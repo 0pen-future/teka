@@ -24,6 +24,14 @@ definitions:
         type: string
       status:
         type: string
+      warning:
+        description: |-
+          Warning is set only by Confirm, only when the session's date falls
+          inside an already-closed billing period and the automatic
+          reconciliation attempt (plan 04) failed. A successful confirm with no
+          closed-period implication, or one whose reconciliation succeeded
+          (including posting nothing because nothing changed), leaves this nil.
+        type: string
     type: object
   attendance.RowResponse:
     properties:
@@ -79,6 +87,212 @@ definitions:
         $ref: '#/definitions/teachers.TeacherResponse'
       token_type:
         type: string
+    type: object
+  billing.AdjustmentRequest:
+    properties:
+      amount:
+        type: integer
+      reason:
+        maxLength: 500
+        minLength: 3
+        type: string
+    required:
+    - amount
+    - reason
+    type: object
+  billing.AdjustmentResponse:
+    properties:
+      amount:
+        type: integer
+      created_at:
+        type: string
+      id:
+        type: string
+      invoice_id:
+        type: string
+      reason:
+        type: string
+      source_session_id:
+        type: string
+    type: object
+  billing.CloseResponse:
+    properties:
+      issued_count:
+        type: integer
+      period:
+        $ref: '#/definitions/billing.PeriodResponse'
+      total_due:
+        description: |-
+          TotalDue sums total_due across every non-void invoice this close
+          produced — the money now owed for the period.
+        type: integer
+      voided_count:
+        type: integer
+      warnings:
+        $ref: '#/definitions/billing.CloseWarnings'
+    type: object
+  billing.CloseWarnings:
+    properties:
+      future_unconfirmed_sessions:
+        description: |-
+          FutureUnconfirmedSessions are sessions dated after today but still
+          inside the period without confirmed attendance — closing early is
+          legal (Architecture), so these do not block, but attendance confirmed
+          on them later must flow through a phase 4 adjustment on the next
+          period rather than this one.
+        items:
+          $ref: '#/definitions/billing.UnconfirmedSession'
+        type: array
+    type: object
+  billing.EnsurePeriodRequest:
+    properties:
+      month:
+        maximum: 12
+        minimum: 1
+        type: integer
+      year:
+        maximum: 2100
+        minimum: 2020
+        type: integer
+    required:
+    - month
+    - year
+    type: object
+  billing.InvoiceResponse:
+    properties:
+      adjustment_total:
+        type: integer
+      contact_id:
+        type: string
+      contact_name:
+        type: string
+      current_charge:
+        type: integer
+      id:
+        type: string
+      opening_balance:
+        type: integer
+      paid_amount:
+        type: integer
+      period_id:
+        type: string
+      status:
+        type: string
+      student_id:
+        type: string
+      student_name:
+        type: string
+      total_due:
+        type: integer
+      void_reason:
+        type: string
+      voided_at:
+        type: string
+    type: object
+  billing.PeriodResponse:
+    properties:
+      closed_at:
+        type: string
+      id:
+        type: string
+      month:
+        type: integer
+      period_end:
+        type: string
+      period_start:
+        type: string
+      status:
+        type: string
+      year:
+        type: integer
+    type: object
+  billing.PreviewInvoice:
+    properties:
+      adjustment_total:
+        type: integer
+      contact_id:
+        type: string
+      contact_name:
+        type: string
+      current_charge:
+        type: integer
+      invoice_id:
+        type: string
+      lines:
+        items:
+          $ref: '#/definitions/billing.PreviewLine'
+        type: array
+      opening_balance:
+        type: integer
+      student_id:
+        type: string
+      student_name:
+        type: string
+      total_due:
+        type: integer
+    type: object
+  billing.PreviewLine:
+    properties:
+      absent_count:
+        type: integer
+      amount:
+        type: integer
+      billable_count:
+        type: integer
+      class_id:
+        type: string
+      class_name:
+        type: string
+      enrollment_id:
+        type: string
+      present_count:
+        type: integer
+      unit_price:
+        type: integer
+    type: object
+  billing.PreviewResponse:
+    properties:
+      invoices:
+        items:
+          $ref: '#/definitions/billing.PreviewInvoice'
+        type: array
+      totals:
+        $ref: '#/definitions/billing.PreviewTotals'
+    type: object
+  billing.PreviewTotals:
+    properties:
+      student_count:
+        type: integer
+      total_adjustment:
+        type: integer
+      total_charge:
+        type: integer
+      total_due:
+        type: integer
+      total_opening:
+        type: integer
+    type: object
+  billing.UnconfirmedSession:
+    properties:
+      class_id:
+        type: string
+      class_name:
+        type: string
+      session_date:
+        type: string
+      session_id:
+        type: string
+      status:
+        type: string
+    type: object
+  billing.VoidInvoiceRequest:
+    properties:
+      reason:
+        maxLength: 500
+        minLength: 3
+        type: string
+    required:
+    - reason
     type: object
   classes.ClassResponse:
     properties:
@@ -292,6 +506,11 @@ definitions:
     properties:
       code:
         type: string
+      details:
+        description: |-
+          Details carries structured error context Fields' map[string]string
+          cannot express — e.g. billing's list of unconfirmed sessions blocking a
+          period close. Only ErrWithDetails populates it; Err leaves it nil.
       fields:
         additionalProperties:
           type: string
@@ -599,6 +818,296 @@ paths:
       summary: Register a new teacher
       tags:
       - auth
+  /billing-periods:
+    get:
+      parameters:
+      - description: page number
+        in: query
+        name: page
+        type: integer
+      - description: page size (max 100)
+        in: query
+        name: per_page
+        type: integer
+      - description: period_start or created_at; - prefix for desc
+        in: query
+        name: sort
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/billing.PeriodResponse'
+                  type: array
+                meta:
+                  $ref: '#/definitions/response.Meta'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List billing periods
+      tags:
+      - billing
+    post:
+      consumes:
+      - application/json
+      description: 'Idempotent create-or-get: calling this twice for the same (teacher,
+        year, month) returns the same period id rather than a 409.'
+      parameters:
+      - description: year and month
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/billing.EnsurePeriodRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/billing.PeriodResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: validation failed
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Ensure billing period
+      tags:
+      - billing
+  /billing-periods/{id}:
+    get:
+      parameters:
+      - description: billing period id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/billing.PeriodResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get billing period
+      tags:
+      - billing
+  /billing-periods/{id}/close:
+    post:
+      description: Irreversible. Blocked (409) if any session in the period is past
+        due without confirmed attendance — the response names each one. There is no
+        reopen.
+      parameters:
+      - description: billing period id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/billing.CloseResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: period not open, or has unconfirmed sessions (details.unconfirmed_sessions)
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Close a billing period
+      tags:
+      - billing
+  /billing-periods/{id}/draft:
+    post:
+      description: Only allowed while the period is open. Refuses to touch an invoice
+        that has already moved past draft.
+      parameters:
+      - description: billing period id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/billing.PreviewResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: period is closed, or an invoice for it has already been issued
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Draft a billing period's invoices
+      tags:
+      - billing
+  /billing-periods/{id}/preview:
+    get:
+      description: Pure read — never creates or updates invoices. Every student with
+        a billable session or carried debt from the previous closed period appears
+        once with one line per class.
+      parameters:
+      - description: billing period id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/billing.PreviewResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Preview a billing period
+      tags:
+      - billing
   /classes:
     get:
       description: 'status filters the list: active (default), archived, or all.'
@@ -1739,6 +2248,193 @@ paths:
       summary: End enrollment
       tags:
       - enrollments
+  /invoices/{id}/adjustments:
+    get:
+      parameters:
+      - description: invoice id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/billing.AdjustmentResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List an invoice's adjustments
+      tags:
+      - billing
+    post:
+      consumes:
+      - application/json
+      description: Allowed while the invoice is draft, issued, or partially paid.
+        Refused on void and paid — a paid invoice's correction belongs on the next
+        period.
+      parameters:
+      - description: invoice id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: signed amount and reason
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/billing.AdjustmentRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/billing.AdjustmentResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: invoice is void or fully paid
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: validation failed
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Add a manual invoice adjustment
+      tags:
+      - billing
+  /invoices/{id}/void:
+    post:
+      consumes:
+      - application/json
+      description: Only an issued or partially-paid invoice with paid_amount=0 can
+        be voided. A paid invoice's payment must be reversed first.
+      parameters:
+      - description: invoice id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: reason
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/billing.VoidInvoiceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/billing.InvoiceResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: invoice not issued/partially paid, or has a recorded payment
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: validation failed
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Void an invoice
+      tags:
+      - billing
   /me:
     get:
       produces:

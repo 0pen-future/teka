@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Period Close and Void"
-status: pending
+status: completed
 priority: P1
 effort: "6h"
 dependencies: [2]
@@ -238,21 +238,21 @@ Delete: none. No migration files.
 
 ## Success Criteria
 
-- [ ] R4: close is blocked by any past unconfirmed session and the response
+- [x] R4: close is blocked by any past unconfirmed session and the response
       names each one (id, class name, date, status).
-- [ ] R4: successful close sets `billing_periods.status='closed'` and
+- [x] R4: successful close sets `billing_periods.status='closed'` and
       `closed_at`, and every draft invoice becomes `issued` or `void`.
-- [ ] R3: three students with different session counts get three different
+- [x] R3: three students with different session counts get three different
       amounts, each equal to `Σ billable_count × unit_price` plus carried debt.
-- [ ] R3: carried debt appears in `opening_balance`, visibly separate from
+- [x] R3: carried debt appears in `opening_balance`, visibly separate from
       `current_charge`.
-- [ ] A class with zero sessions in the period produces no invoice line.
-- [ ] Close is atomic: an injected failure after step 5 leaves the period `open`
+- [x] A class with zero sessions in the period produces no invoice line.
+- [x] Close is atomic: an injected failure after step 5 leaves the period `open`
       with no `issued` invoices.
-- [ ] Two concurrent closes issue each invoice exactly once.
-- [ ] An issued invoice cannot be updated through any exported repository
+- [x] Two concurrent closes issue each invoice exactly once.
+- [x] An issued invoice cannot be updated through any exported repository
       method other than the payment and adjustment paths.
-- [ ] Voided invoices disappear from `v_contact_balance`.
+- [x] Voided invoices disappear from `v_contact_balance`.
 
 ## Risk Assessment
 

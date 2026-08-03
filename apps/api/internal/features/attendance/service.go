@@ -29,6 +29,36 @@ type SessionStore interface {
 	MarkHeldAndConfirmed(ctx context.Context, teacherID, sessionID uuid.UUID, at time.Time) error
 }
 
+// ReconciliationEntry is one student's carried adjustment produced by a
+// post-close reconciliation (plan 04): the invoice it landed on and the
+// signed amount posted.
+type ReconciliationEntry struct {
+	StudentID uuid.UUID `json:"student_id"`
+	PeriodID  uuid.UUID `json:"period_id"`
+	InvoiceID uuid.UUID `json:"invoice_id"`
+	Amount    int64     `json:"amount"`
+}
+
+// Reconciliation is what a BillingReconciler call produces: zero or more
+// carried adjustments, one per affected student whose delta was non-zero.
+// Empty (not nil-checked by callers) means the edit needed no correction —
+// either the session's date is still inside an open period, or every
+// affected student's live billable count came out exactly as billed.
+type Reconciliation struct {
+	Adjustments []ReconciliationEntry `json:"adjustments,omitempty"`
+}
+
+// BillingReconciler is the slice of the billing feature attendance needs:
+// carrying a post-close attendance edit's money delta onto the next open
+// period. Declared here, in attendance, rather than in billing, because
+// billing already imports attendance for TallyByEnrollment — declaring the
+// interface in billing would need billing to import attendance AND
+// attendance to import billing to call it, an import cycle. *billing.Service
+// satisfies this; attendance itself never imports billing.
+type BillingReconciler interface {
+	ReconcileSession(ctx context.Context, teacherID, sessionID uuid.UUID) (Reconciliation, error)
+}
+
 // Service implements one-touch attendance (PRD R2): reading the roster
 // attendance sheet for a session, and confirming it in a single write that
 // also transitions the session to held.
@@ -37,11 +67,38 @@ type Service struct {
 	roster   RosterSource
 	sessions SessionStore
 	tx       database.TxManager
+	// reconciler is nil until SetReconciler wires it in router.go. Confirm
+	// guards every call on it being non-nil so this package stays usable
+	// (e.g. in tests) without billing ever being constructed.
+	reconciler BillingReconciler
 }
 
 // NewService wires the attendance service to its dependencies.
 func NewService(repo Repository, roster RosterSource, sessionStore SessionStore, tx database.TxManager) *Service {
 	return &Service{repo: repo, roster: roster, sessions: sessionStore, tx: tx}
+}
+
+// SetReconciler wires the billing package's post-close reconciliation in
+// after both services exist (router.go: attendance is constructed before
+// billing, so this cannot be a NewService parameter). Safe to leave unset —
+// Confirm no-ops the reconciliation step when it is nil.
+func (s *Service) SetReconciler(r BillingReconciler) {
+	s.reconciler = r
+}
+
+// TallyByEnrollment passes through the repository's batched attendance tally
+// for a date window. This is the one entry point plan 04's billing package
+// uses to price a period — it never re-aggregates attendance_records itself.
+func (s *Service) TallyByEnrollment(ctx context.Context, teacherID uuid.UUID, from, to time.Time) ([]EnrollmentTally, error) {
+	return s.repo.TallyByEnrollment(ctx, teacherID, from, to)
+}
+
+// SessionAttendance passes through the repository's already-recorded rows
+// for one session. This is plan 04's entry point for discovering which
+// students a post-close reconciliation must consider — it never scans
+// attendance_records by anything but session_id.
+func (s *Service) SessionAttendance(ctx context.Context, teacherID, sessionID uuid.UUID) ([]Record, error) {
+	return s.repo.ListBySession(ctx, teacherID, sessionID)
 }
 
 // Get returns the attendance sheet for a session: one row per student
@@ -126,7 +183,24 @@ func (s *Service) Confirm(ctx context.Context, teacherID, sessionID uuid.UUID, r
 	if err != nil {
 		return nil, err
 	}
-	return s.buildResponse(ctx, teacherID, confirmed)
+	resp, err := s.buildResponse(ctx, teacherID, confirmed)
+	if err != nil {
+		return nil, err
+	}
+
+	// Post-close reconciliation (plan 04, D7): this session's attendance is
+	// already committed above, so a reconciliation failure here cannot roll
+	// that back — it is surfaced as a warning on an otherwise successful
+	// response rather than turning the whole confirm into a 5xx. Skipped
+	// entirely when billing has not wired itself in (SetReconciler never
+	// called), which keeps this package usable standalone.
+	if s.reconciler != nil {
+		if _, reconErr := s.reconciler.ReconcileSession(ctx, teacherID, sessionID); reconErr != nil {
+			warning := "attendance saved, but the automatic billing adjustment for this change could not be applied; review the student's invoice manually"
+			resp.Warning = &warning
+		}
+	}
+	return resp, nil
 }
 
 // buildResponse assembles the roster + attendance-status read model shared

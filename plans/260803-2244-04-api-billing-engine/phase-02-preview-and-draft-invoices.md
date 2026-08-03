@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Preview and Draft Invoices"
-status: pending
+status: completed
 priority: P1
 effort: "5h"
 dependencies: [1]
@@ -161,17 +161,17 @@ Delete: none. No migration files.
 
 ## Success Criteria
 
-- [ ] `GET /api/v1/billing-periods/:id/preview` returns every student with at
+- [x] `GET /api/v1/billing-periods/:id/preview` returns every student with at
       least one billable session in the period, plus every student carrying debt
       from the previous closed period.
-- [ ] A student enrolled in two classes appears once with two lines (R1).
-- [ ] Preview writes zero rows (asserted by comparing table counts before and
+- [x] A student enrolled in two classes appears once with two lines (R1).
+- [x] Preview writes zero rows (asserted by comparing table counts before and
       after in the integration test).
-- [ ] `POST /api/v1/billing-periods/:id/draft` is idempotent.
-- [ ] Draft never deletes an `invoice_lines` or `invoice_adjustments` row.
-- [ ] `total_due = opening_balance + current_charge + adjustment_total` holds on
+- [x] `POST /api/v1/billing-periods/:id/draft` is idempotent.
+- [x] Draft never deletes an `invoice_lines` or `invoice_adjustments` row.
+- [x] `total_due = opening_balance + current_charge + adjustment_total` holds on
       every drafted row (asserted by a query, not just by the Go struct).
-- [ ] Draft on a `closed` period returns `409` with no writes.
+- [x] Draft on a `closed` period returns `409` with no writes.
 
 ## Risk Assessment
 

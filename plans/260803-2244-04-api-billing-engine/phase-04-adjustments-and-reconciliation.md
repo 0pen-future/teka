@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Adjustments and Post-Close Reconciliation"
-status: pending
+status: completed
 priority: P1
 effort: "5h"
 dependencies: [3]
@@ -220,19 +220,19 @@ Delete: none. No migration files.
 
 ## Success Criteria
 
-- [ ] R4: editing attendance of a closed period returns a warning and creates an
+- [x] R4: editing attendance of a closed period returns a warning and creates an
       `invoice_adjustments` row on the next open period's invoice with
       `source_session_id` set.
-- [ ] The closed period's invoice and lines are provably unchanged after the
+- [x] The closed period's invoice and lines are provably unchanged after the
       edit (row-level comparison in the test).
-- [ ] Repeated edits to the same session never double count.
-- [ ] Every adjustment has a non-empty reason; the DB CHECK is never hit as a
+- [x] Repeated edits to the same session never double count.
+- [x] Every adjustment has a non-empty reason; the DB CHECK is never hit as a
       500 because Go validates first.
-- [ ] Cancelling an adjustment is done by posting the opposite amount; no
+- [x] Cancelling an adjustment is done by posting the opposite amount; no
       delete endpoint exists.
-- [ ] `total_due = opening_balance + current_charge + adjustment_total` holds
+- [x] `total_due = opening_balance + current_charge + adjustment_total` holds
       after every adjustment write.
-- [ ] Reconciliation is a no-op for sessions in open periods and for periods
+- [x] Reconciliation is a no-op for sessions in open periods and for periods
       with no invoice for that student.
 
 ## Risk Assessment

@@ -1,7 +1,7 @@
 ---
 title: "04 API Billing Engine"
 description: "Billing periods, per-student fee computation, chốt sổ (period close) with hard block on unconfirmed sessions, immutable invoice snapshots, adjustments and void."
-status: pending
+status: completed
 priority: P1
 effort: "22h"
 branch: HEAD
@@ -120,30 +120,30 @@ declared inside the attendance package to keep it that way.
 
 Pulled from PRD R3 and R4.
 
-- [ ] R3: three students in one class with different attended counts produce
+- [x] R3: three students in one class with different attended counts produce
       three different amounts, each equal to `billable_count * unit_price`.
-- [ ] R3: a student owing 500,000 from the previous period sees that amount in
+- [x] R3: a student owing 500,000 from the previous period sees that amount in
       `opening_balance`, rendered separately from `current_charge`.
-- [ ] R3: recomputing after an attendance change inside an **open** period
+- [x] R3: recomputing after an attendance change inside an **open** period
       yields updated figures with no manual step.
-- [ ] R4: closing a period that still has a past session without
+- [x] R4: closing a period that still has a past session without
       `attendance_confirmed_at` returns `409` and lists the offending sessions
       (id, class name, date, status).
-- [ ] R4: after close, editing attendance inside that period returns a warning
+- [x] R4: after close, editing attendance inside that period returns a warning
       and creates an `invoice_adjustments` row on the next open period's
       invoice with `source_session_id` set; the closed invoice is byte-for-byte
       unchanged.
-- [ ] R1: a student enrolled in two classes of the same teacher gets one
+- [x] R1: a student enrolled in two classes of the same teacher gets one
       invoice with two `invoice_lines`.
-- [ ] R1: a student added mid-period is charged only from the first session
+- [x] R1: a student added mid-period is charged only from the first session
       they have an attendance record for.
-- [ ] Edge (PRD §5): a student who quits mid-period is still invoiced up to
+- [x] Edge (PRD §5): a student who quits mid-period is still invoiced up to
       their last session and keeps any carried debt.
-- [ ] Edge (PRD §5): a class with zero sessions in the period produces no
+- [x] Edge (PRD §5): a class with zero sessions in the period produces no
       invoice line; a student with no sessions anywhere and no carried debt
       produces no issued invoice.
-- [ ] Edge (PRD §5): a session with `status='cancelled'` bills nobody.
-- [ ] Every write path runs inside one transaction; a failure mid-close leaves
+- [x] Edge (PRD §5): a session with `status='cancelled'` bills nobody.
+- [x] Every write path runs inside one transaction; a failure mid-close leaves
       the period `open` and no partial invoices.
 
 ## Open questions

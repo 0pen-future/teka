@@ -46,6 +46,12 @@ type Response struct {
 	Status                string        `json:"status"`
 	AttendanceConfirmedAt *time.Time    `json:"attendance_confirmed_at"`
 	Rows                  []RowResponse `json:"rows"`
+	// Warning is set only by Confirm, only when the session's date falls
+	// inside an already-closed billing period and the automatic
+	// reconciliation attempt (plan 04) failed. A successful confirm with no
+	// closed-period implication, or one whose reconciliation succeeded
+	// (including posting nothing because nothing changed), leaves this nil.
+	Warning *string `json:"warning,omitempty"`
 }
 
 // trimmedNotePtr converts a possibly-blank request note into the pointer

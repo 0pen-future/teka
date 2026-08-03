@@ -15,6 +15,7 @@ import (
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/attendance"
 	"teka/apps/api/internal/features/auth"
+	"teka/apps/api/internal/features/billing"
 	"teka/apps/api/internal/features/classes"
 	"teka/apps/api/internal/features/contacts"
 	"teka/apps/api/internal/features/enrollments"
@@ -104,4 +105,22 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB) {
 	// atomically.
 	attendanceSvc := attendance.NewService(attendance.NewRepository(db), enrollmentsSvc, sessionsSvc, txMgr)
 	attendance.RegisterRoutes(v1, attendance.NewHandler(attendanceSvc), requireAuth)
+
+	// billing consumes attendance through billing.AttendanceSource — the
+	// batched per-enrollment tally — rather than re-aggregating
+	// attendance_records itself, sessions through billing.PendingSource — the
+	// unconfirmed-sessions predicate its period close reuses — and
+	// enrollments through billing.EnrollmentSource — the sanctioned roster
+	// membership check its post-close reconciliation's rare no-invoice-line
+	// case reuses — so it is constructed after all three.
+	billingSvc := billing.NewService(billing.NewRepository(db, attendanceSvc), txMgr, sessionsSvc, enrollmentsSvc)
+	billing.RegisterRoutes(v1, billing.NewHandler(billingSvc), requireAuth)
+
+	// attendance.Confirm carries a post-close attendance edit's money delta
+	// onto the next open period (plan 04, D7) through billingSvc, which can
+	// only be wired in after billing exists — hence a setter rather than a
+	// NewService parameter, breaking what would otherwise be a construction
+	// cycle (billing needs attendance for TallyByEnrollment; attendance needs
+	// billing for reconciliation).
+	attendanceSvc.SetReconciler(billingSvc)
 }

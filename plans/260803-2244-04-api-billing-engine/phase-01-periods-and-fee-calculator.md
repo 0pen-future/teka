@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Billing Periods and Fee Calculator"
-status: pending
+status: completed
 priority: P1
 effort: "6h"
 dependencies: []
@@ -278,19 +278,19 @@ No migration files. Schema is frozen (D1).
 
 ## Success Criteria
 
-- [ ] `billing` package compiles and is registered in `registerFeatures`.
-- [ ] `POST /api/v1/billing-periods` is idempotent for the same
+- [x] `billing` package compiles and is registered in `registerFeatures`.
+- [x] `POST /api/v1/billing-periods` is idempotent for the same
       `(teacher, year, month)` and returns the same period id.
-- [ ] `GET /api/v1/billing-periods/:id` for another teacher's period returns
+- [x] `GET /api/v1/billing-periods/:id` for another teacher's period returns
       `404`, not `403` (no cross-teacher existence leak).
-- [ ] `Compute` unit tests pass, including the two CHECK-identity assertions.
-- [ ] Integration test proves cancelled, unconfirmed, and soft-deleted rows are
+- [x] `Compute` unit tests pass, including the two CHECK-identity assertions.
+- [x] Integration test proves cancelled, unconfirmed, and soft-deleted rows are
       excluded from the tally.
-- [ ] Billing contains no aggregate over `attendance_records` and no
+- [x] Billing contains no aggregate over `attendance_records` and no
       `started_on`/`ended_on` comparison; `grep` for both returns nothing in the
       `billing` package.
-- [ ] No float type appears anywhere in the package.
-- [ ] No `deleted_at` reference for `invoices` or `invoice_lines`.
+- [x] No float type appears anywhere in the package.
+- [x] No `deleted_at` reference for `invoices` or `invoice_lines`.
 
 ## Risk Assessment
 

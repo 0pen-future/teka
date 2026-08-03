@@ -27,6 +27,10 @@ type ErrorBody struct {
 	Code    string            `json:"code"`
 	Message string            `json:"message"`
 	Fields  map[string]string `json:"fields,omitempty"`
+	// Details carries structured error context Fields' map[string]string
+	// cannot express — e.g. billing's list of unconfirmed sessions blocking a
+	// period close. Only ErrWithDetails populates it; Err leaves it nil.
+	Details any `json:"details,omitempty"`
 }
 
 // Envelope is the wire format of every /api/v1 response.
@@ -61,6 +65,26 @@ func Err(c *gin.Context, err error) {
 			Code:    appErr.Code,
 			Message: appErr.Message,
 			Fields:  appErr.Fields,
+		},
+	})
+}
+
+// ErrWithDetails writes an error envelope like Err, plus a structured
+// Details payload the caller has already resolved (e.g. a typed error's
+// attached list). Use it when Fields' flat map[string]string cannot express
+// the response the API contract requires.
+func ErrWithDetails(c *gin.Context, appErr *apperror.AppError, details any) {
+	if appErr.Status >= http.StatusInternalServerError {
+		logger.FromContext(c.Request.Context()).Error("request failed",
+			"code", appErr.Code, "error", appErr.Error())
+	}
+	c.AbortWithStatusJSON(appErr.Status, Envelope{
+		Success: false,
+		Error: &ErrorBody{
+			Code:    appErr.Code,
+			Message: appErr.Message,
+			Fields:  appErr.Fields,
+			Details: details,
 		},
 	})
 }

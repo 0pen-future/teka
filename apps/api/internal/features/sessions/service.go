@@ -146,13 +146,12 @@ func (s *Service) ListRange(ctx context.Context, teacherID, classID uuid.UUID, f
 }
 
 // ListPending returns the teacher's unconfirmed past sessions — the feed the
-// dashboard's pending-attendance warning renders from, and the exact
-// predicate plan 04's period-closing gate reuses with from/to bound to the
-// billing period. "Past" is evaluated against today in the teacher's
-// timezone (teachers.Timezone), not the server's: a session dated today is
-// never pending until its own day is over. limit defaults to
-// defaultPendingLimit when unset (zero or negative) and is capped at
-// maxPendingLimit; total always reflects the unlimited count.
+// dashboard's pending-attendance warning renders from. "Past" is evaluated
+// against today in the teacher's timezone (teachers.Timezone), not the
+// server's: a session dated today is never pending until its own day is
+// over. It delegates to ListUnconfirmedInWindow with before=today, so it and
+// plan 04's period-closing gate (which calls ListUnconfirmedInWindow
+// directly with its own before cutoff) share one predicate by construction.
 func (s *Service) ListPending(ctx context.Context, teacherID uuid.UUID, from, to *time.Time, limit int) (*PendingResponse, error) {
 	loc, err := s.teacherLocation(ctx, teacherID)
 	if err != nil {
@@ -162,7 +161,21 @@ func (s *Service) ListPending(ctx context.Context, teacherID uuid.UUID, from, to
 	// first; dateOnly then re-expresses that Y/M/D at UTC midnight, matching
 	// how session_date is stored (see generator.go's dateOnly doc).
 	today := dateOnly(s.now().In(loc), time.UTC)
+	return s.ListUnconfirmedInWindow(ctx, teacherID, from, to, today, limit)
+}
 
+// ListUnconfirmedInWindow is ListPending's predicate with an explicit
+// `before` cutoff instead of an implicit "today": teacher-scoped,
+// session_date < before, attendance_confirmed_at IS NULL, status IN
+// ('held','planned'), deleted_at IS NULL, further narrowed by from/to when
+// set. It exists so a consumer whose cutoff is not "today" — plan 04's
+// billing close, which needs a future-dated window
+// (from=today+1, to=period_end, before=period_end+1) for its unconfirmed-
+// sessions warning — can reuse this exact predicate instead of billing
+// writing its own session query. limit defaults to defaultPendingLimit when
+// unset (zero or negative) and is capped at maxPendingLimit; total always
+// reflects the unlimited count.
+func (s *Service) ListUnconfirmedInWindow(ctx context.Context, teacherID uuid.UUID, from, to *time.Time, before time.Time, limit int) (*PendingResponse, error) {
 	switch {
 	case limit <= 0:
 		limit = defaultPendingLimit
@@ -170,13 +183,13 @@ func (s *Service) ListPending(ctx context.Context, teacherID uuid.UUID, from, to
 		limit = maxPendingLimit
 	}
 
-	rows, total, err := s.repo.ListPending(ctx, teacherID, today, from, to, limit)
+	rows, total, err := s.repo.ListPending(ctx, teacherID, before, from, to, limit)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
 	items := make([]PendingSessionResponse, 0, len(rows))
 	for i := range rows {
-		items = append(items, fromPendingRow(&rows[i], today))
+		items = append(items, fromPendingRow(&rows[i], before))
 	}
 	return &PendingResponse{Total: total, Items: items}, nil
 }

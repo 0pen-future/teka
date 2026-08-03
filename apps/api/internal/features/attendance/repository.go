@@ -18,6 +18,17 @@ type StudentName struct {
 	DisplayNote *string
 }
 
+// EnrollmentTally is one enrollment's billable/absent/present counts over a
+// date window — plan 04's entire entry point into attendance_records. It is
+// the one place these counting rules live; nothing outside this package
+// re-aggregates the table.
+type EnrollmentTally struct {
+	EnrollmentID  uuid.UUID
+	BillableCount int
+	AbsentCount   int
+	PresentCount  int
+}
+
 // Repository is the persistence contract for attendance; the service depends
 // on this interface, tests supply a fake.
 type Repository interface {
@@ -43,11 +54,13 @@ type Repository interface {
 	// deliberately: an anonymised student's attendance history must stay
 	// readable under the placeholder name.
 	StudentNames(ctx context.Context, teacherID uuid.UUID, studentIDs []uuid.UUID) (map[uuid.UUID]StudentName, error)
-	// CountBillableByEnrollment counts billable, non-deleted attendance rows
-	// for one enrollment whose session fell within [from, to] and whose
-	// attendance was actually confirmed — plan 04's entry point for pricing
-	// a billing period, added here because this package owns the table.
-	CountBillableByEnrollment(ctx context.Context, teacherID, enrollmentID uuid.UUID, from, to time.Time) (int64, error)
+	// TallyByEnrollment groups non-deleted attendance rows by enrollment for
+	// every session within [from, to] whose attendance was actually
+	// confirmed — one grouped query, teacher-scoped — into billable, absent,
+	// and present counts. This is plan 04's sole entry point for pricing a
+	// billing period: billing calls this once per period and joins its own
+	// metadata on the result; it never aggregates attendance_records itself.
+	TallyByEnrollment(ctx context.Context, teacherID uuid.UUID, from, to time.Time) ([]EnrollmentTally, error)
 }
 
 type gormRepository struct {
@@ -60,8 +73,8 @@ func NewRepository(db *gorm.DB) Repository {
 }
 
 // scoped returns a query bound to one tenant, qualified because
-// CountBillableByEnrollment joins class_sessions, which carries the same
-// teacher_id column name.
+// TallyByEnrollment joins class_sessions, which carries the same teacher_id
+// column name.
 func (r *gormRepository) scoped(ctx context.Context, teacherID uuid.UUID) *gorm.DB {
 	return database.FromContext(ctx, r.db).Where("attendance_records.teacher_id = ?", teacherID)
 }
@@ -136,17 +149,20 @@ func (r *gormRepository) StudentNames(ctx context.Context, teacherID uuid.UUID, 
 	return out, nil
 }
 
-func (r *gormRepository) CountBillableByEnrollment(ctx context.Context, teacherID, enrollmentID uuid.UUID, from, to time.Time) (int64, error) {
-	var count int64
+func (r *gormRepository) TallyByEnrollment(ctx context.Context, teacherID uuid.UUID, from, to time.Time) ([]EnrollmentTally, error) {
+	var rows []EnrollmentTally
 	err := r.scoped(ctx, teacherID).
 		Model(&Record{}).
+		Select(`attendance_records.enrollment_id AS enrollment_id,
+			COUNT(*) FILTER (WHERE attendance_records.billable = true) AS billable_count,
+			COUNT(*) FILTER (WHERE attendance_records.status = 'absent') AS absent_count,
+			COUNT(*) FILTER (WHERE attendance_records.status = 'present') AS present_count`).
 		Joins("JOIN class_sessions ON class_sessions.id = attendance_records.session_id AND class_sessions.teacher_id = attendance_records.teacher_id").
-		Where("attendance_records.enrollment_id = ?", enrollmentID).
-		Where("attendance_records.billable = true").
 		Where("class_sessions.deleted_at IS NULL").
 		Where("class_sessions.status = 'held'").
 		Where("class_sessions.attendance_confirmed_at IS NOT NULL").
 		Where("class_sessions.session_date BETWEEN ? AND ?", from, to).
-		Count(&count).Error
-	return count, err
+		Group("attendance_records.enrollment_id").
+		Find(&rows).Error
+	return rows, err
 }

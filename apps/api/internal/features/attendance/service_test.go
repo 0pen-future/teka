@@ -153,15 +153,32 @@ func (f *fakeRepository) StudentNames(_ context.Context, _ uuid.UUID, studentIDs
 	return out, nil
 }
 
-func (f *fakeRepository) CountBillableByEnrollment(_ context.Context, teacherID, enrollmentID uuid.UUID, _, _ time.Time) (int64, error) {
-	var count int64
+func (f *fakeRepository) TallyByEnrollment(_ context.Context, teacherID uuid.UUID, _, _ time.Time) ([]EnrollmentTally, error) {
+	byEnrollment := map[uuid.UUID]*EnrollmentTally{}
 	for _, r := range f.rows {
-		if r.deleted || r.TeacherID != teacherID || r.EnrollmentID != enrollmentID || !r.Billable {
+		if r.deleted || r.TeacherID != teacherID {
 			continue
 		}
-		count++
+		t, ok := byEnrollment[r.EnrollmentID]
+		if !ok {
+			t = &EnrollmentTally{EnrollmentID: r.EnrollmentID}
+			byEnrollment[r.EnrollmentID] = t
+		}
+		if r.Billable {
+			t.BillableCount++
+		}
+		switch r.Status {
+		case StatusAbsent:
+			t.AbsentCount++
+		case StatusPresent:
+			t.PresentCount++
+		}
 	}
-	return count, nil
+	out := make([]EnrollmentTally, 0, len(byEnrollment))
+	for _, t := range byEnrollment {
+		out = append(out, *t)
+	}
+	return out, nil
 }
 
 // --- noopTx ---

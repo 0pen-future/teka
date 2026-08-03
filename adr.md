@@ -198,3 +198,333 @@ Nhóm Low hoãn (không chặn nghiệm thu plan 03):
   theo loại node, không phải thứ tự đăng ký); vô hại, route đúng + có test
   literal-path.
 - `Confirm` giải roster hai lần (một truy vấn thừa mỗi lần confirm, bounded).
+
+## 2026-08-04 — Plan 04, Phase 1: chữ ký entry point đếm billable khác plan
+
+Plan 04 (phase 1 + phase 4) giả định `attendance.CountBillableByEnrollment(ctx,
+teacherID, from, to)` trả tally **nhiều enrollment** trong một cửa sổ ngày, kèm
+`billable_count`, `absent_count`, `present_count`. Thực tế plan 03 build
+`CountBillableByEnrollment(ctx, teacherID, enrollmentID, from, to) (int64,
+error)` — theo **một** enrollment và chỉ trả billable count. Ngoài ra template
+layout plan 04 trỏ tới `internal/features/users/` đã bị xoá ở plan 01.
+
+**Quyết định:** thêm entry point batched `attendance.TallyByEnrollment(ctx,
+teacherID uuid.UUID, from, to time.Time) ([]attendance.EnrollmentTally, error)`
+(EnrollmentTally = EnrollmentID, BillableCount, AbsentCount, PresentCount) —
+đúng ý đồ plan ("một call vào attendance, một metadata query billing sở hữu,
+zip theo enrollment_id"), một grouped query giữ toàn bộ luật đếm (status='held'
+AND attendance_confirmed_at IS NOT NULL, deleted_at IS NULL trên cả record lẫn
+session, cancelled loại trừ) ở đúng một nơi. `CountBillableByEnrollment` chưa
+có consumer nào nên gỡ bỏ để tránh hai aggregate song song (đúng nguyên tắc
+plan: "luật đếm tồn tại ở đúng một chỗ"). Template dùng các package hiện có
+(`enrollments`/`sessions`/`attendance`) thay cho `users/` đã xoá; teacher id
+lấy qua `authctx.TeacherID(c)`.
+
+## 2026-08-04 — Plan 04, Phase 1: hai chỉnh sửa do linter (không đụng tiền)
+
+1. **Đổi tên type `BillingPeriod` → `Period`.** `revive` no-stutter chặn
+   `billing.BillingPeriod`; mọi package feature khác đặt tên model theo số ít
+   của package (`sessions.Session`, `enrollments.Enrollment`,
+   `classes.Class`). Đổi tên cho khớp quy ước và pass `make lint-api`; tên
+   bảng giữ nguyên qua `TableName() → "billing_periods"`, không đổi schema.
+2. **`gosec` G115 trên cast `int`→`int16` trong `EnsurePeriod`.** Thêm kiểm
+   tra biên `year` 2020-2100 / `month` 1-12 (đúng ràng buộc binding của
+   `EnsurePeriodRequest`) trước các cast, kèm chú thích `#nosec G115` viện dẫn
+   kiểm tra đó. Đây là validation thật cho method exported khi gọi ngoài HTTP,
+   không phải bịt cảnh báo. Không có tiền lệ `#nosec` trước đó trong repo.
+
+## 2026-08-04 — Plan 04, Phase 2: `PreviewLine` cần `class_id`/`present_count` mà không có field nào mang sẵn
+
+`ComputedLine` (calculator.go, phase 1) không có `ClassID`/`PresentCount`
+(tối giản theo YAGNI của phase 1 vì lúc đó chưa có consumer nào cần). Bảng
+`invoice_lines` persisted cũng không có hai cột này — đọc lại từ đó sau khi
+ghi cũng không cứu được.
+
+**Quyết định:** `ComputePeriod` (preview.go, mới) giữ một map phụ
+`TalliesByEnrollment map[uuid.UUID]AttendanceTally` song song với
+`[]ComputedInvoice`. `buildPreviewResponse` (dto.go) build từng `PreviewLine`
+từ `ComputedLine` rồi lấy `class_id`/`present_count` từ tally cùng
+`enrollment_id` trong map đó. Preview và Draft đều serialize từ cùng kết quả
+compute trong bộ nhớ này — không endpoint nào đọc lại `invoice_lines` thô để
+dựng response.
+
+## 2026-08-04 — Plan 04, Phase 2: `AdjustmentTotals` khoá theo `invoice_id`, `Compute` cần khoá theo `student_id`
+
+`Compute(tallies, opening, adjustments)` (phase 1) nhận `adjustments
+map[uuid.UUID]int64` khoá theo `student_id` — hợp lý cho hàm thuần không biết
+gì về bảng `invoices`. Nhưng dữ liệu thật (`invoice_adjustments.invoice_id`)
+chỉ khoá được theo `invoice_id`, và một invoice chỉ tồn tại sau khi đã draft
+lần đầu.
+
+**Quyết định:** `Repository.AdjustmentTotals` trả `map[invoice_id]int64`
+(đúng khoá tự nhiên của bảng). `ComputePeriod` tự liệt kê `ListInvoices` của
+kỳ (mới, thêm vào `Repository`) để dựng `invoice_id → student_id`, remap
+`AdjustmentTotals` sang `student_id` rồi mới gọi `Compute`. Lần preview/draft
+đầu tiên của một kỳ: `ListInvoices` rỗng → map remap rỗng → đúng ngữ nghĩa
+(chưa có invoice thì chưa thể có adjustment).
+
+## 2026-08-04 — Plan 04, Phase 2: gộp bước 1 (ghi invoice) và bước 4 (áp adjustment_total) của Architecture thành một lượt ghi
+
+Architecture doc mô tả 4 bước tuần tự: ghi invoice → ghi lines → zero lines
+thừa → đọc lại adjustment_total và áp vào invoice. Đọc-sau-ghi ở bước 4 tạo
+một round trip thừa, và vì CHECK `total_due = opening_balance +
+current_charge + adjustment_total` không cho phép invoice tồn tại tạm thời ở
+trạng thái sai tổng, bước 4 tách rời thực ra buộc phải là một UPDATE thứ hai
+ngay sau INSERT/UPDATE ở bước 1 — hai lần ghi cho cùng một hàng trong cùng một
+request.
+
+**Quyết định:** `DraftPeriod` (preview.go) đọc `AdjustmentTotals` một lần
+trong transaction *trước* khi build từng `*Invoice`, tính `total_due` đúng
+ngay trong struct ban đầu, rồi mới gọi `UpsertInvoice` — một lượt ghi mỗi
+invoice thay vì hai. Không đổi kết quả cuối: `adjustment_total` của một
+invoice hoàn toàn không phụ thuộc `invoice_lines` (khác nguồn dữ liệu), và một
+invoice vừa tạo mới trong chính request này chưa thể có adjustment nào (FK
+`invoice_adjustments.invoice_id` bắt buộc invoice đã tồn tại từ trước) — nên
+gộp bước không bỏ sót adjustment nào, kể cả trên đường tạo-mới.
+
+## 2026-08-04 — Plan 04, Phase 2: `ComputePeriod` phải tái xét invoice đã tồn tại dù kỳ này không còn tally/carried-debt/adjustment nào cho học sinh đó
+
+Phát hiện qua integration test "sửa điểm danh rồi draft lại": học sinh đã có
+invoice draft từ lần trước (2 buổi điểm danh), sau đó cả hai attendance_record
+bị xoá mềm (sửa sai). Draft lại: `TallyAttendance` trả 0 dòng cho enrollment
+đó → học sinh không còn xuất hiện trong `tallies`, không có carried-debt (kỳ
+đầu tiên), không có adjustment. `Compute()` chỉ sinh `ComputedInvoice` cho
+student_id có mặt trong `tallies`, `opening`, hoặc `adjustments` — học sinh
+này rơi khỏi cả ba, nên hoàn toàn biến mất khỏi kết quả compute dù invoice cũ
+của họ vẫn còn trong DB với số tiền cũ (sai) và line cũ chưa bị zero.
+
+**Quyết định:** `ComputePeriod` sau khi build `adjustmentsByStudent`, thêm
+một lượt: với mọi `student_id` đã có invoice ở kỳ này (`existingByStudent`)
+mà chưa là key trong `adjustmentsByStudent`, chèn thêm entry giá trị 0. Đây
+không phải chỉnh sửa số liệu — giá trị đọc ra vẫn là 0 giống hệt trước đó khi
+"absent key" — chỉ là buộc `Compute()` đi vào nhánh "extra" của nó (dùng đúng
+cơ chế phase 1 đã có sẵn cho học sinh chỉ có carried-debt/adjustment, không
+thêm nhánh mới) để invoice cũ được tái xét và `DraftPeriod` gọi
+`ZeroUnmatchedLines` zero đúng line thay vì để invoice đứng yên với số tiền
+cũ đã sai.
+
+## 2026-08-04 — Plan 04, Phase 3: cửa sổ cảnh báo tương lai không lấy được từ `ListPending` nguyên trạng
+
+`sessions.Service.ListPending` (plan 03 phase 3) khoá cứng `before=today`
+(dateOnly của "hôm nay" theo múi giờ giáo viên) ngay trong hàm — hợp lý cho
+dashboard, nhưng loại bỏ hoàn toàn buổi học nằm trong tương lai. Close pipeline
+cần cả hai cửa sổ: buổi quá khứ chưa xác nhận (chặn đóng sổ, from=period_start,
+to=min(period_end, today)) và buổi tương lai chưa xác nhận trong kỳ (chỉ cảnh
+báo, from=today+1, to=period_end) — cửa sổ thứ hai không thể diễn đạt bằng
+`before=today` cố định.
+
+**Quyết định:** thêm một method mới `sessions.Service.ListUnconfirmedInWindow(
+ctx, teacherID uuid.UUID, from, to *time.Time, before time.Time, limit int)
+(*PendingResponse, error)` tái dùng đúng predicate của
+`repo.ListPending` (teacher-scoped, `session_date < before`,
+`attendance_confirmed_at IS NULL`, `status IN (held, planned)`,
+`deleted_at IS NULL`) nhưng nhận `before` tường minh từ caller thay vì tự tính
+`today`. `ListPending` refactor thành gọi `ListUnconfirmedInWindow` với
+`before=today` tự tính như cũ — hành vi byte-identical, không đổi test hiện
+có. Billing khai báo interface tiêu thụ hẹp `PendingSource` (một method
+`ListUnconfirmedInWindow`) mà `*sessions.Service` thoả mãn; billing phụ thuộc
+interface đó, không phụ thuộc `sessions.Repository`. Billing không viết bất kỳ
+query quét session nào của riêng nó — đúng yêu cầu "no session-scanning method"
+của phase 3.
+
+`DaysOverdue` trong `PendingSessionResponse` (dùng bởi cả hai lời gọi) được
+tính theo đúng `before` truyền vào — với lời gọi cảnh báo tương lai
+(`before=period_end+1 ngày`) con số này không phải "số ngày trễ tính từ hôm
+nay thật", nhưng `UnconfirmedSession` (DTO billing dùng cho payload 409 và
+cảnh báo) không có field `days_overdue`, nên sai lệch này không lộ ra response
+nào — chỉ ảnh hưởng nội bộ một response tạm thời billing map rồi bỏ.
+
+## 2026-08-04 — Plan 04, Phase 3: 409 payload cần danh sách session, `response.ErrorBody.Fields` chỉ là `map[string]string`
+
+R4 yêu cầu response chặn đóng sổ "chỉ rõ buổi nào" — cần một danh sách object
+(session_id, class_id, class_name, session_date, status), không phải map
+string phẳng `apperror.AppError.Fields` đang hỗ trợ. Widen `AppError` cho một
+caller duy nhất sẽ ảnh hưởng toàn bộ error contract của các feature khác.
+
+**Quyết định:** không đổi `apperror.AppError`. Thêm field `Details any
+\`json:"details,omitempty"\`` vào `response.ErrorBody` và hàm
+`response.ErrWithDetails(c *gin.Context, appErr *apperror.AppError, details
+any)` cạnh `response.Err` hiện có — cùng cơ chế log lỗi 5xx, chỉ thêm details
+vào envelope. Handler `close` bắt riêng lỗi chặn (kiểu `ErrUnconfirmedSessions`
+định nghĩa trong `close.go`) và gọi `ErrWithDetails` với
+`{"unconfirmed_sessions": [...]}`; mọi lỗi khác vẫn qua `response.Err` như cũ.
+Swagger được generate lại sau (`make api-docs`).
+
+## 2026-08-04 — Plan 04, Phase 3: `billing.NewService` nhận thêm `PendingSource`; thêm `VoidInvoice` vào Repository dù không có trong danh sách liệt kê
+
+`NewService` đổi chữ ký thành `NewService(repo Repository, tx
+database.TxManager, pending PendingSource) *Service`; `router.go` truyền
+`sessionsSvc` (đã tồn tại đúng thứ tự khởi tạo, không cần đổi chỗ). Mọi test
+dựng `Service` (service_test.go, preview_test.go, close_test.go mới) truyền
+thêm một `fakePendingSource`.
+
+Danh sách "Modify: repository.go" của phase 3 liệt kê `LockPeriod,
+IssueDraftInvoices, VoidInvoices, ClosePeriod, GetInvoice` nhưng không có
+method ghi void cho một invoice đơn lẻ — trong khi `Service.VoidInvoice` (được
+yêu cầu tường minh ở Architecture và Implementation Steps) bắt buộc phải ghi
+xuống DB. Đây là thiếu sót liệt kê, không phải chỉ thị tránh thêm method.
+Thêm `Repository.VoidInvoice(ctx, teacherID, invoiceID uuid.UUID, reason
+string, at time.Time) error` (UPDATE một hàng, guard `status IN (issued,
+partially_paid)`) để hiện thực đúng ý đồ của Architecture. Tương tự,
+`InvoiceResponse`/`FromInvoiceModel` (dto.go) được thêm làm response tối giản
+cho `voidInvoice` — phase 2 chưa cần response invoice đơn lẻ nào, endpoint chi
+tiết đầy đủ (kèm lines) là việc của phase sau.
+
+## 2026-08-04 — Plan 04, Phase 4: `attendance.CountBillableByEnrollment` không tồn tại; billing tự lọc `TallyByEnrollment`
+
+Phase 4's Architecture/Implementation Steps (bước 6) mô tả `LiveBillableCounts`
+như "a filtered call to `attendance.CountBillableByEnrollment` over the period
+window". Method đó chưa từng tồn tại: phase 1 (xem entry phía trên, "chữ ký
+entry point đếm billable khác plan") đã build và giữ lại đúng một entry point
+đếm, `attendance.Service.TallyByEnrollment(ctx, teacherID, from, to)
+([]EnrollmentTally, error)` — batched theo mọi enrollment trong cửa sổ ngày,
+không nhận danh sách enrollment cụ thể.
+
+**Quyết định:** `Repository.LiveBillableCounts(ctx, teacherID, enrollmentIDs,
+period)` gọi đúng `TallyByEnrollment` (qua `AttendanceSource`, interface
+billing tự khai báo) rồi lọc kết quả xuống còn `enrollmentIDs` billing cần,
+trả `map[enrollment_id]billable_count`. Billing không viết thêm một query đếm
+thứ hai lên `attendance_records` — đúng tinh thần của Implementation Steps
+("Billing writes no second counting query, so `live_charge` and
+`current_charge` can never be computed by two different rules"), chỉ khác ở
+chỗ bộ lọc nằm ở phía billing (sau khi nhận kết quả) thay vì ở phía attendance
+(qua tham số enrollment list truyền vào).
+
+## 2026-08-04 — Plan 04, Phase 4: `BillingReconciler`/`Reconciliation` khai báo trong `attendance`, không phải `billing`, để tránh import cycle
+
+`billing` đã import `attendance` từ phase 1 (cho `TallyByEnrollment`) và phase
+3 (cho pending feed). `ReconcileSession` — method billing implement để phản
+hồi một thay đổi điểm danh đã commit — buộc `attendance.Service` phải giữ một
+tham chiếu ngược về billing. Go không cho phép hai package import lẫn nhau.
+
+**Quyết định:** interface callback `BillingReconciler` và các kiểu dữ liệu nó
+trả về (`Reconciliation`, `ReconciliationEntry`) khai báo trong package
+`attendance` (đúng như Architecture đã ghi rõ), không phải `billing`.
+`billing.Service` implement interface đó một cách cấu trúc (không import
+ngược `attendance.BillingReconciler` — implicit satisfaction). `attendance.
+Service` giữ field `reconciler BillingReconciler` (nil-able, mặc định nil nếu
+không ai gọi `SetReconciler`) và gọi nó sau khi `Confirm` commit thành công;
+lỗi từ `ReconcileSession` không rollback điểm danh đã ghi (không thể, đã
+commit) mà chỉ nổi lên như `Response.Warning *string` — không phải 5xx.
+`registerFeatures` (router.go) nối hai service lại sau khi cả hai đã khởi tạo:
+`billingSvc := billing.NewService(...)` rồi `attendanceSvc.SetReconciler(billingSvc)`.
+Kết quả: `attendance` không bao giờ import `billing` (xác nhận bằng
+`grep -r "features/billing" internal/features/attendance` rỗng).
+
+## 2026-08-04 — Plan 04, Phase 4: `deriveInvoiceStatus` là bản tạm của billing, chưa phải bản chính thức plan 05 sở hữu
+
+Architecture (bước "recompute in the same transaction") ghi "status = derived
+from paid_amount vs total_due (plan 05 helper)" — plan 05 (payments) chưa
+build, chưa có hàm đó để gọi.
+
+**Quyết định:** implement `deriveInvoiceStatus(currentStatus string,
+paidAmount, totalDue int64) string` cục bộ trong `billing/adjustment.go`: chỉ
+chuyển trạng thái trong nhóm issued/partially_paid/paid theo paid_amount so
+với total_due, không bao giờ đụng draft hay void (hai trạng thái đó do
+`Draft`/`VoidInvoice` sở hữu riêng). Hàm này có unit test riêng
+(`TestDeriveInvoiceStatusNeverTouchesDraftOrVoid`,
+`TestDeriveInvoiceStatusTransitionsAmongIssuedPartiallyPaidPaid`) nhưng
+**không** được `RecalcInvoiceTotals` gọi trực tiếp — `RecalcInvoiceTotals`
+(repository.go) mirror cùng luật đó bằng SQL `CASE` ngay trong một `UPDATE ...
+FROM (SELECT sum ...)` duy nhất, để `adjustment_total`, `total_due`, và
+`status` cùng commit trong một lượt ghi atomic (không thể vừa đọc `total_due`
+mới vừa gọi hàm Go rồi ghi lại mà không tạo ra một cửa sổ ghi từng phần vi
+phạm CHECK `total_due = opening_balance + current_charge + adjustment_total`).
+Hệ quả: luật status hiện tồn tại ở hai nơi (Go và SQL) phải giữ đồng bộ thủ
+công — rủi ro trôi luật được chấp nhận có ý thức vì `deriveInvoiceStatus` là
+deliverable tường minh của phase 4 và là bản để plan 05 thay thế toàn bộ, không
+phải nguồn ghi dữ liệu thật.
+
+## 2026-08-04 — Plan 04, Phase 4: `billing.NewService` nhận thêm `EnrollmentSource`; `ensureAdjustmentTarget` đọc `class_sessions`/`students` trực tiếp
+
+Hai việc Architecture yêu cầu không có sẵn dependency nào billing đang giữ
+đáp ứng được:
+
+1. **Trường hợp hiếm "enrollment có điểm danh trong `P` nhưng không có dòng
+   trên `I`"** (học sinh join giữa kỳ, backfill điểm danh sau khi kỳ đã đóng)
+   bắt buộc xác nhận roster qua đúng
+   `enrollments.ActiveOn(ctx, teacherID, classID, session.session_date)` —
+   Architecture ghi rõ "never a hand-written started_on/ended_on comparison".
+   Không có tiền lệ direct-table-read nào thay thế được vì đây là một luật
+   nghiệp vụ (roster membership), không phải một metadata join.
+2. **`ensureAdjustmentTarget`** cần tên lớp của session đang sửa (cho
+   `adjustmentReason`) và snapshot tên học sinh/liên hệ hiện tại (khi phải
+   tạo invoice draft mới trên kỳ đích) — cả hai đều là metadata thuần.
+
+**Quyết định:** (1) thêm interface `billing.EnrollmentSource` (billing tự
+khai báo, `*enrollments.Service` thoả mãn cấu trúc) và tham số thứ 4 cho
+`NewService(repo, tx, pending, enrollmentSource)`. Điểm chạm đổi: router.go,
+service_test.go, preview_test.go, integration_test.go (tất cả gọi
+`NewService` bằng constructor); `close_test.go` không đổi vì nó dựng
+`Service{}` bằng struct literal. (2) thêm `Repository.SessionMeta` (join
+`class_sessions`→`classes`) và `Repository.StudentSnapshot` (join
+`students`→`contacts`) như hai method đọc bảng trực tiếp — theo đúng tiền lệ
+`TallyAttendance`/`CarriedDebtStudents` (phase 1) đã dùng cho metadata của
+feature khác — thay vì thêm dependency service mới, vì đây chỉ là hai lượt
+đọc tên hiển thị, không phải luật nghiệp vụ.
+
+## 2026-08-04 — Plan 04, Phase 4: cách hiểu "kỳ của tháng hiện tại... nếu đã đóng thì tháng kế tiếp" trong bước 2 của `ensureAdjustmentTarget`
+
+Architecture bước 2 viết: "ensure the period for the current calendar month
+(teacher timezone) when it is after P; if that month is already closed,
+ensure the following month" — không nói rõ phải làm gì khi tháng hiện tại
+KHÔNG sau P (trường hợp hiếm: sửa điểm danh của một kỳ đã đóng từ rất lâu,
+trong khi hệ thống đã kịp mở và đóng thêm các kỳ ở giữa nhưng không kỳ nào
+trong số đó còn ở trạng thái `open` — nói cách khác `NextOpenPeriod` trả rỗng
+dù có kỳ nằm giữa P và hiện tại).
+
+**Quyết định** (`resolveTargetPeriod`, adjustment.go): thử `NextOpenPeriod`
+trước (kỳ `open` sớm nhất sau `P.PeriodEnd`); nếu không có, lấy "hôm nay" theo
+timezone giáo viên (`teacherLocation`, tái dùng từ phase 1/3) — nếu tháng hiện
+tại sau `P` thì dùng chính tháng đó làm ứng viên, ngược lại nhảy thẳng tới
+tháng kế tiếp `P` (không dùng tháng hiện tại); sau đó `EnsurePeriod` ứng viên
+đó, và nếu nó hoá ra đã `closed`, nhảy thêm một tháng kế tiếp và
+`EnsurePeriod` lần nữa. Cách này giữ đúng bất biến "kỳ đích luôn sau P và luôn
+`open` khi trả về" cho mọi trường hợp, kể cả trường hợp Architecture không nói
+rõ.
+
+## 2026-08-04 — Plan 04, review chốt sổ: chống double-count khi reconcile đồng thời + đồng bộ validate lý do void
+
+Code review toàn diff plan 04 (money/immutability/tenancy) xác nhận các bất
+biến lõi đều đúng cho luồng tuần tự; phát sinh một số điểm ngoài phạm vi mô tả
+của plan, xử lý như sau.
+
+**H1 — race double-count khi reconcile đồng thời (đã vá).** `reconcileStudent`
+đọc `already_adj` (`AdjustmentsBySourcePeriod`) rồi mới post adjustment, không
+có row lock; dưới READ COMMITTED (mặc định của `database.TxManager.WithinTx`)
+hai `ReconcileSession` cho cùng student + cùng kỳ đã đóng (ví dụ giáo viên xác
+nhận hai buổi khác nhau của một học sinh gần như đồng thời) đều đọc
+`already_adj` cũ rồi cùng post một delta → phụ huynh bị tính dư. Trường hợp
+tuần tự ("sửa đi sửa lại cùng một buổi") vốn đã đúng nhờ số học tích luỹ; đây
+là cạnh còn lại của tính đồng thời.
+
+**Quyết định:** thêm `Repository.LockInvoice` (`SELECT ... FOR UPDATE` trên
+hoá đơn của kỳ đã đóng — natural key của cặp `(student, period)`) và gọi nó
+trong `reconcileStudent` TRƯỚC khi đọc `already_adj`; lần reconcile thứ hai
+block tại đây tới khi lần đầu commit, rồi đọc `already_adj` đã bao gồm carry
+đầu tiên nên tự thành no-op. `ReconcileSession` duyệt student theo thứ tự đã
+sort (theo string id) để hai giao dịch chồng lấn không thể ôm hai row lock
+theo thứ tự ngược nhau mà deadlock. Regression:
+`TestConcurrentReconcileSameStudentDoesNotDoubleCount` (flip cả hai buổi →
+non-billable, reconcile song song, khẳng định carry net đúng một lần
+−200.000, không phải −400.000), chạy xanh dưới `-race`.
+
+**L4 — `Service.VoidInvoice` thiếu validate lý do ở tầng Go (đã vá).** Cột
+`invoices.void_reason` không có CHECK ở DB (chỉ `invoice_adjustments` có), và
+`VoidInvoice` chỉ dựa vào binding `min=3,max=500` của handler — một caller
+không qua Gin có thể ghi lý do rỗng. Thêm `validateAdjustmentReason(reason)`
+đầu `VoidInvoice` cho đồng bộ với `AddAdjustment` (cùng bound 3–500, cùng field
+key `reason`).
+
+**M2 / M3 / L5 — giới hạn đã biết, giữ nguyên cho V1 (ghi nhận, không đổi
+hành vi).** (M2) Gỡ học sinh khỏi một buổi của kỳ đã đóng (`SoftDeleteMissing`
+trong `Confirm`) không tự sinh carry giảm trừ — học sinh biến mất khỏi tập
+attendance sống nên reconcile không thấy; sửa bằng adjustment thủ công. (M3)
+Attendance mới trở nên billable trên một hoá đơn kỳ đã đóng vốn bị void/không
+có → `reconcileStudent` trả `nil` (Architecture: skip), là under-bill thầm cho
+một chỉnh sửa thật; cũng sửa bằng adjustment thủ công. (L5) Reconcile lỗi được
+gộp thành `Warning` trong response chứ không có hàng đợi retry bền — vì số học
+tích luỹ nên một lần sửa sau tự chữa; nếu không có lần sửa nào thì cần rà thủ
+công. Cả ba là quyết định sản phẩm (auto-credit/charge hay giữ đường sửa thủ
+công) vượt phạm vi plan 04; ghi lại để chủ động quyết ở plan 05/06, không chặn
+giao hàng plan 04.
