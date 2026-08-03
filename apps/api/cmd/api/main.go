@@ -4,6 +4,9 @@ package main
 
 import "teka/apps/api/internal/cli"
 
+// Stamped by production builds: -ldflags "-X main.version=<git sha>".
+var version = "dev"
+
 // OpenAPI root metadata (rendered at /swagger outside production).
 //
 //	@title						Teka API
@@ -16,5 +19,5 @@ import "teka/apps/api/internal/cli"
 //	@name						Authorization
 //	@description				Type "Bearer" followed by a space and the access token.
 func main() {
-	cli.Execute()
+	cli.Execute(version)
 }

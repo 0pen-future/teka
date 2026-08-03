@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Bundle analyzer output (npm run build:analyze)
+stats.html

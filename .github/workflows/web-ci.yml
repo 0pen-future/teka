@@ -1,0 +1,160 @@
+# Path-filtered frontend pipeline: lint/format/types, unit tests with a
+# coverage artifact, and the production image (pushed to GHCR on main). The
+# full-stack Playwright e2e job is quarantined to main pushes and a nightly
+# schedule so the PR loop stays fast.
+name: Web CI
+
+on:
+  pull_request:
+    paths:
+      - "apps/web/**"
+      - ".github/workflows/web-ci.yml"
+      # The e2e job consumes the compose stack and its env contract.
+      - "Makefile"
+      - "docker-compose.yml"
+      - ".env.example"
+  push:
+    branches: [main]
+    paths:
+      - "apps/web/**"
+      - ".github/workflows/web-ci.yml"
+      - "Makefile"
+      - "docker-compose.yml"
+      - ".env.example"
+  schedule:
+    - cron: "0 3 * * *"
+
+concurrency:
+  # event_name in the key so the nightly cron (same ref as main) can never
+  # cancel an in-flight release build.
+  group: web-ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: apps/web
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      # Same checks as `make lint-web`.
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run typecheck
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      # Same script locally and in CI — no CI-only invocation drift.
+      - run: npm run test:coverage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-coverage
+          path: apps/web/coverage
+          retention-days: 14
+
+  build:
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: github.event_name == 'push'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository }}/web
+          tags: |
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: apps/web
+          # Deployment-specific: override with a repository variable when the
+          # real API origin is known; /api/v1 assumes same-origin serving.
+          build-args: |
+            VITE_API_URL=${{ vars.VITE_API_URL || '/api/v1' }}
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  e2e:
+    if: github.event_name == 'push' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      # Compose interpolates the repo-root .env; the example values are the
+      # dev-stack defaults and contain no real secrets.
+      - name: Create .env from example
+        working-directory: .
+        run: cp .env.example .env
+      - name: Start the dev stack
+        working-directory: .
+        run: docker compose up -d --build
+      # web healthy transitively implies api healthy (depends_on), and web is
+      # what Playwright actually targets. Generous budget: a cold runner
+      # compiles the Go module tree twice (migrate, then api under air).
+      - name: Wait for the stack to be healthy
+        working-directory: .
+        run: |
+          for _ in $(seq 1 120); do
+            if [ "$(docker compose ps web --format '{{.Health}}')" = "healthy" ]; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "web never became healthy" >&2
+          docker compose ps >&2
+          docker compose logs api web >&2
+          exit 1
+      - name: Seed test users
+        working-directory: .
+        run: docker compose run --rm migrate go run ./cmd/api seed
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-artifacts
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+          retention-days: 7
+      - name: Tear down the stack
+        working-directory: .
+        if: always()
+        run: docker compose down -v

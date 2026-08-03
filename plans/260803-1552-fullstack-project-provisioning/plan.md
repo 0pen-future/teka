@@ -1,7 +1,7 @@
 ---
 title: "Fullstack Project Provisioning"
 description: "Provision a production-ready monorepo with a Go/Gin/GORM/PostgreSQL feature-oriented API and a React/TypeScript/Vite/Tailwind/shadcn feature-oriented web app, plus Docker Compose local dev, tooling, and CI/CD."
-status: in-progress
+status: completed
 priority: P1
 effort: "6d"
 tags: [go, gin, gorm, postgres, cobra, react, typescript, vite, tailwind, shadcn, docker, monorepo]
@@ -222,7 +222,7 @@ project-root/
 | 5 | [Phase 5: Frontend Foundation](./phase-05-frontend-foundation.md) | Completed |
 | 6 | [Phase 6: Frontend Features and Testing](./phase-06-frontend-features-and-testing.md) | Completed |
 | 7 | [Phase 7: Docker Compose Local Dev](./phase-07-docker-compose-local-dev.md) | Completed |
-| 8 | [Phase 8: CI/CD, Tooling and Deployment](./phase-08-ci-cd-tooling-and-deployment.md) | Pending |
+| 8 | [Phase 8: CI/CD, Tooling and Deployment](./phase-08-ci-cd-tooling-and-deployment.md) | Completed |
 
 **Dependencies:** 2→1, 3→2, 4→3, 5→1, 6→5 (+3 for real API in e2e), 7→(3,5), 8→(4,6,7). Phases 2–4 (backend) and 5–6 (frontend) can run as two parallel tracks after Phase 1.
 
@@ -248,13 +248,13 @@ project-root/
 
 ## Success Criteria
 
-- [ ] `make setup && make dev` on a clean machine brings up Postgres, API, and web with migrations applied and seeds loaded
-- [ ] `curl localhost:8080/healthz` and `/readyz` return 200; web app loads at `localhost:5173`, login works against seeded admin
-- [ ] `make test` passes: Go unit + integration tests, Vitest suites; `make lint` passes both stacks
-- [ ] All Cobra commands work: `serve`, `migrate up|down|status`, `seed`, `admin create`
-- [ ] Each reference feature demonstrates the full feature-module contract (docs list the contract; code matches)
-- [ ] CI workflows green on a PR touching both apps; security scan jobs run
-- [ ] Docs cover architecture, API standards, local dev, deployment
+- [x] `make setup && make dev` on a clean machine brings up Postgres, API, and web with migrations applied and seeds loaded
+- [x] `curl localhost:8080/healthz` and `/readyz` return 200; web app loads at `localhost:5173`, login works against seeded admin
+- [x] `make test` passes: Go unit + integration tests, Vitest suites; `make lint` passes both stacks
+- [x] All Cobra commands work: `serve`, `migrate up|down|status`, `seed`, `admin create`
+- [x] Each reference feature demonstrates the full feature-module contract (docs list the contract; code matches)
+- [ ] CI workflows green on a PR touching both apps; security scan jobs run — implemented and locally validated (actionlint, same-make-target parity, images smoke-tested, scans run locally); live run needs a GitHub remote, which does not exist yet
+- [x] Docs cover architecture, API standards, local dev, deployment
 
 ## Open Questions
 

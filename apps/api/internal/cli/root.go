@@ -19,8 +19,10 @@ func init() {
 	rootCmd.AddCommand(serveCmd, migrateCmd, seedCmd, adminCmd)
 }
 
-// Execute runs the root command and exits non-zero on error.
-func Execute() {
+// Execute runs the root command and exits non-zero on error. The version is
+// injected by the build (see cmd/api/main.go) and served by `api --version`.
+func Execute(version string) {
+	rootCmd.Version = version
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)

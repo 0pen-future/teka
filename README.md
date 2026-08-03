@@ -1,5 +1,10 @@
 # Teka
 
+<!-- Badges activate once the repo has a GitHub remote: replace OWNER/REPO. -->
+[![API CI](https://github.com/OWNER/REPO/actions/workflows/api-ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/api-ci.yml)
+[![Web CI](https://github.com/OWNER/REPO/actions/workflows/web-ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/web-ci.yml)
+[![Security](https://github.com/OWNER/REPO/actions/workflows/security.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/security.yml)
+
 Full-stack application: Go API (Gin + GORM + PostgreSQL) and React web app
 (TypeScript + Vite + Tailwind + shadcn/ui) in a single monorepo.
 
@@ -18,7 +23,27 @@ make dev     # start Postgres + API + web via Docker Compose
 ```
 
 Then open http://localhost:5173 (web), http://localhost:8080/healthz (API),
-http://localhost:8081 (Adminer). Run `make help` for the full command list.
+http://localhost:8081 (Adminer).
+
+## Commands
+
+Run `make help` for the full annotated list. The everyday ones:
+
+| Command | What it does |
+|---------|--------------|
+| `make setup` | Check tools, create `.env`, install git hooks |
+| `make dev` / `make dev-down` | Start / stop the Docker Compose dev stack |
+| `make dev-nuke` | Stop the stack and wipe volumes (destroys local DB data) |
+| `make test` | All backend + frontend tests (`test-api`, `test-web`) |
+| `make lint` | Lint both apps (`lint-api`, `lint-web`) |
+| `make e2e` | Playwright end-to-end tests against the running dev stack |
+| `make api-docs` | Regenerate the OpenAPI spec from swag annotations |
+| `make migrate-up` / `make seed` | Apply migrations / seed dev users |
+| `make build` | Build both production Docker images |
+
+CI (`.github/workflows/`) runs the same targets — a green local run means a
+green pipeline. See [`docs/deployment.md`](./docs/deployment.md) for how the
+production images are published and deployed.
 
 ## Repository layout
 

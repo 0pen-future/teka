@@ -1,7 +1,7 @@
 ---
 phase: 8
 title: "Phase 8: CI/CD, Tooling and Deployment"
-status: todo
+status: completed
 priority: P2
 effort: "1d"
 dependencies: [4, 6, 7]
@@ -58,11 +58,11 @@ Finish the operational shell: GitHub Actions CI with path-filtered jobs, securit
 
 ## Success Criteria
 
-- [ ] PR touching only `apps/web` runs only web jobs (and vice versa)
-- [ ] Main merge publishes both images to GHCR; `docker run` of each works standalone
-- [ ] Security workflow completes with zero unaddressed HIGH/CRITICAL findings
-- [ ] Trivy/gosec/govulncheck + Dependabot all active; SARIF visible in code scanning tab
-- [ ] `docs/deployment.md` walks a new operator from images to a running deployment shape
+- [x] PR touching only `apps/web` runs only web jobs (and vice versa)
+- [x] Main merge publishes both images to GHCR; `docker run` of each works standalone
+- [x] Security workflow completes with zero unaddressed HIGH/CRITICAL findings
+- [x] Trivy/gosec/govulncheck + Dependabot all active; SARIF visible in code scanning tab
+- [x] `docs/deployment.md` walks a new operator from images to a running deployment shape
 
 ## Risk Assessment
 

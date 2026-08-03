@@ -1,0 +1,86 @@
+# Weekly (and on-demand) security sweep: Go vulnerability DB, npm audit, and
+# Trivy scans of both production images with SARIF uploaded to code scanning.
+# gosec runs on every PR via golangci-lint; this workflow covers what needs a
+# fresh vulnerability database rather than a code change to go stale.
+name: Security
+
+on:
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+  # Validate edits to this workflow before merge; it is otherwise only
+  # exercised weekly.
+  pull_request:
+    paths:
+      - ".github/workflows/security.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/api/go.mod
+          cache-dependency-path: apps/api/go.sum
+      # Version-pinned like every other tool here; Dependabot cannot bump a
+      # `go run` ref, so revisit the pin when triaging scan results.
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+        working-directory: apps/api
+
+  npm-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # npm-audit gate (high+) with one triaged exception:
+      # GHSA-qwww-vcr4-c8h2 — react-router RSC-mode CSRF bypass. This app is a
+      # plain SPA (createBrowserRouter data mode); RSC mode is never enabled,
+      # so the vulnerable code path is unreachable. No patched 7.x exists; the
+      # fix lands with the react-router v8 major. Drop the allowlist entry
+      # when that upgrade happens.
+      - run: npx audit-ci@^7 --high --allowlist GHSA-qwww-vcr4-c8h2
+        working-directory: apps/web
+
+  trivy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      matrix:
+        app: [api, web]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: |
+          if [ "${{ matrix.app }}" = "web" ]; then
+            docker build --build-arg VITE_API_URL=/api/v1 -t scan-target:${{ matrix.app }} apps/web
+          else
+            docker build -t scan-target:${{ matrix.app }} apps/api
+          fi
+      - uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: scan-target:${{ matrix.app }}
+          format: sarif
+          output: trivy-${{ matrix.app }}.sarif
+          severity: HIGH,CRITICAL
+          # Without this, sarif format silently drops the severity filter and
+          # exit-code fires on LOW/UNKNOWN findings too.
+          limit-severities-for-sarif: true
+          # Base-image CVEs with no upstream fix have no remediation path;
+          # gating on them just trains everyone to ignore a red weekly job.
+          ignore-unfixed: true
+          exit-code: "1"
+      # Note: on a private repo this upload requires GitHub Advanced Security;
+      # without it the step fails even though the scan itself succeeded.
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-${{ matrix.app }}.sarif
+          category: trivy-${{ matrix.app }}

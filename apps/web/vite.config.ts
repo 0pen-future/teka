@@ -2,17 +2,26 @@ import path from "node:path";
 
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { visualizer } from "rollup-plugin-visualizer";
+import { defineConfig, type PluginOption } from "vite";
 
 // Compose-only knobs, read at config-load time in Node (not VITE_-prefixed,
 // so they never reach the client bundle). WEB_API_PROXY_TARGET makes /api
 // same-origin in the browser; host-mode dev talks to localhost:8080 directly.
 const proxyTarget = process.env.WEB_API_PROXY_TARGET;
 const usePolling = process.env.WEB_USE_POLLING === "true";
+// `npm run build:analyze` writes a bundle treemap to stats.html (gitignored).
+const analyze = process.env.ANALYZE === "true";
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    // Cast: the plugin declares rollup's Plugin type, which vite's rolldown
+    // types don't recognize; the hook shape is compatible.
+    ...(analyze ? [visualizer({ filename: "stats.html", gzipSize: true }) as PluginOption] : []),
+  ],
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "./src"),

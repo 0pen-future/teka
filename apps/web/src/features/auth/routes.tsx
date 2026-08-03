@@ -1,10 +1,16 @@
 import type { RouteObject } from "react-router";
 
-import { LoginPage } from "./pages/login-page";
-import { RegisterPage } from "./pages/register-page";
-
-/** Public-only routes; the app router mounts these under the auth layout. */
+/**
+ * Public-only routes; the app router mounts these under the auth layout.
+ * Pages load through route.lazy so each lands in its own build chunk.
+ */
 export const authRoutes: RouteObject[] = [
-  { path: "/login", element: <LoginPage /> },
-  { path: "/register", element: <RegisterPage /> },
+  {
+    path: "/login",
+    lazy: async () => ({ Component: (await import("./pages/login-page")).LoginPage }),
+  },
+  {
+    path: "/register",
+    lazy: async () => ({ Component: (await import("./pages/register-page")).RegisterPage }),
+  },
 ];

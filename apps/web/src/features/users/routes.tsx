@@ -1,10 +1,16 @@
 import type { RouteObject } from "react-router";
 
-import { UserDetailPage } from "./pages/user-detail-page";
-import { UsersPage } from "./pages/users-page";
-
-/** Mounted by the app router inside the protected dashboard layout. */
+/**
+ * Mounted by the app router inside the protected dashboard layout.
+ * Pages load through route.lazy so each lands in its own build chunk.
+ */
 export const usersRoutes: RouteObject[] = [
-  { path: "users", element: <UsersPage /> },
-  { path: "users/:id", element: <UserDetailPage /> },
+  {
+    path: "users",
+    lazy: async () => ({ Component: (await import("./pages/users-page")).UsersPage }),
+  },
+  {
+    path: "users/:id",
+    lazy: async () => ({ Component: (await import("./pages/user-detail-page")).UserDetailPage }),
+  },
 ];

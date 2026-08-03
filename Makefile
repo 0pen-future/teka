@@ -116,12 +116,27 @@ seed: ## Seed the database with development data
 	@cd $(API_DIR) && go run ./cmd/api seed
 
 .PHONY: build
-build: build-api build-web ## Build production artifacts for both apps
+build: build-image-api build-image-web ## Build both production Docker images
+
+# Full sha, matching CI's ${{ github.sha }}, so `api --version` output is
+# identical provenance regardless of where the image was built.
+GIT_SHA := $(shell git rev-parse HEAD 2>/dev/null || echo dev)
+# Same-origin default; override for a split topology:
+#   make build-image-web VITE_API_URL=https://api.example.com/api/v1
+VITE_API_URL ?= /api/v1
+
+.PHONY: build-image-api
+build-image-api: ## Build the production API image (teka-api:local)
+	@docker build --build-arg GIT_SHA=$(GIT_SHA) -t teka-api:local $(API_DIR)
+
+.PHONY: build-image-web
+build-image-web: ## Build the production web image (teka-web:local)
+	@docker build --build-arg VITE_API_URL=$(VITE_API_URL) -t teka-web:local $(WEB_DIR)
 
 .PHONY: build-api
-build-api: ## Build the API binary
+build-api: ## Build the API binary (host, no Docker)
 	@cd $(API_DIR) && CGO_ENABLED=0 go build -o bin/api ./cmd/api && echo "built $(API_DIR)/bin/api"
 
 .PHONY: build-web
-build-web: ## Build the web production bundle / image
+build-web: ## Build the web production bundle (host, no Docker)
 	@cd $(WEB_DIR) && npm run build
