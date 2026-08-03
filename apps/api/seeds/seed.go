@@ -8,11 +8,19 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
+	"time"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
+	"teka/apps/api/internal/database"
+	"teka/apps/api/internal/features/attendance"
+	"teka/apps/api/internal/features/classes"
+	"teka/apps/api/internal/features/enrollments"
+	"teka/apps/api/internal/features/sessions"
+	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/shared/id"
 )
 
@@ -133,7 +141,10 @@ func Run(ctx context.Context, db *gorm.DB, log *slog.Logger) error {
 	if err := seedClassList(ctx, db, log, teacherIDs[0]); err != nil {
 		return err
 	}
-	return seedEnrollmentList(ctx, db, log, teacherIDs[0])
+	if err := seedEnrollmentList(ctx, db, log, teacherIDs[0]); err != nil {
+		return err
+	}
+	return seedSessionList(ctx, db, log, teacherIDs[0])
 }
 
 // ensureTeacher returns the id of the teacher with s.Phone, creating the
@@ -359,5 +370,107 @@ func seedEnrollmentList(ctx context.Context, db *gorm.DB, log *slog.Logger, teac
 		return fmt.Errorf("seed: create enrollments: %w", err)
 	}
 	log.Info("seed: enrollments created", "teacher_id", teacherID, "enrollments", len(seedEnrollments))
+	return nil
+}
+
+// pendingAttendanceCount is how many of the most recent past sessions are
+// left unconfirmed, so phase 3's pending-attendance warning feed has
+// something to warn about from the moment the database is seeded.
+const pendingAttendanceCount = 2
+
+// pastSession is one generated session that fell on or before "now", tracked
+// across all seeded classes so confirmation order is a single date-sorted
+// timeline rather than per-class.
+type pastSession struct {
+	ID      uuid.UUID
+	ClassID uuid.UUID
+	Date    time.Time
+}
+
+// seedSessionList generates class sessions for the seeded classes across the
+// previous and current calendar month, through the real sessions.Service —
+// exercising the same generation path the API uses rather than hand-rolled
+// inserts. Skipped wholesale when the teacher already has any session, so
+// reseeding never duplicates rows. Attendance is then confirmed, through the
+// real attendance.Service, for every past session except the
+// pendingAttendanceCount most recent — a deterministic scatter of absences
+// gives the seeded data realistic variation without needing true randomness.
+func seedSessionList(ctx context.Context, db *gorm.DB, log *slog.Logger, teacherID uuid.UUID) error {
+	var count int64
+	err := db.WithContext(ctx).
+		Raw("SELECT count(*) FROM class_sessions WHERE teacher_id = ? AND deleted_at IS NULL", teacherID).
+		Scan(&count).Error
+	if err != nil {
+		return fmt.Errorf("seed: look up sessions: %w", err)
+	}
+	if count > 0 {
+		log.Info("seed: sessions exist, skipping", "teacher_id", teacherID)
+		return nil
+	}
+
+	var classIDs []uuid.UUID
+	if err := db.WithContext(ctx).
+		Raw("SELECT id FROM classes WHERE teacher_id = ? AND deleted_at IS NULL", teacherID).
+		Scan(&classIDs).Error; err != nil {
+		return fmt.Errorf("seed: look up classes for sessions: %w", err)
+	}
+	if len(classIDs) == 0 {
+		log.Info("seed: no classes to generate sessions for, skipping", "teacher_id", teacherID)
+		return nil
+	}
+
+	txMgr := database.NewTxManager(db)
+	classesSvc := classes.NewService(classes.NewRepository(db), txMgr)
+	teachersSvc := teachers.NewService(teachers.NewRepository(db))
+	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db))
+	sessionsSvc := sessions.NewService(sessions.NewRepository(db), classesSvc, teachersSvc, enrollmentsSvc)
+	attendanceSvc := attendance.NewService(attendance.NewRepository(db), enrollmentsSvc, sessionsSvc, txMgr)
+
+	now := time.Now()
+	from := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 0)
+	to := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 1, -1)
+
+	var generated int
+	var past []pastSession
+	for _, classID := range classIDs {
+		rows, err := sessionsSvc.ListRange(ctx, teacherID, classID, from, to)
+		if err != nil {
+			return fmt.Errorf("seed: generate sessions for class %s: %w", classID, err)
+		}
+		generated += len(rows)
+		for _, r := range rows {
+			if r.SessionDate.After(now) {
+				continue
+			}
+			past = append(past, pastSession{ID: r.ID, ClassID: classID, Date: r.SessionDate})
+		}
+	}
+	sort.Slice(past, func(i, j int) bool { return past[i].Date.Before(past[j].Date) })
+
+	confirmUpTo := max(len(past)-pendingAttendanceCount, 0)
+	var confirmed int
+	for i, ps := range past[:confirmUpTo] {
+		roster, err := enrollmentsSvc.ActiveOn(ctx, teacherID, ps.ClassID, ps.Date)
+		if err != nil {
+			return fmt.Errorf("seed: look up roster for session %s: %w", ps.ID, err)
+		}
+		var absentIDs []uuid.UUID
+		for j, e := range roster {
+			// A deterministic, evenly scattered "about one in eleven"
+			// absence pattern — enough variation for demo data without
+			// depending on a seeded random source.
+			if (i*7+j*3)%11 == 0 {
+				absentIDs = append(absentIDs, e.StudentID)
+			}
+		}
+		req := attendance.ConfirmRequest{AbsentStudentIDs: absentIDs}
+		if _, err := attendanceSvc.Confirm(ctx, teacherID, ps.ID, req); err != nil {
+			return fmt.Errorf("seed: confirm attendance for session %s: %w", ps.ID, err)
+		}
+		confirmed++
+	}
+
+	log.Info("seed: sessions generated", "teacher_id", teacherID, "sessions", generated,
+		"attendance_confirmed", confirmed, "attendance_pending", len(past)-confirmed)
 	return nil
 }

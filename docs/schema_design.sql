@@ -214,10 +214,12 @@ CREATE TABLE class_sessions (
 CREATE UNIQUE INDEX uq_class_sessions_per_day
     ON class_sessions(class_id, session_date) WHERE deleted_at IS NULL;
 -- Truy vấn nóng nhất: "buổi nào đã qua mà chưa điểm danh"
--- (cảnh báo ở R2, điều kiện chặn chốt sổ ở R4).
+-- (cảnh báo ở R2, điều kiện chặn chốt sổ ở R4). Bao gồm cả 'planned' lẫn
+-- 'held' vì buổi bị quên xác nhận vẫn còn ở 'planned' — đúng trường hợp
+-- cảnh báo tồn tại để bắt (widened bởi migration 000003).
 CREATE INDEX idx_class_sessions_pending
     ON class_sessions(teacher_id, session_date)
-    WHERE status = 'held' AND attendance_confirmed_at IS NULL AND deleted_at IS NULL;
+    WHERE status IN ('held', 'planned') AND attendance_confirmed_at IS NULL AND deleted_at IS NULL;
 CREATE INDEX idx_class_sessions_class_date ON class_sessions(class_id, session_date);
 
 -- Ghi nhận ĐẦY ĐỦ mọi học sinh của buổi, kể cả người có mặt.

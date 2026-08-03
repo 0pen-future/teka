@@ -1,7 +1,7 @@
 ---
 title: "03 API Sessions and Attendance"
 description: "Class sessions generated from schedules, session lifecycle, and one-touch attendance (điểm danh) — the raw data every fee calculation is derived from."
-status: pending
+status: completed
 priority: P1
 effort: "18h"
 tags: [api, go, attendance, sessions, north-star]
@@ -59,9 +59,9 @@ materialises everything else.
 
 | # | Phase | Effort | Depends on | Status |
 |---|-------|--------|------------|--------|
-| 1 | [Session generation and lifecycle](./phase-01-session-generation-and-lifecycle.md) | 7h | — | Pending |
-| 2 | [One-touch attendance](./phase-02-one-touch-attendance.md) | 7h | 1 | Pending |
-| 3 | [Pending attendance warnings](./phase-03-pending-attendance-warnings.md) | 4h | 2 | Pending |
+| 1 | [Session generation and lifecycle](./phase-01-session-generation-and-lifecycle.md) | 7h | — | Done |
+| 2 | [One-touch attendance](./phase-02-one-touch-attendance.md) | 7h | 1 | Done |
+| 3 | [Pending attendance warnings](./phase-03-pending-attendance-warnings.md) | 4h | 2 | Done |
 
 ## Key Decisions
 
@@ -117,25 +117,25 @@ still open and is plan 04's to resolve.
 
 Traced to PRD R2.
 
-- [ ] **R2 acceptance:** a 30-student class with 2 absentees is recorded in at
+- [x] **R2 acceptance:** a 30-student class with 2 absentees is recorded in at
       most 3 interactions — two ticks and one confirm. Measured as: one API
       call carrying two ids.
-- [ ] **R2 acceptance:** a session confirmed three days ago can be reopened,
+- [x] **R2 acceptance:** a session confirmed three days ago can be reopened,
       edited, and reconfirmed, and the stored records reflect the edit.
-- [ ] **R2 acceptance:** a past session that has not been confirmed appears in
+- [x] **R2 acceptance:** a past session that has not been confirmed appears in
       the warning feed the dashboard renders on first load.
-- [ ] Sessions are generated from `class_schedules` for a requested range and
+- [x] Sessions are generated from `class_schedules` for a requested range and
       generating twice creates no duplicates.
-- [ ] Sessions are never generated before the class `start_date` or outside a
+- [x] Sessions are never generated before the class `start_date` or outside a
       schedule's effective range.
-- [ ] A cancelled session carries a reason, has no attendance records, and
+- [x] A cancelled session carries a reason, has no attendance records, and
       cannot be confirmed.
-- [ ] Attendance rows exist for **every** enrolled student on the session date,
+- [x] Attendance rows exist for **every** enrolled student on the session date,
       not only absentees.
-- [ ] A student who joined after a session's date gets no record for it; a
+- [x] A student who joined after a session's date gets no record for it; a
       student who left before it gets none either.
-- [ ] Confirming twice concurrently produces exactly one record per student.
-- [ ] All endpoints are teacher-scoped; another teacher's session id returns
+- [x] Confirming twice concurrently produces exactly one record per student.
+- [x] All endpoints are teacher-scoped; another teacher's session id returns
       404.
 
 ## Data model summary

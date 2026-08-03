@@ -13,10 +13,12 @@ import (
 	_ "teka/apps/api/docs"
 	"teka/apps/api/internal/config"
 	"teka/apps/api/internal/database"
+	"teka/apps/api/internal/features/attendance"
 	"teka/apps/api/internal/features/auth"
 	"teka/apps/api/internal/features/classes"
 	"teka/apps/api/internal/features/contacts"
 	"teka/apps/api/internal/features/enrollments"
+	"teka/apps/api/internal/features/sessions"
 	"teka/apps/api/internal/features/students"
 	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/middleware"
@@ -87,4 +89,19 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB) {
 
 	studentsSvc := students.NewService(students.NewRepository(db), enrollmentsSvc, txMgr)
 	students.RegisterRoutes(v1, students.NewHandler(studentsSvc), requireAuth)
+
+	// sessions consumes classes, teachers, and enrollments through consumer
+	// interfaces (ClassSource, TeacherSource, EnrollmentSource) rather than
+	// their repository types, so all three services must exist first.
+	sessionsSvc := sessions.NewService(sessions.NewRepository(db), classesSvc, teachersSvc, enrollmentsSvc)
+	sessions.RegisterRoutes(v1, sessions.NewHandler(sessionsSvc), requireAuth)
+
+	// attendance consumes enrollments and sessions through consumer
+	// interfaces (RosterSource, SessionStore) rather than their repository
+	// types, so both services must exist first. Confirming attendance runs
+	// sessions.MarkHeldAndConfirmed inside attendance's own transaction so
+	// attendance records and the session's held+confirmed status commit
+	// atomically.
+	attendanceSvc := attendance.NewService(attendance.NewRepository(db), enrollmentsSvc, sessionsSvc, txMgr)
+	attendance.RegisterRoutes(v1, attendance.NewHandler(attendanceSvc), requireAuth)
 }

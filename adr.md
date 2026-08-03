@@ -172,3 +172,29 @@ Nhóm Low còn lại (phân trang thiếu tiebreaker, ILIKE không escape, valid
 `end_date >= start_date` ở classes, ghi danh vào lớp archived, `display_note`
 trả `""` cho NULL, docs guidelines chưa nhắc validator mới) được ghi nhận và
 hoãn dọn sau — không chặn nghiệm thu plan 02.
+
+## 2026-08-04 — Plan 03: guard trạng thái nguồn cho Uncancel/Hold (đã fix)
+
+Code review chỉ ra `Uncancel`/`Hold` (sessions) không kiểm tra trạng thái
+nguồn. Gọi `uncancel` trên một buổi đã `held` + đã confirm sẽ đưa `status` về
+`planned` nhưng giữ nguyên `attendance_confirmed_at` và các bản ghi điểm danh —
+tạo ra buổi "planned nhưng đã confirmed". Vì `CountBillableByEnrollment` (điểm
+vào của plan 04) chỉ đếm `status = 'held'`, buổi bị lật sẽ rơi khỏi phần tính
+tiền → thu thiếu. `Hold` cũng không chặn buổi `cancelled` nên tạo buổi `held`
+còn ôm `cancel_reason` cũ.
+
+**Quyết định (đã fix trong commit này):** `Uncancel` yêu cầu nguồn phải là
+`cancelled` (khác → 409 `ErrInvalidTransition`); `Hold` từ chối buổi
+`cancelled` (buộc uncancel trước) và truyền `nil` reason để dọn `cancel_reason`
+cũ. Đúng theo bảng lifecycle ở phase-01 (`cancelled → planned` là chuyển hợp
+lệ duy nhất từ cancelled). Có test unit cho cả hai path guard.
+
+Nhóm Low hoãn (không chặn nghiệm thu plan 03):
+- `CountBillableByEnrollment` chưa có consumer/test khẳng định predicate — sẽ
+  được phủ khi plan 04 dựng consumer (đúng nơi biết hành vi mong đợi).
+- Ad-hoc session không clamp theo `[start_date, end_date]` của lớp — cố ý cho
+  buổi bù (phase-01), chỉ chặn trùng ngày qua unique index.
+- Comment route `/sessions/pending` mô tả cơ chế Gin hơi sai bản chất (ưu tiên
+  theo loại node, không phải thứ tự đăng ký); vô hại, route đúng + có test
+  literal-path.
+- `Confirm` giải roster hai lần (một truy vấn thừa mỗi lần confirm, bounded).

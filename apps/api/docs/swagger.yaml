@@ -1,5 +1,47 @@
 basePath: /api/v1
 definitions:
+  attendance.ConfirmRequest:
+    properties:
+      absent_student_ids:
+        items:
+          type: string
+        type: array
+      note:
+        maxLength: 500
+        type: string
+    type: object
+  attendance.Response:
+    properties:
+      attendance_confirmed_at:
+        type: string
+      rows:
+        items:
+          $ref: '#/definitions/attendance.RowResponse'
+        type: array
+      session_date:
+        type: string
+      session_id:
+        type: string
+      status:
+        type: string
+    type: object
+  attendance.RowResponse:
+    properties:
+      billable:
+        type: boolean
+      display_note:
+        type: string
+      enrollment_id:
+        type: string
+      note:
+        type: string
+      status:
+        type: string
+      student_id:
+        type: string
+      student_name:
+        type: string
+    type: object
   auth.LoginRequest:
     properties:
       password:
@@ -266,6 +308,78 @@ definitions:
       total:
         type: integer
       total_pages:
+        type: integer
+    type: object
+  sessions.CancelRequest:
+    properties:
+      reason:
+        maxLength: 500
+        minLength: 1
+        type: string
+    required:
+    - reason
+    type: object
+  sessions.CreateSessionRequest:
+    properties:
+      session_date:
+        type: string
+      start_time:
+        type: string
+    required:
+    - session_date
+    type: object
+  sessions.PendingResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/sessions.PendingSessionResponse'
+        type: array
+      total:
+        type: integer
+    type: object
+  sessions.PendingSessionResponse:
+    properties:
+      class_id:
+        type: string
+      class_name:
+        type: string
+      days_overdue:
+        description: |-
+          DaysOverdue is computed from the teacher-timezone cutoff Service.ListPending
+          resolved, not stored — it is what makes the warning actionable.
+        type: integer
+      expected_student_count:
+        type: integer
+      session_date:
+        type: string
+      session_id:
+        type: string
+      start_time:
+        type: string
+      status:
+        type: string
+    type: object
+  sessions.SessionResponse:
+    properties:
+      attendance_confirmed_at:
+        type: string
+      cancel_reason:
+        type: string
+      class_id:
+        type: string
+      class_name:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      session_date:
+        type: string
+      start_time:
+        type: string
+      status:
+        type: string
+      student_count:
         type: integer
     type: object
   students.CreateRequest:
@@ -955,6 +1069,144 @@ paths:
       summary: Update schedule row
       tags:
       - classes
+  /classes/{id}/sessions:
+    get:
+      description: 'Generates any session rows missing for [from, to] from the class''s
+        effective schedules, then returns every session in the range — including cancelled
+        ones. Idempotent: calling it again with an overlapping range never duplicates
+        a row. Range is capped at 400 days.'
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: range start, YYYY-MM-DD
+        in: query
+        name: from
+        required: true
+        type: string
+      - description: range end, YYYY-MM-DD
+        in: query
+        name: to
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/sessions.SessionResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: range too large or to before from
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List (and generate) class sessions
+      tags:
+      - sessions
+    post:
+      consumes:
+      - application/json
+      description: Adds a make-up session on a date not covered by any schedule. A
+        date already occupied by another session for the class returns 409.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: session date and optional start time
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/sessions.CreateSessionRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/sessions.SessionResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: a session already exists on this date
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Add an ad-hoc session
+      tags:
+      - sessions
   /contacts:
     get:
       description: Paginated; query matches full_name or phone case-insensitively.
@@ -1561,6 +1813,424 @@ paths:
       summary: Update current teacher profile
       tags:
       - teachers
+  /sessions/{id}:
+    delete:
+      description: Refuses (409) a session whose attendance is already confirmed.
+      parameters:
+      - description: session id
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: attendance already confirmed
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Delete session
+      tags:
+      - sessions
+    get:
+      parameters:
+      - description: session id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/sessions.SessionResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get session
+      tags:
+      - sessions
+  /sessions/{id}/attendance:
+    get:
+      description: Returns one row per student enrolled as of the session date, present
+        students included. status is null for a session never confirmed.
+      parameters:
+      - description: session id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/attendance.Response'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get session attendance
+      tags:
+      - attendance
+    post:
+      consumes:
+      - application/json
+      description: 'One-touch attendance (PRD R2): pass only the ids of absent students
+        — an empty array means everyone was present. Writes one billable record per
+        roster student, drops records for students no longer enrolled, and marks the
+        session held. Refuses (409) a cancelled session; rejects (422) any absent
+        id not on the roster active for the session''s date.'
+      parameters:
+      - description: session id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: absent student ids and optional note
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/attendance.ConfirmRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/attendance.Response'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: session is cancelled
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: an absent id is not on the roster
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Confirm session attendance
+      tags:
+      - attendance
+  /sessions/{id}/cancel:
+    post:
+      consumes:
+      - application/json
+      description: reason is required and becomes the line parents see on their statement.
+        Refuses (409) a session whose attendance is already confirmed.
+      parameters:
+      - description: session id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: cancellation reason
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/sessions.CancelRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/sessions.SessionResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: attendance already confirmed
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: reason is required
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Cancel session
+      tags:
+      - sessions
+  /sessions/{id}/hold:
+    post:
+      description: Explicitly marks a session held, ahead of attendance confirmation
+        (phase 2) implicitly doing the same.
+      parameters:
+      - description: session id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/sessions.SessionResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Hold session
+      tags:
+      - sessions
+  /sessions/{id}/uncancel:
+    post:
+      parameters:
+      - description: session id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/sessions.SessionResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Uncancel session
+      tags:
+      - sessions
+  /sessions/pending:
+    get:
+      description: Sessions in the past (evaluated in the teacher's timezone) that
+        are still unconfirmed and planned or held — cancelled sessions never appear.
+        Ordered newest first. from/to optionally bound the range (both inclusive),
+        the same predicate period-closing uses. limit defaults to 50 and is capped
+        at 200; total reflects the unlimited count.
+      parameters:
+      - description: range start, YYYY-MM-DD
+        in: query
+        name: from
+        type: string
+      - description: range end, YYYY-MM-DD
+        in: query
+        name: to
+        type: string
+      - description: max rows to return, default 50, capped at 200
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/sessions.PendingResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List pending attendance
+      tags:
+      - sessions
   /students:
     get:
       description: class_id filters through open enrollments — the attendance screen's

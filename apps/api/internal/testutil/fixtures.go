@@ -10,9 +10,11 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
+	"teka/apps/api/internal/features/attendance"
 	"teka/apps/api/internal/features/classes"
 	"teka/apps/api/internal/features/contacts"
 	"teka/apps/api/internal/features/enrollments"
+	"teka/apps/api/internal/features/sessions"
 	"teka/apps/api/internal/features/students"
 	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/shared/authctx"
@@ -238,4 +240,107 @@ func Schedule(t *testing.T, db *gorm.DB, class *classes.Class, weekday int16, st
 		t.Fatalf("insert fixture schedule for class %s: %v", class.Name, err)
 	}
 	return s
+}
+
+// SessionOption customizes a fixture session before insertion.
+type SessionOption func(s *sessions.Session)
+
+// WithSessionStatus sets the fixture session's status.
+func WithSessionStatus(status string) SessionOption {
+	return func(s *sessions.Session) { s.Status = status }
+}
+
+// WithSessionStartTime sets the fixture session's start_time.
+func WithSessionStartTime(hhmm string) SessionOption {
+	return func(s *sessions.Session) {
+		t := classes.TimeOfDay(hhmm)
+		s.StartTime = &t
+	}
+}
+
+// WithSessionCancelReason sets the fixture session's cancel_reason.
+func WithSessionCancelReason(reason string) SessionOption {
+	return func(s *sessions.Session) { s.CancelReason = &reason }
+}
+
+// WithSessionAttendanceConfirmed stamps attendance_confirmed_at and flips
+// status to held, simulating a confirmed session ahead of phase 2's
+// attendance endpoint existing.
+func WithSessionAttendanceConfirmed(at time.Time) SessionOption {
+	return func(s *sessions.Session) {
+		s.AttendanceConfirmedAt = &at
+		s.Status = sessions.StatusHeld
+	}
+}
+
+// Session inserts a class_sessions row for the class directly (bypassing the
+// service). Defaults: planned, no start_time. The class must belong to the
+// same teacher — the composite FK rejects the insert otherwise.
+func Session(t *testing.T, db *gorm.DB, teacherID, classID uuid.UUID, date time.Time, opts ...SessionOption) *sessions.Session {
+	t.Helper()
+	s := &sessions.Session{
+		ID:          id.New(),
+		TeacherID:   teacherID,
+		ClassID:     classID,
+		SessionDate: date,
+		Status:      sessions.StatusPlanned,
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	if err := db.Create(s).Error; err != nil {
+		t.Fatalf("insert fixture session for class %s: %v", classID, err)
+	}
+	return s
+}
+
+// AttendanceOption customizes a fixture attendance record before insertion.
+type AttendanceOption func(r *attendance.Record)
+
+// WithAttendanceStatus sets the fixture record's status.
+func WithAttendanceStatus(status string) AttendanceOption {
+	return func(r *attendance.Record) { r.Status = status }
+}
+
+// WithAttendanceBillable sets the fixture record's billable flag.
+func WithAttendanceBillable(billable bool) AttendanceOption {
+	return func(r *attendance.Record) { r.Billable = billable }
+}
+
+// WithAttendanceNote sets the fixture record's note.
+func WithAttendanceNote(note string) AttendanceOption {
+	return func(r *attendance.Record) { r.Note = &note }
+}
+
+// WithAttendanceRecordedAt overrides the fixture record's recorded_at, so
+// tests can assert it is preserved across a later re-confirm.
+func WithAttendanceRecordedAt(at time.Time) AttendanceOption {
+	return func(r *attendance.Record) { r.RecordedAt = at }
+}
+
+// AttendanceRecord inserts an attendance_records row directly (bypassing the
+// service). Defaults: present, billable. The session, student, and
+// enrollment must all belong to the same teacher — the composite FKs reject
+// the insert otherwise.
+func AttendanceRecord(t *testing.T, db *gorm.DB, teacherID, sessionID, studentID, enrollmentID uuid.UUID, opts ...AttendanceOption) *attendance.Record {
+	t.Helper()
+	now := time.Now()
+	r := &attendance.Record{
+		ID:           id.New(),
+		TeacherID:    teacherID,
+		SessionID:    sessionID,
+		StudentID:    studentID,
+		EnrollmentID: enrollmentID,
+		Status:       attendance.StatusPresent,
+		Billable:     true,
+		RecordedAt:   now,
+		UpdatedAt:    now,
+	}
+	for _, opt := range opts {
+		opt(r)
+	}
+	if err := db.Create(r).Error; err != nil {
+		t.Fatalf("insert fixture attendance record for session %s: %v", sessionID, err)
+	}
+	return r
 }
