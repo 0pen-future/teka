@@ -38,6 +38,204 @@ definitions:
       token_type:
         type: string
     type: object
+  classes.ClassResponse:
+    properties:
+      created_at:
+        type: string
+      default_unit_price:
+        type: integer
+      end_date:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      schedules:
+        items:
+          $ref: '#/definitions/classes.ScheduleResponse'
+        type: array
+      start_date:
+        type: string
+      status:
+        type: string
+    type: object
+  classes.CreateClassRequest:
+    properties:
+      default_unit_price:
+        minimum: 0
+        type: integer
+      end_date:
+        type: string
+      name:
+        maxLength: 100
+        minLength: 1
+        type: string
+      schedules:
+        items:
+          $ref: '#/definitions/classes.ScheduleRequest'
+        minItems: 1
+        type: array
+      start_date:
+        type: string
+    required:
+    - default_unit_price
+    - name
+    - schedules
+    - start_date
+    type: object
+  classes.ScheduleRequest:
+    properties:
+      duration_min:
+        minimum: 1
+        type: integer
+      effective_from:
+        description: EffectiveFrom defaults to the class start_date when absent.
+        type: string
+      effective_to:
+        type: string
+      start_time:
+        type: string
+      weekday:
+        maximum: 6
+        minimum: 0
+        type: integer
+    required:
+    - duration_min
+    - start_time
+    - weekday
+    type: object
+  classes.ScheduleResponse:
+    properties:
+      duration_min:
+        type: integer
+      effective_from:
+        type: string
+      effective_to:
+        type: string
+      id:
+        type: string
+      start_time:
+        type: string
+      weekday:
+        type: integer
+    type: object
+  classes.UpdateClassRequest:
+    properties:
+      default_unit_price:
+        minimum: 0
+        type: integer
+      end_date:
+        type: string
+      name:
+        maxLength: 100
+        minLength: 1
+        type: string
+      start_date:
+        type: string
+    required:
+    - default_unit_price
+    - name
+    - start_date
+    type: object
+  classes.UpdateScheduleRequest:
+    properties:
+      duration_min:
+        minimum: 1
+        type: integer
+      effective_from:
+        type: string
+      effective_to:
+        type: string
+      start_time:
+        type: string
+      weekday:
+        maximum: 6
+        minimum: 0
+        type: integer
+    required:
+    - duration_min
+    - effective_from
+    - start_time
+    - weekday
+    type: object
+  contacts.ContactResponse:
+    properties:
+      created_at:
+        type: string
+      full_name:
+        type: string
+      id:
+        type: string
+      phone:
+        type: string
+      student_count:
+        type: integer
+    type: object
+  contacts.CreateRequest:
+    properties:
+      full_name:
+        maxLength: 100
+        minLength: 1
+        type: string
+      phone:
+        type: string
+    required:
+    - full_name
+    - phone
+    type: object
+  contacts.UpdateRequest:
+    properties:
+      full_name:
+        maxLength: 100
+        minLength: 1
+        type: string
+      phone:
+        type: string
+    required:
+    - full_name
+    - phone
+    type: object
+  enrollments.CreateRequest:
+    properties:
+      class_id:
+        type: string
+      started_on:
+        description: |-
+          StartedOn defaults to today when absent. It is stored exactly as
+          given — never snapped to a month boundary or the class start date.
+        type: string
+      student_id:
+        type: string
+    required:
+    - class_id
+    - student_id
+    type: object
+  enrollments.EndRequest:
+    properties:
+      ended_on:
+        type: string
+    type: object
+  enrollments.EnrollmentResponse:
+    properties:
+      class_id:
+        type: string
+      class_name:
+        type: string
+      created_at:
+        type: string
+      ended_on:
+        type: string
+      id:
+        type: string
+      started_on:
+        type: string
+      student_id:
+        type: string
+      student_name:
+        type: string
+      unit_price:
+        type: integer
+    type: object
   response.Envelope:
     properties:
       data: {}
@@ -69,6 +267,53 @@ definitions:
         type: integer
       total_pages:
         type: integer
+    type: object
+  students.CreateRequest:
+    properties:
+      contact_id:
+        type: string
+      display_note:
+        maxLength: 50
+        type: string
+      full_name:
+        maxLength: 100
+        minLength: 1
+        type: string
+    required:
+    - contact_id
+    - full_name
+    type: object
+  students.StudentResponse:
+    properties:
+      contact_id:
+        type: string
+      contact_name:
+        type: string
+      contact_phone:
+        type: string
+      created_at:
+        type: string
+      display_note:
+        type: string
+      full_name:
+        type: string
+      id:
+        type: string
+    type: object
+  students.UpdateRequest:
+    properties:
+      contact_id:
+        type: string
+      display_note:
+        maxLength: 50
+        type: string
+      full_name:
+        maxLength: 100
+        minLength: 1
+        type: string
+    required:
+    - contact_id
+    - full_name
     type: object
   teachers.TeacherResponse:
     properties:
@@ -240,6 +485,1008 @@ paths:
       summary: Register a new teacher
       tags:
       - auth
+  /classes:
+    get:
+      description: 'status filters the list: active (default), archived, or all.'
+      parameters:
+      - description: active (default), archived, or all
+        in: query
+        name: status
+        type: string
+      - description: page number
+        in: query
+        name: page
+        type: integer
+      - description: page size (max 100)
+        in: query
+        name: per_page
+        type: integer
+      - description: name, start_date, or created_at; - prefix for desc
+        in: query
+        name: sort
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/classes.ClassResponse'
+                  type: array
+                meta:
+                  $ref: '#/definitions/response.Meta'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List classes
+      tags:
+      - classes
+    post:
+      consumes:
+      - application/json
+      description: Schedules are required — a class without a timetable generates
+        no sessions.
+      parameters:
+      - description: class fields with schedules
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/classes.CreateClassRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classes.ClassResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: validation failed
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Create class
+      tags:
+      - classes
+  /classes/{id}:
+    delete:
+      description: Soft delete for mistakes; blocked with 409 while open enrollments
+        exist — archive instead.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: open enrollments exist
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Delete class
+      tags:
+      - classes
+    get:
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classes.ClassResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get class
+      tags:
+      - classes
+    put:
+      consumes:
+      - application/json
+      description: Edits name, dates, and default price; schedules and status have
+        their own endpoints.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: class fields
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/classes.UpdateClassRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classes.ClassResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Update class
+      tags:
+      - classes
+  /classes/{id}/archive:
+    post:
+      description: Keeps the class in history and reports; use delete only for classes
+        created by mistake.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classes.ClassResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Archive class
+      tags:
+      - classes
+  /classes/{id}/schedules:
+    post:
+      consumes:
+      - application/json
+      description: Adds a weekly slot; effective_from defaults to the class start
+        date.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: schedule fields
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/classes.ScheduleRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classes.ScheduleResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Add schedule row
+      tags:
+      - classes
+  /classes/{id}/schedules/{scheduleID}:
+    delete:
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: schedule id
+        in: path
+        name: scheduleID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Delete schedule row
+      tags:
+      - classes
+    put:
+      consumes:
+      - application/json
+      description: For correcting a mistyped row or closing it via effective_to; real
+        timetable changes should close the old row and add a new one.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: schedule id
+        in: path
+        name: scheduleID
+        required: true
+        type: string
+      - description: schedule fields
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/classes.UpdateScheduleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classes.ScheduleResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Update schedule row
+      tags:
+      - classes
+  /contacts:
+    get:
+      description: Paginated; query matches full_name or phone case-insensitively.
+      parameters:
+      - description: search full_name or phone
+        in: query
+        name: query
+        type: string
+      - description: page number
+        in: query
+        name: page
+        type: integer
+      - description: page size (max 100)
+        in: query
+        name: per_page
+        type: integer
+      - description: full_name or created_at, - prefix for desc
+        in: query
+        name: sort
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/contacts.ContactResponse'
+                  type: array
+                meta:
+                  $ref: '#/definitions/response.Meta'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List contacts
+      tags:
+      - contacts
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: contact fields
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/contacts.CreateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/contacts.ContactResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: phone already used
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: validation failed
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Create contact
+      tags:
+      - contacts
+  /contacts/{id}:
+    delete:
+      description: Soft delete; blocked with 409 while live students still reference
+        the contact.
+      parameters:
+      - description: contact id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: students still reference the contact
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Delete contact
+      tags:
+      - contacts
+    get:
+      parameters:
+      - description: contact id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/contacts.ContactResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get contact
+      tags:
+      - contacts
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: contact id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: contact fields
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/contacts.UpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/contacts.ContactResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: phone already used
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: validation failed
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Update contact
+      tags:
+      - contacts
+  /enrollments:
+    get:
+      parameters:
+      - description: filter by student
+        in: query
+        name: student_id
+        type: string
+      - description: filter by class
+        in: query
+        name: class_id
+        type: string
+      - description: true = open only, false = ended only
+        in: query
+        name: active
+        type: string
+      - description: page number
+        in: query
+        name: page
+        type: integer
+      - description: page size (max 100)
+        in: query
+        name: per_page
+        type: integer
+      - description: started_on or created_at; - prefix for desc
+        in: query
+        name: sort
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/enrollments.EnrollmentResponse'
+                  type: array
+                meta:
+                  $ref: '#/definitions/response.Meta'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List enrollments
+      tags:
+      - enrollments
+    post:
+      consumes:
+      - application/json
+      description: unit_price is copied from the class's default_unit_price server-side
+        and cannot be supplied. started_on defaults to today and is stored verbatim
+        — mid-cycle joins are expected.
+      parameters:
+      - description: student, class, and optional start date
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/enrollments.CreateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/enrollments.EnrollmentResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: already enrolled
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: validation failed
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Enroll student
+      tags:
+      - enrollments
+  /enrollments/{id}:
+    delete:
+      description: For enrollments created by mistake. A student leaving is an end,
+        not a delete.
+      parameters:
+      - description: enrollment id
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Delete enrollment
+      tags:
+      - enrollments
+    get:
+      parameters:
+      - description: enrollment id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/enrollments.EnrollmentResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get enrollment
+      tags:
+      - enrollments
+  /enrollments/{id}/end:
+    post:
+      consumes:
+      - application/json
+      description: ended_on defaults to today. Ending an already-ended enrollment
+        returns 409 so a double-submit cannot move the departure date.
+      parameters:
+      - description: enrollment id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: optional end date
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/enrollments.EndRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/enrollments.EnrollmentResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: already ended
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: ended_on before started_on
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: End enrollment
+      tags:
+      - enrollments
   /me:
     get:
       produces:
@@ -314,6 +1561,260 @@ paths:
       summary: Update current teacher profile
       tags:
       - teachers
+  /students:
+    get:
+      description: class_id filters through open enrollments — the attendance screen's
+        class roster.
+      parameters:
+      - description: matches the student name
+        in: query
+        name: query
+        type: string
+      - description: only students under this contact
+        in: query
+        name: contact_id
+        type: string
+      - description: only students with an open enrollment in this class
+        in: query
+        name: class_id
+        type: string
+      - description: page number
+        in: query
+        name: page
+        type: integer
+      - description: page size (max 100)
+        in: query
+        name: per_page
+        type: integer
+      - description: full_name or created_at; - prefix for desc
+        in: query
+        name: sort
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/students.StudentResponse'
+                  type: array
+                meta:
+                  $ref: '#/definitions/response.Meta'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List students
+      tags:
+      - students
+    post:
+      consumes:
+      - application/json
+      description: 'The field list is closed by design: full name, contact, and the
+        attendance disambiguator.'
+      parameters:
+      - description: student fields
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/students.CreateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/students.StudentResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: validation failed, including a contact that is not yours
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Create student
+      tags:
+      - students
+  /students/{id}:
+    delete:
+      description: Scrubs the student's personal data and ends open enrollments; invoices
+        keep their name snapshot.
+      parameters:
+      - description: student id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Delete student
+      tags:
+      - students
+    get:
+      parameters:
+      - description: student id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/students.StudentResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get student
+      tags:
+      - students
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: student id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: student fields
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/students.UpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/students.StudentResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Update student
+      tags:
+      - students
 securityDefinitions:
   BearerAuth:
     description: Type "Bearer" followed by a space and the access token.

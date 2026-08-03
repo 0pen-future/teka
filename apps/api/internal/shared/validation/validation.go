@@ -6,6 +6,7 @@ package validation
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 
@@ -19,13 +20,30 @@ import (
 // E.164 (+84xxxxxxxxx) form: prefix 3/5/7/8/9 followed by 8 digits.
 var vnPhonePattern = regexp.MustCompile(`^(0|\+84)(3|5|7|8|9)\d{8}$`)
 
-// init registers the vnphone validator on gin's binding engine. Handlers
-// import this package for BindError, so registration is guaranteed to run
-// before any request binding.
+// hhmmPattern accepts a 24-hour wall-clock time, "HH:MM". Postgres TIME
+// columns travel through the API in this form — never as time.Time, which
+// would drag a date and timezone along.
+var hhmmPattern = regexp.MustCompile(`^([01]\d|2[0-3]):[0-5]\d$`)
+
+// init registers the custom validators and the json-tag field naming on gin's
+// binding engine. Handlers import this package for BindError, so registration
+// is guaranteed to run before any request binding.
 func init() {
 	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
 		_ = v.RegisterValidation("vnphone", func(fl validator.FieldLevel) bool {
 			return vnPhonePattern.MatchString(fl.Field().String())
+		})
+		_ = v.RegisterValidation("hhmm", func(fl validator.FieldLevel) bool {
+			return hhmmPattern.MatchString(fl.Field().String())
+		})
+		// Error field keys must match the request JSON ("full_name"), not the
+		// Go field name ("FullName").
+		v.RegisterTagNameFunc(func(fld reflect.StructField) string {
+			name := strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
+			if name == "" || name == "-" {
+				return fld.Name
+			}
+			return name
 		})
 	}
 }
@@ -56,9 +74,8 @@ func BindError(err error) *apperror.AppError {
 	return apperror.BadRequest("invalid request body")
 }
 
-// fieldName exposes the JSON-ish name: struct field lowercased with snake
-// preserved via the json tag when gin's validator is configured with it;
-// fall back to lowercasing the Go field name.
+// fieldName exposes the request JSON name, supplied by the RegisterTagNameFunc
+// in init; the lowercase fallback only fires for fields with no json tag.
 func fieldName(fe validator.FieldError) string {
 	return strings.ToLower(fe.Field())
 }
@@ -71,6 +88,10 @@ func message(fe validator.FieldError) string {
 		return "must be a valid email"
 	case "vnphone":
 		return "must be a valid Vietnamese phone number"
+	case "hhmm":
+		return "must be a time in HH:MM form"
+	case "datetime":
+		return "must be a date in YYYY-MM-DD form"
 	case "min":
 		return fmt.Sprintf("must be at least %s characters", fe.Param())
 	case "max":

@@ -84,3 +84,91 @@ Frontend hiện tại sẽ được thay toàn bộ ở plan 07 (teacher app) + 
 **Quyết định:** chấp nhận job e2e của web-ci đỏ trong khoảng giữa plan 01 và
 plan 07; không vá frontend cũ (sẽ bị xoá) và không tắt gate CI. Nếu cần merge
 gì đó phụ thuộc job này trước plan 07, xử lý tại thời điểm đó.
+
+## 2026-08-04 — Plan 02: ngày trong DTO là chuỗi `YYYY-MM-DD`, không phải kiểu Date riêng
+
+Plan phase 3 mô tả các trường ngày (`start_date`, `effective_from`,
+`effective_to`) như date. Codebase không có kiểu Date dùng chung; thêm một
+custom type mới chỉ để bind/format là YAGNI ở V1.
+
+**Quyết định:** DTO nhận/trả chuỗi `"2006-01-02"` với
+`binding:"datetime=2006-01-02"`, convert sang `time.Time` (UTC) ở tầng
+service. Model vẫn dùng `time.Time` với cột Postgres `DATE`.
+
+## 2026-08-04 — Plan 02, Phase 3: gộp CloseSchedule vào UpdateSchedule
+
+Plan liệt kê thao tác "close schedule" tách riêng. Về dữ liệu, đóng một dòng
+lịch chỉ là set `effective_to`; tách endpoint riêng tạo hai đường ghi cùng
+một cột.
+
+**Quyết định:** `PUT /classes/:id/schedules/:scheduleID` nhận cả
+`effective_to` — đóng lịch là một dạng update. Service vẫn giữ ngữ nghĩa
+"close and replace" (tạo dòng mới, đóng dòng cũ) khi đổi khung giờ.
+
+## 2026-08-04 — Plan 02: key lỗi validation dùng json tag, không dùng tên field Go
+
+Plan viết ví dụ lỗi 422 với key kiểu `FullName`. Shared validator đã đăng ký
+`RegisterTagNameFunc` theo json tag từ plan 01, và client chỉ biết tên json.
+
+**Quyết định:** mọi lỗi validation trả fields key theo json tag
+(`full_name`, `contact_id`, …). Riêng body JSON sai kiểu (vd `contact_id`
+không phải uuid) fail ở tầng decode → 400 BAD_REQUEST theo contract chung,
+không phải 422.
+
+## 2026-08-04 — Plan 02, Phase 2: routes students mount ở phase 4 thay vì phase 2
+
+Plan phase 2 yêu cầu mount `students` vào router ngay trong phase. Nhưng
+`students.Service` cần một `EnrollmentEnder` thật để delete đóng các ghi danh
+đang mở — implementation nằm ở phase 4 (enrollments). Mount sớm nghĩa là phải
+chế một ender tạm (no-op hoặc SQL trực tiếp) rồi thay lại ngay sau đó.
+
+**Quyết định:** giữ nguyên interface `students.EnrollmentEnder`
+(consumer-defined), toàn bộ feature students hoàn chỉnh và test xanh ở phase
+2, nhưng `router.go` chỉ mount students ở phase 4 cùng enrollments (thứ tự
+khởi tạo: enrollments service trước, students service nhận nó). Hai phase
+nằm trong cùng một commit nên không có trạng thái trung gian nào bị lộ.
+
+## 2026-08-04 — Plan 02: chuẩn "hôm nay" dùng UTC midnight, chưa theo timezone giáo viên
+
+Code review chỉ ra `today()` (enrollments + students) tính theo timezone của
+process. Container không set `TZ` nên chạy UTC, trong khi `teachers.timezone`
+mặc định `Asia/Ho_Chi_Minh` và chưa được đọc ở đâu. Hệ quả: trong khung
+00:00–07:00 giờ VN, kết thúc/xoá ghi danh không có ngày tường minh sẽ đóng với
+`ended_on` = hôm qua theo giờ VN — lệch một buổi.
+
+**Quyết định (V1):** giữ chuẩn "hôm nay" = UTC midnight, nhất quán với cách
+DTO parse ngày (cột DATE không mang zone). Không resolve theo
+`teachers.timezone` ở plan 02 vì đây là quyết định lan tới plan 03 (sinh
+session) và plan 04 (tính tiền) — chuẩn "hôm nay" phải thống nhất toàn hệ
+thống và nên được chốt một lần ở nơi timezone thực sự ảnh hưởng doanh thu.
+Rủi ro thực tế ở plan 02 thấp: chưa có session/attendance nào tồn tại để
+lệch buổi. Ghi nhận là việc cần giải quyết trước khi billing (plan 03/04)
+dựng lên: hoặc set `TZ=Asia/Ho_Chi_Minh` cho container (V1 single-region),
+hoặc thêm helper `today(teacherTZ)`.
+
+## 2026-08-04 — Plan 02, Phase 4: hoãn guard attendance khi xoá enrollment
+
+Review đề xuất `DELETE /enrollments/:id` nên trả 409 khi ghi danh đã có
+`attendance_records`, tương tự guard của `DELETE /classes/:id`.
+
+**Quyết định:** hoãn tới plan 03. Bảng `attendance_records` chưa có dữ liệu ở
+plan 02 (plan 03 mới sinh session và điểm danh), nên guard hiện tại không bảo
+vệ gì cả. Khi plan 03 tạo attendance, guard này sẽ được thêm cùng lúc với
+logic sinh session, ở đúng nơi biết một enrollment "đã được dùng" hay chưa.
+`DELETE` ở V1 chỉ dành cho ghi danh tạo nhầm (chưa có buổi nào), đúng với mô
+tả API.
+
+## 2026-08-04 — Plan 02: sửa 2 lỗi nhỏ từ code review (đã fix trong commit này)
+
+- **End enrollment bỏ qua body khi chunked encoding:** handler đổi từ gate
+  `ContentLength > 0` sang bind vô điều kiện và chỉ tha thứ `io.EOF`. Body có
+  `ended_on` giờ luôn thắng, không bị âm thầm revert về hôm nay.
+- **Double-end song song trả 404 thay vì 409:** `repository.End` khi
+  `RowsAffected == 0` kiểm tra hàng có tồn tại không — tồn tại nhưng đã đóng →
+  `ErrAlreadyEnded` (409), không có hàng → `ErrNotFound` (404). Kẻ thua trong
+  double-submit nhận đúng ngữ nghĩa "đã kết thúc".
+
+Nhóm Low còn lại (phân trang thiếu tiebreaker, ILIKE không escape, validate
+`end_date >= start_date` ở classes, ghi danh vào lớp archived, `display_note`
+trả `""` cho NULL, docs guidelines chưa nhắc validator mới) được ghi nhận và
+hoãn dọn sau — không chặn nghiệm thu plan 02.

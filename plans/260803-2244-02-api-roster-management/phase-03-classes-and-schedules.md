@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Classes and Schedules"
-status: pending
+status: completed
 priority: P1
 effort: "5h"
 dependencies: []
@@ -185,21 +185,21 @@ thousand đồng, and any float representation of money in this system is a bug.
 
 ## Success Criteria
 
-- [ ] Creating a class with schedules is atomic — a failing schedule insert
+- [x] Creating a class with schedules is atomic — a failing schedule insert
       leaves no class row
-- [ ] A class cannot be created with an empty schedule set
-- [ ] `default_unit_price` round-trips exactly as an integer number of đồng
-- [ ] Weekday 0 means Sunday and matches `time.Sunday`, asserted by test
-- [ ] `ListEffectiveSchedules` returns rows whose `[effective_from,
+- [x] A class cannot be created with an empty schedule set
+- [x] `default_unit_price` round-trips exactly as an integer number of đồng
+- [x] Weekday 0 means Sunday and matches `time.Sunday`, asserted by test
+- [x] `ListEffectiveSchedules` returns rows whose `[effective_from,
       effective_to]` overlaps the requested window, treating NULL as open-ended
-- [ ] Closing a schedule (`effective_to`) and adding a replacement leaves the
+- [x] Closing a schedule (`effective_to`) and adding a replacement leaves the
       old row intact and queryable for past dates
-- [ ] The default class list matches the `idx_classes_teacher` predicate
+- [x] The default class list matches the `idx_classes_teacher` predicate
       (`deleted_at IS NULL AND status = 'active'`)
-- [ ] Archiving keeps the class retrievable by id
-- [ ] Deleting a class with open enrollments returns 409 and suggests archiving
-- [ ] Teacher A gets 404 for teacher B's class id
-- [ ] `make test-api` and `make lint-api` pass
+- [x] Archiving keeps the class retrievable by id
+- [x] Deleting a class with open enrollments returns 409 and suggests archiving
+- [x] Teacher A gets 404 for teacher B's class id
+- [x] `make test-api` and `make lint-api` pass
 
 ## Risk Assessment
 

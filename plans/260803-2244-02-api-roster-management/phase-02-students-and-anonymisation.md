@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Students and PII Anonymisation"
-status: pending
+status: completed
 priority: P1
 effort: "6h"
 dependencies: [1]
@@ -182,20 +182,20 @@ not need a second call.
 
 ## Success Criteria
 
-- [ ] Create/list/get/update/delete work against a real Postgres
-- [ ] `dto_fields_test.go` passes and fails if any field is added
-- [ ] A `contact_id` belonging to another teacher returns 422, never 500
-- [ ] Deleting a student sets `anonymized_at` and `deleted_at`, replaces
+- [x] Create/list/get/update/delete work against a real Postgres
+- [x] `dto_fields_test.go` passes and fails if any field is added
+- [x] A `contact_id` belonging to another teacher returns 422, never 500
+- [x] Deleting a student sets `anonymized_at` and `deleted_at`, replaces
       `full_name` with a non-identifying placeholder, and nulls `display_note`
-- [ ] After deletion, an existing invoice still shows the original
+- [x] After deletion, an existing invoice still shows the original
       `student_name`
-- [ ] After deletion, the student's `attendance_records` still exist and are
+- [x] After deletion, the student's `attendance_records` still exist and are
       unchanged
-- [ ] After deletion, any open enrollment has `ended_on` set
-- [ ] A hard `DELETE` on a billed student is refused by the database
-- [ ] Teacher A gets 404 for teacher B's student id
-- [ ] Listing students filtered by `class_id` issues a bounded query count
-- [ ] `make test-api` and `make lint-api` pass
+- [x] After deletion, any open enrollment has `ended_on` set
+- [x] A hard `DELETE` on a billed student is refused by the database
+- [x] Teacher A gets 404 for teacher B's student id
+- [x] Listing students filtered by `class_id` issues a bounded query count
+- [x] `make test-api` and `make lint-api` pass
 
 ## Risk Assessment
 

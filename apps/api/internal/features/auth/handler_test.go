@@ -116,7 +116,7 @@ func TestRegisterValidationAndMalformedJSON(t *testing.T) {
 	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Code != apperror.CodeValidation {
 		t.Fatalf("want 422 VALIDATION_ERROR, got %d %+v", w.Code, env)
 	}
-	for _, field := range []string{"phone", "password", "fullname"} {
+	for _, field := range []string{"phone", "password", "full_name"} {
 		if env.Error.Fields[field] == "" {
 			t.Fatalf("missing per-field message for %q: %+v", field, env.Error.Fields)
 		}

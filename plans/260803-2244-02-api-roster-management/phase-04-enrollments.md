@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Enrollments"
-status: pending
+status: completed
 priority: P1
 effort: "4h"
 dependencies: [2, 3]
@@ -189,21 +189,21 @@ the students service consume it through the small interface phase 2 defined.
 
 ## Success Criteria
 
-- [ ] Enrolling copies `unit_price` from `classes.default_unit_price`
-- [ ] No request path can set `unit_price` — the field is absent from the DTOs
-- [ ] Raising a class's default price leaves existing enrollments untouched
-- [ ] A second open enrollment in the same class returns 409, driven by
+- [x] Enrolling copies `unit_price` from `classes.default_unit_price`
+- [x] No request path can set `unit_price` — the field is absent from the DTOs
+- [x] Raising a class's default price leaves existing enrollments untouched
+- [x] A second open enrollment in the same class returns 409, driven by
       `uq_enrollments_active`
-- [ ] Ending an enrollment sets `ended_on`; the row and its history remain
+- [x] Ending an enrollment sets `ended_on`; the row and its history remain
       readable
-- [ ] Ending an already-ended enrollment returns 409 without moving the date
-- [ ] Re-enrolling after leaving succeeds and the previous row is preserved
-- [ ] `ended_on` earlier than `started_on` returns 422
-- [ ] `ActiveOn` is inclusive at both boundaries, asserted by test
-- [ ] Deleting a student (phase 2) ends their open enrollments
-- [ ] Teacher A gets 404 for teacher B's enrollment id
-- [ ] Seeds include a mid-month joiner and a departed student
-- [ ] `make test-api` and `make lint-api` pass
+- [x] Ending an already-ended enrollment returns 409 without moving the date
+- [x] Re-enrolling after leaving succeeds and the previous row is preserved
+- [x] `ended_on` earlier than `started_on` returns 422
+- [x] `ActiveOn` is inclusive at both boundaries, asserted by test
+- [x] Deleting a student (phase 2) ends their open enrollments
+- [x] Teacher A gets 404 for teacher B's enrollment id
+- [x] Seeds include a mid-month joiner and a departed student
+- [x] `make test-api` and `make lint-api` pass
 
 ## Risk Assessment
 

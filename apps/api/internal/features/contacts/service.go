@@ -1,0 +1,128 @@
+package contacts
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/google/uuid"
+
+	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/id"
+	"teka/apps/api/internal/shared/pagination"
+	"teka/apps/api/internal/shared/validation"
+)
+
+// blockingNamesShown caps how many blocking student names the delete-conflict
+// message spells out; the rest collapse into a count.
+const blockingNamesShown = 5
+
+// Service owns contact business rules: phone normalisation, tenant scoping,
+// and the delete guard.
+type Service struct {
+	repo Repository
+}
+
+// NewService builds the contacts service.
+func NewService(repo Repository) *Service {
+	return &Service{repo: repo}
+}
+
+// Create inserts a contact with a normalised E.164 phone. Duplicate phones are
+// detected by the partial unique index, never by a pre-check SELECT.
+func (s *Service) Create(ctx context.Context, teacherID uuid.UUID, req CreateRequest) (*Row, error) {
+	c := &Contact{
+		ID:        id.New(),
+		TeacherID: teacherID,
+		FullName:  req.FullName,
+		Phone:     validation.NormalizePhone(req.Phone),
+	}
+	if err := s.repo.Create(ctx, c); err != nil {
+		return nil, translate(err)
+	}
+	// A contact fresh out of Create cannot have students yet.
+	return &Row{Contact: *c}, nil
+}
+
+// Get returns one contact with its live-student count.
+func (s *Service) Get(ctx context.Context, teacherID, contactID uuid.UUID) (*Row, error) {
+	row, err := s.repo.GetByID(ctx, teacherID, contactID)
+	if err != nil {
+		return nil, translate(err)
+	}
+	return row, nil
+}
+
+// List returns a page of contacts with student counts.
+func (s *Service) List(ctx context.Context, teacherID uuid.UUID, filter ListFilter, p pagination.Params) ([]Row, int64, error) {
+	return s.repo.List(ctx, teacherID, filter, p)
+}
+
+// Update replaces both editable fields, re-normalising the phone.
+func (s *Service) Update(ctx context.Context, teacherID, contactID uuid.UUID, req UpdateRequest) (*Row, error) {
+	row, err := s.repo.GetByID(ctx, teacherID, contactID)
+	if err != nil {
+		return nil, translate(err)
+	}
+	c := row.Contact
+	c.FullName = req.FullName
+	c.Phone = validation.NormalizePhone(req.Phone)
+	if err := s.repo.Update(ctx, &c); err != nil {
+		return nil, translate(err)
+	}
+	row.Contact = c
+	return row, nil
+}
+
+// Delete soft-deletes a contact unless live students still reference it. The
+// count-then-delete sequence is racy in principle; that is acceptable — the FK
+// only restricts hard deletes, the count exists for a helpful error, and the
+// worst case (soft-deleted contact with a live student) is visible and
+// reversible. Do not add locking for a single-teacher workload.
+func (s *Service) Delete(ctx context.Context, teacherID, contactID uuid.UUID) error {
+	if _, err := s.repo.GetByID(ctx, teacherID, contactID); err != nil {
+		return translate(err)
+	}
+	total, err := s.repo.CountActiveStudents(ctx, teacherID, contactID)
+	if err != nil {
+		return err
+	}
+	if total > 0 {
+		names, err := s.repo.ListStudentNames(ctx, teacherID, contactID, blockingNamesShown)
+		if err != nil {
+			return err
+		}
+		appErr := apperror.Conflict("contact still has " + blockingDetail(total, names))
+		appErr.Err = ErrHasStudents
+		return appErr
+	}
+	return translate(s.repo.SoftDelete(ctx, teacherID, contactID))
+}
+
+// blockingDetail renders "3 student(s): An, Bình, Chi" with an "and N more"
+// tail when the list is truncated.
+func blockingDetail(total int64, names []string) string {
+	detail := fmt.Sprintf("%d student(s): %s", total, strings.Join(names, ", "))
+	if extra := total - int64(len(names)); extra > 0 {
+		detail += fmt.Sprintf(" and %d more", extra)
+	}
+	return detail
+}
+
+// translate maps domain errors onto the API error contract, keeping the domain
+// error as the cause so errors.Is still works.
+func translate(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, ErrNotFound):
+		return apperror.NotFound("contact")
+	case errors.Is(err, ErrDuplicatePhone):
+		appErr := apperror.Conflict(ErrDuplicatePhone.Error())
+		appErr.Err = err
+		return appErr
+	default:
+		return err
+	}
+}

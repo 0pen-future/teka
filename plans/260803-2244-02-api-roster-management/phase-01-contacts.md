@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Contacts"
-status: pending
+status: completed
 priority: P1
 effort: "5h"
 dependencies: []
@@ -158,17 +158,17 @@ statement — a per-row count is an N+1 that shows up immediately at the PRD's
 
 ## Success Criteria
 
-- [ ] Create, list, get, update, soft-delete all work end to end against a real
+- [x] Create, list, get, update, soft-delete all work end to end against a real
       Postgres
-- [ ] Duplicate phone within one teacher returns 409; the same phone under a
+- [x] Duplicate phone within one teacher returns 409; the same phone under a
       second teacher returns 201
-- [ ] Deleting a contact with live students returns 409 naming them
-- [ ] Soft-deleting a contact frees its phone for reuse
-- [ ] `0912345678` and `+84912345678` are treated as the same number
-- [ ] Teacher A gets 404 (not 403) for teacher B's contact id
-- [ ] Listing 150 contacts issues a bounded number of queries — no per-row
+- [x] Deleting a contact with live students returns 409 naming them
+- [x] Soft-deleting a contact frees its phone for reuse
+- [x] `0912345678` and `+84912345678` are treated as the same number
+- [x] Teacher A gets 404 (not 403) for teacher B's contact id
+- [x] Listing 150 contacts issues a bounded number of queries — no per-row
       student count
-- [ ] `make test-api` and `make lint-api` pass
+- [x] `make test-api` and `make lint-api` pass
 
 ## Risk Assessment
 

@@ -14,6 +14,10 @@ import (
 	"teka/apps/api/internal/config"
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/auth"
+	"teka/apps/api/internal/features/classes"
+	"teka/apps/api/internal/features/contacts"
+	"teka/apps/api/internal/features/enrollments"
+	"teka/apps/api/internal/features/students"
 	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/middleware"
 	"teka/apps/api/internal/shared/apperror"
@@ -68,4 +72,19 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB) {
 	authSvc := auth.NewService(teachersSvc, auth.NewRepository(db), auth.NewTokenIssuer(cfg.JWT), txMgr)
 	auth.RegisterRoutes(v1, auth.NewHandler(authSvc, cfg))
 	teachers.RegisterRoutes(v1, teachers.NewHandler(teachersSvc), requireAuth)
+
+	contactsSvc := contacts.NewService(contacts.NewRepository(db))
+	contacts.RegisterRoutes(v1, contacts.NewHandler(contactsSvc), requireAuth)
+
+	classesSvc := classes.NewService(classes.NewRepository(db), txMgr)
+	classes.RegisterRoutes(v1, classes.NewHandler(classesSvc), requireAuth)
+
+	// Construction order matters: the students service consumes the
+	// enrollments service through students.EnrollmentEnder so deleting a
+	// student closes their open enrollments in the same transaction.
+	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db))
+	enrollments.RegisterRoutes(v1, enrollments.NewHandler(enrollmentsSvc), requireAuth)
+
+	studentsSvc := students.NewService(students.NewRepository(db), enrollmentsSvc, txMgr)
+	students.RegisterRoutes(v1, students.NewHandler(studentsSvc), requireAuth)
 }

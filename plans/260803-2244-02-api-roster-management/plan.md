@@ -1,7 +1,7 @@
 ---
 title: "02 API Roster Management"
 description: "Contacts, students, classes, schedules, and enrollments — the closed-field-list roster that PRD R1 specifies and every fee calculation reads from."
-status: pending
+status: completed
 priority: P1
 effort: "20h"
 tags: [api, go, roster, crud, privacy, multi-tenancy]
@@ -70,10 +70,10 @@ data, PRD Q2), not a preference.
 
 | # | Phase | Effort | Depends on | Status |
 |---|-------|--------|------------|--------|
-| 1 | [Contacts](./phase-01-contacts.md) | 5h | — | Pending |
-| 2 | [Students and PII anonymisation](./phase-02-students-and-anonymisation.md) | 6h | 1 | Pending |
-| 3 | [Classes and schedules](./phase-03-classes-and-schedules.md) | 5h | — | Pending |
-| 4 | [Enrollments](./phase-04-enrollments.md) | 4h | 2, 3 | Pending |
+| 1 | [Contacts](./phase-01-contacts.md) | 5h | — | Done |
+| 2 | [Students and PII anonymisation](./phase-02-students-and-anonymisation.md) | 6h | 1 | Done |
+| 3 | [Classes and schedules](./phase-03-classes-and-schedules.md) | 5h | — | Done |
+| 4 | [Enrollments](./phase-04-enrollments.md) | 4h | 2, 3 | Done |
 
 Phases 1→2 and 3 are independent and may run in parallel; they touch disjoint
 directories. Phase 4 needs both.
@@ -126,29 +126,29 @@ different things and both exist.
 
 Traced to PRD R1.
 
-- [ ] A teacher creates a class with a start date (ngày khai giảng), a weekly
+- [x] A teacher creates a class with a start date (ngày khai giảng), a weekly
       schedule, and a default unit price.
-- [ ] A student can be added to a class at any time, with the join date
+- [x] A student can be added to a class at any time, with the join date
       recorded (`enrollments.started_on`).
-- [ ] One student can be enrolled in several classes belonging to the same
+- [x] One student can be enrolled in several classes belonging to the same
       teacher.
-- [ ] **R1 acceptance:** the student creation form exposes no field outside
+- [x] **R1 acceptance:** the student creation form exposes no field outside
       full name, contact, and (as a disambiguator) display note. Asserted by a
       test over the request DTO's field set, not by inspection.
-- [ ] **R1 acceptance:** deleting a student scrubs the personal data and keeps
+- [x] **R1 acceptance:** deleting a student scrubs the personal data and keeps
       the financial trail readable through the invoice snapshots.
-- [ ] Two contacts of the same teacher cannot share a phone; two different
+- [x] Two contacts of the same teacher cannot share a phone; two different
       teachers can each have a contact with the same phone.
-- [ ] Deleting a contact that still has students returns 409 and names them.
-- [ ] Deleting a contact whose students are all deleted succeeds, and the same
+- [x] Deleting a contact that still has students returns 409 and names them.
+- [x] Deleting a contact whose students are all deleted succeeds, and the same
       phone can be registered again afterwards.
-- [ ] A student cannot hold two open enrollments in the same class; ending one
+- [x] A student cannot hold two open enrollments in the same class; ending one
       (`ended_on`) allows a new one.
-- [ ] `enrollments.unit_price` is copied from `classes.default_unit_price` at
+- [x] `enrollments.unit_price` is copied from `classes.default_unit_price` at
       creation and is not writable through the API.
-- [ ] Leaving a class sets `ended_on` and keeps the enrollment (and therefore
+- [x] Leaving a class sets `ended_on` and keeps the enrollment (and therefore
       the debt history) readable.
-- [ ] Every list and detail endpoint is scoped to the calling teacher;
+- [x] Every list and detail endpoint is scoped to the calling teacher;
       requesting another teacher's record id returns 404, not 403.
 
 ## Boundary with billing (plan 04)
