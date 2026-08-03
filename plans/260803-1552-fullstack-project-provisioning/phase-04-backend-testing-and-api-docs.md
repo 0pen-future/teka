@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Phase 4: Backend Testing and API Docs"
-status: todo
+status: completed
 priority: P1
 effort: "1d"
 dependencies: [3]
@@ -36,12 +36,12 @@ Harden the API with the full testing pyramid — unit tests (fake repositories),
 
 **OpenAPI (swaggo/swag):**
 - Annotations on handlers (`// @Summary`, `@Param`, `@Success` with envelope types, `@Security BearerAuth`); root metadata in `cmd/api/main.go`.
-- `swag init` output to `apps/api/docs/` (gitignored, regenerated); `make api-docs` target; CI regenerates and fails on drift (ensures annotations stay current).
+- `swag init` output to `apps/api/docs/` — committed, not gitignored (deviation from the original wording: the router imports the generated package, and the Phase 8 drift check needs a committed baseline to diff against); `make api-docs` target; CI regenerates and fails on drift (ensures annotations stay current).
 - `gin-swagger` route mounted conditionally by env.
 
 ## Related Code Files
 
-- Create: `apps/api/testutil/{postgres.go,server.go,fixtures.go}`
+- Create: `apps/api/internal/testutil/{postgres.go,fixtures.go}` (moved under `internal/` so Docker test deps stay off the module's public surface; a router-level test covers the swagger env gate instead of a full test-server helper)
 - Create: `apps/api/internal/features/users/{integration_test.go,handler_test.go}`
 - Create: `apps/api/internal/features/auth/{integration_test.go,handler_test.go}`
 - Modify: handler files (swag annotations), `cmd/api/main.go` (swag root info)
@@ -59,10 +59,10 @@ Harden the API with the full testing pyramid — unit tests (fake repositories),
 
 ## Success Criteria
 
-- [ ] `make test-api` green on a machine with Docker; `-short` path skips integration cleanly without Docker
-- [ ] Deliberately breaking a migration or SQL query fails an integration test (spot-verified)
-- [ ] `/swagger/index.html` shows all auth + users endpoints with request/response schemas
-- [ ] Coverage report generated; floor met
+- [x] `make test-api` green on a machine with Docker; `-short` path skips integration cleanly without Docker
+- [x] Deliberately breaking a migration or SQL query fails an integration test (spot-verified)
+- [x] `/swagger/index.html` shows all auth + users endpoints with request/response schemas
+- [x] Coverage report generated; floor met
 
 ## Risk Assessment
 

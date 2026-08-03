@@ -21,27 +21,30 @@ type Meta struct {
 	TotalPages int   `json:"total_pages"`
 }
 
-type errorBody struct {
+// ErrorBody is the error half of the envelope; exported (with Envelope) so
+// the OpenAPI annotations can reference the real wire shape.
+type ErrorBody struct {
 	Code    string            `json:"code"`
 	Message string            `json:"message"`
 	Fields  map[string]string `json:"fields,omitempty"`
 }
 
-type envelope struct {
+// Envelope is the wire format of every /api/v1 response.
+type Envelope struct {
 	Success bool       `json:"success"`
 	Data    any        `json:"data,omitempty"`
 	Meta    *Meta      `json:"meta,omitempty"`
-	Error   *errorBody `json:"error,omitempty"`
+	Error   *ErrorBody `json:"error,omitempty"`
 }
 
 // OK writes a success envelope with the given status and data.
 func OK(c *gin.Context, status int, data any) {
-	c.JSON(status, envelope{Success: true, Data: data})
+	c.JSON(status, Envelope{Success: true, Data: data})
 }
 
 // List writes a success envelope with data plus pagination meta.
 func List(c *gin.Context, data any, meta Meta) {
-	c.JSON(http.StatusOK, envelope{Success: true, Data: data, Meta: &meta})
+	c.JSON(http.StatusOK, Envelope{Success: true, Data: data, Meta: &meta})
 }
 
 // Err maps any error onto the envelope via apperror.From. Internal errors are
@@ -52,9 +55,9 @@ func Err(c *gin.Context, err error) {
 		logger.FromContext(c.Request.Context()).Error("request failed",
 			"code", appErr.Code, "error", appErr.Error())
 	}
-	c.AbortWithStatusJSON(appErr.Status, envelope{
+	c.AbortWithStatusJSON(appErr.Status, Envelope{
 		Success: false,
-		Error: &errorBody{
+		Error: &ErrorBody{
 			Code:    appErr.Code,
 			Message: appErr.Message,
 			Fields:  appErr.Fields,

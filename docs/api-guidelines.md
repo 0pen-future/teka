@@ -128,5 +128,75 @@ existing rows never modified) and refuses `API_ENV=production` without
 password without echo when `--password` is omitted so secrets stay out of
 shell history.
 
+## Testing
+
+The backend uses a three-layer pyramid; each layer has a distinct job and a
+distinct wiring style:
+
+| Layer | Files | Doubles | What it proves |
+|-------|-------|---------|----------------|
+| Unit | `*_test.go` (in-package, e.g. `service_test.go`) | Hand-written fakes (`fakeRepository`, `fakeUserService`, `noopTxManager`) | Business rules: token rotation, role checks, validation, error mapping |
+| HTTP | `handler_test.go` (in-package) | Same fakes behind the real router slice: real Gin routes, middleware, JWT parsing, envelope encoding | Status codes, envelope shape, auth/role gating, cookie flags |
+| Integration | `integration_test.go` (`//go:build integration`, external `_test` package) | None — real PostgreSQL via testcontainers-go, real migrations | SQL correctness: citext uniqueness across soft delete, ILIKE search, pagination, transaction rollback |
+
+Integration tests live in external `_test` packages because `testutil` imports
+the feature packages; HTTP tests stay in-package to reuse the unexported fakes
+from the unit tests.
+
+**Fixtures and helpers** live in `apps/api/internal/testutil/`:
+
+- `StartPostgres(t)` — one `postgres:16-alpine` container per test, embedded
+  migrations applied, terminated via `t.Cleanup`.
+- `User(t, db, opts...)` — direct-insert user fixture with a unique random
+  email and `bcrypt.MinCost` hashing (fast, test-only).
+
+Integration tests are excluded two ways: without `-tags=integration` they do
+not compile at all (the `make test-api-unit` path), and under
+`-tags=integration -short` they self-skip via `testing.Short()` before
+touching Docker.
+
+**Running tests:**
+
+```sh
+make test-api-unit   # unit + HTTP only (-short): fast, no Docker
+make test-api        # everything + coverage gate (needs Docker)
+make coverage-api    # HTML report from the last test-api run
+```
+
+Coverage is measured with `-coverpkg=./...` across the whole module; `make
+test-api` fails when the total drops below the **60%** floor
+(`API_COVERAGE_FLOOR` in the root Makefile). It lists only test-bearing
+packages (a `go list` filter) because auto-downloaded Go toolchains lack the
+`covdata` tool that `go test` would need to synthesize empty profiles for
+test-less packages.
+
+**Rules:**
+
+- New SQL (a query with operators, joins, or index-dependent behavior) gets an
+  integration test; plumbing CRUD is covered by service/HTTP layers.
+- Assert on behavior the schema can mask: `email` is `citext`, so a
+  case-insensitive search assertion on email alone would pass even under a
+  broken case-sensitive `LIKE` — pin such assertions to a column with plain
+  semantics (e.g. `name`).
+- Never weaken an assertion to make a test pass; fix the code or the fixture.
+
+## OpenAPI docs
+
+The spec is generated from swag annotations on handlers plus the root metadata
+block in `cmd/api/main.go`, and served at `/swagger/index.html` in every
+environment except production. Regenerate after changing any annotated handler
+signature, request/response type, or route:
+
+```sh
+make api-docs   # runs: go tool swag init -g cmd/api/main.go -o docs --parseInternal
+```
+
+The generated `apps/api/docs/` package is committed: the router imports it for
+its side-effect registration, and CI (Phase 8) diffs a fresh generation against
+the committed baseline to catch drift. Annotate new endpoints following the
+existing pattern — envelope composition like
+`response.Envelope{data=TokenResponse}` and `@Security BearerAuth` on
+authenticated routes.
+
 The feature-module contract is summarized in
 [architecture.md](architecture.md).

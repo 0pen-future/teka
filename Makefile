@@ -52,9 +52,29 @@ web-dev: ## Run the web dev server on the host
 .PHONY: test
 test: test-api test-web ## Run all tests
 
+# Coverage runs only over packages that contain tests (go list filter) while
+# -coverpkg still attributes coverage across the whole module. Passing ./...
+# directly would make `go test` synthesize empty profiles for test-less
+# packages via the covdata tool, which auto-downloaded Go toolchains lack.
+API_COVERAGE_FLOOR := 60
 .PHONY: test-api
-test-api: ## Run backend unit tests
-	@cd $(API_DIR) && go test ./...
+test-api: ## Run backend unit + integration tests; fails under the coverage floor (needs Docker)
+	@cd $(API_DIR) && go test -tags=integration -coverpkg=./... -coverprofile=coverage.out \
+		$$(go list -tags=integration -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' ./...) \
+		&& go tool cover -func=coverage.out | tail -1 \
+		| awk -v floor=$(API_COVERAGE_FLOOR) '{c=$$3+0; printf "total coverage: %.1f%% (floor %d%%)\n", c, floor; exit c<floor}'
+
+.PHONY: test-api-unit
+test-api-unit: ## Run backend unit + HTTP tests only (fast, no Docker)
+	@cd $(API_DIR) && go test -short ./...
+
+.PHONY: coverage-api
+coverage-api: ## Open the HTML coverage report from the last test-api run
+	@cd $(API_DIR) && go tool cover -html=coverage.out
+
+.PHONY: api-docs
+api-docs: ## Regenerate the OpenAPI spec from swag annotations
+	@cd $(API_DIR) && go tool swag init -g cmd/api/main.go -o docs --parseInternal
 
 .PHONY: test-web
 test-web: ## Run frontend tests

@@ -32,6 +32,18 @@ func NewHandler(svc *Service, cfg *config.Config) *Handler {
 	return &Handler{svc: svc, cfg: cfg}
 }
 
+// register creates an account and opens a session.
+//
+//	@Summary		Register a new user
+//	@Description	Creates a user with role "user" and returns an access token; the refresh token is set as an httpOnly cookie.
+//	@Tags			auth
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body		RegisterRequest	true	"registration payload"
+//	@Success		201		{object}	response.Envelope{data=TokenResponse}
+//	@Failure		409		{object}	response.Envelope{error=response.ErrorBody}	"email already in use"
+//	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}	"validation failed"
+//	@Router			/auth/register [post]
 func (h *Handler) register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -47,6 +59,18 @@ func (h *Handler) register(c *gin.Context) {
 	response.OK(c, http.StatusCreated, h.tokenResponse(sess))
 }
 
+// login verifies credentials and opens a session.
+//
+//	@Summary		Log in
+//	@Description	Verifies email and password; returns an access token and sets the refresh cookie (new token family).
+//	@Tags			auth
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body		LoginRequest	true	"credentials"
+//	@Success		200		{object}	response.Envelope{data=TokenResponse}
+//	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}	"invalid email or password"
+//	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}
+//	@Router			/auth/login [post]
 func (h *Handler) login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -62,6 +86,15 @@ func (h *Handler) login(c *gin.Context) {
 	response.OK(c, http.StatusOK, h.tokenResponse(sess))
 }
 
+// refresh rotates the refresh token from the cookie.
+//
+//	@Summary		Refresh the session
+//	@Description	Rotates the refresh-token cookie and returns a fresh access token. Replaying an already-rotated token revokes the whole token family.
+//	@Tags			auth
+//	@Produce		json
+//	@Success		200	{object}	response.Envelope{data=TokenResponse}
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}	"missing, expired, or revoked refresh token"
+//	@Router			/auth/refresh [post]
 func (h *Handler) refresh(c *gin.Context) {
 	plaintext, err := c.Cookie(refreshCookieName)
 	if err != nil || plaintext == "" {
@@ -83,6 +116,14 @@ func (h *Handler) refresh(c *gin.Context) {
 	response.OK(c, http.StatusOK, h.tokenResponse(sess))
 }
 
+// logout revokes the session's token family.
+//
+//	@Summary		Log out
+//	@Description	Revokes the refresh-token family and clears the cookie. Idempotent: succeeds without a valid cookie.
+//	@Tags			auth
+//	@Produce		json
+//	@Success		200	{object}	response.Envelope
+//	@Router			/auth/logout [post]
 func (h *Handler) logout(c *gin.Context) {
 	plaintext, _ := c.Cookie(refreshCookieName)
 	if err := h.svc.Logout(c.Request.Context(), plaintext); err != nil {
@@ -93,6 +134,15 @@ func (h *Handler) logout(c *gin.Context) {
 	response.OK(c, http.StatusOK, gin.H{"message": "logged out"})
 }
 
+// me returns the authenticated user's profile.
+//
+//	@Summary		Current user
+//	@Tags			auth
+//	@Produce		json
+//	@Success		200	{object}	response.Envelope{data=users.Response}
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/auth/me [get]
 func (h *Handler) me(c *gin.Context) {
 	p, ok := authctx.From(c)
 	if !ok {

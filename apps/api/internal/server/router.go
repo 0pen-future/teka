@@ -4,8 +4,13 @@ import (
 	"log/slog"
 
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 	"gorm.io/gorm"
 
+	// Generated OpenAPI spec (make api-docs); imported for its side-effect
+	// registration with gin-swagger.
+	_ "teka/apps/api/docs"
 	"teka/apps/api/internal/config"
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/auth"
@@ -36,6 +41,11 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *gorm.DB) *gin.Engine {
 	)
 
 	registerHealth(r, db)
+
+	// The OpenAPI UI ships only outside production.
+	if !cfg.IsProduction() {
+		r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	}
 
 	v1 := r.Group("/api/v1")
 	registerFeatures(v1, cfg, db)

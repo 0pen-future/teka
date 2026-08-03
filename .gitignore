@@ -6,7 +6,6 @@
 # Go
 apps/api/tmp/
 apps/api/bin/
-apps/api/docs/
 coverage.out
 *.test
 
