@@ -19,6 +19,9 @@ import (
 func Open(cfg config.DatabaseConfig) (*gorm.DB, error) {
 	db, err := gorm.Open(postgres.Open(cfg.URL), &gorm.Config{
 		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+		// Map driver errors (unique violations, FK violations) onto GORM's
+		// typed errors so repositories can translate them.
+		TranslateError: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("open postgres: %w", err)

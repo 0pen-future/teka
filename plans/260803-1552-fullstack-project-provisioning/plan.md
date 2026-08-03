@@ -217,7 +217,7 @@ project-root/
 |---|-------|--------|
 | 1 | [Phase 1: Repository Foundation](./phase-01-start.md) | Completed |
 | 2 | [Phase 2: Backend Core Infrastructure](./phase-02-backend-core-infrastructure.md) | Completed |
-| 3 | [Phase 3: Backend Features and Migrations](./phase-03-backend-features-and-migrations.md) | Pending |
+| 3 | [Phase 3: Backend Features and Migrations](./phase-03-backend-features-and-migrations.md) | Completed |
 | 4 | [Phase 4: Backend Testing and API Docs](./phase-04-backend-testing-and-api-docs.md) | Pending |
 | 5 | [Phase 5: Frontend Foundation](./phase-05-frontend-foundation.md) | Pending |
 | 6 | [Phase 6: Frontend Features and Testing](./phase-06-frontend-features-and-testing.md) | Pending |

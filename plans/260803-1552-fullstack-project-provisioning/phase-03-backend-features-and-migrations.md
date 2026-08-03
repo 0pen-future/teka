@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Phase 3: Backend Features and Migrations"
-status: todo
+status: completed
 priority: P1
 effort: "1.5d"
 dependencies: [2]
@@ -86,12 +86,12 @@ GORM implementation stores the tx `*gorm.DB` in context; repositories fetch `dbF
 
 ## Success Criteria
 
-- [ ] `make migrate-up && make seed` on a fresh DB succeeds and is re-runnable (idempotent seed)
-- [ ] `migrate down` fully reverses; `status` reports version
-- [ ] Auth flow end-to-end with curl; reused rotated refresh token is rejected and family revoked
-- [ ] `GET /users?page=2&per_page=10&sort=-created_at&q=alice` returns correct envelope meta
-- [ ] Validation errors return 422 envelope with per-field messages
-- [ ] Unit tests pass for both services
+- [x] `make migrate-up && make seed` on a fresh DB succeeds and is re-runnable (idempotent seed)
+- [x] `migrate down` fully reverses; `status` reports version
+- [x] Auth flow end-to-end with curl; reused rotated refresh token is rejected and family revoked
+- [x] `GET /users?page=2&per_page=10&sort=-created_at&q=alice` returns correct envelope meta
+- [x] Validation errors return 422 envelope with per-field messages
+- [x] Unit tests pass for both services
 
 ## Risk Assessment
 

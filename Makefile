@@ -81,19 +81,19 @@ fmt: ## Format all source
 
 .PHONY: migrate-up
 migrate-up: ## Apply database migrations
-	$(not_yet)
+	@cd $(API_DIR) && go run ./cmd/api migrate up
 
 .PHONY: migrate-down
 migrate-down: ## Roll back the last migration
-	$(not_yet)
+	@cd $(API_DIR) && go run ./cmd/api migrate down
 
 .PHONY: migrate-status
 migrate-status: ## Show migration status
-	$(not_yet)
+	@cd $(API_DIR) && go run ./cmd/api migrate status
 
 .PHONY: seed
 seed: ## Seed the database with development data
-	$(not_yet)
+	@cd $(API_DIR) && go run ./cmd/api seed
 
 .PHONY: build
 build: build-api build-web ## Build production artifacts for both apps
