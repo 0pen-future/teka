@@ -8,7 +8,7 @@ access, troubleshooting.
 ```bash
 make setup   # tool checks, .env from .env.example, git hooks
 make dev     # build + start the full stack (attached; Ctrl-C to stop)
-make seed    # once, in another terminal: seeded users incl. admin@teka.local
+make seed    # once, in another terminal: seeded teacher accounts (phone-based)
 ```
 
 Then open <http://localhost:5173> and log in with a seeded account (see

@@ -10,7 +10,7 @@ Every `/api/v1` response uses the envelope from `internal/shared/response`:
 
 ```json
 { "success": true,  "data": { }, "meta": { "page": 1, "per_page": 20, "total": 134, "total_pages": 7 } }
-{ "success": false, "error": { "code": "VALIDATION_ERROR", "message": "…", "fields": { "email": "must be a valid email" } } }
+{ "success": false, "error": { "code": "VALIDATION_ERROR", "message": "…", "fields": { "phone": "must be a valid Vietnamese phone number" } } }
 ```
 
 - `meta` appears only on list responses (`response.List`).
@@ -61,6 +61,30 @@ transaction handle in the context and repositories resolve it with
 inside and outside transactions and nested `WithinTx` calls join the ambient
 transaction. Services own transaction boundaries.
 
+## Tenancy
+
+Every domain table carries a `teacher_id`; the composite foreign keys in the
+schema stop cross-teacher **writes**, but nothing except a `WHERE` clause stops
+cross-teacher **reads**. Two rules, applied without exception:
+
+- Handlers learn the tenant only from `authctx.TeacherID(c)` — never from a
+  request body, query string, or path segment. A client-supplied `teacher_id`
+  is an authorization bypass, and it looks completely ordinary in a diff.
+- Every repository over a `teacher_id` table funnels reads through a `scoped`
+  helper (reference implementation:
+  `apps/api/internal/features/teachers/repository.go`):
+
+```go
+// Every read is scoped to one teacher and skips soft-deleted rows.
+func (r *gormRepository) scoped(ctx context.Context, teacherID uuid.UUID) *gorm.DB {
+    return database.FromContext(ctx, r.db).Where("teacher_id = ?", teacherID)
+}
+```
+
+`deleted_at IS NULL` comes free from `gorm.DeletedAt` on model-based queries;
+raw SQL and `Table()` queries must add it by hand. Postgres row-level security
+(schema note m) is deferred as a pre-launch hardening item.
+
 ## Feature modules
 
 Each feature under `internal/features/<name>/` follows the same file contract:
@@ -72,7 +96,7 @@ repository interface), `dto.go` (request/response structs + mappers),
 
 Features never import another feature's repository. Cross-feature calls go
 service→service through an interface the consumer defines — e.g. `auth`
-declares `UserService` with only the three `users.Service` methods it needs.
+declares `AccountService` with only the `teachers.Service` methods it needs.
 
 ## Pagination
 
@@ -91,11 +115,15 @@ per-field messages, anything else (malformed JSON) becomes a 400.
 
 ## Authentication
 
+- **Login identifier**: the Vietnamese phone number. Requests accept local
+  (`0xxxxxxxxx`) or E.164 (`+84xxxxxxxxx`) form (custom `vnphone` binding
+  validator); storage and lookups always use E.164
+  (`validation.NormalizePhone`) so both spellings resolve to one account.
 - **Access token**: HS256 JWT, 15 min default (`API_JWT_ACCESS_TTL`), claims
-  `sub` (user id) + `role`. Verified by `middleware.RequireAuth`, which
-  injects an `authctx.Principal`; `middleware.RequireRole("admin")` gates
-  admin routes. Shared claim/principal types live in `internal/shared/authctx`
-  so middleware and the auth feature agree without an import cycle.
+  `sub` (account id = teacher id) + `role`. Verified by
+  `middleware.RequireAuth`, which injects an `authctx.Principal`. Shared
+  claim/principal types live in `internal/shared/authctx` so middleware and
+  the auth feature agree without an import cycle.
 - **Refresh token**: opaque 256-bit random value, stored as a sha256 hash,
   delivered in an httpOnly `SameSite=Lax` cookie scoped to `/api/v1/auth`.
   `Secure` is set in production only — Safari drops Secure cookies on
@@ -103,30 +131,35 @@ per-field messages, anything else (malformed JSON) becomes a 400.
   rotates the token within its family; presenting an already-rotated token
   revokes the whole family (replay defense). Logout revokes the family and is
   idempotent.
-- **Passwords**: bcrypt cost 12. Login responds identically (401) for
-  unknown email and wrong password, with a dummy bcrypt comparison on the
-  unknown-email path to keep timing comparable.
-- **Roles**: `admin` and `user`, checked in routes (middleware) and re-checked
-  in services (defense in depth). Users read/update themselves but cannot
-  change their own role; admins cannot delete their own account.
+- **Passwords**: bcrypt cost 12. Login responds identically (401) for unknown
+  phone, disabled account, passwordless account, and wrong password, with a
+  dummy bcrypt comparison on the non-compare paths to keep timing comparable.
+- **Roles**: `teachers`, `parent`, `students` (mirroring the
+  `user_accounts.role` CHECK constraint). V1 only issues teacher accounts;
+  registration hard-codes the role server-side. `middleware.RequireRole`
+  exists for later phases.
+- **Profile**: `GET/PUT /api/v1/me` live on the `teachers` feature (auth owns
+  credentials and sessions, not business data). Both re-check the account
+  against the database, so a token issued before a soft-delete or disable
+  stops working there immediately.
 - **Revocation latency (accepted trade-off)**: access tokens are stateless,
   so after logout, soft-delete, or a role change an already-issued access
   token stays valid for up to its 15-minute TTL. Only refresh is revoked
   immediately. Introduce a token denylist only if the product ever needs
   instant revocation.
 
-**Extension points (deliberately out of scope):** password reset, email
-verification, and OAuth/social login are not implemented. They slot in as new
-endpoints on the `auth` feature without changing the token model; email
-verification would add a `verified_at` column via a new migration.
+**Extension points (deliberately out of scope):** password reset, phone (OTP)
+verification, and parent/student portal auth are not implemented. They slot in
+as new endpoints on the `auth` feature without changing the token model;
+`user_accounts.password_hash` is already nullable for future OTP-only
+accounts.
 
-## Seeding and admin bootstrap
+## Seeding
 
-`api seed` inserts the development dataset idempotently (keyed by email,
+`api seed` inserts the development dataset idempotently (keyed by phone,
 existing rows never modified) and refuses `API_ENV=production` without
-`--force`. `api admin create --email …` creates an admin, prompting for the
-password without echo when `--password` is omitted so secrets stay out of
-shell history.
+`--force`. There is no separate admin bootstrap — every account is a teacher
+created via `/auth/register` or the seeder.
 
 ## Testing
 
@@ -135,9 +168,9 @@ distinct wiring style:
 
 | Layer | Files | Doubles | What it proves |
 |-------|-------|---------|----------------|
-| Unit | `*_test.go` (in-package, e.g. `service_test.go`) | Hand-written fakes (`fakeRepository`, `fakeUserService`, `noopTxManager`) | Business rules: token rotation, role checks, validation, error mapping |
+| Unit | `*_test.go` (in-package, e.g. `service_test.go`) | Hand-written fakes (`fakeRepository`, `fakeAccountService`, `noopTxManager`) | Business rules: token rotation, role checks, validation, error mapping |
 | HTTP | `handler_test.go` (in-package) | Same fakes behind the real router slice: real Gin routes, middleware, JWT parsing, envelope encoding | Status codes, envelope shape, auth/role gating, cookie flags |
-| Integration | `integration_test.go` (`//go:build integration`, external `_test` package) | None — real PostgreSQL via testcontainers-go, real migrations | SQL correctness: citext uniqueness across soft delete, ILIKE search, pagination, transaction rollback |
+| Integration | `integration_test.go` (`//go:build integration`, external `_test` package) | None — real PostgreSQL via testcontainers-go, real migrations | SQL correctness: partial unique indexes across soft delete, tenant isolation, pagination, transaction rollback |
 
 Integration tests live in external `_test` packages because `testutil` imports
 the feature packages; HTTP tests stay in-package to reuse the unexported fakes
@@ -147,8 +180,9 @@ from the unit tests.
 
 - `StartPostgres(t)` — one `postgres:16-alpine` container per test, embedded
   migrations applied, terminated via `t.Cleanup`.
-- `User(t, db, opts...)` — direct-insert user fixture with a unique random
-  email and `bcrypt.MinCost` hashing (fast, test-only).
+- `Teacher(t, db, opts...)` — direct-insert account + teacher fixture pair
+  with a unique random `+84` phone and `bcrypt.MinCost` hashing (fast,
+  test-only).
 
 Integration tests are excluded two ways: without `-tags=integration` they do
 not compile at all (the `make test-api-unit` path), and under
@@ -174,10 +208,10 @@ test-less packages.
 
 - New SQL (a query with operators, joins, or index-dependent behavior) gets an
   integration test; plumbing CRUD is covered by service/HTTP layers.
-- Assert on behavior the schema can mask: `email` is `citext`, so a
-  case-insensitive search assertion on email alone would pass even under a
-  broken case-sensitive `LIKE` — pin such assertions to a column with plain
-  semantics (e.g. `name`).
+- Assert on behavior the schema can mask: the phone unique index is partial
+  (`WHERE deleted_at IS NULL`), so a duplicate-phone assertion alone cannot
+  distinguish it from a full unique index — pair it with a soft-delete case
+  when the distinction matters.
 - Never weaken an assertion to make a test pass; fix the code or the fixture.
 
 ## OpenAPI docs
