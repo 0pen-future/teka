@@ -1,7 +1,7 @@
 ---
 phase: 6
 title: "Phase 6: Frontend Features and Testing"
-status: todo
+status: completed
 priority: P1
 effort: "1.5d"
 dependencies: [5]
@@ -77,11 +77,11 @@ Cross-feature imports only via a feature's public `index.ts`; `features/*` never
 
 ## Success Criteria
 
-- [ ] Full manual flow against local API: register, login, users CRUD with pagination/search, role gating, logout
-- [ ] Server 422 on duplicate email lands under the email input, not a toast
-- [ ] `make test-web` green offline (MSW only); list page tests cover loading/empty/error/data
-- [ ] `make e2e` green against `make dev` stack
-- [ ] Refreshing the browser mid-session keeps the user logged in (cookie refresh restore)
+- [x] Full manual flow against local API: register, login, users CRUD with pagination/search, role gating, logout
+- [x] Server 422 on duplicate email lands under the email input, not a toast
+- [x] `make test-web` green offline (MSW only); list page tests cover loading/empty/error/data
+- [x] `make e2e` green against `make dev` stack
+- [x] Refreshing the browser mid-session keeps the user logged in (cookie refresh restore)
 
 ## Risk Assessment
 

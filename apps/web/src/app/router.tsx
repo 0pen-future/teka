@@ -1,7 +1,7 @@
 import { createBrowserRouter } from "react-router";
 
 import { NotFound } from "@/components/shared/not-found";
-import { ProtectedRoute } from "@/features/auth/components/protected-route";
+import { ProtectedRoute } from "@/features/auth";
 import { authRoutes } from "@/features/auth/routes";
 import { dashboardRoutes } from "@/features/dashboard/routes";
 import { usersRoutes } from "@/features/users/routes";

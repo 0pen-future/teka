@@ -1,41 +1,47 @@
-import { type FormEvent, useState } from "react";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
 import { Link, useLocation, useNavigate } from "react-router";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { useAuthStore } from "@/features/auth/stores/auth-store";
+import { useApiFormErrors } from "@/lib/forms/use-api-form-errors";
+
+import { useLogin } from "../hooks/use-auth";
+import { loginSchema, type LoginInput } from "../schemas/auth-schemas";
 
 interface LocationState {
   from?: string;
 }
 
-/**
- * Stub login: seeds an in-memory session so the routing/auth wiring can be
- * exercised end to end. Phase 6 replaces this with the real POST /auth/login.
- */
 export function LoginPage() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const setSession = useAuthStore((state) => state.setSession);
   const navigate = useNavigate();
   const location = useLocation();
+  const from = (location.state as LocationState | null)?.from;
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSession(
-      {
-        id: "00000000-0000-0000-0000-000000000000",
-        email: email || "dev@example.com",
-        name: "Dev User",
-        role: "user",
-      },
-      "stub-access-token",
-    );
-    const from = (location.state as LocationState | null)?.from;
-    void navigate(from ?? "/", { replace: true });
-  }
+  const form = useForm<LoginInput>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: { email: "", password: "" },
+  });
+  const loginMutation = useLogin();
+  const handleApiError = useApiFormErrors(form);
+
+  const onSubmit = form.handleSubmit((values) => {
+    loginMutation.mutate(values, {
+      onSuccess: () => void navigate(from ?? "/", { replace: true }),
+      onError: handleApiError,
+    });
+  });
+
+  const { errors } = form.formState;
 
   return (
     <Card>
@@ -43,31 +49,38 @@ export function LoginPage() {
         <CardTitle>Sign in</CardTitle>
         <CardDescription>Welcome back to Teka.</CardDescription>
       </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
-            <Input
-              id="email"
-              type="email"
-              autoComplete="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="password">Password</Label>
-            <Input
-              id="password"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-            />
-          </div>
-          <Button type="submit" className="w-full">
-            Sign in
+      <form onSubmit={(event) => void onSubmit(event)} noValidate>
+        <CardContent>
+          <FieldGroup>
+            <Field data-invalid={Boolean(errors.email)}>
+              <FieldLabel htmlFor="email">Email</FieldLabel>
+              <Input
+                id="email"
+                type="email"
+                autoComplete="email"
+                placeholder="you@example.com"
+                aria-invalid={Boolean(errors.email)}
+                {...form.register("email")}
+              />
+              <FieldError errors={[errors.email]} />
+            </Field>
+            <Field data-invalid={Boolean(errors.password)}>
+              <FieldLabel htmlFor="password">Password</FieldLabel>
+              <Input
+                id="password"
+                type="password"
+                autoComplete="current-password"
+                aria-invalid={Boolean(errors.password)}
+                {...form.register("password")}
+              />
+              <FieldError errors={[errors.password]} />
+            </Field>
+            <FieldError errors={[errors.root]} />
+          </FieldGroup>
+        </CardContent>
+        <CardFooter className="mt-6 flex-col gap-3">
+          <Button type="submit" className="w-full" disabled={loginMutation.isPending}>
+            {loginMutation.isPending ? "Signing in…" : "Sign in"}
           </Button>
           <p className="text-center text-sm text-muted-foreground">
             No account?{" "}
@@ -78,8 +91,8 @@ export function LoginPage() {
               Register
             </Link>
           </p>
-        </form>
-      </CardContent>
+        </CardFooter>
+      </form>
     </Card>
   );
 }

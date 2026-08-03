@@ -1,52 +1,92 @@
-import { LayoutDashboardIcon, UsersIcon } from "lucide-react";
+import { LayoutDashboardIcon, LogOutIcon, UsersIcon } from "lucide-react";
 import { NavLink, Outlet } from "react-router";
 
 import { ModeToggle } from "@/components/shared/mode-toggle";
-import { useAuthStore } from "@/features/auth/stores/auth-store";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useAuthStore, useLogout } from "@/features/auth";
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboardIcon },
-  { to: "/users", label: "Users", icon: UsersIcon },
+  { to: "/", label: "Dashboard", icon: LayoutDashboardIcon, adminOnly: false },
+  { to: "/users", label: "Users", icon: UsersIcon, adminOnly: true },
 ];
 
 function SidebarNav({ className }: { className?: string }) {
+  const isAdmin = useAuthStore((state) => state.user?.role === "admin");
   return (
     <nav aria-label="Main" className={cn("flex gap-1 md:flex-col", className)}>
-      {navItems.map(({ to, label, icon: Icon }) => (
-        <NavLink
-          key={to}
-          to={to}
-          end={to === "/"}
-          className={({ isActive }) =>
-            cn(
-              "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-              isActive
-                ? "bg-accent text-accent-foreground"
-                : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-            )
-          }
-        >
-          <Icon aria-hidden className="size-4" />
-          {label}
-        </NavLink>
-      ))}
+      {navItems
+        .filter((item) => !item.adminOnly || isAdmin)
+        .map(({ to, label, icon: Icon }) => (
+          <NavLink
+            key={to}
+            to={to}
+            end={to === "/"}
+            className={({ isActive }) =>
+              cn(
+                "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                isActive
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+              )
+            }
+          >
+            <Icon aria-hidden className="size-4" />
+            {label}
+          </NavLink>
+        ))}
     </nav>
+  );
+}
+
+function UserMenu() {
+  const user = useAuthStore((state) => state.user);
+  const logoutMutation = useLogout();
+
+  if (!user) {
+    return null;
+  }
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="sm" className="max-w-48" aria-label="Account menu">
+          <span className="truncate">{user.name}</span>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuLabel>
+          <p className="truncate text-sm font-medium">{user.name}</p>
+          <p className="truncate text-xs font-normal text-muted-foreground">{user.email}</p>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          disabled={logoutMutation.isPending}
+          onSelect={() => logoutMutation.mutate()}
+        >
+          <LogOutIcon aria-hidden className="size-4" />
+          Log out
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
 /** Authenticated app shell: top bar, sidebar (inline nav under md), content. */
 export function DashboardLayout() {
-  const user = useAuthStore((state) => state.user);
-
   return (
     <div className="flex min-h-svh flex-col">
       <header className="flex items-center justify-between border-b px-4 py-3 md:px-6">
         <span className="text-lg font-semibold tracking-tight">Teka</span>
         <div className="flex items-center gap-3">
-          {user ? (
-            <span className="hidden text-sm text-muted-foreground sm:inline">{user.email}</span>
-          ) : null}
+          <UserMenu />
           <ModeToggle />
         </div>
       </header>

@@ -77,12 +77,12 @@ api-docs: ## Regenerate the OpenAPI spec from swag annotations
 	@cd $(API_DIR) && go tool swag init -g cmd/api/main.go -o docs --parseInternal
 
 .PHONY: test-web
-test-web: ## Run frontend tests
-	$(not_yet)
+test-web: ## Run frontend unit tests (vitest + MSW, fully offline)
+	@cd $(WEB_DIR) && npm run test
 
 .PHONY: e2e
-e2e: ## Run Playwright end-to-end tests (expects 'make dev' stack)
-	$(not_yet)
+e2e: ## Run Playwright end-to-end tests (expects 'make dev' stack with seeded users)
+	@cd $(WEB_DIR) && npm run e2e
 
 .PHONY: lint
 lint: lint-api lint-web ## Lint both apps

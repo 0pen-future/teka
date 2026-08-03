@@ -17,15 +17,18 @@ public by design — never put secrets in them. Production builds must supply
 
 ## Scripts
 
-| Command                | Purpose                                  |
-| ---------------------- | ---------------------------------------- |
-| `npm run dev`          | Dev server with HMR                      |
-| `npm run build`        | Typecheck + production bundle to `dist/` |
-| `npm run lint`         | ESLint (flat config, type-aware)         |
-| `npm run format`       | Prettier write                           |
-| `npm run format:check` | Prettier verify                          |
-| `npm run typecheck`    | `tsc -b --noEmit`                        |
-| `npm run preview`      | Serve the production build locally       |
+| Command                | Purpose                                    |
+| ---------------------- | ------------------------------------------ |
+| `npm run dev`          | Dev server with HMR                        |
+| `npm run build`        | Typecheck + production bundle to `dist/`   |
+| `npm run lint`         | ESLint (flat config, type-aware)           |
+| `npm run format`       | Prettier write                             |
+| `npm run format:check` | Prettier verify                            |
+| `npm run typecheck`    | `tsc -b --noEmit`                          |
+| `npm run test`         | Vitest unit/component suite (offline, MSW) |
+| `npm run test:watch`   | Vitest in watch mode                       |
+| `npm run e2e`          | Playwright e2e (needs running dev stack)   |
+| `npm run preview`      | Serve the production build locally         |
 
 ## Structure
 

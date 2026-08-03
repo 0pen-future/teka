@@ -220,7 +220,7 @@ project-root/
 | 3 | [Phase 3: Backend Features and Migrations](./phase-03-backend-features-and-migrations.md) | Completed |
 | 4 | [Phase 4: Backend Testing and API Docs](./phase-04-backend-testing-and-api-docs.md) | Completed |
 | 5 | [Phase 5: Frontend Foundation](./phase-05-frontend-foundation.md) | Completed |
-| 6 | [Phase 6: Frontend Features and Testing](./phase-06-frontend-features-and-testing.md) | Pending |
+| 6 | [Phase 6: Frontend Features and Testing](./phase-06-frontend-features-and-testing.md) | Completed |
 | 7 | [Phase 7: Docker Compose Local Dev](./phase-07-docker-compose-local-dev.md) | Pending |
 | 8 | [Phase 8: CI/CD, Tooling and Deployment](./phase-08-ci-cd-tooling-and-deployment.md) | Pending |
 
