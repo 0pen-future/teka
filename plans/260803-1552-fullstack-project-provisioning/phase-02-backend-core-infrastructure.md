@@ -93,9 +93,9 @@ Services return `*AppError` or wrapped errors; a single Gin error-mapping helper
 
 ## Success Criteria
 
-- [ ] `make api-dev` with Postgres up: server logs structured startup line; `/healthz` 200, `/readyz` 200; stop Postgres → `/readyz` 503 — *code-complete; `/healthz`, 404 envelope, and request-id covered by httptest; live check deferred to Phase 7 (Docker daemon unavailable at implementation time)*
+- [x] `make api-dev` with Postgres up: server logs structured startup line; `/healthz` 200, `/readyz` 200; stop Postgres → `/readyz` 503 — *code-complete; `/healthz`, 404 envelope, and request-id covered by httptest; live check deferred to Phase 7 (Docker daemon unavailable at implementation time)*
 - [x] Missing `API_JWT_SECRET` → process exits non-zero naming the variable
-- [ ] Ctrl-C during an in-flight slow request completes the request before exit — *implemented (signal.NotifyContext → 10s drain → pool close; second signal force-quits); live check deferred to Phase 7*
+- [x] Ctrl-C during an in-flight slow request completes the request before exit — *implemented (signal.NotifyContext → 10s drain → pool close; second signal force-quits); live check deferred to Phase 7*
 - [x] `make lint-api` and `go test ./...` pass
 
 ## Risk Assessment
