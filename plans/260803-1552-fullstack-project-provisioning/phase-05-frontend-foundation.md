@@ -1,7 +1,7 @@
 ---
 phase: 5
 title: "Phase 5: Frontend Foundation"
-status: todo
+status: completed
 priority: P1
 effort: "1d"
 dependencies: [1]
@@ -73,10 +73,10 @@ Scaffold the React app: Vite + TypeScript (strict), Tailwind CSS + shadcn/ui, ES
 
 ## Success Criteria
 
-- [ ] `make web-dev` → app shell renders, dark/light toggle works, no console errors
-- [ ] Visiting `/users` unauthenticated redirects to `/login` and back after (stub) login
-- [ ] `npm run lint`, `format:check`, `tsc --noEmit`, `npm run build` all clean
-- [ ] Killing the API turns the health card into the normalized error state (`NETWORK_ERROR`)
+- [x] `make web-dev` → app shell renders, dark/light toggle works, no console errors
+- [x] Visiting `/users` unauthenticated redirects to `/login` and back after (stub) login
+- [x] `npm run lint`, `format:check`, `tsc --noEmit`, `npm run build` all clean
+- [x] Killing the API turns the health card into the normalized error state (`NETWORK_ERROR`)
 
 ## Risk Assessment
 

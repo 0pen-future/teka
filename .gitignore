@@ -2,6 +2,8 @@
 .env
 .env.*
 !.env.example
+# Localhost-only Vite defaults; VITE_* values are public by design.
+!apps/web/.env.development
 
 # Go
 apps/api/tmp/

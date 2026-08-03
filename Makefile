@@ -47,7 +47,7 @@ api-dev: ## Run the API with hot reload (host, needs local Postgres)
 
 .PHONY: web-dev
 web-dev: ## Run the web dev server on the host
-	$(not_yet)
+	@cd $(WEB_DIR) && npm run dev
 
 .PHONY: test
 test: test-api test-web ## Run all tests
@@ -93,7 +93,7 @@ lint-api: ## Lint backend (golangci-lint)
 
 .PHONY: lint-web
 lint-web: ## Lint frontend (eslint, prettier, tsc)
-	$(not_yet)
+	@cd $(WEB_DIR) && npm run lint && npm run format:check && npm run typecheck
 
 .PHONY: fmt
 fmt: ## Format all source
@@ -124,4 +124,4 @@ build-api: ## Build the API binary
 
 .PHONY: build-web
 build-web: ## Build the web production bundle / image
-	$(not_yet)
+	@cd $(WEB_DIR) && npm run build
