@@ -1,0 +1,30 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# Go
+apps/api/tmp/
+apps/api/bin/
+apps/api/docs/
+coverage.out
+*.test
+
+# Node
+node_modules/
+dist/
+apps/web/coverage/
+apps/web/playwright-report/
+apps/web/test-results/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Lefthook personal overrides
+lefthook-local.yml
+.lefthook-local/
+
+# Logs
+*.log

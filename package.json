@@ -1,0 +1,10 @@
+{
+  "name": "teka-root",
+  "private": true,
+  "description": "Repo-root tooling only (git hooks + commitlint). App code lives in apps/.",
+  "devDependencies": {
+    "@commitlint/cli": "^19.8.0",
+    "@commitlint/config-conventional": "^19.8.0",
+    "lefthook": "2.1.10"
+  }
+}

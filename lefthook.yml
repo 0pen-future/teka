@@ -1,0 +1,38 @@
+# Git hooks. Install with: make hooks   Escape hatch: LEFTHOOK=0 git commit ...
+# glob_matcher doublestar lets ** match zero directories (apps/web/*.ts included).
+glob_matcher: doublestar
+
+# parallel stays off: stage_fixed re-stages files and concurrent git index
+# writes race on .git/index.lock.
+pre-commit:
+  parallel: false
+  commands:
+    go-fmt:
+      root: "apps/api/"
+      glob: "**/*.go"
+      run: gofmt -l -w {staged_files}
+      stage_fixed: true
+    go-lint:
+      root: "apps/api/"
+      glob: "**/*.go"
+      run: |
+        if command -v golangci-lint >/dev/null 2>&1; then golangci-lint run; fi
+    web-format:
+      root: "apps/web/"
+      glob: "**/*.{ts,tsx,js,jsx,css,json,html}"
+      run: |
+        [ -x node_modules/.bin/prettier ] || exit 0
+        npx --no-install prettier --write {staged_files}
+      stage_fixed: true
+    web-lint:
+      root: "apps/web/"
+      glob: "**/*.{ts,tsx,js,jsx}"
+      run: |
+        [ -x node_modules/.bin/eslint ] || exit 0
+        npx --no-install eslint --fix {staged_files}
+      stage_fixed: true
+
+commit-msg:
+  commands:
+    commitlint:
+      run: npx --no-install commitlint --edit {1}
