@@ -1,7 +1,7 @@
 ---
 phase: 7
 title: "Phase 7: Docker Compose Local Dev"
-status: todo
+status: completed
 priority: P1
 effort: "0.5d"
 dependencies: [3, 5]
@@ -67,11 +67,11 @@ One-command local environment: `make dev` starts Postgres, migration runner, API
 
 ## Success Criteria
 
-- [ ] Clean machine: `make setup && make dev` → login page works against seeded admin (after `make seed`) with no manual steps
-- [ ] `docker compose ps` shows postgres/api healthy; migrate exited 0
-- [ ] Go edit → air rebuild < ~5s; TS edit → HMR without page reload
-- [ ] Adminer at `:8081` connects to the dev DB
-- [ ] Second `make dev` while running does not spawn duplicates or hop ports
+- [x] Clean machine: `make setup && make dev` → login page works against seeded admin (after `make seed`) with no manual steps
+- [x] `docker compose ps` shows postgres/api healthy; migrate exited 0
+- [x] Go edit → air rebuild < ~5s; TS edit → HMR without page reload
+- [x] Adminer at `:8081` connects to the dev DB
+- [x] Second `make dev` while running does not spawn duplicates or hop ports
 
 ## Risk Assessment
 

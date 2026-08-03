@@ -221,7 +221,7 @@ project-root/
 | 4 | [Phase 4: Backend Testing and API Docs](./phase-04-backend-testing-and-api-docs.md) | Completed |
 | 5 | [Phase 5: Frontend Foundation](./phase-05-frontend-foundation.md) | Completed |
 | 6 | [Phase 6: Frontend Features and Testing](./phase-06-frontend-features-and-testing.md) | Completed |
-| 7 | [Phase 7: Docker Compose Local Dev](./phase-07-docker-compose-local-dev.md) | Pending |
+| 7 | [Phase 7: Docker Compose Local Dev](./phase-07-docker-compose-local-dev.md) | Completed |
 | 8 | [Phase 8: CI/CD, Tooling and Deployment](./phase-08-ci-cd-tooling-and-deployment.md) | Pending |
 
 **Dependencies:** 2→1, 3→2, 4→3, 5→1, 6→5 (+3 for real API in e2e), 7→(3,5), 8→(4,6,7). Phases 2–4 (backend) and 5–6 (frontend) can run as two parallel tracks after Phase 1.
