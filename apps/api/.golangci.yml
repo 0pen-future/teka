@@ -1,0 +1,39 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - revive
+    - gosec
+    - ineffassign
+    - misspell
+    - forbidigo
+  settings:
+    forbidigo:
+      forbid:
+        - pattern: os\.(Getenv|LookupEnv)
+          msg: read configuration through internal/config, not the raw environment
+  exclusions:
+    rules:
+      # Tests favor readability over hardened patterns.
+      - path: _test\.go
+        linters:
+          - gosec
+      # config is the one package allowed to read the environment.
+      - path: internal/config/
+        linters:
+          - forbidigo
+
+formatters:
+  enable:
+    - gofmt
+    - gci
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - localmodule

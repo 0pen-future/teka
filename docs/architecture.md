@@ -21,4 +21,24 @@ changes. Revisit if a shared TypeScript package becomes necessary.
   schemas, types, state, and tests. `src/app/` owns bootstrap and routing;
   `src/lib/` owns API/config/utility infrastructure.
 
-_Filled in as phases land: DI container details, request lifecycle diagram._
+## Dependency injection (backend)
+
+Manual constructor injection, no framework. `internal/app.Container` holds the
+app-wide dependencies (`Cfg`, `Log`, `DB`); `app.RunServer` wires
+config → container → router → HTTP server. Feature wiring
+(repository → service → handler) happens in `server.registerFeatures`, keeping
+features decoupled from bootstrap. Adopt `google/wire` only if wiring exceeds
+~5 features.
+
+## Request lifecycle (backend)
+
+```
+client → http.Server (timeouts: read-header 5s / read 10s / write 30s / idle 120s)
+       → gin engine (no trusted proxies)
+       → request-id → logger → recovery → CORS
+       → /healthz | /readyz | /api/v1/<feature routes>
+```
+
+Graceful shutdown: SIGINT/SIGTERM cancels the serve context; the server drains
+in-flight requests (10s budget) before the DB pool closes. A second signal
+force-quits.

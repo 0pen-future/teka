@@ -38,9 +38,12 @@ dev-nuke: ## Stop the stack and remove volumes (destroys local DB data)
 dev-logs: ## Tail api and web logs
 	@if [ -f docker-compose.yml ]; then docker compose logs -f api web; else echo "'dev-logs' needs docker-compose.yml (provisioned in Phase 7)."; fi
 
+# No .env sourcing here: the API loads the repo-root .env itself in development.
 .PHONY: api-dev
 api-dev: ## Run the API with hot reload (host, needs local Postgres)
-	$(not_yet)
+	@cd $(API_DIR) && if command -v air >/dev/null 2>&1; then air; else \
+		echo "air not found; running without hot reload (go install github.com/air-verse/air@latest)"; \
+		go run ./cmd/api serve; fi
 
 .PHONY: web-dev
 web-dev: ## Run the web dev server on the host
@@ -50,8 +53,8 @@ web-dev: ## Run the web dev server on the host
 test: test-api test-web ## Run all tests
 
 .PHONY: test-api
-test-api: ## Run backend unit + integration tests
-	$(not_yet)
+test-api: ## Run backend unit tests
+	@cd $(API_DIR) && go test ./...
 
 .PHONY: test-web
 test-web: ## Run frontend tests
@@ -66,7 +69,7 @@ lint: lint-api lint-web ## Lint both apps
 
 .PHONY: lint-api
 lint-api: ## Lint backend (golangci-lint)
-	$(not_yet)
+	@cd $(API_DIR) && golangci-lint run
 
 .PHONY: lint-web
 lint-web: ## Lint frontend (eslint, prettier, tsc)
@@ -96,8 +99,8 @@ seed: ## Seed the database with development data
 build: build-api build-web ## Build production artifacts for both apps
 
 .PHONY: build-api
-build-api: ## Build the API binary / image
-	$(not_yet)
+build-api: ## Build the API binary
+	@cd $(API_DIR) && CGO_ENABLED=0 go build -o bin/api ./cmd/api && echo "built $(API_DIR)/bin/api"
 
 .PHONY: build-web
 build-web: ## Build the web production bundle / image

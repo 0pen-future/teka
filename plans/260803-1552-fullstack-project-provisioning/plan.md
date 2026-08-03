@@ -1,7 +1,7 @@
 ---
 title: "Fullstack Project Provisioning"
 description: "Provision a production-ready monorepo with a Go/Gin/GORM/PostgreSQL feature-oriented API and a React/TypeScript/Vite/Tailwind/shadcn feature-oriented web app, plus Docker Compose local dev, tooling, and CI/CD."
-status: pending
+status: in-progress
 priority: P1
 effort: "6d"
 tags: [go, gin, gorm, postgres, cobra, react, typescript, vite, tailwind, shadcn, docker, monorepo]
@@ -215,8 +215,8 @@ project-root/
 
 | # | Phase | Status |
 |---|-------|--------|
-| 1 | [Phase 1: Repository Foundation](./phase-01-start.md) | Pending |
-| 2 | [Phase 2: Backend Core Infrastructure](./phase-02-backend-core-infrastructure.md) | Pending |
+| 1 | [Phase 1: Repository Foundation](./phase-01-start.md) | Completed |
+| 2 | [Phase 2: Backend Core Infrastructure](./phase-02-backend-core-infrastructure.md) | Completed |
 | 3 | [Phase 3: Backend Features and Migrations](./phase-03-backend-features-and-migrations.md) | Pending |
 | 4 | [Phase 4: Backend Testing and API Docs](./phase-04-backend-testing-and-api-docs.md) | Pending |
 | 5 | [Phase 5: Frontend Foundation](./phase-05-frontend-foundation.md) | Pending |
