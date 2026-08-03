@@ -17,7 +17,7 @@ const docTemplate = `{
     "paths": {
         "/auth/login": {
             "post": {
-                "description": "Verifies email and password; returns an access token and sets the refresh cookie (new token family).",
+                "description": "Verifies phone and password; returns an access token and sets the refresh cookie (new token family).",
                 "consumes": [
                     "application/json"
                 ],
@@ -59,7 +59,7 @@ const docTemplate = `{
                         }
                     },
                     "401": {
-                        "description": "invalid email or password",
+                        "description": "invalid phone or password",
                         "schema": {
                             "allOf": [
                                 {
@@ -117,60 +117,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/auth/me": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "auth"
-                ],
-                "summary": "Current user",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "data": {
-                                            "$ref": "#/definitions/users.Response"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    }
-                }
-            }
-        },
         "/auth/refresh": {
             "post": {
                 "description": "Rotates the refresh-token cookie and returns a fresh access token. Replaying an already-rotated token revokes the whole token family.",
@@ -223,7 +169,7 @@ const docTemplate = `{
         },
         "/auth/register": {
             "post": {
-                "description": "Creates a user with role \"user\" and returns an access token; the refresh token is set as an httpOnly cookie.",
+                "description": "Creates a teacher account from a Vietnamese phone number (0xxxxxxxxx or +84xxxxxxxxx) and returns an access token; the refresh token is set as an httpOnly cookie.",
                 "consumes": [
                     "application/json"
                 ],
@@ -233,7 +179,7 @@ const docTemplate = `{
                 "tags": [
                     "auth"
                 ],
-                "summary": "Register a new user",
+                "summary": "Register a new teacher",
                 "parameters": [
                     {
                         "description": "registration payload",
@@ -265,7 +211,7 @@ const docTemplate = `{
                         }
                     },
                     "409": {
-                        "description": "email already in use",
+                        "description": "phone already registered",
                         "schema": {
                             "allOf": [
                                 {
@@ -303,7 +249,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/users": {
+        "/me": {
             "get": {
                 "security": [
                     {
@@ -314,55 +260,9 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "users"
+                    "teachers"
                 ],
-                "summary": "List users (admin)",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "default": 1,
-                        "description": "page number",
-                        "name": "page",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "default": 20,
-                        "description": "items per page (max 100)",
-                        "name": "per_page",
-                        "in": "query"
-                    },
-                    {
-                        "enum": [
-                            "created_at",
-                            "-created_at",
-                            "name",
-                            "-name",
-                            "email",
-                            "-email"
-                        ],
-                        "type": "string",
-                        "description": "sort column; leading - for descending",
-                        "name": "sort",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "substring match on name or email",
-                        "name": "q",
-                        "in": "query"
-                    },
-                    {
-                        "enum": [
-                            "admin",
-                            "user"
-                        ],
-                        "type": "string",
-                        "description": "filter by role",
-                        "name": "role",
-                        "in": "query"
-                    }
-                ],
+                "summary": "Current teacher profile",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -375,13 +275,7 @@ const docTemplate = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "type": "array",
-                                            "items": {
-                                                "$ref": "#/definitions/users.Response"
-                                            }
-                                        },
-                                        "meta": {
-                                            "$ref": "#/definitions/response.Meta"
+                                            "$ref": "#/definitions/teachers.TeacherResponse"
                                         }
                                     }
                                 }
@@ -390,24 +284,6 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
                         "schema": {
                             "allOf": [
                                 {
@@ -426,12 +302,13 @@ const docTemplate = `{
                     }
                 }
             },
-            "post": {
+            "put": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
                 ],
+                "description": "Updates full_name and timezone only; other fields are ignored.",
                 "consumes": [
                     "application/json"
                 ],
@@ -439,23 +316,23 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "users"
+                    "teachers"
                 ],
-                "summary": "Create a user (admin)",
+                "summary": "Update current teacher profile",
                 "parameters": [
                     {
-                        "description": "user payload",
+                        "description": "profile fields",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/users.CreateRequest"
+                            "$ref": "#/definitions/teachers.UpdateProfileRequest"
                         }
                     }
                 ],
                 "responses": {
-                    "201": {
-                        "description": "Created",
+                    "200": {
+                        "description": "OK",
                         "schema": {
                             "allOf": [
                                 {
@@ -465,7 +342,7 @@ const docTemplate = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/users.Response"
+                                            "$ref": "#/definitions/teachers.TeacherResponse"
                                         }
                                     }
                                 }
@@ -474,42 +351,6 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "409": {
-                        "description": "email already in use",
                         "schema": {
                             "allOf": [
                                 {
@@ -527,391 +368,7 @@ const docTemplate = `{
                         }
                     },
                     "422": {
-                        "description": "Unprocessable Entity",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    }
-                }
-            }
-        },
-        "/users/{id}": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "users"
-                ],
-                "summary": "Get a user",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "user id (UUID)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "data": {
-                                            "$ref": "#/definitions/users.Response"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "400": {
-                        "description": "invalid user id",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Soft delete; admins cannot delete their own account.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "users"
-                ],
-                "summary": "Delete a user (admin)",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "user id (UUID)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/response.Envelope"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "409": {
-                        "description": "admins cannot delete themselves",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    }
-                }
-            },
-            "patch": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "users"
-                ],
-                "summary": "Update a user",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "user id (UUID)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "fields to change; omitted fields keep their value",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/users.UpdateRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "data": {
-                                            "$ref": "#/definitions/users.Response"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "422": {
-                        "description": "Unprocessable Entity",
+                        "description": "validation failed",
                         "schema": {
                             "allOf": [
                                 {
@@ -936,14 +393,14 @@ const docTemplate = `{
         "auth.LoginRequest": {
             "type": "object",
             "required": [
-                "email",
-                "password"
+                "password",
+                "phone"
             ],
             "properties": {
-                "email": {
+                "password": {
                     "type": "string"
                 },
-                "password": {
+                "phone": {
                     "type": "string"
                 }
             }
@@ -951,23 +408,23 @@ const docTemplate = `{
         "auth.RegisterRequest": {
             "type": "object",
             "required": [
-                "email",
-                "name",
-                "password"
+                "full_name",
+                "password",
+                "phone"
             ],
             "properties": {
-                "email": {
-                    "type": "string"
-                },
-                "name": {
+                "full_name": {
                     "type": "string",
-                    "maxLength": 255,
+                    "maxLength": 100,
                     "minLength": 1
                 },
                 "password": {
                     "type": "string",
                     "maxLength": 72,
                     "minLength": 8
+                },
+                "phone": {
+                    "type": "string"
                 }
             }
         },
@@ -980,11 +437,11 @@ const docTemplate = `{
                 "expires_in": {
                     "type": "integer"
                 },
+                "teacher": {
+                    "$ref": "#/definitions/teachers.TeacherResponse"
+                },
                 "token_type": {
                     "type": "string"
-                },
-                "user": {
-                    "$ref": "#/definitions/users.Response"
                 }
             }
         },
@@ -1037,74 +494,44 @@ const docTemplate = `{
                 }
             }
         },
-        "users.CreateRequest": {
-            "type": "object",
-            "required": [
-                "email",
-                "name",
-                "password"
-            ],
-            "properties": {
-                "email": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string",
-                    "maxLength": 100,
-                    "minLength": 1
-                },
-                "password": {
-                    "type": "string",
-                    "maxLength": 72,
-                    "minLength": 8
-                },
-                "role": {
-                    "type": "string",
-                    "enum": [
-                        "admin",
-                        "user"
-                    ]
-                }
-            }
-        },
-        "users.Response": {
+        "teachers.TeacherResponse": {
             "type": "object",
             "properties": {
                 "created_at": {
                     "type": "string"
                 },
-                "email": {
+                "full_name": {
                     "type": "string"
                 },
                 "id": {
                     "type": "string"
                 },
-                "name": {
+                "phone": {
                     "type": "string"
                 },
-                "role": {
+                "status": {
                     "type": "string"
                 },
-                "updated_at": {
+                "timezone": {
                     "type": "string"
                 }
             }
         },
-        "users.UpdateRequest": {
+        "teachers.UpdateProfileRequest": {
             "type": "object",
+            "required": [
+                "full_name",
+                "timezone"
+            ],
             "properties": {
-                "name": {
+                "full_name": {
                     "type": "string",
                     "maxLength": 100,
                     "minLength": 1
                 },
-                "role": {
-                    "description": "Role changes are admin-only; the service enforces it.",
+                "timezone": {
                     "type": "string",
-                    "enum": [
-                        "admin",
-                        "user"
-                    ]
+                    "maxLength": 64
                 }
             }
         }

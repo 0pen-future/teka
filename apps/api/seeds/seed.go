@@ -1,57 +1,74 @@
 // Package seeds populates development data. Runs are idempotent: records are
-// keyed by email and existing users are never modified, so reseeding a
+// keyed by phone and existing accounts are never modified, so reseeding a
 // database with real data is safe.
 package seeds
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
-	"teka/apps/api/internal/features/users"
+	"teka/apps/api/internal/shared/id"
 )
 
-const bcryptCost = 12
+const (
+	bcryptCost      = 12
+	defaultTimezone = "Asia/Ho_Chi_Minh"
+)
 
-type seedUser struct {
-	Email    string
+type seedTeacher struct {
+	Phone    string
 	Password string
-	Name     string
-	Role     string
+	FullName string
 }
 
 // Development credentials only — never used outside seeded local databases.
-var seedUsers = []seedUser{
-	{Email: "admin@teka.local", Password: "admin-password", Name: "Admin", Role: users.RoleAdmin},
-	{Email: "alice@teka.local", Password: "alice-password", Name: "Alice Nguyen", Role: users.RoleUser},
-	{Email: "bob@teka.local", Password: "bob-password", Name: "Bob Tran", Role: users.RoleUser},
-	{Email: "carol@teka.local", Password: "carol-password", Name: "Carol Le", Role: users.RoleUser},
+var seedTeachers = []seedTeacher{
+	{Phone: "+84901000001", Password: "lan-password", FullName: "Cô Lan"},
+	{Phone: "+84901000002", Password: "minh-password", FullName: "Thầy Minh"},
 }
 
-// Run inserts the seed users that do not exist yet and reports each outcome.
+// Run inserts the seed teachers that do not exist yet and reports each
+// outcome. Each teacher is one user_accounts row plus one teachers row
+// sharing the same id, created in a single transaction.
 func Run(ctx context.Context, db *gorm.DB, log *slog.Logger) error {
-	repo := users.NewRepository(db)
-	for _, s := range seedUsers {
-		if _, err := repo.GetByEmail(ctx, s.Email); err == nil {
-			log.Info("seed: user exists, skipping", "email", s.Email)
+	for _, s := range seedTeachers {
+		var count int64
+		err := db.WithContext(ctx).
+			Raw("SELECT count(*) FROM user_accounts WHERE phone = ? AND deleted_at IS NULL", s.Phone).
+			Scan(&count).Error
+		if err != nil {
+			return fmt.Errorf("seed: look up %s: %w", s.Phone, err)
+		}
+		if count > 0 {
+			log.Info("seed: teacher exists, skipping", "phone", s.Phone)
 			continue
-		} else if !errors.Is(err, users.ErrNotFound) {
-			return fmt.Errorf("seed: look up %s: %w", s.Email, err)
 		}
 
 		hash, err := bcrypt.GenerateFromPassword([]byte(s.Password), bcryptCost)
 		if err != nil {
-			return fmt.Errorf("seed: hash password for %s: %w", s.Email, err)
+			return fmt.Errorf("seed: hash password for %s: %w", s.Phone, err)
 		}
-		u := &users.User{Email: s.Email, PasswordHash: string(hash), Name: s.Name, Role: s.Role}
-		if err := repo.Create(ctx, u); err != nil {
-			return fmt.Errorf("seed: create %s: %w", s.Email, err)
+		accountID := id.New()
+		err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec(
+				"INSERT INTO user_accounts (id, role, phone, password_hash, status) VALUES (?, 'teachers', ?, ?, 'active')",
+				accountID, s.Phone, string(hash),
+			).Error; err != nil {
+				return err
+			}
+			return tx.Exec(
+				"INSERT INTO teachers (id, full_name, timezone) VALUES (?, ?, ?)",
+				accountID, s.FullName, defaultTimezone,
+			).Error
+		})
+		if err != nil {
+			return fmt.Errorf("seed: create %s: %w", s.Phone, err)
 		}
-		log.Info("seed: user created", "email", s.Email, "role", s.Role)
+		log.Info("seed: teacher created", "phone", s.Phone, "full_name", s.FullName)
 	}
 	return nil
 }

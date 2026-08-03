@@ -2,30 +2,30 @@ basePath: /api/v1
 definitions:
   auth.LoginRequest:
     properties:
-      email:
-        type: string
       password:
         type: string
+      phone:
+        type: string
     required:
-    - email
     - password
+    - phone
     type: object
   auth.RegisterRequest:
     properties:
-      email:
-        type: string
-      name:
-        maxLength: 255
+      full_name:
+        maxLength: 100
         minLength: 1
         type: string
       password:
         maxLength: 72
         minLength: 8
         type: string
+      phone:
+        type: string
     required:
-    - email
-    - name
+    - full_name
     - password
+    - phone
     type: object
   auth.TokenResponse:
     properties:
@@ -33,10 +33,10 @@ definitions:
         type: string
       expires_in:
         type: integer
+      teacher:
+        $ref: '#/definitions/teachers.TeacherResponse'
       token_type:
         type: string
-      user:
-        $ref: '#/definitions/users.Response'
     type: object
   response.Envelope:
     properties:
@@ -70,55 +70,33 @@ definitions:
       total_pages:
         type: integer
     type: object
-  users.CreateRequest:
-    properties:
-      email:
-        type: string
-      name:
-        maxLength: 100
-        minLength: 1
-        type: string
-      password:
-        maxLength: 72
-        minLength: 8
-        type: string
-      role:
-        enum:
-        - admin
-        - user
-        type: string
-    required:
-    - email
-    - name
-    - password
-    type: object
-  users.Response:
+  teachers.TeacherResponse:
     properties:
       created_at:
         type: string
-      email:
+      full_name:
         type: string
       id:
         type: string
-      name:
+      phone:
         type: string
-      role:
+      status:
         type: string
-      updated_at:
+      timezone:
         type: string
     type: object
-  users.UpdateRequest:
+  teachers.UpdateProfileRequest:
     properties:
-      name:
+      full_name:
         maxLength: 100
         minLength: 1
         type: string
-      role:
-        description: Role changes are admin-only; the service enforces it.
-        enum:
-        - admin
-        - user
+      timezone:
+        maxLength: 64
         type: string
+    required:
+    - full_name
+    - timezone
     type: object
 info:
   contact: {}
@@ -131,7 +109,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: Verifies email and password; returns an access token and sets the
+      description: Verifies phone and password; returns an access token and sets the
         refresh cookie (new token family).
       parameters:
       - description: credentials
@@ -153,7 +131,7 @@ paths:
                   $ref: '#/definitions/auth.TokenResponse'
               type: object
         "401":
-          description: invalid email or password
+          description: invalid phone or password
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'
@@ -185,34 +163,6 @@ paths:
           schema:
             $ref: '#/definitions/response.Envelope'
       summary: Log out
-      tags:
-      - auth
-  /auth/me:
-    get:
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                data:
-                  $ref: '#/definitions/users.Response'
-              type: object
-        "401":
-          description: Unauthorized
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-      security:
-      - BearerAuth: []
-      summary: Current user
       tags:
       - auth
   /auth/refresh:
@@ -247,8 +197,9 @@ paths:
     post:
       consumes:
       - application/json
-      description: Creates a user with role "user" and returns an access token; the
-        refresh token is set as an httpOnly cookie.
+      description: Creates a teacher account from a Vietnamese phone number (0xxxxxxxxx
+        or +84xxxxxxxxx) and returns an access token; the refresh token is set as
+        an httpOnly cookie.
       parameters:
       - description: registration payload
         in: body
@@ -269,7 +220,7 @@ paths:
                   $ref: '#/definitions/auth.TokenResponse'
               type: object
         "409":
-          description: email already in use
+          description: phone already registered
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'
@@ -286,44 +237,11 @@ paths:
                 error:
                   $ref: '#/definitions/response.ErrorBody'
               type: object
-      summary: Register a new user
+      summary: Register a new teacher
       tags:
       - auth
-  /users:
+  /me:
     get:
-      parameters:
-      - default: 1
-        description: page number
-        in: query
-        name: page
-        type: integer
-      - default: 20
-        description: items per page (max 100)
-        in: query
-        name: per_page
-        type: integer
-      - description: sort column; leading - for descending
-        enum:
-        - created_at
-        - -created_at
-        - name
-        - -name
-        - email
-        - -email
-        in: query
-        name: sort
-        type: string
-      - description: substring match on name or email
-        in: query
-        name: q
-        type: string
-      - description: filter by role
-        enum:
-        - admin
-        - user
-        in: query
-        name: role
-        type: string
       produces:
       - application/json
       responses:
@@ -334,23 +252,10 @@ paths:
             - $ref: '#/definitions/response.Envelope'
             - properties:
                 data:
-                  items:
-                    $ref: '#/definitions/users.Response'
-                  type: array
-                meta:
-                  $ref: '#/definitions/response.Meta'
+                  $ref: '#/definitions/teachers.TeacherResponse'
               type: object
         "401":
           description: Unauthorized
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-        "403":
-          description: Forbidden
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'
@@ -360,51 +265,34 @@ paths:
               type: object
       security:
       - BearerAuth: []
-      summary: List users (admin)
+      summary: Current teacher profile
       tags:
-      - users
-    post:
+      - teachers
+    put:
       consumes:
       - application/json
+      description: Updates full_name and timezone only; other fields are ignored.
       parameters:
-      - description: user payload
+      - description: profile fields
         in: body
         name: request
         required: true
         schema:
-          $ref: '#/definitions/users.CreateRequest'
+          $ref: '#/definitions/teachers.UpdateProfileRequest'
       produces:
       - application/json
       responses:
-        "201":
-          description: Created
+        "200":
+          description: OK
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'
             - properties:
                 data:
-                  $ref: '#/definitions/users.Response'
+                  $ref: '#/definitions/teachers.TeacherResponse'
               type: object
         "401":
           description: Unauthorized
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-        "403":
-          description: Forbidden
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-        "409":
-          description: email already in use
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'
@@ -413,7 +301,7 @@ paths:
                   $ref: '#/definitions/response.ErrorBody'
               type: object
         "422":
-          description: Unprocessable Entity
+          description: validation failed
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'
@@ -423,212 +311,9 @@ paths:
               type: object
       security:
       - BearerAuth: []
-      summary: Create a user (admin)
+      summary: Update current teacher profile
       tags:
-      - users
-  /users/{id}:
-    delete:
-      description: Soft delete; admins cannot delete their own account.
-      parameters:
-      - description: user id (UUID)
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/response.Envelope'
-        "400":
-          description: Bad Request
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-        "401":
-          description: Unauthorized
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-        "403":
-          description: Forbidden
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-        "404":
-          description: Not Found
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-        "409":
-          description: admins cannot delete themselves
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-      security:
-      - BearerAuth: []
-      summary: Delete a user (admin)
-      tags:
-      - users
-    get:
-      parameters:
-      - description: user id (UUID)
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                data:
-                  $ref: '#/definitions/users.Response'
-              type: object
-        "400":
-          description: invalid user id
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-        "401":
-          description: Unauthorized
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-        "403":
-          description: Forbidden
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-        "404":
-          description: Not Found
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-      security:
-      - BearerAuth: []
-      summary: Get a user
-      tags:
-      - users
-    patch:
-      consumes:
-      - application/json
-      parameters:
-      - description: user id (UUID)
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: fields to change; omitted fields keep their value
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/users.UpdateRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                data:
-                  $ref: '#/definitions/users.Response'
-              type: object
-        "400":
-          description: Bad Request
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-        "401":
-          description: Unauthorized
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-        "403":
-          description: Forbidden
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-        "404":
-          description: Not Found
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-        "422":
-          description: Unprocessable Entity
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-      security:
-      - BearerAuth: []
-      summary: Update a user
-      tags:
-      - users
+      - teachers
 securityDefinitions:
   BearerAuth:
     description: Type "Bearer" followed by a space and the access token.

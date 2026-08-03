@@ -10,60 +10,98 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"teka/apps/api/internal/config"
-	"teka/apps/api/internal/features/users"
+	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
+	"teka/apps/api/internal/shared/id"
+	"teka/apps/api/internal/shared/validation"
 )
 
-// fakeUserService implements UserService in memory.
-type fakeUserService struct {
-	byID map[uuid.UUID]*users.User
+// fakeAccountService implements AccountService in memory. Like the real
+// teachers.Service, it normalizes phones before lookup and storage.
+type fakeAccountService struct {
+	byID map[uuid.UUID]*teachers.Profile
 }
 
-func newFakeUserService() *fakeUserService {
-	return &fakeUserService{byID: map[uuid.UUID]*users.User{}}
+func newFakeAccountService() *fakeAccountService {
+	return &fakeAccountService{byID: map[uuid.UUID]*teachers.Profile{}}
 }
 
-func (f *fakeUserService) add(t *testing.T, email, password, role string) *users.User {
+func (f *fakeAccountService) add(t *testing.T, phone, password, status string) *teachers.Profile {
 	t.Helper()
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
 	if err != nil {
 		t.Fatalf("hash password: %v", err)
 	}
-	u := &users.User{ID: uuid.New(), Email: email, PasswordHash: string(hash), Name: "Test", Role: role}
-	f.byID[u.ID] = u
-	return u
+	hashStr := string(hash)
+	accountID := id.New()
+	p := &teachers.Profile{
+		Account: teachers.Account{
+			ID:           accountID,
+			Role:         authctx.RoleTeacher,
+			Phone:        validation.NormalizePhone(phone),
+			PasswordHash: &hashStr,
+			Status:       status,
+		},
+		Teacher: teachers.Teacher{ID: accountID, FullName: "Test", Timezone: teachers.DefaultTimezone},
+	}
+	f.byID[accountID] = p
+	return p
 }
 
-func (f *fakeUserService) Create(_ context.Context, req users.CreateRequest) (*users.User, error) {
-	for _, u := range f.byID {
-		if u.Email == req.Email {
-			return nil, apperror.Conflict("email already in use")
+func (f *fakeAccountService) CreateTeacher(_ context.Context, req teachers.CreateRequest) (*teachers.Profile, error) {
+	phone := validation.NormalizePhone(req.Phone)
+	for _, p := range f.byID {
+		if p.Account.Phone == phone {
+			return nil, apperror.Conflict("phone already registered")
 		}
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.MinCost)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
-	u := &users.User{ID: uuid.New(), Email: req.Email, PasswordHash: string(hash), Name: req.Name, Role: req.Role}
-	f.byID[u.ID] = u
-	return u, nil
+	hashStr := string(hash)
+	accountID := id.New()
+	p := &teachers.Profile{
+		Account: teachers.Account{
+			ID:           accountID,
+			Role:         authctx.RoleTeacher,
+			Phone:        phone,
+			PasswordHash: &hashStr,
+			Status:       teachers.StatusActive,
+		},
+		Teacher: teachers.Teacher{ID: accountID, FullName: req.FullName, Timezone: teachers.DefaultTimezone},
+	}
+	f.byID[accountID] = p
+	return p, nil
 }
 
-func (f *fakeUserService) GetByEmail(_ context.Context, email string) (*users.User, error) {
-	for _, u := range f.byID {
-		if u.Email == email {
-			return u, nil
+func (f *fakeAccountService) GetByPhone(_ context.Context, phone string) (*teachers.Profile, error) {
+	phone = validation.NormalizePhone(phone)
+	for _, p := range f.byID {
+		if p.Account.Phone == phone {
+			return p, nil
 		}
 	}
-	return nil, apperror.NotFound("user")
+	return nil, apperror.NotFound("teacher")
 }
 
-func (f *fakeUserService) GetByID(_ context.Context, id uuid.UUID) (*users.User, error) {
-	u, ok := f.byID[id]
+func (f *fakeAccountService) GetByID(_ context.Context, accountID uuid.UUID) (*teachers.Profile, error) {
+	p, ok := f.byID[accountID]
 	if !ok {
-		return nil, apperror.NotFound("user")
+		return nil, apperror.NotFound("teacher")
 	}
-	return u, nil
+	return p, nil
+}
+
+func (f *fakeAccountService) TouchLastLogin(_ context.Context, accountID uuid.UUID) error {
+	p, ok := f.byID[accountID]
+	if !ok {
+		return apperror.NotFound("teacher")
+	}
+	now := time.Now()
+	p.Account.LastLoginAt = &now
+	return nil
 }
 
 // fakeTokenRepository implements Repository in memory.
@@ -121,16 +159,16 @@ func (noopTxManager) WithinTx(ctx context.Context, fn func(ctx context.Context) 
 	return fn(ctx)
 }
 
-func newTestAuthService(t *testing.T) (*Service, *fakeUserService, *fakeTokenRepository) {
+func newTestAuthService(t *testing.T) (*Service, *fakeAccountService, *fakeTokenRepository) {
 	t.Helper()
-	usersSvc := newFakeUserService()
+	accounts := newFakeAccountService()
 	repo := newFakeTokenRepository()
 	issuer := NewTokenIssuer(config.JWTConfig{
 		Secret:     "test-secret-at-least-32-characters!!",
 		AccessTTL:  15 * time.Minute,
 		RefreshTTL: 720 * time.Hour,
 	})
-	return NewService(usersSvc, repo, issuer, noopTxManager{}), usersSvc, repo
+	return NewService(accounts, repo, issuer, noopTxManager{}), accounts, repo
 }
 
 func wantUnauthorized(t *testing.T, err error) {
@@ -141,17 +179,20 @@ func wantUnauthorized(t *testing.T, err error) {
 	}
 }
 
-func TestRegisterCreatesUserRoleAndSession(t *testing.T) {
+func TestRegisterCreatesTeacherRoleAndSession(t *testing.T) {
 	svc, _, repo := newTestAuthService(t)
 
 	sess, err := svc.Register(context.Background(), RegisterRequest{
-		Email: "new@example.com", Password: "password-123", Name: "New",
+		Phone: "0901234567", Password: "password-123", FullName: "Cô Lan",
 	})
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if sess.User.Role != users.RoleUser {
-		t.Fatalf("registered role must be %q, got %q", users.RoleUser, sess.User.Role)
+	if sess.Teacher.Account.Role != authctx.RoleTeacher {
+		t.Fatalf("registered role must be %q, got %q", authctx.RoleTeacher, sess.Teacher.Account.Role)
+	}
+	if sess.Teacher.Account.Phone != "+84901234567" {
+		t.Fatalf("phone must be stored in E.164, got %q", sess.Teacher.Account.Phone)
 	}
 	if sess.AccessToken == "" || sess.RefreshToken == "" {
 		t.Fatal("session missing tokens")
@@ -165,35 +206,59 @@ func TestRegisterCreatesUserRoleAndSession(t *testing.T) {
 }
 
 func TestLoginRejectsBadCredentials(t *testing.T) {
-	svc, usersSvc, _ := newTestAuthService(t)
-	usersSvc.add(t, "a@example.com", "correct-password", users.RoleUser)
+	svc, accounts, _ := newTestAuthService(t)
+	accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
 
-	_, err := svc.Login(context.Background(), LoginRequest{Email: "a@example.com", Password: "wrong-password"})
+	_, err := svc.Login(context.Background(), LoginRequest{Phone: "+84901234567", Password: "wrong-password"})
 	wantUnauthorized(t, err)
 
-	_, err = svc.Login(context.Background(), LoginRequest{Email: "missing@example.com", Password: "whatever-123"})
+	_, err = svc.Login(context.Background(), LoginRequest{Phone: "+84909999999", Password: "whatever-123"})
 	wantUnauthorized(t, err)
 }
 
-func TestLoginSucceeds(t *testing.T) {
-	svc, usersSvc, _ := newTestAuthService(t)
-	u := usersSvc.add(t, "a@example.com", "correct-password", users.RoleAdmin)
+func TestLoginRejectsDisabledAccount(t *testing.T) {
+	svc, accounts, _ := newTestAuthService(t)
+	accounts.add(t, "+84901234567", "correct-password", teachers.StatusDisabled)
 
-	sess, err := svc.Login(context.Background(), LoginRequest{Email: "a@example.com", Password: "correct-password"})
-	if err != nil {
-		t.Fatalf("login: %v", err)
+	// Correct password on a disabled account must look identical to bad
+	// credentials.
+	_, err := svc.Login(context.Background(), LoginRequest{Phone: "+84901234567", Password: "correct-password"})
+	wantUnauthorized(t, err)
+}
+
+func TestLoginRejectsPasswordlessAccount(t *testing.T) {
+	svc, accounts, _ := newTestAuthService(t)
+	p := accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
+	p.Account.PasswordHash = nil
+
+	_, err := svc.Login(context.Background(), LoginRequest{Phone: "+84901234567", Password: "correct-password"})
+	wantUnauthorized(t, err)
+}
+
+func TestLoginSucceedsWithEitherPhoneForm(t *testing.T) {
+	svc, accounts, _ := newTestAuthService(t)
+	p := accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
+
+	for _, phone := range []string{"+84901234567", "0901234567"} {
+		sess, err := svc.Login(context.Background(), LoginRequest{Phone: phone, Password: "correct-password"})
+		if err != nil {
+			t.Fatalf("login with %q: %v", phone, err)
+		}
+		if sess.Teacher.Account.ID != p.Account.ID {
+			t.Fatalf("login with %q: session teacher mismatch", phone)
+		}
 	}
-	if sess.User.ID != u.ID {
-		t.Fatal("session user mismatch")
+	if p.Account.LastLoginAt == nil {
+		t.Fatal("login must stamp last_login_at")
 	}
 }
 
 func TestRefreshRotatesWithinFamily(t *testing.T) {
-	svc, usersSvc, repo := newTestAuthService(t)
-	usersSvc.add(t, "a@example.com", "correct-password", users.RoleUser)
+	svc, accounts, repo := newTestAuthService(t)
+	accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
 	ctx := context.Background()
 
-	sess, err := svc.Login(ctx, LoginRequest{Email: "a@example.com", Password: "correct-password"})
+	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"})
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -215,12 +280,28 @@ func TestRefreshRotatesWithinFamily(t *testing.T) {
 	}
 }
 
-func TestRefreshReuseRevokesFamily(t *testing.T) {
-	svc, usersSvc, repo := newTestAuthService(t)
-	usersSvc.add(t, "a@example.com", "correct-password", users.RoleUser)
+func TestRefreshRejectsDisabledAccount(t *testing.T) {
+	svc, accounts, _ := newTestAuthService(t)
+	p := accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
 	ctx := context.Background()
 
-	sess, err := svc.Login(ctx, LoginRequest{Email: "a@example.com", Password: "correct-password"})
+	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"})
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	// Disabling the account must invalidate its outstanding refresh tokens.
+	p.Account.Status = teachers.StatusDisabled
+	_, err = svc.Refresh(ctx, sess.RefreshToken)
+	wantUnauthorized(t, err)
+}
+
+func TestRefreshReuseRevokesFamily(t *testing.T) {
+	svc, accounts, repo := newTestAuthService(t)
+	accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
+	ctx := context.Background()
+
+	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"})
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -257,18 +338,18 @@ func (r *staleReadRepository) GetByHash(ctx context.Context, hash string) (*Refr
 }
 
 func TestRefreshConcurrentRotationRevokesFamily(t *testing.T) {
-	usersSvc := newFakeUserService()
+	accounts := newFakeAccountService()
 	repo := newFakeTokenRepository()
 	issuer := NewTokenIssuer(config.JWTConfig{
 		Secret:     "test-secret-at-least-32-characters!!",
 		AccessTTL:  15 * time.Minute,
 		RefreshTTL: 720 * time.Hour,
 	})
-	svc := NewService(usersSvc, &staleReadRepository{repo}, issuer, noopTxManager{})
-	usersSvc.add(t, "a@example.com", "correct-password", users.RoleUser)
+	svc := NewService(accounts, &staleReadRepository{repo}, issuer, noopTxManager{})
+	accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
 	ctx := context.Background()
 
-	sess, err := svc.Login(ctx, LoginRequest{Email: "a@example.com", Password: "correct-password"})
+	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"})
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -288,11 +369,11 @@ func TestRefreshConcurrentRotationRevokesFamily(t *testing.T) {
 }
 
 func TestRefreshRejectsExpiredAndUnknown(t *testing.T) {
-	svc, usersSvc, _ := newTestAuthService(t)
-	usersSvc.add(t, "a@example.com", "correct-password", users.RoleUser)
+	svc, accounts, _ := newTestAuthService(t)
+	accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
 	ctx := context.Background()
 
-	sess, err := svc.Login(ctx, LoginRequest{Email: "a@example.com", Password: "correct-password"})
+	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"})
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -308,11 +389,11 @@ func TestRefreshRejectsExpiredAndUnknown(t *testing.T) {
 }
 
 func TestLogoutRevokesFamilyAndIsIdempotent(t *testing.T) {
-	svc, usersSvc, repo := newTestAuthService(t)
-	usersSvc.add(t, "a@example.com", "correct-password", users.RoleUser)
+	svc, accounts, repo := newTestAuthService(t)
+	accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
 	ctx := context.Background()
 
-	sess, err := svc.Login(ctx, LoginRequest{Email: "a@example.com", Password: "correct-password"})
+	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"})
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}

@@ -11,28 +11,27 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"teka/apps/api/internal/config"
-	"teka/apps/api/internal/features/users"
-	"teka/apps/api/internal/middleware"
+	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/shared/apperror"
 )
 
 // newHandlerHTTPTest wires the real auth routes and middleware over the
 // in-memory fakes — full HTTP behavior (cookies, envelopes) without a DB.
-func newHandlerHTTPTest(t *testing.T) (*gin.Engine, *fakeUserService) {
+func newHandlerHTTPTest(t *testing.T) (*gin.Engine, *fakeAccountService) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	usersSvc := newFakeUserService()
+	accounts := newFakeAccountService()
 	jwtCfg := config.JWTConfig{
 		Secret:     "handler-test-secret-0123456789abcdef",
 		AccessTTL:  15 * time.Minute,
 		RefreshTTL: 720 * time.Hour,
 	}
-	svc := NewService(usersSvc, newFakeTokenRepository(), NewTokenIssuer(jwtCfg), noopTxManager{})
+	svc := NewService(accounts, newFakeTokenRepository(), NewTokenIssuer(jwtCfg), noopTxManager{})
 	cfg := &config.Config{Env: config.EnvTest, JWT: jwtCfg}
 
 	r := gin.New()
-	RegisterRoutes(r.Group("/api/v1"), NewHandler(svc, cfg), middleware.RequireAuth(jwtCfg))
-	return r, usersSvc
+	RegisterRoutes(r.Group("/api/v1"), NewHandler(svc, cfg))
+	return r, accounts
 }
 
 type wireEnvelope struct {
@@ -78,7 +77,7 @@ func TestRegisterSetsCookieAndEnvelope(t *testing.T) {
 	r, _ := newHandlerHTTPTest(t)
 
 	w, env := doJSON(t, r, http.MethodPost, "/api/v1/auth/register",
-		`{"email":"new@example.com","password":"password-123","name":"New"}`, nil)
+		`{"phone":"0901234567","password":"password-123","full_name":"Cô Lan"}`, nil)
 	if w.Code != http.StatusCreated || !env.Success {
 		t.Fatalf("want 201 success envelope, got %d %+v", w.Code, env)
 	}
@@ -90,8 +89,8 @@ func TestRegisterSetsCookieAndEnvelope(t *testing.T) {
 	if body.AccessToken == "" || body.TokenType != "Bearer" || body.ExpiresIn != int64((15*time.Minute).Seconds()) {
 		t.Fatalf("unexpected token body: %+v", body)
 	}
-	if body.User.Email != "new@example.com" {
-		t.Fatalf("unexpected user in body: %+v", body.User)
+	if body.Teacher.Phone != "+84901234567" || body.Teacher.FullName != "Cô Lan" {
+		t.Fatalf("unexpected teacher in body: %+v", body.Teacher)
 	}
 	if strings.Contains(string(env.Data), "refresh") {
 		t.Fatal("refresh token must never appear in the response body")
@@ -113,28 +112,40 @@ func TestRegisterValidationAndMalformedJSON(t *testing.T) {
 	r, _ := newHandlerHTTPTest(t)
 
 	w, env := doJSON(t, r, http.MethodPost, "/api/v1/auth/register",
-		`{"email":"nope","password":"short","name":""}`, nil)
+		`{"phone":"12345","password":"short","full_name":""}`, nil)
 	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Code != apperror.CodeValidation {
 		t.Fatalf("want 422 VALIDATION_ERROR, got %d %+v", w.Code, env)
 	}
-	for _, field := range []string{"email", "password", "name"} {
+	for _, field := range []string{"phone", "password", "fullname"} {
 		if env.Error.Fields[field] == "" {
 			t.Fatalf("missing per-field message for %q: %+v", field, env.Error.Fields)
 		}
 	}
 
-	w, env = doJSON(t, r, http.MethodPost, "/api/v1/auth/register", `{"email":`, nil)
+	w, env = doJSON(t, r, http.MethodPost, "/api/v1/auth/register", `{"phone":`, nil)
 	if w.Code != http.StatusBadRequest || env.Error == nil || env.Error.Code != apperror.CodeBadRequest {
 		t.Fatalf("want 400 BAD_REQUEST, got %d %+v", w.Code, env)
 	}
 }
 
+func TestRegisterRejectsNonVietnamesePhone(t *testing.T) {
+	r, _ := newHandlerHTTPTest(t)
+
+	for _, phone := range []string{"+1555123456", "0123456789", "84901234567", "090123456"} {
+		w, env := doJSON(t, r, http.MethodPost, "/api/v1/auth/register",
+			`{"phone":"`+phone+`","password":"password-123","full_name":"X"}`, nil)
+		if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["phone"] == "" {
+			t.Fatalf("phone %q: want 422 with phone field message, got %d %+v", phone, w.Code, env)
+		}
+	}
+}
+
 func TestLoginRejectsWrongPassword(t *testing.T) {
-	r, usersSvc := newHandlerHTTPTest(t)
-	usersSvc.add(t, "a@example.com", "correct-password", users.RoleUser)
+	r, accounts := newHandlerHTTPTest(t)
+	accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
 
 	w, env := doJSON(t, r, http.MethodPost, "/api/v1/auth/login",
-		`{"email":"a@example.com","password":"wrong-password"}`, nil)
+		`{"phone":"+84901234567","password":"wrong-password"}`, nil)
 	if w.Code != http.StatusUnauthorized || env.Error == nil || env.Error.Code != apperror.CodeUnauthorized {
 		t.Fatalf("want 401 UNAUTHORIZED, got %d %+v", w.Code, env)
 	}
@@ -153,7 +164,7 @@ func TestRefreshRotatesCookieOverHTTP(t *testing.T) {
 	r, _ := newHandlerHTTPTest(t)
 
 	w, _ := doJSON(t, r, http.MethodPost, "/api/v1/auth/register",
-		`{"email":"cycle@example.com","password":"password-123","name":"Cycle"}`, nil)
+		`{"phone":"0901234567","password":"password-123","full_name":"Cycle"}`, nil)
 	first := refreshCookie(t, w)
 
 	w, env := doJSON(t, r, http.MethodPost, "/api/v1/auth/refresh", "", func(req *http.Request) {
@@ -168,38 +179,16 @@ func TestRefreshRotatesCookieOverHTTP(t *testing.T) {
 	}
 }
 
-func TestMeRequiresAndAcceptsAccessToken(t *testing.T) {
+func TestAuthMeRouteIsGone(t *testing.T) {
 	r, _ := newHandlerHTTPTest(t)
 
-	w, _ := doJSON(t, r, http.MethodPost, "/api/v1/auth/register",
-		`{"email":"me@example.com","password":"password-123","name":"Me"}`, nil)
-	var body TokenResponse
-	env := struct {
-		Data json.RawMessage `json:"data"`
-	}{}
-	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
-		t.Fatalf("decode register body: %v", err)
-	}
-	if err := json.Unmarshal(env.Data, &body); err != nil {
-		t.Fatalf("decode token response: %v", err)
-	}
-
-	w, wireEnv := doJSON(t, r, http.MethodGet, "/api/v1/auth/me", "", nil)
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("me without token: want 401, got %d", w.Code)
-	}
-	if wireEnv.Success || wireEnv.Error == nil || wireEnv.Error.Code != apperror.CodeUnauthorized {
-		t.Fatalf("me without token: want UNAUTHORIZED envelope, got %+v", wireEnv)
-	}
-
-	w, wireEnv = doJSON(t, r, http.MethodGet, "/api/v1/auth/me", "", func(req *http.Request) {
-		req.Header.Set("Authorization", "Bearer "+body.AccessToken)
-	})
-	if w.Code != http.StatusOK || !wireEnv.Success {
-		t.Fatalf("me with token: want 200, got %d %+v", w.Code, wireEnv)
-	}
-	if !strings.Contains(string(wireEnv.Data), "me@example.com") {
-		t.Fatalf("me must return the profile, got %s", wireEnv.Data)
+	// The profile moved to /me on the teachers feature; the old route must
+	// not linger as a duplicate.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("GET /auth/me must 404 after the move, got %d", w.Code)
 	}
 }
 
@@ -207,7 +196,7 @@ func TestLogoutClearsCookie(t *testing.T) {
 	r, _ := newHandlerHTTPTest(t)
 
 	w, _ := doJSON(t, r, http.MethodPost, "/api/v1/auth/register",
-		`{"email":"bye@example.com","password":"password-123","name":"Bye"}`, nil)
+		`{"phone":"0901234567","password":"password-123","full_name":"Bye"}`, nil)
 	issued := refreshCookie(t, w)
 
 	w, env := doJSON(t, r, http.MethodPost, "/api/v1/auth/logout", "", func(req *http.Request) {

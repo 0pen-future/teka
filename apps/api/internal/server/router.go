@@ -14,10 +14,9 @@ import (
 	"teka/apps/api/internal/config"
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/auth"
-	"teka/apps/api/internal/features/users"
+	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/middleware"
 	"teka/apps/api/internal/shared/apperror"
-	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/response"
 )
 
@@ -62,12 +61,11 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *gorm.DB) *gin.Engine {
 // decoupled from bootstrap.
 func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB) {
 	requireAuth := middleware.RequireAuth(cfg.JWT)
-	requireAdmin := middleware.RequireRole(authctx.RoleAdmin)
 	txMgr := database.NewTxManager(db)
 
-	usersSvc := users.NewService(users.NewRepository(db))
-	users.RegisterRoutes(v1, users.NewHandler(usersSvc), requireAuth, requireAdmin)
+	teachersSvc := teachers.NewService(teachers.NewRepository(db))
 
-	authSvc := auth.NewService(usersSvc, auth.NewRepository(db), auth.NewTokenIssuer(cfg.JWT), txMgr)
-	auth.RegisterRoutes(v1, auth.NewHandler(authSvc, cfg), requireAuth)
+	authSvc := auth.NewService(teachersSvc, auth.NewRepository(db), auth.NewTokenIssuer(cfg.JWT), txMgr)
+	auth.RegisterRoutes(v1, auth.NewHandler(authSvc, cfg))
+	teachers.RegisterRoutes(v1, teachers.NewHandler(teachersSvc), requireAuth)
 }

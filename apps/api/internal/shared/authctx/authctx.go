@@ -9,17 +9,20 @@ import (
 )
 
 // AccessClaims is the access-token payload shared by the issuer
-// (features/auth) and the verifier (middleware): sub = user id, role custom
-// claim.
+// (features/auth) and the verifier (middleware): sub = account id, role
+// custom claim.
 type AccessClaims struct {
 	Role string `json:"role"`
 	jwt.RegisteredClaims
 }
 
-// Roles a principal can hold; mirrored by the users table CHECK constraint.
+// Roles a principal can hold; mirrored by the user_accounts.role CHECK
+// constraint. V1 only issues teacher accounts; parent and student exist in
+// the schema for later phases.
 const (
-	RoleAdmin = "admin"
-	RoleUser  = "user"
+	RoleTeacher = "teachers"
+	RoleParent  = "parent"
+	RoleStudent = "students"
 )
 
 // Principal is the authenticated caller extracted from a verified access
@@ -28,9 +31,6 @@ type Principal struct {
 	UserID uuid.UUID
 	Role   string
 }
-
-// IsAdmin reports whether the caller holds the admin role.
-func (p Principal) IsAdmin() bool { return p.Role == RoleAdmin }
 
 const ginKey = "auth_principal"
 
@@ -48,4 +48,16 @@ func From(c *gin.Context) (Principal, bool) {
 	}
 	p, ok := v.(Principal)
 	return p, ok
+}
+
+// TeacherID returns the tenant id for the authenticated teacher. This is the
+// only sanctioned source of teacher_id for scoping queries — accepting one
+// from a request body, query, or path would be an authorization bypass. ok is
+// false when unauthenticated or when the caller is not a teacher.
+func TeacherID(c *gin.Context) (uuid.UUID, bool) {
+	p, ok := From(c)
+	if !ok || p.Role != RoleTeacher {
+		return uuid.Nil, false
+	}
+	return p.UserID, true
 }

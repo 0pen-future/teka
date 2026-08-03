@@ -7,9 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"teka/apps/api/internal/config"
-	"teka/apps/api/internal/features/users"
 	"teka/apps/api/internal/shared/apperror"
-	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/response"
 	"teka/apps/api/internal/shared/validation"
 )
@@ -32,16 +30,16 @@ func NewHandler(svc *Service, cfg *config.Config) *Handler {
 	return &Handler{svc: svc, cfg: cfg}
 }
 
-// register creates an account and opens a session.
+// register creates a teacher account and opens a session.
 //
-//	@Summary		Register a new user
-//	@Description	Creates a user with role "user" and returns an access token; the refresh token is set as an httpOnly cookie.
+//	@Summary		Register a new teacher
+//	@Description	Creates a teacher account from a Vietnamese phone number (0xxxxxxxxx or +84xxxxxxxxx) and returns an access token; the refresh token is set as an httpOnly cookie.
 //	@Tags			auth
 //	@Accept			json
 //	@Produce		json
 //	@Param			request	body		RegisterRequest	true	"registration payload"
 //	@Success		201		{object}	response.Envelope{data=TokenResponse}
-//	@Failure		409		{object}	response.Envelope{error=response.ErrorBody}	"email already in use"
+//	@Failure		409		{object}	response.Envelope{error=response.ErrorBody}	"phone already registered"
 //	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}	"validation failed"
 //	@Router			/auth/register [post]
 func (h *Handler) register(c *gin.Context) {
@@ -62,13 +60,13 @@ func (h *Handler) register(c *gin.Context) {
 // login verifies credentials and opens a session.
 //
 //	@Summary		Log in
-//	@Description	Verifies email and password; returns an access token and sets the refresh cookie (new token family).
+//	@Description	Verifies phone and password; returns an access token and sets the refresh cookie (new token family).
 //	@Tags			auth
 //	@Accept			json
 //	@Produce		json
 //	@Param			request	body		LoginRequest	true	"credentials"
 //	@Success		200		{object}	response.Envelope{data=TokenResponse}
-//	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}	"invalid email or password"
+//	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}	"invalid phone or password"
 //	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}
 //	@Router			/auth/login [post]
 func (h *Handler) login(c *gin.Context) {
@@ -132,29 +130,6 @@ func (h *Handler) logout(c *gin.Context) {
 	}
 	h.clearRefreshCookie(c)
 	response.OK(c, http.StatusOK, gin.H{"message": "logged out"})
-}
-
-// me returns the authenticated user's profile.
-//
-//	@Summary		Current user
-//	@Tags			auth
-//	@Produce		json
-//	@Success		200	{object}	response.Envelope{data=users.Response}
-//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
-//	@Security		BearerAuth
-//	@Router			/auth/me [get]
-func (h *Handler) me(c *gin.Context) {
-	p, ok := authctx.From(c)
-	if !ok {
-		response.Err(c, apperror.Unauthorized("authentication required"))
-		return
-	}
-	u, err := h.svc.Me(c.Request.Context(), p.UserID)
-	if err != nil {
-		response.Err(c, err)
-		return
-	}
-	response.OK(c, http.StatusOK, users.FromModel(u))
 }
 
 func (h *Handler) tokenResponse(sess *Session) TokenResponse {

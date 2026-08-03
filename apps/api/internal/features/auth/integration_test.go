@@ -4,6 +4,7 @@ package auth_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 	"teka/apps/api/internal/config"
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/auth"
-	"teka/apps/api/internal/features/users"
+	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/testutil"
 )
@@ -21,13 +22,13 @@ import (
 func newIntegrationService(t *testing.T) (*auth.Service, *gorm.DB) {
 	t.Helper()
 	db := testutil.StartPostgres(t)
-	usersSvc := users.NewService(users.NewRepository(db))
+	teachersSvc := teachers.NewService(teachers.NewRepository(db))
 	issuer := auth.NewTokenIssuer(config.JWTConfig{
 		Secret:     testutil.JWTSecret,
 		AccessTTL:  15 * time.Minute,
 		RefreshTTL: 720 * time.Hour,
 	})
-	svc := auth.NewService(usersSvc, auth.NewRepository(db), issuer, database.NewTxManager(db))
+	svc := auth.NewService(teachersSvc, auth.NewRepository(db), issuer, database.NewTxManager(db))
 	return svc, db
 }
 
@@ -50,7 +51,7 @@ func TestRefreshRotationAndReuseAgainstRealSQL(t *testing.T) {
 	ctx := context.Background()
 
 	sess, err := svc.Register(ctx, auth.RegisterRequest{
-		Email: "rotate@example.com", Password: "password-123", Name: "Rotate",
+		Phone: "0901234567", Password: "password-123", FullName: "Rotate",
 	})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, liveTokenCount(t, db))
@@ -69,25 +70,73 @@ func TestRefreshRotationAndReuseAgainstRealSQL(t *testing.T) {
 	requireUnauthorized(t, err)
 }
 
-func TestRegisterDuplicateEmailRollsBack(t *testing.T) {
+func TestRegisterDuplicatePhoneRollsBack(t *testing.T) {
 	t.Parallel()
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 
-	_, err := svc.Register(ctx, auth.RegisterRequest{
-		Email: "once@example.com", Password: "password-123", Name: "Once",
+	sess, err := svc.Register(ctx, auth.RegisterRequest{
+		Phone: "0901234567", Password: "password-123", FullName: "Once",
 	})
 	require.NoError(t, err)
+	require.Equal(t, "+84901234567", sess.Teacher.Account.Phone,
+		"local-form input must be stored as E.164")
 
+	// The E.164 spelling of the same number must collide with the local-form
+	// registration above — one number, one account.
 	_, err = svc.Register(ctx, auth.RegisterRequest{
-		Email: "once@example.com", Password: "password-123", Name: "Twice",
+		Phone: "+84901234567", Password: "password-123", FullName: "Twice",
 	})
 	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
 
-	var userCount int64
-	require.NoError(t, db.Model(&users.User{}).Count(&userCount).Error)
-	require.EqualValues(t, 1, userCount, "failed register must persist nothing")
+	var accountCount, teacherCount int64
+	require.NoError(t, db.Model(&teachers.Account{}).Count(&accountCount).Error)
+	require.NoError(t, db.Model(&teachers.Teacher{}).Count(&teacherCount).Error)
+	require.EqualValues(t, 1, accountCount, "failed register must persist no account")
+	require.EqualValues(t, 1, teacherCount, "failed register must persist no teacher profile")
 	require.EqualValues(t, 1, liveTokenCount(t, db))
+}
+
+func TestRegisterRollsBackAccountWhenTeacherInsertFails(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+
+	// Calling the service directly bypasses the handler's max=100 binding tag.
+	// 101 characters exceeds teachers.full_name VARCHAR(100), so the second
+	// INSERT of the transaction fails after the user_accounts row is written —
+	// the only path that actually exercises the rollback.
+	_, err := svc.Register(ctx, auth.RegisterRequest{
+		Phone: "0901234567", Password: "password-123", FullName: strings.Repeat("x", 101),
+	})
+	require.Error(t, err, "over-length full_name must fail the teachers insert")
+
+	var accountCount int64
+	require.NoError(t, db.Unscoped().Model(&teachers.Account{}).
+		Where("phone = ?", "+84901234567").Count(&accountCount).Error)
+	require.EqualValues(t, 0, accountCount,
+		"failed teachers insert must roll back the user_accounts row")
+	require.EqualValues(t, 0, liveTokenCount(t, db))
+}
+
+func TestRegisterCreatesMatchingAccountAndTeacherRows(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+
+	sess, err := svc.Register(ctx, auth.RegisterRequest{
+		Phone: "0912345678", Password: "password-123", FullName: "Cô Lan",
+	})
+	require.NoError(t, err)
+
+	var acct teachers.Account
+	require.NoError(t, db.First(&acct, "phone = ?", "+84912345678").Error)
+	var teacher teachers.Teacher
+	require.NoError(t, db.First(&teacher, "id = ?", acct.ID).Error)
+	require.Equal(t, acct.ID, teacher.ID, "account and teacher must share one id")
+	require.Equal(t, sess.Teacher.Account.ID, acct.ID)
+	require.Equal(t, "Cô Lan", teacher.FullName)
+	require.Equal(t, teachers.DefaultTimezone, teacher.Timezone)
 }
 
 func TestLoginAgainstStoredHash(t *testing.T) {
@@ -95,13 +144,28 @@ func TestLoginAgainstStoredHash(t *testing.T) {
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 
-	u := testutil.User(t, db, testutil.WithPassword("s3cret-pass!"))
+	acct, _ := testutil.Teacher(t, db, testutil.WithPassword("s3cret-pass!"))
 
-	sess, err := svc.Login(ctx, auth.LoginRequest{Email: u.Email, Password: "s3cret-pass!"})
+	sess, err := svc.Login(ctx, auth.LoginRequest{Phone: acct.Phone, Password: "s3cret-pass!"})
 	require.NoError(t, err)
-	require.Equal(t, u.ID, sess.User.ID)
+	require.Equal(t, acct.ID, sess.Teacher.Account.ID)
 	require.NotEmpty(t, sess.AccessToken)
 
-	_, err = svc.Login(ctx, auth.LoginRequest{Email: u.Email, Password: "wrong-pass"})
+	var reloaded teachers.Account
+	require.NoError(t, db.First(&reloaded, "id = ?", acct.ID).Error)
+	require.NotNil(t, reloaded.LastLoginAt, "login must stamp last_login_at")
+
+	_, err = svc.Login(ctx, auth.LoginRequest{Phone: acct.Phone, Password: "wrong-pass"})
+	requireUnauthorized(t, err)
+}
+
+func TestLoginRejectsDisabledAccountAgainstRealSQL(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+
+	acct, _ := testutil.Teacher(t, db, testutil.WithStatus(teachers.StatusDisabled))
+
+	_, err := svc.Login(ctx, auth.LoginRequest{Phone: acct.Phone, Password: testutil.DefaultPassword})
 	requireUnauthorized(t, err)
 }

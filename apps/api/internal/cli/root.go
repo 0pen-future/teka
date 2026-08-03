@@ -16,7 +16,7 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(serveCmd, migrateCmd, seedCmd, adminCmd)
+	rootCmd.AddCommand(serveCmd, migrateCmd, seedCmd)
 }
 
 // Execute runs the root command and exits non-zero on error. The version is
