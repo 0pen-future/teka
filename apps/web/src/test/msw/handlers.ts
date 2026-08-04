@@ -97,6 +97,227 @@ export function makePeriod(overrides: Record<string, unknown> = {}) {
   };
 }
 
+// --- Public statement fixtures (GET /public/statements/:token) ---
+
+const publicStatementFixtureOneChild = {
+  contact_name: "Chị Hoa",
+  period: "08/2026",
+  children: [
+    {
+      student_name: "Nguyễn Văn An",
+      display_note: null,
+      opening_balance: 0,
+      classes: [
+        {
+          class_name: "Toán 6A",
+          unit_price: 150000,
+          billable_count: 12,
+          absent_count: 1,
+          amount: 1800000,
+          sessions: [
+            { date: "2026-08-03", status: "present", counted: true },
+            { date: "2026-08-05", status: "present", counted: true },
+            { date: "2026-08-07", status: "absent", counted: false },
+          ],
+        },
+      ],
+      adjustments: [],
+      carried_adjustment: null,
+      subtotal: 1800000,
+    },
+  ],
+  totals: {
+    opening_balance: 0,
+    current_charge: 1800000,
+    adjustment_total: 0,
+    total_due: 1800000,
+    paid: 0,
+    outstanding: 1800000,
+  },
+  payments: {
+    total_paid: 0,
+    by_invoice: [
+      { student_name: "Nguyễn Văn An", total_due: 1800000, paid: 0, outstanding: 1800000 },
+    ],
+  },
+  qr: {
+    image_url: "https://img.vietqr.io/image/example-an.png",
+    amount: 1800000,
+    note: "HP An T8",
+  },
+};
+
+const publicStatementFixtureTwoChildren = {
+  contact_name: "Anh Minh",
+  period: "08/2026",
+  children: [
+    {
+      student_name: "Trần Thị Bích",
+      display_note: "Lớp 6",
+      opening_balance: 500000,
+      classes: [
+        {
+          class_name: "Toán 6A",
+          unit_price: 150000,
+          billable_count: 10,
+          absent_count: 0,
+          amount: 1500000,
+          sessions: [
+            { date: "2026-08-03", status: "present", counted: true },
+            { date: "2026-08-05", status: "present", counted: true },
+          ],
+        },
+        {
+          class_name: "Lý 6A",
+          unit_price: 130000,
+          billable_count: 8,
+          absent_count: 2,
+          amount: 1040000,
+          sessions: [
+            { date: "2026-08-04", status: "present", counted: true },
+            { date: "2026-08-06", status: "absent", counted: false },
+          ],
+        },
+      ],
+      adjustments: [],
+      carried_adjustment: null,
+      subtotal: 3040000,
+    },
+    {
+      student_name: "Trần Văn Cường",
+      display_note: null,
+      opening_balance: 0,
+      classes: [
+        {
+          class_name: "Văn 9A",
+          unit_price: 160000,
+          billable_count: 9,
+          absent_count: 0,
+          amount: 1440000,
+          sessions: [{ date: "2026-08-02", status: "present", counted: true }],
+        },
+      ],
+      adjustments: [],
+      carried_adjustment: null,
+      subtotal: 1440000,
+    },
+  ],
+  totals: {
+    opening_balance: 500000,
+    current_charge: 3980000,
+    adjustment_total: 0,
+    total_due: 4480000,
+    paid: 0,
+    outstanding: 4480000,
+  },
+  payments: {
+    total_paid: 0,
+    by_invoice: [
+      { student_name: "Trần Thị Bích", total_due: 3040000, paid: 0, outstanding: 3040000 },
+      { student_name: "Trần Văn Cường", total_due: 1440000, paid: 0, outstanding: 1440000 },
+    ],
+  },
+  qr: {
+    image_url: "https://img.vietqr.io/image/example-minh.png",
+    amount: 4480000,
+    note: "HP Bich Cuong T8",
+  },
+};
+
+const publicStatementFixtureCancelledSession = {
+  contact_name: "Chị Lan",
+  period: "08/2026",
+  children: [
+    {
+      student_name: "Phạm Thị Dung",
+      display_note: null,
+      opening_balance: 0,
+      classes: [
+        {
+          class_name: "Tiếng Anh 7A",
+          unit_price: 140000,
+          billable_count: 7,
+          absent_count: 1,
+          amount: 980000,
+          sessions: [
+            { date: "2026-08-01", status: "present", counted: true },
+            { date: "2026-08-08", status: "absent", counted: false },
+            { date: "2026-08-15", status: "cancelled", counted: false },
+          ],
+        },
+      ],
+      adjustments: [],
+      carried_adjustment: null,
+      subtotal: 980000,
+    },
+  ],
+  totals: {
+    opening_balance: 0,
+    current_charge: 980000,
+    adjustment_total: 0,
+    total_due: 980000,
+    paid: 0,
+    outstanding: 980000,
+  },
+  payments: {
+    total_paid: 0,
+    by_invoice: [
+      { student_name: "Phạm Thị Dung", total_due: 980000, paid: 0, outstanding: 980000 },
+    ],
+  },
+  qr: {
+    image_url: "https://img.vietqr.io/image/example-dung.png",
+    amount: 980000,
+    note: "HP Dung T8",
+  },
+};
+
+const publicStatementFixtureNoQr = {
+  contact_name: "Anh Tuấn",
+  period: "08/2026",
+  children: [
+    {
+      student_name: "Lê Văn Em",
+      display_note: null,
+      opening_balance: 0,
+      classes: [
+        {
+          class_name: "Toán 5A",
+          unit_price: 120000,
+          billable_count: 8,
+          absent_count: 0,
+          amount: 960000,
+          sessions: [{ date: "2026-08-02", status: "present", counted: true }],
+        },
+      ],
+      adjustments: [],
+      carried_adjustment: null,
+      subtotal: 960000,
+    },
+  ],
+  totals: {
+    opening_balance: 0,
+    current_charge: 960000,
+    adjustment_total: 0,
+    total_due: 960000,
+    paid: 0,
+    outstanding: 960000,
+  },
+  payments: {
+    total_paid: 0,
+    by_invoice: [{ student_name: "Lê Văn Em", total_due: 960000, paid: 0, outstanding: 960000 }],
+  },
+  qr: null,
+};
+
+/** Reachable by token value from `publicStatementHandler` below; any other token 404s. */
+const publicStatementFixturesByToken: Record<string, unknown> = {
+  "valid-token": publicStatementFixtureOneChild,
+  "two-child-token": publicStatementFixtureTwoChildren,
+  "cancelled-session-token": publicStatementFixtureCancelledSession,
+  "no-qr-token": publicStatementFixtureNoQr,
+};
+
 // --- Default happy-path handlers; tests override per case with server.use() ---
 
 export const handlers = [
@@ -118,4 +339,14 @@ export const handlers = [
   http.post(`${API_URL}/billing-periods`, () =>
     HttpResponse.json(ok(makePeriod()), { status: 201 }),
   ),
+  // Every failure mode (unknown, malformed, revoked, expired, already-paid,
+  // soft-deleted) collapses to a plain 404 — the real API has no other error
+  // code for this endpoint.
+  http.get(`${API_URL}/public/statements/:token`, ({ params }) => {
+    const fixture = publicStatementFixturesByToken[params.token as string];
+    if (!fixture) {
+      return HttpResponse.json(fail("NOT_FOUND", "statement not found"), { status: 404 });
+    }
+    return HttpResponse.json(ok(fixture));
+  }),
 ];

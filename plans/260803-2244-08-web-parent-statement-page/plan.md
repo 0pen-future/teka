@@ -1,7 +1,7 @@
 ---
 title: "08 Web Parent Statement Page"
 description: "Public tokenized statement page at /s/:token: mobile-first per-child fee breakdown with session dates, family grand total, transfer QR, and a neutral error page for bad or expired tokens."
-status: pending
+status: completed
 priority: P2
 effort: "2.5d"
 branch: main
@@ -85,8 +85,8 @@ Out of scope:
 
 | # | Phase | Effort | Depends on | Status |
 |---|-------|--------|------------|--------|
-| 1 | [Public route, data layer, neutral error page](./phase-01-public-route-and-data-layer.md) | 1d | — | Pending |
-| 2 | [Statement content, QR, mobile layout, tests](./phase-02-statement-view-and-tests.md) | 1.5d | 1 | Pending |
+| 1 | [Public route, data layer, neutral error page](./phase-01-public-route-and-data-layer.md) | 1d | — | Done |
+| 2 | [Statement content, QR, mobile layout, tests](./phase-02-statement-view-and-tests.md) | 1.5d | 1 | Done |
 
 Both phases own files under `apps/web/src/features/statement` and
 `apps/web/src/layouts/public-layout.tsx`; they are sequential, not parallel.
@@ -107,19 +107,19 @@ adds one top-level route entry outside the protected subtree.
 
 From PRD R5:
 
-- [ ] Given a parent with 2 children, when they open the link, then each child
+- [x] Given a parent with 2 children, when they open the link, then each child
       has their own section and the total appears at the end (R5 AC 2).
-- [ ] Given the teacher edited attendance after sending, when the parent reopens
+- [x] Given the teacher edited attendance after sending, when the parent reopens
       the old link, then the updated figures are shown (R5 AC 4).
-- [ ] Given a wrong or expired token, when it is opened, then a neutral error
+- [x] Given a wrong or expired token, when it is opened, then a neutral error
       page appears revealing no student information (R5 AC 5).
-- [ ] Given a parent on a phone, when the page loads, then all information is
+- [x] Given a parent on a phone, when the page loads, then all information is
       readable with no horizontal scrolling (R5 AC 6).
-- [ ] Given a child's section, when the parent reads it, then the attended and
+- [x] Given a child's section, when the parent reads it, then the attended and
       missed session dates and the fee formula are visible (parent story 2).
-- [ ] Given the total amount, when the parent wants to pay, then a transfer QR
+- [x] Given the total amount, when the parent wants to pay, then a transfer QR
       for that amount is on the same screen (parent story 3).
-- [ ] Given any statement page load, when it renders, then the document carries
+- [x] Given any statement page load, when it renders, then the document carries
       `noindex, nofollow` (R5 "not indexed by search engines").
 
 ## Non-Functional Targets

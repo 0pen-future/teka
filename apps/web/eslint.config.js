@@ -35,5 +35,30 @@ export default tseslint.config(
       "@typescript-eslint/array-type": "off",
     },
   },
+  {
+    // The public, unauthenticated parent-statement route must never pull in
+    // the authenticated app's plumbing: a 401/404 there is a normal outcome
+    // (a wrong token), not a session problem, and must render the neutral
+    // error page rather than trigger a refresh attempt or a redirect.
+    files: ["src/features/statement/**/*.{ts,tsx}", "src/layouts/public-layout.tsx"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/features/auth", "@/features/auth/*"],
+              message:
+                "The public statement route must not depend on the authenticated app's auth feature.",
+            },
+            {
+              group: ["@/lib/api/client"],
+              message: "Use @/lib/api/public-client instead — this route carries no session.",
+            },
+          ],
+        },
+      ],
+    },
+  },
   eslintConfigPrettier,
 );

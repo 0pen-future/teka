@@ -1166,3 +1166,65 @@ thực tế của backend, không theo spec):
 10. **Đánh dấu đã gửi:** toàn cục `POST /notifications/mark-sent { ids[] }`
     (không lồng theo kỳ). Không có route index `/collections` trần — luôn điều
     hướng kèm `periodId` cụ thể (từ liên kết "Gửi thông báo →" của màn chốt sổ).
+
+## 2026-08-04 — Plan 08, Phase 1+2: payload `PublicStatement` thật lệch nhiều so với shape giả định trong plan
+
+Plan 08 giả định một shape payload (`{ contact_name, period: {year,month,...},
+children:[{classes:[{attended_dates, absent_dates, cancelled_dates}], ...}],
+grand_total, payment:{bank_name, account_number, account_holder, transfer_note,
+qr_image_url} }`). Backend Go thật (`apps/api/internal/features/statements/
+dto.go` — `PublicStatement`) khác ở nhiều điểm; feature dựng zod schema theo DTO
+thật, không theo shape giả định:
+
+1. **Một mã lỗi duy nhất — 404 cho mọi trường hợp.** `GET /public/statements/
+   :token` trả 404 trung tính cho token không tồn tại, sai định dạng, đã thu
+   hồi, hết hạn, đã xoá mềm, HOẶC đã thanh toán đủ (`public_handler.go`,
+   `writeNeutralNotFound`). Không có 401/403/410. Trang vẫn gộp mọi non-200 về
+   một `StatementError` như plan yêu cầu.
+2. **`period` là chuỗi `"MM/YYYY"`**, không phải object `{year, month,
+   period_start, period_end}` (`render.go`: `fmt.Sprintf("%02d/%d", month,
+   year)`). Nhãn tháng lấy trực tiếp từ chuỗi này.
+3. **Buổi học là danh sách hợp nhất `sessions: [{date, status, counted}]`** trên
+   mỗi lớp, không phải ba mảng `attended_dates`/`absent_dates`/`cancelled_dates`
+   riêng. Client tự nhóm: `status="present"` → Có mặt, `"absent"` → Vắng,
+   `"cancelled"` → Buổi huỷ. `counted` (=billable) phân biệt buổi tính tiền.
+   Trả lời OQ3: buổi huỷ nằm trong danh sách này qua `status`, không cần field
+   riêng.
+4. **Tổng gia đình = `totals.total_due`**, không phải `grand_total`. `totals`
+   còn có `opening_balance, current_charge, adjustment_total, paid,
+   outstanding`. Suy ra trạng thái "✓ Đã thanh toán" khi `outstanding === 0`.
+   Có thêm `payments.by_invoice: [{student_name, total_due, paid, outstanding}]`
+   cho trạng thái trả tiền từng con.
+5. **QR chỉ mang `{image_url, amount, note}`** (`PublicQR`), KHÔNG có
+   `bank_name`/`account_number`/`account_holder`. Chi tiết ngân hàng chỉ được
+   nhúng trong ảnh QR (`/public/statements/:token/qr.png`, chuỗi VietQR dựng
+   server-side). Vì vậy phần "chi tiết ngân hàng copy được" trong phase 2 rút
+   lại còn: ảnh QR + số tiền + `note` (copy được). `qr` là `null` khi thầy/cô
+   chưa cấu hình ngân hàng → chỉ hiện phần văn bản, không ảnh vỡ. `image_url`
+   trỏ tới chính endpoint qr.png của server.
+6. **Điều chỉnh không lộ lý do (OQ5 chốt).** `adjustments: [{amount, kind}]` với
+   `kind ∈ {"manual","correction"}` suy từ có/không `source_session_id`; free-
+   text `reason` của thầy/cô không bao giờ vào payload công khai. Ngoài ra
+   `carried_adjustment: {amount, session_dates[]} | null` giải thích chênh lệch
+   do sửa điểm danh sau chốt sổ bằng danh sách ngày buổi, không phải lý do.
+7. **`display_note` (nullable) trên mỗi con** — ghi chú hiển thị do server dựng
+   (ví dụ tên đã ẩn danh); hiện dưới tên con khi có.
+8. **Robots/cache/referrer đã được server đặt bằng header** (`X-Robots-Tag:
+   noindex, nofollow, noarchive`, `Cache-Control: no-store`, `Referrer-Policy:
+   no-referrer`). Meta `noindex` phía client vẫn giữ làm phòng thủ nhiều lớp cho
+   SPA như plan yêu cầu (một `index.html` chung).
+
+**Đối soát khi trả một phần (làm rõ trên màn thanh toán).** `qr.amount` bằng
+`totals.outstanding` (số còn phải trả), trong khi tiêu đề tổng vẫn là
+`totals.total_due` (tổng cả kỳ). Với gia đình đã trả một phần
+(`outstanding !== 0 && paid > 0`), `GrandTotal` hiện thêm hai dòng "Đã thanh
+toán" (`paid`) và "Còn lại" (`outstanding`) để mã QR bên dưới (yêu cầu số nhỏ
+hơn) khớp với con số trên màn. Mọi giá trị lấy nguyên từ server, không cộng trừ
+phía client. Khi `outstanding === 0` giữ nguyên nhãn "✓ Đã thanh toán".
+
+**Mục tiêu ngân sách bundle không đo được trong môi trường này.** Non-Functional
+Target của plan yêu cầu đo route chunk `< 30 KB` gzip bằng
+`npm run build:analyze`. Lệnh build bị hook môi trường chặn nên không chạy được
+treemap ở đây. Thiết kế vẫn tuân mục tiêu về mặt cấu trúc: route lazy-load, layout
+công khai không import code dashboard, client `axios` riêng không interceptor.
+Cần đo lại `stats.html` trong CI/máy dev trước khi phát hành production.

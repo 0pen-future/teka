@@ -38,4 +38,30 @@ describe("SessionRestore", () => {
     expect(useAuthStore.getState().user).toBeNull();
     expect(useAuthStore.getState().accessToken).toBeNull();
   });
+
+  it("skips the refresh attempt entirely on the public statement route", () => {
+    let refreshRequested = false;
+    server.use(
+      http.post(`${API_URL}/auth/refresh`, () => {
+        refreshRequested = true;
+        return HttpResponse.json(ok(makeSession(primaryTeacher)));
+      }),
+    );
+    const originalLocation = window.location.pathname;
+    window.history.pushState({}, "", "/s/some-token");
+
+    try {
+      renderWithProviders(
+        <SessionRestore>
+          <p>App content</p>
+        </SessionRestore>,
+      );
+
+      // No restoring spinner is shown at all — content renders immediately.
+      expect(screen.getByText("App content")).toBeInTheDocument();
+      expect(refreshRequested).toBe(false);
+    } finally {
+      window.history.pushState({}, "", originalLocation);
+    }
+  });
 });

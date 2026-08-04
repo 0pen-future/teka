@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Statement View, QR, Mobile Layout, Tests"
-status: pending
+status: completed
 priority: P2
 effort: "1.5d"
 dependencies: [1]
@@ -23,26 +23,26 @@ and the explicit formula are non-negotiable rather than nice-to-have.
 
 ## Requirements
 
-- [ ] One section per child, in a stable order, each headed by the child's name.
-- [ ] Within a child, one block per class when they attend several classes
+- [x] One section per child, in a stable order, each headed by the child's name.
+- [x] Within a child, one block per class when they attend several classes
       (`invoice_lines` is per enrollment, `docs/schema_design.sql:314-318`).
-- [ ] Per-class: attended session dates and missed session dates, both visible
+- [x] Per-class: attended session dates and missed session dates, both visible
       (parent story 2).
-- [ ] Per-class fee formula rendered literally, for example
+- [x] Per-class fee formula rendered literally, for example
       `12 buổi × 150.000 ₫ = 1.800.000 ₫` (PRD R3 formula).
-- [ ] Nợ cũ (opening balance) shown as its own line, separate from this period's
+- [x] Nợ cũ (opening balance) shown as its own line, separate from this period's
       charge (PRD R3 AC 2).
-- [ ] Manual adjustments shown with their amount; the reason is shown only if
+- [x] Manual adjustments shown with their amount; the reason is shown only if
       the API deliberately includes it in the public payload — see plan open
       question 5.
-- [ ] Family grand total at the end, visually dominant, matching the sum of all
+- [x] Family grand total at the end, visually dominant, matching the sum of all
       children plus nợ cũ (PRD R5 AC 2).
-- [ ] Transfer QR for the grand total, plus bank name, account number, account
+- [x] Transfer QR for the grand total, plus bank name, account number, account
       holder, and a suggested transfer note — all copyable, so a parent whose
       banking app cannot scan can still pay.
-- [ ] Nothing overflows horizontally at 320px width.
-- [ ] Period label states which month these figures are for.
-- [ ] A short "last updated" or live-data cue, since the figures may have
+- [x] Nothing overflows horizontally at 320px width.
+- [x] Period label states which month these figures are for.
+- [x] A short "last updated" or live-data cue, since the figures may have
       changed since the message was sent (PRD R5 AC 4).
 
 ## Architecture
@@ -253,26 +253,26 @@ must return nothing.
 
 ## Success Criteria
 
-- [ ] A two-child family sees one section per child and a single grand total.
-- [ ] Each class block shows attended dates, missed dates, and the literal fee
+- [x] A two-child family sees one section per child and a single grand total.
+- [x] Each class block shows attended dates, missed dates, and the literal fee
       formula.
-- [ ] Nợ cũ appears as a distinct line from this period's charge.
-- [ ] The grand total equals the server's value with no client arithmetic.
-- [ ] The QR renders for the grand total, and the account number and transfer
+- [x] Nợ cũ appears as a distinct line from this period's charge.
+- [x] The grand total equals the server's value with no client arithmetic.
+- [x] The QR renders for the grand total, and the account number and transfer
       note are copyable.
-- [ ] With `qr_image_url` null, the bank details still render and nothing looks
+- [x] With `qr_image_url` null, the bank details still render and nothing looks
       broken.
-- [ ] At 320px, `scrollWidth <= clientWidth` — no horizontal scrolling.
-- [ ] Reloading after the teacher edits attendance shows the new figures.
-- [ ] The route chunk is under the 30 KB gzipped target, or the overage is
+- [x] At 320px, `scrollWidth <= clientWidth` — no horizontal scrolling.
+- [x] Reloading after the teacher edits attendance shows the new figures.
+- [x] The route chunk is under the 30 KB gzipped target, or the overage is
       recorded with its cause.
-- [ ] The page matches the prototype parent sheet: mint-400 header, wrapping
+- [x] The page matches the prototype parent sheet: mint-400 header, wrapping
       ✓/✕ date chips, dashed-top child subtotal, surface-dark total block with
       the sun-400 amount and white QR panel, and the expiry footer — all from
       DS tokens (no raw hex in `features/statement`).
-- [ ] On tablet/desktop widths (768px, 1280px) the sheet renders as a centered
+- [x] On tablet/desktop widths (768px, 1280px) the sheet renders as a centered
       card on cream with no layout break and no horizontal scroll.
-- [ ] typecheck, lint, vitest, and `statement.spec.ts` pass.
+- [x] typecheck, lint, vitest, and `statement.spec.ts` pass.
 
 ## Risk Assessment
 

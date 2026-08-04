@@ -8,8 +8,10 @@ import { billingRoutes } from "@/features/billing/routes";
 import { collectionsRoutes } from "@/features/collections/routes";
 import { dashboardRoutes } from "@/features/dashboard/routes";
 import { rosterRoutes } from "@/features/roster/routes";
+import { statementRoutes } from "@/features/statement";
 import { AuthLayout } from "@/layouts/auth-layout";
 import { DashboardLayout } from "@/layouts/dashboard-layout";
+import { PublicLayout } from "@/layouts/public-layout";
 import { RootLayout } from "@/layouts/root-layout";
 
 // Features export their route arrays; this file owns the tree (layouts,
@@ -38,6 +40,10 @@ export const router = createBrowserRouter([
           ...billingRoutes,
           ...collectionsRoutes,
         ],
+      },
+      {
+        element: <PublicLayout />,
+        children: statementRoutes,
       },
       { path: "*", element: <NotFound /> },
     ],

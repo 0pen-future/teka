@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Public Route, Unauthenticated Data Layer, Neutral Error Page"
-status: pending
+status: completed
 priority: P2
 effort: "1d"
 dependencies: []
@@ -21,20 +21,20 @@ fix later is a refactor rather than a setting.
 
 ## Requirements
 
-- [ ] `/s/:token` renders without a session and without contacting
+- [x] `/s/:token` renders without a session and without contacting
       `/auth/refresh`.
-- [ ] The route is mounted outside `ProtectedRoute` and outside
+- [x] The route is mounted outside `ProtectedRoute` and outside
       `DashboardLayout` (`apps/web/src/app/router.tsx:24-32`).
-- [ ] A dedicated axios instance carries no auth interceptors and no
+- [x] A dedicated axios instance carries no auth interceptors and no
       credentials.
-- [ ] Any non-200 response — 401, 403, 404, 410, 500, or a network failure —
+- [x] Any non-200 response — 401, 403, 404, 410, 500, or a network failure —
       renders one identical neutral error page naming no student, no teacher,
       no class, and no reason.
-- [ ] The page sets `noindex, nofollow` while mounted and removes it on unmount
+- [x] The page sets `noindex, nofollow` while mounted and removes it on unmount
       so the rest of the app stays indexable.
-- [ ] The public layout imports nothing from `features/auth`,
+- [x] The public layout imports nothing from `features/auth`,
       `features/roster`, `features/billing`, or `features/collections`.
-- [ ] Data is fetched fresh on every mount (`staleTime: 0`, refetch on mount),
+- [x] Data is fetched fresh on every mount (`staleTime: 0`, refetch on mount),
       overriding the app-wide 30s `staleTime`
       (`apps/web/src/app/providers.tsx:12`).
 
@@ -218,20 +218,20 @@ client-side view tracking exists or is needed.
 
 ## Success Criteria
 
-- [ ] Visiting `/s/anything` in a logged-out browser renders without redirecting
+- [x] Visiting `/s/anything` in a logged-out browser renders without redirecting
       to `/login`.
-- [ ] The network panel on `/s/:token` shows exactly one request — the statement
+- [x] The network panel on `/s/:token` shows exactly one request — the statement
       GET — and no `/auth/refresh`.
-- [ ] A 404, a 500, and a network failure all produce byte-identical error copy.
-- [ ] The error page contains no student name, teacher name, class name, or
+- [x] A 404, a 500, and a network failure all produce byte-identical error copy.
+- [x] The error page contains no student name, teacher name, class name, or
       status code.
-- [ ] `document.head` carries `noindex, nofollow` on the statement route and not
+- [x] `document.head` carries `noindex, nofollow` on the statement route and not
       on `/login`.
-- [ ] Reloading the page issues a fresh request rather than serving the cached
+- [x] Reloading the page issues a fresh request rather than serving the cached
       response.
-- [ ] The lint or test guard fails if `features/statement` imports the
+- [x] The lint or test guard fails if `features/statement` imports the
       authenticated client or the auth feature.
-- [ ] typecheck, lint, and vitest pass.
+- [x] typecheck, lint, and vitest pass.
 
 ## Risk Assessment
 
