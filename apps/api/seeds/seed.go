@@ -61,12 +61,15 @@ type seedStudent struct {
 }
 
 // Students hang off the seeded contacts; Chị Hoa has two children so the
-// attendance-sheet disambiguation note has data to show.
+// attendance-sheet disambiguation note has data to show, and Chị Mai has two
+// children in the same class so a public statement can show a multi-child
+// family whose invoices stay unpaid even after Chị Hoa's are settled.
 var seedStudents = []seedStudent{
 	{FullName: "Bé An", ContactPhone: "+84912000001", DisplayNote: "Con chị Hoa - lớp 8"},
 	{FullName: "Bé Bình", ContactPhone: "+84912000001", DisplayNote: "Con chị Hoa - lớp 9"},
 	{FullName: "Bé Cường", ContactPhone: "+84912000002"},
 	{FullName: "Bé Dung", ContactPhone: "+84912000003"},
+	{FullName: "Bé Em", ContactPhone: "+84912000003"},
 }
 
 type seedSchedule struct {
@@ -98,6 +101,7 @@ var seedEnrollments = []seedEnrollment{
 	{StudentName: "Bé Bình", ClassName: "Toán 8 - Tối Thứ Ba", StartedOn: "2026-01-20"},
 	{StudentName: "Bé Cường", ClassName: "Toán 8 - Tối Thứ Ba", StartedOn: "2026-01-06", EndedOn: "2026-03-31"},
 	{StudentName: "Bé Dung", ClassName: "Văn 9 - Sáng Thứ Bảy", StartedOn: "2026-02-07"},
+	{StudentName: "Bé Em", ClassName: "Văn 9 - Sáng Thứ Bảy", StartedOn: "2026-02-07"},
 }
 
 // Two classes on different weekdays with different opening dates, so session
@@ -426,24 +430,43 @@ func seedSessionList(ctx context.Context, db *gorm.DB, log *slog.Logger, teacher
 	sessionsSvc := sessions.NewService(sessions.NewRepository(db), classesSvc, teachersSvc, enrollmentsSvc)
 	attendanceSvc := attendance.NewService(attendance.NewRepository(db), enrollmentsSvc, sessionsSvc, txMgr)
 
-	now := time.Now()
+	// "Today" is the teacher's calendar day, matching how the app decides
+	// which sessions count as already held. Session dates are stored as
+	// UTC-midnight date values, so the comparison boundary is built in UTC
+	// from the teacher-local date components.
+	loc, err := time.LoadLocation(defaultTimezone)
+	if err != nil {
+		loc = time.UTC
+	}
+	now := time.Now().In(loc)
+	todayMid := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	from := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 0)
 	to := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 1, -1)
 
 	var generated int
 	var past []pastSession
+	// Every generated date per class, so the current-month backfill below can
+	// avoid the unique (class_id, session_date) constraint.
+	classDates := make(map[uuid.UUID]map[string]bool, len(classIDs))
 	for _, classID := range classIDs {
 		rows, err := sessionsSvc.ListRange(ctx, teacherID, classID, from, to)
 		if err != nil {
 			return fmt.Errorf("seed: generate sessions for class %s: %w", classID, err)
 		}
 		generated += len(rows)
+		dates := make(map[string]bool, len(rows))
 		for _, r := range rows {
-			if r.SessionDate.After(now) {
+			dates[r.SessionDate.Format("2006-01-02")] = true
+			// Only sessions strictly before today have actually been held; a
+			// session scheduled for today hasn't happened yet and must not be
+			// seeded as pending attendance — the dashboard would (correctly)
+			// not count it, leaving the seed's promised pending items short.
+			if !r.SessionDate.Before(todayMid) {
 				continue
 			}
 			past = append(past, pastSession{ID: r.ID, ClassID: classID, Date: r.SessionDate})
 		}
+		classDates[classID] = dates
 	}
 	sort.Slice(past, func(i, j int) bool { return past[i].Date.Before(past[j].Date) })
 
@@ -470,7 +493,63 @@ func seedSessionList(ctx context.Context, db *gorm.DB, log *slog.Logger, teacher
 		confirmed++
 	}
 
+	// Early in a month, a class whose weekday hasn't come around yet has no
+	// billable session in the current billing period, so billing previews and
+	// parent statements for its families would be empty until the first
+	// scheduled date passes. Backfill one ad-hoc, fully-confirmed session (a
+	// make-up class, in product terms) for each such class so every seeded
+	// family is billable in the current period on any calendar day. Billing
+	// only counts confirmed sessions, and the most recent past sessions were
+	// deliberately left pending above — so the check must look at what was
+	// actually confirmed, not merely at what has passed. The backfilled
+	// session is confirmed immediately and never joins the pending selection.
+	var backfilled int
+	confirmedPast := past[:confirmUpTo]
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	for _, classID := range classIDs {
+		hasCurrentMonthConfirmed := false
+		for _, ps := range confirmedPast {
+			if ps.ClassID == classID && !ps.Date.Before(monthStart) {
+				hasCurrentMonthConfirmed = true
+				break
+			}
+		}
+		if hasCurrentMonthConfirmed {
+			continue
+		}
+		candidate := time.Time{}
+		for d := todayMid.AddDate(0, 0, -1); !d.Before(monthStart); d = d.AddDate(0, 0, -1) {
+			if !classDates[classID][d.Format("2006-01-02")] {
+				candidate = d
+				break
+			}
+		}
+		if candidate.IsZero() {
+			// First day of the month: no strictly-past date exists in the
+			// period, so fall back to today unless the schedule already
+			// generated a session there.
+			if classDates[classID][todayMid.Format("2006-01-02")] {
+				log.Info("seed: no free date for current-month backfill, skipping", "class_id", classID)
+				continue
+			}
+			candidate = todayMid
+		}
+		detail, err := sessionsSvc.CreateAdHoc(ctx, teacherID, classID, sessions.CreateSessionRequest{
+			SessionDate: candidate.Format("2006-01-02"),
+		})
+		if err != nil {
+			return fmt.Errorf("seed: backfill session for class %s: %w", classID, err)
+		}
+		if _, err := attendanceSvc.Confirm(ctx, teacherID, detail.ID, attendance.ConfirmRequest{}); err != nil {
+			return fmt.Errorf("seed: confirm backfilled session %s: %w", detail.ID, err)
+		}
+		generated++
+		confirmed++
+		backfilled++
+	}
+
 	log.Info("seed: sessions generated", "teacher_id", teacherID, "sessions", generated,
-		"attendance_confirmed", confirmed, "attendance_pending", len(past)-confirmed)
+		"attendance_confirmed", confirmed, "attendance_pending", len(past)-(confirmed-backfilled),
+		"backfilled", backfilled)
 	return nil
 }
