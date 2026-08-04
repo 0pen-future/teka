@@ -21,7 +21,7 @@ export function SessionRestore({ children }: { children: ReactNode }) {
     }
     attempted.current = true;
     refreshSession()
-      .then((session) => useAuthStore.getState().setSession(session.user, session.access_token))
+      .then((session) => useAuthStore.getState().setSession(session.teacher, session.access_token))
       .catch(() => undefined)
       .finally(() => setRestoring(false));
   }, [restoring]);

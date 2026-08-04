@@ -4,4 +4,6 @@
 export { ProtectedRoute } from "./components/protected-route";
 export { SessionRestore } from "./components/session-restore";
 export { useLogout } from "./hooks/use-auth";
+export { normalizePhone, teacherSchema } from "./schemas/auth-schemas";
+export type { Teacher } from "./schemas/auth-schemas";
 export { useAuthStore, useIsAuthenticated } from "./stores/auth-store";

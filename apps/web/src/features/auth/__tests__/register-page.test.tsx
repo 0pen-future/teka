@@ -19,9 +19,9 @@ function renderRegister() {
 }
 
 async function fillForm(user: ReturnType<typeof userEvent.setup>) {
-  await user.type(screen.getByLabelText("Name"), "New Person");
-  await user.type(screen.getByLabelText("Email"), "new@example.com");
-  await user.type(screen.getByLabelText("Password"), "long-enough-password");
+  await user.type(screen.getByLabelText("Họ và tên"), "New Person");
+  await user.type(screen.getByLabelText("Số điện thoại"), "0912345678");
+  await user.type(screen.getByLabelText("Mật khẩu"), "long-enough-password");
 }
 
 describe("RegisterPage", () => {
@@ -30,27 +30,27 @@ describe("RegisterPage", () => {
     renderRegister();
 
     await fillForm(user);
-    await user.click(screen.getByRole("button", { name: "Create account" }));
+    await user.click(screen.getByRole("button", { name: "Tạo tài khoản" }));
 
     expect(await screen.findByText("Dashboard home")).toBeInTheDocument();
-    expect(useAuthStore.getState().user?.email).toBe("new@example.com");
+    expect(useAuthStore.getState().user?.phone).toBe("+84912345678");
   });
 
-  it("pins a duplicate-email conflict to the email field", async () => {
+  it("pins a duplicate-phone conflict to the phone field", async () => {
     server.use(
       http.post(`${API_URL}/auth/register`, () =>
-        HttpResponse.json(fail("CONFLICT", "email already in use"), { status: 409 }),
+        HttpResponse.json(fail("CONFLICT", "phone already registered"), { status: 409 }),
       ),
     );
     const user = userEvent.setup();
     renderRegister();
 
     await fillForm(user);
-    await user.click(screen.getByRole("button", { name: "Create account" }));
+    await user.click(screen.getByRole("button", { name: "Tạo tài khoản" }));
 
-    const emailInput = screen.getByLabelText("Email");
-    expect(await screen.findByText("email already in use")).toBeInTheDocument();
-    expect(emailInput).toHaveAttribute("aria-invalid", "true");
+    const phoneInput = screen.getByLabelText("Số điện thoại");
+    expect(await screen.findByText("phone already registered")).toBeInTheDocument();
+    expect(phoneInput).toHaveAttribute("aria-invalid", "true");
     expect(useAuthStore.getState().user).toBeNull();
   });
 
@@ -58,11 +58,11 @@ describe("RegisterPage", () => {
     const user = userEvent.setup();
     renderRegister();
 
-    await user.type(screen.getByLabelText("Name"), "New Person");
-    await user.type(screen.getByLabelText("Email"), "new@example.com");
-    await user.type(screen.getByLabelText("Password"), "short");
-    await user.click(screen.getByRole("button", { name: "Create account" }));
+    await user.type(screen.getByLabelText("Họ và tên"), "New Person");
+    await user.type(screen.getByLabelText("Số điện thoại"), "0912345678");
+    await user.type(screen.getByLabelText("Mật khẩu"), "short");
+    await user.click(screen.getByRole("button", { name: "Tạo tài khoản" }));
 
-    expect(await screen.findByText("Password must be at least 8 characters")).toBeInTheDocument();
+    expect(await screen.findByText("Mật khẩu tối thiểu 8 ký tự")).toBeInTheDocument();
   });
 });

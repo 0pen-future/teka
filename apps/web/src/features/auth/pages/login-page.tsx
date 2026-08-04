@@ -2,15 +2,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { Link, useLocation, useNavigate } from "react-router";
 
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { HvButton, HvCard } from "@/components/hv";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useApiFormErrors } from "@/lib/forms/use-api-form-errors";
@@ -29,7 +21,7 @@ export function LoginPage() {
 
   const form = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
-    defaultValues: { email: "", password: "" },
+    defaultValues: { phone: "", password: "" },
   });
   const loginMutation = useLogin();
   const handleApiError = useApiFormErrors(form);
@@ -44,55 +36,69 @@ export function LoginPage() {
   const { errors } = form.formState;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Sign in</CardTitle>
-        <CardDescription>Welcome back to Teka.</CardDescription>
-      </CardHeader>
+    <HvCard variant="raised" padding="lg" className="mx-auto w-full max-w-[var(--w-phone)]">
+      <div className="mb-6 text-center">
+        <p className="font-display text-[22px] font-extrabold text-ink-900">Sổ Lớp</p>
+        <p className="mt-1 text-[13px] text-ink-400">Đăng nhập để tiếp tục</p>
+      </div>
       <form onSubmit={(event) => void onSubmit(event)} noValidate>
-        <CardContent>
-          <FieldGroup>
-            <Field data-invalid={Boolean(errors.email)}>
-              <FieldLabel htmlFor="email">Email</FieldLabel>
-              <Input
-                id="email"
-                type="email"
-                autoComplete="email"
-                placeholder="you@example.com"
-                aria-invalid={Boolean(errors.email)}
-                {...form.register("email")}
-              />
-              <FieldError errors={[errors.email]} />
-            </Field>
-            <Field data-invalid={Boolean(errors.password)}>
-              <FieldLabel htmlFor="password">Password</FieldLabel>
-              <Input
-                id="password"
-                type="password"
-                autoComplete="current-password"
-                aria-invalid={Boolean(errors.password)}
-                {...form.register("password")}
-              />
-              <FieldError errors={[errors.password]} />
-            </Field>
-            <FieldError errors={[errors.root]} />
-          </FieldGroup>
-        </CardContent>
-        <CardFooter className="mt-6 flex-col gap-3">
-          <Button type="submit" className="w-full" disabled={loginMutation.isPending}>
-            {loginMutation.isPending ? "Signing in…" : "Sign in"}
-          </Button>
-          <p className="text-center text-sm text-muted-foreground">
-            No account?{" "}
+        <FieldGroup>
+          <Field data-invalid={Boolean(errors.phone)}>
+            <FieldLabel htmlFor="phone" className="font-display text-[14px] font-bold text-ink-700">
+              Số điện thoại
+            </FieldLabel>
+            <Input
+              id="phone"
+              type="tel"
+              inputMode="numeric"
+              autoComplete="tel"
+              placeholder="0912345678"
+              className="h-12"
+              aria-invalid={Boolean(errors.phone)}
+              {...form.register("phone")}
+            />
+            <FieldError className="text-[14px] text-coral-600" errors={[errors.phone]} />
+          </Field>
+          <Field data-invalid={Boolean(errors.password)}>
+            <FieldLabel
+              htmlFor="password"
+              className="font-display text-[14px] font-bold text-ink-700"
+            >
+              Mật khẩu
+            </FieldLabel>
+            <Input
+              id="password"
+              type="password"
+              autoComplete="current-password"
+              className="h-12"
+              aria-invalid={Boolean(errors.password)}
+              {...form.register("password")}
+            />
+            <FieldError className="text-[14px] text-coral-600" errors={[errors.password]} />
+          </Field>
+          <FieldError className="text-[14px] text-coral-600" errors={[errors.root]} />
+        </FieldGroup>
+        <div className="mt-6 flex flex-col gap-3">
+          <HvButton
+            type="submit"
+            variant="primary"
+            size="lg"
+            block
+            disabled={loginMutation.isPending}
+          >
+            {loginMutation.isPending ? "Đang đăng nhập…" : "Đăng nhập"}
+          </HvButton>
+          <p className="text-center text-[13px] text-ink-400">
+            Chưa có tài khoản?{" "}
             <Link
               to="/register"
-              className="font-medium text-foreground underline-offset-4 hover:underline"
+              className="font-bold text-mint-600 underline-offset-4 hover:underline"
             >
-              Register
+              Đăng ký
             </Link>
           </p>
-        </CardFooter>
+        </div>
       </form>
-    </Card>
+    </HvCard>
   );
 }

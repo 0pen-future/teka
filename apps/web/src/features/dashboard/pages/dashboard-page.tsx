@@ -1,36 +1,31 @@
 import { PageHeader } from "@/components/shared/page-header";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuthStore } from "@/features/auth";
 
+import { PendingAttendanceAlert } from "../components/pending-attendance-alert";
+import { PeriodStatusCard } from "../components/period-status-card";
+
 export function DashboardPage() {
-  const user = useAuthStore((state) => state.user);
+  const teacher = useAuthStore((state) => state.user);
+  // Computed at render, not module load, so an SPA session left open across
+  // midnight doesn't keep showing yesterday's date.
+  const todayLabel = new Intl.DateTimeFormat("vi-VN", {
+    weekday: "long",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(new Date());
 
   return (
-    <div className="space-y-6">
+    // Order matters: the pending-attendance alert must render right after
+    // the header, without scrolling, per the unattended-session warning
+    // requirement (PRD R2 AC 3).
+    <div className="flex flex-col gap-6">
       <PageHeader
-        title={user ? `Welcome, ${user.name}` : "Dashboard"}
-        description="Overview of your Teka workspace."
+        title={teacher ? `Chào ${teacher.full_name} 👋` : "Chào mừng"}
+        description={todayLabel}
       />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Card>
-          <CardHeader>
-            <CardTitle>Your account</CardTitle>
-            <CardDescription>Details of the signed-in session.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <dl className="space-y-2 text-sm">
-              <div className="flex justify-between gap-4">
-                <dt className="text-muted-foreground">Email</dt>
-                <dd className="truncate">{user?.email}</dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-muted-foreground">Role</dt>
-                <dd className="capitalize">{user?.role}</dd>
-              </div>
-            </dl>
-          </CardContent>
-        </Card>
-      </div>
+      <PendingAttendanceAlert />
+      <PeriodStatusCard />
     </div>
   );
 }

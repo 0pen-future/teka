@@ -6,7 +6,7 @@ import { ApiError } from "@/lib/api/errors";
 interface ApiFormErrorOptions<T extends FieldValues> {
   /**
    * Where a CONFLICT error should land. The API reports duplicates (e.g.
-   * "email already in use") as CONFLICT with a plain message, not as a
+   * "phone already registered") as CONFLICT with a plain message, not as a
    * field-level VALIDATION_ERROR, but users should still see it on the input
    * that caused it.
    */

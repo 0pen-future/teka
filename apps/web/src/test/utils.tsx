@@ -5,18 +5,17 @@ import { createMemoryRouter, RouterProvider, type RouteObject } from "react-rout
 
 import { ThemeProvider } from "@/components/shared/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
-import { useAuthStore } from "@/features/auth";
-import type { User } from "@/features/users";
+import { useAuthStore, type Teacher } from "@/features/auth";
 
-import { adminUser, aliceUser } from "./msw/handlers";
+import { primaryTeacher, secondaryTeacher } from "./msw/handlers";
 
-/** Seeds the auth store as if the user had just logged in. */
-export function signInAs(user: User): void {
-  useAuthStore.getState().setSession(user, "test-access-token");
+/** Seeds the auth store as if the teacher had just logged in. */
+export function signInAs(teacher: Teacher): void {
+  useAuthStore.getState().setSession(teacher, "test-access-token");
 }
 
-export const testAdmin = adminUser;
-export const testUser = aliceUser;
+export const testPrimaryTeacher = primaryTeacher;
+export const testSecondaryTeacher = secondaryTeacher;
 
 interface RenderWithProvidersOptions {
   /** Initial URL, including any search params. */

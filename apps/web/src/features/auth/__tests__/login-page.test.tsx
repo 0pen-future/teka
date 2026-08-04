@@ -16,32 +16,43 @@ function renderLogin(route = "/login") {
     path: "/login",
     extraRoutes: [
       { path: "/", element: <p>Dashboard home</p> },
-      { path: "/users", element: <p>Users home</p> },
+      { path: "/classes", element: <p>Classes home</p> },
     ],
   });
 }
 
 describe("LoginPage", () => {
-  it("shows validation errors without calling the API", async () => {
+  it("shows required-field errors when submitted empty", async () => {
     const user = userEvent.setup();
     renderLogin();
 
-    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
 
-    expect(await screen.findByText("Enter a valid email address")).toBeInTheDocument();
-    expect(screen.getByText("Password is required")).toBeInTheDocument();
+    expect(await screen.findByText("Vui lòng nhập số điện thoại")).toBeInTheDocument();
+    expect(screen.getByText("Vui lòng nhập mật khẩu")).toBeInTheDocument();
+  });
+
+  it("shows a format error for a non-empty but invalid phone number", async () => {
+    const user = userEvent.setup();
+    renderLogin();
+
+    await user.type(screen.getByLabelText("Số điện thoại"), "123");
+    await user.type(screen.getByLabelText("Mật khẩu"), "some-password");
+    await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
+
+    expect(await screen.findByText("Số điện thoại không hợp lệ")).toBeInTheDocument();
   });
 
   it("stores the session and navigates home on success", async () => {
     const user = userEvent.setup();
     renderLogin();
 
-    await user.type(screen.getByLabelText("Email"), "admin@example.com");
-    await user.type(screen.getByLabelText("Password"), "correct-password");
-    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    await user.type(screen.getByLabelText("Số điện thoại"), "0901000001");
+    await user.type(screen.getByLabelText("Mật khẩu"), "lan-password");
+    await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
 
     expect(await screen.findByText("Dashboard home")).toBeInTheDocument();
-    expect(useAuthStore.getState().user?.email).toBe("admin@example.com");
+    expect(useAuthStore.getState().user?.phone).toBe("+84901000001");
     expect(useAuthStore.getState().accessToken).toBe("test-access-token");
   });
 
@@ -49,29 +60,29 @@ describe("LoginPage", () => {
     const user = userEvent.setup();
     const { router } = renderLogin("/login");
     // Simulate arriving via ProtectedRoute's redirect state.
-    await router.navigate("/login", { state: { from: "/users" } });
+    await router.navigate("/login", { state: { from: "/classes" } });
 
-    await user.type(screen.getByLabelText("Email"), "admin@example.com");
-    await user.type(screen.getByLabelText("Password"), "correct-password");
-    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    await user.type(screen.getByLabelText("Số điện thoại"), "0901000001");
+    await user.type(screen.getByLabelText("Mật khẩu"), "lan-password");
+    await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
 
-    expect(await screen.findByText("Users home")).toBeInTheDocument();
+    expect(await screen.findByText("Classes home")).toBeInTheDocument();
   });
 
   it("shows the server message when credentials are rejected", async () => {
     server.use(
       http.post(`${API_URL}/auth/login`, () =>
-        HttpResponse.json(fail("UNAUTHORIZED", "invalid email or password"), { status: 401 }),
+        HttpResponse.json(fail("UNAUTHORIZED", "invalid phone or password"), { status: 401 }),
       ),
     );
     const user = userEvent.setup();
     renderLogin();
 
-    await user.type(screen.getByLabelText("Email"), "admin@example.com");
-    await user.type(screen.getByLabelText("Password"), "wrong-password");
-    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    await user.type(screen.getByLabelText("Số điện thoại"), "0901000001");
+    await user.type(screen.getByLabelText("Mật khẩu"), "wrong-password");
+    await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
 
-    expect(await screen.findByText("invalid email or password")).toBeInTheDocument();
+    expect(await screen.findByText("invalid phone or password")).toBeInTheDocument();
     expect(useAuthStore.getState().user).toBeNull();
   });
 });

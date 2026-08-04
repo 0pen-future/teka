@@ -4,7 +4,6 @@ import { NotFound } from "@/components/shared/not-found";
 import { ProtectedRoute } from "@/features/auth";
 import { authRoutes } from "@/features/auth/routes";
 import { dashboardRoutes } from "@/features/dashboard/routes";
-import { usersRoutes } from "@/features/users/routes";
 import { AuthLayout } from "@/layouts/auth-layout";
 import { DashboardLayout } from "@/layouts/dashboard-layout";
 import { RootLayout } from "@/layouts/root-layout";
@@ -28,7 +27,7 @@ export const router = createBrowserRouter([
           </ProtectedRoute>
         ),
         path: "/",
-        children: [...dashboardRoutes, ...usersRoutes],
+        children: [...dashboardRoutes],
       },
       { path: "*", element: <NotFound /> },
     ],

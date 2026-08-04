@@ -880,3 +880,42 @@ sau:
 
 - **Dark mode.** DS không định nghĩa dark. Giữ block `.dark` (map tạm về
   surface-dark) để `dark:` variant của shadcn không lỗi, nhưng không dùng.
+
+## 2026-08-04 — Plan 07, Phase 1: đối chiếu "Assumed API contract" với backend Go thật
+
+Phase file `phase-01-auth-shell-dashboard.md` giả định ba hình dạng response
+khác với API thật (`apps/api`). Đối chiếu trực tiếp mã nguồn Go, không suy đoán
+từ tài liệu:
+
+- **`TokenResponse` nhúng `teacher`, không phải `user`.** Phase file viết
+  `session.user`. `apps/api/internal/features/auth/dto.go` (`TokenResponse`)
+  khai báo field JSON `teacher` — đúng như ADR "Plan 01, Phase 2: `AccountService`
+  trả `*teachers.Profile`" phía trên đã ghi: response auth nhúng thẳng hồ sơ
+  giáo viên để khỏi gọi thêm `/me`. Client (`auth-schemas.ts`) parse
+  `sessionSchema.teacher`, không phải `.user`; store, hook, và mọi test đổi
+  theo (`useAuthStore.getState().user` vẫn giữ tên field state cũ, chỉ nguồn
+  gán đổi).
+
+- **`GET /sessions/pending` trả `{total, items: [...]}`, không phải mảng trần
+  với field `id`.** Phase file giả định response là một mảng session object có
+  field `id`. `apps/api/internal/features/sessions/dto.go`
+  (`PendingResponse`/`PendingSessionResponse`) trả object bọc
+  `{total int, items []PendingSessionResponse}`, và mỗi phần tử dùng khoá
+  `session_id` (không phải `id`), kèm `class_id`, `class_name`, `session_date`,
+  `start_time`, `status`, `expected_student_count`, `days_overdue`. Client
+  (`dashboard/schemas/dashboard-schemas.ts`) khai `pendingSessionsResponseSchema`
+  đúng hình dạng này rồi lấy `.items`; mọi liên kết "Điểm danh ngay" trỏ
+  `/sessions/{session_id}/attendance`.
+
+- **Không có `GET /billing/periods/current`.** Route đó không tồn tại trong
+  `apps/api/internal/features/billing/routes.go`. API chỉ có
+  `POST /billing-periods` (`EnsurePeriodRequest{year, month}` →
+  `handler.go`/`service.go` gọi `EnsurePeriod`, tạo-hoặc-lấy kỳ, idempotent).
+  Client không thể hỏi "kỳ hiện tại" trực tiếp; `features/billing/api/billing-api.ts`
+  (`getCurrentPeriod`) POST kỳ của tháng/năm hiện tại (giờ máy client) mỗi lần
+  gọi — an toàn vì `EnsurePeriod` là ensure, không phải create-or-fail.
+
+**Quyết định:** sửa toàn bộ ba điểm ở tầng client (schema, API call, mọi test
+liên quan) để khớp API thật; không đổi API. Phase file mô tả sai vì được viết
+trước khi plan 04 (billing engine) chốt endpoint thật; các plan API 01–06 (đã
+merge trước plan 07) là nguồn chân lý.

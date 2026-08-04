@@ -1,13 +1,14 @@
 import { create } from "zustand";
 
-import type { User } from "@/features/users";
 import { connectAuthBridge, markRefreshAlive } from "@/lib/api/auth-bridge";
+
+import type { Teacher } from "../schemas/auth-schemas";
 
 interface AuthState {
   /** Access token lives in memory only — never localStorage (XSS surface). */
   accessToken: string | null;
-  user: User | null;
-  setSession: (user: User, accessToken: string) => void;
+  user: Teacher | null;
+  setSession: (user: Teacher, accessToken: string) => void;
   setAccessToken: (accessToken: string) => void;
   clearSession: () => void;
 }

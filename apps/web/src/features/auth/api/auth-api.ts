@@ -3,9 +3,11 @@ import { parseData } from "@/lib/api/envelope";
 
 import {
   sessionSchema,
+  teacherSchema,
   type LoginInput,
   type RegisterInput,
   type Session,
+  type Teacher,
 } from "../schemas/auth-schemas";
 
 export async function login(input: LoginInput): Promise<Session> {
@@ -30,4 +32,10 @@ export async function refreshSession(): Promise<Session> {
 /** Revokes the refresh-token family; idempotent server-side. */
 export async function logout(): Promise<void> {
   await apiClient.post("/auth/logout");
+}
+
+/** Fetches the authenticated teacher's profile. */
+export async function getMe(): Promise<Teacher> {
+  const res = await apiClient.get<unknown>("/me");
+  return parseData(teacherSchema, res.data);
 }

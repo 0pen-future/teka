@@ -5,7 +5,7 @@ import type { Session } from "../schemas/auth-schemas";
 import { useAuthStore } from "../stores/auth-store";
 
 function storeSession(session: Session): void {
-  useAuthStore.getState().setSession(session.user, session.access_token);
+  useAuthStore.getState().setSession(session.teacher, session.access_token);
 }
 
 export function useLogin() {
