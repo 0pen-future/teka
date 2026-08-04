@@ -3,7 +3,11 @@ import { createBrowserRouter } from "react-router";
 import { NotFound } from "@/components/shared/not-found";
 import { ProtectedRoute } from "@/features/auth";
 import { authRoutes } from "@/features/auth/routes";
+import { attendanceRoutes } from "@/features/attendance/routes";
+import { billingRoutes } from "@/features/billing/routes";
+import { collectionsRoutes } from "@/features/collections/routes";
 import { dashboardRoutes } from "@/features/dashboard/routes";
+import { rosterRoutes } from "@/features/roster/routes";
 import { AuthLayout } from "@/layouts/auth-layout";
 import { DashboardLayout } from "@/layouts/dashboard-layout";
 import { RootLayout } from "@/layouts/root-layout";
@@ -27,7 +31,13 @@ export const router = createBrowserRouter([
           </ProtectedRoute>
         ),
         path: "/",
-        children: [...dashboardRoutes],
+        children: [
+          ...dashboardRoutes,
+          ...rosterRoutes,
+          ...attendanceRoutes,
+          ...billingRoutes,
+          ...collectionsRoutes,
+        ],
       },
       { path: "*", element: <NotFound /> },
     ],

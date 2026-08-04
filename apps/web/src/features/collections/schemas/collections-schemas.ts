@@ -1,0 +1,253 @@
+import { z } from "zod";
+
+/**
+ * Minimal `billing_periods` shape, duplicated from `features/billing` rather
+ * than imported — the two features are owned by different phase-4 workstreams
+ * and must not couple through source imports (see `adr.md`). Mirrors
+ * `billing.PeriodResponse` (`apps/api/internal/features/billing/dto.go`).
+ */
+export const periodSchema = z.object({
+  id: z.string(),
+  year: z.number().int(),
+  month: z.number().int(),
+  period_start: z.string(),
+  period_end: z.string(),
+  status: z.enum(["open", "closed"]),
+  closed_at: z.string().nullable(),
+});
+
+export type Period = z.infer<typeof periodSchema>;
+
+/** `collections.ContactBalanceRow`/`ClassCollectionRow.payment_status` (`apps/api/internal/features/collections/model.go`). */
+export const paymentStatusSchema = z.enum(["unpaid", "partial", "paid"]);
+
+export type PaymentStatus = z.infer<typeof paymentStatusSchema>;
+
+/** `collections.ContactChildInvoiceRow` (`apps/api/internal/features/collections/dto.go`). */
+export const contactChildInvoiceRowSchema = z.object({
+  invoice_id: z.string(),
+  student_name: z.string(),
+  total_due: z.number(),
+  paid_amount: z.number(),
+  outstanding: z.number(),
+});
+
+export type ContactChildInvoiceRow = z.infer<typeof contactChildInvoiceRowSchema>;
+
+/**
+ * `collections.ContactBalanceRow` — the by-contact view's row shape, one per
+ * family merging every child's invoice under a single balance.
+ */
+export const contactBalanceRowSchema = z.object({
+  contact_id: z.string(),
+  full_name: z.string(),
+  phone: z.string(),
+  contact_archived: z.boolean(),
+  student_count: z.number().int(),
+  total_due: z.number(),
+  total_paid: z.number(),
+  outstanding: z.number(),
+  payment_status: paymentStatusSchema,
+  invoices: z.array(contactChildInvoiceRowSchema),
+});
+
+export type ContactBalanceRow = z.infer<typeof contactBalanceRowSchema>;
+
+/**
+ * `collections.ClassCollectionRow` — the by-class view's row shape, one per
+ * invoice line for the requested class. `line_*` describes just this line;
+ * the `invoice_*` fields describe the whole invoice the line belongs to.
+ */
+export const classCollectionRowSchema = z.object({
+  invoice_id: z.string(),
+  student_id: z.string(),
+  student_name: z.string(),
+  contact_id: z.string(),
+  contact_name: z.string(),
+  class_name: z.string(),
+  billable_count: z.number().int(),
+  absent_count: z.number().int(),
+  line_amount: z.number(),
+  invoice_opening_balance: z.number(),
+  invoice_total_due: z.number(),
+  invoice_paid_amount: z.number(),
+  invoice_outstanding: z.number(),
+  payment_status: paymentStatusSchema,
+});
+
+export type ClassCollectionRow = z.infer<typeof classCollectionRowSchema>;
+
+/** `collections.SummaryResponse` — one unfiltered, unpaginated period total. */
+export const collectionsSummarySchema = z.object({
+  student_count: z.number().int(),
+  contact_count: z.number().int(),
+  total_due: z.number(),
+  total_paid: z.number(),
+  total_outstanding: z.number(),
+  paid_contact_count: z.number().int(),
+  unpaid_contact_count: z.number().int(),
+  partial_contact_count: z.number().int(),
+  unallocated_credit: z.number(),
+});
+
+export type CollectionsSummary = z.infer<typeof collectionsSummarySchema>;
+
+/** `payments.RecordPaymentRequest.method` (`docs/schema_design.sql:365`). */
+export const paymentMethodSchema = z.enum(["cash", "transfer", "other"]);
+
+export type PaymentMethod = z.infer<typeof paymentMethodSchema>;
+
+/** `payment_allocations.allocated_by` (`docs/schema_design.sql:392`). */
+export const allocatedBySchema = z.enum(["auto", "manual"]);
+
+export type AllocatedBy = z.infer<typeof allocatedBySchema>;
+
+/** `payments.AllocationResponse`. */
+export const allocationResponseSchema = z.object({
+  invoice_id: z.string(),
+  student_id: z.string(),
+  student_name: z.string(),
+  period_id: z.string(),
+  amount: z.number(),
+  allocated_by: allocatedBySchema,
+  total_due: z.number(),
+  paid_amount: z.number(),
+  outstanding: z.number(),
+});
+
+export type AllocationResponse = z.infer<typeof allocationResponseSchema>;
+
+/**
+ * `payments.PaymentResponse`. There is no allocation *preview* endpoint on
+ * the real API — `POST /payments` always auto-allocates via the D8 rule
+ * (oldest debt first) and returns the resulting split directly on this
+ * response; a preview is this same shape requested, then optionally
+ * corrected through `PUT /payments/:id/allocations`.
+ */
+export const paymentResponseSchema = z.object({
+  id: z.string(),
+  contact_id: z.string(),
+  amount: z.number(),
+  method: paymentMethodSchema,
+  received_on: z.string(),
+  reference_code: z.string().nullable().optional(),
+  note: z.string().nullable().optional(),
+  reverses_payment_id: z.string().nullable().optional(),
+  reversed_at: z.string().nullable().optional(),
+  allocations: z.array(allocationResponseSchema),
+  unallocated_amount: z.number(),
+  created_at: z.string(),
+});
+
+export type PaymentResponse = z.infer<typeof paymentResponseSchema>;
+
+/** `payments.RecordPaymentRequest` (`POST /payments` body). */
+export const recordPaymentInputSchema = z.object({
+  contact_id: z.string().min(1),
+  amount: z.number().int().positive("Số tiền phải lớn hơn 0"),
+  method: paymentMethodSchema,
+  received_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ngày phải theo định dạng YYYY-MM-DD"),
+  reference_code: z.string().trim().max(50, "Tối đa 50 ký tự").optional(),
+  note: z.string().trim().max(1000, "Tối đa 1000 ký tự").optional(),
+});
+
+export type RecordPaymentInput = z.infer<typeof recordPaymentInputSchema>;
+
+/** One line of `payments.ReallocateRequest` (`PUT /payments/:id/allocations`). */
+export const reallocationLineSchema = z.object({
+  invoice_id: z.string().min(1),
+  amount: z.number().int().positive(),
+});
+
+export type ReallocationLine = z.infer<typeof reallocationLineSchema>;
+
+export const reallocateInputSchema = z.object({
+  allocations: z.array(reallocationLineSchema).min(1),
+});
+
+export type ReallocateInput = z.infer<typeof reallocateInputSchema>;
+
+/**
+ * `notifications.BulkSendRequest.purpose` accepts the singular "statement"
+ * spelling too, normalized server-side onto "statements" — the app only ever
+ * sends the plural form, but the type stays permissive to match the real
+ * binding contract.
+ */
+export const notificationPurposeSchema = z.enum(["statement", "statements", "reminder"]);
+
+export type NotificationPurpose = z.infer<typeof notificationPurposeSchema>;
+
+/** `notifications.channel` CHECK constraint (`docs/schema_design.sql:439`). */
+export const notificationChannelSchema = z.enum(["zalo_manual", "zalo_zns", "sms"]);
+
+export type NotificationChannel = z.infer<typeof notificationChannelSchema>;
+
+/** `notifications.status` CHECK constraint (`docs/schema_design.sql:442`). */
+export const notificationStatusSchema = z.enum(["queued", "sent", "delivered", "failed"]);
+
+export type NotificationStatus = z.infer<typeof notificationStatusSchema>;
+
+/**
+ * `notifications.BulkSendRow` — the only shape the real API ever returns
+ * `message_text` on. The list endpoint (`notificationRowSchema` below)
+ * intentionally has no text field; the backend never persists rendered text.
+ */
+export const bulkSendRowSchema = z.object({
+  notification_id: z.string(),
+  contact_id: z.string(),
+  contact_name: z.string(),
+  phone: z.string(),
+  channel: notificationChannelSchema,
+  purpose: notificationPurposeSchema,
+  status: notificationStatusSchema,
+  message_text: z.string(),
+  url: z.string(),
+  collapsed: z.boolean(),
+});
+
+export type BulkSendRow = z.infer<typeof bulkSendRowSchema>;
+
+/** `notifications.BulkSendResponse`. */
+export const bulkSendResponseSchema = z.object({
+  queued_count: z.number().int(),
+  skipped_paid_count: z.number().int(),
+  collapsed_count: z.number().int(),
+  bulk_text: z.string(),
+  rows: z.array(bulkSendRowSchema),
+});
+
+export type BulkSendResponse = z.infer<typeof bulkSendResponseSchema>;
+
+/**
+ * `notifications.NotificationResponse` (`GET /billing-periods/:id/notifications`).
+ * No `message_text`/`url` — those exist only on a fresh `bulkSendRowSchema`
+ * row, never replayable from the ledger.
+ */
+export const notificationRowSchema = z.object({
+  id: z.string(),
+  contact_id: z.string(),
+  contact_name: z.string(),
+  phone: z.string(),
+  channel: notificationChannelSchema,
+  purpose: notificationPurposeSchema,
+  status: notificationStatusSchema,
+  sent_at: z.string().nullable(),
+  created_at: z.string(),
+});
+
+export type NotificationRow = z.infer<typeof notificationRowSchema>;
+
+/** `notifications.BulkSendRequest` (`POST /billing-periods/:id/notifications/bulk` body). */
+export const bulkSendInputSchema = z.object({
+  purpose: z.enum(["statements", "reminder"]),
+  channel: notificationChannelSchema.optional(),
+});
+
+export type BulkSendInput = z.infer<typeof bulkSendInputSchema>;
+
+/** `notifications.MarkSentRequest` (`POST /notifications/mark-sent` body). */
+export const markSentInputSchema = z.object({
+  ids: z.array(z.string()).min(1),
+});
+
+export type MarkSentInput = z.infer<typeof markSentInputSchema>;

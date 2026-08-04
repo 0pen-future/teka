@@ -919,3 +919,250 @@ từ tài liệu:
 liên quan) để khớp API thật; không đổi API. Phase file mô tả sai vì được viết
 trước khi plan 04 (billing engine) chốt endpoint thật; các plan API 01–06 (đã
 merge trước plan 07) là nguồn chân lý.
+
+## 2026-08-04 — Plan 07, Phase 2: đối chiếu bảng "Assumed API contract" của roster với backend Go thật
+
+Phase file `phase-02-roster.md` tự đánh dấu bảng API là ASSUMED, cần đối chiếu
+mã nguồn thật (`apps/api/internal/features/{contacts,students,classes,
+enrollments}`) trước khi viết client. Đối chiếu trực tiếp `routes.go`/`dto.go`
+của cả bốn package, các điểm khác với bảng giả định:
+
+- **`PUT`, không phải `PATCH`.** `contacts`/`students`/`classes` update đều
+  đăng ký `g.PUT("/:id", ...)`. Client (`*-api.ts`) gọi `apiClient.put`.
+- **`GET /contacts/:id` không lồng `students[]`.** `ContactResponse`
+  (`contacts/dto.go`) chỉ có `student_count int64`, không có mảng con.
+  `ContactDetailPage` gọi riêng `useStudentsList({ contact_id: id })` thay vì kỳ
+  vọng danh sách con nằm sẵn trong response contact.
+- **`POST /classes` bắt buộc `schedules` không rỗng ngay trong request tạo
+  lớp**, không phải một luồng "tạo lớp rồi thêm lịch riêng" như bảng giả định
+  ngụ ý. `CreateClassRequest.Schedules` là `binding:"required,min=1,dive"` — lớp
+  không lịch sẽ không sinh buổi học nào nên bị chặn tạo. `ClassDialog` gom
+  name/weekday-chip/time/duration/dates/price cho MỘT schedule khởi đầu vào
+  một request `POST /classes` duy nhất (đúng field `implementation-steps` bước
+  11 đã mô tả, không phải bảng contract).
+- **Đổi trạng thái lớp đi qua `POST /classes/:id/archive` riêng, không qua
+  `PATCH`/`PUT` với field `status`.** `UpdateClassRequest` không có field
+  `status`. `ClassDialog` (edit mode) hiện trạng thái bằng `HvBadge` +
+  nút "Lưu trữ lớp" gọi endpoint archive riêng, tách khỏi form sửa
+  name/dates/price.
+- **Sửa một dòng lịch dùng `PUT /classes/:id/schedules/:scheduleID`**, và
+  đóng lịch (set `effective_to`) là MỘT dạng của chính update đó — không có
+  endpoint "close schedule" riêng (xem ADR "Plan 02, Phase 3: gộp
+  CloseSchedule vào UpdateSchedule" phía trên). `ScheduleEditor` gọi
+  `updateSchedule` cho cả sửa giờ/thứ lẫn đóng lịch.
+- **Kết thúc ghi danh là `POST /enrollments/:id/end`**, không phải
+  `PATCH /enrollments/:id`. Double-end trả 409 (không phải cho phép ghi đè
+  ngày kết thúc lần hai) — `EndEnrollmentDialog` không có đường retry ngầm,
+  lỗi 409 nổi lên qua `form.setError("root", ...)` như mọi lỗi mutation khác.
+  API còn có `DELETE /enrollments/:id` (dành cho ghi danh tạo nhầm, chưa có
+  buổi học nào) — roster UI ở phase này không có nút "Xoá ghi danh" vì
+  Design Spec chỉ yêu cầu "Kết thúc ghi danh"; endpoint tồn tại nhưng chưa có
+  consumer ở tầng web, ghi nhận ở đây để không bị tưởng là bỏ sót.
+
+**Quyết định:** toàn bộ bốn module `api/*.ts` viết đúng theo API thật ở trên
+(không viết theo bảng giả định); không đổi API. `docstring` trên từng hàm
+`*-api.ts` trỏ thẳng file Go tương ứng để lần sau đối chiếu không phải lặp lại
+việc đọc mã nguồn.
+
+## 2026-08-04 — Plan 07, Phase 2: đường dẫn tham chiếu `features/users/` trong phase file không còn tồn tại
+
+Implementation Steps (bước 2, 15) chỉ định khuôn mẫu file theo
+`apps/web/src/features/users/{api/users-api.ts, hooks/use-users.ts,
+components/create-user-dialog.tsx, pages/users-page.tsx, routes.tsx}`. Thư mục
+này không tồn tại trong `apps/web/src/features/` hiện tại (chỉ có `auth`,
+`billing`, `dashboard`, `roster`) — feature "users" thuộc bản scaffold email/
+admin cũ, đã được thay bởi phone-based auth (xem ADR "Plan 01, Phase 2: xoá
+`features/users/`..." phía trên, phía backend) và không có tương ứng phía web
+kể từ Web Design System Foundation.
+
+**Quyết định:** dùng `apps/web/src/features/dashboard/routes.tsx` làm khuôn
+mẫu `route.lazy` (đã ghi chú thẳng trong `roster/routes.tsx`), và
+`apps/web/src/features/auth` (form + dialog patterns, `useApiFormErrors`, cấu
+trúc `api/`+`hooks/`+`schemas/`) làm khuôn mẫu cho các file còn lại — cùng
+shape file, cùng convention, là feature gần nhất còn tồn tại trong repo.
+Không đổi kết quả cuối, chỉ đổi nguồn tham chiếu bố cục.
+
+## 2026-08-04 — Plan 07, Phase 2: `ContactPicker` tạo liên hệ mới inline, không mở `ContactDialog` lồng
+
+Design Spec không chốt cách "tạo người liên hệ mới ngay trong form học sinh"
+nên thực hiện: mở một `HvModal` lồng bên trong `HvModal` của `StudentDialog`
+(modal-trong-modal), hay một form rút gọn ngay tại chỗ.
+
+**Quyết định:** dòng cuối danh sách kết quả tìm kiếm của `ContactPicker`
+("— Tạo người liên hệ mới —") mở rộng hai input (họ tên, số điện thoại) ngay
+tại chỗ, không phải một `HvModal` thứ hai. Radix `Dialog` không hỗ trợ lồng
+tốt (portal/focus-trap chồng nhau), và giáo viên đang ở giữa việc điền form
+học sinh — một modal thứ hai đè lên sẽ ngắt mạch nhập liệu. Form rút gọn dùng
+lại `contactInputSchema`/`useCreateContact` y hệt `ContactDialog`, chỉ khác nơi
+render.
+
+## 2026-08-04 — Plan 07, Phase 2: `EnrollStudentDialog` gộp hai chiều gọi (bước 10 và bước 13) thành một component `mode: "student" | "class"`
+
+Bước 10 (Implementation Steps) mô tả `StudentDetailPage` có hành động "Ghi
+danh vào lớp" — học sinh đã cố định, cần tìm LỚP. Bước 13 mô tả
+`EnrollStudentDialog` với "student picker (search by name)" — ngụ ý lớp đã cố
+định (gọi từ `ClassDetailPage`), cần tìm HỌC SINH. Hai bước mô tả cùng một tên
+component nhưng hai chiều tìm kiếm ngược nhau; phase file không nói rõ đây là
+một component hay hai.
+
+**Quyết định:** một `EnrollStudentDialog` union-type theo `mode`: `mode:
+"student"` (từ `StudentDetailPage`, `studentId` cố định, tìm/lọc lớp qua
+`useClassesList({status:"active"})`) và `mode: "class"` (từ `ClassDetailPage`,
+`classId` cố định, tìm học sinh qua `useStudentsList({query})` debounce
+300ms). Cả hai đường đều chia sẻ cùng field `started_on`, cùng dòng đơn giá
+kế thừa read-only, cùng toast sau khi thành công — chỉ khác ô tìm kiếm nào
+hiện ra. Tránh nhân đôi gần như toàn bộ logic mutation/toast/validate giữa hai
+component riêng.
+
+## 2026-08-04 — Plan 07, Phase 2: `parseMoney`/`formatWeekday` đặt cục bộ trong feature, không thêm vào `lib/utils` dùng chung
+
+`money-input.tsx` cần parse ngược chuỗi đã format nhóm nghìn về số nguyên;
+`schedule-editor.tsx`/`class-dialog.tsx` cần nhãn tiếng Việt cho `weekday`
+(0=Chủ nhật…6=Thứ 7). `apps/web/src/lib/utils/format.ts` (dùng chung) đã có
+`formatMoney` (chiều ngược lại) nhưng không có hai hàm này, và không feature
+nào khác ngoài roster cần chúng.
+
+**Quyết định:** thêm `apps/web/src/features/roster/lib/roster-format.ts`
+(feature-local, không đụng `lib/utils` — file dùng chung nằm ngoài phạm vi sở
+hữu file của phase này) chứa `parseMoney`/`formatWeekday`. Nếu một feature
+khác sau này cần dùng lại, nâng lên `lib/utils` lúc đó; giữ cục bộ bây giờ là
+YAGNI, không phải giới hạn kỹ thuật.
+
+## 2026-08-04 — Plan 07, Phase 3: xác nhận điểm danh là `POST /sessions/:id/attendance`, không phải `PUT`
+
+Phase file giả định bảng API contract theo hướng REST thuần: xác nhận/ghi đè
+điểm danh dùng `PUT`. Đọc thẳng `apps/api/internal/features/attendance/
+handler.go` và `router.go` thì endpoint thật là `POST /sessions/:id/attendance`
+(hàm service `attendance.confirm`) — dùng cho cả lần xác nhận đầu tiên lẫn
+lần sửa lại sau khi mở lại một buổi đã chốt, dù ngữ nghĩa là "ghi đè toàn bộ".
+
+**Quyết định:** `confirmAttendance` (`apps/web/src/features/attendance/api/
+attendance-api.ts`) gọi `POST`, gửi nguyên danh sách `absent_student_ids` mỗi
+lần (không chỉ phần thay đổi) — khớp với cách server tính lại toàn bộ dòng
+present cho những học sinh còn lại rồi chuyển session sang `held` trong một
+lượt gọi. Backend là nguồn chân lý, không phải bảng REST giả định trong phase
+file.
+
+## 2026-08-04 — Plan 07, Phase 3: không có `GET /sessions` liệt kê toàn cục — luôn liệt kê theo lớp
+
+Phase file giả định một endpoint danh sách buổi học phẳng kiểu `GET
+/sessions?from=&to=`. Backend thật (`sessions.listRange`,
+`apps/api/internal/features/sessions/handler.go`) chỉ có `GET
+/classes/:id/sessions?from=&to=` — luôn đi kèm `class_id`, và tự sinh thêm
+các dòng còn thiếu trong khoảng `[from, to]` từ lịch học của lớp trước khi trả
+về (giới hạn 400 ngày phía server).
+
+**Quyết định:** `SessionsPage` (`apps/web/src/features/attendance/pages/
+sessions-page.tsx`) giữ nguyên thiết kế "tab chọn lớp" của Design Spec — vốn
+đã ngầm định một lớp được chọn tại một thời điểm — nên việc API bắt buộc
+`classId` không đổi hành vi UI, chỉ đổi chữ ký hàm `listClassSessions(classId,
+params)` trong `api/attendance-api.ts` so với giả định `listSessions(params)`
+phẳng ban đầu.
+
+## 2026-08-04 — Plan 07, Phase 3: trường lý do huỷ buổi học là `reason`, không phải `cancel_reason`
+
+Phase file mô tả request huỷ buổi gửi field `cancel_reason` (trùng tên với
+field đọc lại trên `SessionResponse`). Handler thật
+(`apps/api/internal/features/sessions/handler.go`, `cancelSessionRequest`)
+nhận field `reason` trong body `POST /sessions/:id/cancel`; response trả về
+mới có tên `cancel_reason`. Hai field đọc/ghi khác tên nhau.
+
+**Quyết định:** `cancelSessionInputSchema` (`schemas/attendance-schemas.ts`)
+định nghĩa form field là `reason` để khớp request thật, còn `sessionSchema`
+đọc `cancel_reason` từ response — `CancelSessionDialog` submit đúng field
+`reason`, `SessionListItem`/`AttendancePage` hiển thị đúng field
+`cancel_reason`. Không đổi tên nào cho khớp phase file vì phase file sai, không
+phải backend.
+
+## 2026-08-04 — Plan 07, Phase 3: không có field `period_status` trên session/attendance — cảnh báo kỳ đã chốt phải tự suy ra qua `POST /billing-periods`
+
+Phase file giả định `SessionResponse` hoặc attendance sheet mang sẵn một field
+`period_status` để hiển thị cảnh báo "kỳ đã chốt" trước khi giáo viên bấm xác
+nhận. Đọc `apps/api/internal/features/attendance/handler.go` và
+`apps/api/internal/features/sessions/handler.go` thì không endpoint nào trả
+field này — tín hiệu "kỳ đã chốt" chỉ xuất hiện *sau khi* xác nhận, dưới dạng
+chuỗi `warning` tự do trên response của `POST /sessions/:id/attendance`, tức
+là quá muộn để cảnh báo trước khi ghi.
+
+**Quyết định:** thêm `getPeriodForDate`/`usePeriodForDate`
+(`api/attendance-api.ts`, `hooks/use-sessions.ts`) gọi lại `POST
+/billing-periods` (`billing.ensurePeriod`, endpoint idempotent create-or-get
+mà feature `billing` đã dùng cho `getCurrentPeriod`) nhưng truyền năm/tháng
+của `session.session_date` thay vì tháng hiện tại. `AttendancePage` dùng
+`period?.status === "closed"` để hiện `ClosedPeriodWarning` và đổi nhãn nút
+xác nhận thành "LƯU VÀ TẠO ĐIỀU CHỈNH" *trước* khi giáo viên bấm, đồng thời vẫn
+hiển thị `warning` trả về sau khi lưu như một lớp xác nhận thứ hai. Đây là giải
+pháp tạm dùng API sẵn có, không phải endpoint được thiết kế cho mục đích này —
+nếu backend sau này thêm `period_status` trực tiếp, có thể bỏ lượt gọi phụ
+này.
+
+## 2026-08-04 — Plan 07, Phase 3: `SessionResponse` không có số liệu có mặt/vắng — danh sách buổi học không hiện được "N có mặt · M vắng" cho buổi đã chốt
+
+Design Spec mô tả mỗi dòng buổi học đã điểm danh trong danh sách hiện dạng "N
+có mặt · M vắng". `SessionResponse` (`apps/api/internal/features/sessions/
+handler.go`) chỉ có `student_count` — tổng sĩ số roster tại thời điểm đó,
+không phải số đã điểm danh — vì phần chia present/absent chỉ tồn tại trên
+từng dòng của attendance sheet (`GET /sessions/:id/attendance`), không phải
+trên chính session.
+
+**Quyết định:** `SessionListItem` (`components/session-list-item.tsx`) hiện
+"Đã điểm danh" (không kèm số) cho buổi đã có `attendance_confirmed_at`; con số
+"N có mặt · M vắng" chính xác chỉ hiện khi mở panel điểm danh của buổi đó
+(`AttendancePage` đã tải `rows` đầy đủ). Không gọi thêm request roster cho mỗi
+dòng trong danh sách chỉ để lấy số liệu hiển thị — vi phạm trực tiếp ngân sách
+tương tác/độ trễ của PRD R2 khi danh sách có nhiều buổi.
+
+## 2026-08-04 — Plan 07, Phase 4: hợp đồng API "giả định" của phase chốt sổ / thu tiền / thông báo lệch nhiều so với backend Go thật
+
+Phần "Assumed API contract" của phase-04 là phỏng đoán; khi dựng zod schema đã
+đối chiếu trực tiếp với handler/route/dto Go thật của `billing`, `collections`,
+`payments`, `notifications`. Các điểm lệch và cách xử lý (đều implement theo
+thực tế của backend, không theo spec):
+
+**Màn chốt sổ (`features/billing`).**
+
+1. **Nguồn dữ liệu review:** spec giả định `GET /billing/periods/:id/review` —
+   không tồn tại. Dùng `POST /billing-periods/:id/draft` (`billing.Service.
+   Draft`, idempotent, là endpoint duy nhất trả `invoice_id` thật).
+2. **Hình dạng response:** `billing.PreviewResponse` thật chỉ là `{ invoices[],
+   totals }` — không kèm `period` hay `blocking_sessions`. Tách thành các query
+   tổ hợp: `usePeriod` (`GET /billing-periods/:id`) và `useBlockingSessions`
+   (`GET /sessions/pending?from=&to=`).
+3. **Tên trường dòng/line:** `PreviewInvoice`/`PreviewLine` thật có thêm
+   `enrollment_id`, `class_id`, `present_count`, `current_charge` (chứ không chỉ
+   `total_due`). Schema dựng khớp DTO thật.
+4. **Đường dẫn:** tài nguyên là `/billing-periods/...` (có gạch nối), không
+   lồng dưới `/billing`. Đóng kỳ: `POST /billing-periods/:id/close`. Bộ chuyển
+   kỳ: `GET /billing-periods?per_page=2&sort=-period_start`. Điều chỉnh: `POST
+   /invoices/:invoiceId/adjustments` (điểm duy nhất khớp spec).
+5. **Chặn chốt sổ:** không có trường `blocking_sessions` nhúng trong response.
+   Dựng query chủ động `GET /sessions/pending?from=period_start&to=period_end`
+   phản chiếu đúng predicate `blockingSessions()` của `close.go`, còn lỗi 409
+   (`unconfirmed_sessions`) khi gọi close là chốt chặn phía server.
+
+**Màn thu tiền / thông báo (`features/collections`).**
+
+6. **Không có endpoint xem trước phân bổ:** spec giả định `GET /contacts/:id/
+   allocation-preview`. Thật: `POST /payments` luôn ghi VÀ tự phân bổ (D8, nợ cũ
+   trước) trong một bước; không có lời gọi chỉ-xem-trước. UX "xem trước" trở
+   thành ghi-rồi-sửa: dialog ghi nhận thu thật ngay, hiện split server trả về,
+   cho sửa qua `PUT /payments/:id/allocations` (nơi duy nhất `allocated_by` đổi
+   sang `manual`). Không tái tính phân bổ ở client.
+7. **Nhắc nợ / thông báo hàng loạt:** thật là `POST /billing-periods/:id/
+   notifications/bulk { purpose: "statements"|"reminder" }` — không idempotent,
+   không lọc `contact_ids`, luôn nhắm mọi contact đủ điều kiện của kỳ. Nút "Nhắc
+   nợ" trên dòng contact vì thế điều hướng tới `/notifications/:periodId` thay
+   vì gửi lẻ từng contact (endpoint gửi lẻ không tồn tại). Vẫn đảm bảo một tin
+   nhắn/một gia đình vì bulk gom theo contact.
+8. **Sổ thông báo (ledger):** `GET .../notifications` chỉ trả bookkeeping
+   (`status`/`sent_at`); `message_text`/`url` chỉ có trong response `bulk` mới
+   tạo. `NotificationsPage` giữ `rows` cục bộ làm nguồn text, dùng ledger để
+   quyết định tự sinh một lần (ledger rỗng) hay yêu cầu "Tạo lại" (ledger đã có,
+   vì tạo lại không idempotent). `message_text` do server render, không dựng ở
+   client.
+9. **Thu tiền theo lớp:** `GET /billing-periods/:id/collections?view=class` bắt
+   buộc `class_id` (422 nếu thiếu). Thêm tablist chọn lớp lấy từ
+   `@/features/roster` `useClassesList`.
+10. **Đánh dấu đã gửi:** toàn cục `POST /notifications/mark-sent { ids[] }`
+    (không lồng theo kỳ). Không có route index `/collections` trần — luôn điều
+    hướng kèm `periodId` cụ thể (từ liên kết "Gửi thông báo →" của màn chốt sổ).
