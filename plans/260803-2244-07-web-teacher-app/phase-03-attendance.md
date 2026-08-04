@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Attendance: Sessions, One-Touch Điểm Danh, Past Edits"
-status: pending
+status: completed
 priority: P2
 effort: "1.5d"
 dependencies: [1]
@@ -22,28 +22,28 @@ per row, no confirmation dialog on the happy path, no scroll-to-submit.
 
 ## Requirements
 
-- [ ] Session list at `/sessions` grouped by date, unconfirmed past sessions
+- [x] Session list at `/sessions` grouped by date, unconfirmed past sessions
       first and visually flagged (PRD §5 story 7).
-- [ ] Attendance screen defaults every enrolled student to present; the teacher
+- [x] Attendance screen defaults every enrolled student to present; the teacher
       only marks absentees (PRD R2).
-- [ ] Confirming is one interaction from anywhere on the screen — the confirm
+- [x] Confirming is one interaction from anywhere on the screen — the confirm
       button is fixed to the bottom of the viewport, not at the end of a
       30-row list.
-- [ ] Absent count is visible on the confirm button at all times
+- [x] Absent count is visible on the confirm button at all times
       ("Xác nhận · 2 vắng").
-- [ ] Same-name siblings in one class are visually distinct via `display_note`
+- [x] Same-name siblings in one class are visually distinct via `display_note`
       (`docs/schema_design.sql:109`); when two students in the roster share a
       `full_name`, the note is promoted to a badge rather than muted suffix.
-- [ ] A confirmed session reopens and remains editable; saving recomputes fees
+- [x] A confirmed session reopens and remains editable; saving recomputes fees
       (PRD R2 AC 2).
-- [ ] Editing attendance for a session inside a **closed** period shows a
+- [x] Editing attendance for a session inside a **closed** period shows a
       warning that the difference becomes an adjustment in the next period
       (PRD R4 AC 2; `invoice_adjustments.source_session_id`,
       `docs/schema_design.sql:344`).
-- [ ] Cancelling a session is possible with a reason and bills nobody
+- [x] Cancelling a session is possible with a reason and bills nobody
       (PRD §5 edge case; `class_sessions.status = 'cancelled'`,
       `docs/schema_design.sql:201`).
-- [ ] Only students whose enrollment covers `session_date` appear in the roster
+- [x] Only students whose enrollment covers `session_date` appear in the roster
       for that session — the server decides this; the UI must not filter.
 
 ## Architecture
@@ -250,25 +250,25 @@ tablet. One component tree, two mounts.
 
 ## Success Criteria
 
-- [ ] Marking 2 absentees in a 30-student class and confirming takes exactly 3
+- [x] Marking 2 absentees in a 30-student class and confirming takes exactly 3
       taps, asserted by a test that counts `user-event` interactions.
-- [ ] The confirm button is reachable without scrolling at any scroll position
+- [x] The confirm button is reachable without scrolling at any scroll position
       on a 375×667 viewport.
-- [ ] Reopening a session confirmed days ago shows the earlier absentees and
+- [x] Reopening a session confirmed days ago shows the earlier absentees and
       re-saving succeeds.
-- [ ] A session inside a closed period shows the adjustment warning before the
+- [x] A session inside a closed period shows the adjustment warning before the
       teacher commits.
-- [ ] Two same-name students in one class are visually distinguishable.
-- [ ] Cancelling a session records the reason and the session no longer counts
+- [x] Two same-name students in one class are visually distinguishable.
+- [x] Cancelling a session records the reason and the session no longer counts
       toward the pending warning.
-- [ ] After confirming, the dashboard's pending alert no longer lists that
+- [x] After confirming, the dashboard's pending alert no longer lists that
       session.
-- [ ] The panel matches the prototype `attend` recipe: mint-400 header, live
+- [x] The panel matches the prototype `attend` recipe: mint-400 header, live
       count pills, ✓/✕ circle marks, coral-100 absent rows, uppercase lg
       confirm button with press-mint shadow, sun-toned closed-period state,
       and the cancelled-session treatment — all via DS tokens (no raw hex in
       `features/attendance`).
-- [ ] typecheck, lint, vitest, and `attendance.spec.ts` pass.
+- [x] typecheck, lint, vitest, and `attendance.spec.ts` pass.
 
 ## Risk Assessment
 

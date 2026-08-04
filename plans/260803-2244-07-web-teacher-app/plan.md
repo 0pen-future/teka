@@ -1,7 +1,7 @@
 ---
 title: "07 Web Teacher App"
 description: "Teacher-facing mobile-friendly web app: phone login, pending-attendance dashboard, roster, one-touch attendance, billing close (chốt sổ), collections board, and manual Zalo notification hand-off."
-status: pending
+status: completed
 priority: P2
 effort: "8d"
 branch: main
@@ -184,32 +184,32 @@ rebases its route registration.
 
 From PRD §6; each phase file restates the subset it owns.
 
-- [ ] Given a 30-student class with 2 absentees, when the teacher takes
+- [x] Given a 30-student class with 2 absentees, when the teacher takes
       attendance, then at most 3 interactions are needed (R2 AC 1).
-- [ ] Given a session confirmed 3 days ago, when reopened, then it is still
+- [x] Given a session confirmed 3 days ago, when reopened, then it is still
       editable and the fee recomputes (R2 AC 2).
-- [ ] Given a past session with no attendance, when the teacher opens the app,
+- [x] Given a past session with no attendance, when the teacher opens the app,
       then the warning is visible on the first screen (R2 AC 3).
-- [ ] Given the student create form, when it renders, then it contains no field
+- [x] Given the student create form, when it renders, then it contains no field
       outside full name, display note, contact, and enrollment start date
       (R1 AC).
-- [ ] Given the teacher deletes a student, when confirmed, then personal data is
+- [x] Given the teacher deletes a student, when confirmed, then personal data is
       erased and only anonymized financial records remain (R1 AC).
-- [ ] Given a class with 10 sessions already held, when a student is added, then
+- [x] Given a class with 10 sessions already held, when a student is added, then
       that student is billed only from the next session onwards (R1 AC).
-- [ ] Given unconfirmed sessions inside the period, when the teacher attempts
+- [x] Given unconfirmed sessions inside the period, when the teacher attempts
       chốt sổ, then close is blocked and each offending session is listed and
       linkable (R4 AC 1).
-- [ ] Given a closed period, when attendance inside it is edited, then the UI
+- [x] Given a closed period, when attendance inside it is edited, then the UI
       warns that the delta becomes an adjustment in the next period (R4 AC 2).
-- [ ] Given 150 students, when the collections board opens, then the unpaid
+- [x] Given 150 students, when the collections board opens, then the unpaid
       group can be filtered in one interaction (R7 AC 1).
-- [ ] Given a contact with 2 children who underpaid, when switching to the
+- [x] Given a contact with 2 children who underpaid, when switching to the
       by-class view, then the shortfall allocated to each child is visible
       (R7 AC 4).
-- [ ] Given a contact with 2 children both in debt, when sending a reminder,
+- [x] Given a contact with 2 children both in debt, when sending a reminder,
       then exactly one reminder exists for that contact (R7 AC 5).
-- [ ] Given a closed period, when the notifications screen opens, then each
+- [x] Given a closed period, when the notifications screen opens, then each
       contact has exactly one generated message containing per-child session
       counts, absences, amounts, nợ cũ, and the family grand total (R5 layer 1).
 

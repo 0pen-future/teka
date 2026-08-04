@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Roster: Contacts, Students, Classes, Enrollments"
-status: pending
+status: completed
 priority: P2
 effort: "2d"
 dependencies: [1]
@@ -24,31 +24,31 @@ merging notifications and debts depends on it.
 
 ## Requirements
 
-- [ ] Contact CRUD: `full_name`, `phone`. Duplicate phone within one teacher is
+- [x] Contact CRUD: `full_name`, `phone`. Duplicate phone within one teacher is
       rejected with a readable message (unique index
       `docs/schema_design.sql:94`).
-- [ ] Contact detail lists that contact's children and links to each.
-- [ ] Student create/edit form exposes exactly: `full_name` (required),
+- [x] Contact detail lists that contact's children and links to each.
+- [x] Student create/edit form exposes exactly: `full_name` (required),
       `display_note` (optional), contact (required, existing or created inline).
       No age, grade, birth date, address, school, or photo field
       (PRD R1 AC 1).
-- [ ] `display_note` is presented as the sibling-disambiguation label with an
+- [x] `display_note` is presented as the sibling-disambiguation label with an
       explanatory hint, since same-name siblings in one class are the known
       mis-tick hazard (PRD §5 edge cases; `docs/schema_design.sql:109`).
-- [ ] Student delete is an **anonymize** confirm flow, not a row delete: the
+- [x] Student delete is an **anonymize** confirm flow, not a row delete: the
       dialog states that personal data is erased and anonymized financial
       records are kept (PRD R1 AC 2; `students.anonymized_at`,
       `docs/schema_design.sql:116`).
-- [ ] Class CRUD: `name`, `start_date`, optional `end_date`,
+- [x] Class CRUD: `name`, `start_date`, optional `end_date`,
       `default_unit_price`, `status`.
-- [ ] Weekly schedule editor per class: weekday, start time, duration,
+- [x] Weekly schedule editor per class: weekday, start time, duration,
       `effective_from` / `effective_to` (`docs/schema_design.sql:145`).
-- [ ] Enrollment: add a student to a class with `started_on` defaulting to
+- [x] Enrollment: add a student to a class with `started_on` defaulting to
       today, showing explicitly that billing starts from the next session
       (PRD R1 AC "billed from the next session onwards").
-- [ ] End an enrollment mid-cycle by setting `ended_on`, with a note that
+- [x] End an enrollment mid-cycle by setting `ended_on`, with a note that
       existing debt is preserved (PRD §5 edge case "nghỉ hẳn giữa chu kỳ").
-- [ ] A student can be enrolled in several classes; the student detail page
+- [x] A student can be enrolled in several classes; the student detail page
       lists all enrollments.
 
 ## Architecture
@@ -298,30 +298,30 @@ row from `modalClass`.
 
 ## Success Criteria
 
-- [ ] The student form renders exactly three inputs; a test asserts the count so
+- [x] The student form renders exactly three inputs; a test asserts the count so
       a future field addition fails CI.
-- [ ] Creating a contact with an already-used phone shows the error on the phone
+- [x] Creating a contact with an already-used phone shows the error on the phone
       field, not as a generic toast.
-- [ ] A contact detail page shows both children of a two-child family.
-- [ ] Deleting a student shows anonymize wording and, after confirming, the
+- [x] A contact detail page shows both children of a two-child family.
+- [x] Deleting a student shows anonymize wording and, after confirming, the
       student disappears from the roster while their invoices remain reachable
       from the collections screens.
-- [ ] Enrolling a student into a class that already has sessions shows the
+- [x] Enrolling a student into a class that already has sessions shows the
       "billed from the next session" note, and the resulting enrollment carries
       the class's default unit price.
-- [ ] Ending an enrollment sets `ended_on` and the student still appears in the
+- [x] Ending an enrollment sets `ended_on` and the student still appears in the
       class history.
-- [ ] A student enrolled in two classes shows both on their detail page.
-- [ ] Two same-name siblings are distinguishable everywhere they are listed,
+- [x] A student enrolled in two classes shows both on their detail page.
+- [x] Two same-name siblings are distinguishable everywhere they are listed,
       through `display_note` rendered as a visible badge (prototype treatment).
-- [ ] The consolidated screen matches the prototype `students` layout: pill
+- [x] The consolidated screen matches the prototype `students` layout: pill
       class tabs with press shadow on active, the 5-column table with
       uppercase 11px headers, sibling/nợ-cũ/giữa-kỳ pills, and the privacy
       footer note — all via DS tokens (no raw hex in `features/roster`).
-- [ ] Create-class and add-student run entirely inside `HvModal` dialogs
+- [x] Create-class and add-student run entirely inside `HvModal` dialogs
       matching `modalClass` / `modalAdd`, including the 7-chip weekday picker
       and the inline new-contact expansion.
-- [ ] typecheck, lint, vitest, and `roster.spec.ts` pass.
+- [x] typecheck, lint, vitest, and `roster.spec.ts` pass.
 
 ## Risk Assessment
 

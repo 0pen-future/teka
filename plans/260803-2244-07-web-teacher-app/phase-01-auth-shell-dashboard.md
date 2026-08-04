@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Phone Auth Rework, App Shell, Dashboard Warnings"
-status: pending
+status: completed
 priority: P2
 effort: "1.5d"
 dependencies: []
@@ -23,29 +23,29 @@ phases 2–4 never invent their own.
 
 ## Requirements
 
-- [ ] Login uses phone + password. Phone is the login identifier
+- [x] Login uses phone + password. Phone is the login identifier
       (`user_accounts.phone`, `docs/schema_design.sql:47`, `VARCHAR(20)`). The
       stored format is still open upstream — see plan open question 5.
-- [ ] Register (if kept — see plan open question 4) collects full name, phone,
+- [x] Register (if kept — see plan open question 4) collects full name, phone,
       password, mapping to `teachers.full_name` (`docs/schema_design.sql:66`)
       and `user_accounts.phone`.
-- [ ] Session restore through the httpOnly refresh cookie keeps working
+- [x] Session restore through the httpOnly refresh cookie keeps working
       unchanged (`apps/web/src/features/auth/components/session-restore.tsx`).
-- [ ] The signed-in user object exposes `full_name` and `phone`; no `email`
+- [x] The signed-in user object exposes `full_name` and `phone`; no `email`
       field remains anywhere in the web app.
-- [ ] Profile data is read from the canonical `GET /api/v1/me`. Nothing in the
+- [x] Profile data is read from the canonical `GET /api/v1/me`. Nothing in the
       web app calls `/auth/me`, which API plan 01 phase 3 deletes
       (`plans/260803-2244-01-api-schema-replacement-and-auth/phase-03-teacher-profile-and-scoping.md:41`).
-- [ ] `apps/web/src/features/users/` is deleted along with its routes, tests, and
+- [x] `apps/web/src/features/users/` is deleted along with its routes, tests, and
       nav entry — the API feature it consumes is removed in the same plan
       (`.../phase-03-teacher-profile-and-scoping.md:32`).
-- [ ] Dashboard shows, above the fold, the count and list of held-but-unconfirmed
+- [x] Dashboard shows, above the fold, the count and list of held-but-unconfirmed
       sessions, each linking to `/sessions/:id/attendance`.
-- [ ] Dashboard shows the current billing period with its status (open/closed)
+- [x] Dashboard shows the current billing period with its status (open/closed)
       and a link into `/billing/:periodId`.
-- [ ] Navigation is usable one-handed: bottom tab bar under `md`, sidebar at
+- [x] Navigation is usable one-handed: bottom tab bar under `md`, sidebar at
       `md` and above.
-- [ ] Money renders as Vietnamese đồng integers with no decimals — amounts are
+- [x] Money renders as Vietnamese đồng integers with no decimals — amounts are
       `BIGINT` đồng server-side (`docs/schema_design.sql:24`).
 
 ## Architecture
@@ -352,30 +352,30 @@ block` "Đăng nhập". Errors in `--coral-600`, 14px.
 
 ## Success Criteria
 
-- [ ] `rg "email" apps/web/src apps/web/e2e` returns no product-code hits.
-- [ ] `rg "features/users|auth/me" apps/web` returns nothing, and
+- [x] `rg "email" apps/web/src apps/web/e2e` returns no product-code hits.
+- [x] `rg "features/users|auth/me" apps/web` returns nothing, and
       `apps/web/src/features/users/` no longer exists.
-- [ ] Logging in with `0912345678` succeeds against an account stored in
+- [x] Logging in with `0912345678` succeeds against an account stored in
       whichever format the API settled on; the only place that decides is
       `normalizePhone`, and its unit test states the chosen format explicitly.
-- [ ] `GET /me` returns the signed-in teacher and the UI renders `full_name`
+- [x] `GET /me` returns the signed-in teacher and the UI renders `full_name`
       plus the local-form phone from it.
-- [ ] Reloading the page keeps the session (existing refresh-cookie behavior
+- [x] Reloading the page keeps the session (existing refresh-cookie behavior
       intact).
-- [ ] At a 375px viewport, `/` shows the pending-attendance alert without
+- [x] At a 375px viewport, `/` shows the pending-attendance alert without
       scrolling and the bottom nav is thumb-reachable.
-- [ ] Each pending session row navigates to that session's attendance screen.
-- [ ] `formatMoney(1500000)` renders `1.500.000 ₫`.
-- [ ] Shell and dashboard match the prototype `home` screen: 236px sidebar with
+- [x] Each pending session row navigates to that session's attendance screen.
+- [x] `formatMoney(1500000)` renders `1.500.000 ₫`.
+- [x] Shell and dashboard match the prototype `home` screen: 236px sidebar with
       mint-50 active nav state and "KỲ HIỆN TẠI" card, coral-100 warning banner
       with per-session danger buttons, stat/class card grids — all colors,
       fonts, radii, and shadows resolved from DS tokens (`rg
       "#[0-9a-fA-F]{3,6}" apps/web/src/features/dashboard apps/web/src/layouts`
       finds nothing).
-- [ ] All three shell tiers render correctly: bottom bar at 375px, 72px icon
+- [x] All three shell tiers render correctly: bottom bar at 375px, 72px icon
       rail with tooltips at 768px, full sidebar at 1280px; no horizontal page
       scroll at any of the three widths (e2e viewport assertions).
-- [ ] typecheck, lint, and the full vitest suite pass.
+- [x] typecheck, lint, and the full vitest suite pass.
 
 ## Risk Assessment
 

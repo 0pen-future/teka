@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Billing Close (Chốt Sổ), Collections Board, Notifications"
-status: pending
+status: completed
 priority: P2
 effort: "3d"
 dependencies: [1, 2, 3]
@@ -31,49 +31,49 @@ Three screens, one continuous flow:
 
 **Review and close (PRD R3, R4)**
 
-- [ ] One screen shows every student × session count × amount for the period
+- [x] One screen shows every student × session count × amount for the period
       (R4).
-- [ ] Each row separates nợ cũ (opening balance) from this period's charge
+- [x] Each row separates nợ cũ (opening balance) from this period's charge
       (R3 AC 2).
-- [ ] A student in two classes shows one row with two class lines that sum into
+- [x] A student in two classes shows one row with two class lines that sum into
       a single invoice (R1 AC 2; `invoice_lines`, `docs/schema_design.sql:318`).
-- [ ] Per-line manual adjustment with a **required** reason (R4;
+- [x] Per-line manual adjustment with a **required** reason (R4;
       `invoice_adjustments.reason` is `NOT NULL` with a non-empty CHECK,
       `docs/schema_design.sql:343,351`).
-- [ ] Close is blocked while any session in the period is held but unconfirmed;
+- [x] Close is blocked while any session in the period is held but unconfirmed;
       each offending session is listed and links to its attendance screen
       (R4 AC 1).
-- [ ] Close asks for one confirmation showing student count and grand total,
+- [x] Close asks for one confirmation showing student count and grand total,
       then locks the period and issues invoices.
-- [ ] A class with no sessions in the period produces no invoice and appears as
+- [x] A class with no sessions in the period produces no invoice and appears as
       such rather than as a zero row (PRD §5 edge case).
 
 **Collections (PRD R7)**
 
-- [ ] Two toggleable views over the same data; **by-contact is the default**.
-- [ ] By-contact: one row per parent merging all children, with total due, total
+- [x] Two toggleable views over the same data; **by-contact is the default**.
+- [x] By-contact: one row per parent merging all children, with total due, total
       paid, and outstanding (`v_contact_balance`, `docs/schema_design.sql:459`).
-- [ ] By-class: students grouped by class with chưa đóng / đã đóng / đóng thiếu
+- [x] By-class: students grouped by class with chưa đóng / đã đóng / đóng thiếu
       status.
-- [ ] Unpaid filter reachable in one interaction (R7 AC 1).
-- [ ] Mark-paid happens at contact level; the allocation across children is
+- [x] Unpaid filter reachable in one interaction (R7 AC 1).
+- [x] Mark-paid happens at contact level; the allocation across children is
       shown before confirming and can be overridden manually (R7; Q8;
       `payment_allocations.allocated_by`, `docs/schema_design.sql:392`).
-- [ ] Header totals: đã thu / còn phải thu.
-- [ ] A fully-paid contact shows both children as paid in the by-class view
+- [x] Header totals: đã thu / còn phải thu.
+- [x] A fully-paid contact shows both children as paid in the by-class view
       (R7 AC 3); an underpaying contact shows where the shortfall landed
       (R7 AC 4).
 
 **Notifications (PRD R5 layer 1, R6)**
 
-- [ ] One message per contact per period — never one per child (R5 AC 1).
-- [ ] Message body contains, per child: name, sessions attended, sessions
+- [x] One message per contact per period — never one per child (R5 AC 1).
+- [x] Message body contains, per child: name, sessions attended, sessions
       missed, amount; then nợ cũ and the family grand total; then the statement
       link (R5 layer 1, R5 AC 3).
-- [ ] Copy button per row and a bulk copy for all unsent messages.
-- [ ] Sent status is tracked per contact and survives reload
+- [x] Copy button per row and a bulk copy for all unsent messages.
+- [x] Sent status is tracked per contact and survives reload
       (`notifications.status`, `docs/schema_design.sql:440`).
-- [ ] A reminder is a single message per family even when several children owe
+- [x] A reminder is a single message per family even when several children owe
       (R7 AC 5).
 
 ## Architecture
@@ -394,34 +394,34 @@ scroll at `lg+`; message cards 1-col below `lg`, 2-col at `lg+`; every
 
 ## Success Criteria
 
-- [ ] The review screen shows every student with session count, unit price,
+- [x] The review screen shows every student with session count, unit price,
       amount, nợ cũ, and total, on one screen at `sm+` and as cards below it.
-- [ ] A student in two classes appears as one row with two class lines and one
+- [x] A student in two classes appears as one row with two class lines and one
       total.
-- [ ] Adjusting a line requires a reason; the new total is visible before
+- [x] Adjusting a line requires a reason; the new total is visible before
       confirming.
-- [ ] Close is blocked while any past session is unattended, and each blocking
+- [x] Close is blocked while any past session is unattended, and each blocking
       session links to its attendance screen.
-- [ ] Closing shows one confirmation with the student count and grand total,
+- [x] Closing shows one confirmation with the student count and grand total,
       then locks the period.
-- [ ] The collections board opens in the by-contact view without a URL
+- [x] The collections board opens in the by-contact view without a URL
       parameter.
-- [ ] The unpaid group is reachable in one interaction.
-- [ ] Marking a family paid persists across reload and reduces outstanding in
+- [x] The unpaid group is reachable in one interaction.
+- [x] Marking a family paid persists across reload and reduces outstanding in
       both views.
-- [ ] Under-payment shows the per-child allocation in the by-class view.
-- [ ] A family with two children receives exactly one message and one reminder.
-- [ ] Copying a message works on a phone browser and does not silently mark it
+- [x] Under-payment shows the per-child allocation in the by-class view.
+- [x] A family with two children receives exactly one message and one reminder.
+- [x] Copying a message works on a phone browser and does not silently mark it
       sent.
-- [ ] All three screens match their prototype recipes: mint-50 class group
+- [x] All three screens match their prototype recipes: mint-50 class group
       headers and the coral blocked panel on chốt sổ; segmented toggle, ink-900
       filter chips, and the StatusPill trio on thu tiền; sky-tinted message
       cards with initial avatars on gửi thông báo — DS tokens throughout (no
       raw hex in `features/billing` or `features/collections`).
-- [ ] The review screen renders correctly at all three tiers — cards at 375px,
+- [x] The review screen renders correctly at all three tiers — cards at 375px,
       sticky-column scrolling table at 768px, full no-scroll table at 1280px —
       with no horizontal page scroll (e2e viewport assertions).
-- [ ] typecheck, lint, vitest, and both e2e specs pass.
+- [x] typecheck, lint, vitest, and both e2e specs pass.
 
 ## Risk Assessment
 
