@@ -35,9 +35,10 @@ Each service receives only its own variables — there is no blanket `env_file`.
 
 Inside the compose network, services address each other by name
 (`postgres:5432`, `api:8080`). The browser talks **same-origin** to the web
-dev server: compose sets `VITE_API_URL=/api/v1` and Vite proxies `/api` to
-`http://api:8080`. That sidesteps CORS and refresh-cookie SameSite issues in
-dev. The API's published port `localhost:8080` remains available for curl and
+dev server: compose sets `VITE_API_URL=/api/v1` and Vite proxies `/api` — plus
+`/public`, the root-mounted parent-statement routes that live outside
+`/api/v1` — to `http://api:8080`. That sidesteps CORS and refresh-cookie
+SameSite issues in dev. The API's published port `localhost:8080` remains available for curl and
 host-mode tooling; host-mode web dev (`make web-dev`) keeps using the absolute
 URL from `apps/web/.env.development`.
 

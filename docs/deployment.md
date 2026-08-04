@@ -41,10 +41,11 @@ make build-image-web VITE_API_URL=https://api.example.com/api/v1
 ### Web image specifics
 
 - `VITE_API_URL` is a **build argument**, baked into the bundle. The default
-  `/api/v1` assumes same-origin serving (a reverse proxy routing `/api/*` to
-  the API and everything else to the web container). For a split-origin
-  topology, rebuild with the real API origin and add that web origin to the
-  API's `API_CORS_ORIGINS`.
+  `/api/v1` assumes same-origin serving (a reverse proxy routing `/api/*` —
+  and `/public/*`, the root-mounted parent-statement routes that live outside
+  `/api/v1` — to the API and everything else to the web container). For a
+  split-origin topology, rebuild with the real API origin and add that web
+  origin to the API's `API_CORS_ORIGINS`.
 - nginx serves the SPA with history-API fallback (deep links resolve to
   `index.html`), immutable caching for hashed `/assets/*`, `no-cache` for
   `index.html`, and baseline security headers.
@@ -74,7 +75,7 @@ operation; `migrate down` exists for local development and emergencies.
    client ── https ───► │ reverse proxy│
                         │  / TLS edge  │
                         └──────┬───────┘
-                    /api/* ────┤──── everything else
+         /api/*, /public/* ────┤──── everything else
                         ┌──────▼───────┐      ┌──────────────┐
                         │  api :8080   │      │  web :8080   │
                         │ (distroless) │      │   (nginx)    │
