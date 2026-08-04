@@ -38,7 +38,12 @@ export default defineConfig({
     // the documented fallback when HMR stops firing in the container.
     watch: usePolling ? { usePolling: true } : undefined,
     // No path rewrite: the API serves /api/v1/... and the refresh cookie is
-    // scoped to /api/v1/auth, so the prefix must survive the hop.
-    proxy: proxyTarget ? { "/api": { target: proxyTarget } } : undefined,
+    // scoped to /api/v1/auth, so the prefix must survive the hop. /public is
+    // the unauthenticated parent-statement group, mounted at the API's root
+    // (outside /api/v1) — it must be proxied too or the SPA fallback would
+    // answer those JSON requests with index.html.
+    proxy: proxyTarget
+      ? { "/api": { target: proxyTarget }, "/public": { target: proxyTarget } }
+      : undefined,
   },
 });

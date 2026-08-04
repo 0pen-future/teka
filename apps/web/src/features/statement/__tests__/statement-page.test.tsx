@@ -3,7 +3,7 @@ import { http, HttpResponse } from "msw";
 import { describe, expect, it } from "vitest";
 
 import { formatMoney } from "@/lib/utils";
-import { API_URL, fail } from "@/test/msw/handlers";
+import { API_URL, fail, PUBLIC_API_URL } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import { renderWithProviders } from "@/test/utils";
 
@@ -40,7 +40,7 @@ describe("StatementPage", () => {
 
   it("renders byte-identical error text for a server failure as for an unknown token", async () => {
     server.use(
-      http.get(`${API_URL}/public/statements/:token`, () =>
+      http.get(`${PUBLIC_API_URL}/public/statements/:token`, () =>
         HttpResponse.json(fail("INTERNAL", "boom"), { status: 500 }),
       ),
     );

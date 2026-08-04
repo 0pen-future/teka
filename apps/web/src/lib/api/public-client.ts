@@ -18,8 +18,18 @@ import { toApiError } from "./errors";
  * has one consistent shape to branch on — that normalization is auth-agnostic
  * and safe to reuse as-is.
  */
+/**
+ * The public statement routes are deliberately mounted at the server root
+ * (`/public/statements`, see `apps/api/internal/features/statements/routes.go`),
+ * outside the versioned `/api/v1` group — so the base URL is `VITE_API_URL`
+ * with its `/api/v1` suffix stripped: a full origin in host-mode dev
+ * (`http://localhost:8080`) or the empty string under the compose/Vite proxy
+ * (same-origin, proxied via the `/public` rule in `vite.config.ts`).
+ */
+const publicBaseURL = env.VITE_API_URL.replace(/\/api\/v1\/?$/, "");
+
 export const publicApiClient = axios.create({
-  baseURL: env.VITE_API_URL,
+  baseURL: publicBaseURL,
   withCredentials: false,
   timeout: 10_000,
 });

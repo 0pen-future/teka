@@ -6,6 +6,13 @@ import type { Meta } from "@/lib/api/envelope";
 /** Must match vitest.config.ts test.env.VITE_API_URL. */
 export const API_URL = "http://localhost:8080/api/v1";
 
+/**
+ * Origin for the public statement routes, which the real API mounts at the
+ * server root (`/public/statements`) — outside `/api/v1`. Mirrors the
+ * `publicApiClient` base-URL derivation in `@/lib/api/public-client.ts`.
+ */
+export const PUBLIC_API_URL = API_URL.replace(/\/api\/v1\/?$/, "");
+
 // --- Envelope builders (mirror the Go API's response shape exactly) ---
 
 export function ok<T>(data: T, meta?: Meta) {
@@ -342,7 +349,7 @@ export const handlers = [
   // Every failure mode (unknown, malformed, revoked, expired, already-paid,
   // soft-deleted) collapses to a plain 404 — the real API has no other error
   // code for this endpoint.
-  http.get(`${API_URL}/public/statements/:token`, ({ params }) => {
+  http.get(`${PUBLIC_API_URL}/public/statements/:token`, ({ params }) => {
     const fixture = publicStatementFixturesByToken[params.token as string];
     if (!fixture) {
       return HttpResponse.json(fail("NOT_FOUND", "statement not found"), { status: 404 });

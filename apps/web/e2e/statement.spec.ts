@@ -3,8 +3,10 @@ import { expect, test, type Page } from "@playwright/test";
 
 // Dev-only credentials created by the API seeder (`apps/api` seed command).
 // The seeded roster gives "Chị Hoa" two children ("Bé An", "Bé Bình") and
-// "Chị Mai" one ("Bé Dung") — real multi-child and single-child families to
-// exercise the public statement page against.
+// "Chị Mai" two ("Bé Dung", "Bé Em"). These specs target Chị Mai throughout:
+// the collections spec earlier in the suite pays Chị Hoa's invoices in full,
+// and a fully-paid family's statement token deliberately resolves to the
+// neutral 404 — Chị Mai's family stays unpaid, so her link keeps rendering.
 const TEACHER_PHONE = "0901000001";
 const TEACHER_PASSWORD = "lan-password";
 
@@ -49,7 +51,9 @@ async function collectStatementUrls(page: Page): Promise<Record<string, string>>
     if (!match) {
       continue;
     }
-    const contactName = text.split("\n")[0]?.trim() ?? "";
+    // The card's first text line is the avatar initial, not the name — read
+    // the contact name out of the message template's greeting instead.
+    const contactName = /Chào anh\/chị (.+?),/.exec(text)?.[1]?.trim() ?? "";
     urlsByContact[contactName] = match[0].replace(/[.,;]+$/, "");
   }
   return urlsByContact;
@@ -61,8 +65,10 @@ test("a valid token renders the family total, and an invalid token renders the n
 }) => {
   await login(page);
   const urls = await collectStatementUrls(page);
-  const [, statementUrl] = Object.entries(urls)[0] ?? [];
-  test.skip(!statementUrl, "no statement URL could be extracted from the seeded roster");
+  // A missing URL is a data regression (seed or billing flow broke), not an
+  // environment limitation — fail loudly instead of silently skipping.
+  const statementUrl = urls["Chị Mai"];
+  expect(statementUrl, "Chị Mai's statement URL missing from generated notifications").toBeTruthy();
 
   // A fresh, cookie-less context stands in for a parent who never logged in.
   const parentPage = await context
@@ -87,24 +93,24 @@ test("a valid token renders the family total, and an invalid token renders the n
 test("a two-child family's statement shows both children's names", async ({ page, context }) => {
   await login(page);
   const urls = await collectStatementUrls(page);
-  const statementUrl = urls["Chị Hoa"];
-  test.skip(!statementUrl, "Chị Hoa's statement URL was not found for the seeded roster");
+  const statementUrl = urls["Chị Mai"];
+  expect(statementUrl, "Chị Mai's statement URL missing from generated notifications").toBeTruthy();
 
   const parentPage = await context
     .browser()!
     .newContext()
     .then((c) => c.newPage());
   await parentPage.goto(statementUrl);
-  await expect(parentPage.getByText("Bé An")).toBeVisible();
-  await expect(parentPage.getByText("Bé Bình")).toBeVisible();
+  await expect(parentPage.getByText("Bé Dung")).toBeVisible();
+  await expect(parentPage.getByText("Bé Em")).toBeVisible();
   await parentPage.close();
 });
 
 test("nothing overflows horizontally at 320px width", async ({ page, context }) => {
   await login(page);
   const urls = await collectStatementUrls(page);
-  const [, statementUrl] = Object.entries(urls)[0] ?? [];
-  test.skip(!statementUrl, "no statement URL could be extracted from the seeded roster");
+  const statementUrl = urls["Chị Mai"];
+  expect(statementUrl, "Chị Mai's statement URL missing from generated notifications").toBeTruthy();
 
   const parentPage = await context
     .browser()!

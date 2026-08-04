@@ -70,9 +70,12 @@ test("roster flow: contact, two students, a class, enroll both, end one", async 
   await page.getByRole("button", { name: "Ghi danh" }).click();
   await expect(page.getByText(/được tính từ buổi học tiếp theo/)).toBeVisible();
 
-  const studentOneRow = page.getByText(studentOneName).locator("..");
+  // The enrollment row is the card two levels above the name: the name <p>
+  // sits inside a text-column <div>, and the row's action button is that
+  // div's sibling — one `..` would stop at the text column and miss it.
+  const studentOneRow = page.getByText(studentOneName).locator("xpath=../..");
   await expect(studentOneRow.getByRole("button", { name: "Kết thúc ghi danh" })).toBeVisible();
-  const studentTwoRow = page.getByText(studentTwoName).locator("..");
+  const studentTwoRow = page.getByText(studentTwoName).locator("xpath=../..");
   await expect(studentTwoRow.getByRole("button", { name: "Kết thúc ghi danh" })).toBeVisible();
 
   // 5. End one enrollment — existing debt (if any) must be preserved, not written off.

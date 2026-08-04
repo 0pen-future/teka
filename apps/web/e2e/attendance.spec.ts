@@ -65,13 +65,30 @@ test("marks absentees and confirms a pending session in one touch each, clearing
 test("cancelling a session takes a reason and bills nobody", async ({ page }) => {
   await login(page);
 
-  await page.getByRole("link", { name: "Điểm danh ngay" }).first().click();
+  // Cancel an upcoming session rather than a pending one: the pending feed is
+  // shared suite state the previous test already drained, while the weekly
+  // schedule always has future sessions. Extending the list's end date two
+  // weeks out guarantees at least one "Sắp diễn ra" row regardless of which
+  // weekday the suite runs on.
+  await page.goto("/sessions");
+  const to = new Date();
+  to.setDate(to.getDate() + 14);
+  await page.getByLabel("Đến").fill(to.toISOString().slice(0, 10));
+
+  const upcoming = page.getByRole("link").filter({ hasText: "Sắp diễn ra" }).first();
+  await expect(upcoming).toBeVisible();
+  await upcoming.click();
   await expect(page).toHaveURL(/\/sessions\/.+\/attendance$/);
+  const sessionUrl = page.url();
 
   await page.getByRole("button", { name: "Huỷ buổi học" }).click();
   await page.getByLabel("Lý do huỷ").fill("Nghỉ lễ Quốc khánh");
   await page.getByRole("button", { name: "Xác nhận huỷ" }).click();
 
+  // Cancelling navigates back to the session list; the cancelled state lives
+  // on the session page itself, so revisit the saved URL to assert it.
+  await expect(page).toHaveURL(/\/sessions$/);
+  await page.goto(sessionUrl);
   await expect(page.getByText("Buổi học đã huỷ")).toBeVisible();
   await expect(page.getByText("Nghỉ lễ Quốc khánh")).toBeVisible();
   await expect(page.getByText("Không tính tiền cho học sinh nào.")).toBeVisible();
