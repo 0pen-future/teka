@@ -1,7 +1,7 @@
 ---
 title: "05 API Payments and Collections"
 description: "Contact-level payment recording, automatic allocation across a family's invoices, reversal, and the two-axis collection board (by contact, by class)."
-status: pending
+status: completed
 priority: P1
 effort: "16h"
 branch: HEAD
@@ -59,9 +59,9 @@ Non-goals:
 
 | # | Phase | Effort | Depends on | Status |
 |---|-------|--------|-----------|--------|
-| 1 | [Payment recording and auto-allocation](./phase-01-payment-recording-and-auto-allocation.md) | 6h | — | Pending |
-| 2 | [Reallocation, reversal, and invoice status](./phase-02-reallocation-and-reversal.md) | 5h | 1 | Pending |
-| 3 | [Collection board views](./phase-03-collection-board.md) | 5h | 2 | Pending |
+| 1 | [Payment recording and auto-allocation](./phase-01-payment-recording-and-auto-allocation.md) | 6h | — | Completed |
+| 2 | [Reallocation, reversal, and invoice status](./phase-02-reallocation-and-reversal.md) | 5h | 1 | Completed |
+| 3 | [Collection board views](./phase-03-collection-board.md) | 5h | 2 | Completed |
 
 ## Key decisions
 
@@ -101,22 +101,22 @@ Non-goals:
 
 From PRD R7.
 
-- [ ] Recording a payment at contact level allocates across that contact's
+- [x] Recording a payment at contact level allocates across that contact's
       children's invoices without further input.
-- [ ] A parent with two children who pays in full: both children show "đã đóng"
+- [x] A parent with two children who pays in full: both children show "đã đóng"
       (paid) in the by-class view.
-- [ ] A parent with two children who underpays: the by-class view shows which
+- [x] A parent with two children who underpays: the by-class view shows which
       child is short and by how much.
-- [ ] Marking a payment persists — reopening the board later shows the same
+- [x] Marking a payment persists — reopening the board later shows the same
       state with the debt reduced.
-- [ ] With 150 students, the unpaid group can be filtered in one request.
-- [ ] The by-contact view is the default: one row per parent, all children
+- [x] With 150 students, the unpaid group can be filtered in one request.
+- [x] The by-contact view is the default: one row per parent, all children
       merged, with total due / paid / outstanding.
-- [ ] Period totals show collected and outstanding.
-- [ ] A reversed payment restores the invoices to their prior status and
+- [x] Period totals show collected and outstanding.
+- [x] A reversed payment restores the invoices to their prior status and
       `paid_amount`, and both the original and the reversal remain in the
       ledger.
-- [ ] Allocation never exceeds an invoice's outstanding, and `paid_amount` never
+- [x] Allocation never exceeds an invoice's outstanding, and `paid_amount` never
       goes negative (the CHECK at `docs/schema_design.sql:305`).
 
 ## Open questions

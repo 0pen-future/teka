@@ -528,3 +528,150 @@ tích luỹ nên một lần sửa sau tự chữa; nếu không có lần sửa
 công. Cả ba là quyết định sản phẩm (auto-credit/charge hay giữ đường sửa thủ
 công) vượt phạm vi plan 04; ghi lại để chủ động quyết ở plan 05/06, không chặn
 giao hàng plan 04.
+
+## 2026-08-04 — Plan 05, Phase 1: template layout trỏ `internal/features/users/` đã bị xoá; dùng `internal/features/contacts/` thay thế
+
+Phase file (`phase-01-payment-recording-and-auto-allocation.md`) tham chiếu
+`internal/features/users/` làm khuôn mẫu bố cục file (model/repository/
+service/dto/handler/routes/errors + test). Package đó đã bị `git rm` từ plan
+01 phase 2 (xem entry phía trên) khi `auth` chuyển sang phone-based; không còn
+tồn tại để soi theo.
+
+**Quyết định:** dùng `internal/features/contacts/` làm khuôn mẫu — cùng hình
+dạng file, cùng convention xử lý lỗi (`apperror`), pagination, tenancy qua
+`authctx.TeacherID`, và là package feature gần nhất về độ phức tạp (CRUD +
+soft delete) còn tồn tại trong repo. Không đổi kết quả cuối, chỉ đổi nguồn
+tham chiếu bố cục.
+
+## 2026-08-04 — Plan 05, Phase 1: `ContactExists` không lọc `deleted_at`
+
+Phase file không nói rõ payments write path có nên chặn ghi nhận thanh toán
+cho một contact đã soft-delete hay không.
+
+**Quyết định:** áp dụng đúng ngoại lệ D4 đã ghi ở plan 04 ("nợ của contact đã
+xoá mềm vẫn phải thu được") sang chiều ngược lại — `ContactExists` (repository
+mới của payments) không lọc `deleted_at`, nên `Record` vẫn nhận thanh toán cho
+một contact đã xoá mềm miễn còn thuộc đúng giáo viên. Chặn ghi nhận thanh toán
+chỉ vì contact bị xoá mềm sẽ mâu thuẫn trực tiếp với lý do D4 tồn tại: xoá mềm
+là dọn danh sách hiển thị, không phải xoá nợ.
+
+## 2026-08-04 — Plan 05, Phase 1: thêm hai method repository (`ListAllocations`, `ListAllocationsForPayments`) ngoài danh sách liệt kê ở bước 4
+
+Bước 4 của phase file liệt kê interface `Repository` với 7 method
+(`CreatePayment`, `GetPayment`, `ListPayments`, `CandidateInvoices`,
+`InsertAllocations`, `RecalcInvoicePaid`, `ContactExists`). Nhưng bước 6 (hình
+dạng response) đòi `AllocationResponse` phải mang `invoice_id`, `student_id`,
+`student_name`, `period_id`, `total_due`, `paid_amount` — dữ liệu chỉ có được
+qua join `payment_allocations` → `invoices`, không method nào trong 7 cái trên
+trả được.
+
+**Quyết định:** thêm `ListAllocations` (một payment) và
+`ListAllocationsForPayments` (nhiều payment cùng lúc, dùng ở `List` để tránh
+N+1) — cùng một `allocationRowSelect` SQL dùng chung. Đây là mở rộng cần thiết
+để thoả mãn hợp đồng response mà bước 4 không liệt kê, không phải method thừa.
+
+## 2026-08-04 — Plan 05, Phase 1: `queryDate` — helper query param ngày mới, chưa có tiền lệ ở feature khác
+
+`GET /payments` cần filter khoảng ngày `received_from`/`received_to` (bước 6).
+Các handler hiện có (`queryUUID` ở enrollments/attendance) chỉ có tiền lệ parse
+uuid optional; chưa có helper parse ngày optional nào để tái dùng.
+
+**Quyết định:** thêm `queryDate(c, name) (*time.Time, bool)` trong
+`payments/handler.go`, cùng khuôn dạng lỗi với `queryUUID` (absent = unset,
+malformed = 422 nêu tên field), dùng `dateLayout` ("2006-01-02") đã có sẵn ở
+`dto.go`. Cục bộ trong package payments; chưa nâng lên shared vì mới có một
+consumer.
+
+## 2026-08-04 — Plan 05, Phase 2: sửa `recalcInvoicePaidQuery` (phase file nói giữ nguyên)
+
+Phase file ghi rõ `recalcInvoicePaidQuery` ở `repository.go` giữ nguyên từ
+phase 1, chỉ tái dùng. Nhưng test tích hợp
+`TestReallocateRebalancesATwoChildSplitOntoOneInvoice` phát hiện câu SQL này
+có lỗi tiềm ẩn: derived table `x` chỉ có hàng khi hoá đơn còn ít nhất một dòng
+allocation; mệnh đề `UPDATE invoices i ... FROM (subquery) x WHERE i.id = ?
+AND i.teacher_id = ?` không có điều kiện join nào giữa `i` và `x`, nên khi
+Reallocate xoá sạch allocation của một hoá đơn (đưa nó về 0), `x` trả về 0
+hàng, phép cross-join giữa `i` (1 hàng) và `x` (0 hàng) ra 0 hàng, và UPDATE
+âm thầm không khớp hàng nào — hoá đơn giữ nguyên `status`/`paid_amount` cũ
+(vd: vẫn "paid" dù đã bị rút hết tiền). Lỗi này nằm im ở phase 1 vì `Record`
+chỉ insert allocation, chưa bao giờ gọi `RecalcInvoicePaid` trên một hoá đơn
+có 0 dòng allocation; `DeleteAllocations` (Reallocate, phase 2) là đường đi
+đầu tiên tạo ra hoàn cảnh đó.
+
+**Quyết định:** sửa câu SQL — chốt một hàng neo `target` cho đúng
+`invoiceID` trước, rồi `LEFT JOIN` bảng tổng hợp allocation vào `target` thay
+vì để `i` cross-join thẳng với subquery. `COALESCE(x.paid, 0)` giờ luôn tính
+được kể cả khi không còn allocation nào, và `UPDATE` luôn khớp đúng một hàng
+hoá đơn. Thứ tự 3 tham số gọi `Exec` (`invoiceID, invoiceID, teacherID`) giữ
+nguyên, không đổi call site nào khác. Đây là sửa lỗi thật trong file thuộc
+quyền sở hữu của phase 2 (`repository.go`), không phải viết lại thiết kế.
+
+## 2026-08-04 — Plan 05, Phase 3: kịch bản test collection board — `status=unpaid` không thể trả về một contact vừa "underpaid"
+
+Phase file (`phase-03-collection-board.md`, bước 7) mô tả contact B "đóng
+thiếu nên một con `partially_paid`" rồi liệt kê tiêu chí "`status=unpaid` trả
+về đúng B, C và D". Nhưng công thức `payment_status` cũng do chính phase file
+đặt ra (bước 4): `total_paid == 0` mới là "unpaid", còn lại là "partial" khi
+còn nợ. Một contact có bất kỳ con nào `partially_paid` — tức hoá đơn đó có
+`paid_amount > 0` — luôn kéo `total_paid` cấp contact lên khác 0, nên B không
+bao giờ tính ra "unpaid" theo đúng công thức đã nêu. Đây là mâu thuẫn nội tại
+của phase file, không phải một cách diễn giải khác đi tới cùng kết quả — đã
+thử mọi cách dựng số liệu cho B (một con trả đủ/một con thiếu, hay cả hai con
+đều thiếu một phần) và `total_paid` cấp contact luôn khác 0 khi có bất kỳ
+khoản thanh toán nào được ghi nhận.
+
+**Quyết định:** triển khai `payment_status` đúng y nguyên công thức ở bước 4
+(nguồn tham chiếu duy nhất, cũng là công thức tái dùng cho lọc theo trạng thái
+lẫn hiển thị theo lớp — nơi B2 phải hiện `partially_paid` để giáo viên biết
+đúng đứa trẻ nào còn thiếu, tiêu chí kiến trúc quan trọng hơn). Test tích hợp
+(`integration_test.go`,
+`TestContactViewMergesFamiliesAndClassViewShowsPerChildStatus`) dựng đúng kịch
+bản tường thuật ở bước 7 (B đóng 150.000/200.000, B1 đủ, B2 thiếu 50.000) và
+thay hai tiêu chí lọc bằng cặp đúng với công thức: `status=partial` trả về
+đúng B, `status=unpaid` trả về đúng C và D. Không đổi công thức, không đổi kịch
+bản tường thuật — chỉ sửa lại đúng vế lọc theo trạng thái cho khớp công thức
+mà chính phase file đã chốt.
+
+## 2026-08-04 — Plan 05, review chốt: đồng nhất thứ tự khoá chống deadlock ở đường sửa thanh toán + bảo toàn draft khi recompute
+
+Rà soát tiền tệ/tenancy/đồng thời trên `payments` + `collections` xác nhận lõi
+đúng (không lỗi làm sai/mất tiền), và nêu một khiếm khuyết đồng thời thật cùng
+vài điểm nhỏ.
+
+**MEDIUM (đã sửa) — deadlock giữa các thao tác sửa trên cùng một contact.**
+`Reallocate` chỉ khoá `FOR UPDATE` các hoá đơn đích *mới*, nhưng lại recompute
+cả hoá đơn *bị rời khỏi split* (union old ∪ new); `Reverse` không khoá hoá đơn
+nào trước recompute; và vòng recompute lặp trên Go map (thứ tự ngẫu nhiên).
+Cộng với `candidateInvoicesQuery` khoá theo `period_start` còn `InvoicesByIDs`
+theo `id`, hai giao dịch đồng thời có thể giành cùng hai hoá đơn theo thứ tự
+ngược nhau → deadlock (Postgres rollback một giao dịch, trả 500). Không sai
+ledger (rollback sạch) nhưng vi phạm bất biến "lock ordering deadlock-free"
+(cùng lớp lỗi đã xử lý ở H1 plan 04).
+
+**Quyết định:** đồng nhất mọi đường ghi theo phạm vi contact về *một* trật tự
+khoá duy nhất là `invoice_id`:
+- `Reallocate` khoá toàn bộ union old ∪ new qua `InvoicesByIDs` trước khi ghi.
+- `Reverse` khoá các hoá đơn bị ảnh hưởng (theo allocation gốc) trước recompute.
+- Recompute chạy qua helper `recalcTouched` lặp theo id tăng dần (thay cho map).
+- Đổi `ORDER BY` của `candidateInvoicesQuery` từ `(period_start, earliest_class_start NULLS LAST, id)` sang `id`. An toàn cho D8 vì `Allocate` tự sort lại theo comparator D8 trước khi phân bổ; `ORDER BY` ở query chỉ chi phối thứ tự *khoá*, không chi phối kết quả phân bổ. Đây là sai lệch có chủ đích so với thứ tự khoá mô tả ở phase-01 (đổi để chống deadlock, không đổi hành vi phân bổ).
+- Test hồi quy `TestConcurrentReallocationsOnSameContactDoNotDeadlock`: hai reallocation đồng thời cùng đụng hai hoá đơn, khẳng định không call nào lỗi internal/deadlock và ledger vẫn cân, chạy xanh dưới `-race`.
+
+**LOW-1 (đã sửa) — recompute chỉ bảo toàn `void`, chưa bảo toàn `draft`.**
+`recalcInvoicePaidQuery` chỉ có `WHEN i.status = 'void'`. Hiện an toàn (draft
+không bao giờ tới được recompute), nhưng bất biến ghi rõ "void/draft không bị
+recompute chỉnh". Sửa thành `WHEN i.status IN ('void','draft')` để chặn bẫy
+nếu về sau có caller truyền id draft.
+
+**LOW-2 (quyết định V1) — dòng đảo (reversal) không chép `reference_code`.**
+Counter-entry của một reversal không mang lại mã tham chiếu chứng từ gốc. Không
+sai ledger (reference chỉ là ghi chú đối soát). Giữ nguyên ở V1: reversal là
+một *chứng từ mới* độc lập, và mã tham chiếu gốc vẫn tra được trên payment gốc
+(không bị xoá). Xem lại nếu đối soát ngân hàng cần bắc cầu mã này.
+
+**LOW-3 (quyết định V1) — `unallocated_credit` mang tính global theo contact.**
+Summary cộng `payment.amount − Σ allocations` cho payment sống của contact có
+hoá đơn trong kỳ; tín dụng chưa phân bổ vốn không thuộc kỳ nào nên cùng một
+khoản credit hiện ở summary của mọi kỳ mà contact có hoá đơn. Không âm, không
+sai từng con số. Giữ nguyên ở V1 như một "cửa sổ hiển thị" credit tồn (OQ-2);
+gắn credit vào một kỳ cụ thể là quyết định sản phẩm, để lại cho khi có màn hình
+đối soát credit.

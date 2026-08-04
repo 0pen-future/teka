@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Payment Recording and Auto-Allocation"
-status: pending
+status: completed
 priority: P1
 effort: "6h"
 dependencies: []
@@ -260,18 +260,18 @@ Delete: none. No migration files.
 
 ## Success Criteria
 
-- [ ] `POST /api/v1/payments` records the payment and allocates in one
+- [x] `POST /api/v1/payments` records the payment and allocates in one
       transaction; a forced failure after insert leaves zero rows.
-- [ ] Allocation follows D8: opening balance across all invoices before any
+- [x] Allocation follows D8: opening balance across all invoices before any
       current charge, ties by earlier class start date.
-- [ ] `Σ allocations + unallocated == payment.amount` for every recorded payment.
-- [ ] No allocation exceeds its invoice's outstanding.
-- [ ] `invoices.status` moves `issued` → `partially_paid` → `paid` correctly and
+- [x] `Σ allocations + unallocated == payment.amount` for every recorded payment.
+- [x] No allocation exceeds its invoice's outstanding.
+- [x] `invoices.status` moves `issued` → `partially_paid` → `paid` correctly and
       never leaves `void` or `draft`.
-- [ ] `paid_amount` is recomputed, never incremented (verified by running the
+- [x] `paid_amount` is recomputed, never incremented (verified by running the
       recompute twice and getting the same value).
-- [ ] `Allocate` unit tests cover all eleven cases in step 3.
-- [ ] Every read response containing a payment also returns the per-invoice
+- [x] `Allocate` unit tests cover all eleven cases in step 3.
+- [x] Every read response containing a payment also returns the per-invoice
       allocation breakdown with post-allocation `outstanding`, so no client ever
       needs to reimplement the D8 rule.
 

@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Reallocation, Reversal, and Invoice Status"
-status: pending
+status: completed
 priority: P1
 effort: "5h"
 dependencies: [1]
@@ -177,18 +177,18 @@ Delete: none. No migration files.
 
 ## Success Criteria
 
-- [ ] R7: a reversed payment restores every affected invoice to its exact prior
+- [x] R7: a reversed payment restores every affected invoice to its exact prior
       `paid_amount` and `status`.
-- [ ] Both the original and the reversal remain queryable; no `payments` row is
+- [x] Both the original and the reversal remain queryable; no `payments` row is
       ever deleted.
-- [ ] Manual reallocation writes `allocated_by='manual'` and recomputes the
+- [x] Manual reallocation writes `allocated_by='manual'` and recomputes the
       union of old and new invoices.
-- [ ] Reallocation cannot move money to another contact's invoice, cannot exceed
+- [x] Reallocation cannot move money to another contact's invoice, cannot exceed
       the payment, and cannot push an invoice past `total_due`.
-- [ ] `paid_amount >= 0` holds after every operation, including double
+- [x] `paid_amount >= 0` holds after every operation, including double
       reversal attempts.
-- [ ] The ledger invariant in step 8 holds after every integration scenario.
-- [ ] Reversing a payment then voiding its invoice succeeds (unblocking plan 04
+- [x] The ledger invariant in step 8 holds after every integration scenario.
+- [x] Reversing a payment then voiding its invoice succeeds (unblocking plan 04
       phase 3's `paid_amount = 0` guard).
 
 ## Risk Assessment

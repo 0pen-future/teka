@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Collection Board Views"
-status: pending
+status: completed
 priority: P1
 effort: "5h"
 dependencies: [2]
@@ -198,19 +198,19 @@ Delete: none. No migration files.
 
 ## Success Criteria
 
-- [ ] R7: by-contact is the default view; one row per parent with all children
+- [x] R7: by-contact is the default view; one row per parent with all children
       merged and total due / paid / outstanding.
-- [ ] R7: a family that paid in full shows both children as paid in the by-class
+- [x] R7: a family that paid in full shows both children as paid in the by-class
       view.
-- [ ] R7: a family that underpaid shows the shortfall against the specific
+- [x] R7: a family that underpaid shows the shortfall against the specific
       child.
-- [ ] R7: the unpaid group is filterable in one request and returns in under
+- [x] R7: the unpaid group is filterable in one request and returns in under
       500ms at 150 students.
-- [ ] Summary reports collected and outstanding, and reconciles with the row
+- [x] Summary reports collected and outstanding, and reconciles with the row
       totals.
-- [ ] Void invoices are absent from both views and from all totals.
-- [ ] Soft-deleted contacts with debt remain visible and flagged.
-- [ ] Line-level and invoice-level money fields are distinctly named in the DTO.
+- [x] Void invoices are absent from both views and from all totals.
+- [x] Soft-deleted contacts with debt remain visible and flagged.
+- [x] Line-level and invoice-level money fields are distinctly named in the DTO.
 
 ## Risk Assessment
 

@@ -17,8 +17,10 @@ import (
 	"teka/apps/api/internal/features/auth"
 	"teka/apps/api/internal/features/billing"
 	"teka/apps/api/internal/features/classes"
+	"teka/apps/api/internal/features/collections"
 	"teka/apps/api/internal/features/contacts"
 	"teka/apps/api/internal/features/enrollments"
+	"teka/apps/api/internal/features/payments"
 	"teka/apps/api/internal/features/sessions"
 	"teka/apps/api/internal/features/students"
 	"teka/apps/api/internal/features/teachers"
@@ -123,4 +125,12 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB) {
 	// cycle (billing needs attendance for TallyByEnrollment; attendance needs
 	// billing for reconciliation).
 	attendanceSvc.SetReconciler(billingSvc)
+
+	paymentsSvc := payments.NewService(payments.NewRepository(db), txMgr)
+	payments.RegisterRoutes(v1, payments.NewHandler(paymentsSvc), requireAuth)
+
+	// collections is read-only reporting over billing_periods/invoices/
+	// payments — no writes, so no transaction manager.
+	collectionsSvc := collections.NewService(collections.NewRepository(db))
+	collections.RegisterRoutes(v1, collections.NewHandler(collectionsSvc), requireAuth)
 }
