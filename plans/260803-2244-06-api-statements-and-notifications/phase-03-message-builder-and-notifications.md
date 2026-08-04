@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Message Builder and Notifications"
-status: pending
+status: completed
 priority: P1
 effort: "6h"
 dependencies: [2]
@@ -241,21 +241,21 @@ Delete: none. No migration files.
 
 ## Success Criteria
 
-- [ ] R5: the message alone tells a parent each child's session count and the
+- [x] R5: the message alone tells a parent each child's session count and the
       amount due.
-- [ ] R5/R6: a two-child family receives one message with one total.
-- [ ] R6: one endpoint call generates statements and queues every contact in the
+- [x] R5/R6: a two-child family receives one message with one total.
+- [x] R6: one endpoint call generates statements and queues every contact in the
       period.
-- [ ] R6: messages stay within the configured ceiling; over-long ones collapse
+- [x] R6: messages stay within the configured ceiling; over-long ones collapse
       and keep the link, and the response reports how many collapsed.
-- [ ] R7: a reminder run targets only contacts with `outstanding > 0`, one row
+- [x] R7: a reminder run targets only contacts with `outstanding > 0`, one row
       each.
-- [ ] Contacts with only voided invoices receive no notification.
-- [ ] Status transitions are limited to `queued → sent`; `delivered` is never
+- [x] Contacts with only voided invoices receive no notification.
+- [x] Status transitions are limited to `queued → sent`; `delivered` is never
       claimed under `zalo_manual`.
-- [ ] Mark-sent is idempotent.
-- [ ] Every queued message contains a URL that resolves to a live statement.
-- [ ] 50 contacts complete in one call under 3 seconds.
+- [x] Mark-sent is idempotent.
+- [x] Every queued message contains a URL that resolves to a live statement.
+- [x] 50 contacts complete in one call under 3 seconds.
 
 ## Risk Assessment
 

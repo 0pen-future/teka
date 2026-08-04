@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Statement Generation and Tokens"
-status: pending
+status: completed
 priority: P1
 effort: "5h"
 dependencies: []
@@ -186,16 +186,16 @@ Delete: none. No migration files.
 
 ## Success Criteria
 
-- [ ] One statement per contact per period; a two-child family gets one row with
+- [x] One statement per contact per period; a two-child family gets one row with
       the combined total (R5).
-- [ ] Generation refuses on an open period.
-- [ ] Generation is idempotent and never rotates an existing token.
-- [ ] The database contains no plaintext token — asserted by scanning the
+- [x] Generation refuses on an open period.
+- [x] Generation is idempotent and never rotates an existing token.
+- [x] The database contains no plaintext token — asserted by scanning the
       `statements` row for any column equal to the derived token.
-- [ ] `token_hash` is 32 bytes and unique.
-- [ ] Contacts with only voided invoices receive no statement.
-- [ ] A missing or short `TokenKey` in production mode fails startup.
-- [ ] Revoke is idempotent and immediately reflected.
+- [x] `token_hash` is 32 bytes and unique.
+- [x] Contacts with only voided invoices receive no statement.
+- [x] A missing or short `TokenKey` in production mode fails startup.
+- [x] Revoke is idempotent and immediately reflected.
 
 ## Risk Assessment
 

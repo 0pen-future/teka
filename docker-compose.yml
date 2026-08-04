@@ -61,6 +61,16 @@ services:
       # Browser traffic is same-origin through the Vite proxy; this allowlist
       # only covers direct-port usage (curl, host-mode web).
       API_CORS_ORIGINS: ${API_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      # Dev fallback: unset gets a per-process generated key (logged as a
+      # fingerprint, never the key itself) — fine locally, never for prod.
+      API_STATEMENTS_TOKEN_KEY: ${API_STATEMENTS_TOKEN_KEY:-}
+      API_STATEMENTS_PUBLIC_BASE_URL: ${API_STATEMENTS_PUBLIC_BASE_URL:-http://localhost:5173}
+      # Optional VietQR transfer target; blank omits the QR from statements.
+      API_BANK_CODE: ${API_BANK_CODE:-}
+      API_BANK_ACCOUNT_NUMBER: ${API_BANK_ACCOUNT_NUMBER:-}
+      API_BANK_ACCOUNT_NAME: ${API_BANK_ACCOUNT_NAME:-}
+      API_NOTIFICATIONS_DEFAULT_CHANNEL: ${API_NOTIFICATIONS_DEFAULT_CHANNEL:-zalo_manual}
+      API_NOTIFICATIONS_MAX_MESSAGE_LEN: ${API_NOTIFICATIONS_MAX_MESSAGE_LEN:-1000}
     volumes:
       - ./apps/api:/app
       - go-mod-cache:/go/pkg/mod

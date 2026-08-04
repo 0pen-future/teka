@@ -20,8 +20,10 @@ import (
 	"teka/apps/api/internal/features/collections"
 	"teka/apps/api/internal/features/contacts"
 	"teka/apps/api/internal/features/enrollments"
+	"teka/apps/api/internal/features/notifications"
 	"teka/apps/api/internal/features/payments"
 	"teka/apps/api/internal/features/sessions"
+	"teka/apps/api/internal/features/statements"
 	"teka/apps/api/internal/features/students"
 	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/middleware"
@@ -56,7 +58,11 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *gorm.DB) *gin.Engine {
 	}
 
 	v1 := r.Group("/api/v1")
-	registerFeatures(v1, cfg, db)
+	statementsSvc := registerFeatures(v1, cfg, db)
+
+	// Deliberately outside v1 and outside requireAuth: the only unauthenticated
+	// route in the product that serves child/money data.
+	statements.RegisterPublicRoutes(r, statements.NewPublicHandler(statementsSvc))
 
 	r.NoRoute(func(c *gin.Context) {
 		response.Err(c, apperror.NotFound("route"))
@@ -67,8 +73,10 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *gorm.DB) *gin.Engine {
 
 // registerFeatures wires feature modules into the versioned group. Feature
 // construction (repository → service → handler) happens here so features stay
-// decoupled from bootstrap.
-func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB) {
+// decoupled from bootstrap. Returns the statements service so NewRouter can
+// mount its public, unauthenticated route group separately, on the root
+// engine rather than under v1.
+func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB) *statements.Service {
 	requireAuth := middleware.RequireAuth(cfg.JWT)
 	txMgr := database.NewTxManager(db)
 
@@ -119,10 +127,10 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB) {
 	billing.RegisterRoutes(v1, billing.NewHandler(billingSvc), requireAuth)
 
 	// attendance.Confirm carries a post-close attendance edit's money delta
-	// onto the next open period (plan 04, D7) through billingSvc, which can
-	// only be wired in after billing exists — hence a setter rather than a
-	// NewService parameter, breaking what would otherwise be a construction
-	// cycle (billing needs attendance for TallyByEnrollment; attendance needs
+	// onto the next open period through billingSvc, which can only be wired in
+	// after billing exists — hence a setter rather than a NewService
+	// parameter, breaking what would otherwise be a construction cycle
+	// (billing needs attendance for TallyByEnrollment; attendance needs
 	// billing for reconciliation).
 	attendanceSvc.SetReconciler(billingSvc)
 
@@ -133,4 +141,17 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB) {
 	// payments — no writes, so no transaction manager.
 	collectionsSvc := collections.NewService(collections.NewRepository(db))
 	collections.RegisterRoutes(v1, collections.NewHandler(collectionsSvc), requireAuth)
+
+	bankCfg := statements.BankConfig{
+		BankCode:      cfg.Bank.BankCode,
+		AccountNumber: cfg.Bank.AccountNumber,
+		AccountName:   cfg.Bank.AccountName,
+	}
+	statementsSvc := statements.NewService(statements.NewRepository(db), txMgr, cfg.Statements, bankCfg, statements.NewQRBuilder())
+	statements.RegisterRoutes(v1, statements.NewHandler(statementsSvc), requireAuth)
+
+	notificationsSvc := notifications.NewService(notifications.NewRepository(db), txMgr, statementsSvc, cfg.Notifications)
+	notifications.RegisterRoutes(v1, notifications.NewHandler(notificationsSvc), requireAuth)
+
+	return statementsSvc
 }

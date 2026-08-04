@@ -582,6 +582,96 @@ definitions:
       unit_price:
         type: integer
     type: object
+  notifications.BulkSendRequest:
+    properties:
+      channel:
+        enum:
+        - zalo_manual
+        - zalo_zns
+        - sms
+        type: string
+      purpose:
+        enum:
+        - statement
+        - statements
+        - reminder
+        type: string
+    required:
+    - purpose
+    type: object
+  notifications.BulkSendResponse:
+    properties:
+      bulk_text:
+        description: |-
+          BulkText joins every row's message, separated by a blank line, so a
+          teacher can copy once when pasting into a broadcast tool instead of
+          copying each contact's message individually.
+        type: string
+      collapsed_count:
+        type: integer
+      queued_count:
+        type: integer
+      rows:
+        items:
+          $ref: '#/definitions/notifications.BulkSendRow'
+        type: array
+      skipped_paid_count:
+        type: integer
+    type: object
+  notifications.BulkSendRow:
+    properties:
+      channel:
+        type: string
+      collapsed:
+        type: boolean
+      contact_id:
+        type: string
+      contact_name:
+        type: string
+      message_text:
+        type: string
+      notification_id:
+        type: string
+      phone:
+        type: string
+      purpose:
+        type: string
+      status:
+        type: string
+      url:
+        type: string
+    type: object
+  notifications.MarkSentRequest:
+    properties:
+      ids:
+        items:
+          type: string
+        minItems: 1
+        type: array
+    required:
+    - ids
+    type: object
+  notifications.NotificationResponse:
+    properties:
+      channel:
+        type: string
+      contact_id:
+        type: string
+      contact_name:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      phone:
+        type: string
+      purpose:
+        type: string
+      sent_at:
+        type: string
+      status:
+        type: string
+    type: object
   payments.AllocationResponse:
     properties:
       allocated_by:
@@ -794,6 +884,168 @@ definitions:
       status:
         type: string
       student_count:
+        type: integer
+    type: object
+  statements.GenerateResponse:
+    properties:
+      created:
+        type: integer
+      refreshed:
+        type: integer
+      skipped_revoked:
+        type: integer
+      statements:
+        items:
+          $ref: '#/definitions/statements.StatementResponse'
+        type: array
+    type: object
+  statements.PublicAdjustment:
+    properties:
+      amount:
+        type: integer
+      kind:
+        type: string
+    type: object
+  statements.PublicCarriedAdjustment:
+    properties:
+      amount:
+        type: integer
+      session_dates:
+        items:
+          type: string
+        type: array
+    type: object
+  statements.PublicChild:
+    properties:
+      adjustments:
+        items:
+          $ref: '#/definitions/statements.PublicAdjustment'
+        type: array
+      carried_adjustment:
+        $ref: '#/definitions/statements.PublicCarriedAdjustment'
+      classes:
+        items:
+          $ref: '#/definitions/statements.PublicClass'
+        type: array
+      display_note:
+        type: string
+      opening_balance:
+        type: integer
+      student_name:
+        type: string
+      subtotal:
+        type: integer
+    type: object
+  statements.PublicClass:
+    properties:
+      absent_count:
+        type: integer
+      amount:
+        type: integer
+      billable_count:
+        type: integer
+      class_name:
+        type: string
+      sessions:
+        items:
+          $ref: '#/definitions/statements.PublicSession'
+        type: array
+      unit_price:
+        type: integer
+    type: object
+  statements.PublicInvoicePayment:
+    properties:
+      outstanding:
+        type: integer
+      paid:
+        type: integer
+      student_name:
+        type: string
+      total_due:
+        type: integer
+    type: object
+  statements.PublicPayments:
+    properties:
+      by_invoice:
+        items:
+          $ref: '#/definitions/statements.PublicInvoicePayment'
+        type: array
+      total_paid:
+        type: integer
+    type: object
+  statements.PublicQR:
+    properties:
+      amount:
+        type: integer
+      image_url:
+        type: string
+      note:
+        type: string
+    type: object
+  statements.PublicSession:
+    properties:
+      counted:
+        type: boolean
+      date:
+        type: string
+      status:
+        type: string
+    type: object
+  statements.PublicStatement:
+    properties:
+      children:
+        items:
+          $ref: '#/definitions/statements.PublicChild'
+        type: array
+      contact_name:
+        type: string
+      payments:
+        $ref: '#/definitions/statements.PublicPayments'
+      period:
+        type: string
+      qr:
+        $ref: '#/definitions/statements.PublicQR'
+      totals:
+        $ref: '#/definitions/statements.PublicTotals'
+    type: object
+  statements.PublicTotals:
+    properties:
+      adjustment_total:
+        type: integer
+      current_charge:
+        type: integer
+      opening_balance:
+        type: integer
+      outstanding:
+        type: integer
+      paid:
+        type: integer
+      total_due:
+        type: integer
+    type: object
+  statements.StatementResponse:
+    properties:
+      contact_id:
+        type: string
+      contact_name:
+        type: string
+      expires_at:
+        type: string
+      first_viewed_at:
+        type: string
+      id:
+        type: string
+      last_viewed_at:
+        type: string
+      phone:
+        type: string
+      revoked_at:
+        type: string
+      total_due:
+        type: integer
+      url:
+        type: string
+      view_count:
         type: integer
     type: object
   students.CreateRequest:
@@ -1388,6 +1640,123 @@ paths:
       summary: Draft a billing period's invoices
       tags:
       - billing
+  /billing-periods/{id}/notifications:
+    get:
+      parameters:
+      - description: billing period id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: statements or reminder
+        in: query
+        name: purpose
+        type: string
+      - description: queued, sent, delivered, or failed
+        in: query
+        name: status
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/notifications.NotificationResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List a billing period's notifications
+      tags:
+      - notifications
+  /billing-periods/{id}/notifications/bulk:
+    post:
+      consumes:
+      - application/json
+      description: 'Regenerates/refreshes the period''s statements, then queues one
+        message per eligible contact: purpose=statement (or "statements") targets
+        every contact with a non-void invoice; purpose=reminder further narrows to
+        contacts with outstanding > 0. One row per contact, never one per child.'
+      parameters:
+      - description: billing period id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: purpose and optional channel
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/notifications.BulkSendRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/notifications.BulkSendResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: period is not closed
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: validation failed
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Bulk-send statement notifications
+      tags:
+      - notifications
   /billing-periods/{id}/preview:
     get:
       description: Pure read — never creates or updates invoices. Every student with
@@ -1434,6 +1803,120 @@ paths:
       summary: Preview a billing period
       tags:
       - billing
+  /billing-periods/{id}/statements:
+    get:
+      parameters:
+      - description: billing period id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: page number
+        in: query
+        name: page
+        type: integer
+      - description: page size (max 100)
+        in: query
+        name: per_page
+        type: integer
+      - description: created_at (default) or total_due, - prefix for desc
+        in: query
+        name: sort
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/statements.StatementResponse'
+                  type: array
+                meta:
+                  $ref: '#/definitions/response.Meta'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List a billing period's statements
+      tags:
+      - statements
+  /billing-periods/{id}/statements/generate:
+    post:
+      description: 'The period must be closed. Re-running is safe: existing, not-yet-revoked
+        statements have only their total refreshed, their link is unchanged, and revoked
+        statements are left untouched.'
+      parameters:
+      - description: billing period id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/statements.GenerateResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: period is not closed
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Generate statements for a billing period
+      tags:
+      - statements
   /classes:
     get:
       description: 'status filters the list: active (default), archived, or all.'
@@ -2835,6 +3318,47 @@ paths:
       summary: Update current teacher profile
       tags:
       - teachers
+  /notifications/mark-sent:
+    post:
+      consumes:
+      - application/json
+      description: 'Idempotent: an id already sent, or not belonging to the caller,
+        is silently skipped rather than erroring.'
+      parameters:
+      - description: notification ids
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/notifications.MarkSentRequest'
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: validation failed
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Mark notifications sent
+      tags:
+      - notifications
   /payments:
     get:
       parameters:
@@ -3201,6 +3725,68 @@ paths:
       summary: Reverse payment
       tags:
       - payments
+  /public/statements/{token}:
+    get:
+      description: 'No authentication: the token itself is the credential. Always
+        returns the same neutral 404 for an unknown, malformed, revoked, expired,
+        soft-deleted, or already fully-paid token.'
+      parameters:
+      - description: statement token
+        in: path
+        name: token
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/statements.PublicStatement'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      summary: Get a parent's statement
+      tags:
+      - public
+  /public/statements/{token}/qr.png:
+    get:
+      description: Same token, same neutral 404. Returns the neutral 404, not an empty
+        image, when the teacher's bank details are not configured.
+      parameters:
+      - description: statement token
+        in: path
+        name: token
+        required: true
+        type: string
+      produces:
+      - image/png
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      summary: Get a parent's statement payment QR code
+      tags:
+      - public
   /sessions/{id}:
     delete:
       description: Refuses (409) a session whose attendance is already confirmed.
@@ -3619,6 +4205,87 @@ paths:
       summary: List pending attendance
       tags:
       - sessions
+  /statements/{id}:
+    get:
+      parameters:
+      - description: statement id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/statements.StatementResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get a statement
+      tags:
+      - statements
+  /statements/{id}/revoke:
+    post:
+      description: 'Idempotent: revoking an already-revoked statement succeeds without
+        changing it.'
+      parameters:
+      - description: statement id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Revoke a statement
+      tags:
+      - statements
   /students:
     get:
       description: class_id filters through open enrollments — the attendance screen's

@@ -675,3 +675,158 @@ khoản credit hiện ở summary của mọi kỳ mà contact có hoá đơn. K
 sai từng con số. Giữ nguyên ở V1 như một "cửa sổ hiển thị" credit tồn (OQ-2);
 gắn credit vào một kỳ cụ thể là quyết định sản phẩm, để lại cho khi có màn hình
 đối soát credit.
+
+## 2026-08-04 — Plan 06, Phase 2: VietQR field 38 dùng thẳng `BankCode` làm acquirer id, chưa tra BIN NAPAS thật
+
+EMVCo field 38 sub-tag 01 (trong `merchantAccountInfo`) đúng chuẩn phải mang mã
+BIN số của NAPAS cho ngân hàng thụ hưởng (ví dụ Vietcombank = `970436`), không
+phải mã ngắn tuỳ ý của ngân hàng. V1 chưa có bảng tra BIN nào, và phase file
+cũng không cấp một bảng như vậy.
+
+**Quyết định:** `emvQRBuilder.Payload` (qr.go) dùng thẳng `cfg.BankCode` (chuỗi
+giáo viên tự nhập vào config, ví dụ `"TESTBANK"` trong fixture test — cố ý giả,
+không phải BIN thật) làm giá trị sub-tag 01. Payload vẫn đúng cấu trúc TLV và
+checksum CRC-16/CCITT-FALSE — cái `qr_test.go`/`public_integration_test.go`
+xác nhận — chỉ khác ở chỗ một ví quét QR thật sẽ không tự resolve đúng tên
+ngân hàng nếu `BankCode` không trùng BIN NAPAS thật. Không chặn giao hàng V1 vì
+QR chỉ là tiện ích gợi ý chuyển khoản, không phải đường thanh toán tự động đối
+soát; số tiền/nội dung chuyển khoản vẫn đúng để phụ huynh tự nhập tay nếu ví
+không tự nhận diện ngân hàng. Cần một bảng tra BIN NAPAS thật (hoặc để giáo
+viên nhập thẳng BIN thay vì mã ngắn) trước khi tính năng này rời V1.
+
+## 2026-08-04 — Plan 06, Phase 2: hình dạng DTO `carried_adjustment` là `{amount, session_dates}`, không phải lý do gốc của giáo viên
+
+Phase file mô tả khối "carried forward" cần giải thích cho phụ huynh "vì sao
+số tiền kỳ này không khớp số đã thấy tháng trước", nhưng không chốt hình dạng
+JSON chính xác. `invoice_adjustments.reason` (text tự do giáo viên gõ khi sửa
+điểm danh) là ứng viên tự nhiên nhất để "giải thích", nhưng đây chính là
+trường bị cấm tuyệt đối xuất hiện trên payload công khai (không xác thực).
+
+**Quyết định:** `PublicCarriedAdjustment{Amount int64, SessionDates
+[]string}` (dto.go) — giải thích bằng NGÀY của (các) buổi học nguồn gây ra
+carry-forward (qua `invoice_adjustments.source_session_id` → `class_sessions.
+session_date`, đọc trong `adjustmentsQuery`'s union thứ hai, repository.go),
+cộng dồn theo tổng `amount` — không phải chuỗi lý do gốc. Phụ huynh thấy "buổi
+06/01 đã được sửa lại, chênh lệch -100.000", đủ để đối chiếu mà không lộ ghi
+chú nội bộ của giáo viên (có thể chứa tên học sinh khác, nhận xét riêng tư,
+…). `TestPublicAdjustmentReasonNeverAppearsInResponseBody` khẳng định
+`reason` không bao giờ xuất hiện trong response body.
+
+## 2026-08-04 — Plan 06, Phase 2: 404 trung lập chỉ cho token/outstanding, lỗi hạ tầng thật vẫn là 500
+
+Phase file yêu cầu "mọi nhánh thất bại" của route công khai trả 404 trung lập
+byte-giống-hệt nhau, nhưng không tách rõ "thất bại" nghĩa là gì — chỉ tính
+token không hợp lệ (không tồn tại/sai định dạng/đã thu hồi/hết hạn/xoá mềm) và
+"đã trả hết nợ", hay tính cả một lỗi DB/mạng thật sự giữa chừng.
+
+**Quyết định:** `LookupPublic`/`RenderPublic` (service.go) chỉ trả
+`ErrNotFound` (→ 404 trung lập qua `writeNeutralNotFound`) cho đúng sáu lý do
+đã liệt kê ở docstring của `LookupPublic`/`RenderPublic`: token không tồn tại,
+sai định dạng (hash không khớp), đã thu hồi, hết hạn, xoá mềm, hoặc
+`Totals.Outstanding <= 0`. Một lỗi đọc DB thật (`apperror.Internal(err)`) vẫn
+nổi lên như 500 thật qua `response.Err` — che nó thành 404 sẽ khiến một sự cố
+hạ tầng thật (mất kết nối DB, timeout, …) bị nuốt thầm lặng và không bao giờ
+lên log/alert đúng mức nghiêm trọng của nó. "Trung lập" nghĩa là không phân
+biệt được LÝ DO token thất bại với nhau — không có nghĩa là mọi loại lỗi đều
+phải giả vờ thành 404.
+
+## 2026-08-04 — Plan 06, Phase 2: một method `Adjustments` bằng UNION ALL, không tách `CarriedAdjustments` như phase file gọi tên
+
+Phase file (Architecture) nhắc tới một method riêng tên `CarriedAdjustments`
+bên cạnh việc đọc adjustment trực tiếp trên hoá đơn của kỳ. Tách hai round trip
+riêng (một đọc adjustment trực tiếp, một đọc carried-forward) sẽ vi phạm ngay
+bất biến "không tăng số lượng query theo số con" mà chính phase file đặt ra
+cho toàn bộ route này (test `TestPublicRenderIssuesTheSameQueryCountRegardlessOfFamilySize`
+khẳng định đúng 3 query cố định: InvoicesWithLines + LiveSessions +
+Adjustments).
+
+**Quyết định:** `Repository.Adjustments` (repository.go) là MỘT method, thân
+là một câu SQL `UNION ALL` hai nhánh — nhánh 1 đọc adjustment đăng trực tiếp
+trên hoá đơn của kỳ này (`Carried=false`), nhánh 2 đọc adjustment đăng trên
+hoá đơn của một kỳ SAU nhưng có `source_session_id` rơi vào đúng khoảng ngày
+của kỳ này (`Carried=true`, kèm `session_date`) — đúng ngữ nghĩa
+`CarriedAdjustments` mà phase file mô tả, chỉ khác ở chỗ gộp vào cùng một
+round trip DB thay vì một method Go riêng. `AdjustmentRow.Carried` là cờ phân
+biệt hai nhánh khi `render.go` build payload; không có method
+
+## 2026-08-04 — Plan 06, Phase 3: `notifications` không có cột `message_text`/`contact_id`; `purpose` DB là số nhiều
+
+Phase file (Architecture, bước 5 "Insert one `notifications` row per contact")
+mô tả việc ghi `message_text`, `statement_id`, `contact_id` lên mỗi dòng
+`notifications`, và request body mẫu dùng `purpose: "statement" | "reminder"`.
+Đối chiếu trực tiếp với `docs/schema_design.sql:434-451` — nguồn chân lý duy
+nhất cho schema, vì schema đã đóng băng, không có migration nào trong phase
+này — bảng `notifications` thực tế chỉ có các cột: `id, teacher_id,
+statement_id, channel, purpose, status, provider_msg_id, error_message,
+sent_at, created_at, updated_at, deleted_at`. Không có `message_text`, không
+có `contact_id`. Liên kết tới contact đi gián tiếp qua
+`statement_id → statements.contact_id`. Đồng thời `purpose`'s CHECK constraint
+(`schema_design.sql:440-441`) chỉ chấp nhận `'statements'` (số nhiều) và
+`'reminder'` — không có giá trị `'statement'` (số ít) nào từng tồn tại trong
+DB.
+
+**Quyết định (hai điểm):**
+
+1. **Message text là response-only, không bao giờ persist.** `notifications`
+   model (`model.go`) chỉ map đúng các cột thật của bảng — không thêm field
+   `MessageText`/`ContactID` giả vào struct GORM chỉ để rồi không bao giờ ghi
+   được xuống DB (không có cột để ghi). `notifications.Service.BulkSend` build
+   text bằng `statements.Build` tại thời điểm response, trả thẳng trong
+   `BulkSendResponse.rows[].message_text` cho client — không lưu lại. Hệ quả
+   trực tiếp: `GET .../notifications` (danh sách ledger) không thể trả lại
+   nguyên văn tin nhắn đã gửi trước đó — chỉ trả `channel/purpose/status/
+   sent_at` cùng tên/điện thoại contact (join qua statement_id). Đây là giới
+   hạn thật của schema đã đóng băng, không phải thiếu sót của
+   implementation; ghi chú lại ở đây thay vì âm thầm bỏ qua.
+2. **API nhận `"statement"`, DB lưu `"statements"`.** DTO request
+   (`dto.go`) validate `purpose` bằng `binding:"oneof=statement statements
+   reminder"` (chấp nhận cả hai dạng số ít lẫn số nhiều đúng theo yêu cầu của
+   nhiệm vụ), rồi map cả hai về hằng số Go `purposeStatements = "statements"`
+   trước khi truyền xuống Service/Repository — không bao giờ có chuỗi
+   `"statement"` chạm tới câu SQL hay bị ghi xuống cột `purpose`. Toàn bộ giá
+   trị `channel`/`purpose`/`status` đều là hằng số Go khớp đúng chữ với CHECK
+   constraint của schema (`zalo_zns|zalo_manual|sms`,
+   `statements|reminder`, `queued|sent|delivered|failed`) — không có string
+   literal rời ở call site nào.
+`CarriedAdjustments` riêng nào trong `Repository` interface.
+
+## 2026-08-04 — Plan 06 review chốt (statements & notifications)
+
+Rà soát code-reviewer: 0 CRITICAL/0 HIGH. Các bất biến trọng yếu của endpoint
+công khai (neutral 404 hợp nhất một helper, ba security header trên cả 200 lẫn
+404 kể cả qr.png, token bị redact khỏi access log, không rò teacher/phone/bank/
+reason/dữ liệu gia đình khác, mọi query scoped teacher_id∧contact_id∧period_id)
+đều được trace xác nhận đúng. Xử lý các phát hiện:
+
+- **L2 (đã sửa).** `qr.tlv` dùng độ dài 2 chữ số; note = `"HP {tên} {MM/YYYY}"`
+  mà `full_name` tối đa 100 ký tự nên note có thể ≥100 → `%02d` sinh 3 chữ số,
+  phá cấu trúc EMVCo và làm QR không quét được. Thêm `clampRunes(note, 25)`
+  (đúng giới hạn field 08 của NAPAS, cắt theo ranh giới rune nên không vỡ ký tự
+  đa byte; 25 rune ≤ 75 byte → độ dài luôn 2 chữ số). V1 chưa có đối soát
+  ngân hàng tự động nên việc cắt ghi chú không ảnh hưởng nghiệp vụ.
+- **L4 (đã sửa).** Bỏ chữ "phase 2" trong comment test `publicRouter` —
+  không đưa số phase vào artifact mã.
+- **L5 (đã bổ sung tài liệu).** Thêm `API_BANK_*` và `API_NOTIFICATIONS_*`
+  (đều optional, default rỗng/zalo_manual/1000) vào `.env.example`,
+  `docker-compose.yml`, `docker-compose.prod.yml`. Bank rỗng ở prod là chủ ý
+  V1: thiếu cấu hình thì statement chỉ đơn giản bỏ khối QR, không placeholder.
+- **M1 (chấp nhận).** `render.buildPublicStatement` và
+  `service.assemblePeriodFigures` là hai vòng tổng hợp riêng trên cùng shape
+  `InvoiceLineRow`; đã xác minh cho kết quả identical và integration test khẳng
+  định tổng tin nhắn bulk == `total_due` của endpoint công khai cho cùng
+  contact. Giữ nguyên cho V1; rủi ro là bảo trì (đồng bộ bằng quy ước), không
+  phải sai số học.
+- **M2 (chấp nhận).** Package `notifications` chỉ có integration test theo đúng
+  phạm vi phase (phase file chỉ liệt kê `integration_test.go`). Coverage tổng
+  repo 71.6% > sàn 60%.
+- **L1 (chấp nhận).** `qr.png` trả 500 (không phải neutral 404) khi `RenderQR`
+  lỗi encode PNG — đây là lỗi server thật, chỉ tới được sau khi token đã hợp lệ
+  (vốn đã trả 200 cho JSON), không phải token oracle; giữ 500 để không che một
+  lỗi hạ tầng thật.
+- **L3 (chấp nhận).** Bulk `zalo_zns` khi 0 contact đủ điều kiện trả 200
+  QueuedCount=0 (không ghi gì) thay vì báo "not configured"; chỉ khác thông
+  điệp, không sai dữ liệu.
+- **display_note trong payload công khai — không phải rò rỉ.** Schema
+  (`schema_design.sql:109`) định nghĩa đây là "nhãn phân biệt anh em cùng lớp
+  trùng họ tên (vd 'An lớp 9A')" — chủ đích hiển thị cho phụ huynh, không phải
+  ghi chú riêng tư của giáo viên.

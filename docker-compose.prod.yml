@@ -24,8 +24,9 @@ services:
     environment:
       API_ENV: production
       API_DATABASE_URL: ${API_DATABASE_URL:?postgres connection string}
-      # Config validation requires this even though migrate never serves.
+      # Config validation requires these even though migrate never serves.
       API_JWT_SECRET: ${API_JWT_SECRET:?}
+      API_STATEMENTS_TOKEN_KEY: ${API_STATEMENTS_TOKEN_KEY:?}
     restart: "no"
 
   api:
@@ -43,6 +44,16 @@ services:
       # Only needed when the web app is served from a different origin than
       # the API; same-origin (reverse proxy in front of both) needs no CORS.
       API_CORS_ORIGINS: ${API_CORS_ORIGINS:-}
+      # Min 32 bytes, hex or base64. Generate: openssl rand -base64 32
+      # Rotating this invalidates all parent statement links.
+      API_STATEMENTS_TOKEN_KEY: ${API_STATEMENTS_TOKEN_KEY:?}
+      API_STATEMENTS_PUBLIC_BASE_URL: ${API_STATEMENTS_PUBLIC_BASE_URL:-http://localhost:5173}
+      # Optional VietQR transfer target; blank omits the QR from statements.
+      API_BANK_CODE: ${API_BANK_CODE:-}
+      API_BANK_ACCOUNT_NUMBER: ${API_BANK_ACCOUNT_NUMBER:-}
+      API_BANK_ACCOUNT_NAME: ${API_BANK_ACCOUNT_NAME:-}
+      API_NOTIFICATIONS_DEFAULT_CHANNEL: ${API_NOTIFICATIONS_DEFAULT_CHANNEL:-zalo_manual}
+      API_NOTIFICATIONS_MAX_MESSAGE_LEN: ${API_NOTIFICATIONS_MAX_MESSAGE_LEN:-1000}
     depends_on:
       migrate:
         condition: service_completed_successfully

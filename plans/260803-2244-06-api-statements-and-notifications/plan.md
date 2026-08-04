@@ -1,7 +1,7 @@
 ---
 title: "06 API Statements and Notifications"
 description: "Per-contact statements with tokenised public links rendering live data, the Zalo message content builder, and one-action bulk send with reminders."
-status: pending
+status: completed
 priority: P1
 effort: "17h"
 branch: HEAD
@@ -67,9 +67,9 @@ Non-goals:
 
 | # | Phase | Effort | Depends on | Status |
 |---|-------|--------|-----------|--------|
-| 1 | [Statement generation and tokens](./phase-01-statement-generation-and-tokens.md) | 5h | — | Pending |
-| 2 | [Public statement endpoint](./phase-02-public-statement-endpoint.md) | 6h | 1 | Pending |
-| 3 | [Message builder and notifications](./phase-03-message-builder-and-notifications.md) | 6h | 2 | Pending |
+| 1 | [Statement generation and tokens](./phase-01-statement-generation-and-tokens.md) | 5h | — | Completed |
+| 2 | [Public statement endpoint](./phase-02-public-statement-endpoint.md) | 6h | 1 | Completed |
+| 3 | [Message builder and notifications](./phase-03-message-builder-and-notifications.md) | 6h | 2 | Completed |
 
 ## Key decisions
 
@@ -136,24 +136,24 @@ Non-goals:
 
 From PRD R5, R6 and R7.
 
-- [ ] R5: a parent with two children in two classes receives exactly **one**
+- [x] R5: a parent with two children in two classes receives exactly **one**
       message with **one** total.
-- [ ] R5: opening the link shows each child's section separately with a family
+- [x] R5: opening the link shows each child's section separately with a family
       total at the end.
-- [ ] R5: a parent who reads only the message still knows the amount due and
+- [x] R5: a parent who reads only the message still knows the amount due and
       each child's session count.
-- [ ] R5: after the teacher corrects attendance, an already-sent link shows the
+- [x] R5: after the teacher corrects attendance, an already-sent link shows the
       updated figures.
-- [ ] R5: an invalid, expired, or revoked token returns a neutral error page
+- [x] R5: an invalid, expired, or revoked token returns a neutral error page
       that leaks no student, contact, or teacher information.
-- [ ] R5: the page fits a phone screen with no horizontal scrolling (API side:
+- [x] R5: the page fits a phone screen with no horizontal scrolling (API side:
       one request returns everything the page needs, no N+1 round trips).
-- [ ] R6: one action generates per-parent content and queues every send for the
+- [x] R6: one action generates per-parent content and queues every send for the
       period.
-- [ ] R6: the layer-1 message fits within the configured template length ceiling.
-- [ ] R7: a parent with two children both in debt receives a single reminder.
-- [ ] View counters increment on each open, and `first_viewed_at` is set once.
-- [ ] Contacts whose only invoice was voided at close receive no statement and
+- [x] R6: the layer-1 message fits within the configured template length ceiling.
+- [x] R7: a parent with two children both in debt receives a single reminder.
+- [x] View counters increment on each open, and `first_viewed_at` is set once.
+- [x] Contacts whose only invoice was voided at close receive no statement and
       no notification (PRD §5: class with no sessions).
 
 ## Open questions

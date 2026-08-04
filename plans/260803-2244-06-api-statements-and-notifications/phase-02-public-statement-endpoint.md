@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Public Statement Endpoint"
-status: pending
+status: completed
 priority: P1
 effort: "6h"
 dependencies: [1]
@@ -337,23 +337,23 @@ Delete: none. No migration files.
 
 ## Success Criteria
 
-- [ ] R5: a two-child parent sees both children separately with a grand total.
-- [ ] R5: an old link reflects an attendance correction made after it was sent.
-- [ ] R5: invalid, expired, revoked, and paid-in-full tokens all return the same
+- [x] R5: a two-child parent sees both children separately with a grand total.
+- [x] R5: an old link reflects an attendance correction made after it was sent.
+- [x] R5: invalid, expired, revoked, and paid-in-full tokens all return the same
       neutral 404 with no identifying information.
-- [ ] R5: one request returns everything the page needs; query count does not
+- [x] R5: one request returns everything the page needs; query count does not
       grow with the number of children.
-- [ ] `X-Robots-Tag`, `Cache-Control`, and `Referrer-Policy` are set on every
+- [x] `X-Robots-Tag`, `Cache-Control`, and `Referrer-Policy` are set on every
       response from the route.
-- [ ] The token never appears in an application log.
-- [ ] View counters behave correctly across repeated opens and never fail the
+- [x] The token never appears in an application log.
+- [x] View counters behave correctly across repeated opens and never fail the
       request.
-- [ ] The QR block is omitted, not faked, when bank config is absent.
-- [ ] The QR arrives as a server-rendered `image_url`; no bank code, account
+- [x] The QR block is omitted, not faked, when bank config is absent.
+- [x] The QR arrives as a server-rendered `image_url`; no bank code, account
       number, or account name appears in the parent payload.
-- [ ] Adjustment `reason` text never reaches the parent payload; only signed
+- [x] Adjustment `reason` text never reaches the parent payload; only signed
       amounts and a derived `kind`.
-- [ ] `payments.by_invoice` gives the per-child split, so the page never
+- [x] `payments.by_invoice` gives the per-child split, so the page never
       recomputes the allocation rule.
 
 ## Risk Assessment

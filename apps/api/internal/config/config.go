@@ -3,6 +3,10 @@
 package config
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
@@ -20,6 +24,11 @@ const (
 	EnvProduction  = "production"
 
 	minJWTSecretLen = 32
+
+	// minStatementTokenKeyLen is the minimum decoded key length, in bytes,
+	// statement links are signed with. 32 bytes (256 bits) matches
+	// deriveToken's HMAC-SHA256.
+	minStatementTokenKeyLen = 32
 )
 
 // HTTPConfig configures the HTTP listener.
@@ -42,6 +51,53 @@ type JWTConfig struct {
 	RefreshTTL time.Duration `env:"JWT_REFRESH_TTL" envDefault:"720h"`
 }
 
+// StatementsConfig configures parent statement links: the secret token
+// derivation is keyed on, and the base URL those links are built against.
+type StatementsConfig struct {
+	// TokenKeyRaw is the configured secret exactly as read from the
+	// environment — hex or base64, either is accepted (see decodeTokenKey).
+	// Never logged; use TokenKey for the decoded bytes deriveToken/hashToken
+	// actually sign with.
+	TokenKeyRaw string `env:"STATEMENTS_TOKEN_KEY"`
+	// PublicBaseURL prefixes the token path ("/s/{token}") a generated
+	// statement link points at.
+	PublicBaseURL string `env:"STATEMENTS_PUBLIC_BASE_URL" envDefault:"http://localhost:5173"`
+
+	// TokenKey is the decoded secret, resolved by validateStatements. Not an
+	// environment field itself (env:"-"): production requires TokenKeyRaw to
+	// decode to at least minStatementTokenKeyLen bytes; every other
+	// environment falls back to a random per-process key when it does not,
+	// so a fresh key each run never leaks into logs or version control.
+	TokenKey []byte `env:"-"`
+}
+
+// BankConfig is the teacher's transfer target used to render VietQR payment
+// codes on public statements (see the statements package's QRBuilder). The
+// schema has no column for one in V1 — a single teacher-wide account is
+// enough for a solo-teacher tenant — so it is read from application
+// configuration instead. Every field is optional and unvalidated: an
+// unconfigured account is a supported state (the QR block is simply omitted
+// from a statement, never faked), not a startup error.
+type BankConfig struct {
+	BankCode      string `env:"BANK_CODE"`
+	AccountNumber string `env:"BANK_ACCOUNT_NUMBER"`
+	AccountName   string `env:"BANK_ACCOUNT_NAME"`
+}
+
+// NotificationsConfig configures parent notification sends: the channel a
+// bulk send uses when the request does not specify one, and the character
+// ceiling a rendered message collapses to fit under (see the statements
+// package's Build).
+type NotificationsConfig struct {
+	// DefaultChannel is the channel a bulk send uses when the request omits
+	// one — zalo_manual is V1's only wired sender.
+	DefaultChannel string `env:"NOTIFICATIONS_DEFAULT_CHANNEL" envDefault:"zalo_manual"`
+	// MaxMessageLen is the character ceiling a rendered message must fit
+	// under before it collapses its per-child detail (statements.Build's
+	// maxLen).
+	MaxMessageLen int `env:"NOTIFICATIONS_MAX_MESSAGE_LEN" envDefault:"1000"`
+}
+
 // Config is the full application configuration, populated from API_-prefixed
 // environment variables.
 type Config struct {
@@ -49,9 +105,12 @@ type Config struct {
 	LogLevel    string   `env:"LOG_LEVEL" envDefault:"info"`
 	CORSOrigins []string `env:"CORS_ORIGINS" envSeparator:"," envDefault:"http://localhost:5173"`
 
-	HTTP     HTTPConfig
-	Database DatabaseConfig
-	JWT      JWTConfig
+	HTTP          HTTPConfig
+	Database      DatabaseConfig
+	JWT           JWTConfig
+	Statements    StatementsConfig
+	Bank          BankConfig
+	Notifications NotificationsConfig
 }
 
 // Load reads configuration from the environment (prefix API_). In development
@@ -102,6 +161,57 @@ func (c *Config) validate() error {
 			return fmt.Errorf("API_CORS_ORIGINS entry %q must start with http:// or https://", origin)
 		}
 	}
+	return c.validateStatements()
+}
+
+// decodeTokenKey resolves a configured secret into raw key bytes. It tries
+// hex first (the shape `openssl rand -hex 32` produces), then standard and
+// URL-safe base64 (the shape `openssl rand -base64 32` produces — the form
+// .env.example documents), and finally falls back to the string's own bytes
+// so any sufficiently long random string still works. Only length is
+// enforced here; validateStatements decides whether that length is
+// acceptable for the running environment.
+func decodeTokenKey(raw string) []byte {
+	if raw == "" {
+		return nil
+	}
+	if b, err := hex.DecodeString(raw); err == nil {
+		return b
+	}
+	if b, err := base64.StdEncoding.DecodeString(raw); err == nil {
+		return b
+	}
+	if b, err := base64.RawURLEncoding.DecodeString(raw); err == nil {
+		return b
+	}
+	return []byte(raw)
+}
+
+// validateStatements resolves Statements.TokenKey from TokenKeyRaw. In
+// production a missing or short key is fatal — rotating it invalidates every
+// parent statement link already sent out, so it must be deliberate and
+// stable, never silently substituted. Outside production, a missing or short
+// key falls back to a random 32-byte key generated once for this process;
+// only a fingerprint (never the key) is logged, so a developer immediately
+// knows a real key was not configured without a secret ever reaching stdout.
+func (c *Config) validateStatements() error {
+	key := decodeTokenKey(c.Statements.TokenKeyRaw)
+	if len(key) >= minStatementTokenKeyLen {
+		c.Statements.TokenKey = key
+		return nil
+	}
+	if c.IsProduction() {
+		return fmt.Errorf("API_STATEMENTS_TOKEN_KEY must be at least %d bytes", minStatementTokenKeyLen)
+	}
+
+	fallback := make([]byte, minStatementTokenKeyLen)
+	if _, err := rand.Read(fallback); err != nil {
+		return fmt.Errorf("generate development statement token key: %w", err)
+	}
+	c.Statements.TokenKey = fallback
+	fingerprint := sha256.Sum256(fallback)
+	slog.Warn("insecure development statement token key generated",
+		"fingerprint", hex.EncodeToString(fingerprint[:])[:8])
 	return nil
 }
 
