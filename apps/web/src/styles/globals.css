@@ -1,13 +1,94 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/geist";
+
+/* Self-hosted "Học Vui Mỗi Ngày" faces — replaces the design system's
+   Google Fonts CDN import (fonts.css) with bundled woff2, zero third-party
+   font requests. Baloo 2 = display, Nunito = body. */
+@import "@fontsource/baloo-2/600.css";
+@import "@fontsource/baloo-2/700.css";
+@import "@fontsource/baloo-2/800.css";
+@import "@fontsource/nunito/400.css";
+@import "@fontsource/nunito/600.css";
+@import "@fontsource/nunito/700.css";
+@import "@fontsource/nunito/800.css";
+
+/* Design system token contract — copied verbatim from the "Học Vui Mỗi Ngày"
+   design project. These files are the single source of truth for every value;
+   the @theme bridge below references their custom properties, never hex. */
+@import "./tokens/colors.css";
+@import "./tokens/typography.css";
+@import "./tokens/spacing.css";
+@import "./tokens/effects.css";
+
+/* "Học Vui Mỗi Ngày" component kit keyframes (HvModal popIn, HvToast
+   toastIn) — the only bespoke CSS in the kit; everything else is utilities. */
+@import "../components/hv/hv-animations.css";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --font-heading: var(--font-sans);
-  --font-sans: "Geist Variable", sans-serif;
+  /* ---- fonts ---- */
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+  --font-sans: var(--font-body);
+  --font-heading: var(--font-display);
+
+  /* ---- design system color ramps → Tailwind utilities ---- */
+  --color-cream-50: var(--cream-50);
+  --color-cream-100: var(--cream-100);
+  --color-cream-200: var(--cream-200);
+  --color-cream-300: var(--cream-300);
+  --color-ink-900: var(--ink-900);
+  --color-ink-700: var(--ink-700);
+  --color-ink-500: var(--ink-500);
+  --color-ink-400: var(--ink-400);
+  --color-ink-300: var(--ink-300);
+  --color-white: var(--white);
+  --color-mint-50: var(--mint-50);
+  --color-mint-100: var(--mint-100);
+  --color-mint-200: var(--mint-200);
+  --color-mint-300: var(--mint-300);
+  --color-mint-400: var(--mint-400);
+  --color-mint-500: var(--mint-500);
+  --color-mint-600: var(--mint-600);
+  --color-mint-700: var(--mint-700);
+  --color-sky-50: var(--sky-50);
+  --color-sky-100: var(--sky-100);
+  --color-sky-200: var(--sky-200);
+  --color-sky-300: var(--sky-300);
+  --color-sky-400: var(--sky-400);
+  --color-sky-500: var(--sky-500);
+  --color-sky-600: var(--sky-600);
+  --color-sun-100: var(--sun-100);
+  --color-sun-200: var(--sun-200);
+  --color-sun-300: var(--sun-300);
+  --color-sun-400: var(--sun-400);
+  --color-sun-500: var(--sun-500);
+  --color-sun-600: var(--sun-600);
+  --color-coral-100: var(--coral-100);
+  --color-coral-300: var(--coral-300);
+  --color-coral-400: var(--coral-400);
+  --color-coral-500: var(--coral-500);
+  --color-coral-600: var(--coral-600);
+  --color-line-100: var(--line-100);
+  --color-line-200: var(--line-200);
+  --color-line-300: var(--line-300);
+  --color-surface-dark: var(--surface-dark);
+
+  /* ---- chunky press shadows + soft ambient shadows ---- */
+  --shadow-press-mint: var(--press-mint);
+  --shadow-press-sky: var(--press-sky);
+  --shadow-press-sun: var(--press-sun);
+  --shadow-press-coral: var(--press-coral);
+  --shadow-press-line: var(--press-line);
+  --shadow-soft-xs: var(--shadow-xs);
+  --shadow-soft-sm: var(--shadow-sm);
+  --shadow-soft-md: var(--shadow-md);
+  --shadow-soft-lg: var(--shadow-lg);
+  --shadow-soft-xl: var(--shadow-xl);
+
+  /* ---- shadcn semantic bridge (values remapped onto DS tokens in :root) ---- */
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -21,7 +102,9 @@
   --color-chart-3: var(--chart-3);
   --color-chart-2: var(--chart-2);
   --color-chart-1: var(--chart-1);
-  --color-ring: var(--ring);
+  /* shadcn ring utilities take the DS mint focus color directly; the raw
+     --ring token stays the full 4px focus shadow used by :focus-visible. */
+  --color-ring: var(--mint-200);
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
@@ -48,83 +131,116 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* shadcn semantic variables remapped onto the "Dịu Mát" palette so every
+   existing primitive (inputs, dialogs, selects) inherits the design system
+   without per-usage overrides. Values reference the DS tokens above. */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --background: var(--cream-100);
+  --foreground: var(--ink-700);
+  --card: var(--white);
+  --card-foreground: var(--ink-700);
+  --popover: var(--white);
+  --popover-foreground: var(--ink-700);
+  --primary: var(--mint-400);
+  --primary-foreground: var(--white);
+  --secondary: var(--sky-300);
+  --secondary-foreground: var(--ink-900);
+  --muted: var(--cream-200);
+  --muted-foreground: var(--ink-400);
+  --accent: var(--mint-50);
+  --accent-foreground: var(--mint-600);
+  --destructive: var(--coral-400);
+  --border: var(--line-200);
+  --input: var(--line-200);
+  /* --ring stays the DS focus shadow (from effects.css); shadcn's ring color
+     is bridged to --mint-200 in @theme above. */
+  --chart-1: var(--mint-400);
+  --chart-2: var(--sky-300);
+  --chart-3: var(--sun-400);
+  --chart-4: var(--coral-400);
+  --chart-5: var(--mint-600);
+  --radius: 20px;
+  --sidebar: var(--cream-50);
+  --sidebar-foreground: var(--ink-700);
+  --sidebar-primary: var(--mint-400);
+  --sidebar-primary-foreground: var(--white);
+  --sidebar-accent: var(--mint-50);
+  --sidebar-accent-foreground: var(--mint-600);
+  --sidebar-border: var(--line-200);
+  --sidebar-ring: var(--mint-200);
 }
 
+/* The design system defines no dark mode; this selector is left present but
+   unused so shadcn's dark: variants do not error. */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: var(--surface-dark);
+  --foreground: var(--text-on-dark);
+  --card: var(--surface-dark);
+  --card-foreground: var(--text-on-dark);
+  --popover: var(--surface-dark);
+  --popover-foreground: var(--text-on-dark);
+  --primary: var(--mint-400);
+  --primary-foreground: var(--white);
+  --secondary: var(--sky-300);
+  --secondary-foreground: var(--ink-900);
+  --muted: var(--ink-700);
+  --muted-foreground: var(--ink-300);
+  --accent: var(--mint-600);
+  --accent-foreground: var(--white);
+  --destructive: var(--coral-400);
+  --border: rgba(255, 255, 255, 0.12);
+  --input: rgba(255, 255, 255, 0.15);
+  --sidebar: var(--surface-dark);
+  --sidebar-foreground: var(--text-on-dark);
+  --sidebar-primary: var(--mint-400);
+  --sidebar-primary-foreground: var(--white);
+  --sidebar-accent: var(--mint-600);
+  --sidebar-accent-foreground: var(--white);
+  --sidebar-border: rgba(255, 255, 255, 0.12);
+  --sidebar-ring: var(--mint-200);
 }
 
+/* Base layer — the DS base.css behaviours: cream page, Nunito 600 body, Baloo
+   headings, accessible focus ring, and a reduced-motion kill-switch. */
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    background: var(--surface-page);
+    color: var(--text-body);
+    font-family: var(--font-body);
+    font-weight: var(--fw-semibold);
+    font-size: var(--text-md);
+    line-height: var(--leading-normal);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
-  html {
-    @apply font-sans;
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    font-weight: var(--fw-bold);
+    line-height: var(--leading-snug);
+    color: var(--text-strong);
+    margin: 0;
+  }
+  :focus-visible {
+    outline: none;
+    box-shadow: var(--ring);
+  }
+  ::selection {
+    background: var(--mint-200);
+    color: var(--ink-900);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
   }
 }

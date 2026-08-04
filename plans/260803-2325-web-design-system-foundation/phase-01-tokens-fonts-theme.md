@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Tokens, Fonts, Tailwind Theme"
-status: pending
+status: completed
 priority: P1
 effort: "1d"
 dependencies: []
@@ -19,19 +19,19 @@ semantic variables so every existing primitive picks up the "Dịu Mát" palette
 ## Requirements
 
 - Functional:
-  - [ ] All DS custom properties from `tokens/{colors,typography,spacing,effects}.css`
+  - [x] All DS custom properties from `tokens/{colors,typography,spacing,effects}.css`
         resolve on `:root` at runtime, byte-identical values to the source files.
-  - [ ] `base.css` behaviors applied: body on `--cream-100` with `--ink-700`
+  - [x] `base.css` behaviors applied: body on `--cream-100` with `--ink-700`
         Nunito 600 at 17px, headings Baloo 2 `--ink-900`, global
         `prefers-reduced-motion` kill-switch.
-  - [ ] Baloo 2 (600/700/800) and Nunito (400/600/700/800) served from the app
+  - [x] Baloo 2 (600/700/800) and Nunito (400/600/700/800) served from the app
         bundle via Fontsource — **no Google Fonts CDN request** (the DS
         `fonts.css` explicitly says to replace its CDN import when self-hosting).
-  - [ ] Tailwind utilities exist for every color step (`bg-mint-50`…`bg-mint-600`,
+  - [x] Tailwind utilities exist for every color step (`bg-mint-50`…`bg-mint-600`,
         `text-ink-900`, `bg-cream-100`, `bg-surface-dark`, sky/sun/coral ramps),
         both font families (`font-display`, `font-body`), press shadows
         (`shadow-press-mint|sky|sun|coral|line`), soft shadows, and DS radii.
-  - [ ] shadcn semantic vars remapped: `--background→cream-100`,
+  - [x] shadcn semantic vars remapped: `--background→cream-100`,
         `--foreground→ink-700`, `--primary→mint-400`,
         `--primary-foreground→white`, `--secondary→sky-300`,
         `--destructive→coral-400`, `--muted→cream-200`,
@@ -39,9 +39,9 @@ semantic variables so every existing primitive picks up the "Dịu Mát" palette
         `--ring→mint-200`, `--radius→20px` (DS `--radius-lg`, so shadcn
         `rounded-lg` = DS button radius).
 - Non-functional:
-  - [ ] Existing auth pages and their vitest suites pass unchanged (palette
+  - [x] Existing auth pages and their vitest suites pass unchanged (palette
         swap only, no layout contract change).
-  - [ ] No FOUT worse than today: Fontsource files are imported in
+  - [x] No FOUT worse than today: Fontsource files are imported in
         `globals.css` so Vite inlines/preloads them like the current Geist
         import.
 
@@ -124,12 +124,12 @@ Rules of the bridge:
 
 ## Success Criteria
 
-- [ ] `diff` of the copied token files vs the DS sources shows no drift.
-- [ ] Zero requests to `fonts.googleapis.com` / `fonts.gstatic.com`.
-- [ ] `bg-mint-400 text-white font-display shadow-press-mint` compiles into a
+- [x] `diff` of the copied token files vs the DS sources shows no drift.
+- [x] Zero requests to `fonts.googleapis.com` / `fonts.gstatic.com`.
+- [x] `bg-mint-400 text-white font-display shadow-press-mint` compiles into a
       chunky mint sample in a scratch component (removed before merge).
-- [ ] shadcn `Button`/`Input` render mint/cream/ink without per-component edits.
-- [ ] Auth vitest suites green; typecheck and lint green.
+- [x] shadcn `Button`/`Input` render mint/cream/ink without per-component edits.
+- [x] Auth vitest suites green; typecheck and lint green.
 
 ## Risk Assessment
 

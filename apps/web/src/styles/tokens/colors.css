@@ -1,0 +1,125 @@
+/* ============================================================
+   Học Vui Mỗi Ngày — COLOR TOKENS
+   Hướng "Dịu Mát": nền kem, bạc hà (mint), pastel xanh (sky),
+   điểm nhấn vàng nắng (sun) cho phần thưởng, coral cho tim/lỗi.
+   ============================================================ */
+:root {
+  /* ---- Cream / page neutrals (warm green-tinted) ---- */
+  --cream-50: #fbfdfb;
+  --cream-100: #f4f8f3; /* app background */
+  --cream-200: #eaf1ea;
+  --cream-300: #dfe9df;
+
+  /* ---- Ink (warm green-gray text) ---- */
+  --ink-900: #1c3a31; /* headings */
+  --ink-700: #27433b; /* body */
+  --ink-500: #5b756c; /* muted / secondary text */
+  --ink-400: #86998f; /* placeholder, captions */
+  --ink-300: #aab9b1; /* disabled text */
+  --white: #ffffff;
+
+  /* ---- Mint (PRIMARY · môn Toán · success) ---- */
+  --mint-50: #e9f7f1;
+  --mint-100: #d3efe3;
+  --mint-200: #a9e0cb;
+  --mint-300: #7fd2b4;
+  --mint-400: #5cc9a7; /* primary */
+  --mint-500: #3fa888; /* primary pressed / shadow */
+  --mint-600: #2e8d6e; /* primary ink on light */
+  --mint-700: #1f6b53;
+
+  /* ---- Sky (SECONDARY · môn Tiếng Việt · info) ---- */
+  --sky-50: #eaf5fb;
+  --sky-100: #d6ecf7;
+  --sky-200: #a9d8ee;
+  --sky-300: #7fc8e8; /* secondary */
+  --sky-400: #4fa9d4;
+  --sky-500: #2d7aa0; /* secondary ink */
+  --sky-600: #226383;
+
+  /* ---- Sun (REWARD · sao, huy hiệu · warning) ---- */
+  --sun-100: #fff4d6;
+  --sun-200: #ffe6a3;
+  --sun-300: #ffd86b;
+  --sun-400: #ffc83d; /* stars / streak */
+  --sun-500: #f0a500;
+  --sun-600: #b87d00; /* ink on sun */
+
+  /* ---- Coral (LIVES/tim · error) ---- */
+  --coral-100: #ffe7e1;
+  --coral-300: #ff9b8a;
+  --coral-400: #ff7a66; /* hearts / wrong */
+  --coral-500: #e85a44;
+  --coral-600: #b23a28;
+
+  /* ---- Lines / borders ---- */
+  --line-100: #eef4ee;
+  --line-200: #e2ece2; /* default border */
+  --line-300: #cfe0d4; /* strong border */
+
+  /* ============================================================
+     SEMANTIC ALIASES — prefer these in components
+     ============================================================ */
+  /* text */
+  --text-strong: var(--ink-900);
+  --text-body: var(--ink-700);
+  --text-muted: var(--ink-500);
+  --text-soft: var(--ink-400);
+  --text-disabled: var(--ink-300);
+  --text-on-primary: var(--white);
+  --text-on-dark: #eafff7;
+
+  /* surfaces */
+  --surface-page: var(--cream-100);
+  --surface-card: var(--white);
+  --surface-sunken: var(--cream-200);
+  --surface-raised: var(--white);
+  --surface-primary-soft: var(--mint-50);
+  --surface-info-soft: var(--sky-50);
+  --surface-reward-soft: var(--sun-100);
+  --surface-danger-soft: var(--coral-100);
+  --surface-dark: #16514c; /* celebration / reward screens */
+
+  /* borders */
+  --border-subtle: var(--line-200);
+  --border-strong: var(--line-300);
+  --border-focus: var(--mint-400);
+
+  /* brand / primary */
+  --brand-primary: var(--mint-400);
+  --brand-primary-dk: var(--mint-500);
+  --brand-primary-ink: var(--mint-600);
+  --brand-primary-soft: var(--mint-50);
+
+  /* secondary */
+  --brand-secondary: var(--sky-300);
+  --brand-secondary-dk: var(--sky-400);
+  --brand-secondary-ink: var(--sky-500);
+
+  /* semantic states */
+  --success: var(--mint-400);
+  --success-dk: var(--mint-500);
+  --success-soft: var(--mint-50);
+  --success-ink: var(--mint-600);
+  --info: var(--sky-300);
+  --info-soft: var(--sky-50);
+  --info-ink: var(--sky-500);
+  --warning: var(--sun-400);
+  --warning-soft: var(--sun-100);
+  --warning-ink: var(--sun-600);
+  --danger: var(--coral-400);
+  --danger-dk: var(--coral-500);
+  --danger-soft: var(--coral-100);
+  --danger-ink: var(--coral-600);
+
+  /* subject color-coding */
+  --subject-math: var(--mint-400);
+  --subject-math-soft: var(--mint-50);
+  --subject-viet: var(--sky-300);
+  --subject-viet-soft: var(--sky-50);
+
+  /* reward / gamification */
+  --reward-star: var(--sun-400);
+  --reward-streak: var(--coral-400);
+  --reward-badge: var(--sky-300);
+}

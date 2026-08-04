@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Core Components"
-status: pending
+status: completed
 priority: P1
 effort: "1d"
 dependencies: [1]
@@ -21,7 +21,7 @@ inline styles; this phase ports them to React + Tailwind utilities from phase 1.
 ## Requirements
 
 - Functional (each component matches the DS/prototype recipe exactly):
-  - [ ] `HvButton` — variants `primary` (mint-400 bg, white ink, press-mint),
+  - [x] `HvButton` — variants `primary` (mint-400 bg, white ink, press-mint),
         `secondary` (sky-300, press-sky), `reward` (sun-400 bg, sun-600 ink,
         press-sun), `danger` (coral-400, press-coral), `ghost` (white bg, inset
         line border, press-line); sizes `sm` 44px / `md` 56px / `lg` 64px
@@ -29,44 +29,44 @@ inline styles; this phase ports them to React + Tailwind utilities from phase 1.
         `font-display` bold, wide tracking, `--radius-lg` 20px;
         `box-shadow: 0 5px 0 <press>`; `:active` → `translateY(5px)` and shadow
         collapse; `:focus-visible` → `--ring`.
-  - [ ] `HvCard` — white bg, `--radius-xl` 24px, `--pad-card` 20px; variants
+  - [x] `HvCard` — white bg, `--radius-xl` 24px, `--pad-card` 20px; variants
         `raised` (default, `--shadow-sm`), `flat` (border line-200, no shadow),
         `sunken` (cream-200 bg, inset feel); `interactive` adds hover lift
         (translateY(-2px) + `--shadow-md`, duration 140ms `--ease-out`).
-  - [ ] `StatusPill` — the collections trio used across close/pay/students
+  - [x] `StatusPill` — the collections trio used across close/pay/students
         screens: `paid` mint-50 bg / mint-600 text ("Đã đóng"), `partial`
         sun-100 / sun-600 ("Đóng thiếu"), `unpaid` coral-100 / coral-600
         ("Chưa đóng"); `--radius-pill`, `font-display` 700, 13px.
-  - [ ] `HvBadge` — small rounded label matching the DS badge recipe (subject
+  - [x] `HvBadge` — small rounded label matching the DS badge recipe (subject
         variants mint/sky, `sm` size, `solid` option) for class tags and
         display-note markers.
-  - [ ] `StatPill` / `ProgressBar` — DS recipes: StatPill = icon + number
+  - [x] `StatPill` / `ProgressBar` — DS recipes: StatPill = icon + number
         (Baloo 2) + label on white pill; ProgressBar = line-200 track,
         mint-400 fill (coral-400 when the semantic is "missing"), radius-pill,
         360ms `--ease-soft` width transition.
-  - [ ] `HvModal` — shell over the existing shadcn `Dialog`: overlay
+  - [x] `HvModal` — shell over the existing shadcn `Dialog`: overlay
         `rgba(28,58,49,.4)`, panel white `--radius-xl`+ (prototype uses 24px),
         `popIn` 220ms `--ease-soft` (scale .96→1 + fade), header `font-display`
         700 `--ink-900`, close affordance ≥48px. Responsive built in: bottom
         sheet (full-width, rounded top corners only, slide-up) under `sm`;
         centered panel `max-w-md` (≤480px) from `sm` up — consumers in plans
         07/08 get this behavior for free.
-  - [ ] `HvToast` — fixed bottom-center pill, ink-900 bg, white `font-display`
+  - [x] `HvToast` — fixed bottom-center pill, ink-900 bg, white `font-display`
         text, `toastIn` 250ms rise+fade, auto-dismiss ~2600ms, respects
         reduced motion; exposed via a tiny `useHvToast()` (or wraps the
         existing sonner/toaster if present — reuse before adding a dependency).
-  - [ ] Icons — re-export the prototype's icon set (home, check, users, file,
+  - [x] Icons — re-export the prototype's icon set (home, check, users, file,
         send, wallet, x, plus…) from `lucide-react` with DS defaults (2px
         stroke, round caps, 20px) as `HvIcon`/named exports.
 - Non-functional:
-  - [ ] Every interactive element ≥ `--touch-min` 48px hit area (44px `sm`
+  - [x] Every interactive element ≥ `--touch-min` 48px hit area (44px `sm`
         button is DS-sanctioned for dense secondary actions only — documented
         on the prop).
-  - [ ] All animations gated by the phase 1 reduced-motion kill-switch.
-  - [ ] Hover-only affordances (`HvCard interactive` lift, ghost hover tints)
+  - [x] All animations gated by the phase 1 reduced-motion kill-switch.
+  - [x] Hover-only affordances (`HvCard interactive` lift, ghost hover tints)
         wrapped in `@media (hover: hover)` so touch devices (phone/tablet)
         never stick a hover state.
-  - [ ] Kit exports one barrel `apps/web/src/components/hv/index.ts`;
+  - [x] Kit exports one barrel `apps/web/src/components/hv/index.ts`;
         components typed with explicit variant/size unions (cva or plain maps,
         following `apps/web/src/components/ui` conventions).
 
@@ -122,16 +122,16 @@ keyframes.
 
 ## Success Criteria
 
-- [ ] A kitchen-sink render (test-only) shows all five button variants × three
+- [x] A kitchen-sink render (test-only) shows all five button variants × three
       sizes matching the prototype's look: chunky shadow, correct pressed
       color, Baloo 2 labels.
-- [ ] StatusPill colors/labels byte-match the prototype `PILLS`/`STATUS_L`
+- [x] StatusPill colors/labels byte-match the prototype `PILLS`/`STATUS_L`
       maps.
-- [ ] Modal and toast animate with `--ease-soft` and stay static under
+- [x] Modal and toast animate with `--ease-soft` and stay static under
       `prefers-reduced-motion: reduce`.
-- [ ] No raw hex colors in `components/hv/` (grep gate) — tokens/utilities
+- [x] No raw hex colors in `components/hv/` (grep gate) — tokens/utilities
       only.
-- [ ] typecheck, lint, vitest pass.
+- [x] typecheck, lint, vitest pass.
 
 ## Risk Assessment
 

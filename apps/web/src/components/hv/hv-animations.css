@@ -1,0 +1,36 @@
+/* Keyframes for HvModal (popIn) and HvToast (toastIn). Every other motion in
+   the "Học Vui Mỗi Ngày" kit is expressed with Tailwind transition utilities;
+   these two live here only because CSS keyframes have no utility-class form. */
+
+@keyframes popIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

@@ -1,7 +1,7 @@
 ---
 title: "Web Design System Foundation"
 description: "Integrate the 'Học Vui Mỗi Ngày' design system (direction 'Dịu Mát') into apps/web: self-hosted Baloo 2 + Nunito, full token set mapped into Tailwind v4, and the chunky-press component kit (Button, Card, pills, progress, modal shell, toast) that plans 07 and 08 build every screen from."
-status: pending
+status: completed
 priority: P1
 effort: "2d"
 branch: main
@@ -51,8 +51,8 @@ soft shadows, and chunky 5px "press" buttons that physically depress on tap.**
 
 | # | Phase | Status |
 |---|-------|--------|
-| 1 | [Tokens, fonts, Tailwind theme](./phase-01-tokens-fonts-theme.md) | Pending |
-| 2 | [Core components](./phase-02-core-components.md) | Pending |
+| 1 | [Tokens, fonts, Tailwind theme](./phase-01-tokens-fonts-theme.md) | Completed |
+| 2 | [Core components](./phase-02-core-components.md) | Completed |
 
 Sequential: phase 2 consumes the utilities phase 1 creates.
 
@@ -88,19 +88,19 @@ cubic-bezier(.34,1.56,.64,1)`; durations 140/220/360/600ms.
 
 ## Success Criteria
 
-- [ ] `npm --prefix apps/web run dev` renders the app on `--cream-100` with
+- [x] `npm --prefix apps/web run dev` renders the app on `--cream-100` with
       Baloo 2 headings and Nunito body, zero Google Fonts network requests.
-- [ ] `bg-mint-400`, `text-ink-900`, `font-display`, `shadow-press-mint`,
+- [x] `bg-mint-400`, `text-ink-900`, `font-display`, `shadow-press-mint`,
       `rounded-[var(--radius-xl)]`-equivalent utilities compile and are used by
       the component kit.
-- [ ] `HvButton` variants visually match the prototype: chunky 5px press shadow,
+- [x] `HvButton` variants visually match the prototype: chunky 5px press shadow,
       `translateY` on `:active`, min-heights 44/56/64px.
-- [ ] Status pills render the exact prototype palette (paid mint-50/mint-600,
+- [x] Status pills render the exact prototype palette (paid mint-50/mint-600,
       partial sun-100/sun-600, unpaid coral-100/coral-600).
-- [ ] `prefers-reduced-motion: reduce` disables press/pop/toast animations.
-- [ ] Existing auth screens still render and pass their tests after the shadcn
+- [x] `prefers-reduced-motion: reduce` disables press/pop/toast animations.
+- [x] Existing auth screens still render and pass their tests after the shadcn
       variable remap (no regression in `features/auth`).
-- [ ] typecheck, lint, vitest pass.
+- [x] typecheck, lint, vitest pass.
 
 ## Risks
 

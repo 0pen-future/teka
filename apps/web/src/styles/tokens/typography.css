@@ -1,0 +1,88 @@
+/* ============================================================
+   Học Vui Mỗi Ngày — TYPOGRAPHY TOKENS
+   Display: Baloo 2 (tròn, vui, hỗ trợ dấu tiếng Việt)
+   Body:    Nunito  (tròn mềm, dễ đọc cho trẻ tập đọc, đủ dấu VN)
+   App cho trẻ 6–8 → cỡ chữ lớn, line-height thoáng.
+   ============================================================ */
+:root {
+  /* ---- families ---- */
+  --font-display: "Baloo 2", system-ui, sans-serif;
+  --font-body: "Nunito", system-ui, sans-serif;
+
+  /* ---- weights ---- */
+  --fw-regular: 400; /* @kind font */
+  --fw-medium: 500; /* @kind font */
+  --fw-semibold: 600; /* @kind font */
+  --fw-bold: 700; /* @kind font */
+  --fw-extra: 800; /* @kind font */
+  --fw-black: 900; /* @kind font */
+
+  /* ---- type scale (px) ---- */
+  --text-2xs: 12px;
+  --text-xs: 13px;
+  --text-sm: 15px;
+  --text-md: 17px; /* base body for kids — larger than web default */
+  --text-lg: 20px;
+  --text-xl: 24px;
+  --text-2xl: 30px;
+  --text-3xl: 38px;
+  --text-4xl: 48px;
+  --text-5xl: 60px; /* big numbers in math questions */
+
+  /* ---- line heights ---- */
+  --leading-tight: 1.1;
+  --leading-snug: 1.25;
+  --leading-normal: 1.45;
+  --leading-relaxed: 1.6;
+
+  /* ---- letter spacing ---- */
+  --tracking-tight: -0.01em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.04em; /* small caps labels / buttons */
+
+  /* ============================================================
+     SEMANTIC TYPE ROLES
+     ============================================================ */
+  /* display — Baloo 2, used for hero numbers, screen titles, rewards */
+  --type-display-font: var(--font-display);
+  --type-display-weight: var(--fw-bold);
+  --type-display-lh: var(--leading-tight);
+
+  /* heading — Baloo 2 */
+  --type-heading-font: var(--font-display);
+  --type-heading-weight: var(--fw-semibold);
+  --type-heading-lh: var(--leading-snug);
+
+  /* body — Nunito */
+  --type-body-font: var(--font-body);
+  --type-body-weight: var(--fw-semibold); /* kids read better at 600 */
+  --type-body-lh: var(--leading-normal);
+
+  /* label / button — Nunito or Baloo, slightly tracked */
+  --type-label-font: var(--font-display);
+  --type-label-weight: var(--fw-semibold);
+  --type-label-tracking: var(--tracking-wide);
+}
+
+/* Optional convenience classes (components mostly use vars directly) */
+.t-display {
+  font-family: var(--font-display);
+  font-weight: var(--fw-bold);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+}
+.t-heading {
+  font-family: var(--font-display);
+  font-weight: var(--fw-semibold);
+  line-height: var(--leading-snug);
+}
+.t-body {
+  font-family: var(--font-body);
+  font-weight: var(--fw-semibold);
+  line-height: var(--leading-normal);
+}
+.t-muted {
+  font-family: var(--font-body);
+  font-weight: var(--fw-medium);
+  color: var(--text-muted);
+}

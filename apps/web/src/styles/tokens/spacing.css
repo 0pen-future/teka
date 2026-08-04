@@ -1,0 +1,34 @@
+/* ============================================================
+   Học Vui Mỗi Ngày — SPACING TOKENS
+   Base 4px. Generous gaps — kid touch targets are large.
+   ============================================================ */
+:root {
+  --space-0: 0px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 48px;
+  --space-10: 64px;
+  --space-11: 80px;
+
+  /* semantic spacing */
+  --gap-inline: var(--space-2); /* between inline chips/icons */
+  --gap-stack: var(--space-4); /* between stacked blocks */
+  --gap-section: var(--space-7); /* between screen sections */
+  --pad-screen: var(--space-5); /* default screen edge padding */
+  --pad-card: var(--space-5); /* default card padding */
+
+  /* minimum touch targets — bigger for small hands */
+  --touch-min: 48px; /* absolute floor */
+  --touch-kid: 64px; /* preferred for kid app primary actions */
+
+  /* container widths */
+  --w-phone: 390px; /* kid app design width */
+  --w-content: 720px; /* parent dashboard content column */
+  --w-page: 1080px; /* parent dashboard full width */
+}

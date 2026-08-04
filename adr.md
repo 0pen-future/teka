@@ -830,3 +830,53 @@ reason/dữ liệu gia đình khác, mọi query scoped teacher_id∧contact_id�
   (`schema_design.sql:109`) định nghĩa đây là "nhãn phân biệt anh em cùng lớp
   trùng họ tên (vd 'An lớp 9A')" — chủ đích hiển thị cho phụ huynh, không phải
   ghi chú riêng tư của giáo viên.
+
+## 2026-08-04 — Web Design System Foundation: nguồn chuẩn & các deviation
+
+Tích hợp design system "Học Vui Mỗi Ngày" (hướng "Dịu Mát") vào `apps/web`.
+Nguyên tắc: khi lời văn phase spec và `_ds_bundle.js` (recipe gốc của design
+project) khác nhau, **bundle là nguồn chuẩn** (rule "100% design system").
+Các điểm đã reconcile về phía bundle, ghi lại để không bị "sửa ngược" ở audit
+sau:
+
+- **Ring vs focus shadow (collision).** `effects.css` định nghĩa `--ring` là
+  full box-shadow `0 0 0 4px var(--mint-200)`, nhưng shadcn kỳ vọng `--ring`
+  là một *màu*. Giải: trong `@theme inline` map `--color-ring: var(--mint-200)`
+  (màu cho ring utilities của shadcn) và **không** khai báo lại `--ring` ở
+  `:root`, để token DS `--ring` giữ nguyên làm box-shadow cho global
+  `:focus-visible { box-shadow: var(--ring) }`. Nút HV dùng
+  `focus-visible:ring-4` (compose cùng press shadow).
+
+- **HvCard shadow.** Lời văn phase-02 nói raised=`shadow-sm`, interactive
+  hover=`shadow-md`; nhưng bundle `hv-card` dùng `shadow-md` base + `shadow-lg`
+  hover. Giữ theo bundle (`shadow-soft-md`/`shadow-soft-lg`).
+
+- **ProgressBar easing + track.** Bundle dùng `transition ... var(--ease-out)`
+  và track `bg cream-200`. Giữ theo bundle (không đổi sang ease-soft/line-200
+  như lời văn spec gợi ý). Bổ sung `color="missing"` → fill `coral-400` để
+  màn thu học phí (plan 08) biểu thị "còn thiếu" — đây là phần spec phase-02
+  thêm ngoài bundle, được giữ vì consumer cần.
+
+- **HvButton ghost press = 5px (không dùng `shadow-press-line`).** Mọi biến thể
+  nút depress đúng `--press-depth` = 5px và `active:translate-y` = 5px. Token
+  `--press-line` lại là `0 4px 0` (4px, dùng cho ngữ cảnh khác). Nếu ghost dùng
+  `shadow-press-line` (4px) sẽ lệch 1px so với translate 5px → hở đáy. Vì vậy
+  ghost hardcode `0 var(--press-depth) 0 var(--line-300)` (qua token, không
+  hex) để đồng bộ 5px với các biến thể khác. Nút `sm` dùng `--radius-md` (16px)
+  đúng theo recipe DS.
+
+- **HvModal.** Bọc `DialogPrimitive` trực tiếp (không qua `ui/dialog`
+  `DialogContent`) vì `DialogContent` hardcode canh giữa (`top-1/2 left-1/2
+  -translate-*`) không thể override per-breakpoint để thành bottom-sheet dưới
+  `sm`. Vẫn tái dùng hành vi radix (focus trap, esc, portal). A11y: luôn render
+  `DialogPrimitive.Title` (sr-only "Hộp thoại" khi không truyền `title`) để
+  dialog luôn có accessible name; truyền `aria-describedby={undefined}` để tắt
+  cảnh báo Description. Animation: `max-sm:slideUp` (bottom sheet trượt lên) /
+  `sm:popIn` (panel canh giữa).
+
+- **Fonts self-hosted.** Thay Google Fonts CDN của DS bằng `@fontsource`
+  (Baloo 2 600/700/800, Nunito 400/600/700/800), woff2 bundle kèm subset
+  vietnamese — 0 request bên thứ ba.
+
+- **Dark mode.** DS không định nghĩa dark. Giữ block `.dark` (map tạm về
+  surface-dark) để `dark:` variant của shadcn không lỗi, nhưng không dùng.
