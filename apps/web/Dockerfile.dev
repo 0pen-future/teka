@@ -1,7 +1,7 @@
 # Dev-only image: compose bind-mounts ./apps/web over /app with an anonymous
 # volume shadowing /app/node_modules, so dependencies stay container-built
 # (linux binaries) while source edits hot-reload via Vite HMR.
-FROM node:22-alpine
+FROM node:25-alpine
 
 WORKDIR /app
 
