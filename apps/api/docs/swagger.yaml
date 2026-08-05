@@ -4303,6 +4303,10 @@ paths:
         in: query
         name: class_id
         type: string
+      - description: only students with no open enrollment in any class
+        in: query
+        name: unenrolled
+        type: boolean
       - description: page number
         in: query
         name: page

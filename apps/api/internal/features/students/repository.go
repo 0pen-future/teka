@@ -12,11 +12,14 @@ import (
 )
 
 // ListFilter narrows the student list. ClassID filters through open
-// enrollments — the attendance screen's view of a class roster.
+// enrollments — the attendance screen's view of a class roster. Unenrolled
+// keeps only students with no open enrollment in any class — the roster's
+// "Chưa ghi danh" tab.
 type ListFilter struct {
-	Query     string
-	ContactID uuid.UUID
-	ClassID   uuid.UUID
+	Query      string
+	ContactID  uuid.UUID
+	ClassID    uuid.UUID
+	Unenrolled bool
 }
 
 // Row is a student joined with its contact's name and phone, so the roster
@@ -111,6 +114,11 @@ func (r *gormRepository) List(ctx context.Context, teacherID uuid.UUID, filter L
 			"JOIN enrollments ON enrollments.student_id = students.id"+
 				" AND enrollments.class_id = ? AND enrollments.ended_on IS NULL AND enrollments.deleted_at IS NULL",
 			filter.ClassID)
+	}
+	if filter.Unenrolled {
+		q = q.Where("NOT EXISTS (SELECT 1 FROM enrollments" +
+			" WHERE enrollments.student_id = students.id" +
+			" AND enrollments.ended_on IS NULL AND enrollments.deleted_at IS NULL)")
 	}
 
 	var total int64

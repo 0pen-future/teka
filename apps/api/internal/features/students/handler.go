@@ -107,6 +107,7 @@ func (h *Handler) create(c *gin.Context) {
 //	@Param			query		query		string	false	"matches the student name"
 //	@Param			contact_id	query		string	false	"only students under this contact"
 //	@Param			class_id	query		string	false	"only students with an open enrollment in this class"
+//	@Param			unenrolled	query		bool	false	"only students with no open enrollment in any class"
 //	@Param			page		query		int		false	"page number"
 //	@Param			per_page	query		int		false	"page size (max 100)"
 //	@Param			sort		query		string	false	"full_name or created_at; - prefix for desc"
@@ -128,7 +129,12 @@ func (h *Handler) list(c *gin.Context) {
 	if !ok {
 		return
 	}
-	filter := ListFilter{Query: c.Query("query"), ContactID: contactID, ClassID: classID}
+	filter := ListFilter{
+		Query:      c.Query("query"),
+		ContactID:  contactID,
+		ClassID:    classID,
+		Unenrolled: c.Query("unenrolled") == "true",
+	}
 	params := pagination.Parse(c, "full_name", listSorts)
 	rows, total, err := h.svc.List(c.Request.Context(), teacherID, filter, params)
 	if err != nil {

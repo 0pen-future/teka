@@ -5727,6 +5727,12 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "type": "boolean",
+                        "description": "only students with no open enrollment in any class",
+                        "name": "unenrolled",
+                        "in": "query"
+                    },
+                    {
                         "type": "integer",
                         "description": "page number",
                         "name": "page",

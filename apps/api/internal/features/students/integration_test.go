@@ -217,6 +217,32 @@ func TestListByClassFiltersThroughOpenEnrollmentsBounded(t *testing.T) {
 		"class filtering must stay at count+select — join, do not loop")
 }
 
+func TestListUnenrolledExcludesOpenEnrollments(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	teacher, _ := testutil.Teacher(t, db)
+	contact := testutil.Contact(t, db, teacher.ID)
+	class := testutil.Class(t, db, teacher.ID)
+
+	enrolled, err := svc.Create(ctx, teacher.ID, students.CreateRequest{FullName: "Bé An", ContactID: contact.ID})
+	require.NoError(t, err)
+	departed, err := svc.Create(ctx, teacher.ID, students.CreateRequest{FullName: "Bé Bình", ContactID: contact.ID})
+	require.NoError(t, err)
+	never, err := svc.Create(ctx, teacher.ID, students.CreateRequest{FullName: "Bé Cường", ContactID: contact.ID})
+	require.NoError(t, err)
+
+	insertEnrollment(t, db, teacher.ID, enrolled.ID, class.ID)
+	endedID := insertEnrollment(t, db, teacher.ID, departed.ID, class.ID)
+	require.NoError(t, db.Exec("UPDATE enrollments SET ended_on = '2026-02-01' WHERE id = ?", endedID).Error)
+
+	rows, total, err := svc.List(ctx, teacher.ID, students.ListFilter{Unenrolled: true}, listParams(t))
+	require.NoError(t, err)
+	require.EqualValues(t, 2, total, "an ended enrollment leaves the student unenrolled again")
+	ids := []uuid.UUID{rows[0].ID, rows[1].ID}
+	require.ElementsMatch(t, []uuid.UUID{departed.ID, never.ID}, ids)
+}
+
 // sqlCounter counts executed statements through the GORM logger's Trace hook.
 type sqlCounter struct {
 	gormlogger.Interface
