@@ -165,7 +165,7 @@ export function StudentsPage() {
                   // box-shadow ring, so the ring must be re-added explicitly
                   // (same trap HvButton guards against).
                   "min-h-11 rounded-full px-[18px] font-display text-[14px] font-extrabold transition-[background-color,color,box-shadow] focus-visible:outline-none focus-visible:ring-4",
-                  activeClassId === tab.id
+                  effectiveClassId === tab.id
                     ? "bg-mint-400 text-white shadow-press-mint"
                     : "bg-white text-ink-500 shadow-soft-sm hover:bg-cream-100",
                 )}
