@@ -14,7 +14,7 @@ on:
       - "docker-compose.yml"
       - ".env.example"
   push:
-    branches: [main]
+    branches: [master]
     paths:
       - "apps/web/**"
       - ".github/workflows/web-ci.yml"

@@ -11,7 +11,7 @@ on:
       # CI runs make targets, so Makefile edits must trigger this pipeline.
       - "Makefile"
   push:
-    branches: [main]
+    branches: [master]
     paths:
       - "apps/api/**"
       - ".github/workflows/api-ci.yml"
