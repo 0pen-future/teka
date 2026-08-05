@@ -38,7 +38,7 @@ export function LoginPage() {
   return (
     <HvCard variant="raised" padding="lg" className="mx-auto w-full max-w-[var(--w-phone)]">
       <div className="mb-6 text-center">
-        <p className="font-display text-[22px] font-extrabold text-ink-900">Sổ Lớp</p>
+        <p className="font-display text-[22px] font-extrabold text-ink-900">Teka</p>
         <p className="mt-1 text-[13px] text-ink-400">Đăng nhập để tiếp tục</p>
       </div>
       <form onSubmit={(event) => void onSubmit(event)} noValidate>

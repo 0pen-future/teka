@@ -209,7 +209,7 @@ export function DashboardLayout() {
     <div className="flex min-h-svh bg-cream-100">
       <aside className="hidden lg:flex lg:w-[236px] lg:shrink-0 lg:flex-col lg:border-r lg:border-line-200 lg:bg-white">
         <div className="p-6">
-          <p className="font-display text-[22px] font-extrabold text-ink-900">Sổ Lớp</p>
+          <p className="font-display text-[22px] font-extrabold text-ink-900">Teka</p>
           <p className="text-[12px] text-ink-400">Quản lý lớp học</p>
         </div>
         <nav aria-label="Main" className="flex flex-1 flex-col gap-1 px-4">
