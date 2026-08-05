@@ -52,19 +52,25 @@ export function StudentsPage() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      const next = new URLSearchParams(searchParams);
-      if (query) {
-        next.set("q", query);
-      } else {
-        next.delete("q");
-      }
-      setSearchParams(next, { replace: true });
+      // Functional updater: the timer fires up to 300ms after this render,
+      // and building from a captured `searchParams` would overwrite any
+      // param written in between — e.g. revert a class tab clicked while
+      // the user was still typing.
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (query) {
+            next.set("q", query);
+          } else {
+            next.delete("q");
+          }
+          return next;
+        },
+        { replace: true },
+      );
     }, 300);
     return () => clearTimeout(timer);
-    // searchParams/setSearchParams intentionally excluded: only the debounced
-    // query should retrigger this effect, not every URL change it causes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query]);
+  }, [query, setSearchParams]);
 
   // per_page must cover every active class — the search filter asserts
   // "no class matches" over this list, so a truncated page would turn a
@@ -86,13 +92,21 @@ export function StudentsPage() {
   const students = studentsPage?.items ?? [];
 
   function selectClass(classId: string) {
-    const next = new URLSearchParams(searchParams);
-    if (classId) {
-      next.set("class_id", classId);
-    } else {
-      next.delete("class_id");
-    }
-    setSearchParams(next, { replace: true });
+    // Functional updater for the same reason as the search debounce above:
+    // this also runs from dialog callbacks whose render (and captured
+    // params) may be several URL writes old.
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (classId) {
+          next.set("class_id", classId);
+        } else {
+          next.delete("class_id");
+        }
+        return next;
+      },
+      { replace: true },
+    );
   }
 
   return (

@@ -17,19 +17,24 @@ export function ContactsPage() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      const next = new URLSearchParams(searchParams);
-      if (query) {
-        next.set("q", query);
-      } else {
-        next.delete("q");
-      }
-      setSearchParams(next, { replace: true });
+      // Functional updater: the timer fires up to 300ms after this render,
+      // and building from a captured `searchParams` would overwrite any
+      // param another interaction wrote in the meantime.
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (query) {
+            next.set("q", query);
+          } else {
+            next.delete("q");
+          }
+          return next;
+        },
+        { replace: true },
+      );
     }, 300);
     return () => clearTimeout(timer);
-    // searchParams/setSearchParams intentionally excluded: only the debounced
-    // query should retrigger this effect, not every URL change it causes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query]);
+  }, [query, setSearchParams]);
 
   const { data, isPending } = useContactsList({ query: urlQuery, per_page: 50 });
   const contacts = data?.items ?? [];
