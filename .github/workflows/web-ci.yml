@@ -65,7 +65,7 @@ jobs:
       - run: npm ci
       # Same script locally and in CI — no CI-only invocation drift.
       - run: npm run test:coverage
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: web-coverage
           path: apps/web/coverage
@@ -150,7 +150,7 @@ jobs:
         run: docker compose run --rm migrate go run ./cmd/api seed
       - run: npx playwright install --with-deps chromium
       - run: npm run e2e
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-artifacts
