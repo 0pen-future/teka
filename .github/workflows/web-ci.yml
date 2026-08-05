@@ -116,6 +116,11 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
+      # npm ci must run before the stack starts: compose bind-mounts
+      # ./apps/web with an anonymous node_modules volume, and if the host
+      # directory doesn't exist yet Docker creates the mountpoint root-owned,
+      # which makes a later npm ci fail with EACCES.
+      - run: npm ci
       # Compose interpolates the repo-root .env; the example values are the
       # dev-stack defaults and contain no real secrets.
       - name: Create .env from example
@@ -143,7 +148,6 @@ jobs:
       - name: Seed test users
         working-directory: .
         run: docker compose run --rm migrate go run ./cmd/api seed
-      - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run e2e
       - uses: actions/upload-artifact@v4
