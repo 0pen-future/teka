@@ -46,22 +46,21 @@ test("roster flow: contact, two students, a class, enroll both, end one", async 
   await page.getByRole("dialog").getByRole("button", { name: "Thêm học sinh" }).click();
   await expect(page.getByText(studentTwoName)).toBeVisible();
 
-  // 3. Create a class with one weekly slot (`ClassDialog` create mode).
-  await page.goto("/classes");
+  // 3. Create a class with one weekly slot (`ClassDialog` create mode) —
+  // class creation lives on the consolidated "Lớp & học sinh" screen; the
+  // new class shows up as a pill tab in the class picker.
+  await page.goto("/students");
   await page.getByRole("button", { name: "+ Tạo lớp mới" }).click();
   await page.getByLabel("Tên lớp").fill(className);
   await page.getByLabel("Giờ học").fill("18:00");
   await page.getByLabel("Thời lượng (phút)").fill("90");
   await page.getByLabel("Đơn giá / buổi (đ)").fill("150000");
   await page.getByRole("dialog").getByRole("button", { name: "Tạo lớp" }).click();
-  await expect(page.getByText(className)).toBeVisible();
-  await page.getByText(className).click();
-  await expect(page).toHaveURL(/\/classes\/.+/);
+  await expect(page.getByRole("tab", { name: className })).toBeVisible();
 
   // 3b. Add-student wizard on the roster screen: create the profile (Bước
   // 1/2), postpone enrollment with "Để sau", find the student on the "Chưa
   // ghi danh" tab, then enroll from there (Bước 2 reused standalone).
-  await page.goto("/students");
   await page.getByRole("button", { name: "+ Thêm học sinh" }).click();
   await page.getByLabel("Họ và tên").fill(studentThreeName);
   await page.getByRole("combobox", { name: "Người liên hệ" }).fill(contactName);
@@ -85,34 +84,39 @@ test("roster flow: contact, two students, a class, enroll both, end one", async 
   await expect(page).toHaveURL(/class_id=(?!none)/);
   await expect(page.getByRole("row").filter({ hasText: studentThreeName })).toBeVisible();
 
-  // 4. Enroll both remaining students into the class from the class screen.
-  await page.goto("/classes");
-  await page.getByText(className).click();
-  await expect(page).toHaveURL(/\/classes\/.+/);
-  await page.getByRole("button", { name: "Ghi danh học sinh" }).click();
-  await page.getByLabel("Tìm học sinh").fill(studentOneName);
-  await page.getByRole("option", { name: new RegExp(studentOneName) }).click();
-  await page.getByRole("button", { name: "Ghi danh" }).click();
-  await expect(page.getByText(/được tính từ buổi học tiếp theo/)).toBeVisible();
+  // 4. Enroll both remaining students from the "Chưa ghi danh" tab — the
+  // per-class enrollment screen is gone; every enrollment goes through
+  // `EnrollStudentDialog` for one student at a time. The success toast names
+  // the student, which also disambiguates it from the previous toast.
+  for (const studentName of [studentOneName, studentTwoName]) {
+    await page.getByRole("tab", { name: "Chưa ghi danh" }).click();
+    await page.getByPlaceholder("Tìm theo tên học sinh").fill(studentName);
+    const studentRow = page.getByRole("row").filter({ hasText: studentName });
+    await studentRow.getByRole("button", { name: "Ghi danh vào lớp" }).click();
+    await page.getByRole("combobox", { name: "Lớp" }).click();
+    await page.getByRole("option", { name: new RegExp(className) }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Ghi danh vào lớp" }).click();
+    await expect(page.getByText(new RegExp(`Đã ghi danh ${studentName}`))).toBeVisible();
+    // Enrolling switches the roster to the class's tab with the student on it.
+    await expect(page.getByRole("row").filter({ hasText: studentName })).toBeVisible();
+  }
 
-  await page.getByRole("button", { name: "Ghi danh học sinh" }).click();
-  await page.getByLabel("Tìm học sinh").fill(studentTwoName);
-  await page.getByRole("option", { name: new RegExp(studentTwoName) }).click();
-  await page.getByRole("button", { name: "Ghi danh" }).click();
-  await expect(page.getByText(/được tính từ buổi học tiếp theo/)).toBeVisible();
-
-  // The enrollment row is the card two levels above the name: the name <p>
-  // sits inside a text-column <div>, and the row's action button is that
-  // div's sibling — one `..` would stop at the text column and miss it.
-  const studentOneRow = page.getByText(studentOneName).locator("xpath=../..");
-  await expect(studentOneRow.getByRole("button", { name: "Kết thúc ghi danh" })).toBeVisible();
-  const studentTwoRow = page.getByText(studentTwoName).locator("xpath=../..");
-  await expect(studentTwoRow.getByRole("button", { name: "Kết thúc ghi danh" })).toBeVisible();
-
-  // 5. End one enrollment — existing debt (if any) must be preserved, not written off.
-  await studentOneRow.getByRole("button", { name: "Kết thúc ghi danh" }).click();
+  // 5. End one enrollment from the student detail screen — existing debt
+  // (if any) must be preserved, not written off.
+  await page.getByPlaceholder("Tìm theo tên học sinh").fill(studentOneName);
+  await page.getByRole("link", { name: studentOneName }).click();
+  await expect(page).toHaveURL(/\/students\/.+/);
+  await page.getByRole("button", { name: "Kết thúc ghi danh" }).click();
   await expect(page.getByText("Nợ cũ (nếu có) vẫn được giữ.")).toBeVisible();
-  await page.getByRole("button", { name: "Kết thúc" }).click();
-  await expect(studentOneRow.getByRole("button", { name: "Kết thúc ghi danh" })).toHaveCount(0);
-  await expect(studentTwoRow.getByRole("button", { name: "Kết thúc ghi danh" })).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Kết thúc" }).click();
+  await expect(page.getByRole("button", { name: "Kết thúc ghi danh" })).toHaveCount(0);
+  await expect(page.getByText(/— \d{4}-\d{2}-\d{2}/)).toBeVisible();
+
+  // The other student's enrollment is untouched by ending the first one.
+  await page.goto("/students");
+  await page.getByRole("tab", { name: className }).click();
+  await page.getByPlaceholder("Tìm theo tên học sinh").fill(studentTwoName);
+  await page.getByRole("link", { name: studentTwoName }).click();
+  await expect(page).toHaveURL(/\/students\/.+/);
+  await expect(page.getByRole("button", { name: "Kết thúc ghi danh" })).toBeVisible();
 });
