@@ -97,6 +97,9 @@ export function AttendancePage({ sessionId: sessionIdProp }: AttendancePageProps
   }
 
   const dirty = baselineIds !== null && !setsEqual(absentIds, baselineIds);
+  // Confirmed server-side with no local edits — the single source of truth
+  // for both the button label and the confirm handler's no-op branch.
+  const settled = Boolean(session?.attendance_confirmed_at) && !dirty;
   // A successful save navigates away in the same callback that resets the
   // baseline; React batches those state writes, so at navigate() time the
   // committed render still reads `dirty === true`. Without this ref the
@@ -127,6 +130,12 @@ export function AttendancePage({ sessionId: sessionIdProp }: AttendancePageProps
   }
 
   function handleConfirm() {
+    // Prototype behavior: a confirmed session with no edits only reports its
+    // state — no redundant roster write, no navigation.
+    if (settled) {
+      hvToast("Buổi này đã xác nhận rồi");
+      return;
+    }
     saveMutation.mutate(
       { absent_student_ids: Array.from(absentIds) },
       {
@@ -237,6 +246,7 @@ export function AttendancePage({ sessionId: sessionIdProp }: AttendancePageProps
         absentCount={absentIds.size}
         pending={saveMutation.isPending}
         closedPeriod={closedPeriod}
+        settled={settled}
         onConfirm={handleConfirm}
       />
 
