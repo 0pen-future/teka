@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 
 import { HvBadge, HvButton, HvCard, hvToast } from "@/components/hv";
 import { cn, formatPhoneLocal } from "@/lib/utils";
 
 import { AnonymizeStudentDialog } from "../components/anonymize-student-dialog";
 import { ClassDialog } from "../components/class-dialog";
+import { ClassSearchEmptyNote, ClassSearchInput } from "../components/class-search";
 import { EnrollStudentDialog } from "../components/enroll-student-dialog";
 import { StudentDialog } from "../components/student-dialog";
 import { useClassesList } from "../hooks/use-classes";
+import { useClassSearch } from "../hooks/use-class-search";
 import { useStudentsList } from "../hooks/use-students";
 import type { Student } from "../schemas/roster-schemas";
 
@@ -34,6 +36,7 @@ const tableCellClassName = "border-t border-line-100 px-[18px] py-[11px]";
  * table rather than routing to per-class pages, matching the prototype.
  */
 export function StudentsPage() {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeClassId = searchParams.get("class_id") ?? "";
   const isUnenrolledTab = activeClassId === UNENROLLED_TAB;
@@ -63,11 +66,20 @@ export function StudentsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
-  const { data: classesPage } = useClassesList({ status: "active" });
+  // per_page must cover every active class — the search filter asserts
+  // "no class matches" over this list, so a truncated page would turn a
+  // paging artifact into a false claim.
+  const { data: classesPage } = useClassesList({ status: "active", per_page: 100 });
   const classes = classesPage?.items ?? [];
+  const classSearch = useClassSearch(classes);
+  // No "all classes" tab — a URL without class_id falls back to the first
+  // class (same default as the attendance screen) instead of an unscoped list.
+  const effectiveClassId = isUnenrolledTab
+    ? activeClassId
+    : activeClassId || (classes[0]?.id ?? "");
   const { data: studentsPage, isPending } = useStudentsList({
     query: urlQuery,
-    class_id: isUnenrolledTab ? undefined : activeClassId || undefined,
+    class_id: isUnenrolledTab ? undefined : effectiveClassId || undefined,
     unenrolled: isUnenrolledTab || undefined,
     per_page: 50,
   });
@@ -94,6 +106,19 @@ export function StudentsPage() {
           <h1 className="flex-1 font-display text-[26px] font-extrabold text-ink-900">
             Lớp &amp; học sinh
           </h1>
+          {/* Only while a real class is active — a stale or mistyped class_id
+              in the URL matches no class and gets no settings button. */}
+          {classes.some((klass) => klass.id === effectiveClassId) ? (
+            <HvButton
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                void navigate(`/classes/${effectiveClassId}/settings`);
+              }}
+            >
+              ⚙ Cài đặt lớp
+            </HvButton>
+          ) : null}
           <HvButton variant="secondary" size="sm" onClick={() => setClassDialogOpen(true)}>
             + Tạo lớp mới
           </HvButton>
@@ -113,44 +138,43 @@ export function StudentsPage() {
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <div role="tablist" aria-label="Lớp" className="flex flex-wrap gap-2">
-          {[
-            { id: "", label: "Tất cả" },
-            ...classes.map((klass) => ({ id: klass.id, label: klass.name })),
-            { id: UNENROLLED_TAB, label: "Chưa ghi danh" },
-          ].map((tab) => (
-            <button
-              key={tab.id || "all"}
-              type="button"
-              role="tab"
-              aria-selected={activeClassId === tab.id}
-              onClick={() => selectClass(tab.id)}
-              className={cn(
-                // The shadow utilities override the base :focus-visible
-                // box-shadow ring, so the ring must be re-added explicitly
-                // (same trap HvButton guards against).
-                "min-h-11 rounded-full px-[18px] font-display text-[14px] font-extrabold transition-[background-color,color,box-shadow] focus-visible:outline-none focus-visible:ring-4",
-                activeClassId === tab.id
-                  ? "bg-mint-400 text-white shadow-press-mint"
-                  : "bg-white text-ink-500 shadow-soft-sm hover:bg-cream-100",
-              )}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-        <div className="ml-auto flex items-center gap-3">
-          {/* Prototype: the ⚙ pill shows only while a real class tab is active —
-              a stale or mistyped class_id in the URL matches no tab and gets no pill. */}
-          {classes.some((klass) => klass.id === activeClassId) ? (
-            <Link
-              to={`/classes/${activeClassId}/settings`}
-              className="inline-flex min-h-11 items-center rounded-full border-[1.5px] border-line-300 px-4 font-display text-[13px] font-bold text-ink-500 transition-colors hover:border-mint-400 hover:text-mint-600"
-            >
-              ⚙ Cài đặt lớp
-            </Link>
+      <div className="flex flex-col gap-2">
+        <h2 className="text-[12px] font-extrabold tracking-[var(--tracking-wide)] text-ink-400">
+          CHỌN LỚP
+        </h2>
+        <div className="flex flex-wrap items-center gap-2">
+          {classSearch.showSearch ? (
+            <ClassSearchInput value={classSearch.query} onChange={classSearch.setQuery} />
           ) : null}
+          {/* `contents` dissolves the tablist's box so each tab wraps
+              individually in the row shared with the search pill and empty
+              note — otherwise the whole tab strip drops to its own line. */}
+          <div role="tablist" aria-label="Lớp" className="contents">
+            {[
+              ...classSearch.filtered.map((klass) => ({ id: klass.id, label: klass.name })),
+              { id: UNENROLLED_TAB, label: "Chưa ghi danh" },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={effectiveClassId === tab.id}
+                onClick={() => selectClass(tab.id)}
+                className={cn(
+                  // The shadow utilities override the base :focus-visible
+                  // box-shadow ring, so the ring must be re-added explicitly
+                  // (same trap HvButton guards against).
+                  "min-h-11 rounded-full px-[18px] font-display text-[14px] font-extrabold transition-[background-color,color,box-shadow] focus-visible:outline-none focus-visible:ring-4",
+                  activeClassId === tab.id
+                    ? "bg-mint-400 text-white shadow-press-mint"
+                    : "bg-white text-ink-500 shadow-soft-sm hover:bg-cream-100",
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          {classSearch.emptyNote ? <ClassSearchEmptyNote note={classSearch.emptyNote} /> : null}
         </div>
       </div>
 

@@ -1,11 +1,15 @@
 import { useState } from "react";
 import { Outlet, useMatches } from "react-router";
 
-import { HvButton, HvCard } from "@/components/hv";
+import { HvCard } from "@/components/hv";
 import { cn, formatSessionDate } from "@/lib/utils";
-import { useClassesList } from "@/features/roster";
+import {
+  ClassSearchEmptyNote,
+  ClassSearchInput,
+  useClassesList,
+  useClassSearch,
+} from "@/features/roster";
 
-import { CreateSessionDialog } from "../components/create-session-dialog";
 import { SessionListItem } from "../components/session-list-item";
 import { useSessionsList } from "../hooks/use-sessions";
 import type { Session } from "../schemas/attendance-schemas";
@@ -59,10 +63,12 @@ export function SessionsPage() {
   // class below, without needing an effect to seed it once classes load.
   const [explicitClassId, setExplicitClassId] = useState<string | null>(null);
   const [range, setRange] = useState(() => ({ from: daysAgo(13), to: today() }));
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
   const { data: classesPage } = useClassesList({ status: "active", per_page: 100 });
   const classes = classesPage?.items ?? [];
+  // Search narrows which pills render; selection still falls back to the
+  // full list so filtering can never change the selected class.
+  const classSearch = useClassSearch(classes);
   const selectedClassId = explicitClassId ?? classes[0]?.id ?? null;
 
   const { data: sessions, isPending } = useSessionsList(selectedClassId ?? undefined, range);
@@ -85,29 +91,16 @@ export function SessionsPage() {
   const hasSelection = Boolean(selectedId);
 
   return (
-    <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-      <div
-        className={cn(
-          "flex flex-col gap-4",
-          hasSelection
-            ? "hidden lg:flex lg:w-[360px] lg:shrink-0"
-            : "flex lg:w-[360px] lg:shrink-0",
-        )}
-      >
+    <div className="flex flex-col gap-4">
+      {/* Prototype places the header and the class picker above the
+          list/panel row at full page width, so the pills get the whole
+          line instead of wrapping inside the 360px list column. Under lg
+          the open panel takes over the screen, so this block hides with
+          the list. */}
+      <div className={cn("flex-col gap-4", hasSelection ? "hidden lg:flex" : "flex")}>
         <div>
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="flex-1 font-display text-[26px] font-extrabold text-ink-900">
-              Điểm danh
-            </h1>
-            <HvButton
-              size="sm"
-              disabled={!selectedClassId}
-              onClick={() => setCreateDialogOpen(true)}
-            >
-              Thêm buổi học
-            </HvButton>
-          </div>
-          <p className="mt-1 text-[13.5px] text-ink-500">
+          <h1 className="font-display text-[26px] font-extrabold text-ink-900">Điểm danh</h1>
+          <p className="mt-1 text-[14px] text-ink-500">
             Mặc định cả lớp có mặt — chỉ chạm vào bạn vắng, rồi xác nhận.
           </p>
         </div>
@@ -117,30 +110,51 @@ export function SessionsPage() {
             Chưa có lớp nào đang hoạt động. Tạo một lớp trước khi điểm danh.
           </HvCard>
         ) : (
-          <div role="tablist" aria-label="Lớp" className="flex flex-wrap gap-2">
-            {classes.map((klass) => (
-              <button
-                key={klass.id}
-                type="button"
-                role="tab"
-                aria-selected={selectedClassId === klass.id}
-                onClick={() => setExplicitClassId(klass.id)}
-                className={cn(
-                  // The shadow utilities override the base :focus-visible
-                  // box-shadow ring, so the ring must be re-added explicitly
-                  // (same trap HvButton guards against).
-                  "min-h-11 rounded-full px-[18px] font-display text-[14px] font-extrabold transition-[background-color,color,box-shadow] focus-visible:outline-none focus-visible:ring-4",
-                  selectedClassId === klass.id
-                    ? "bg-mint-400 text-white shadow-press-mint"
-                    : "bg-white text-ink-500 shadow-soft-sm hover:bg-cream-100",
-                )}
-              >
-                {klass.name}
-              </button>
-            ))}
+          <div className="flex flex-col gap-2">
+            <h2 className="text-[12px] font-extrabold tracking-[var(--tracking-wide)] text-ink-400">
+              CHỌN LỚP
+            </h2>
+            <div className="flex flex-wrap items-center gap-2">
+              {classSearch.showSearch ? (
+                <ClassSearchInput value={classSearch.query} onChange={classSearch.setQuery} />
+              ) : null}
+              {/* A tablist must own at least one tab, so the container leaves
+                  the tree entirely when the filter matches nothing.
+                  `contents` dissolves its box so each tab wraps individually
+                  in the row shared with the search pill and empty note —
+                  otherwise the whole tab strip drops to its own line. */}
+              {classSearch.filtered.length > 0 ? (
+                <div role="tablist" aria-label="Lớp" className="contents">
+                  {classSearch.filtered.map((klass) => (
+                    <button
+                      key={klass.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={selectedClassId === klass.id}
+                      onClick={() => setExplicitClassId(klass.id)}
+                      className={cn(
+                        // The shadow utilities override the base :focus-visible
+                        // box-shadow ring, so the ring must be re-added explicitly
+                        // (same trap HvButton guards against).
+                        "min-h-11 rounded-full px-[18px] font-display text-[14px] font-extrabold transition-[background-color,color,box-shadow] focus-visible:outline-none focus-visible:ring-4",
+                        selectedClassId === klass.id
+                          ? "bg-mint-400 text-white shadow-press-mint"
+                          : "bg-white text-ink-500 shadow-soft-sm hover:bg-cream-100",
+                      )}
+                    >
+                      {klass.name}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {classSearch.emptyNote ? <ClassSearchEmptyNote note={classSearch.emptyNote} /> : null}
+            </div>
           </div>
         )}
 
+        {/* The date filter lives up here with the other controls so the row
+            below holds only the session card and the panel — both start on
+            the same line, like the prototype's list/panel flex row. */}
         <div className="flex items-center gap-2 text-[13px] text-ink-500">
           <label className="flex items-center gap-1">
             Từ
@@ -163,78 +177,81 @@ export function SessionsPage() {
             />
           </label>
         </div>
+      </div>
 
-        {isPending ? <p className="text-[13px] text-ink-400">Đang tải…</p> : null}
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+        <div
+          className={cn(
+            "flex flex-col gap-4",
+            hasSelection
+              ? "hidden lg:flex lg:w-[360px] lg:shrink-0"
+              : "flex lg:w-[360px] lg:shrink-0",
+          )}
+        >
+          {isPending ? <p className="text-[13px] text-ink-400">Đang tải…</p> : null}
 
-        {!isPending && selectedClassId && allSessions.length === 0 ? (
-          <HvCard variant="flat" className="text-center text-[13px] text-ink-400">
-            Không có buổi học nào trong khoảng thời gian này.
-          </HvCard>
-        ) : null}
+          {!isPending && selectedClassId && allSessions.length === 0 ? (
+            <HvCard variant="flat" className="text-center text-[13px] text-ink-400">
+              Không có buổi học nào trong khoảng thời gian này.
+            </HvCard>
+          ) : null}
 
-        {/* Prototype session-list card: one white rounded-20 surface holding
+          {/* Prototype session-list card: one white rounded-20 surface holding
             every group, section labels in the muted 12.5px/800 band style. */}
-        {allSessions.length > 0 ? (
-          <div className="flex flex-col gap-1 rounded-[20px] bg-white p-[14px] shadow-soft-md">
-            {unconfirmedPast.length > 0 ? (
-              <>
-                <h2 className="px-2 py-1 text-[12.5px] font-extrabold uppercase tracking-[0.4px] text-coral-600">
-                  Cần điểm danh
-                </h2>
-                <div className="flex flex-col gap-[6px]">
-                  {unconfirmedPast.map((session) => (
+          {allSessions.length > 0 ? (
+            <div className="flex flex-col gap-1 rounded-[20px] bg-white p-[14px] shadow-soft-md">
+              {unconfirmedPast.length > 0 ? (
+                <>
+                  <h2 className="px-2 py-1 text-[12.5px] font-extrabold uppercase tracking-[0.4px] text-coral-600">
+                    Cần điểm danh
+                  </h2>
+                  <div className="flex flex-col gap-[6px]">
+                    {unconfirmedPast.map((session) => (
+                      <SessionListItem
+                        key={session.id}
+                        session={session}
+                        unconfirmedPast
+                        selected={session.id === selectedId}
+                      />
+                    ))}
+                  </div>
+                </>
+              ) : null}
+
+              {remainingGroups.map(([date, group]) => (
+                <div key={date} className="flex flex-col gap-[6px]">
+                  <h2 className="px-2 pt-2 text-[12.5px] font-extrabold uppercase tracking-[0.4px] text-ink-400">
+                    {formatSessionDate(date)}
+                  </h2>
+                  {group.map((session) => (
                     <SessionListItem
                       key={session.id}
                       session={session}
-                      unconfirmedPast
+                      unconfirmedPast={false}
                       selected={session.id === selectedId}
                     />
                   ))}
                 </div>
-              </>
-            ) : null}
+              ))}
+            </div>
+          ) : null}
+        </div>
 
-            {remainingGroups.map(([date, group]) => (
-              <div key={date} className="flex flex-col gap-[6px]">
-                <h2 className="px-2 pt-2 text-[12.5px] font-extrabold uppercase tracking-[0.4px] text-ink-400">
-                  {formatSessionDate(date)}
-                </h2>
-                {group.map((session) => (
-                  <SessionListItem
-                    key={session.id}
-                    session={session}
-                    unconfirmedPast={false}
-                    selected={session.id === selectedId}
-                  />
-                ))}
-              </div>
-            ))}
-          </div>
-        ) : null}
+        <div
+          className={cn(
+            "flex-1",
+            hasSelection
+              ? "flex flex-col"
+              : "hidden lg:flex lg:min-h-[240px] lg:items-center lg:justify-center",
+          )}
+        >
+          {hasSelection ? (
+            <Outlet />
+          ) : (
+            <p className="text-[13px] text-ink-400">Chọn một buổi học để điểm danh.</p>
+          )}
+        </div>
       </div>
-
-      <div
-        className={cn(
-          "flex-1",
-          hasSelection
-            ? "flex flex-col"
-            : "hidden lg:flex lg:min-h-[240px] lg:items-center lg:justify-center",
-        )}
-      >
-        {hasSelection ? (
-          <Outlet />
-        ) : (
-          <p className="text-[13px] text-ink-400">Chọn một buổi học để điểm danh.</p>
-        )}
-      </div>
-
-      {selectedClassId ? (
-        <CreateSessionDialog
-          open={createDialogOpen}
-          onOpenChange={setCreateDialogOpen}
-          classId={selectedClassId}
-        />
-      ) : null}
     </div>
   );
 }
