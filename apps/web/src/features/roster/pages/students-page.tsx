@@ -118,9 +118,21 @@ export function StudentsPage() {
             </button>
           ))}
         </div>
-        <Link to="/classes" className="ml-auto text-[13px] font-bold text-mint-600 hover:underline">
-          Quản lý lớp
-        </Link>
+        <div className="ml-auto flex items-center gap-3">
+          {/* Prototype: the ⚙ pill shows only while a real class tab is active —
+              a stale or mistyped class_id in the URL matches no tab and gets no pill. */}
+          {classes.some((klass) => klass.id === activeClassId) ? (
+            <Link
+              to={`/classes/${activeClassId}/settings`}
+              className="inline-flex min-h-11 items-center rounded-full border-[1.5px] border-line-300 px-4 font-display text-[13px] font-bold text-ink-500 transition-colors hover:border-mint-400 hover:text-mint-600"
+            >
+              ⚙ Cài đặt lớp
+            </Link>
+          ) : null}
+          <Link to="/classes" className="text-[13px] font-bold text-mint-600 hover:underline">
+            Quản lý lớp
+          </Link>
+        </div>
       </div>
 
       <Input

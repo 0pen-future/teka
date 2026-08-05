@@ -92,10 +92,11 @@ export function useAddSchedule(classId: string) {
   });
 }
 
-export function useUpdateSchedule(classId: string, scheduleId: string) {
+export function useUpdateSchedule(classId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: UpdateScheduleInput) => updateSchedule(classId, scheduleId, input),
+    mutationFn: ({ scheduleId, input }: { scheduleId: string; input: UpdateScheduleInput }) =>
+      updateSchedule(classId, scheduleId, input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: classesKeys.detail(classId) });
     },

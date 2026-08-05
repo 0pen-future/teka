@@ -36,4 +36,10 @@ export const rosterRoutes: RouteObject[] = [
       Component: (await import("./pages/class-detail-page")).ClassDetailPage,
     }),
   },
+  {
+    path: "classes/:id/settings",
+    lazy: async () => ({
+      Component: (await import("./pages/class-settings-page")).ClassSettingsPage,
+    }),
+  },
 ];

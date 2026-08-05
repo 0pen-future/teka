@@ -60,3 +60,53 @@ export function WeekdayChips({
     </div>
   );
 }
+
+export interface WeekdayChipsMultiProps {
+  value: number[];
+  onChange: (weekdays: number[]) => void;
+  /** Accessible group label; defaults to the classCfg recipe's copy. */
+  label?: string;
+  id?: string;
+}
+
+/**
+ * Multi-select variant for the "Cài đặt lớp" screen (prototype `classCfg`),
+ * where a class meets on several weekdays at once. Same chips and states as
+ * `WeekdayChips`; toggling adds or removes the weekday from the set.
+ */
+export function WeekdayChipsMulti({
+  value,
+  onChange,
+  label = "Lịch trong tuần",
+  id,
+}: WeekdayChipsMultiProps) {
+  function toggle(weekday: number) {
+    onChange(
+      value.includes(weekday) ? value.filter((day) => day !== weekday) : [...value, weekday],
+    );
+  }
+
+  return (
+    <div role="group" aria-label={label} id={id} className="flex flex-wrap gap-2">
+      {chipOrder.map((chip) => {
+        const selected = value.includes(chip.weekday);
+        return (
+          <button
+            key={chip.weekday}
+            type="button"
+            aria-pressed={selected}
+            onClick={() => toggle(chip.weekday)}
+            className={cn(
+              "min-h-11 min-w-11 rounded-[var(--radius-md)] border px-3 font-display text-[14px] font-bold transition-colors",
+              selected
+                ? "border-mint-400 bg-mint-400 text-white"
+                : "border-line-200 bg-white text-ink-500 hover:bg-cream-100",
+            )}
+          >
+            {chip.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}

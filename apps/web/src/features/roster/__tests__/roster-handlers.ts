@@ -105,6 +105,11 @@ export function resetRosterStore() {
   store = seedRosterStore();
 }
 
+/** Read-only peek for asserting what a flow actually persisted. */
+export function getRosterStore() {
+  return store;
+}
+
 let idCounter = 0;
 function nextId(prefix: string) {
   idCounter += 1;
@@ -326,6 +331,19 @@ export const rosterHandlers = [
     };
     klass.schedules.push(schedule);
     return HttpResponse.json(ok(schedule), { status: 201 });
+  }),
+  http.put(`${API_URL}/classes/:classId/schedules/:scheduleId`, async ({ params, request }) => {
+    const klass = store.classes.find((item) => item.id === params.classId);
+    if (!klass) {
+      return HttpResponse.json(fail("NOT_FOUND", "class not found"), { status: 404 });
+    }
+    const schedule = klass.schedules.find((item) => item.id === params.scheduleId);
+    if (!schedule) {
+      return HttpResponse.json(fail("NOT_FOUND", "schedule not found"), { status: 404 });
+    }
+    const body = (await request.json()) as Omit<Schedule, "id">;
+    Object.assign(schedule, body, { effective_to: orNull(body.effective_to) });
+    return HttpResponse.json(ok(schedule));
   }),
   http.delete(`${API_URL}/classes/:classId/schedules/:scheduleId`, ({ params }) => {
     const klass = store.classes.find((item) => item.id === params.classId);

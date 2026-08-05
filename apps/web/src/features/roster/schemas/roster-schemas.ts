@@ -144,6 +144,23 @@ export const classUpdateInputSchema = z.object({
 export type ClassUpdateInput = z.infer<typeof classUpdateInputSchema>;
 
 /**
+ * Form shape for the "Cài đặt lớp" screen (prototype `classCfg`): one name,
+ * one set of weekdays, one shared start time, one unit price. The screen
+ * fans this out into `PUT /classes/:id` plus schedule add/delete calls —
+ * see `diffSchedules` (`../lib/schedule-diff.ts`). Unlike
+ * `classUpdateInputSchema`, price must be positive here: the prototype's
+ * onSave rejects a zero rate with "Nhập đơn giá mỗi buổi".
+ */
+export const classSettingsInputSchema = z.object({
+  name: z.string().trim().min(1, "Bắt buộc nhập tên lớp").max(100, "Tối đa 100 ký tự"),
+  days: z.array(z.number().int().min(0).max(6)).min(1, "Chọn ít nhất một ngày trong tuần"),
+  start_time: z.string().regex(hhmmPattern, "Giờ phải theo định dạng HH:MM"),
+  default_unit_price: z.number().int().min(1, "Nhập đơn giá mỗi buổi"),
+});
+
+export type ClassSettingsInput = z.infer<typeof classSettingsInputSchema>;
+
+/**
  * Form shape for `ClassDialog`'s create mode, which flattens the class and
  * its one initial `ScheduleInput` into a single field set, matching the
  * `modalClass` Design Spec (one weekday/time/duration picker alongside the
