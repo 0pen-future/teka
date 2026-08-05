@@ -96,11 +96,7 @@ export function StudentsPage() {
   }
 
   return (
-    // sm+ pins the page to the viewport so only the table body scrolls, never
-    // the document. The subtracted offsets mirror DashboardLayout's chrome
-    // (main padding + logout row) per breakpoint — if that layout's padding or
-    // header rows change, these numbers must change with it.
-    <div className="flex min-h-0 flex-col gap-4 sm:h-[calc(100svh-158px)] md:h-[calc(100svh-94px)] lg:h-[calc(100svh-102px)]">
+    <div className="flex flex-col gap-4">
       <div>
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="flex-1 font-display text-[26px] font-extrabold text-ink-900">
@@ -247,13 +243,12 @@ export function StudentsPage() {
       </div>
 
       {/* Prototype table card: rounded-20 + soft shadow, cream-200 header
-          band. The inner div is the scroll container, so the sticky header
-          row stays pinned while only the rows scroll. */}
-      {/* min-h floor keeps the table usable when the tab pills wrap into
-          several rows on a short viewport — without it the fixed-height page
-          would squeeze this card (the only min-h-0 flex child) to nothing. */}
-      <div className="hidden min-h-[240px] flex-col overflow-hidden rounded-[20px] bg-white shadow-soft-md sm:flex">
-        <div className="min-h-0 overflow-auto">
+          band. The inner div scrolls on its own (capped at 62vh) with the
+          header row sticky inside it, so long rosters scroll within the
+          card while the document keeps its own scroll for the rest of the
+          page and the footer. */}
+      <div className="hidden flex-col overflow-hidden rounded-[20px] bg-white shadow-soft-md sm:flex">
+        <div className="max-h-[62vh] overflow-auto">
           <table className="w-full min-w-[640px] border-collapse text-left text-[14px]">
             <thead>
               <tr>
