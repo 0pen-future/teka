@@ -197,31 +197,6 @@ export const attendanceHandlers = [
     return HttpResponse.json(ok(items));
   }),
 
-  http.post(`${API_URL}/classes/:classId/sessions`, async ({ params, request }) => {
-    const classId = params.classId as string;
-    const klass = store.classes.find((item) => item.id === classId);
-    if (!klass) {
-      return HttpResponse.json(fail("NOT_FOUND", "class not found"), { status: 404 });
-    }
-    const body = (await request.json()) as { session_date: string; start_time?: string };
-    const rows = fixtureRosterTemplate.map((row) => ({ ...row }));
-    const session: Session = {
-      id: nextId("session-"),
-      class_id: klass.id,
-      class_name: klass.name,
-      session_date: body.session_date,
-      start_time: body.start_time ?? null,
-      status: "planned",
-      cancel_reason: null,
-      attendance_confirmed_at: null,
-      student_count: rows.length,
-      created_at: new Date().toISOString(),
-    };
-    store.sessions.push(session);
-    store.rosters.set(session.id, rows);
-    return HttpResponse.json(ok(session), { status: 201 });
-  }),
-
   http.get(`${API_URL}/sessions/:id`, ({ params }) => {
     const session = store.sessions.find((item) => item.id === params.id);
     if (!session) {
