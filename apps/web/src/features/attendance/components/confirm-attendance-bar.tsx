@@ -23,7 +23,7 @@ export function ConfirmAttendanceBar({
 }: ConfirmAttendanceBarProps) {
   const label = closedPeriod ? "LƯU VÀ TẠO ĐIỀU CHỈNH" : "XÁC NHẬN BUỔI HỌC";
   return (
-    <div className="sticky bottom-14 z-10 border-t border-line-200 bg-white p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:bottom-0">
+    <div className="sticky bottom-14 z-10 rounded-b-[28px] border-t border-line-100 bg-white px-4 py-[14px] pb-[max(14px,env(safe-area-inset-bottom))] md:bottom-0">
       <HvButton
         type="button"
         variant={closedPeriod ? "reward" : "primary"}

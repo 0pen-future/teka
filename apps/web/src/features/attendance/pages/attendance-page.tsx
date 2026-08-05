@@ -29,6 +29,25 @@ function absentIdsFromRows(rows: AttendanceRowData[]): Set<string> {
   return new Set(rows.filter((row) => row.status === "absent").map((row) => row.student_id));
 }
 
+/** Mint band atop the panel — shared by the live and cancelled branches. */
+function PanelHeader({
+  session,
+  subtitle,
+}: {
+  session: { class_name: string; session_date: string; start_time?: string | null };
+  subtitle?: string;
+}) {
+  return (
+    <div className="rounded-t-[28px] bg-mint-400 px-5 py-4 text-white">
+      <p className="font-display text-[19px] font-bold">
+        {session.class_name} — {formatSessionDate(session.session_date)}
+        {session.start_time ? ` · ${session.start_time}` : ""}
+      </p>
+      {subtitle ? <p className="text-[13px] opacity-90">{subtitle}</p> : null}
+    </div>
+  );
+}
+
 function setsEqual(a: Set<string>, b: Set<string>): boolean {
   if (a.size !== b.size) {
     return false;
@@ -143,41 +162,48 @@ export function AttendancePage({ sessionId: sessionIdProp }: AttendancePageProps
 
   if (session.status === "cancelled") {
     return (
-      <div className="flex flex-col items-center gap-2 rounded-[var(--radius-xl)] bg-white p-8 text-center">
-        <span aria-hidden className="text-4xl">
-          🚫
-        </span>
-        <p className="font-display text-[18px] font-bold text-ink-900">Buổi học đã huỷ</p>
-        {session.cancel_reason ? (
-          <p className="text-[14px] text-ink-500">{session.cancel_reason}</p>
-        ) : null}
-        <p className="text-[13px] text-ink-400">Không tính tiền cho học sinh nào.</p>
+      <div className="flex flex-col rounded-[28px] bg-white shadow-soft-lg">
+        <PanelHeader session={session} />
+        <div className="flex flex-col items-center gap-1 px-5 py-[26px] text-center text-[14.5px] text-ink-500">
+          <span aria-hidden className="text-[30px]">
+            🚫
+          </span>
+          <p className="font-bold text-ink-900">Buổi học đã huỷ</p>
+          {session.cancel_reason ? <p>{session.cancel_reason}</p> : null}
+          <p className="mt-1 font-bold text-mint-600">Không tính tiền cho học sinh nào.</p>
+        </div>
       </div>
     );
   }
 
   const presentCount = roster.rows.length - absentIds.size;
   const closedPeriod = period?.status === "closed";
+  const confirmed = Boolean(session.attendance_confirmed_at);
 
   return (
-    <div className="flex flex-col rounded-[var(--radius-xl)] bg-white">
-      <div className="rounded-t-[var(--radius-xl)] bg-mint-400 p-4 text-white">
-        <p className="font-display text-[18px] font-bold">{session.class_name}</p>
-        <p className="text-[13px] opacity-90">
-          {formatSessionDate(session.session_date)}
-          {session.start_time ? ` · ${session.start_time}` : ""}
-        </p>
-        <div className="mt-3 flex gap-2">
-          <span className="rounded-[var(--radius-pill)] bg-white px-3 py-1 font-display text-[13px] font-bold text-mint-600">
-            {presentCount} có mặt
-          </span>
-          <span className="rounded-[var(--radius-pill)] bg-white px-3 py-1 font-display text-[13px] font-bold text-coral-600">
-            {absentIds.size} vắng
-          </span>
-        </div>
+    <div className="flex flex-col rounded-[28px] bg-white shadow-soft-lg">
+      <PanelHeader
+        session={session}
+        subtitle={
+          confirmed
+            ? "Đã xác nhận — chạm để sửa lại"
+            : "Buổi chưa điểm danh — mặc định cả lớp có mặt"
+        }
+      />
+
+      <div className="flex items-center gap-[10px] border-b border-line-100 px-4 py-3">
+        <span className="rounded-full bg-mint-50 px-3 py-[5px] text-[13px] font-extrabold text-mint-600">
+          Có mặt {presentCount}
+        </span>
+        <span className="rounded-full bg-coral-100 px-3 py-[5px] text-[13px] font-extrabold text-coral-600">
+          Vắng {absentIds.size}
+        </span>
+        {confirmed ? (
+          <span className="ml-auto text-[12.5px] text-ink-400">Sửa được cả buổi đã qua</span>
+        ) : null}
       </div>
 
-      <div className="flex flex-col gap-3 p-3">
+      <div className="flex flex-col gap-3 px-3 pt-3">
         {closedPeriod ? <ClosedPeriodWarning /> : null}
         <div className="flex justify-end">
           <HvButton
@@ -191,7 +217,11 @@ export function AttendancePage({ sessionId: sessionIdProp }: AttendancePageProps
         </div>
       </div>
 
-      <div className="flex flex-col">
+      {/* Prototype list viewport, two-pane only: at lg+ rows scroll inside
+          430px so the confirm bar never leaves reach. Under lg the document
+          already scrolls and the confirm bar is sticky — a nested scroller
+          there would just fight touch scrolling. */}
+      <div className="flex flex-col gap-[6px] px-3 py-[10px] lg:max-h-[430px] lg:overflow-auto">
         {roster.rows.map((row) => (
           <AttendanceRow
             key={row.student_id}

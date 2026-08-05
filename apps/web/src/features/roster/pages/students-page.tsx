@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
 import { HvBadge, HvButton, HvCard, hvToast } from "@/components/hv";
-import { Input } from "@/components/ui/input";
 import { cn, formatPhoneLocal } from "@/lib/utils";
 
 import { AnonymizeStudentDialog } from "../components/anonymize-student-dialog";
@@ -18,6 +17,16 @@ import type { Student } from "../schemas/roster-schemas";
  * class has this id, so it can never collide with a real tab.
  */
 const UNENROLLED_TAB = "none";
+
+/**
+ * Prototype header band — cream-200 background, 12px/800 ink-500 uppercase.
+ * Sticky against the card's inner scroll container so the header stays
+ * pinned while rows scroll beneath it.
+ */
+const tableHeadCellClassName =
+  "sticky top-0 z-10 bg-cream-200 px-[18px] py-[10px] text-[12px] font-extrabold uppercase tracking-[0.4px] text-ink-500";
+
+const tableCellClassName = "border-t border-line-100 px-[18px] py-[11px]";
 
 /**
  * Consolidated "Lớp & học sinh" screen — the roster's primary nav
@@ -75,10 +84,16 @@ export function StudentsPage() {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="font-display text-[22px] font-bold text-ink-900">Lớp &amp; học sinh</h1>
-        <div className="flex gap-2">
+    // sm+ pins the page to the viewport so only the table body scrolls, never
+    // the document. The subtracted offsets mirror DashboardLayout's chrome
+    // (main padding + logout row) per breakpoint — if that layout's padding or
+    // header rows change, these numbers must change with it.
+    <div className="flex min-h-0 flex-col gap-4 sm:h-[calc(100svh-158px)] md:h-[calc(100svh-94px)] lg:h-[calc(100svh-102px)]">
+      <div>
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="flex-1 font-display text-[26px] font-extrabold text-ink-900">
+            Lớp &amp; học sinh
+          </h1>
           <HvButton variant="secondary" size="sm" onClick={() => setClassDialogOpen(true)}>
             + Tạo lớp mới
           </HvButton>
@@ -92,6 +107,10 @@ export function StudentsPage() {
             + Thêm học sinh
           </HvButton>
         </div>
+        <p className="mt-1 text-[13.5px] text-ink-500">
+          Chỉ lưu thông tin cần thiết để tính học phí: họ tên, ghi chú phân biệt và người liên hệ.
+          Không lưu tuổi, ngày sinh, địa chỉ, trường học hay ảnh của học sinh.
+        </p>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -108,10 +127,13 @@ export function StudentsPage() {
               aria-selected={activeClassId === tab.id}
               onClick={() => selectClass(tab.id)}
               className={cn(
-                "min-h-11 rounded-full px-4 font-display text-[14px] font-bold transition-[background-color,color,box-shadow]",
+                // The shadow utilities override the base :focus-visible
+                // box-shadow ring, so the ring must be re-added explicitly
+                // (same trap HvButton guards against).
+                "min-h-11 rounded-full px-[18px] font-display text-[14px] font-extrabold transition-[background-color,color,box-shadow] focus-visible:outline-none focus-visible:ring-4",
                 activeClassId === tab.id
                   ? "bg-mint-400 text-white shadow-press-mint"
-                  : "bg-white text-ink-500 shadow-sm hover:bg-cream-100",
+                  : "bg-white text-ink-500 shadow-soft-sm hover:bg-cream-100",
               )}
             >
               {tab.label}
@@ -132,11 +154,13 @@ export function StudentsPage() {
         </div>
       </div>
 
-      <Input
+      <input
+        type="search"
+        aria-label="Tìm theo tên học sinh"
         placeholder="Tìm theo tên học sinh"
         value={query}
         onChange={(event) => setQuery(event.target.value)}
-        className="max-w-sm"
+        className="w-full max-w-[240px] rounded-full border-2 border-line-200 bg-white px-4 py-2 text-[13.5px] font-bold text-ink-700 outline-none placeholder:text-ink-400 focus:border-mint-400"
       />
 
       {isPending ? <p className="text-[13px] text-ink-400">Đang tải…</p> : null}
@@ -198,93 +222,98 @@ export function StudentsPage() {
         ))}
       </div>
 
-      <HvCard variant="flat" padding="sm" className="hidden overflow-x-auto p-0 sm:block">
-        <table className="w-full min-w-[640px] border-collapse text-left text-[14px]">
-          <thead>
-            <tr className="border-b border-line-200 text-[13px] text-ink-400">
-              <th className="px-4 py-3 font-display font-bold">Học sinh</th>
-              <th className="px-4 py-3 font-display font-bold">Ghi chú</th>
-              <th className="px-4 py-3 font-display font-bold">Người liên hệ</th>
-              <th className="px-4 py-3 font-display font-bold">Số điện thoại</th>
-              <th className="px-4 py-3 font-display font-bold">Hành động</th>
-            </tr>
-          </thead>
-          <tbody>
-            {students.map((student) => (
-              <tr key={student.id} className="border-b border-line-100 last:border-0">
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2">
+      {/* Prototype table card: rounded-20 + soft shadow, cream-200 header
+          band. The inner div is the scroll container, so the sticky header
+          row stays pinned while only the rows scroll. */}
+      {/* min-h floor keeps the table usable when the tab pills wrap into
+          several rows on a short viewport — without it the fixed-height page
+          would squeeze this card (the only min-h-0 flex child) to nothing. */}
+      <div className="hidden min-h-[240px] flex-col overflow-hidden rounded-[20px] bg-white shadow-soft-md sm:flex">
+        <div className="min-h-0 overflow-auto">
+          <table className="w-full min-w-[640px] border-collapse text-left text-[14px]">
+            <thead>
+              <tr>
+                <th className={tableHeadCellClassName}>Học sinh</th>
+                <th className={tableHeadCellClassName}>Ghi chú</th>
+                <th className={tableHeadCellClassName}>Người liên hệ</th>
+                <th className={tableHeadCellClassName}>
+                  <span className="sr-only">Hành động</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {students.map((student) => (
+                <tr key={student.id}>
+                  <td className={tableCellClassName}>
+                    <div className="flex items-center gap-2">
+                      <Link
+                        to={`/students/${student.id}`}
+                        className="font-extrabold text-ink-900 hover:text-mint-600"
+                      >
+                        {student.full_name}
+                      </Link>
+                      {isUnenrolledTab ? (
+                        <HvBadge variant="warning" size="sm">
+                          Chưa vào lớp nào
+                        </HvBadge>
+                      ) : null}
+                    </div>
+                  </td>
+                  <td className={tableCellClassName}>
+                    {student.display_note ? (
+                      <HvBadge variant="info">{student.display_note}</HvBadge>
+                    ) : (
+                      <span className="text-ink-300">—</span>
+                    )}
+                  </td>
+                  <td className={tableCellClassName}>
                     <Link
-                      to={`/students/${student.id}`}
-                      className="font-display font-bold text-ink-900 hover:text-mint-600"
+                      to={`/contacts/${student.contact_id}`}
+                      className="block font-bold hover:text-mint-600"
                     >
-                      {student.full_name}
+                      {student.contact_name}
                     </Link>
-                    {isUnenrolledTab ? (
-                      <HvBadge variant="warning" size="sm">
-                        Chưa vào lớp nào
-                      </HvBadge>
-                    ) : null}
-                  </div>
-                </td>
-                <td className="px-4 py-3">
-                  {student.display_note ? (
-                    <HvBadge variant="info">{student.display_note}</HvBadge>
-                  ) : (
-                    <span className="text-ink-300">—</span>
-                  )}
-                </td>
-                <td className="px-4 py-3">
-                  <Link to={`/contacts/${student.contact_id}`} className="hover:text-mint-600">
-                    {student.contact_name}
-                  </Link>
-                </td>
-                <td className="px-4 py-3">
-                  <a
-                    href={`tel:${student.contact_phone}`}
-                    className="text-mint-600 hover:underline"
-                  >
-                    {formatPhoneLocal(student.contact_phone)}
-                  </a>
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex gap-2">
-                    {isUnenrolledTab ? (
+                    <a
+                      href={`tel:${student.contact_phone}`}
+                      className="text-[12.5px] text-ink-400 hover:text-mint-600"
+                    >
+                      {formatPhoneLocal(student.contact_phone)}
+                    </a>
+                  </td>
+                  <td className={tableCellClassName}>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      {isUnenrolledTab ? (
+                        <HvButton
+                          size="sm"
+                          onClick={() => {
+                            setEnrollFromWizard(false);
+                            setEnrolling(student);
+                          }}
+                        >
+                          Ghi danh vào lớp
+                        </HvButton>
+                      ) : null}
                       <HvButton
+                        variant="ghost"
                         size="sm"
                         onClick={() => {
-                          setEnrollFromWizard(false);
-                          setEnrolling(student);
+                          setEditingStudent(student);
+                          setStudentDialogOpen(true);
                         }}
                       >
-                        Ghi danh vào lớp
+                        Sửa
                       </HvButton>
-                    ) : null}
-                    <HvButton
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setEditingStudent(student);
-                        setStudentDialogOpen(true);
-                      }}
-                    >
-                      Sửa
-                    </HvButton>
-                    <HvButton variant="danger" size="sm" onClick={() => setAnonymizing(student)}>
-                      Xoá
-                    </HvButton>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </HvCard>
-
-      <p className="text-[12px] text-ink-400">
-        Chỉ lưu thông tin cần thiết để tính học phí: họ tên, ghi chú phân biệt và người liên hệ.
-        Không lưu tuổi, ngày sinh, địa chỉ, trường học hay ảnh của học sinh.
-      </p>
+                      <HvButton variant="danger" size="sm" onClick={() => setAnonymizing(student)}>
+                        Xoá
+                      </HvButton>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
       <ClassDialog open={classDialogOpen} onOpenChange={setClassDialogOpen} />
       <StudentDialog

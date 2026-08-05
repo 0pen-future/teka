@@ -94,11 +94,22 @@ export function SessionsPage() {
             : "flex lg:w-[360px] lg:shrink-0",
         )}
       >
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="font-display text-[22px] font-bold text-ink-900">Buổi học</h1>
-          <HvButton size="sm" disabled={!selectedClassId} onClick={() => setCreateDialogOpen(true)}>
-            Thêm buổi học
-          </HvButton>
+        <div>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="flex-1 font-display text-[26px] font-extrabold text-ink-900">
+              Điểm danh
+            </h1>
+            <HvButton
+              size="sm"
+              disabled={!selectedClassId}
+              onClick={() => setCreateDialogOpen(true)}
+            >
+              Thêm buổi học
+            </HvButton>
+          </div>
+          <p className="mt-1 text-[13.5px] text-ink-500">
+            Mặc định cả lớp có mặt — chỉ chạm vào bạn vắng, rồi xác nhận.
+          </p>
         </div>
 
         {classes.length === 0 ? (
@@ -115,10 +126,13 @@ export function SessionsPage() {
                 aria-selected={selectedClassId === klass.id}
                 onClick={() => setExplicitClassId(klass.id)}
                 className={cn(
-                  "min-h-11 rounded-full border px-4 font-display text-[14px] font-bold transition-colors",
+                  // The shadow utilities override the base :focus-visible
+                  // box-shadow ring, so the ring must be re-added explicitly
+                  // (same trap HvButton guards against).
+                  "min-h-11 rounded-full px-[18px] font-display text-[14px] font-extrabold transition-[background-color,color,box-shadow] focus-visible:outline-none focus-visible:ring-4",
                   selectedClassId === klass.id
-                    ? "border-mint-400 bg-mint-400 text-white"
-                    : "border-line-200 bg-white text-ink-500 hover:bg-cream-100",
+                    ? "bg-mint-400 text-white shadow-press-mint"
+                    : "bg-white text-ink-500 shadow-soft-sm hover:bg-cream-100",
                 )}
               >
                 {klass.name}
@@ -158,37 +172,45 @@ export function SessionsPage() {
           </HvCard>
         ) : null}
 
-        {unconfirmedPast.length > 0 ? (
-          <div className="flex flex-col gap-2">
-            <h2 className="text-[13px] font-bold text-coral-600">Cần điểm danh</h2>
-            <div className="flex flex-col gap-2">
-              {unconfirmedPast.map((session) => (
-                <SessionListItem
-                  key={session.id}
-                  session={session}
-                  unconfirmedPast
-                  selected={session.id === selectedId}
-                />
-              ))}
-            </div>
+        {/* Prototype session-list card: one white rounded-20 surface holding
+            every group, section labels in the muted 12.5px/800 band style. */}
+        {allSessions.length > 0 ? (
+          <div className="flex flex-col gap-1 rounded-[20px] bg-white p-[14px] shadow-soft-md">
+            {unconfirmedPast.length > 0 ? (
+              <>
+                <h2 className="px-2 py-1 text-[12.5px] font-extrabold uppercase tracking-[0.4px] text-coral-600">
+                  Cần điểm danh
+                </h2>
+                <div className="flex flex-col gap-[6px]">
+                  {unconfirmedPast.map((session) => (
+                    <SessionListItem
+                      key={session.id}
+                      session={session}
+                      unconfirmedPast
+                      selected={session.id === selectedId}
+                    />
+                  ))}
+                </div>
+              </>
+            ) : null}
+
+            {remainingGroups.map(([date, group]) => (
+              <div key={date} className="flex flex-col gap-[6px]">
+                <h2 className="px-2 pt-2 text-[12.5px] font-extrabold uppercase tracking-[0.4px] text-ink-400">
+                  {formatSessionDate(date)}
+                </h2>
+                {group.map((session) => (
+                  <SessionListItem
+                    key={session.id}
+                    session={session}
+                    unconfirmedPast={false}
+                    selected={session.id === selectedId}
+                  />
+                ))}
+              </div>
+            ))}
           </div>
         ) : null}
-
-        {remainingGroups.map(([date, group]) => (
-          <div key={date} className="flex flex-col gap-2">
-            <h2 className="text-[13px] font-bold text-ink-400">{formatSessionDate(date)}</h2>
-            <div className="flex flex-col gap-2">
-              {group.map((session) => (
-                <SessionListItem
-                  key={session.id}
-                  session={session}
-                  unconfirmedPast={false}
-                  selected={session.id === selectedId}
-                />
-              ))}
-            </div>
-          </div>
-        ))}
       </div>
 
       <div
