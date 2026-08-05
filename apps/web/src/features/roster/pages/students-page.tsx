@@ -1,16 +1,23 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
-import { HvBadge, HvButton, HvCard } from "@/components/hv";
+import { HvBadge, HvButton, HvCard, hvToast } from "@/components/hv";
 import { Input } from "@/components/ui/input";
 import { cn, formatPhoneLocal } from "@/lib/utils";
 
 import { AnonymizeStudentDialog } from "../components/anonymize-student-dialog";
 import { ClassDialog } from "../components/class-dialog";
+import { EnrollStudentDialog } from "../components/enroll-student-dialog";
 import { StudentDialog } from "../components/student-dialog";
 import { useClassesList } from "../hooks/use-classes";
 import { useStudentsList } from "../hooks/use-students";
 import type { Student } from "../schemas/roster-schemas";
+
+/**
+ * The "Chưa ghi danh" tab's sentinel in the `class_id` search param — no
+ * class has this id, so it can never collide with a real tab.
+ */
+const UNENROLLED_TAB = "none";
 
 /**
  * Consolidated "Lớp & học sinh" screen — the roster's primary nav
@@ -20,12 +27,16 @@ import type { Student } from "../schemas/roster-schemas";
 export function StudentsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeClassId = searchParams.get("class_id") ?? "";
+  const isUnenrolledTab = activeClassId === UNENROLLED_TAB;
   const urlQuery = searchParams.get("q") ?? "";
   const [query, setQuery] = useState(urlQuery);
   const [classDialogOpen, setClassDialogOpen] = useState(false);
   const [studentDialogOpen, setStudentDialogOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | undefined>(undefined);
   const [anonymizing, setAnonymizing] = useState<Student | undefined>(undefined);
+  /** Step 2 of the add-student wizard, or a direct enroll from the unenrolled tab. */
+  const [enrolling, setEnrolling] = useState<Student | undefined>(undefined);
+  const [enrollFromWizard, setEnrollFromWizard] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -47,7 +58,8 @@ export function StudentsPage() {
   const classes = classesPage?.items ?? [];
   const { data: studentsPage, isPending } = useStudentsList({
     query: urlQuery,
-    class_id: activeClassId || undefined,
+    class_id: isUnenrolledTab ? undefined : activeClassId || undefined,
+    unenrolled: isUnenrolledTab || undefined,
     per_page: 50,
   });
   const students = studentsPage?.items ?? [];
@@ -67,8 +79,8 @@ export function StudentsPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-display text-[22px] font-bold text-ink-900">Lớp &amp; học sinh</h1>
         <div className="flex gap-2">
-          <HvButton variant="ghost" size="sm" onClick={() => setClassDialogOpen(true)}>
-            Thêm lớp
+          <HvButton variant="secondary" size="sm" onClick={() => setClassDialogOpen(true)}>
+            + Tạo lớp mới
           </HvButton>
           <HvButton
             size="sm"
@@ -77,42 +89,32 @@ export function StudentsPage() {
               setStudentDialogOpen(true);
             }}
           >
-            Thêm học sinh
+            + Thêm học sinh
           </HvButton>
         </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
         <div role="tablist" aria-label="Lớp" className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeClassId === ""}
-            onClick={() => selectClass("")}
-            className={cn(
-              "min-h-11 rounded-full border px-4 font-display text-[14px] font-bold transition-colors",
-              activeClassId === ""
-                ? "border-mint-400 bg-mint-400 text-white"
-                : "border-line-200 bg-white text-ink-500 hover:bg-cream-100",
-            )}
-          >
-            Tất cả
-          </button>
-          {classes.map((klass) => (
+          {[
+            { id: "", label: "Tất cả" },
+            ...classes.map((klass) => ({ id: klass.id, label: klass.name })),
+            { id: UNENROLLED_TAB, label: "Chưa ghi danh" },
+          ].map((tab) => (
             <button
-              key={klass.id}
+              key={tab.id || "all"}
               type="button"
               role="tab"
-              aria-selected={activeClassId === klass.id}
-              onClick={() => selectClass(klass.id)}
+              aria-selected={activeClassId === tab.id}
+              onClick={() => selectClass(tab.id)}
               className={cn(
-                "min-h-11 rounded-full border px-4 font-display text-[14px] font-bold transition-colors",
-                activeClassId === klass.id
-                  ? "border-mint-400 bg-mint-400 text-white"
-                  : "border-line-200 bg-white text-ink-500 hover:bg-cream-100",
+                "min-h-11 rounded-full px-4 font-display text-[14px] font-bold transition-[background-color,color,box-shadow]",
+                activeClassId === tab.id
+                  ? "bg-mint-400 text-white shadow-press-mint"
+                  : "bg-white text-ink-500 shadow-sm hover:bg-cream-100",
               )}
             >
-              {klass.name}
+              {tab.label}
             </button>
           ))}
         </div>
@@ -150,6 +152,7 @@ export function StudentsPage() {
                 <HvBadge variant="info">{student.display_note}</HvBadge>
               ) : null}
             </div>
+            {isUnenrolledTab ? <HvBadge variant="warning">Chưa vào lớp nào</HvBadge> : null}
             <Link to={`/contacts/${student.contact_id}`} className="text-[13px] text-ink-500">
               {student.contact_name}
             </Link>
@@ -157,6 +160,17 @@ export function StudentsPage() {
               {formatPhoneLocal(student.contact_phone)}
             </a>
             <div className="flex gap-2">
+              {isUnenrolledTab ? (
+                <HvButton
+                  size="sm"
+                  onClick={() => {
+                    setEnrollFromWizard(false);
+                    setEnrolling(student);
+                  }}
+                >
+                  Ghi danh vào lớp
+                </HvButton>
+              ) : null}
               <HvButton
                 variant="ghost"
                 size="sm"
@@ -190,12 +204,19 @@ export function StudentsPage() {
             {students.map((student) => (
               <tr key={student.id} className="border-b border-line-100 last:border-0">
                 <td className="px-4 py-3">
-                  <Link
-                    to={`/students/${student.id}`}
-                    className="font-display font-bold text-ink-900 hover:text-mint-600"
-                  >
-                    {student.full_name}
-                  </Link>
+                  <div className="flex items-center gap-2">
+                    <Link
+                      to={`/students/${student.id}`}
+                      className="font-display font-bold text-ink-900 hover:text-mint-600"
+                    >
+                      {student.full_name}
+                    </Link>
+                    {isUnenrolledTab ? (
+                      <HvBadge variant="warning" size="sm">
+                        Chưa vào lớp nào
+                      </HvBadge>
+                    ) : null}
+                  </div>
                 </td>
                 <td className="px-4 py-3">
                   {student.display_note ? (
@@ -219,6 +240,17 @@ export function StudentsPage() {
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex gap-2">
+                    {isUnenrolledTab ? (
+                      <HvButton
+                        size="sm"
+                        onClick={() => {
+                          setEnrollFromWizard(false);
+                          setEnrolling(student);
+                        }}
+                      >
+                        Ghi danh vào lớp
+                      </HvButton>
+                    ) : null}
                     <HvButton
                       variant="ghost"
                       size="sm"
@@ -255,7 +287,37 @@ export function StudentsPage() {
           }
         }}
         student={editingStudent}
+        wizard={!editingStudent}
+        onSuccess={(created) => {
+          if (!editingStudent) {
+            setEnrollFromWizard(true);
+            setEnrolling(created);
+          }
+        }}
       />
+      {enrolling ? (
+        <EnrollStudentDialog
+          open={Boolean(enrolling)}
+          onOpenChange={(open) => {
+            if (!open) {
+              setEnrolling(undefined);
+              setEnrollFromWizard(false);
+            }
+          }}
+          mode="student"
+          studentId={enrolling.id}
+          stepBadge={enrollFromWizard ? "Bước 2/2" : undefined}
+          onLater={
+            enrollFromWizard
+              ? () => {
+                  hvToast('Đã lưu hồ sơ — ghi danh sau ở tab "Chưa ghi danh"');
+                  selectClass(UNENROLLED_TAB);
+                }
+              : undefined
+          }
+          onSuccess={(enrollment) => selectClass(enrollment.class_id)}
+        />
+      ) : null}
       {anonymizing ? (
         <AnonymizeStudentDialog
           open={Boolean(anonymizing)}

@@ -152,7 +152,7 @@ export function ClassDialog({ open, onOpenChange, klass, onSuccess }: ClassDialo
               <FieldError errors={[errors.name]} />
             </Field>
             <Field data-invalid={Boolean(errors.start_date)}>
-              <FieldLabel htmlFor="class-start-date">Ngày bắt đầu</FieldLabel>
+              <FieldLabel htmlFor="class-start-date">Khai giảng</FieldLabel>
               <Input
                 id="class-start-date"
                 type="date"
@@ -172,7 +172,7 @@ export function ClassDialog({ open, onOpenChange, klass, onSuccess }: ClassDialo
               <FieldError errors={[errors.end_date]} />
             </Field>
             <Field data-invalid={Boolean(errors.default_unit_price)}>
-              <FieldLabel htmlFor="class-unit-price">Học phí mỗi buổi</FieldLabel>
+              <FieldLabel htmlFor="class-unit-price">Đơn giá / buổi (đ)</FieldLabel>
               <MoneyInput
                 id="class-unit-price"
                 aria-invalid={Boolean(errors.default_unit_price)}
@@ -198,18 +198,19 @@ export function ClassDialog({ open, onOpenChange, klass, onSuccess }: ClassDialo
     <HvModal
       open={open}
       onOpenChange={onOpenChange}
-      title="Thêm lớp"
+      title="Tạo lớp mới"
+      description="Ngày khai giảng · lịch cố định trong tuần · đơn giá mỗi buổi."
       footer={
         <>
           <HvButton type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-            Huỷ
+            Hủy
           </HvButton>
           <HvButton
             type="submit"
             form="class-dialog-create-form"
             disabled={createMutation.isPending}
           >
-            {createMutation.isPending ? "Đang lưu…" : "Lưu"}
+            {createMutation.isPending ? "Đang lưu…" : "Tạo lớp"}
           </HvButton>
         </>
       }
@@ -224,13 +225,14 @@ export function ClassDialog({ open, onOpenChange, klass, onSuccess }: ClassDialo
             <FieldLabel htmlFor="class-name">Tên lớp</FieldLabel>
             <Input
               id="class-name"
+              placeholder="VD: Toán 9C"
               aria-invalid={Boolean(errors.name)}
               {...createForm.register("name")}
             />
             <FieldError errors={[errors.name]} />
           </Field>
           <Field data-invalid={Boolean(errors.weekday)}>
-            <FieldLabel htmlFor="class-weekday">Ngày học trong tuần</FieldLabel>
+            <FieldLabel htmlFor="class-weekday">Lịch trong tuần</FieldLabel>
             <WeekdayChips
               id="class-weekday"
               value={createForm.watch("weekday")}
@@ -240,62 +242,69 @@ export function ClassDialog({ open, onOpenChange, klass, onSuccess }: ClassDialo
             />
             <FieldError errors={[errors.weekday]} />
           </Field>
-          <Field data-invalid={Boolean(errors.start_time)}>
-            <FieldLabel htmlFor="class-start-time">Giờ học</FieldLabel>
-            <Input
-              id="class-start-time"
-              type="time"
-              aria-invalid={Boolean(errors.start_time)}
-              {...createForm.register("start_time")}
-            />
-            <FieldError errors={[errors.start_time]} />
-          </Field>
-          <Field data-invalid={Boolean(errors.duration_min)}>
-            <FieldLabel htmlFor="class-duration">Thời lượng (phút)</FieldLabel>
-            <Input
-              id="class-duration"
-              type="number"
-              min={1}
-              aria-invalid={Boolean(errors.duration_min)}
-              {...createForm.register("duration_min", { valueAsNumber: true })}
-            />
-            <FieldError errors={[errors.duration_min]} />
-          </Field>
-          <Field data-invalid={Boolean(errors.start_date)}>
-            <FieldLabel htmlFor="class-start-date">Ngày bắt đầu</FieldLabel>
-            <Input
-              id="class-start-date"
-              type="date"
-              aria-invalid={Boolean(errors.start_date)}
-              {...createForm.register("start_date")}
-            />
-            <FieldError errors={[errors.start_date]} />
-          </Field>
-          <Field data-invalid={Boolean(errors.end_date)}>
-            <FieldLabel htmlFor="class-end-date">Ngày kết thúc</FieldLabel>
-            <Input
-              id="class-end-date"
-              type="date"
-              aria-invalid={Boolean(errors.end_date)}
-              {...createForm.register("end_date")}
-            />
-            <FieldError errors={[errors.end_date]} />
-          </Field>
-          <Field data-invalid={Boolean(errors.default_unit_price)}>
-            <FieldLabel htmlFor="class-unit-price">Học phí mỗi buổi</FieldLabel>
-            <MoneyInput
-              id="class-unit-price"
-              aria-invalid={Boolean(errors.default_unit_price)}
-              value={createForm.watch("default_unit_price")}
-              onChange={(value) =>
-                createForm.setValue("default_unit_price", value, {
-                  shouldValidate: true,
-                  shouldDirty: true,
-                })
-              }
-            />
-            <FieldError errors={[errors.default_unit_price]} />
-          </Field>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Field data-invalid={Boolean(errors.start_time)}>
+              <FieldLabel htmlFor="class-start-time">Giờ học</FieldLabel>
+              <Input
+                id="class-start-time"
+                type="time"
+                aria-invalid={Boolean(errors.start_time)}
+                {...createForm.register("start_time")}
+              />
+              <FieldError errors={[errors.start_time]} />
+            </Field>
+            <Field data-invalid={Boolean(errors.duration_min)}>
+              <FieldLabel htmlFor="class-duration">Thời lượng (phút)</FieldLabel>
+              <Input
+                id="class-duration"
+                type="number"
+                min={1}
+                aria-invalid={Boolean(errors.duration_min)}
+                {...createForm.register("duration_min", { valueAsNumber: true })}
+              />
+              <FieldError errors={[errors.duration_min]} />
+            </Field>
+            <Field data-invalid={Boolean(errors.start_date)}>
+              <FieldLabel htmlFor="class-start-date">Khai giảng</FieldLabel>
+              <Input
+                id="class-start-date"
+                type="date"
+                aria-invalid={Boolean(errors.start_date)}
+                {...createForm.register("start_date")}
+              />
+              <FieldError errors={[errors.start_date]} />
+            </Field>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field data-invalid={Boolean(errors.default_unit_price)}>
+              <FieldLabel htmlFor="class-unit-price">Đơn giá / buổi (đ)</FieldLabel>
+              <MoneyInput
+                id="class-unit-price"
+                aria-invalid={Boolean(errors.default_unit_price)}
+                value={createForm.watch("default_unit_price")}
+                onChange={(value) =>
+                  createForm.setValue("default_unit_price", value, {
+                    shouldValidate: true,
+                    shouldDirty: true,
+                  })
+                }
+              />
+              <FieldError errors={[errors.default_unit_price]} />
+            </Field>
+            <Field data-invalid={Boolean(errors.end_date)}>
+              <FieldLabel htmlFor="class-end-date">Ngày kết thúc</FieldLabel>
+              <Input
+                id="class-end-date"
+                type="date"
+                aria-invalid={Boolean(errors.end_date)}
+                {...createForm.register("end_date")}
+              />
+              <FieldError errors={[errors.end_date]} />
+            </Field>
+          </div>
+          <p className="text-[12px] text-ink-400">
+            Đơn giá lưu ở từng lượt ghi danh (mặc định kế thừa đơn giá lớp).
+          </p>
           <FieldError errors={[errors.root]} />
         </FieldGroup>
       </form>

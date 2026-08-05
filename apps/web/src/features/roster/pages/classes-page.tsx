@@ -31,7 +31,7 @@ export function ClassesPage() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-display text-[22px] font-bold text-ink-900">Quản lý lớp</h1>
-        <HvButton onClick={() => setDialogOpen(true)}>Thêm lớp</HvButton>
+        <HvButton onClick={() => setDialogOpen(true)}>+ Tạo lớp mới</HvButton>
       </div>
       {isPending ? <p className="text-[13px] text-ink-400">Đang tải…</p> : null}
       {!isPending && sorted.length === 0 ? (

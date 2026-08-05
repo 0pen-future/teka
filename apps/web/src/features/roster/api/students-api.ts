@@ -7,6 +7,8 @@ export interface ListStudentsParams {
   query?: string;
   contact_id?: string;
   class_id?: string;
+  /** Only students with no open enrollment in any class — the "Chưa ghi danh" tab. */
+  unenrolled?: boolean;
   page?: number;
   per_page?: number;
   sort?: string;

@@ -18,6 +18,12 @@ export interface StudentDialogProps {
   student?: Student;
   /** Pre-fills the owning contact, e.g. when adding a second child from a contact's detail page. */
   defaultContactId?: string;
+  /**
+   * Create-mode only: renders the dialog as "Bước 1/2" of the add-student
+   * wizard, whose submit continues into the enrollment dialog (the caller
+   * chains it via `onSuccess`).
+   */
+  wizard?: boolean;
   onSuccess?: (student: Student) => void;
 }
 
@@ -44,9 +50,11 @@ export function StudentDialog({
   onOpenChange,
   student,
   defaultContactId,
+  wizard = false,
   onSuccess,
 }: StudentDialogProps) {
   const isEdit = Boolean(student);
+  const isWizard = wizard && !isEdit;
   const form = useForm<StudentInput>({
     resolver: zodResolver(studentInputSchema),
     defaultValues: toDefaultValues(student, defaultContactId),
@@ -80,14 +88,40 @@ export function StudentDialog({
     <HvModal
       open={open}
       onOpenChange={onOpenChange}
-      title={isEdit ? "Sửa học sinh" : "Thêm học sinh"}
+      title={
+        isEdit ? (
+          "Sửa học sinh"
+        ) : isWizard ? (
+          <span className="flex items-center gap-2">
+            <span className="rounded-full bg-mint-50 px-[9px] py-[4px] font-body text-[length:var(--text-2xs)] font-bold text-mint-600">
+              Bước 1/2
+            </span>
+            Thêm học sinh
+          </span>
+        ) : (
+          "Thêm học sinh"
+        )
+      }
+      description={
+        isEdit
+          ? undefined
+          : isWizard
+            ? "Tạo hồ sơ trước — ghi danh vào lớp ở bước sau."
+            : "Chỉ lưu họ tên, ghi chú phân biệt và người liên hệ."
+      }
       footer={
         <>
           <HvButton type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-            Huỷ
+            Hủy
           </HvButton>
           <HvButton type="submit" form="student-dialog-form" disabled={mutation.isPending}>
-            {mutation.isPending ? "Đang lưu…" : "Lưu"}
+            {mutation.isPending
+              ? "Đang lưu…"
+              : isEdit
+                ? "Lưu"
+                : isWizard
+                  ? "Tiếp tục: Ghi danh →"
+                  : "Thêm học sinh"}
           </HvButton>
         </>
       }
@@ -128,6 +162,9 @@ export function StudentDialog({
             />
             <FieldError errors={[errors.contact_id]} />
           </Field>
+          <p className="text-[12px] text-ink-400">
+            Không thu thập tuổi, trường, địa chỉ hay bất kỳ dữ liệu nào khác của trẻ.
+          </p>
           <FieldError errors={[errors.root]} />
         </FieldGroup>
       </form>

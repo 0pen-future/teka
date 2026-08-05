@@ -171,12 +171,17 @@ export const rosterHandlers = [
     const query = url.searchParams.get("query")?.toLowerCase() ?? "";
     const contactId = url.searchParams.get("contact_id");
     const classId = url.searchParams.get("class_id");
+    const unenrolled = url.searchParams.get("unenrolled") === "true";
     const enrolledStudentIds = new Set(
       store.enrollments.filter((e) => e.class_id === classId).map((e) => e.student_id),
+    );
+    const anyOpenEnrollmentIds = new Set(
+      store.enrollments.filter((e) => !e.ended_on).map((e) => e.student_id),
     );
     const items = store.students.filter((student) => {
       if (contactId && student.contact_id !== contactId) return false;
       if (classId && !enrolledStudentIds.has(student.id)) return false;
+      if (unenrolled && anyOpenEnrollmentIds.has(student.id)) return false;
       return student.full_name.toLowerCase().includes(query);
     });
     return HttpResponse.json(ok(items, listMeta(items.length)));
