@@ -2,9 +2,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 
 import {
   addSchedule,
-  archiveClass,
   createClass,
-  deleteClass,
   deleteSchedule,
   getClass,
   listClasses,
@@ -49,28 +47,6 @@ export function useUpdateClass(id: string) {
   return useMutation({
     mutationFn: (input: ClassUpdateInput) => updateClass(id, input),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: classesKeys.lists() });
-      void queryClient.invalidateQueries({ queryKey: classesKeys.detail(id) });
-    },
-  });
-}
-
-export function useArchiveClass() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => archiveClass(id),
-    onSuccess: (_data, id) => {
-      void queryClient.invalidateQueries({ queryKey: classesKeys.lists() });
-      void queryClient.invalidateQueries({ queryKey: classesKeys.detail(id) });
-    },
-  });
-}
-
-export function useDeleteClass() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => deleteClass(id),
-    onSuccess: (_data, id) => {
       void queryClient.invalidateQueries({ queryKey: classesKeys.lists() });
       void queryClient.invalidateQueries({ queryKey: classesKeys.detail(id) });
     },

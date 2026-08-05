@@ -45,17 +45,6 @@ export async function updateClass(id: string, input: ClassUpdateInput): Promise<
   return parseData(classSchema, res.data);
 }
 
-/** `POST /classes/:id/archive` — the only way to change status; there is no status field on update. */
-export async function archiveClass(id: string): Promise<Class> {
-  const res = await apiClient.post<unknown>(`/classes/${id}/archive`);
-  return parseData(classSchema, res.data);
-}
-
-/** Soft delete for a class created by mistake; blocked with 409 while open enrollments exist. */
-export async function deleteClass(id: string): Promise<void> {
-  await apiClient.delete(`/classes/${id}`);
-}
-
 export async function addSchedule(classId: string, input: ScheduleInput): Promise<Schedule> {
   const res = await apiClient.post<unknown>(`/classes/${classId}/schedules`, input);
   return parseData(scheduleSchema, res.data);

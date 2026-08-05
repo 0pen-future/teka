@@ -129,9 +129,6 @@ export function StudentsPage() {
               ⚙ Cài đặt lớp
             </Link>
           ) : null}
-          <Link to="/classes" className="text-[13px] font-bold text-mint-600 hover:underline">
-            Quản lý lớp
-          </Link>
         </div>
       </div>
 
@@ -316,7 +313,6 @@ export function StudentsPage() {
               setEnrollFromWizard(false);
             }
           }}
-          mode="student"
           studentId={enrolling.id}
           stepBadge={enrollFromWizard ? "Bước 2/2" : undefined}
           onLater={

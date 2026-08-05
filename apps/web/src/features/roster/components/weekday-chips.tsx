@@ -24,11 +24,9 @@ export interface WeekdayChipsProps {
 }
 
 /**
- * The 7 toggle chips from prototype `modalClass`, reused as-is by
- * `ScheduleEditor` per the Design Spec ("reuses the 7-chip weekday row from
- * modalClass"). Selected: mint-400 fill, white text. Idle: white fill,
- * line-200 border. Each chip is at least 44px tall to stay a comfortable
- * touch target.
+ * The 7 toggle chips from prototype `modalClass`. Selected: mint-400 fill,
+ * white text. Idle: white fill, line-200 border. Each chip is at least 44px
+ * tall to stay a comfortable touch target.
  */
 export function WeekdayChips({
   value,

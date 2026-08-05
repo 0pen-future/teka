@@ -310,14 +310,6 @@ export const rosterHandlers = [
     klass.default_unit_price = body.default_unit_price;
     return HttpResponse.json(ok(klass));
   }),
-  http.post(`${API_URL}/classes/:id/archive`, ({ params }) => {
-    const klass = store.classes.find((item) => item.id === params.id);
-    if (!klass) {
-      return HttpResponse.json(fail("NOT_FOUND", "class not found"), { status: 404 });
-    }
-    klass.status = "archived";
-    return HttpResponse.json(ok(klass));
-  }),
   http.post(`${API_URL}/classes/:classId/schedules`, async ({ params, request }) => {
     const klass = store.classes.find((item) => item.id === params.classId);
     if (!klass) {
