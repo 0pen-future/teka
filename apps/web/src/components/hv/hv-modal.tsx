@@ -49,7 +49,7 @@ function HvModalContent({
         data-slot="hv-modal-content"
         className={cn(
           "fixed inset-x-0 bottom-0 top-auto z-50 max-h-[85vh] w-full translate-x-0 translate-y-0",
-          "overflow-y-auto rounded-t-[var(--radius-xl)] rounded-b-none bg-white p-[var(--pad-card)]",
+          "overflow-y-auto rounded-t-[var(--radius-xl)] rounded-b-none bg-white p-6",
           "outline-none max-sm:animate-[slideUp_var(--dur-base)_var(--ease-soft)]",
           "sm:animate-[popIn_var(--dur-base)_var(--ease-soft)] sm:inset-x-auto sm:bottom-auto",
           "sm:left-1/2 sm:top-1/2 sm:max-w-md sm:-translate-x-1/2 sm:-translate-y-1/2",
@@ -99,6 +99,8 @@ export interface HvModalProps {
   onOpenChange: (open: boolean) => void;
   /** Optional heading rendered above the content. */
   title?: React.ReactNode;
+  /** Optional muted subtitle rendered directly under the title. */
+  description?: React.ReactNode;
   /** Modal body. */
   children: React.ReactNode;
   /** Optional trailing action row (buttons), right-aligned. */
@@ -107,15 +109,37 @@ export interface HvModalProps {
   className?: string;
 }
 
-export function HvModal({ open, onOpenChange, title, children, footer, className }: HvModalProps) {
+export function HvModal({
+  open,
+  onOpenChange,
+  title,
+  description,
+  children,
+  footer,
+  className,
+}: HvModalProps) {
+  const descriptionId = React.useId();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <HvModalContent className={className}>
+      <HvModalContent
+        className={className}
+        aria-describedby={description != null ? descriptionId : undefined}
+      >
         {title != null ? (
-          <HvModalTitle className="mb-[var(--space-4)]">{title}</HvModalTitle>
+          <HvModalTitle className={description != null ? "mb-0.5" : "mb-[var(--space-4)]"}>
+            {title}
+          </HvModalTitle>
         ) : (
           <DialogPrimitive.Title className="sr-only">Hộp thoại</DialogPrimitive.Title>
         )}
+        {description != null ? (
+          <DialogPrimitive.Description
+            id={descriptionId}
+            className="mb-[var(--space-4)] pr-10 text-[12.5px] text-ink-500"
+          >
+            {description}
+          </DialogPrimitive.Description>
+        ) : null}
         <div className="font-body text-ink-700">{children}</div>
         {footer != null ? (
           <div className="mt-[var(--space-5)] flex justify-end gap-[var(--space-2)]">{footer}</div>
