@@ -19,6 +19,10 @@ describe("formatSessionDate", () => {
     expect(formatSessionDate("2026-07-15")).toBe("Th 4, 15/07");
   });
 
+  it("renders Sunday as CN", () => {
+    expect(formatSessionDate("2026-07-19")).toBe("CN, 19/07");
+  });
+
   it("passes an invalid date string through unchanged", () => {
     expect(formatSessionDate("not-a-date")).toBe("not-a-date");
   });
