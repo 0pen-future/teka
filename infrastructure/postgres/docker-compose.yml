@@ -1,0 +1,33 @@
+# Operator-run PostgreSQL for the teka homelab deployment. Lives outside
+# docker-compose.prod.yml on purpose (see docs/deployment.md): production data
+# belongs in a named volume with its own lifecycle, not in the app stack.
+#
+# Joins the app stack's default network so the API resolves the DSN host
+# `teka-db` directly; no port is published to the host.
+#
+#   docker compose --env-file .env -f docker-compose.yml up -d
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: teka-db
+    environment:
+      POSTGRES_DB: teka
+      POSTGRES_USER: teka
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in infrastructure/postgres/.env}
+    volumes:
+      - teka-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U teka -d teka"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+    networks:
+      - teka_default
+
+volumes:
+  teka-pgdata:
+
+networks:
+  teka_default:
+    external: true
