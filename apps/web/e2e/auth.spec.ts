@@ -38,7 +38,7 @@ test("registers a new account and lands on the dashboard", async ({ page }) => {
   await page.getByLabel("Số điện thoại").fill(phone);
   await page.getByLabel("Mật khẩu").fill("e2e-password-123");
   await page.getByRole("button", { name: "Tạo tài khoản" }).click();
-  await expect(page.getByText("Chào E2E Register")).toBeVisible();
+  await expect(page.getByText(/Chào buổi (sáng|trưa|chiều|tối), E2E Register!/)).toBeVisible();
 });
 
 test("logs in, keeps the session across a reload, and logs out", async ({ page }) => {
@@ -46,12 +46,12 @@ test("logs in, keeps the session across a reload, and logs out", async ({ page }
   await page.getByLabel("Số điện thoại").fill(TEACHER_PHONE);
   await page.getByLabel("Mật khẩu").fill(TEACHER_PASSWORD);
   await page.getByRole("button", { name: "Đăng nhập" }).click();
-  await expect(page.getByText(/Chào Cô Lan/)).toBeVisible();
+  await expect(page.getByText(/Chào buổi (sáng|trưa|chiều|tối), Cô Lan!/)).toBeVisible();
 
   // The access token lives in memory only; a reload must restore the session
   // from the httpOnly refresh cookie without bouncing to /login.
   await page.reload();
-  await expect(page.getByText(/Chào Cô Lan/)).toBeVisible();
+  await expect(page.getByText(/Chào buổi (sáng|trưa|chiều|tối), Cô Lan!/)).toBeVisible();
   await expect(page).not.toHaveURL(/\/login/);
 
   await page.getByRole("button", { name: "Đăng xuất" }).click();
@@ -80,14 +80,14 @@ test("a reload restores the session via exactly one refresh and rotates the cook
   await page.getByLabel("Số điện thoại").fill(TEACHER_PHONE);
   await page.getByLabel("Mật khẩu").fill(TEACHER_PASSWORD);
   await page.getByRole("button", { name: "Đăng nhập" }).click();
-  await expect(page.getByText(/Chào Cô Lan/)).toBeVisible();
+  await expect(page.getByText(/Chào buổi (sáng|trưa|chiều|tối), Cô Lan!/)).toBeVisible();
 
   const cookieBefore = (await context.cookies()).find((c) => c.name === "refresh_token");
   expect(cookieBefore).toBeDefined();
 
   const refreshCalls = trackRequests(page, "/auth/refresh");
   await page.reload();
-  await expect(page.getByText(/Chào Cô Lan/)).toBeVisible();
+  await expect(page.getByText(/Chào buổi (sáng|trưa|chiều|tối), Cô Lan!/)).toBeVisible();
   expect(refreshCalls).toHaveLength(1);
   expect((await refreshCalls[0].response())?.status()).toBe(200);
 
@@ -102,7 +102,7 @@ test("after logout the next load attempts refresh exactly once and gives up", as
   await page.getByLabel("Số điện thoại").fill(TEACHER_PHONE);
   await page.getByLabel("Mật khẩu").fill(TEACHER_PASSWORD);
   await page.getByRole("button", { name: "Đăng nhập" }).click();
-  await expect(page.getByText(/Chào Cô Lan/)).toBeVisible();
+  await expect(page.getByText(/Chào buổi (sáng|trưa|chiều|tối), Cô Lan!/)).toBeVisible();
 
   await page.getByRole("button", { name: "Đăng xuất" }).click();
   await expect(page).toHaveURL(/\/login$/);

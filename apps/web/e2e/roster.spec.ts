@@ -9,7 +9,7 @@ async function login(page: import("@playwright/test").Page) {
   await page.getByLabel("Số điện thoại").fill(TEACHER_PHONE);
   await page.getByLabel("Mật khẩu").fill(TEACHER_PASSWORD);
   await page.getByRole("button", { name: "Đăng nhập" }).click();
-  await expect(page.getByText(/Chào Cô Lan/)).toBeVisible();
+  await expect(page.getByText(/Chào buổi (sáng|trưa|chiều|tối), Cô Lan!/)).toBeVisible();
 }
 
 test("roster flow: contact, two students, a class, enroll both, end one", async ({ page }) => {
