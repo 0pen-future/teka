@@ -31,8 +31,8 @@ services:
 
   api:
     image: ${API_IMAGE:?e.g. ghcr.io/<owner>/<repo>/api:sha-<commit>}
-    ports:
-      - "8080:8080"
+    expose:
+      - "8080"
     environment:
       API_ENV: production
       API_HTTP_PORT: 8080
@@ -69,6 +69,6 @@ services:
   # container — the browser does, through the reverse proxy.
   web:
     image: ${WEB_IMAGE:?e.g. ghcr.io/<owner>/<repo>/web:sha-<commit>}
-    ports:
-      - "80:8080"
+    expose:
+      - "8080"
     restart: unless-stopped

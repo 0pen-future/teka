@@ -8,6 +8,11 @@ Kubernetes, or VPS). Everything below is platform-agnostic; the reference
 topology in [`docker-compose.prod.yml`](../docker-compose.prod.yml) shows how
 the pieces fit on any single host.
 
+The repository also includes a homelab-specific Traefik overlay in
+[`docker-compose.homelab.yml`](../docker-compose.homelab.yml). It configures
+application routing only; it does not provision DNS, Cloudflare Tunnel,
+Traefik, the Docker network, or PostgreSQL.
+
 ## Images
 
 CI publishes two images to GHCR on every merge to `main` (see
@@ -119,6 +124,111 @@ only tracked env file is `.env.example` with dev defaults.
 
 The web image takes no runtime configuration — everything is baked at build
 time via `VITE_API_URL`.
+
+## Homelab deployment with Traefik
+
+This deployment exposes the API at
+`https://teka-api.cauchuyenlaptrinh.com` and the web application at
+`https://teka-web.cauchuyenlaptrinh.com`. API and web publish no host ports;
+Traefik reaches port 8080 on each container through the external `homelab`
+Docker network. The API also remains on Compose's private default network so it
+can reach the migration job and the PostgreSQL address in its DSN. The
+migration job never joins `homelab` and is not exposed through Traefik.
+
+### Prerequisites
+
+Provision these outside this repository before deploying:
+
+- An existing external Docker network named `homelab`, shared with Traefik.
+- Traefik's Docker provider configured with `exposedByDefault=false` and
+  attached to `homelab`.
+- Cloudflare Tunnel routes for both public hostnames, each targeting
+  `http://traefik:80`. TLS terminates at Cloudflare; the Traefik routers use
+  the internal `web` entrypoint.
+- An external PostgreSQL instance reachable from the API host through
+  `API_DATABASE_URL`.
+
+### Prepare images and environment
+
+Pin both images to immutable `sha-<commit>` tags. The web API URL is a Vite
+build argument, not a runtime setting, so build or publish the web image with
+the production API origin:
+
+```bash
+make build-image-api
+make build-image-web \
+  VITE_API_URL=https://teka-api.cauchuyenlaptrinh.com/api/v1
+```
+
+Those commands create local `teka-api:local` and `teka-web:local` images. Tag
+and push them to your registry using the immutable commit SHA, then put those
+exact references in `.env.production`. If CI publishes the images instead, set
+the repository's `VITE_API_URL` variable to the production API URL before the
+SHA-tagged web image is built:
+
+```bash
+docker tag teka-api:local ghcr.io/OWNER/REPO/api:sha-COMMIT
+docker tag teka-web:local ghcr.io/OWNER/REPO/web:sha-COMMIT
+docker push ghcr.io/OWNER/REPO/api:sha-COMMIT
+docker push ghcr.io/OWNER/REPO/web:sha-COMMIT
+```
+
+Copy the tracked placeholder template to the ignored production file, then
+replace every placeholder with the image references, database DSN, and
+generated secrets for this deployment. The deliberately short `REPLACE_ME`
+secret values fail API startup validation if they are not replaced:
+
+```bash
+cp .env.production.example .env.production
+```
+
+### Validate and start
+
+Always pass the base production file first and the homelab overlay second:
+
+```bash
+docker compose --env-file .env.production \
+  -f docker-compose.prod.yml \
+  -f docker-compose.homelab.yml config
+
+docker compose --env-file .env.production \
+  -f docker-compose.prod.yml \
+  -f docker-compose.homelab.yml up -d
+```
+
+Compose runs `migrate` first and starts the API only after migration exits
+successfully. Traefik checks API readiness at `/readyz` before routing traffic.
+
+### Verify and operate
+
+Inspect all containers, including the completed migration job. Expect `api`
+and `web` to be running, `migrate` to have exited with code 0, and no published
+application ports. Compose does not define container healthchecks; the public
+requests below verify readiness through the real Traefik and Tunnel path:
+
+```bash
+docker compose --env-file .env.production \
+  -f docker-compose.prod.yml \
+  -f docker-compose.homelab.yml ps --all
+
+curl --fail https://teka-api.cauchuyenlaptrinh.com/readyz
+curl --fail https://teka-web.cauchuyenlaptrinh.com/
+```
+
+Inspect logs with the same file order:
+
+```bash
+docker compose --env-file .env.production \
+  -f docker-compose.prod.yml \
+  -f docker-compose.homelab.yml logs --tail=200 api web migrate
+```
+
+For an update, change `API_IMAGE` and `WEB_IMAGE` in `.env.production` to the
+new immutable SHA tags, ensure that the web image was built with the production
+`VITE_API_URL`, run `config` again, and repeat `up -d`. To roll back, restore
+the previous SHA tags and repeat the same validation and startup commands.
+Database migrations are normally forward-only, so confirm migration
+compatibility before rolling the API image back.
 
 ## Health probes
 
