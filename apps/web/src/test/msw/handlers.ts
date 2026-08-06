@@ -91,6 +91,82 @@ export function makePendingSession(overrides: Partial<PendingSession> = {}): Pen
 
 export const defaultPendingSessions: PendingSession[] = [];
 
+let classCounter = 0;
+
+/** `classes.ClassResponse` fixture — one Monday-19:00 schedule by default. */
+export function makeClass(overrides: Record<string, unknown> = {}) {
+  classCounter += 1;
+  const id = `20000000-0000-4000-8000-${String(classCounter).padStart(12, "0")}`;
+  return {
+    id,
+    name: `Toán 9A${classCounter}`,
+    start_date: "2026-08-01",
+    end_date: null,
+    default_unit_price: 60000,
+    status: "active",
+    schedules: [
+      {
+        id: `21000000-0000-4000-8000-${String(classCounter).padStart(12, "0")}`,
+        weekday: 1,
+        start_time: "19:00",
+        duration_min: 90,
+        effective_from: "2026-08-01",
+        effective_to: null,
+      },
+    ],
+    created_at: "2026-08-01T10:00:00Z",
+    ...overrides,
+  };
+}
+
+/** `sessions.SessionResponse` fixture for `GET /classes/:id/sessions`. */
+export function makeClassSession(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "10000000-0000-4000-8000-000000000099",
+    class_id: "20000000-0000-4000-8000-000000000001",
+    class_name: "Toán 9A1",
+    session_date: "2026-08-03",
+    start_time: "19:00:00",
+    status: "held",
+    cancel_reason: null,
+    attendance_confirmed_at: "2026-08-03T21:00:00Z",
+    student_count: 10,
+    created_at: "2026-08-01T10:00:00Z",
+    ...overrides,
+  };
+}
+
+/** `billing.PreviewResponse` fixture — zeroed totals unless overridden. */
+export function makePreview(overrides: Record<string, unknown> = {}) {
+  return {
+    invoices: [],
+    totals: {
+      student_count: 0,
+      total_opening: 0,
+      total_charge: 0,
+      total_adjustment: 0,
+      total_due: 0,
+    },
+    ...overrides,
+  };
+}
+
+/** `collections` summary fixture — zeroed unless overridden. */
+export function makeCollectionsSummary(overrides: Record<string, unknown> = {}) {
+  return {
+    student_count: 0,
+    contact_count: 0,
+    total_due: 0,
+    total_paid: 0,
+    total_outstanding: 0,
+    paid_contact_count: 0,
+    unpaid_contact_count: 0,
+    partial_contact_count: 0,
+    unallocated_credit: 0,
+    ...overrides,
+  };
+}
+
 export function makePeriod(overrides: Record<string, unknown> = {}) {
   return {
     id: "30000000-0000-4000-8000-000000000001",
@@ -345,6 +421,14 @@ export const handlers = [
   ),
   http.post(`${API_URL}/billing-periods`, () =>
     HttpResponse.json(ok(makePeriod()), { status: 201 }),
+  ),
+  // Dashboard aggregation defaults: an empty roster with nothing billed.
+  http.get(`${API_URL}/classes`, () => HttpResponse.json(ok([], listMeta(0)))),
+  http.get(`${API_URL}/classes/:id/sessions`, () => HttpResponse.json(ok([]))),
+  http.get(`${API_URL}/students`, () => HttpResponse.json(ok([], listMeta(0)))),
+  http.get(`${API_URL}/billing-periods/:id/preview`, () => HttpResponse.json(ok(makePreview()))),
+  http.get(`${API_URL}/billing-periods/:id/collections/summary`, () =>
+    HttpResponse.json(ok(makeCollectionsSummary())),
   ),
   // Every failure mode (unknown, malformed, revoked, expired, already-paid,
   // soft-deleted) collapses to a plain 404 — the real API has no other error

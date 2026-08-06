@@ -9,6 +9,10 @@ export { useContact, useContactsList, contactsKeys } from "./hooks/use-contacts"
 export { useEnrollment, useEnrollmentsList, enrollmentsKeys } from "./hooks/use-enrollments";
 export { useStudent, useStudentsList, studentsKeys } from "./hooks/use-students";
 
+// Raw fetcher for consumers that need a dynamic number of per-class queries
+// (`useQueries`), which a fixed hook call cannot express.
+export { listStudents } from "./api/students-api";
+
 export {
   classSchema,
   contactSchema,
@@ -19,3 +23,4 @@ export {
 export type { Class, Contact, Enrollment, Schedule, Student } from "./schemas/roster-schemas";
 
 export { formatWeekday } from "./lib/roster-format";
+export { activeSchedules } from "./lib/schedule-diff";

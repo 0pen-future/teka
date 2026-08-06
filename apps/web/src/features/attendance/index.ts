@@ -3,6 +3,10 @@
 // without pulling them into every consumer's chunk.
 export { useSession, useSessionRoster, useSessionsList, sessionsKeys } from "./hooks/use-sessions";
 
+// Raw fetcher for consumers that need a dynamic number of per-class queries
+// (`useQueries`), which a fixed hook call cannot express.
+export { listClassSessions } from "./api/attendance-api";
+
 export {
   sessionSchema,
   attendanceRowSchema,

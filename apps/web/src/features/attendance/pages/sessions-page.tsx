@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Outlet, useMatches } from "react-router";
+import { Outlet, useMatches, useSearchParams } from "react-router";
 
 import { HvCard } from "@/components/hv";
 import { cn, formatSessionDate } from "@/lib/utils";
@@ -69,7 +69,14 @@ export function SessionsPage() {
   // Search narrows which pills render; selection still falls back to the
   // full list so filtering can never change the selected class.
   const classSearch = useClassSearch(classes);
-  const selectedClassId = explicitClassId ?? classes[0]?.id ?? null;
+  // Read-only deep link from the dashboard's class cards (`?class_id=`);
+  // an id not in the active list (stale link, other teacher) is ignored so
+  // the sessions query never fires against a class this account can't read.
+  const [searchParams] = useSearchParams();
+  const urlClassId = searchParams.get("class_id");
+  const linkedClassId =
+    urlClassId && classes.some((cls) => cls.id === urlClassId) ? urlClassId : null;
+  const selectedClassId = explicitClassId ?? linkedClassId ?? classes[0]?.id ?? null;
 
   const { data: sessions, isPending } = useSessionsList(selectedClassId ?? undefined, range);
   const allSessions = sessions ?? [];
