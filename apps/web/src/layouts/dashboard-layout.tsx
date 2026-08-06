@@ -10,10 +10,10 @@ import {
   HvUsersIcon,
   HvWalletIcon,
 } from "@/components/hv";
-import { useLogout } from "@/features/auth";
+import { useAuthStore, useLogout } from "@/features/auth";
 import { useCurrentPeriod } from "@/features/billing";
 import { usePendingSessions } from "@/features/dashboard/hooks/use-dashboard";
-import { cn } from "@/lib/utils";
+import { cn, nameInitial } from "@/lib/utils";
 
 interface NavEntry {
   label: string;
@@ -201,6 +201,72 @@ function LogoutButton() {
   );
 }
 
+/**
+ * Sidebar footer per the prototype: below the period card, split by a border —
+ * the profile nav entry (avatar disc + name) on top of the Đăng xuất row.
+ */
+function SidebarFooter() {
+  const user = useAuthStore((state) => state.user);
+  const logoutMutation = useLogout();
+  return (
+    <div className="mx-4 mb-4 border-t border-line-200 pt-3">
+      <NavLink
+        to="/profile"
+        className={({ isActive }) =>
+          cn(
+            "flex items-center gap-2.5 rounded-[14px] px-2.5 py-2 transition-colors hover:bg-cream-200",
+            isActive && "bg-mint-50",
+          )
+        }
+      >
+        <span
+          aria-hidden
+          className="flex size-9 shrink-0 items-center justify-center rounded-full bg-mint-100 font-display text-[16px] font-extrabold text-mint-600"
+        >
+          {nameInitial(user?.full_name ?? "")}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[13.5px] font-extrabold text-ink-900">
+            {user?.full_name}
+          </span>
+          <span className="block text-[12px] text-ink-400">Hồ sơ giáo viên</span>
+        </span>
+      </NavLink>
+      <button
+        type="button"
+        onClick={() => logoutMutation.mutate()}
+        disabled={logoutMutation.isPending}
+        className="flex w-full cursor-pointer items-center gap-2.5 rounded-[14px] px-2.5 py-2 text-left text-[13.5px] font-extrabold text-ink-400 transition-colors hover:bg-cream-200 hover:text-coral-500 disabled:opacity-50"
+      >
+        <span className="inline-flex w-9 justify-center">
+          <LogOutIcon aria-hidden className="size-[18px]" />
+        </span>
+        Đăng xuất
+      </button>
+    </div>
+  );
+}
+
+/** Rail avatar disc → /profile, mirroring the sidebar footer at md–lg. */
+function ProfileDisc() {
+  const user = useAuthStore((state) => state.user);
+  return (
+    <NavLink
+      to="/profile"
+      title="Hồ sơ giáo viên"
+      aria-label="Hồ sơ giáo viên"
+      className={({ isActive }) =>
+        cn(
+          "mb-2 flex size-11 items-center justify-center rounded-full bg-mint-100 font-display text-[15px] font-bold text-mint-600",
+          isActive && "ring-2 ring-mint-400",
+        )
+      }
+    >
+      {nameInitial(user?.full_name ?? "")}
+    </NavLink>
+  );
+}
+
 /** Authenticated app shell: full sidebar at lg+, icon rail at md–lg, bottom tab bar under md. */
 export function DashboardLayout() {
   const entries = useNavEntries();
@@ -218,6 +284,7 @@ export function DashboardLayout() {
           ))}
         </nav>
         <CurrentPeriodCard />
+        <SidebarFooter />
       </aside>
 
       <aside className="hidden md:flex md:w-[72px] md:shrink-0 md:flex-col md:items-center md:border-r md:border-line-200 md:bg-white lg:hidden">
@@ -226,6 +293,7 @@ export function DashboardLayout() {
             <RailNavItem key={entry.label} {...entry} />
           ))}
         </nav>
+        <ProfileDisc />
         <CurrentPeriodDisc />
       </aside>
 
@@ -238,7 +306,15 @@ export function DashboardLayout() {
             "lg:max-w-[var(--w-page)] lg:px-8 lg:py-7",
           )}
         >
-          <div className="mb-2 flex justify-end">
+          {/* At lg+ the sidebar footer owns profile + logout; below that the
+              header row keeps both reachable for the rail and bottom tabs. */}
+          <div className="mb-2 flex items-center justify-end gap-1 lg:hidden">
+            <Link
+              to="/profile"
+              className="inline-flex items-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-[13px] font-semibold text-ink-500 transition-colors hover:bg-cream-100 hover:text-mint-600"
+            >
+              Hồ sơ giáo viên
+            </Link>
             <LogoutButton />
           </div>
           <Outlet />

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatMoney, formatPhoneLocal, formatSessionDate } from "../format";
+import { formatMoney, formatPhoneLocal, formatSessionDate, nameInitial } from "../format";
 
 describe("formatMoney", () => {
   it("renders zero with the đồng symbol", () => {
@@ -35,5 +35,20 @@ describe("formatPhoneLocal", () => {
 
   it("passes a number without the +84 prefix through unchanged", () => {
     expect(formatPhoneLocal("0912345678")).toBe("0912345678");
+  });
+});
+
+describe("nameInitial", () => {
+  it("takes the first letter of the last word — the Vietnamese given name", () => {
+    expect(nameInitial("Nguyễn Thị Lan")).toBe("L");
+  });
+
+  it("handles a single-word name", () => {
+    expect(nameInitial("Lan")).toBe("L");
+  });
+
+  it("returns an empty string for empty or whitespace-only input", () => {
+    expect(nameInitial("")).toBe("");
+    expect(nameInitial("   ")).toBe("");
   });
 });

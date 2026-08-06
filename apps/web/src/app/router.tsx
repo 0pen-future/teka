@@ -7,6 +7,7 @@ import { attendanceRoutes } from "@/features/attendance/routes";
 import { billingRoutes } from "@/features/billing/routes";
 import { collectionsRoutes } from "@/features/collections/routes";
 import { dashboardRoutes } from "@/features/dashboard/routes";
+import { profileRoutes } from "@/features/profile/routes";
 import { rosterRoutes } from "@/features/roster/routes";
 import { statementRoutes } from "@/features/statement";
 import { AuthLayout } from "@/layouts/auth-layout";
@@ -39,6 +40,7 @@ export const router = createBrowserRouter([
           ...attendanceRoutes,
           ...billingRoutes,
           ...collectionsRoutes,
+          ...profileRoutes,
         ],
       },
       {

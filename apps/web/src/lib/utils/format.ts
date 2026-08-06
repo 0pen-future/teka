@@ -43,3 +43,11 @@ export function formatSessionDate(sessionDate: string): string {
 export function formatPhoneLocal(phone: string): string {
   return phone.startsWith("+84") ? `0${phone.slice(3)}` : phone;
 }
+
+/**
+ * Last given name's first letter for avatar discs — Vietnamese names put the
+ * given name last, so "Nguyễn Thị Lan" → "L". Empty input yields "".
+ */
+export function nameInitial(fullName: string): string {
+  return fullName.trim().split(/\s+/).at(-1)?.charAt(0) ?? "";
+}
