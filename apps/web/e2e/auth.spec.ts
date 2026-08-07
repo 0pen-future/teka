@@ -133,8 +133,10 @@ test("a logged-in teacher with pending sessions sees the attendance alert on /",
   await page.getByLabel("Mật khẩu").fill(TEACHER_PASSWORD);
   await page.getByRole("button", { name: "Đăng nhập" }).click();
 
-  // The seeder leaves the two most recent past sessions unconfirmed
-  // (`apps/api/seeds/seed.go`, `pendingAttendanceCount`).
-  await expect(page.getByText("buổi đã qua chưa điểm danh")).toBeVisible();
+  // The seeder leaves its most recent past sessions unconfirmed
+  // (`apps/api/seeds/seed.go`, `pendingAttendanceCount`). How many of them the
+  // dashboard still counts depends on how far the run date has drifted from the
+  // seeded timeline, so the count stays out of the matcher.
+  await expect(page.getByText(/buổi đã dạy nhưng chưa điểm danh/)).toBeVisible();
   await expect(page.getByRole("link", { name: "Điểm danh ngay" }).first()).toBeVisible();
 });
