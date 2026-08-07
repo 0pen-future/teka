@@ -1,16 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none" role="img" aria-label="favicon-32">
-<title>favicon-32</title>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" role="img" aria-label="app-icon-1024">
+<title>app-icon-1024</title>
 <style>
   .display { font-family: 'Baloo 2', 'Nunito', Arial, sans-serif; font-weight: 800; }
   .body { font-family: 'Nunito', Arial, sans-serif; font-weight: 700; }
 </style>
 
-<rect width="32" height="32" rx="7" fill="#FFFDF4"/>
-<circle cx="16.0" cy="16.0" r="13.76" fill="#D8FFED"/>
-<circle cx="24.32" cy="7.68" r="3.52" fill="#FFF1B8"/>
-<circle cx="7.68" cy="24.96" r="3.20" fill="#D9F0FF"/>
+<rect width="1024" height="1024" rx="225" fill="#FFFDF4"/>
+<circle cx="512.0" cy="512.0" r="440.32" fill="#D8FFED"/>
+<circle cx="778.24" cy="245.76" r="112.64" fill="#FFF1B8"/>
+<circle cx="245.76" cy="798.72" r="102.40" fill="#D9F0FF"/>
 
-<g transform="translate(16.0 15.36) scale(0.19375)" stroke-linecap="round" stroke-linejoin="round">
+<g transform="translate(512.0 491.52) scale(6.2)" stroke-linecap="round" stroke-linejoin="round">
   <circle cx="0" cy="0" r="46" fill="#EFFFF7" stroke="#17313B" stroke-width="6"/>
   <rect x="-28" y="-29" width="56" height="36" rx="10" fill="#7CCBFF" stroke="#17313B" stroke-width="5"/>
   <path d="M-17 -11 L-7 0 L18 -25" stroke="#0D8F61" stroke-width="8" fill="none"/>
@@ -19,6 +19,6 @@
   <circle cx="26" cy="24" r="10" fill="#FFC533" stroke="#17313B" stroke-width="4"/>
   
 </g>
-<path d="M9.60 26.88 H22.40" stroke="#FFC533" stroke-width="2.00" stroke-linecap="round"/>
+<path d="M307.20 860.16 H716.80" stroke="#FFC533" stroke-width="46.08" stroke-linecap="round"/>
 
 </svg>
