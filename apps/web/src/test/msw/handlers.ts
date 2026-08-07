@@ -416,6 +416,8 @@ export const handlers = [
   ),
   http.post(`${API_URL}/auth/logout`, () => HttpResponse.json(ok({ message: "logged out" }))),
   http.get(`${API_URL}/me`, () => HttpResponse.json(ok(primaryTeacher))),
+  // A test teacher has no linked Zalo account unless the test says otherwise.
+  http.get(`${API_URL}/me/zalo`, () => HttpResponse.json(ok({ linked: false }))),
   http.get(`${API_URL}/sessions/pending`, () =>
     HttpResponse.json(ok({ total: defaultPendingSessions.length, items: defaultPendingSessions })),
   ),
