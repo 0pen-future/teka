@@ -23,6 +23,23 @@ export const zaloFriendSchema = z.object({
 
 export type ZaloFriend = z.infer<typeof zaloFriendSchema>;
 
+/**
+ * One row of `POST /me/zalo/friends/match` (`zalo.FriendMatchResponse`).
+ * `phone` echoes the phone exactly as the caller sent it — it is the join key
+ * back to the contact — and every other field is absent on a miss.
+ */
+export const zaloFriendMatchSchema = z.object({
+  phone: z.string(),
+  matched: z.boolean(),
+  user_id: z.string().optional(),
+  display_name: z.string().optional(),
+  zalo_name: z.string().optional(),
+  avatar: z.string().optional(),
+  is_friend: z.boolean(),
+});
+
+export type ZaloFriendMatch = z.infer<typeof zaloFriendMatchSchema>;
+
 /** `zalo.LinkStartResponse` — the id every later poll carries. */
 export const zaloLinkStartSchema = z.object({
   link_id: z.string(),

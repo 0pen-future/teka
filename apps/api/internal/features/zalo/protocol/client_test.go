@@ -222,3 +222,18 @@ func TestBuildFormBody(t *testing.T) {
 		t.Error("missing foo=bar")
 	}
 }
+
+func TestServiceURL_ResolvesFriendService(t *testing.T) {
+	sess := NewSession()
+	sess.LoginInfo = &LoginInfo{
+		ZpwServiceMapV3: ZpwServiceMapV3{Friend: []string{"https://friend.example", "https://friend2.example"}},
+	}
+	if got := ServiceURL(sess, "friend"); got != "https://friend.example" {
+		t.Errorf("ServiceURL(friend) = %q, want the first advertised URL", got)
+	}
+
+	sess.LoginInfo = &LoginInfo{}
+	if got := ServiceURL(sess, "friend"); got != "" {
+		t.Errorf("ServiceURL(friend) with no URLs = %q, want empty", got)
+	}
+}

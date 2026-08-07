@@ -17,6 +17,7 @@ type ZpwServiceMapV3 struct {
 	File      []string `json:"file"`
 	Profile   []string `json:"profile"`
 	GroupPoll []string `json:"group_poll"`
+	Friend    []string `json:"friend"`
 	// Only the fields this port needs; Zalo returns many more.
 }
 
@@ -96,6 +97,17 @@ type FriendInfo struct {
 	UserID      string `json:"userId"`
 	DisplayName string `json:"displayName"`
 	ZaloName    string `json:"zaloName,omitempty"`
+	Avatar      string `json:"avatar,omitempty"`
+}
+
+// FoundUser is one phone-lookup result, decoded down to what the auto-map
+// suggestion flow shows. A found account is not necessarily a friend; Zalo
+// returns many more fields that stay ignored so shape drift cannot break
+// decoding.
+type FoundUser struct {
+	UID         string `json:"uid"`
+	DisplayName string `json:"display_name"`
+	ZaloName    string `json:"zalo_name,omitempty"`
 	Avatar      string `json:"avatar,omitempty"`
 }
 

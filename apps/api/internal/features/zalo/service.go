@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +29,18 @@ type SendFunc func(ctx context.Context, sess *protocol.Session, toUID, text stri
 // FriendsFunc lists the account's Zalo friends over an established session.
 // protocol.FetchFriends is the production value.
 type FriendsFunc func(ctx context.Context, sess *protocol.Session) ([]protocol.FriendInfo, error)
+
+// FindUserFunc resolves a batch of phone numbers to Zalo accounts.
+// protocol.FindUser is the production value.
+type FindUserFunc func(ctx context.Context, sess *protocol.Session, phones []string) (map[string]protocol.FoundUser, error)
+
+// SendFriendRequestFunc sends one friend request to one Zalo user.
+// protocol.SendFriendRequest is the production value.
+type SendFriendRequestFunc func(ctx context.Context, sess *protocol.Session, userID, message string) error
+
+// PaceFunc waits between successive lookup chunks so a batch of lookups reads
+// like a person, not a scraper. The production value sleeps with jitter.
+type PaceFunc func(ctx context.Context)
 
 // Friend is one entry of the teacher's Zalo friend list, as the contact-mapping
 // picker consumes it. It mirrors protocol.FriendInfo so nothing outside this
@@ -56,26 +71,32 @@ type AccountStatus struct {
 // zero value uses the real Zalo protocol, which is what production wants and
 // what no test may use.
 type ServiceOptions struct {
-	Login   LoginFunc
-	Relogin ReloginFunc
-	Send    SendFunc
-	Friends FriendsFunc
-	Logger  *slog.Logger
-	Link    LinkOptions
+	Login             LoginFunc
+	Relogin           ReloginFunc
+	Send              SendFunc
+	Friends           FriendsFunc
+	FindUser          FindUserFunc
+	SendFriendRequest SendFriendRequestFunc
+	Pace              PaceFunc
+	Logger            *slog.Logger
+	Link              LinkOptions
 }
 
 // Service is the Zalo linking feature: starting and following a QR link,
 // reporting and removing a link, and handing out live sessions to whatever
 // needs to act as the teacher on Zalo.
 type Service struct {
-	repo    Repository
-	cipher  *secrets.Cipher
-	cache   *SessionCache
-	links   *LinkManager
-	relogin ReloginFunc
-	send    SendFunc
-	friends FriendsFunc
-	log     *slog.Logger
+	repo              Repository
+	cipher            *secrets.Cipher
+	cache             *SessionCache
+	links             *LinkManager
+	relogin           ReloginFunc
+	send              SendFunc
+	friends           FriendsFunc
+	findUser          FindUserFunc
+	sendFriendRequest SendFriendRequestFunc
+	pace              PaceFunc
+	log               *slog.Logger
 
 	// The health probe is optional and owned here rather than by the caller, so
 	// that stopping the service stops everything it started.
@@ -102,15 +123,27 @@ func NewService(repo Repository, cipher *secrets.Cipher, opts ServiceOptions) *S
 	if opts.Friends == nil {
 		opts.Friends = protocol.FetchFriends
 	}
+	if opts.FindUser == nil {
+		opts.FindUser = protocol.FindUser
+	}
+	if opts.SendFriendRequest == nil {
+		opts.SendFriendRequest = protocol.SendFriendRequest
+	}
+	if opts.Pace == nil {
+		opts.Pace = defaultPace
+	}
 
 	svc := &Service{
-		repo:    repo,
-		cipher:  cipher,
-		cache:   NewSessionCache(),
-		relogin: opts.Relogin,
-		send:    opts.Send,
-		friends: opts.Friends,
-		log:     opts.Logger,
+		repo:              repo,
+		cipher:            cipher,
+		cache:             NewSessionCache(),
+		relogin:           opts.Relogin,
+		send:              opts.Send,
+		friends:           opts.Friends,
+		findUser:          opts.FindUser,
+		sendFriendRequest: opts.SendFriendRequest,
+		pace:              opts.Pace,
+		log:               opts.Logger,
 	}
 	svc.links = NewLinkManager(opts.Login, svc.persistLink, opts.Logger, opts.Link)
 	return svc
@@ -279,6 +312,189 @@ func (s *Service) ListFriends(ctx context.Context, teacherID uuid.UUID) ([]Frien
 		}
 	}
 	return friends, nil
+}
+
+// MaxMatchPhones caps one match request; anything larger belongs in several
+// requests. It bounds the pacing budget (six waits of up to three seconds) and
+// the number of round trips to Zalo — it does not guarantee the request beats
+// the server's write timeout when Zalo itself is slow. The handler enforces
+// it; MatchFriends trusts its caller.
+const MaxMatchPhones = 200
+
+// matchChunkSize is how many phones travel in one lookup call. The batch rides
+// in a GET query string, so it stays small enough for common proxy URL limits.
+const matchChunkSize = 30
+
+// defaultFriendRequestMessage is what a parent sees when the teacher sends a
+// friend request without writing anything — Zalo displays the request text, and
+// a blank one reads as spam.
+const defaultFriendRequestMessage = "Xin chào, tôi là giáo viên của bé. Mình kết bạn Zalo để tiện trao đổi nhé!"
+
+// FriendMatch is one row of a match answer: the phone exactly as the caller
+// sent it, and — when Zalo resolved it — who it belongs to and whether that
+// account is already a friend.
+type FriendMatch struct {
+	Phone       string
+	Matched     bool
+	UserID      string
+	DisplayName string
+	ZaloName    string
+	Avatar      string
+	IsFriend    bool
+}
+
+// vnMobilePattern is the local form a normalized phone must land in before it
+// may travel to Zalo; anything else is answered unmatched without ever being
+// sent. It mirrors the "vnphone" rule the API validates phones with elsewhere.
+// The wire form is not this one — MatchFriends converts a validated 0… phone
+// to 84… because Zalo's lookup only resolves the country-code form.
+var vnMobilePattern = regexp.MustCompile(`^0(3|5|7|8|9)\d{8}$`)
+
+// normalizePhone canonicalizes a Vietnamese phone number into the local 0…
+// form vnMobilePattern validates: spaces and dots go, and the +84/84 country
+// prefix becomes the local leading zero. It returns "" for a blank input.
+// This is neither the storage form (validation.NormalizePhone canonicalizes
+// to +84… for the database) nor the lookup wire form (84…, converted after
+// validation) — it exists so one pattern can gate every input shape.
+func normalizePhone(raw string) string {
+	p := strings.Map(func(r rune) rune {
+		if r == ' ' || r == '.' {
+			return -1
+		}
+		return r
+	}, strings.TrimSpace(raw))
+	p = strings.TrimPrefix(p, "+")
+	if strings.HasPrefix(p, "84") && len(p) > 2 {
+		p = "0" + p[2:]
+	}
+	return p
+}
+
+// defaultPace sleeps one to three seconds, honouring cancellation, so chunked
+// lookups read like a person paging through results rather than a scraper.
+func defaultPace(ctx context.Context) {
+	timer := time.NewTimer(time.Second + rand.N(2*time.Second))
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+	}
+}
+
+// MatchFriends resolves phone numbers against Zalo and labels each row with
+// whether it matched an account and whether that account is already a friend.
+// Rows come back in request order, echoing the phone exactly as sent, so the
+// caller can join them to its own records without re-normalizing. Nothing is
+// persisted — confirming a suggestion is a separate, explicit write.
+//
+// Phones are personal data: they go to Zalo and come back in rows, but they
+// are never logged — only counts and durations are.
+func (s *Service) MatchFriends(ctx context.Context, teacherID uuid.UUID, phones []string) ([]FriendMatch, error) {
+	sess, err := s.sessionFor(ctx, teacherID)
+	if err != nil {
+		return nil, err
+	}
+
+	// One lookup per distinct normalized phone. Anything that does not
+	// normalize into a Vietnamese mobile number is answered unmatched without
+	// being sent — Zalo only ever sees well-formed phones.
+	normalized := make([]string, len(phones))
+	lookup := make([]string, 0, len(phones))
+	seen := make(map[string]struct{}, len(phones))
+	for i, p := range phones {
+		n := normalizePhone(p)
+		if !vnMobilePattern.MatchString(n) {
+			continue
+		}
+		// Zalo's reverse lookup resolves only the country-code form — a local
+		// 0… phone gets a successful-but-empty answer. The result map is keyed
+		// by the phone exactly as sent, so the same 84… form is also the join
+		// key for the rows below.
+		n = "84" + n[1:]
+		normalized[i] = n
+		if _, dup := seen[n]; dup {
+			continue
+		}
+		seen[n] = struct{}{}
+		lookup = append(lookup, n)
+	}
+
+	start := time.Now()
+	found := make(map[string]protocol.FoundUser, len(lookup))
+	chunks := 0
+	for begin := 0; begin < len(lookup); begin += matchChunkSize {
+		if begin > 0 {
+			s.pace(ctx)
+		}
+		end := min(begin+matchChunkSize, len(lookup))
+		chunk, err := s.findUser(ctx, sess, lookup[begin:end])
+		if err != nil {
+			return nil, s.expireIfLoggedOut(ctx, teacherID, "lookup", err)
+		}
+		chunks++
+		for phone, user := range chunk {
+			found[phone] = user
+		}
+	}
+
+	// The friend list only serves to label resolved rows — when nothing
+	// resolved there is nothing to label, and the (potentially huge) list
+	// fetch is skipped.
+	friendUIDs := map[string]struct{}{}
+	if len(found) > 0 {
+		infos, err := s.friends(ctx, sess)
+		if err != nil {
+			return nil, s.expireIfLoggedOut(ctx, teacherID, "friends fetch", err)
+		}
+		friendUIDs = make(map[string]struct{}, len(infos))
+		for _, f := range infos {
+			friendUIDs[f.UserID] = struct{}{}
+		}
+	}
+
+	rows := make([]FriendMatch, len(phones))
+	for i, p := range phones {
+		rows[i] = FriendMatch{Phone: p}
+		user, ok := found[normalized[i]]
+		if normalized[i] == "" || !ok || user.UID == "" {
+			continue
+		}
+		_, isFriend := friendUIDs[user.UID]
+		rows[i] = FriendMatch{
+			Phone:       p,
+			Matched:     true,
+			UserID:      user.UID,
+			DisplayName: user.DisplayName,
+			ZaloName:    user.ZaloName,
+			Avatar:      user.Avatar,
+			IsFriend:    isFriend,
+		}
+	}
+
+	s.log.Info("zalo: matched phones against the friend list",
+		"teacher_id", teacherID,
+		"phones", len(phones), "looked_up", len(lookup), "chunks", chunks,
+		"found", len(found), "duration", time.Since(start))
+	return rows, nil
+}
+
+// SendRequest sends exactly one friend request as the teacher. One call, one
+// request — the contract itself is the rate limit, backed by an explicit click
+// per person in the UI; no batch variant exists. A blank message falls back to
+// a short greeting so the parent sees who is asking.
+func (s *Service) SendRequest(ctx context.Context, teacherID uuid.UUID, userID, message string) error {
+	if message == "" {
+		message = defaultFriendRequestMessage
+	}
+	sess, err := s.sessionFor(ctx, teacherID)
+	if err != nil {
+		return err
+	}
+	if err := s.sendFriendRequest(ctx, sess, userID, message); err != nil {
+		return s.expireIfLoggedOut(ctx, teacherID, "friend request", err)
+	}
+	s.log.Info("zalo: friend request sent", "teacher_id", teacherID)
+	return nil
 }
 
 // LinkedTeachers lists the teachers whose account is currently healthy. The

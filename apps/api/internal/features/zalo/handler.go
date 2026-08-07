@@ -2,6 +2,7 @@ package zalo
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -146,6 +147,82 @@ func (h *Handler) friends(c *gin.Context) {
 		return
 	}
 	response.OK(c, http.StatusOK, newFriendResponses(list))
+}
+
+// matchFriends resolves phone numbers against Zalo and the friend list.
+//
+//	@Summary		Match phones against Zalo accounts
+//	@Description	Looks up 1–200 phone numbers against Zalo in paced chunks, intersects the hits with the linked account's friend list, and returns one row per phone in request order. Rows echo the phone exactly as sent; unresolved phones come back matched=false. Nothing is persisted — confirming a suggestion goes through PUT /contacts/{id}/zalo-mapping. 404 when no account is linked, 409 when the stored session no longer works.
+//	@Tags			zalo
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body		MatchFriendsRequest	true	"phones to look up"
+//	@Success		200		{object}	response.Envelope{data=[]FriendMatchResponse}
+//	@Failure		400		{object}	response.Envelope{error=response.ErrorBody}	"empty or oversized phone list"
+//	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404		{object}	response.Envelope{error=response.ErrorBody}	"no linked account"
+//	@Failure		409		{object}	response.Envelope{error=response.ErrorBody}	"session expired"
+//	@Security		BearerAuth
+//	@Router			/me/zalo/friends/match [post]
+func (h *Handler) matchFriends(c *gin.Context) {
+	teacherID, ok := h.teacherID(c)
+	if !ok {
+		return
+	}
+	var req MatchFriendsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Err(c, validation.BindError(err))
+		return
+	}
+	if len(req.Phones) == 0 {
+		response.Err(c, apperror.BadRequest("phones is required"))
+		return
+	}
+	if len(req.Phones) > MaxMatchPhones {
+		response.Err(c, apperror.BadRequest(fmt.Sprintf("at most %d phones per request", MaxMatchPhones)))
+		return
+	}
+	rows, err := h.svc.MatchFriends(c.Request.Context(), teacherID, req.Phones)
+	if err != nil {
+		response.Err(c, linkError(err))
+		return
+	}
+	response.OK(c, http.StatusOK, newFriendMatchResponses(rows))
+}
+
+// friendRequest sends one friend request as the teacher.
+//
+//	@Summary		Send one Zalo friend request
+//	@Description	Sends exactly one friend request per call to the given Zalo user — no batch variant exists. message is optional; a blank one falls back to a short Vietnamese greeting. 404 when no account is linked, 409 when the stored session no longer works.
+//	@Tags			zalo
+//	@Accept			json
+//	@Param			request	body	FriendRequestRequest	true	"target user and optional message"
+//	@Success		204
+//	@Failure		400	{object}	response.Envelope{error=response.ErrorBody}	"user_id missing"
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}	"no linked account"
+//	@Failure		409	{object}	response.Envelope{error=response.ErrorBody}	"session expired"
+//	@Security		BearerAuth
+//	@Router			/me/zalo/friends/request [post]
+func (h *Handler) friendRequest(c *gin.Context) {
+	teacherID, ok := h.teacherID(c)
+	if !ok {
+		return
+	}
+	var req FriendRequestRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Err(c, validation.BindError(err))
+		return
+	}
+	if req.UserID == "" {
+		response.Err(c, apperror.BadRequest("user_id is required"))
+		return
+	}
+	if err := h.svc.SendRequest(c.Request.Context(), teacherID, req.UserID, req.Message); err != nil {
+		response.Err(c, linkError(err))
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // unlink detaches the caller's Zalo account.

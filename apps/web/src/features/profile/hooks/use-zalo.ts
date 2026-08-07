@@ -4,6 +4,8 @@ import {
   getZaloFriends,
   getZaloLinkStatus,
   getZaloStatus,
+  matchZaloFriends,
+  sendZaloFriendRequest,
   startZaloLink,
   unlinkZalo,
 } from "../api/zalo-api";
@@ -47,6 +49,27 @@ export function useZaloFriends(enabled: boolean) {
     queryFn: getZaloFriends,
     enabled,
     staleTime: ZALO_FRIENDS_STALE_MS,
+  });
+}
+
+/**
+ * A mutation (not a query) although it only reads: every call is a live,
+ * paced Zalo lookup, so it must run once per explicit user action and never
+ * refetch on remount or focus. It touches no cached data, so nothing is
+ * invalidated. Callers pass an `AbortSignal` so an abandoned dialog stops the
+ * paced server-side work instead of leaving it running against Zalo.
+ */
+export function useMatchZaloFriends() {
+  return useMutation({
+    mutationFn: ({ phones, signal }: { phones: string[]; signal?: AbortSignal }) =>
+      matchZaloFriends(phones, signal),
+  });
+}
+
+/** One friend request per explicit click; there is no bulk variant to wrap. */
+export function useSendZaloFriendRequest() {
+  return useMutation({
+    mutationFn: (userId: string) => sendZaloFriendRequest(userId),
   });
 }
 

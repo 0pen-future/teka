@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -177,6 +179,9 @@ func TestZaloEndpointsRejectAnUnauthenticatedCaller(t *testing.T) {
 		{http.MethodPost, "/api/v1/me/zalo/link/start", `{"consent_version":"` + testConsentVersion + `"}`},
 		{http.MethodGet, "/api/v1/me/zalo/link/status?id=" + uuid.NewString(), ""},
 		{http.MethodDelete, "/api/v1/me/zalo", ""},
+		{http.MethodGet, "/api/v1/me/zalo/friends", ""},
+		{http.MethodPost, "/api/v1/me/zalo/friends/match", `{"phones":["0901234567"]}`},
+		{http.MethodPost, "/api/v1/me/zalo/friends/request", `{"user_id":"111"}`},
 	}
 	for _, tc := range cases {
 		w, _ := do(t, r, tc.method, tc.path, tc.body, "")
@@ -261,7 +266,7 @@ func TestStartLinkWithoutConsentStartsNoAttempt(t *testing.T) {
 func TestLinkFlowServesTheQRThenReportsLinked(t *testing.T) {
 	t.Parallel()
 	login := newScriptedLogin("Cô Lan")
-	r, repo, _ := newZaloHTTPTest(t, ServiceOptions{Login: login.login})
+	r, repo, _ := newZaloHTTPTest(t, ServiceOptions{Login: login.login, Relogin: (&reloginSpy{}).relogin})
 	teacherID := uuid.New()
 	token := mintToken(t, teacherID)
 
@@ -321,7 +326,7 @@ func (e errStub) Error() string { return string(e) }
 func TestLinkStatusHidesAnotherTeachersAttempt(t *testing.T) {
 	t.Parallel()
 	login := newScriptedLogin("Cô Lan")
-	r, _, _ := newZaloHTTPTest(t, ServiceOptions{Login: login.login})
+	r, _, _ := newZaloHTTPTest(t, ServiceOptions{Login: login.login, Relogin: (&reloginSpy{}).relogin})
 	t.Cleanup(func() { close(login.release) })
 
 	owner := mintToken(t, uuid.New())
@@ -370,7 +375,17 @@ func TestUnlinkRemovesTheAccountAndIsIdempotent(t *testing.T) {
 func TestNoResponseCarriesCredentialMaterial(t *testing.T) {
 	t.Parallel()
 	login := newScriptedLogin("Cô Lan")
-	r, _, _ := newZaloHTTPTest(t, ServiceOptions{Login: login.login})
+	friends := func(_ context.Context, _ *protocol.Session) ([]protocol.FriendInfo, error) {
+		return []protocol.FriendInfo{{UserID: "111", DisplayName: "Mẹ bé An"}}, nil
+	}
+	findUser := func(_ context.Context, _ *protocol.Session, _ []string) (map[string]protocol.FoundUser, error) {
+		return map[string]protocol.FoundUser{"84901234567": {UID: "111", DisplayName: "Mẹ bé An"}}, nil
+	}
+	sendReq := func(_ context.Context, _ *protocol.Session, _, _ string) error { return nil }
+	r, _, _ := newZaloHTTPTest(t, ServiceOptions{
+		Login: login.login, Friends: friends, Relogin: (&reloginSpy{}).relogin,
+		FindUser: findUser, SendFriendRequest: sendReq,
+	})
 	teacherID := uuid.New()
 	token := mintToken(t, teacherID)
 
@@ -391,6 +406,12 @@ func TestNoResponseCarriesCredentialMaterial(t *testing.T) {
 	w, _ = do(t, r, http.MethodGet, "/api/v1/me/zalo/link/status?id="+started.LinkID.String(), "", token)
 	record(w)
 	w, _ = do(t, r, http.MethodGet, "/api/v1/me/zalo", "", token)
+	record(w)
+	w, _ = do(t, r, http.MethodGet, "/api/v1/me/zalo/friends", "", token)
+	record(w)
+	w, _ = do(t, r, http.MethodPost, "/api/v1/me/zalo/friends/match", `{"phones":["0901234567"]}`, token)
+	record(w)
+	w, _ = do(t, r, http.MethodPost, "/api/v1/me/zalo/friends/request", `{"user_id":"111"}`, token)
 	record(w)
 	w, _ = do(t, r, http.MethodDelete, "/api/v1/me/zalo", "", token)
 	record(w)
@@ -416,6 +437,8 @@ func TestResponseTypesHaveNoCredentialFields(t *testing.T) {
 		reflect.TypeOf(StatusResponse{}),
 		reflect.TypeOf(LinkStartResponse{}),
 		reflect.TypeOf(LinkStatusResponse{}),
+		reflect.TypeOf(FriendResponse{}),
+		reflect.TypeOf(FriendMatchResponse{}),
 	}
 	for _, typ := range types {
 		for i := range typ.NumField() {
@@ -428,4 +451,207 @@ func TestResponseTypesHaveNoCredentialFields(t *testing.T) {
 				"%s.%s embeds protocol credentials", typ.Name(), field.Name)
 		}
 	}
+}
+
+func TestFriendsReturnsTheLinkedTeachersFriends(t *testing.T) {
+	t.Parallel()
+
+	friends := func(_ context.Context, _ *protocol.Session) ([]protocol.FriendInfo, error) {
+		return []protocol.FriendInfo{
+			{UserID: "111", DisplayName: "Mẹ bé An", ZaloName: "Lan Nguyễn", Avatar: "https://a/1.jpg"},
+			{UserID: "222", DisplayName: "Bố bé Bình"},
+			// No alias set: Zalo sends the profile name only. The picker must
+			// still show something the teacher can recognise and map.
+			{UserID: "333", ZaloName: "Dì Út"},
+		}, nil
+	}
+	r, repo, _ := newZaloHTTPTest(t, ServiceOptions{Relogin: (&reloginSpy{}).relogin, Friends: friends})
+	teacherID := storeLinkedAccount(t, repo)
+
+	w, env := do(t, r, http.MethodGet, "/api/v1/me/zalo/friends", "", mintToken(t, teacherID))
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	require.True(t, env.Success)
+
+	var got []FriendResponse
+	require.NoError(t, json.Unmarshal(env.Data, &got))
+	require.Equal(t, []FriendResponse{
+		{UserID: "111", DisplayName: "Mẹ bé An", Avatar: "https://a/1.jpg"},
+		{UserID: "222", DisplayName: "Bố bé Bình"},
+		{UserID: "333", DisplayName: "Dì Út"},
+	}, got)
+}
+
+// Not linked reads the same as the other /me/zalo endpoints: the account is a
+// resource the caller does not have.
+func TestFriendsOfAnUnlinkedTeacherIsNotFound(t *testing.T) {
+	t.Parallel()
+	r, _, _ := newZaloHTTPTest(t, ServiceOptions{Relogin: (&reloginSpy{}).relogin})
+
+	w, env := do(t, r, http.MethodGet, "/api/v1/me/zalo/friends", "", mintToken(t, uuid.New()))
+	require.Equal(t, http.StatusNotFound, w.Code)
+	require.NotNil(t, env.Error)
+}
+
+// An expired session answers 409 so the UI can route the teacher back to the
+// profile page for a re-scan rather than showing an empty picker.
+func TestFriendsOfAnExpiredSessionIsConflict(t *testing.T) {
+	t.Parallel()
+	spy := &reloginSpy{err: errors.New("session rejected")}
+	r, repo, _ := newZaloHTTPTest(t, ServiceOptions{Relogin: spy.relogin})
+	teacherID := storeLinkedAccount(t, repo)
+
+	w, env := do(t, r, http.MethodGet, "/api/v1/me/zalo/friends", "", mintToken(t, teacherID))
+	require.Equal(t, http.StatusConflict, w.Code)
+	require.NotNil(t, env.Error)
+}
+
+// --- POST /me/zalo/friends/match ---
+
+func TestMatchFriendsReturnsLabeledRows(t *testing.T) {
+	t.Parallel()
+
+	findUser := func(_ context.Context, _ *protocol.Session, phones []string) (map[string]protocol.FoundUser, error) {
+		require.Equal(t, []string{"84901234567", "84907654321"}, phones)
+		return map[string]protocol.FoundUser{
+			"84901234567": {UID: "111", DisplayName: "Lan Nguyễn", ZaloName: "Lan", Avatar: "https://a/1.jpg"},
+		}, nil
+	}
+	friends := func(_ context.Context, _ *protocol.Session) ([]protocol.FriendInfo, error) {
+		return []protocol.FriendInfo{{UserID: "111", DisplayName: "Mẹ bé An"}}, nil
+	}
+	r, repo, _ := newZaloHTTPTest(t, ServiceOptions{
+		Relogin: (&reloginSpy{}).relogin, FindUser: findUser, Friends: friends,
+	})
+	teacherID := storeLinkedAccount(t, repo)
+
+	w, env := do(t, r, http.MethodPost, "/api/v1/me/zalo/friends/match",
+		`{"phones":["+84901234567","0907654321"]}`, mintToken(t, teacherID))
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	require.True(t, env.Success)
+
+	var got []FriendMatchResponse
+	require.NoError(t, json.Unmarshal(env.Data, &got))
+	require.Equal(t, []FriendMatchResponse{
+		{Phone: "+84901234567", Matched: true, UserID: "111", DisplayName: "Lan Nguyễn", ZaloName: "Lan", Avatar: "https://a/1.jpg", IsFriend: true},
+		{Phone: "0907654321"},
+	}, got)
+}
+
+// The list bounds are the endpoint's own contract: an empty list has nothing to
+// look up, and the cap keeps one request inside the server's write timeout.
+func TestMatchFriendsRejectsABadPhoneList(t *testing.T) {
+	t.Parallel()
+
+	tooMany := make([]string, MaxMatchPhones+1)
+	for i := range tooMany {
+		tooMany[i] = fmt.Sprintf("\"09%08d\"", i)
+	}
+	bodies := []string{
+		`{}`,
+		`{"phones":[]}`,
+		`{"phones":[` + strings.Join(tooMany, ",") + `]}`,
+		``,
+	}
+
+	lookups := 0
+	findUser := func(_ context.Context, _ *protocol.Session, _ []string) (map[string]protocol.FoundUser, error) {
+		lookups++
+		return nil, nil
+	}
+	r, repo, _ := newZaloHTTPTest(t, ServiceOptions{Relogin: (&reloginSpy{}).relogin, FindUser: findUser})
+	teacherID := storeLinkedAccount(t, repo)
+
+	for _, body := range bodies {
+		w, env := do(t, r, http.MethodPost, "/api/v1/me/zalo/friends/match", body, mintToken(t, teacherID))
+		require.Equal(t, http.StatusBadRequest, w.Code, "body %.60q", body)
+		require.NotNil(t, env.Error)
+		require.Equal(t, "BAD_REQUEST", env.Error.Code)
+	}
+	require.Zero(t, lookups, "a refused request must not reach Zalo")
+}
+
+func TestMatchFriendsOfAnUnlinkedTeacherIsNotFound(t *testing.T) {
+	t.Parallel()
+	r, _, _ := newZaloHTTPTest(t, ServiceOptions{Relogin: (&reloginSpy{}).relogin})
+
+	w, env := do(t, r, http.MethodPost, "/api/v1/me/zalo/friends/match",
+		`{"phones":["0901234567"]}`, mintToken(t, uuid.New()))
+	require.Equal(t, http.StatusNotFound, w.Code)
+	require.NotNil(t, env.Error)
+}
+
+func TestMatchFriendsOfAnExpiredSessionIsConflict(t *testing.T) {
+	t.Parallel()
+	spy := &reloginSpy{err: errors.New("session rejected")}
+	r, repo, _ := newZaloHTTPTest(t, ServiceOptions{Relogin: spy.relogin})
+	teacherID := storeLinkedAccount(t, repo)
+
+	w, env := do(t, r, http.MethodPost, "/api/v1/me/zalo/friends/match",
+		`{"phones":["0901234567"]}`, mintToken(t, teacherID))
+	require.Equal(t, http.StatusConflict, w.Code)
+	require.NotNil(t, env.Error)
+}
+
+// --- POST /me/zalo/friends/request ---
+
+func TestFriendRequestEndpointSendsExactlyOne(t *testing.T) {
+	t.Parallel()
+
+	var calls int
+	var gotUID, gotMessage string
+	sendReq := func(_ context.Context, _ *protocol.Session, userID, message string) error {
+		calls++
+		gotUID, gotMessage = userID, message
+		return nil
+	}
+	r, repo, _ := newZaloHTTPTest(t, ServiceOptions{Relogin: (&reloginSpy{}).relogin, SendFriendRequest: sendReq})
+	teacherID := storeLinkedAccount(t, repo)
+
+	w, _ := do(t, r, http.MethodPost, "/api/v1/me/zalo/friends/request",
+		`{"user_id":"target-uid","message":"Chào chị"}`, mintToken(t, teacherID))
+	require.Equal(t, http.StatusNoContent, w.Code, "body: %s", w.Body.String())
+	require.Empty(t, w.Body.Bytes())
+	require.Equal(t, 1, calls)
+	require.Equal(t, "target-uid", gotUID)
+	require.Equal(t, "Chào chị", gotMessage)
+}
+
+func TestFriendRequestEndpointRejectsAMissingUserID(t *testing.T) {
+	t.Parallel()
+
+	sends := 0
+	sendReq := func(_ context.Context, _ *protocol.Session, _, _ string) error {
+		sends++
+		return nil
+	}
+	r, repo, _ := newZaloHTTPTest(t, ServiceOptions{Relogin: (&reloginSpy{}).relogin, SendFriendRequest: sendReq})
+	teacherID := storeLinkedAccount(t, repo)
+
+	for _, body := range []string{`{}`, `{"user_id":""}`, ``} {
+		w, env := do(t, r, http.MethodPost, "/api/v1/me/zalo/friends/request", body, mintToken(t, teacherID))
+		require.Equal(t, http.StatusBadRequest, w.Code, "body %q", body)
+		require.NotNil(t, env.Error)
+		require.Equal(t, "BAD_REQUEST", env.Error.Code)
+	}
+	require.Zero(t, sends, "a refused request must not reach Zalo")
+}
+
+// A refusal Zalo explains with a code the product does not act on — already
+// friends, blocked — must not leak the code's raw text, only a teacher-facing
+// failure. It answers 502: the upstream refused, the request was fine.
+func TestFriendRequestEndpointSurfacesARefusalWithoutUpstreamDetail(t *testing.T) {
+	t.Parallel()
+
+	sendReq := func(_ context.Context, _ *protocol.Session, _, _ string) error {
+		return &protocol.APIError{Op: "friend_request", Code: 225}
+	}
+	r, repo, _ := newZaloHTTPTest(t, ServiceOptions{Relogin: (&reloginSpy{}).relogin, SendFriendRequest: sendReq})
+	teacherID := storeLinkedAccount(t, repo)
+
+	w, env := do(t, r, http.MethodPost, "/api/v1/me/zalo/friends/request",
+		`{"user_id":"target-uid"}`, mintToken(t, teacherID))
+	require.GreaterOrEqual(t, w.Code, 500, "an upstream refusal is a server-side answer")
+	require.NotNil(t, env.Error)
+	require.NotContains(t, w.Body.String(), "225", "the upstream code stays out of the body")
+	require.NotContains(t, w.Body.String(), "friend_request", "the protocol op stays out of the body")
 }

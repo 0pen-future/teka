@@ -1,11 +1,12 @@
-import { LogOutIcon, type LucideProps } from "lucide-react";
-import type { ComponentType } from "react";
-import { NavLink, Outlet, Link } from "react-router";
+import { BookUserIcon, EllipsisIcon, LogOutIcon, type LucideProps } from "lucide-react";
+import { useState, type ComponentType } from "react";
+import { NavLink, Outlet, Link, useLocation } from "react-router";
 
 import {
   HvCheckIcon,
   HvFileIcon,
   HvHomeIcon,
+  HvModal,
   HvSendIcon,
   HvUsersIcon,
   HvWalletIcon,
@@ -24,10 +25,10 @@ interface NavEntry {
 }
 
 /**
- * The six nav destinations from the prototype `home` screen. The three
- * period-scoped routes (Chốt sổ, Gửi thông báo, Thu tiền) build their link
- * once `useCurrentPeriod` resolves rather than routing through a redirect
- * page, since phase 1 owns no `/billing/current`-style route.
+ * The nav destinations from the prototype `home` screen plus Phụ huynh. The
+ * three period-scoped routes (Chốt sổ, Gửi thông báo, Thu tiền) build their
+ * link once `useCurrentPeriod` resolves rather than routing through a
+ * redirect page, since phase 1 owns no `/billing/current`-style route.
  */
 function useNavEntries(): NavEntry[] {
   const { data: period } = useCurrentPeriod();
@@ -39,6 +40,7 @@ function useNavEntries(): NavEntry[] {
     { label: "Tổng quan", to: "/", Icon: HvHomeIcon },
     { label: "Điểm danh", to: "/sessions", Icon: HvCheckIcon, pending: hasPending },
     { label: "Lớp & học sinh", to: "/students", Icon: HvUsersIcon },
+    { label: "Phụ huynh", to: "/contacts", Icon: BookUserIcon },
     { label: "Chốt sổ", to: periodId ? `/billing/${periodId}` : null, Icon: HvFileIcon },
     {
       label: "Gửi thông báo",
@@ -49,11 +51,26 @@ function useNavEntries(): NavEntry[] {
   ];
 }
 
+/**
+ * Bottom-bar split (<md only; sidebar and rail stay flat): daily actions keep
+ * a direct tab, while billing-cycle entries (Chốt sổ, Gửi thông báo) and the
+ * setup-time Phụ huynh entry live behind the Thêm sheet so the bar holds five
+ * slots at 360px.
+ */
+const OVERFLOW_LABELS = new Set(["Chốt sổ", "Gửi thông báo", "Phụ huynh"]);
+
+/**
+ * Route families reachable only through the Thêm sheet. Static prefixes, not
+ * the entries' `to` values, because the period-scoped links are `null` until
+ * the current period resolves — the tab must still light up on their routes.
+ */
+const OVERFLOW_PATH_PREFIXES = ["/billing", "/notifications", "/contacts"];
+
 function PendingDot() {
   return <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-coral-400" />;
 }
 
-function SidebarNavItem({ to, label, Icon, pending }: NavEntry) {
+function SidebarNavItem({ to, label, Icon, pending, onNavigate }: NavEntry & { onNavigate?: () => void }) {
   if (!to) {
     return (
       <span
@@ -69,6 +86,7 @@ function SidebarNavItem({ to, label, Icon, pending }: NavEntry) {
     <NavLink
       to={to}
       end={to === "/"}
+      onClick={onNavigate}
       className={({ isActive }) =>
         cn(
           "relative flex items-center gap-3 rounded-[14px] px-3 py-[10px] text-[14px] transition-colors",
@@ -145,6 +163,43 @@ function BottomTabItem({ to, label, Icon, pending }: NavEntry) {
       </span>
       <span className="w-full truncate">{label}</span>
     </NavLink>
+  );
+}
+
+/**
+ * Fifth bottom-bar slot: opens a sheet listing the overflow entries, reusing
+ * `SidebarNavItem` so icons, labels, pending dots, and disabled handling stay
+ * identical to the sidebar. The tab itself lights up whenever the current
+ * route belongs to one of the sheet's destinations.
+ */
+function MoreTab({ entries }: { entries: NavEntry[] }) {
+  const [open, setOpen] = useState(false);
+  const location = useLocation();
+  const active = OVERFLOW_PATH_PREFIXES.some(
+    (prefix) => location.pathname === prefix || location.pathname.startsWith(`${prefix}/`),
+  );
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className={cn(
+          "flex min-h-[56px] flex-1 flex-col items-center justify-center gap-1 px-1 text-center text-[11px] font-semibold",
+          active ? "text-mint-600" : "text-ink-500",
+        )}
+      >
+        <EllipsisIcon className="size-5" />
+        <span className="w-full truncate">Thêm</span>
+      </button>
+      <HvModal open={open} onOpenChange={setOpen} title="Thêm">
+        <div className="flex flex-col gap-1">
+          {entries.map((entry) => (
+            <SidebarNavItem key={entry.label} {...entry} onNavigate={() => setOpen(false)} />
+          ))}
+        </div>
+      </HvModal>
+    </>
   );
 }
 
@@ -270,6 +325,8 @@ function ProfileDisc() {
 /** Authenticated app shell: full sidebar at lg+, icon rail at md–lg, bottom tab bar under md. */
 export function DashboardLayout() {
   const entries = useNavEntries();
+  const primaryTabs = entries.filter((entry) => !OVERFLOW_LABELS.has(entry.label));
+  const overflowEntries = entries.filter((entry) => OVERFLOW_LABELS.has(entry.label));
 
   return (
     <div className="flex min-h-svh bg-cream-100">
@@ -325,9 +382,10 @@ export function DashboardLayout() {
         aria-label="Main"
         className="fixed inset-x-0 bottom-0 z-40 flex border-t border-line-200 bg-white md:hidden"
       >
-        {entries.map((entry) => (
+        {primaryTabs.map((entry) => (
           <BottomTabItem key={entry.label} {...entry} />
         ))}
+        <MoreTab entries={overflowEntries} />
       </nav>
     </div>
   );

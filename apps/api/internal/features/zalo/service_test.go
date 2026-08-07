@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -804,4 +805,348 @@ func TestLinkedTeachersListsOnlyLiveAccounts(t *testing.T) {
 	ids, err := svc.LinkedTeachers(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, []uuid.UUID{linked}, ids)
+}
+
+// --- Auto-map: phone normalization, matching, friend requests ---
+
+func TestNormalizePhoneCanonicalizesVietnameseNumbers(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct{ in, want string }{
+		{"0901234567", "0901234567"},
+		{" 0901 234 567 ", "0901234567"},
+		{"090.123.4567", "0901234567"},
+		{"+84901234567", "0901234567"},
+		{"84901234567", "0901234567"},
+		{"+84 901 234 567", "0901234567"},
+		{"", ""},
+		{"   ", ""},
+	}
+	for _, tc := range cases {
+		require.Equal(t, tc.want, normalizePhone(tc.in), "input %q", tc.in)
+	}
+}
+
+func TestMatchFriendsLabelsRowsInRequestOrder(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	teacherID := storeLinkedAccount(t, repo)
+
+	var lookedUp []string
+	findUser := func(_ context.Context, _ *protocol.Session, phones []string) (map[string]protocol.FoundUser, error) {
+		lookedUp = append(lookedUp, phones...)
+		return map[string]protocol.FoundUser{
+			"84901234567": {UID: "111", DisplayName: "Lan Nguyễn", ZaloName: "Lan", Avatar: "https://a/1.jpg"},
+			"84908888777": {UID: "333", DisplayName: "Hoa Trần"},
+		}, nil
+	}
+	friends := func(_ context.Context, _ *protocol.Session) ([]protocol.FriendInfo, error) {
+		return []protocol.FriendInfo{{UserID: "111", DisplayName: "Mẹ bé An"}}, nil
+	}
+	svc := newTestService(t, repo, ServiceOptions{
+		Relogin: (&reloginSpy{}).relogin, FindUser: findUser, Friends: friends,
+	})
+
+	rows, err := svc.MatchFriends(context.Background(), teacherID,
+		[]string{"+84 901 234 567", "0907654321", "84908888777", "   "})
+	require.NoError(t, err)
+
+	// The lookup travels in the country-code form Zalo resolves and skips
+	// blanks; rows echo the phone exactly as the caller sent it, in request
+	// order.
+	require.Equal(t, []string{"84901234567", "84907654321", "84908888777"}, lookedUp)
+	require.Equal(t, []FriendMatch{
+		{Phone: "+84 901 234 567", Matched: true, UserID: "111", DisplayName: "Lan Nguyễn", ZaloName: "Lan", Avatar: "https://a/1.jpg", IsFriend: true},
+		{Phone: "0907654321"},
+		{Phone: "84908888777", Matched: true, UserID: "333", DisplayName: "Hoa Trần"},
+		{Phone: "   "},
+	}, rows)
+}
+
+func TestMatchFriendsChunksLookupsAndPacesBetweenChunks(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	teacherID := storeLinkedAccount(t, repo)
+
+	var batches [][]string
+	findUser := func(_ context.Context, _ *protocol.Session, phones []string) (map[string]protocol.FoundUser, error) {
+		batches = append(batches, append([]string(nil), phones...))
+		return map[string]protocol.FoundUser{}, nil
+	}
+	friends := func(_ context.Context, _ *protocol.Session) ([]protocol.FriendInfo, error) {
+		return nil, nil
+	}
+	paces := 0
+	svc := newTestService(t, repo, ServiceOptions{
+		Relogin:  (&reloginSpy{}).relogin,
+		FindUser: findUser,
+		Friends:  friends,
+		Pace:     func(_ context.Context) { paces++ },
+	})
+
+	phones := make([]string, 61)
+	for i := range phones {
+		phones[i] = fmt.Sprintf("09%08d", i)
+	}
+	rows, err := svc.MatchFriends(context.Background(), teacherID, phones)
+	require.NoError(t, err)
+	require.Len(t, rows, 61)
+
+	require.Len(t, batches, 3, "61 phones must travel as 30+30+1")
+	require.Len(t, batches[0], 30)
+	require.Len(t, batches[1], 30)
+	require.Len(t, batches[2], 1)
+	require.Equal(t, 2, paces, "pacing sits between chunks, not after the last")
+}
+
+func TestMatchFriendsForAnUnlinkedTeacherReportsNotLinked(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t, newFakeRepo(), ServiceOptions{Relogin: (&reloginSpy{}).relogin})
+
+	_, err := svc.MatchFriends(context.Background(), uuid.New(), []string{"0901234567"})
+	require.ErrorIs(t, err, ErrNotLinked)
+}
+
+func TestMatchFriendsReportsExpiredWhenZaloRejectsTheStoredCredentials(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	teacherID := storeLinkedAccount(t, repo)
+
+	lookups := 0
+	findUser := func(_ context.Context, _ *protocol.Session, _ []string) (map[string]protocol.FoundUser, error) {
+		lookups++
+		return nil, nil
+	}
+	spy := &reloginSpy{err: errors.New("session rejected")}
+	svc := newTestService(t, repo, ServiceOptions{Relogin: spy.relogin, FindUser: findUser})
+
+	_, err := svc.MatchFriends(context.Background(), teacherID, []string{"0901234567"})
+	require.ErrorIs(t, err, ErrLinkExpired)
+	require.Zero(t, lookups, "a dead session must not be handed to the lookup path")
+}
+
+// A cached session Zalo stopped honouring surfaces as -3 mid-lookup; like the
+// send path, that means the link expired — not a generic lookup failure.
+func TestMatchFriendsTreatsANotLoggedInLookupAsExpired(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	teacherID := storeLinkedAccount(t, repo)
+
+	findUser := func(_ context.Context, _ *protocol.Session, _ []string) (map[string]protocol.FoundUser, error) {
+		return nil, &protocol.APIError{Op: "lookup", Code: protocol.ErrCodeNotLoggedIn}
+	}
+	svc := newTestService(t, repo, ServiceOptions{Relogin: (&reloginSpy{}).relogin, FindUser: findUser})
+
+	_, err := svc.MatchFriends(context.Background(), teacherID, []string{"0901234567"})
+	require.ErrorIs(t, err, ErrLinkExpired)
+
+	_, ok := svc.cache.Get(teacherID)
+	require.False(t, ok, "a session Zalo rejected must not stay cached")
+	_, _, statuses := repo.counts()
+	require.Equal(t, []string{StatusExpired}, statuses)
+}
+
+func TestSendRequestSendsExactlyOneFriendRequest(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	teacherID := storeLinkedAccount(t, repo)
+
+	var calls int
+	var gotUID, gotMessage string
+	sendReq := func(_ context.Context, _ *protocol.Session, userID, message string) error {
+		calls++
+		gotUID, gotMessage = userID, message
+		return nil
+	}
+	svc := newTestService(t, repo, ServiceOptions{Relogin: (&reloginSpy{}).relogin, SendFriendRequest: sendReq})
+
+	err := svc.SendRequest(context.Background(), teacherID, "target-uid", "Chào chị")
+	require.NoError(t, err)
+	require.Equal(t, 1, calls)
+	require.Equal(t, "target-uid", gotUID)
+	require.Equal(t, "Chào chị", gotMessage)
+}
+
+// A blank message still sends something the parent can recognise — Zalo shows
+// the request text, and an empty one looks like spam.
+func TestSendRequestDefaultsTheMessage(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	teacherID := storeLinkedAccount(t, repo)
+
+	var gotMessage string
+	sendReq := func(_ context.Context, _ *protocol.Session, _, message string) error {
+		gotMessage = message
+		return nil
+	}
+	svc := newTestService(t, repo, ServiceOptions{Relogin: (&reloginSpy{}).relogin, SendFriendRequest: sendReq})
+
+	require.NoError(t, svc.SendRequest(context.Background(), teacherID, "target-uid", ""))
+	require.Equal(t, defaultFriendRequestMessage, gotMessage)
+	require.NotEmpty(t, gotMessage)
+}
+
+func TestSendRequestForAnUnlinkedTeacherReportsNotLinked(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t, newFakeRepo(), ServiceOptions{Relogin: (&reloginSpy{}).relogin})
+
+	err := svc.SendRequest(context.Background(), uuid.New(), "target-uid", "hi")
+	require.ErrorIs(t, err, ErrNotLinked)
+}
+
+func TestSendRequestTreatsANotLoggedInRejectionAsExpired(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	teacherID := storeLinkedAccount(t, repo)
+
+	sendReq := func(_ context.Context, _ *protocol.Session, _, _ string) error {
+		return &protocol.APIError{Op: "friend_request", Code: protocol.ErrCodeNotLoggedIn}
+	}
+	svc := newTestService(t, repo, ServiceOptions{Relogin: (&reloginSpy{}).relogin, SendFriendRequest: sendReq})
+
+	err := svc.SendRequest(context.Background(), teacherID, "target-uid", "hi")
+	require.ErrorIs(t, err, ErrLinkExpired)
+
+	_, ok := svc.cache.Get(teacherID)
+	require.False(t, ok, "a session Zalo rejected must not stay cached")
+	_, _, statuses := repo.counts()
+	require.Equal(t, []string{StatusExpired}, statuses)
+}
+
+// Refusals that are not about the session — already friends, blocked — reach
+// the caller as they are; the protocol cannot tell what they mean for the link.
+func TestSendRequestPropagatesOtherRefusals(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	teacherID := storeLinkedAccount(t, repo)
+
+	refusal := &protocol.APIError{Op: "friend_request", Code: 225}
+	sendReq := func(_ context.Context, _ *protocol.Session, _, _ string) error {
+		return refusal
+	}
+	svc := newTestService(t, repo, ServiceOptions{Relogin: (&reloginSpy{}).relogin, SendFriendRequest: sendReq})
+
+	err := svc.SendRequest(context.Background(), teacherID, "target-uid", "hi")
+	require.ErrorIs(t, err, refusal)
+}
+
+// The friend-list leg of a match runs over the same cached session as the
+// lookups, so -3 there means the same thing: the link expired.
+func TestMatchFriendsTreatsANotLoggedInFriendsFetchAsExpired(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	teacherID := storeLinkedAccount(t, repo)
+
+	findUser := func(_ context.Context, _ *protocol.Session, _ []string) (map[string]protocol.FoundUser, error) {
+		return map[string]protocol.FoundUser{"84901234567": {UID: "111"}}, nil
+	}
+	friends := func(_ context.Context, _ *protocol.Session) ([]protocol.FriendInfo, error) {
+		return nil, &protocol.APIError{Op: "friends", Code: protocol.ErrCodeNotLoggedIn}
+	}
+	svc := newTestService(t, repo, ServiceOptions{
+		Relogin: (&reloginSpy{}).relogin, FindUser: findUser, Friends: friends,
+	})
+
+	_, err := svc.MatchFriends(context.Background(), teacherID, []string{"0901234567"})
+	require.ErrorIs(t, err, ErrLinkExpired)
+
+	_, ok := svc.cache.Get(teacherID)
+	require.False(t, ok, "a session Zalo rejected must not stay cached")
+	_, _, statuses := repo.counts()
+	require.Equal(t, []string{StatusExpired}, statuses)
+}
+
+// GET /me/zalo/friends shares the session with everything else, so a -3 there
+// must expire the link the same way — not surface as an internal error.
+func TestListFriendsTreatsANotLoggedInFetchAsExpired(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	teacherID := storeLinkedAccount(t, repo)
+
+	friends := func(_ context.Context, _ *protocol.Session) ([]protocol.FriendInfo, error) {
+		return nil, &protocol.APIError{Op: "friends", Code: protocol.ErrCodeNotLoggedIn}
+	}
+	svc := newTestService(t, repo, ServiceOptions{Relogin: (&reloginSpy{}).relogin, Friends: friends})
+
+	_, err := svc.ListFriends(context.Background(), teacherID)
+	require.ErrorIs(t, err, ErrLinkExpired)
+
+	_, ok := svc.cache.Get(teacherID)
+	require.False(t, ok, "a session Zalo rejected must not stay cached")
+	_, _, statuses := repo.counts()
+	require.Equal(t, []string{StatusExpired}, statuses)
+}
+
+// A duplicated phone costs one lookup but still labels every row it appears in.
+func TestMatchFriendsLooksUpDuplicatePhonesOnce(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	teacherID := storeLinkedAccount(t, repo)
+
+	var lookedUp []string
+	findUser := func(_ context.Context, _ *protocol.Session, phones []string) (map[string]protocol.FoundUser, error) {
+		lookedUp = append(lookedUp, phones...)
+		return map[string]protocol.FoundUser{"84901234567": {UID: "111", DisplayName: "Lan"}}, nil
+	}
+	friends := func(_ context.Context, _ *protocol.Session) ([]protocol.FriendInfo, error) {
+		return nil, nil
+	}
+	svc := newTestService(t, repo, ServiceOptions{
+		Relogin: (&reloginSpy{}).relogin, FindUser: findUser, Friends: friends,
+	})
+
+	rows, err := svc.MatchFriends(context.Background(), teacherID,
+		[]string{"0901234567", "+84901234567"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"84901234567"}, lookedUp, "one lookup per distinct normalized phone")
+	require.Equal(t, []FriendMatch{
+		{Phone: "0901234567", Matched: true, UserID: "111", DisplayName: "Lan"},
+		{Phone: "+84901234567", Matched: true, UserID: "111", DisplayName: "Lan"},
+	}, rows)
+}
+
+// Anything that does not normalize into a Vietnamese mobile number never
+// travels to Zalo — it comes back unmatched instead of riding in a query
+// string as arbitrary text.
+func TestMatchFriendsNeverSendsANonPhoneToZalo(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	teacherID := storeLinkedAccount(t, repo)
+
+	var lookedUp []string
+	findUser := func(_ context.Context, _ *protocol.Session, phones []string) (map[string]protocol.FoundUser, error) {
+		lookedUp = append(lookedUp, phones...)
+		return nil, nil
+	}
+	friends := func(_ context.Context, _ *protocol.Session) ([]protocol.FriendInfo, error) {
+		return nil, nil
+	}
+	svc := newTestService(t, repo, ServiceOptions{
+		Relogin: (&reloginSpy{}).relogin, FindUser: findUser, Friends: friends,
+	})
+
+	rows, err := svc.MatchFriends(context.Background(), teacherID,
+		[]string{"not-a-phone", "12345", "0201234567", "0901234567"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"84901234567"}, lookedUp)
+	require.Equal(t, []FriendMatch{
+		{Phone: "not-a-phone"},
+		{Phone: "12345"},
+		{Phone: "0201234567"},
+		{Phone: "0901234567"},
+	}, rows)
 }

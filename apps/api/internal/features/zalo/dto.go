@@ -61,6 +61,49 @@ func newFriendResponses(friends []Friend) []FriendResponse {
 	return out
 }
 
+// MatchFriendsRequest is the POST /me/zalo/friends/match body. The 1–200
+// bound is enforced in the handler so the error can name the cap.
+type MatchFriendsRequest struct {
+	Phones []string `json:"phones"`
+}
+
+// FriendMatchResponse is one row of a match answer. Phone echoes the caller's
+// input exactly — normalization stays server-side — so the client can join
+// rows back to its contacts without re-implementing it. Hand-built from
+// FriendMatch so nothing from the protocol layer can ride along.
+type FriendMatchResponse struct {
+	Phone       string `json:"phone"`
+	Matched     bool   `json:"matched"`
+	UserID      string `json:"user_id,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
+	ZaloName    string `json:"zalo_name,omitempty"`
+	Avatar      string `json:"avatar,omitempty"`
+	IsFriend    bool   `json:"is_friend"`
+}
+
+func newFriendMatchResponses(rows []FriendMatch) []FriendMatchResponse {
+	out := make([]FriendMatchResponse, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, FriendMatchResponse{
+			Phone:       r.Phone,
+			Matched:     r.Matched,
+			UserID:      r.UserID,
+			DisplayName: r.DisplayName,
+			ZaloName:    r.ZaloName,
+			Avatar:      r.Avatar,
+			IsFriend:    r.IsFriend,
+		})
+	}
+	return out
+}
+
+// FriendRequestRequest is the POST /me/zalo/friends/request body. Message is
+// optional; a blank one falls back to a short Vietnamese greeting.
+type FriendRequestRequest struct {
+	UserID  string `json:"user_id"`
+	Message string `json:"message"`
+}
+
 // StatusResponse is what the profile card shows. Linked and Status are separate
 // answers: an expired session is still a linked account, and the card says
 // "reconnect" rather than "connect" because of it.

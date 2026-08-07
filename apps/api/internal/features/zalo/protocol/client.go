@@ -395,6 +395,8 @@ func ServiceURL(sess *Session, service string) string {
 		urls = sess.LoginInfo.ZpwServiceMapV3.Profile
 	case "group_poll":
 		urls = sess.LoginInfo.ZpwServiceMapV3.GroupPoll
+	case "friend":
+		urls = sess.LoginInfo.ZpwServiceMapV3.Friend
 	}
 	if len(urls) == 0 {
 		return ""
