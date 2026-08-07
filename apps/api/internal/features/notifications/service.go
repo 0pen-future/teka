@@ -2,13 +2,17 @@ package notifications
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
 	"teka/apps/api/internal/config"
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/statements"
+	"teka/apps/api/internal/features/zalo"
 	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/shared/id"
 )
@@ -28,17 +32,44 @@ type StatementsSource interface {
 	ToResponse(row statements.Row) statements.StatementResponse
 }
 
+// ZaloSender is the slice of the Zalo feature the personal channel needs:
+// checking the teacher's session is alive before a run is created, and the DM
+// send the run itself is made of. *zalo.Service satisfies this — a
+// consumer-defined interface, so tests drive the channel without a Zalo
+// session and the zalo package never learns notifications exists.
+type ZaloSender interface {
+	DMSender
+	VerifyAccount(ctx context.Context, teacherID uuid.UUID) error
+}
+
 // Service owns notification queueing, sending, and status.
 type Service struct {
 	repo       Repository
 	tx         database.TxManager
 	statements StatementsSource
+	zalo       ZaloSender
+	runs       *RunManager
+	log        *slog.Logger
 	cfg        config.NotificationsConfig
 }
 
-// NewService builds the notifications service.
-func NewService(repo Repository, tx database.TxManager, statementsSvc StatementsSource, cfg config.NotificationsConfig) *Service {
-	return &Service{repo: repo, tx: tx, statements: statementsSvc, cfg: cfg}
+// NewService builds the notifications service. A nil logger falls back to
+// slog.Default.
+func NewService(repo Repository, tx database.TxManager, statementsSvc StatementsSource, zaloSender ZaloSender, log *slog.Logger, cfg config.NotificationsConfig) *Service {
+	if log == nil {
+		log = slog.Default()
+	}
+	runs := NewRunManager(repo, zaloSender, log,
+		time.Duration(cfg.PaceMinSeconds)*time.Second,
+		time.Duration(cfg.PaceMaxSeconds)*time.Second)
+	return &Service{repo: repo, tx: tx, statements: statementsSvc, zalo: zaloSender, runs: runs, log: log, cfg: cfg}
+}
+
+// Close stops any background sending run and waits for it to finish writing.
+// Rows a stopped run never reached stay queued; the next boot's reconcile
+// marks their run interrupted.
+func (s *Service) Close() {
+	s.runs.Close()
 }
 
 // BulkSend queues one notification per eligible contact in periodID, in a
@@ -53,6 +84,12 @@ func NewService(repo Repository, tx database.TxManager, statementsSvc Statements
 // send (an unconfigured provider, or an unsupported channel), the whole call
 // fails and nothing is written — including the statement refresh — so a bad
 // channel choice never leaves partial state behind.
+// Under channel=ChannelZaloPersonal the call additionally splits the target
+// set by Zalo mapping: mapped contacts queue as zalo_personal rows attached
+// to a notification run that a background goroutine sends one by one after
+// commit, unmapped contacts fall back to zalo_manual copy-paste rows exactly
+// as if the manual channel had been chosen for them. BulkText then carries
+// only the fallback rows — the auto-sent messages have nothing to copy.
 func (s *Service) BulkSend(ctx context.Context, teacherID, periodID uuid.UUID, req BulkSendRequest) (*BulkSendResponse, error) {
 	purpose := normalizePurpose(req.Purpose)
 	channel := req.Channel
@@ -64,6 +101,33 @@ func (s *Service) BulkSend(ctx context.Context, teacherID, periodID uuid.UUID, r
 		return nil, err
 	}
 
+	personal := channel == ChannelZaloPersonal
+	var reservation *RunReservation
+	if personal {
+		// Every check runs before the transaction: a dead session or a still-
+		// sending run must refuse the call before anything — including the
+		// statement refresh — is written. The reservation claims this teacher's
+		// run slot for the same reason: two concurrent personal sends must not
+		// both commit a run, so the loser is turned away while it still has
+		// nothing to lose.
+		if err := s.verifyPersonalSession(ctx, teacherID); err != nil {
+			return nil, err
+		}
+		active, err := s.repo.HasActiveRun(ctx, teacherID)
+		if err != nil {
+			return nil, apperror.From(err)
+		}
+		if active {
+			return nil, apperror.Conflict("a zalo_personal run is already sending; wait for it to finish")
+		}
+		if reservation, err = s.runs.Reserve(teacherID); err != nil {
+			return nil, apperror.Conflict("a zalo_personal run is already sending; wait for it to finish")
+		}
+		defer reservation.Release()
+	}
+
+	runID := id.New()
+	var runItems []RunItem
 	var resp BulkSendResponse
 	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
 		genResult, err := s.statements.Generate(ctx, teacherID, periodID)
@@ -76,11 +140,23 @@ func (s *Service) BulkSend(ctx context.Context, teacherID, periodID uuid.UUID, r
 			return err
 		}
 
+		var mappings map[uuid.UUID]string
+		if personal {
+			contactIDs := make([]uuid.UUID, 0, len(genResult.Statements))
+			for _, target := range genResult.Statements {
+				contactIDs = append(contactIDs, target.ContactID)
+			}
+			if mappings, err = s.repo.ZaloMappings(ctx, teacherID, contactIDs); err != nil {
+				return apperror.From(err)
+			}
+		}
+
 		rows := make([]*Notification, 0, len(genResult.Statements))
 		outRows := make([]BulkSendRow, 0, len(genResult.Statements))
 		texts := make([]string, 0, len(genResult.Statements))
 		skippedPaid := 0
 		collapsedCount := 0
+		fallbackManual := 0
 
 		for _, target := range genResult.Statements {
 			cf, ok := figures[target.ContactID]
@@ -97,50 +173,50 @@ func (s *Service) BulkSend(ctx context.Context, teacherID, periodID uuid.UUID, r
 				continue
 			}
 
-			// statements.ChildFigures and statements.ChildSummary carry the same
-			// fields in the same order by design (PeriodFigures produces exactly
-			// what Build consumes) — a plain conversion, not a second field-by-
-			// field mapping to keep in sync.
-			children := make([]statements.ChildSummary, 0, len(cf.Children))
-			for _, c := range cf.Children {
-				children = append(children, statements.ChildSummary(c))
-			}
-
-			url := s.statements.ToResponse(target).URL
-			text, collapsed := statements.Build(statements.MessageInput{
-				ContactName:     cf.ContactName,
-				PeriodLabel:     cf.PeriodLabel,
-				Children:        children,
-				OpeningBalance:  cf.OpeningBalance,
-				AdjustmentTotal: cf.AdjustmentTotal,
-				TotalDue:        cf.TotalDue,
-				Outstanding:     cf.Outstanding,
-				URL:             url,
-			}, s.cfg.MaxMessageLen)
+			text, url, collapsed := s.renderMessage(target, cf)
 			if collapsed {
 				collapsedCount++
+			}
+
+			rowChannel := channel
+			toUID := ""
+			if personal {
+				if uid, mapped := mappings[target.ContactID]; mapped {
+					toUID = uid
+				} else {
+					rowChannel = ChannelZaloManual
+					fallbackManual++
+				}
 			}
 
 			n := &Notification{
 				ID:          id.New(),
 				TeacherID:   teacherID,
 				StatementID: target.ID,
-				Channel:     channel,
+				Channel:     rowChannel,
 				Purpose:     purpose,
 				Status:      StatusQueued,
+			}
+			if toUID != "" {
+				n.RunID = &runID
+				runItems = append(runItems, RunItem{NotificationID: n.ID, ToUID: toUID, Text: text})
 			}
 			if err := sender.Send(ctx, n); err != nil {
 				return apperror.BadRequest(channel + " channel is not available: " + err.Error())
 			}
 
 			rows = append(rows, n)
-			texts = append(texts, text)
+			// BulkText is the copy-paste bundle, so an auto-sent personal row
+			// stays out of it.
+			if toUID == "" {
+				texts = append(texts, text)
+			}
 			outRows = append(outRows, BulkSendRow{
 				NotificationID: n.ID,
 				ContactID:      target.ContactID,
 				ContactName:    cf.ContactName,
 				Phone:          target.ContactPhone,
-				Channel:        channel,
+				Channel:        rowChannel,
 				Purpose:        purpose,
 				Status:         n.Status,
 				MessageText:    text,
@@ -149,23 +225,94 @@ func (s *Service) BulkSend(ctx context.Context, teacherID, periodID uuid.UUID, r
 			})
 		}
 
+		if len(runItems) > s.cfg.MaxRunSize && s.cfg.MaxRunSize > 0 {
+			return apperror.BadRequest("this send would auto-deliver to too many contacts at once; send in smaller batches")
+		}
+
+		if len(runItems) > 0 {
+			run := &Run{
+				ID:              runID,
+				TeacherID:       teacherID,
+				BillingPeriodID: periodID,
+				Purpose:         purpose,
+				Status:          RunStatusRunning,
+			}
+			if err := s.repo.CreateRun(ctx, run); err != nil {
+				if errors.Is(err, ErrRunActive) {
+					return apperror.Conflict("a zalo_personal run is already sending; wait for it to finish")
+				}
+				return apperror.From(err)
+			}
+		}
+
 		if err := s.repo.InsertBatch(ctx, rows); err != nil {
 			return apperror.From(err)
 		}
 
 		resp = BulkSendResponse{
-			QueuedCount:      len(rows),
-			SkippedPaidCount: skippedPaid,
-			CollapsedCount:   collapsedCount,
-			BulkText:         strings.Join(texts, "\n\n"),
-			Rows:             outRows,
+			QueuedCount:         len(rows),
+			SkippedPaidCount:    skippedPaid,
+			CollapsedCount:      collapsedCount,
+			PersonalQueuedCount: len(runItems),
+			FallbackManualCount: fallbackManual,
+			BulkText:            strings.Join(texts, "\n\n"),
+			Rows:                outRows,
+		}
+		if len(runItems) > 0 {
+			resp.RunID = &runID
 		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+
+	if len(runItems) > 0 {
+		reservation.Start(runID, runItems)
+	}
 	return &resp, nil
+}
+
+// renderMessage builds one contact's message text and statement URL.
+// statements.ChildFigures and statements.ChildSummary carry the same fields in
+// the same order by design (PeriodFigures produces exactly what Build
+// consumes) — a plain conversion, not a second field-by-field mapping to keep
+// in sync.
+func (s *Service) renderMessage(target statements.Row, cf statements.ContactFigures) (text, url string, collapsed bool) {
+	children := make([]statements.ChildSummary, 0, len(cf.Children))
+	for _, c := range cf.Children {
+		children = append(children, statements.ChildSummary(c))
+	}
+	url = s.statements.ToResponse(target).URL
+	text, collapsed = statements.Build(statements.MessageInput{
+		ContactName:     cf.ContactName,
+		PeriodLabel:     cf.PeriodLabel,
+		Children:        children,
+		OpeningBalance:  cf.OpeningBalance,
+		AdjustmentTotal: cf.AdjustmentTotal,
+		TotalDue:        cf.TotalDue,
+		Outstanding:     cf.Outstanding,
+		URL:             url,
+	}, s.cfg.MaxMessageLen)
+	return text, url, collapsed
+}
+
+// verifyPersonalSession relogins the teacher's cached Zalo session and maps
+// the two expected failure modes onto client errors: never linked is a bad
+// request (the teacher skipped a setup step), expired is a conflict with the
+// account's current state (relink, then retry).
+func (s *Service) verifyPersonalSession(ctx context.Context, teacherID uuid.UUID) error {
+	err := s.zalo.VerifyAccount(ctx, teacherID)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, zalo.ErrNotLinked):
+		return apperror.BadRequest("zalo_personal needs a linked Zalo account")
+	case errors.Is(err, zalo.ErrLinkExpired):
+		return apperror.Conflict("the linked Zalo session has expired; relink the account first")
+	default:
+		return apperror.From(err)
+	}
 }
 
 // List returns one billing period's notification ledger, optionally
@@ -189,6 +336,176 @@ func (s *Service) List(ctx context.Context, teacherID, periodID uuid.UUID, filte
 func (s *Service) MarkSent(ctx context.Context, teacherID uuid.UUID, ids []uuid.UUID) error {
 	if err := s.repo.MarkSent(ctx, teacherID, ids); err != nil {
 		return apperror.From(err)
+	}
+	return nil
+}
+
+// RunSnapshot reports the period's latest run and its row-derived progress.
+// A period that never had a run answers with the zero snapshot rather than an
+// error — "no run" is an ordinary poll result, not a missing resource.
+func (s *Service) RunSnapshot(ctx context.Context, teacherID, periodID uuid.UUID) (*RunSnapshotResponse, error) {
+	run, err := s.repo.LatestRunByPeriod(ctx, teacherID, periodID)
+	if errors.Is(err, ErrRunNotFound) {
+		return &RunSnapshotResponse{}, nil
+	}
+	if err != nil {
+		return nil, apperror.From(err)
+	}
+	counts, err := s.repo.RunCounts(ctx, teacherID, run.ID)
+	if err != nil {
+		return nil, apperror.From(err)
+	}
+	return &RunSnapshotResponse{
+		Active:  run.Status == RunStatusRunning,
+		RunID:   &run.ID,
+		Status:  run.Status,
+		Purpose: run.Purpose,
+		Total:   counts.Total,
+		Sent:    counts.Sent,
+		Failed:  counts.Failed,
+	}, nil
+}
+
+// Ledger messages for rows a resume cannot re-send. Like the run manager's
+// failure messages these are fixed constants: the ledger is teacher-facing and
+// must never echo internal detail.
+const (
+	resumeUnmappedFailureMessage = "Chưa gán bạn Zalo"
+	resumePaidFailureMessage     = "Đã thanh toán đủ"
+	resumeStaleFailureMessage    = "Không còn dữ liệu để gửi"
+)
+
+// ResumeRun restarts the period's latest run after an interruption. Only a
+// run in RunStatusInterrupted qualifies: a running one is already being sent
+// and a completed/expired one has nothing left. The still-queued rows are
+// re-rendered from live statement data — figures may have changed since the
+// original send — and rows that can no longer be auto-sent (mapping removed,
+// statement gone, or a reminder's balance since paid) are failed with a
+// reason instead of silently dropped.
+func (s *Service) ResumeRun(ctx context.Context, teacherID, periodID uuid.UUID) (*RunSnapshotResponse, error) {
+	run, err := s.repo.LatestRunByPeriod(ctx, teacherID, periodID)
+	if errors.Is(err, ErrRunNotFound) {
+		return nil, apperror.NotFound("notification run")
+	}
+	if err != nil {
+		return nil, apperror.From(err)
+	}
+	if run.Status != RunStatusInterrupted {
+		return nil, apperror.Conflict("only an interrupted run can be resumed")
+	}
+	if err := s.verifyPersonalSession(ctx, teacherID); err != nil {
+		return nil, err
+	}
+	active, err := s.repo.HasActiveRun(ctx, teacherID)
+	if err != nil {
+		return nil, apperror.From(err)
+	}
+	if active {
+		return nil, apperror.Conflict("a zalo_personal run is already sending; wait for it to finish")
+	}
+	// The slot is claimed before the transaction so a concurrent resume (or
+	// bulk send) loses here, before this call touches the shared run record —
+	// a loser that got as far as writing would flip a run the winner is
+	// actively sending back to interrupted.
+	reservation, err := s.runs.Reserve(teacherID)
+	if err != nil {
+		return nil, apperror.Conflict("a zalo_personal run is already sending; wait for it to finish")
+	}
+	defer reservation.Release()
+
+	var items []RunItem
+	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		genResult, err := s.statements.Generate(ctx, teacherID, periodID)
+		if err != nil {
+			return err
+		}
+		figures, err := s.statements.PeriodFigures(ctx, teacherID, periodID)
+		if err != nil {
+			return err
+		}
+		queued, err := s.repo.QueuedRunRows(ctx, teacherID, run.ID)
+		if err != nil {
+			return apperror.From(err)
+		}
+
+		contactIDs := make([]uuid.UUID, 0, len(queued))
+		for _, row := range queued {
+			contactIDs = append(contactIDs, row.ContactID)
+		}
+		mappings, err := s.repo.ZaloMappings(ctx, teacherID, contactIDs)
+		if err != nil {
+			return apperror.From(err)
+		}
+		targets := make(map[uuid.UUID]statements.Row, len(genResult.Statements))
+		for _, target := range genResult.Statements {
+			targets[target.ContactID] = target
+		}
+
+		for _, row := range queued {
+			fail := func(reason string) error {
+				return s.repo.MarkOutcome(ctx, teacherID, row.NotificationID, StatusFailed, nil, ptr(reason))
+			}
+			uid, mapped := mappings[row.ContactID]
+			if !mapped {
+				if err := fail(resumeUnmappedFailureMessage); err != nil {
+					return apperror.From(err)
+				}
+				continue
+			}
+			target, hasTarget := targets[row.ContactID]
+			cf, hasFigures := figures[row.ContactID]
+			if !hasTarget || !hasFigures {
+				if err := fail(resumeStaleFailureMessage); err != nil {
+					return apperror.From(err)
+				}
+				continue
+			}
+			if run.Purpose == PurposeReminder && cf.Outstanding <= 0 {
+				if err := fail(resumePaidFailureMessage); err != nil {
+					return apperror.From(err)
+				}
+				continue
+			}
+			text, _, _ := s.renderMessage(target, cf)
+			items = append(items, RunItem{NotificationID: row.NotificationID, ToUID: uid, Text: text})
+		}
+
+		// A resume that finds nothing sendable left still resolves the run:
+		// every queued row was just failed with its reason, so the run is done.
+		status := RunStatusRunning
+		if len(items) == 0 {
+			status = RunStatusCompleted
+		}
+		if err := s.repo.UpdateRunStatus(ctx, teacherID, run.ID, status); err != nil {
+			if errors.Is(err, ErrRunActive) {
+				return apperror.Conflict("a zalo_personal run is already sending; wait for it to finish")
+			}
+			return apperror.From(err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if len(items) > 0 {
+		reservation.Start(run.ID, items)
+	}
+	return s.RunSnapshot(ctx, teacherID, periodID)
+}
+
+// ReconcileInterrupted marks every run a previous process left in
+// RunStatusRunning as interrupted. Called once at boot, before requests are
+// served: a run can only be "running" while a goroutine in this process is
+// sending it, so any running row found at startup belongs to a process that
+// died mid-run.
+func (s *Service) ReconcileInterrupted(ctx context.Context) error {
+	count, err := s.repo.MarkInterrupted(ctx)
+	if err != nil {
+		return apperror.From(err)
+	}
+	if count > 0 {
+		s.log.Warn("notifications: marked runs abandoned by a previous process as interrupted", "count", count)
 	}
 	return nil
 }

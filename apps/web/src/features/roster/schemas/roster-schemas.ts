@@ -15,16 +15,32 @@ const phoneField = z
   .min(1, "Bắt buộc nhập số điện thoại")
   .regex(vnPhonePattern, "Số điện thoại không hợp lệ");
 
-/** `contacts.ContactResponse` (`apps/api/internal/features/contacts/dto.go`). */
+/**
+ * `contacts.ContactResponse` (`apps/api/internal/features/contacts/dto.go`).
+ * The Zalo fields are `omitempty` server-side: an unmapped contact has no key
+ * at all rather than `null`, hence `.optional()` and not `.nullable()`.
+ */
 export const contactSchema = z.object({
   id: z.string(),
   full_name: z.string(),
   phone: z.string(),
   student_count: z.number().int(),
   created_at: z.string(),
+  zalo_user_id: z.string().optional(),
+  zalo_name: z.string().optional(),
 });
 
 export type Contact = z.infer<typeof contactSchema>;
+
+/**
+ * `contacts.ZaloMappingRequest` — both values come straight from the picked
+ * `GET /me/zalo/friends` row; the name is stored so lists render without
+ * refetching the live friend list.
+ */
+export interface ZaloMappingInput {
+  zalo_user_id: string;
+  zalo_name: string;
+}
 
 /**
  * `contacts.CreateRequest` / `UpdateRequest` — full replace, no partial

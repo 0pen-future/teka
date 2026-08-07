@@ -44,6 +44,15 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Notifications.MaxMessageLen != 1000 {
 		t.Errorf("Notifications.MaxMessageLen = %d, want 1000", cfg.Notifications.MaxMessageLen)
 	}
+	if cfg.Notifications.PaceMinSeconds != 3 {
+		t.Errorf("Notifications.PaceMinSeconds = %d, want 3", cfg.Notifications.PaceMinSeconds)
+	}
+	if cfg.Notifications.PaceMaxSeconds != 8 {
+		t.Errorf("Notifications.PaceMaxSeconds = %d, want 8", cfg.Notifications.PaceMaxSeconds)
+	}
+	if cfg.Notifications.MaxRunSize != 50 {
+		t.Errorf("Notifications.MaxRunSize = %d, want 50", cfg.Notifications.MaxRunSize)
+	}
 }
 
 func TestLoadErrors(t *testing.T) {
@@ -81,6 +90,24 @@ func TestLoadErrors(t *testing.T) {
 			name:    "malformed cors origin",
 			mutate:  func(t *testing.T) { t.Setenv("API_CORS_ORIGINS", "http://ok.example,bad.example") },
 			wantSub: "API_CORS_ORIGINS",
+		},
+		{
+			name:    "zero send pace minimum",
+			mutate:  func(t *testing.T) { t.Setenv("API_NOTIFICATIONS_PACE_MIN_SECONDS", "0") },
+			wantSub: "API_NOTIFICATIONS_PACE_MIN_SECONDS",
+		},
+		{
+			name: "pace minimum above maximum",
+			mutate: func(t *testing.T) {
+				t.Setenv("API_NOTIFICATIONS_PACE_MIN_SECONDS", "10")
+				t.Setenv("API_NOTIFICATIONS_PACE_MAX_SECONDS", "5")
+			},
+			wantSub: "API_NOTIFICATIONS_PACE_MAX_SECONDS",
+		},
+		{
+			name:    "zero run size cap",
+			mutate:  func(t *testing.T) { t.Setenv("API_NOTIFICATIONS_MAX_RUN_SIZE", "0") },
+			wantSub: "API_NOTIFICATIONS_MAX_RUN_SIZE",
 		},
 		{
 			name: "missing statements token key in production",

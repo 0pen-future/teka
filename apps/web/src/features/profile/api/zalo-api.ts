@@ -1,10 +1,14 @@
+import { z } from "zod";
+
 import { apiClient } from "@/lib/api/client";
 import { parseData } from "@/lib/api/envelope";
 
 import {
+  zaloFriendSchema,
   zaloLinkStartSchema,
   zaloLinkStatusSchema,
   zaloStatusSchema,
+  type ZaloFriend,
   type ZaloLinkStart,
   type ZaloLinkStatus,
   type ZaloStatus,
@@ -14,6 +18,15 @@ import {
 export async function getZaloStatus(): Promise<ZaloStatus> {
   const res = await apiClient.get<unknown>("/me/zalo");
   return parseData(zaloStatusSchema, res.data);
+}
+
+/**
+ * The linked account's friend list — a live Zalo call on every request, not a
+ * cached table, so callers must throttle with `staleTime` (see `useZaloFriends`).
+ */
+export async function getZaloFriends(): Promise<ZaloFriend[]> {
+  const res = await apiClient.get<unknown>("/me/zalo/friends");
+  return parseData(z.array(zaloFriendSchema), res.data);
 }
 
 /** Begins a QR attempt, recording the consent version the teacher acknowledged. */

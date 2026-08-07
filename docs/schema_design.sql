@@ -82,6 +82,12 @@ CREATE TABLE contacts (
     user_id         UUID         REFERENCES user_accounts(id) ON DELETE SET NULL,
     full_name       VARCHAR(100) NOT NULL,
     phone           VARCHAR(20)  NOT NULL,
+    -- Mapping sang bạn Zalo của giáo viên cho kênh zalo_personal. Giáo viên tự
+    -- chọn từ picker; backend không đối chiếu với live friends list. Cả hai cột
+    -- NULL khi chưa map, luôn set/clear cùng nhau. zalo_name là tên hiển thị
+    -- tại thời điểm map để UI không phải refetch friends.
+    zalo_user_id    VARCHAR(32),
+    zalo_name       VARCHAR(100),
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
     deleted_at      TIMESTAMPTZ,
@@ -93,6 +99,11 @@ CREATE TABLE contacts (
 -- bản ghi contacts độc lập.
 CREATE UNIQUE INDEX uq_contacts_phone
     ON contacts(teacher_id, phone) WHERE deleted_at IS NULL;
+-- Một bạn Zalo chỉ map vào một contact sống per teacher — map trùng nghĩa là
+-- một người nhận statement link (kèm dữ liệu công nợ) của hai gia đình.
+CREATE UNIQUE INDEX uq_contacts_zalo_user
+    ON contacts(teacher_id, zalo_user_id)
+    WHERE zalo_user_id IS NOT NULL AND deleted_at IS NULL;
 CREATE INDEX idx_contacts_teacher ON contacts(teacher_id) WHERE deleted_at IS NULL;
 CREATE INDEX idx_contacts_user ON contacts(user_id) WHERE user_id IS NOT NULL;
 
@@ -431,12 +442,33 @@ CREATE UNIQUE INDEX uq_statements
     ON statements(contact_id, period_id) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX uq_statements_token ON statements(token_hash);
 
+-- Một batch gửi zalo_personal có nhịp giãn cách (paced). Counters
+-- (total/sent/failed) luôn derive bằng COUNT trên notifications theo run_id —
+-- lưu counter ở đây là nguồn sự thật thứ hai sẽ drift. Ngữ nghĩa status:
+-- 'interrupted' = process chết giữa run (rows còn queued, giáo viên resume thủ
+-- công); 'expired' = phiên Zalo chết giữa run (rows còn lại chuyển failed).
+CREATE TABLE notification_runs (
+    id                 UUID PRIMARY KEY,
+    teacher_id         UUID        NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
+    billing_period_id  UUID        NOT NULL,
+    purpose            VARCHAR(20) NOT NULL DEFAULT 'statements'
+                           CHECK (purpose IN ('statements', 'reminder')),
+    status             VARCHAR(20) NOT NULL DEFAULT 'running'
+                           CHECK (status IN ('running', 'completed', 'interrupted', 'expired')),
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at        TIMESTAMPTZ,
+    FOREIGN KEY (billing_period_id, teacher_id)
+        REFERENCES billing_periods(id, teacher_id) ON DELETE CASCADE,
+    CONSTRAINT uq_notification_runs_tid UNIQUE (id, teacher_id)
+);
+CREATE INDEX idx_notification_runs_teacher ON notification_runs(teacher_id);
+
 CREATE TABLE notifications (
     id                  UUID PRIMARY KEY,
     teacher_id          UUID        NOT NULL,
     statement_id        UUID        NOT NULL,
     channel             VARCHAR(20) NOT NULL
-                            CHECK (channel IN ('zalo_zns', 'zalo_manual', 'sms')),
+                            CHECK (channel IN ('zalo_zns', 'zalo_manual', 'sms', 'zalo_personal')),
     purpose             VARCHAR(20) NOT NULL DEFAULT 'statements'
                             CHECK (purpose IN ('statements', 'reminder')),
     status              VARCHAR(20) NOT NULL DEFAULT 'queued'
@@ -444,14 +476,25 @@ CREATE TABLE notifications (
     provider_msg_id     VARCHAR(100),
     error_message       TEXT,
     sent_at             TIMESTAMPTZ,
+    -- Thuộc về một run gửi hàng loạt (kênh zalo_personal); NULL với gửi lẻ.
+    -- SET NULL chứ không CASCADE: notification là bản ghi audit của một tin đã
+    -- gửi (hoặc gửi hỏng) tới phụ huynh, sống lâu hơn batch của nó.
+    run_id              UUID,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at          TIMESTAMPTZ,
-    FOREIGN KEY (statement_id, teacher_id) REFERENCES statements(id, teacher_id) ON DELETE CASCADE
+    FOREIGN KEY (statement_id, teacher_id) REFERENCES statements(id, teacher_id) ON DELETE CASCADE,
+    -- FK composite: DB tự chặn notification trỏ vào run của giáo viên khác —
+    -- tiến độ run derive bằng COUNT trên các row này nên link chéo tenant sẽ
+    -- trộn số liệu. SET NULL kèm column list (PG >= 15) giữ nguyên teacher_id
+    -- khi run bị xoá.
+    FOREIGN KEY (run_id, teacher_id)
+        REFERENCES notification_runs(id, teacher_id) ON DELETE SET NULL (run_id)
 );
 CREATE INDEX idx_notifications_statement ON notifications(statement_id);
 CREATE INDEX idx_notifications_retry ON notifications(status)
     WHERE status IN ('queued','failed') AND deleted_at IS NULL;
+CREATE INDEX idx_notifications_run ON notifications(run_id) WHERE run_id IS NOT NULL;
 
 -- =============================================================
 -- 9. VIEW HỖ TRỢ

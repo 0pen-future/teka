@@ -204,6 +204,114 @@ func TestListSearchMatchesNameAndPhone(t *testing.T) {
 	require.Equal(t, "Anh Tuấn", rows[0].FullName)
 }
 
+func TestZaloMappingPersistsAndClears(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	teacher, _ := testutil.Teacher(t, db)
+
+	row, err := svc.Create(ctx, teacher.ID, contacts.CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
+	require.NoError(t, err)
+
+	mapped, err := svc.UpdateZaloMapping(ctx, teacher.ID, row.ID, contacts.ZaloMappingRequest{
+		ZaloUserID: "8421113355",
+		ZaloName:   "Hoa Nguyễn",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, mapped.ZaloUserID)
+	require.Equal(t, "8421113355", *mapped.ZaloUserID)
+	require.NotNil(t, mapped.ZaloName)
+	require.Equal(t, "Hoa Nguyễn", *mapped.ZaloName)
+
+	// A fresh read proves the columns persisted, not just the returned struct.
+	got, err := svc.Get(ctx, teacher.ID, row.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.ZaloUserID)
+	require.Equal(t, "8421113355", *got.ZaloUserID)
+
+	// Remapping replaces both fields together.
+	remapped, err := svc.UpdateZaloMapping(ctx, teacher.ID, row.ID, contacts.ZaloMappingRequest{
+		ZaloUserID: "8429990001",
+		ZaloName:   "Hoa (mẹ bé An)",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "8429990001", *remapped.ZaloUserID)
+	require.Equal(t, "Hoa (mẹ bé An)", *remapped.ZaloName)
+
+	require.NoError(t, svc.ClearZaloMapping(ctx, teacher.ID, row.ID))
+	cleared, err := svc.Get(ctx, teacher.ID, row.ID)
+	require.NoError(t, err)
+	require.Nil(t, cleared.ZaloUserID)
+	require.Nil(t, cleared.ZaloName)
+
+	// Clearing again is still fine — the caller's intent is already true.
+	require.NoError(t, svc.ClearZaloMapping(ctx, teacher.ID, row.ID))
+}
+
+// One Zalo friend maps to at most one live contact per teacher: a duplicate
+// mapping would send one person the statement links — and the debt data — of
+// two different families.
+func TestZaloMappingRefusesAFriendAlreadyMappedToAnotherContact(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	teacher, _ := testutil.Teacher(t, db)
+	otherTeacher, _ := testutil.Teacher(t, db)
+
+	first, err := svc.Create(ctx, teacher.ID, contacts.CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
+	require.NoError(t, err)
+	second, err := svc.Create(ctx, teacher.ID, contacts.CreateRequest{FullName: "Anh Tuấn", Phone: "0912345679"})
+	require.NoError(t, err)
+
+	friend := contacts.ZaloMappingRequest{ZaloUserID: "8421113355", ZaloName: "Hoa Nguyễn"}
+	_, err = svc.UpdateZaloMapping(ctx, teacher.ID, first.ID, friend)
+	require.NoError(t, err)
+
+	_, err = svc.UpdateZaloMapping(ctx, teacher.ID, second.ID, friend)
+	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code,
+		"the same Zalo friend must not map to two contacts of one teacher")
+
+	// Re-saving the same mapping on the same contact is not a duplicate.
+	_, err = svc.UpdateZaloMapping(ctx, teacher.ID, first.ID, friend)
+	require.NoError(t, err)
+
+	// Another teacher's roster is a separate world.
+	foreign, err := svc.Create(ctx, otherTeacher.ID, contacts.CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
+	require.NoError(t, err)
+	_, err = svc.UpdateZaloMapping(ctx, otherTeacher.ID, foreign.ID, friend)
+	require.NoError(t, err, "uniqueness must be per-teacher, not global")
+
+	// A soft-deleted contact releases its friend, like uq_contacts_phone.
+	require.NoError(t, svc.ClearZaloMapping(ctx, teacher.ID, first.ID))
+	require.NoError(t, svc.Delete(ctx, teacher.ID, first.ID))
+	_, err = svc.UpdateZaloMapping(ctx, teacher.ID, second.ID, friend)
+	require.NoError(t, err)
+}
+
+func TestZaloMappingIsTenantScoped(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	teacherA, _ := testutil.Teacher(t, db)
+	teacherB, _ := testutil.Teacher(t, db)
+
+	row, err := svc.Create(ctx, teacherA.ID, contacts.CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
+	require.NoError(t, err)
+
+	_, err = svc.UpdateZaloMapping(ctx, teacherB.ID, row.ID, contacts.ZaloMappingRequest{
+		ZaloUserID: "8421113355",
+		ZaloName:   "Hoa Nguyễn",
+	})
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+	err = svc.ClearZaloMapping(ctx, teacherB.ID, row.ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+
+	// The other tenant's probe must not have touched the row.
+	got, err := svc.Get(ctx, teacherA.ID, row.ID)
+	require.NoError(t, err)
+	require.Nil(t, got.ZaloUserID)
+}
+
 // sqlCounter counts executed statements through the GORM logger's Trace hook.
 type sqlCounter struct {
 	gormlogger.Interface

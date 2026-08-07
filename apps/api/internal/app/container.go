@@ -9,6 +9,8 @@ import (
 
 	"teka/apps/api/internal/config"
 	"teka/apps/api/internal/database"
+	"teka/apps/api/internal/features/notifications"
+	"teka/apps/api/internal/features/statements"
 	"teka/apps/api/internal/features/zalo"
 	"teka/apps/api/internal/shared/logger"
 	"teka/apps/api/internal/shared/secrets"
@@ -19,10 +21,14 @@ type Container struct {
 	Cfg *config.Config
 	Log *slog.Logger
 	DB  *gorm.DB
-	// Zalo is the one feature service built here rather than in the router:
-	// it owns background goroutines — link attempts and the session health
-	// probe — whose lifetime is the process's, and Close is where they stop.
-	Zalo *zalo.Service
+	// Zalo, Statements, and Notifications are built here rather than in the
+	// router because their lifetime is the process's, not a request's: zalo
+	// owns link attempts and the session health probe, notifications owns the
+	// background zalo_personal send runs (and consumes both of the others),
+	// and Close is where that background work stops.
+	Zalo          *zalo.Service
+	Statements    *statements.Service
+	Notifications *notifications.Service
 }
 
 // NewContainer builds the dependency graph: logger first, then database.
@@ -46,12 +52,31 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 
 	zaloSvc := zalo.NewService(zalo.NewRepository(db), cipher, zalo.ServiceOptions{Logger: log})
 
-	return &Container{Cfg: cfg, Log: log, DB: db, Zalo: zaloSvc}, nil
+	txMgr := database.NewTxManager(db)
+	bankCfg := statements.BankConfig{
+		BankCode:      cfg.Bank.BankCode,
+		AccountNumber: cfg.Bank.AccountNumber,
+		AccountName:   cfg.Bank.AccountName,
+	}
+	statementsSvc := statements.NewService(statements.NewRepository(db), txMgr, cfg.Statements, bankCfg, statements.NewQRBuilder())
+
+	notificationsSvc := notifications.NewService(notifications.NewRepository(db), txMgr, statementsSvc, zaloSvc, log, cfg.Notifications)
+
+	return &Container{
+		Cfg:           cfg,
+		Log:           log,
+		DB:            db,
+		Zalo:          zaloSvc,
+		Statements:    statementsSvc,
+		Notifications: notificationsSvc,
+	}, nil
 }
 
-// Close releases held resources: background Zalo work first, so nothing is
-// still using the database connection pool when it goes away.
+// Close releases held resources: notification runs first (they send through
+// zalo), then zalo's own background work, so nothing is still using the
+// database connection pool when it goes away.
 func (c *Container) Close() {
+	c.Notifications.Close()
 	c.Zalo.Close()
 	if err := database.Close(c.DB); err != nil {
 		c.Log.Error("closing database", "error", err)

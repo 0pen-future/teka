@@ -98,6 +98,26 @@ func (f *fakeRepository) ListStudentNames(_ context.Context, _, contactID uuid.U
 	return names, nil
 }
 
+func (f *fakeRepository) UpdateZaloMapping(_ context.Context, teacherID, contactID uuid.UUID, zaloUserID, zaloName string) error {
+	c, ok := f.rows[contactID]
+	if !ok || c.deleted || c.TeacherID != teacherID {
+		return ErrNotFound
+	}
+	c.ZaloUserID = &zaloUserID
+	c.ZaloName = &zaloName
+	return nil
+}
+
+func (f *fakeRepository) ClearZaloMapping(_ context.Context, teacherID, contactID uuid.UUID) error {
+	c, ok := f.rows[contactID]
+	if !ok || c.deleted || c.TeacherID != teacherID {
+		return ErrNotFound
+	}
+	c.ZaloUserID = nil
+	c.ZaloName = nil
+	return nil
+}
+
 func TestCreateNormalisesPhone(t *testing.T) {
 	repo := newFakeRepository()
 	svc := NewService(repo)
@@ -233,5 +253,140 @@ func TestDeleteOtherTeachersContactIsNotFound(t *testing.T) {
 	err = svc.Delete(ctx, id.New(), row.ID)
 	if apperror.From(err).Code != apperror.CodeNotFound {
 		t.Fatalf("cross-tenant delete must be NOT_FOUND, got %v", err)
+	}
+}
+
+func TestUpdateZaloMappingSetsBothFields(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+	ctx := context.Background()
+	teacherID := id.New()
+
+	row, err := svc.Create(ctx, teacherID, CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	updated, err := svc.UpdateZaloMapping(ctx, teacherID, row.ID, ZaloMappingRequest{
+		ZaloUserID: "8421000123456789", ZaloName: "Hoa Nguyễn",
+	})
+	if err != nil {
+		t.Fatalf("update mapping: %v", err)
+	}
+	if updated.ZaloUserID == nil || *updated.ZaloUserID != "8421000123456789" {
+		t.Fatalf("zalo_user_id not stored, got %v", updated.ZaloUserID)
+	}
+	if updated.ZaloName == nil || *updated.ZaloName != "Hoa Nguyễn" {
+		t.Fatalf("zalo_name not stored, got %v", updated.ZaloName)
+	}
+
+	got, err := svc.Get(ctx, teacherID, row.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.ZaloUserID == nil || *got.ZaloUserID != "8421000123456789" {
+		t.Fatalf("mapping must persist, got %v", got.ZaloUserID)
+	}
+}
+
+func TestUpdateZaloMappingOtherTeachersContactIsNotFound(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+	ctx := context.Background()
+
+	row, err := svc.Create(ctx, id.New(), CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	_, err = svc.UpdateZaloMapping(ctx, id.New(), row.ID, ZaloMappingRequest{
+		ZaloUserID: "8421", ZaloName: "Hoa",
+	})
+	if apperror.From(err).Code != apperror.CodeNotFound {
+		t.Fatalf("cross-tenant mapping must be NOT_FOUND, got %v", err)
+	}
+}
+
+func TestClearZaloMappingIsIdempotent(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+	ctx := context.Background()
+	teacherID := id.New()
+
+	row, err := svc.Create(ctx, teacherID, CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := svc.UpdateZaloMapping(ctx, teacherID, row.ID, ZaloMappingRequest{
+		ZaloUserID: "8421", ZaloName: "Hoa",
+	}); err != nil {
+		t.Fatalf("update mapping: %v", err)
+	}
+
+	if err := svc.ClearZaloMapping(ctx, teacherID, row.ID); err != nil {
+		t.Fatalf("first clear: %v", err)
+	}
+	got, err := svc.Get(ctx, teacherID, row.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.ZaloUserID != nil || got.ZaloName != nil {
+		t.Fatalf("mapping must be cleared, got %v %v", got.ZaloUserID, got.ZaloName)
+	}
+
+	// Clearing an already-unmapped contact is a no-op success, mirroring the
+	// unlink endpoint's idempotency.
+	if err := svc.ClearZaloMapping(ctx, teacherID, row.ID); err != nil {
+		t.Fatalf("second clear must succeed, got %v", err)
+	}
+}
+
+func TestUpdateZaloMappingTrimsAndRejectsWhitespaceOnly(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+	ctx := context.Background()
+	teacherID := id.New()
+
+	row, err := svc.Create(ctx, teacherID, CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Padded values are stored clean — the id is compared byte-for-byte when
+	// the sender resolves a contact to a Zalo user.
+	updated, err := svc.UpdateZaloMapping(ctx, teacherID, row.ID, ZaloMappingRequest{
+		ZaloUserID: "  8421000123456789  ", ZaloName: "  Hoa Nguyễn  ",
+	})
+	if err != nil {
+		t.Fatalf("update mapping: %v", err)
+	}
+	if updated.ZaloUserID == nil || *updated.ZaloUserID != "8421000123456789" {
+		t.Fatalf("zalo_user_id must be trimmed, got %v", updated.ZaloUserID)
+	}
+	if updated.ZaloName == nil || *updated.ZaloName != "Hoa Nguyễn" {
+		t.Fatalf("zalo_name must be trimmed, got %v", updated.ZaloName)
+	}
+
+	// Whitespace-only slips past the required binding but is still no mapping.
+	_, err = svc.UpdateZaloMapping(ctx, teacherID, row.ID, ZaloMappingRequest{
+		ZaloUserID: "   ", ZaloName: "Hoa Nguyễn",
+	})
+	if apperror.From(err).Code != apperror.CodeValidation {
+		t.Fatalf("blank zalo_user_id must be VALIDATION_ERROR, got %v", err)
+	}
+	_, err = svc.UpdateZaloMapping(ctx, teacherID, row.ID, ZaloMappingRequest{
+		ZaloUserID: "8421000123456789", ZaloName: "   ",
+	})
+	if apperror.From(err).Code != apperror.CodeValidation {
+		t.Fatalf("blank zalo_name must be VALIDATION_ERROR, got %v", err)
+	}
+}
+
+func TestClearZaloMappingUnknownContactIsNotFound(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+
+	err := svc.ClearZaloMapping(context.Background(), id.New(), id.New())
+	if apperror.From(err).Code != apperror.CodeNotFound {
+		t.Fatalf("unknown contact must be NOT_FOUND, got %v", err)
 	}
 }

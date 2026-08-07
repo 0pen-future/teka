@@ -34,9 +34,11 @@ import (
 
 // NewRouter builds the Gin engine: middleware stack, health probes, and the
 // versioned API group that feature modules mount into. Every feature is
-// constructed from db here except zalo, which is passed in already built
-// because it owns background goroutines the app lifecycle has to stop.
-func NewRouter(cfg *config.Config, log *slog.Logger, db *gorm.DB, zaloSvc *zalo.Service) *gin.Engine {
+// constructed from db here except zalo, statements, and notifications, which
+// are passed in already built: zalo and notifications own background
+// goroutines the app lifecycle has to stop, and statements is a constructor
+// dependency of notifications.
+func NewRouter(cfg *config.Config, log *slog.Logger, db *gorm.DB, zaloSvc *zalo.Service, statementsSvc *statements.Service, notificationsSvc *notifications.Service) *gin.Engine {
 	if cfg.IsProduction() {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -61,7 +63,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *gorm.DB, zaloSvc *zalo.
 	}
 
 	v1 := r.Group("/api/v1")
-	statementsSvc := registerFeatures(v1, cfg, db, zaloSvc)
+	registerFeatures(v1, cfg, db, zaloSvc, statementsSvc, notificationsSvc)
 
 	// Deliberately outside v1 and outside requireAuth: the only unauthenticated
 	// route in the product that serves child/money data.
@@ -76,10 +78,10 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *gorm.DB, zaloSvc *zalo.
 
 // registerFeatures wires feature modules into the versioned group. Feature
 // construction (repository → service → handler) happens here so features stay
-// decoupled from bootstrap. Returns the statements service so NewRouter can
-// mount its public, unauthenticated route group separately, on the root
-// engine rather than under v1.
-func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zaloSvc *zalo.Service) *statements.Service {
+// decoupled from bootstrap; the process-lifetime services (zalo, statements,
+// notifications) arrive already built from the container and are only
+// mounted.
+func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zaloSvc *zalo.Service, statementsSvc *statements.Service, notificationsSvc *notifications.Service) {
 	requireAuth := middleware.RequireAuth(cfg.JWT)
 	txMgr := database.NewTxManager(db)
 
@@ -145,18 +147,9 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	collectionsSvc := collections.NewService(collections.NewRepository(db))
 	collections.RegisterRoutes(v1, collections.NewHandler(collectionsSvc), requireAuth)
 
-	bankCfg := statements.BankConfig{
-		BankCode:      cfg.Bank.BankCode,
-		AccountNumber: cfg.Bank.AccountNumber,
-		AccountName:   cfg.Bank.AccountName,
-	}
-	statementsSvc := statements.NewService(statements.NewRepository(db), txMgr, cfg.Statements, bankCfg, statements.NewQRBuilder())
 	statements.RegisterRoutes(v1, statements.NewHandler(statementsSvc), requireAuth)
 
-	notificationsSvc := notifications.NewService(notifications.NewRepository(db), txMgr, statementsSvc, cfg.Notifications)
 	notifications.RegisterRoutes(v1, notifications.NewHandler(notificationsSvc), requireAuth)
 
 	zalo.RegisterRoutes(v1, zalo.NewHandler(zaloSvc), requireAuth)
-
-	return statementsSvc
 }

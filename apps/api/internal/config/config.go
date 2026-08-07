@@ -101,6 +101,17 @@ type NotificationsConfig struct {
 	// under before it collapses its per-child detail (statements.Build's
 	// maxLen).
 	MaxMessageLen int `env:"NOTIFICATIONS_MAX_MESSAGE_LEN" envDefault:"1000"`
+	// PaceMinSeconds and PaceMaxSeconds bound the random gap between two
+	// consecutive zalo_personal sends in one run. The pacing exists to keep a
+	// teacher's personal account from looking like a spam bot to Zalo; 3–8s is
+	// a deliberate guess (Zalo publishes no limits), which is why it is
+	// configurable at all.
+	PaceMinSeconds int `env:"NOTIFICATIONS_PACE_MIN_SECONDS" envDefault:"3"`
+	PaceMaxSeconds int `env:"NOTIFICATIONS_PACE_MAX_SECONDS" envDefault:"8"`
+	// MaxRunSize caps how many zalo_personal messages one bulk send may queue
+	// for automatic delivery — the other half of the same anti-ban guardrail.
+	// A larger period simply has to be sent in batches.
+	MaxRunSize int `env:"NOTIFICATIONS_MAX_RUN_SIZE" envDefault:"50"`
 }
 
 // ZaloConfig configures the encryption of linked Zalo session credentials.
@@ -184,10 +195,31 @@ func (c *Config) validate() error {
 			return fmt.Errorf("API_CORS_ORIGINS entry %q must start with http:// or https://", origin)
 		}
 	}
+	if err := c.validateNotifications(); err != nil {
+		return err
+	}
 	if err := c.validateStatements(); err != nil {
 		return err
 	}
 	return c.validateZalo()
+}
+
+// validateNotifications guards the zalo_personal pacing guardrail: a zero or
+// negative gap, an inverted range, or a boundless run would defeat the whole
+// point of pacing, so a config that asks for one is a startup error rather
+// than a silently "fast" run.
+func (c *Config) validateNotifications() error {
+	n := c.Notifications
+	if n.PaceMinSeconds < 1 {
+		return fmt.Errorf("API_NOTIFICATIONS_PACE_MIN_SECONDS must be at least 1, got %d", n.PaceMinSeconds)
+	}
+	if n.PaceMaxSeconds < n.PaceMinSeconds {
+		return fmt.Errorf("API_NOTIFICATIONS_PACE_MAX_SECONDS must be >= the minimum pace (%d), got %d", n.PaceMinSeconds, n.PaceMaxSeconds)
+	}
+	if n.MaxRunSize < 1 {
+		return fmt.Errorf("API_NOTIFICATIONS_MAX_RUN_SIZE must be at least 1, got %d", n.MaxRunSize)
+	}
+	return nil
 }
 
 // decodeTokenKey resolves a configured secret into raw key bytes. It tries

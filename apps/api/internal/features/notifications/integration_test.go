@@ -5,6 +5,7 @@ package notifications_test
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -64,8 +65,21 @@ func newDeps(t *testing.T) *deps {
 
 // newDepsOnDB wires the same dependency chain against an already-started db
 // handle, so the scale test can attach a query counter to the handle before
-// any service is constructed.
+// any service is constructed. The Zalo side is a benign fake — these tests
+// exercise the copy-paste channels, which never touch it.
 func newDepsOnDB(t *testing.T, db *gorm.DB) *deps {
+	t.Helper()
+	return newDepsWithZalo(t, db, &fakeZaloSender{})
+}
+
+// newDepsWithZalo wires the chain with a caller-controlled Zalo fake, for
+// tests driving the zalo_personal channel.
+func newDepsWithZalo(t *testing.T, db *gorm.DB, zaloSender notifications.ZaloSender) *deps {
+	t.Helper()
+	return newDepsWithZaloAndRunCap(t, db, zaloSender, 50)
+}
+
+func newDepsWithZaloAndRunCap(t *testing.T, db *gorm.DB, zaloSender notifications.ZaloSender, maxRunSize int) *deps {
 	t.Helper()
 	txMgr := database.NewTxManager(db)
 	classesSvc := classes.NewService(classes.NewRepository(db), txMgr)
@@ -79,10 +93,17 @@ func newDepsOnDB(t *testing.T, db *gorm.DB) *deps {
 		PublicBaseURL: "https://parent.example.com",
 	}, statements.BankConfig{}, statements.NewQRBuilder())
 	paymentsSvc := payments.NewService(payments.NewRepository(db), txMgr)
-	notificationsSvc := notifications.NewService(notifications.NewRepository(db), txMgr, statementsSvc, config.NotificationsConfig{
-		DefaultChannel: notifications.ChannelZaloManual,
-		MaxMessageLen:  1000,
-	})
+	notificationsSvc := notifications.NewService(notifications.NewRepository(db), txMgr, statementsSvc, zaloSender,
+		slog.New(slog.DiscardHandler), config.NotificationsConfig{
+			DefaultChannel: notifications.ChannelZaloManual,
+			MaxMessageLen:  1000,
+			// Zero pacing: integration runs must finish in milliseconds, not
+			// minutes — the gap arithmetic itself is pinned by unit tests.
+			PaceMinSeconds: 0,
+			PaceMaxSeconds: 0,
+			MaxRunSize:     maxRunSize,
+		})
+	t.Cleanup(notificationsSvc.Close)
 	return &deps{
 		notifications: notificationsSvc,
 		statements:    statementsSvc,

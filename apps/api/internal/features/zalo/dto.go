@@ -34,6 +34,33 @@ type LinkStatusResponse struct {
 	ErrorMessage string `json:"error_message,omitempty"`
 }
 
+// FriendResponse is one row of the contact-mapping picker: exactly what the
+// teacher needs to recognise a friend, hand-built so nothing from the protocol
+// layer can ride along.
+type FriendResponse struct {
+	UserID      string `json:"user_id"`
+	DisplayName string `json:"display_name"`
+	Avatar      string `json:"avatar,omitempty"`
+}
+
+func newFriendResponses(friends []Friend) []FriendResponse {
+	out := make([]FriendResponse, 0, len(friends))
+	for _, f := range friends {
+		name := f.DisplayName
+		if name == "" {
+			// A friend without an alias arrives with only the profile name;
+			// an empty row would be impossible to recognise or map.
+			name = f.ZaloName
+		}
+		out = append(out, FriendResponse{
+			UserID:      f.UserID,
+			DisplayName: name,
+			Avatar:      f.Avatar,
+		})
+	}
+	return out
+}
+
 // StatusResponse is what the profile card shows. Linked and Status are separate
 // answers: an expired session is still a linked account, and the card says
 // "reconnect" rather than "connect" because of it.

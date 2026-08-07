@@ -21,12 +21,18 @@ type Contact struct {
 	TeacherID uuid.UUID
 	// UserID stays NULL for all of V1 — parents do not log in, they open a
 	// token link. Modelled but never written.
-	UserID    *uuid.UUID
-	FullName  string
-	Phone     string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	DeletedAt gorm.DeletedAt
+	UserID   *uuid.UUID
+	FullName string
+	Phone    string
+	// ZaloUserID/ZaloName record which Zalo friend this contact is, chosen by
+	// the teacher in the friend picker. ZaloName is the friend's name at
+	// mapping time so lists render without refetching the live friend list.
+	// Both NULL until mapped; always set and cleared together.
+	ZaloUserID *string
+	ZaloName   *string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	DeletedAt  gorm.DeletedAt
 }
 
 // TableName pins the table explicitly so a later model rename cannot silently

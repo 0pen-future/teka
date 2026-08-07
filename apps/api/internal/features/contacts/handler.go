@@ -206,3 +206,69 @@ func (h *Handler) remove(c *gin.Context) {
 	}
 	c.Status(http.StatusNoContent)
 }
+
+// setZaloMapping binds the contact to a Zalo friend chosen in the picker.
+//
+//	@Summary		Map contact to a Zalo friend
+//	@Description	Stores the picked friend's id and display name on the contact. Values come from GET /me/zalo/friends; the backend does not re-check them against the live friend list.
+//	@Tags			contacts
+//	@Accept			json
+//	@Produce		json
+//	@Param			id		path		string				true	"contact id"
+//	@Param			request	body		ZaloMappingRequest	true	"picked Zalo friend"
+//	@Success		200		{object}	response.Envelope{data=ContactResponse}
+//	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		409		{object}	response.Envelope{error=response.ErrorBody}	"friend already mapped to another contact"
+//	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}	"validation failed"
+//	@Security		BearerAuth
+//	@Router			/contacts/{id}/zalo-mapping [put]
+func (h *Handler) setZaloMapping(c *gin.Context) {
+	teacherID, ok := h.teacherID(c)
+	if !ok {
+		return
+	}
+	cid, ok := contactID(c)
+	if !ok {
+		return
+	}
+	var req ZaloMappingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Err(c, validation.BindError(err))
+		return
+	}
+	row, err := h.svc.UpdateZaloMapping(c.Request.Context(), teacherID, cid, req)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, FromModel(row))
+}
+
+// clearZaloMapping detaches the contact from its Zalo friend.
+//
+//	@Summary		Unmap contact from its Zalo friend
+//	@Description	Nulls both mapping fields. Idempotent: unmapping an unmapped contact is still 204.
+//	@Tags			contacts
+//	@Produce		json
+//	@Param			id	path	string	true	"contact id"
+//	@Success		204
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/contacts/{id}/zalo-mapping [delete]
+func (h *Handler) clearZaloMapping(c *gin.Context) {
+	teacherID, ok := h.teacherID(c)
+	if !ok {
+		return
+	}
+	cid, ok := contactID(c)
+	if !ok {
+		return
+	}
+	if err := h.svc.ClearZaloMapping(c.Request.Context(), teacherID, cid); err != nil {
+		response.Err(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}

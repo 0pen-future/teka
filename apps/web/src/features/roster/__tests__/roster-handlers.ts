@@ -170,6 +170,34 @@ export const rosterHandlers = [
     contact.phone = body.phone;
     return HttpResponse.json(ok(contact));
   }),
+  http.put(`${API_URL}/contacts/:id/zalo-mapping`, async ({ params, request }) => {
+    const contact = store.contacts.find((item) => item.id === params.id);
+    if (!contact) {
+      return HttpResponse.json(fail("NOT_FOUND", "contact not found"), { status: 404 });
+    }
+    const body = (await request.json()) as { zalo_user_id: string; zalo_name: string };
+    // Mirrors the API's unique index: one Zalo friend maps to one contact.
+    const taken = store.contacts.some(
+      (item) => item.id !== contact.id && item.zalo_user_id === body.zalo_user_id,
+    );
+    if (taken) {
+      return HttpResponse.json(fail("CONFLICT", "friend already mapped to another contact"), {
+        status: 409,
+      });
+    }
+    contact.zalo_user_id = body.zalo_user_id;
+    contact.zalo_name = body.zalo_name;
+    return HttpResponse.json(ok(contact));
+  }),
+  http.delete(`${API_URL}/contacts/:id/zalo-mapping`, ({ params }) => {
+    const contact = store.contacts.find((item) => item.id === params.id);
+    if (!contact) {
+      return HttpResponse.json(fail("NOT_FOUND", "contact not found"), { status: 404 });
+    }
+    delete contact.zalo_user_id;
+    delete contact.zalo_name;
+    return new HttpResponse(null, { status: 204 });
+  }),
 
   http.get(`${API_URL}/students`, ({ request }) => {
     const url = new URL(request.url);

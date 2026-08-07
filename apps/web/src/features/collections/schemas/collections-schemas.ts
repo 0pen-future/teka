@@ -177,8 +177,17 @@ export const notificationPurposeSchema = z.enum(["statement", "statements", "rem
 
 export type NotificationPurpose = z.infer<typeof notificationPurposeSchema>;
 
-/** `notifications.channel` CHECK constraint (`docs/schema_design.sql:439`). */
-export const notificationChannelSchema = z.enum(["zalo_manual", "zalo_zns", "sms"]);
+/**
+ * `notifications.channel` CHECK constraint (`docs/schema_design.sql:439`);
+ * `zalo_personal` rows are auto-delivered by a background run instead of the
+ * teacher's copy-paste.
+ */
+export const notificationChannelSchema = z.enum([
+  "zalo_manual",
+  "zalo_zns",
+  "sms",
+  "zalo_personal",
+]);
 
 export type NotificationChannel = z.infer<typeof notificationChannelSchema>;
 
@@ -207,16 +216,42 @@ export const bulkSendRowSchema = z.object({
 
 export type BulkSendRow = z.infer<typeof bulkSendRowSchema>;
 
-/** `notifications.BulkSendResponse`. */
+/**
+ * `notifications.BulkSendResponse`. `run_id` is null unless a `zalo_personal`
+ * send actually queued mapped contacts into a background run;
+ * `personal_queued_count`/`fallback_manual_count` split that send's rows into
+ * auto-delivered vs left-for-copy-paste (both zero on other channels).
+ */
 export const bulkSendResponseSchema = z.object({
   queued_count: z.number().int(),
   skipped_paid_count: z.number().int(),
   collapsed_count: z.number().int(),
+  run_id: z.string().nullable(),
+  personal_queued_count: z.number().int(),
+  fallback_manual_count: z.number().int(),
   bulk_text: z.string(),
   rows: z.array(bulkSendRowSchema),
 });
 
 export type BulkSendResponse = z.infer<typeof bulkSendResponseSchema>;
+
+/**
+ * `notifications.RunSnapshotResponse` (`GET /billing-periods/:id/notifications/run`).
+ * A period that never had a run answers `active: false` with a null `run_id`
+ * — an ordinary answer, not an error. `status`/`purpose` are omitempty on the
+ * wire, so they are optional here, never null.
+ */
+export const runSnapshotSchema = z.object({
+  active: z.boolean(),
+  run_id: z.string().nullable(),
+  status: z.enum(["running", "completed", "interrupted", "expired"]).optional(),
+  purpose: notificationPurposeSchema.optional(),
+  total: z.number().int(),
+  sent: z.number().int(),
+  failed: z.number().int(),
+});
+
+export type RunSnapshot = z.infer<typeof runSnapshotSchema>;
 
 /**
  * `notifications.NotificationResponse` (`GET /billing-periods/:id/notifications`).
@@ -231,6 +266,12 @@ export const notificationRowSchema = z.object({
   channel: notificationChannelSchema,
   purpose: notificationPurposeSchema,
   status: notificationStatusSchema,
+  // A failed row's teacher-facing reason; omitempty on the wire, so optional
+  // here, never null.
+  error_message: z.string().optional(),
+  // The paced run this row was queued into; absent on manual/copy-paste rows.
+  // Lets the UI pin a run's banner to exactly its own rows.
+  run_id: z.string().optional(),
   sent_at: z.string().nullable(),
   created_at: z.string(),
 });

@@ -25,6 +25,13 @@ func RunServer(ctx context.Context) error {
 	// The health probe runs for as long as the server does; c.Close stops it.
 	c.Zalo.StartHealthProbe(ctx, zalo.ProbeOptions{})
 
-	router := server.NewRouter(c.Cfg, c.Log, c.DB, c.Zalo)
+	// A "running" run can only be true while this process is sending it, so
+	// any found at boot belongs to a previous process that died mid-run — mark
+	// them interrupted (resumable) before requests can observe them.
+	if err := c.Notifications.ReconcileInterrupted(ctx); err != nil {
+		return err
+	}
+
+	router := server.NewRouter(c.Cfg, c.Log, c.DB, c.Zalo, c.Statements, c.Notifications)
 	return server.Run(ctx, c.Cfg, c.Log, router)
 }

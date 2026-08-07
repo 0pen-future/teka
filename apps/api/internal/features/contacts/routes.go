@@ -11,4 +11,6 @@ func RegisterRoutes(rg *gin.RouterGroup, h *Handler, requireAuth gin.HandlerFunc
 	g.GET("/:id", h.get)
 	g.PUT("/:id", h.update)
 	g.DELETE("/:id", h.remove)
+	g.PUT("/:id/zalo-mapping", h.setZaloMapping)
+	g.DELETE("/:id/zalo-mapping", h.clearZaloMapping)
 }

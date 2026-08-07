@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 
 	"teka/apps/api/internal/database"
@@ -36,6 +37,13 @@ type Repository interface {
 	// ListStudentNames returns up to limit names of live students referencing
 	// the contact, alphabetically, for the delete-blocked error message.
 	ListStudentNames(ctx context.Context, teacherID, contactID uuid.UUID, limit int) ([]string, error)
+	// UpdateZaloMapping binds the contact to one Zalo friend; both columns are
+	// written together. ErrNotFound when the contact is missing, deleted, or
+	// another teacher's.
+	UpdateZaloMapping(ctx context.Context, teacherID, contactID uuid.UUID, zaloUserID, zaloName string) error
+	// ClearZaloMapping nulls both mapping columns. Clearing an unmapped
+	// contact succeeds; a missing contact is still ErrNotFound.
+	ClearZaloMapping(ctx context.Context, teacherID, contactID uuid.UUID) error
 }
 
 type gormRepository struct {
@@ -141,11 +149,41 @@ func (r *gormRepository) ListStudentNames(ctx context.Context, teacherID, contac
 	return names, err
 }
 
-// translateError maps the uq_contacts_phone partial unique index violation
-// onto ErrDuplicatePhone so callers stay driver-agnostic.
-func translateError(err error) error {
-	if errors.Is(err, gorm.ErrDuplicatedKey) {
-		return ErrDuplicatePhone
+func (r *gormRepository) UpdateZaloMapping(ctx context.Context, teacherID, contactID uuid.UUID, zaloUserID, zaloName string) error {
+	return r.setZaloMapping(ctx, teacherID, contactID, &zaloUserID, &zaloName)
+}
+
+func (r *gormRepository) ClearZaloMapping(ctx context.Context, teacherID, contactID uuid.UUID) error {
+	return r.setZaloMapping(ctx, teacherID, contactID, nil, nil)
+}
+
+// setZaloMapping writes both mapping columns in one tenant-scoped UPDATE;
+// RowsAffected 0 means the contact is missing, deleted, or another teacher's.
+func (r *gormRepository) setZaloMapping(ctx context.Context, teacherID, contactID uuid.UUID, zaloUserID, zaloName *string) error {
+	res := r.scoped(ctx, teacherID).
+		Model(&Contact{}).
+		Where("id = ?", contactID).
+		Updates(map[string]any{"zalo_user_id": zaloUserID, "zalo_name": zaloName})
+	if res.Error != nil {
+		return translateError(res.Error)
 	}
-	return err
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// translateError maps unique index violations onto domain errors so callers
+// stay driver-agnostic. Two unique indexes live on contacts, so the constraint
+// name decides which; the phone index stays the default because callers that
+// insert or save a contact can only trip that one.
+func translateError(err error) error {
+	if !errors.Is(err, gorm.ErrDuplicatedKey) {
+		return err
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.ConstraintName == "uq_contacts_zalo_user" {
+		return ErrDuplicateZaloMapping
+	}
+	return ErrDuplicatePhone
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/md5"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -317,6 +318,49 @@ func convertToString(v any) string {
 	default:
 		return fmt.Sprint(val)
 	}
+}
+
+// encryptPayload encrypts a JSON payload with the session's secret key via
+// AES-CBC. This is the request-body encryption every post-login API call uses;
+// the login flow itself derives its key differently (see encryptParams).
+func encryptPayload(sess *Session, payload map[string]any) (string, error) {
+	blob, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	key, err := base64.StdEncoding.DecodeString(sess.SecretKey)
+	if err != nil {
+		return "", fmt.Errorf("zalo_personal: decode secret key: %w", err)
+	}
+	return EncodeAESCBC(key, string(blob), false)
+}
+
+// decryptDataField decrypts an encrypted base64 data string from a Zalo API
+// response. The decrypted payload is itself a Response envelope
+// {"error_code":0, "data":...}, so this unwraps the inner envelope and returns
+// the raw data field.
+func decryptDataField(sess *Session, data string) ([]byte, error) {
+	key, err := base64.StdEncoding.DecodeString(sess.SecretKey)
+	if err != nil {
+		return nil, fmt.Errorf("zalo_personal: decode secret key: %w", err)
+	}
+	unescaped, err := url.PathUnescape(data)
+	if err != nil {
+		return nil, err
+	}
+	plain, err := DecodeAESCBC(key, unescaped)
+	if err != nil {
+		return nil, err
+	}
+
+	var inner Response[json.RawMessage]
+	if err := json.Unmarshal(plain, &inner); err != nil {
+		return nil, fmt.Errorf("zalo_personal: unwrap inner response: %w", err)
+	}
+	if inner.ErrorCode != 0 {
+		return nil, fmt.Errorf("zalo_personal: inner error code %d: %s", inner.ErrorCode, inner.ErrorMessage)
+	}
+	return inner.Data, nil
 }
 
 // defaultHeaders returns standard Zalo API request headers.

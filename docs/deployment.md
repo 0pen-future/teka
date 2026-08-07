@@ -105,6 +105,12 @@ docker compose -f docker-compose.prod.yml up -d
 TLS termination is the proxy's job (Caddy, Traefik, nginx, or the platform's
 load balancer); neither image speaks TLS itself.
 
+Run exactly one API instance. Zalo notification runs are held in process
+memory (one run per teacher), and each boot marks any run left `running` as
+interrupted — so overlapping instances (scale-out, rolling deploys with two
+live containers) would flag each other's active runs and invite duplicate
+messages on resume. Deploy the API with stop-then-start, not start-then-stop.
+
 ## Environment and secrets
 
 The API is configured entirely through `API_*` environment variables:

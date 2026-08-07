@@ -10,6 +10,19 @@ export const zaloStatusSchema = z.object({
 
 export type ZaloStatus = z.infer<typeof zaloStatusSchema>;
 
+/**
+ * One row of `GET /me/zalo/friends` (`zalo.FriendResponse`). `display_name`
+ * is never empty — the server already falls back to the friend's profile name
+ * when the teacher gave them no alias.
+ */
+export const zaloFriendSchema = z.object({
+  user_id: z.string(),
+  display_name: z.string(),
+  avatar: z.string().optional(),
+});
+
+export type ZaloFriend = z.infer<typeof zaloFriendSchema>;
+
 /** `zalo.LinkStartResponse` — the id every later poll carries. */
 export const zaloLinkStartSchema = z.object({
   link_id: z.string(),

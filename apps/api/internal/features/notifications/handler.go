@@ -83,6 +83,66 @@ func (h *Handler) bulkSend(c *gin.Context) {
 	response.OK(c, http.StatusOK, result)
 }
 
+// runSnapshot reports the period's latest zalo_personal run and its progress.
+//
+//	@Summary		Poll a period's zalo_personal run
+//	@Description	Returns the period's latest background send run with progress counters derived from its rows. A period that never had a run answers active=false with a null run_id, not a 404 — poll this after a zalo_personal bulk send until active turns false.
+//	@Tags			notifications
+//	@Produce		json
+//	@Param			id	path		string	true	"billing period id"
+//	@Success		200	{object}	response.Envelope{data=RunSnapshotResponse}
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/billing-periods/{id}/notifications/run [get]
+func (h *Handler) runSnapshot(c *gin.Context) {
+	teacherID, ok := h.teacherID(c)
+	if !ok {
+		return
+	}
+	periodID, ok := pathID(c, "id", "billing period")
+	if !ok {
+		return
+	}
+	snapshot, err := h.svc.RunSnapshot(c.Request.Context(), teacherID, periodID)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, snapshot)
+}
+
+// resumeRun restarts the period's interrupted zalo_personal run.
+//
+//	@Summary		Resume an interrupted zalo_personal run
+//	@Description	Re-renders and re-sends only the run's still-queued rows; rows already sent keep their verdict. Only a run in the interrupted state qualifies. Rows that can no longer be auto-sent (mapping removed, balance since paid) are failed with a reason.
+//	@Tags			notifications
+//	@Produce		json
+//	@Param			id	path		string	true	"billing period id"
+//	@Success		200	{object}	response.Envelope{data=RunSnapshotResponse}
+//	@Failure		400	{object}	response.Envelope{error=response.ErrorBody}	"no linked Zalo account"
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}	"period has no run"
+//	@Failure		409	{object}	response.Envelope{error=response.ErrorBody}	"run is not interrupted, another run is sending, or the Zalo session expired"
+//	@Security		BearerAuth
+//	@Router			/billing-periods/{id}/notifications/run/resume [post]
+func (h *Handler) resumeRun(c *gin.Context) {
+	teacherID, ok := h.teacherID(c)
+	if !ok {
+		return
+	}
+	periodID, ok := pathID(c, "id", "billing period")
+	if !ok {
+		return
+	}
+	snapshot, err := h.svc.ResumeRun(c.Request.Context(), teacherID, periodID)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, snapshot)
+}
+
 // markSent marks the given notification ids as sent.
 //
 //	@Summary		Mark notifications sent

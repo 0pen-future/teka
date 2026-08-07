@@ -12,6 +12,9 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"teka/apps/api/internal/config"
+	"teka/apps/api/internal/database"
+	"teka/apps/api/internal/features/notifications"
+	"teka/apps/api/internal/features/statements"
 	"teka/apps/api/internal/features/zalo"
 	"teka/apps/api/internal/middleware"
 	"teka/apps/api/internal/shared/secrets"
@@ -33,7 +36,13 @@ func newTestRouterEnv(t *testing.T, env string) http.Handler {
 		Database:    config.DatabaseConfig{ConnMaxLifetime: time.Minute},
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return NewRouter(cfg, log, nil, newTestZaloService(t))
+	zaloSvc := newTestZaloService(t)
+	statementsSvc := statements.NewService(statements.NewRepository(nil), database.NewTxManager(nil),
+		cfg.Statements, statements.BankConfig{}, statements.NewQRBuilder())
+	notificationsSvc := notifications.NewService(notifications.NewRepository(nil), database.NewTxManager(nil),
+		statementsSvc, zaloSvc, log, cfg.Notifications)
+	t.Cleanup(notificationsSvc.Close)
+	return NewRouter(cfg, log, nil, zaloSvc, statementsSvc, notificationsSvc)
 }
 
 // newTestZaloService builds the one feature service NewRouter does not build

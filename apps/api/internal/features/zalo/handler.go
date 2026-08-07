@@ -123,6 +123,31 @@ func (h *Handler) linkStatus(c *gin.Context) {
 	response.OK(c, http.StatusOK, newLinkStatusResponse(snap))
 }
 
+// friends lists the linked account's Zalo friends for the contact picker.
+//
+//	@Summary		List Zalo friends
+//	@Description	Fetches the linked account's friend list live from Zalo for the contact-mapping picker. The chosen friend is stored via PUT /contacts/{id}/zalo-mapping; nothing is persisted here. 404 when no account is linked, 409 when the stored session no longer works.
+//	@Tags			zalo
+//	@Produce		json
+//	@Success		200	{object}	response.Envelope{data=[]FriendResponse}
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}	"no linked account"
+//	@Failure		409	{object}	response.Envelope{error=response.ErrorBody}	"session expired"
+//	@Security		BearerAuth
+//	@Router			/me/zalo/friends [get]
+func (h *Handler) friends(c *gin.Context) {
+	teacherID, ok := h.teacherID(c)
+	if !ok {
+		return
+	}
+	list, err := h.svc.ListFriends(c.Request.Context(), teacherID)
+	if err != nil {
+		response.Err(c, linkError(err))
+		return
+	}
+	response.OK(c, http.StatusOK, newFriendResponses(list))
+}
+
 // unlink detaches the caller's Zalo account.
 //
 //	@Summary		Unlink the Zalo account

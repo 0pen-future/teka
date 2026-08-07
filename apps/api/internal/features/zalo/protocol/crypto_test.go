@@ -80,6 +80,27 @@ func TestDecodeAESCBC_InvalidBase64(t *testing.T) {
 	}
 }
 
+// Ciphertext arrives from Zalo's servers; a truncated or corrupted response
+// must come back as an error, never reach CryptBlocks' input-not-full-blocks
+// panic — the paced sender runs this outside any HTTP recovery middleware.
+func TestDecodeAESCBC_TruncatedCiphertext(t *testing.T) {
+	key := []byte("0123456789ABCDEF")
+
+	encoded, err := EncodeAESCBC(key, "secret data spanning blocks", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	truncated := base64.StdEncoding.EncodeToString(raw[:len(raw)-3])
+	if _, err := DecodeAESCBC(key, truncated); err == nil {
+		t.Fatal("expected error for ciphertext that is not a block multiple")
+	}
+}
+
 func TestDecodeAESCBC_WrongKey(t *testing.T) {
 	key1 := []byte("0123456789ABCDEF")
 	key2 := []byte("FEDCBA9876543210")

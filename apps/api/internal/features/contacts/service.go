@@ -100,6 +100,39 @@ func (s *Service) Delete(ctx context.Context, teacherID, contactID uuid.UUID) er
 	return translate(s.repo.SoftDelete(ctx, teacherID, contactID))
 }
 
+// UpdateZaloMapping binds the contact to the Zalo friend the teacher picked
+// and returns the updated row. Values are stored trimmed: the id is compared
+// byte-for-byte when the sender resolves a contact, and the required binding
+// tag cannot see that a padded value is really blank.
+func (s *Service) UpdateZaloMapping(ctx context.Context, teacherID, contactID uuid.UUID, req ZaloMappingRequest) (*Row, error) {
+	req.ZaloUserID = strings.TrimSpace(req.ZaloUserID)
+	req.ZaloName = strings.TrimSpace(req.ZaloName)
+	fields := map[string]string{}
+	if req.ZaloUserID == "" {
+		fields["zalo_user_id"] = "must not be blank"
+	}
+	if req.ZaloName == "" {
+		fields["zalo_name"] = "must not be blank"
+	}
+	if len(fields) > 0 {
+		return nil, apperror.Invalid("validation failed", fields)
+	}
+	if err := s.repo.UpdateZaloMapping(ctx, teacherID, contactID, req.ZaloUserID, req.ZaloName); err != nil {
+		return nil, translate(err)
+	}
+	row, err := s.repo.GetByID(ctx, teacherID, contactID)
+	if err != nil {
+		return nil, translate(err)
+	}
+	return row, nil
+}
+
+// ClearZaloMapping detaches the contact from its Zalo friend. Clearing an
+// unmapped contact succeeds — the caller's intent is already true.
+func (s *Service) ClearZaloMapping(ctx context.Context, teacherID, contactID uuid.UUID) error {
+	return translate(s.repo.ClearZaloMapping(ctx, teacherID, contactID))
+}
+
 // blockingDetail renders "3 student(s): An, Bình, Chi" with an "and N more"
 // tail when the list is truncated.
 func blockingDetail(total int64, names []string) string {
@@ -120,6 +153,10 @@ func translate(err error) error {
 		return apperror.NotFound("contact")
 	case errors.Is(err, ErrDuplicatePhone):
 		appErr := apperror.Conflict(ErrDuplicatePhone.Error())
+		appErr.Err = err
+		return appErr
+	case errors.Is(err, ErrDuplicateZaloMapping):
+		appErr := apperror.Conflict(ErrDuplicateZaloMapping.Error())
 		appErr.Err = err
 		return appErr
 	default:

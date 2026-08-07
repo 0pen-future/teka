@@ -19,6 +19,24 @@ import (
 // protocol.LoginWithCredentials is the production value; tests inject a fake.
 type ReloginFunc func(ctx context.Context, sess *protocol.Session, cred protocol.Credentials) error
 
+// SendFunc sends a text DM over an established session and returns the message
+// id Zalo assigned. protocol.SendMessage is the production value.
+type SendFunc func(ctx context.Context, sess *protocol.Session, toUID, text string) (string, error)
+
+// FriendsFunc lists the account's Zalo friends over an established session.
+// protocol.FetchFriends is the production value.
+type FriendsFunc func(ctx context.Context, sess *protocol.Session) ([]protocol.FriendInfo, error)
+
+// Friend is one entry of the teacher's Zalo friend list, as the contact-mapping
+// picker consumes it. It mirrors protocol.FriendInfo so nothing outside this
+// package has to import the protocol.
+type Friend struct {
+	UserID      string
+	DisplayName string
+	ZaloName    string
+	Avatar      string
+}
+
 // AccountStatus is everything the API may tell a teacher about their link. It
 // deliberately has no field that could carry credential material.
 type AccountStatus struct {
@@ -40,6 +58,8 @@ type AccountStatus struct {
 type ServiceOptions struct {
 	Login   LoginFunc
 	Relogin ReloginFunc
+	Send    SendFunc
+	Friends FriendsFunc
 	Logger  *slog.Logger
 	Link    LinkOptions
 }
@@ -53,6 +73,8 @@ type Service struct {
 	cache   *SessionCache
 	links   *LinkManager
 	relogin ReloginFunc
+	send    SendFunc
+	friends FriendsFunc
 	log     *slog.Logger
 
 	// The health probe is optional and owned here rather than by the caller, so
@@ -74,12 +96,20 @@ func NewService(repo Repository, cipher *secrets.Cipher, opts ServiceOptions) *S
 	if opts.Relogin == nil {
 		opts.Relogin = protocol.LoginWithCredentials
 	}
+	if opts.Send == nil {
+		opts.Send = protocol.SendMessage
+	}
+	if opts.Friends == nil {
+		opts.Friends = protocol.FetchFriends
+	}
 
 	svc := &Service{
 		repo:    repo,
 		cipher:  cipher,
 		cache:   NewSessionCache(),
 		relogin: opts.Relogin,
+		send:    opts.Send,
+		friends: opts.Friends,
 		log:     opts.Logger,
 	}
 	svc.links = NewLinkManager(opts.Login, svc.persistLink, opts.Logger, opts.Link)
@@ -192,6 +222,63 @@ func (s *Service) Unlink(ctx context.Context, teacherID uuid.UUID) error {
 		return nil
 	}
 	return err
+}
+
+// SendDM sends a text message as the teacher to one Zalo user and returns the
+// message id Zalo assigned. The session comes from sessionFor, so a missing
+// link is ErrNotLinked and dead credentials are ErrLinkExpired before any send
+// is attempted. One send failure is acted on by name: Zalo's not-logged-in
+// code means the cached session died since it was restored — the only path
+// that ever sees it, since a cache hit skips the relogin — so the account is
+// expired the same way a rejected relogin would have. Every other failure is
+// returned as-is; the protocol cannot tell what it means for the link.
+func (s *Service) SendDM(ctx context.Context, teacherID uuid.UUID, toUID, text string) (string, error) {
+	sess, err := s.sessionFor(ctx, teacherID)
+	if err != nil {
+		return "", err
+	}
+	msgID, err := s.send(ctx, sess, toUID, text)
+	if err != nil {
+		return "", s.expireIfLoggedOut(ctx, teacherID, "send", err)
+	}
+	return msgID, nil
+}
+
+// expireIfLoggedOut turns Zalo's not-logged-in code into ErrLinkExpired and
+// records the expiry; any other error passes through untouched. Only calls made
+// over a cached session can see this code — a fresh relogin already failed
+// inside sessionFor — so it always means the cached session died since it was
+// restored.
+func (s *Service) expireIfLoggedOut(ctx context.Context, teacherID uuid.UUID, op string, err error) error {
+	var apiErr *protocol.APIError
+	if errors.As(err, &apiErr) && apiErr.Code == protocol.ErrCodeNotLoggedIn {
+		s.log.Warn("zalo: "+op+" rejected as not logged in", "teacher_id", teacherID)
+		s.expire(ctx, teacherID)
+		return ErrLinkExpired
+	}
+	return err
+}
+
+// ListFriends lists the teacher's Zalo friends for the contact-mapping picker.
+func (s *Service) ListFriends(ctx context.Context, teacherID uuid.UUID) ([]Friend, error) {
+	sess, err := s.sessionFor(ctx, teacherID)
+	if err != nil {
+		return nil, err
+	}
+	infos, err := s.friends(ctx, sess)
+	if err != nil {
+		return nil, s.expireIfLoggedOut(ctx, teacherID, "friends fetch", err)
+	}
+	friends := make([]Friend, len(infos))
+	for i, f := range infos {
+		friends[i] = Friend{
+			UserID:      f.UserID,
+			DisplayName: f.DisplayName,
+			ZaloName:    f.ZaloName,
+			Avatar:      f.Avatar,
+		}
+	}
+	return friends, nil
 }
 
 // LinkedTeachers lists the teachers whose account is currently healthy. The

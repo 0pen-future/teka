@@ -1,6 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getZaloLinkStatus, getZaloStatus, startZaloLink, unlinkZalo } from "../api/zalo-api";
+import {
+  getZaloFriends,
+  getZaloLinkStatus,
+  getZaloStatus,
+  startZaloLink,
+  unlinkZalo,
+} from "../api/zalo-api";
 import { isTerminalLinkState } from "../schemas/zalo-schemas";
 
 /** How often an in-flight attempt is polled while the modal is open. */
@@ -13,9 +19,17 @@ export const ZALO_POLL_INTERVAL_MS = 1500;
  */
 export const ZALO_MAX_POLL_ERRORS = 3;
 
+/**
+ * How long a fetched friend list is served from cache. Every fetch is a live
+ * call from the teacher's personal Zalo account, so opening and closing the
+ * picker repeatedly must not fire a burst of requests at Zalo.
+ */
+export const ZALO_FRIENDS_STALE_MS = 60_000;
+
 export const zaloKeys = {
   all: ["zalo"] as const,
   status: () => [...zaloKeys.all, "status"] as const,
+  friends: () => [...zaloKeys.all, "friends"] as const,
   link: (linkId: string) => [...zaloKeys.all, "link", linkId] as const,
 };
 
@@ -23,6 +37,16 @@ export function useZaloStatus() {
   return useQuery({
     queryKey: zaloKeys.status(),
     queryFn: getZaloStatus,
+  });
+}
+
+/** Friend list for the mapping picker. Fetches only while the picker is open. */
+export function useZaloFriends(enabled: boolean) {
+  return useQuery({
+    queryKey: zaloKeys.friends(),
+    queryFn: getZaloFriends,
+    enabled,
+    staleTime: ZALO_FRIENDS_STALE_MS,
   });
 }
 

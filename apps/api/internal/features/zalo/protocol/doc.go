@@ -5,10 +5,12 @@
 // wire format without notice — when that happens this package breaks and has to
 // be re-ported. Keep it small for exactly that reason.
 //
-// Scope is authentication only: QR link (LoginQR) and cookie re-login
+// Scope: authentication — QR link (LoginQR) and cookie re-login
 // (LoginWithCredentials), plus the Session and Credentials values that carry
-// state between them. Messaging, contacts, groups, media, and the WebSocket
-// listener are deliberately absent.
+// state between them; the friend list (FetchFriends); text DMs (SendMessage);
+// phone-to-account lookup (FindUser); and single friend requests
+// (SendFriendRequest). Groups, media, and the WebSocket listener are
+// deliberately absent.
 //
 // The package is quarantined: it imports nothing from the rest of Teka, so it
 // can be deleted or swapped wholesale. Credentials produced here are full

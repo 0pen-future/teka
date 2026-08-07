@@ -45,6 +45,11 @@ func DecodeAESCBC(key []byte, data string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("zalo_personal crypto: base64 decode: %w", err)
 	}
+	// Server-controlled input: CryptBlocks panics on partial blocks, so a
+	// truncated response must be rejected here rather than crash the caller.
+	if len(ciphertext) == 0 || len(ciphertext)%aes.BlockSize != 0 {
+		return nil, fmt.Errorf("zalo_personal crypto: ciphertext length %d is not a block multiple", len(ciphertext))
+	}
 
 	block, err := aes.NewCipher(key)
 	if err != nil {

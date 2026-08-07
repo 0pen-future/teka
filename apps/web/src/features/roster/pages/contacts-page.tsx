@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
-import { HvButton, HvCard } from "@/components/hv";
+import { HvBadge, HvButton, HvCard } from "@/components/hv";
 import { Input } from "@/components/ui/input";
 import { formatPhoneLocal } from "@/lib/utils";
 
@@ -66,6 +66,11 @@ export function ContactsPage() {
                   {contact.full_name}
                 </p>
                 <p className="text-[13px] text-ink-400">{formatPhoneLocal(contact.phone)}</p>
+                {contact.zalo_name ? (
+                  <HvBadge variant="success" size="sm" dot className="mt-1">
+                    {contact.zalo_name}
+                  </HvBadge>
+                ) : null}
               </div>
               <span className="text-[13px] text-ink-400">{contact.student_count} học sinh</span>
             </HvCard>

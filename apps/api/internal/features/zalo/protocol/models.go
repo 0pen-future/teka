@@ -89,6 +89,16 @@ type KeepaliveSettings struct {
 	KeepaliveDuration uint `json:"keepalive_duration"`
 }
 
+// FriendInfo is one entry of the friend list, decoded down to what the
+// contact-mapping picker shows. DisplayName is the name the account holder
+// gave the friend; ZaloName is the friend's own profile name.
+type FriendInfo struct {
+	UserID      string `json:"userId"`
+	DisplayName string `json:"displayName"`
+	ZaloName    string `json:"zaloName,omitempty"`
+	Avatar      string `json:"avatar,omitempty"`
+}
+
 // --- Zalo API response types ---
 
 // Response is the generic Zalo API response envelope.

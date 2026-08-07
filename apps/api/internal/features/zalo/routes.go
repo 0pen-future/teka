@@ -11,6 +11,7 @@ func RegisterRoutes(rg *gin.RouterGroup, h *Handler, requireAuth gin.HandlerFunc
 	g := rg.Group("/me/zalo", requireAuth)
 	g.GET("", h.status)
 	g.DELETE("", h.unlink)
+	g.GET("/friends", h.friends)
 	g.POST("/link/start", h.startLink)
 	g.GET("/link/status", h.linkStatus)
 }

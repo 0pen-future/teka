@@ -648,6 +648,149 @@ func TestVerifyAccountIgnoresTheCacheAndLogsInAgain(t *testing.T) {
 	require.Equal(t, 1, calls)
 }
 
+// storeLinkedAccount stores a decryptable linked account and returns its
+// teacher id, which is all the send/friends paths need to reach a session.
+func storeLinkedAccount(t *testing.T, repo *fakeRepo) uuid.UUID {
+	t.Helper()
+	teacherID := uuid.New()
+	repo.accounts[teacherID] = &Account{
+		TeacherID:            teacherID,
+		EncryptedCredentials: sealCredentials(t, protocol.Credentials{IMEI: "imei", UserAgent: "ua"}),
+		Status:               StatusLinked,
+		ConsentVersion:       testConsentVersion,
+	}
+	return teacherID
+}
+
+func TestSendDMSendsThroughTheTeachersSessionAndReturnsTheMessageID(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	teacherID := storeLinkedAccount(t, repo)
+
+	var gotSess *protocol.Session
+	var gotUID, gotText string
+	send := func(_ context.Context, sess *protocol.Session, toUID, text string) (string, error) {
+		gotSess, gotUID, gotText = sess, toUID, text
+		return "msg-991", nil
+	}
+
+	svc := newTestService(t, repo, ServiceOptions{Relogin: (&reloginSpy{}).relogin, Send: send})
+
+	msgID, err := svc.SendDM(context.Background(), teacherID, "friend-uid", "Học phí tháng 8")
+	require.NoError(t, err)
+	require.Equal(t, "msg-991", msgID)
+	require.Equal(t, "friend-uid", gotUID)
+	require.Equal(t, "Học phí tháng 8", gotText)
+
+	cached, ok := svc.cache.Get(teacherID)
+	require.True(t, ok)
+	require.Same(t, cached, gotSess, "the send must ride the session sessionFor restored")
+}
+
+func TestSendDMReportsExpiredWhenZaloRejectsTheStoredCredentials(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	teacherID := storeLinkedAccount(t, repo)
+
+	sendCalls := 0
+	send := func(_ context.Context, _ *protocol.Session, _, _ string) (string, error) {
+		sendCalls++
+		return "", nil
+	}
+	spy := &reloginSpy{err: errors.New("session rejected")}
+	svc := newTestService(t, repo, ServiceOptions{Relogin: spy.relogin, Send: send})
+
+	_, err := svc.SendDM(context.Background(), teacherID, "friend-uid", "hi")
+	require.ErrorIs(t, err, ErrLinkExpired)
+	require.Zero(t, sendCalls, "a dead session must not be handed to the send path")
+
+	_, _, statuses := repo.counts()
+	require.Equal(t, []string{StatusExpired}, statuses)
+}
+
+func TestSendDMForAnUnlinkedTeacherReportsNotLinked(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t, newFakeRepo(), ServiceOptions{Relogin: (&reloginSpy{}).relogin})
+
+	_, err := svc.SendDM(context.Background(), uuid.New(), "friend-uid", "hi")
+	require.ErrorIs(t, err, ErrNotLinked)
+}
+
+func TestSendDMPropagatesASendFailure(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	teacherID := storeLinkedAccount(t, repo)
+
+	sendErr := errors.New("zalo_personal: send error code 216")
+	send := func(_ context.Context, _ *protocol.Session, _, _ string) (string, error) {
+		return "", sendErr
+	}
+	svc := newTestService(t, repo, ServiceOptions{Relogin: (&reloginSpy{}).relogin, Send: send})
+
+	_, err := svc.SendDM(context.Background(), teacherID, "friend-uid", "hi")
+	require.ErrorIs(t, err, sendErr)
+}
+
+func TestSendDMTreatsANotLoggedInRejectionAsExpired(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	teacherID := storeLinkedAccount(t, repo)
+
+	// Zalo answers a send from a session it no longer honours with inner error
+	// code -3; only the send path ever sees it, because the cached session
+	// skips the relogin that would otherwise catch the dead credentials.
+	send := func(_ context.Context, _ *protocol.Session, _, _ string) (string, error) {
+		return "", &protocol.APIError{Op: "send", Code: protocol.ErrCodeNotLoggedIn}
+	}
+	svc := newTestService(t, repo, ServiceOptions{Relogin: (&reloginSpy{}).relogin, Send: send})
+
+	// First send restores and caches a session; the -3 must evict it and
+	// expire the account rather than surfacing as a generic send failure.
+	_, err := svc.SendDM(context.Background(), teacherID, "friend-uid", "hi")
+	require.ErrorIs(t, err, ErrLinkExpired)
+
+	_, ok := svc.cache.Get(teacherID)
+	require.False(t, ok, "a session Zalo rejected must not stay cached")
+	_, _, statuses := repo.counts()
+	require.Equal(t, []string{StatusExpired}, statuses)
+}
+
+func TestListFriendsReturnsTheTeachersFriends(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	teacherID := storeLinkedAccount(t, repo)
+
+	friends := func(_ context.Context, _ *protocol.Session) ([]protocol.FriendInfo, error) {
+		return []protocol.FriendInfo{
+			{UserID: "111", DisplayName: "Mẹ bé An", ZaloName: "Lan Nguyễn", Avatar: "https://a/1.jpg"},
+			{UserID: "222", DisplayName: "Bố bé Bình"},
+		}, nil
+	}
+	svc := newTestService(t, repo, ServiceOptions{Relogin: (&reloginSpy{}).relogin, Friends: friends})
+
+	got, err := svc.ListFriends(context.Background(), teacherID)
+	require.NoError(t, err)
+	require.Equal(t, []Friend{
+		{UserID: "111", DisplayName: "Mẹ bé An", ZaloName: "Lan Nguyễn", Avatar: "https://a/1.jpg"},
+		{UserID: "222", DisplayName: "Bố bé Bình"},
+	}, got)
+}
+
+func TestListFriendsForAnUnlinkedTeacherReportsNotLinked(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t, newFakeRepo(), ServiceOptions{Relogin: (&reloginSpy{}).relogin})
+
+	_, err := svc.ListFriends(context.Background(), uuid.New())
+	require.ErrorIs(t, err, ErrNotLinked)
+}
+
 func TestLinkedTeachersListsOnlyLiveAccounts(t *testing.T) {
 	t.Parallel()
 
