@@ -17,14 +17,14 @@ import (
 )
 
 // domainTables is every table docs/schema_design.sql creates, plus the
-// refresh_tokens table from 000002. schema_migrations belongs to
-// golang-migrate itself.
+// refresh_tokens table from 000002 and zalo_accounts from 000004.
+// schema_migrations belongs to golang-migrate itself.
 var domainTables = []string{
 	"user_accounts", "teachers", "contacts", "students", "classes",
 	"class_schedules", "enrollments", "class_sessions", "attendance_records",
 	"billing_periods", "invoices", "invoice_lines", "invoice_adjustments",
 	"payments", "payment_allocations", "statements", "notifications",
-	"refresh_tokens",
+	"refresh_tokens", "zalo_accounts",
 }
 
 var views = []string{"v_contact_balance", "v_unbilled_attendance"}
