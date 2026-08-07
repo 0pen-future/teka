@@ -24,9 +24,7 @@ describe("ProfilePage", () => {
   it("prefills tên hiển thị from the session and shows the account phone read-only", async () => {
     renderProfile();
 
-    expect(await screen.findByLabelText("Tên hiển thị")).toHaveValue(
-      testPrimaryTeacher.full_name,
-    );
+    expect(await screen.findByLabelText("Tên hiển thị")).toHaveValue(testPrimaryTeacher.full_name);
     const phoneInput = screen.getByLabelText("Số điện thoại (Zalo)");
     expect(phoneInput).toHaveValue(formatPhoneLocal(testPrimaryTeacher.phone));
     expect(phoneInput).toHaveAttribute("readonly");

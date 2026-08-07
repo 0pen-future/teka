@@ -10,6 +10,7 @@ import { useClassesList, useStudentsList } from "@/features/roster";
 import { useApiFormErrors } from "@/lib/forms/use-api-form-errors";
 import { formatPhoneLocal, nameInitial } from "@/lib/utils";
 
+import { ZaloConnectCard } from "../components/zalo-connect-card";
 import { useUpdateMe } from "../hooks/use-profile";
 import { profileFormSchema, type ProfileFormInput } from "../schemas/profile-schemas";
 
@@ -23,8 +24,8 @@ const DATA_PROMISES = [
  * "Hồ sơ giáo viên" (prototype `isProfile` screen). Only "Tên hiển thị"
  * persists (PUT /me); môn dạy and bank fields have no server columns yet, so
  * they render empty, feed the live Zalo-footer preview, and reset on reload.
- * Zalo linking and the .xlsx export are later scope — the controls match the
- * prototype but only announce that via toast.
+ * The .xlsx export is later scope — its control matches the prototype but only
+ * announces that via toast.
  */
 export function ProfilePage() {
   const user = useAuthStore((state) => state.user);
@@ -131,25 +132,7 @@ export function ProfilePage() {
             <FieldError errors={[errors.root]} />
           </HvCard>
 
-          <HvCard>
-            <p className="font-display text-[17px] font-bold text-ink-900">Kết nối Zalo</p>
-            <p className="mt-0.5 text-[12.5px] text-ink-500">
-              Đăng nhập bằng Zalo để gửi thông báo học phí hàng loạt từ chính tài khoản của bạn.
-            </p>
-            <button
-              type="button"
-              onClick={() => hvToast("Kết nối Zalo — tính năng đang phát triển")}
-              className="mt-3.5 flex w-full cursor-pointer items-center gap-3 rounded-[16px] bg-[#0068ff] px-4 py-3 text-[14.5px] font-extrabold text-white shadow-[0_5px_0_#0052cc] transition-transform active:translate-y-1 active:shadow-none"
-            >
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-[10px] bg-white text-[11px] font-black text-[#0068ff]">
-                Zalo
-              </span>
-              Đăng nhập với Zalo
-            </button>
-            <p className="mt-2.5 text-[12px] text-ink-400">
-              Chưa kết nối — thông báo học phí sẽ phải sao chép và gửi thủ công.
-            </p>
-          </HvCard>
+          <ZaloConnectCard />
 
           <HvCard>
             <p className="font-display text-[17px] font-bold text-ink-900">
@@ -194,7 +177,9 @@ export function ProfilePage() {
                 [Học phí {periodLabel}] {displayName}
                 {values.subject.trim() ? ` — ${values.subject.trim()}` : ""}
               </p>
-              {transferPreview ? <p className="opacity-85">Chuyển khoản: {transferPreview}</p> : null}
+              {transferPreview ? (
+                <p className="opacity-85">Chuyển khoản: {transferPreview}</p>
+              ) : null}
             </div>
             <p className="mt-2.5 text-[12px] opacity-75">
               Thay đổi hồ sơ áp dụng cho các lần gửi sau — tin đã gửi không đổi.
