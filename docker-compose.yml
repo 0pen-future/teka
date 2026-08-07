@@ -65,6 +65,9 @@ services:
       # fingerprint, never the key itself) — fine locally, never for prod.
       API_STATEMENTS_TOKEN_KEY: ${API_STATEMENTS_TOKEN_KEY:-}
       API_STATEMENTS_PUBLIC_BASE_URL: ${API_STATEMENTS_PUBLIC_BASE_URL:-http://localhost:5173}
+      # Same dev fallback. Unset means each restart generates a new key, so
+      # any Zalo account linked in a previous run stops decrypting.
+      API_ZALO_CRED_KEY: ${API_ZALO_CRED_KEY:-}
       # Optional VietQR transfer target; blank omits the QR from statements.
       API_BANK_CODE: ${API_BANK_CODE:-}
       API_BANK_ACCOUNT_NUMBER: ${API_BANK_ACCOUNT_NUMBER:-}

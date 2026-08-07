@@ -65,6 +65,7 @@ docker run --rm \
   -e API_ENV=production \
   -e API_DATABASE_URL="$API_DATABASE_URL" \
   -e API_JWT_SECRET="$API_JWT_SECRET" \
+  -e API_ZALO_CRED_KEY="$API_ZALO_CRED_KEY" \
   ghcr.io/OWNER/REPO/api:sha-<commit> migrate up
 ```
 
@@ -113,6 +114,7 @@ The API is configured entirely through `API_*` environment variables:
 | `API_ENV` | yes | `production` disables dev conveniences |
 | `API_DATABASE_URL` | yes | Postgres DSN; use `sslmode=require` against managed Postgres |
 | `API_JWT_SECRET` | yes | High-entropy secret; rotating it invalidates all sessions |
+| `API_ZALO_CRED_KEY` | yes | Encrypts linked Zalo session credentials; min 32 bytes, hex or base64, generate with `openssl rand -base64 32`. Missing or too short is fatal on startup; rotating or losing it permanently orphans every already-linked account (every teacher must re-scan a QR code) — treat it as permanent, like `API_JWT_SECRET`. See [`.env.production.example`](../.env.production.example) |
 | `API_HTTP_PORT` | no | Defaults to 8080 |
 | `API_JWT_ACCESS_TTL` / `API_JWT_REFRESH_TTL` | no | Default 15m / 720h |
 | `API_LOG_LEVEL` | no | Use `info` in production |

@@ -27,6 +27,7 @@ services:
       # Config validation requires these even though migrate never serves.
       API_JWT_SECRET: ${API_JWT_SECRET:?}
       API_STATEMENTS_TOKEN_KEY: ${API_STATEMENTS_TOKEN_KEY:?}
+      API_ZALO_CRED_KEY: ${API_ZALO_CRED_KEY:?}
     restart: "no"
 
   api:
@@ -48,6 +49,9 @@ services:
       # Rotating this invalidates all parent statement links.
       API_STATEMENTS_TOKEN_KEY: ${API_STATEMENTS_TOKEN_KEY:?}
       API_STATEMENTS_PUBLIC_BASE_URL: ${API_STATEMENTS_PUBLIC_BASE_URL:-http://localhost:5173}
+      # Min 32 bytes, hex or base64. Generate: openssl rand -base64 32
+      # Rotating this forces every teacher to re-link their Zalo account.
+      API_ZALO_CRED_KEY: ${API_ZALO_CRED_KEY:?}
       # Optional VietQR transfer target; blank omits the QR from statements.
       API_BANK_CODE: ${API_BANK_CODE:-}
       API_BANK_ACCOUNT_NUMBER: ${API_BANK_ACCOUNT_NUMBER:-}
