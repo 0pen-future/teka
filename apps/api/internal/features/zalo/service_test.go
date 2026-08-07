@@ -154,6 +154,12 @@ func (r *reloginSpy) relogin(_ context.Context, sess *protocol.Session, cred pro
 		return r.err
 	}
 	sess.UID = "zalo-uid"
+	// A cookie login always yields the service map; the QR handshake never
+	// does. The spy mirrors that guarantee so tests can tell the two apart.
+	sess.LoginInfo = &protocol.LoginInfo{ZpwServiceMapV3: protocol.ZpwServiceMapV3{
+		Chat:    []string{"https://chat.example"},
+		Profile: []string{"https://profile.example"},
+	}}
 	return nil
 }
 
@@ -366,15 +372,18 @@ func TestStartLinkSealsTheCredentialsItPersistsAndCachesTheSession(t *testing.T)
 	t.Parallel()
 
 	cred := protocol.Credentials{IMEI: "fresh-imei-secret", UserAgent: "ua"}
+	var qrSess *protocol.Session
 	login := func(_ context.Context, sess *protocol.Session, cb protocol.QRCallbacks) (*protocol.Credentials, error) {
 		cb.OnQR([]byte("png"))
-		sess.UID = "zalo-uid"
+		sess.UID = "qr-session-uid"
 		sess.DisplayName = "Cô Lan"
+		qrSess = sess
 		return &cred, nil
 	}
 
 	repo := newFakeRepo()
-	svc := newTestService(t, repo, ServiceOptions{Login: login, Relogin: (&reloginSpy{}).relogin})
+	spy := &reloginSpy{}
+	svc := newTestService(t, repo, ServiceOptions{Login: login, Relogin: spy.relogin})
 	teacherID := uuid.New()
 
 	linkID, err := svc.StartLink(teacherID, testConsentVersion)
@@ -391,7 +400,7 @@ func TestStartLinkSealsTheCredentialsItPersistsAndCachesTheSession(t *testing.T)
 	require.NotNil(t, acc.DisplayName)
 	require.Equal(t, "Cô Lan", *acc.DisplayName)
 	require.NotNil(t, acc.ZaloUID)
-	require.Equal(t, "zalo-uid", *acc.ZaloUID)
+	require.Equal(t, "zalo-uid", *acc.ZaloUID, "the UID Zalo reports at credential login wins over the QR session's")
 	require.NotContains(t, string(acc.EncryptedCredentials), cred.IMEI, "credentials must never be stored in the clear")
 
 	plain, err := testCipher(t).Open(acc.EncryptedCredentials)
@@ -400,11 +409,52 @@ func TestStartLinkSealsTheCredentialsItPersistsAndCachesTheSession(t *testing.T)
 	require.NoError(t, json.Unmarshal(plain, &back))
 	require.Equal(t, cred, back)
 
-	_, cached := svc.cache.Get(teacherID)
+	// The QR handshake never fetches Zalo's service map, so the QR session
+	// cannot send messages or list friends. The cached session must be the one
+	// the credential login produced, never the bare QR session.
+	cachedSess, cached := svc.cache.Get(teacherID)
 	require.True(t, cached, "the session just created must be usable without a re-login")
+	require.NotSame(t, qrSess, cachedSess)
+	require.NotEmpty(t, protocol.ServiceURL(cachedSess, "profile"),
+		"a cached session without the service map cannot list friends or send")
+
+	calls, got := spy.snapshot()
+	require.Equal(t, 1, calls, "linking must prove the persisted credentials can log in")
+	require.Equal(t, cred, got)
 
 	upserts, _, _ := repo.counts()
 	require.Equal(t, 1, upserts)
+}
+
+func TestStartLinkFailsWhenTheStoredCredentialsCannotLogIn(t *testing.T) {
+	t.Parallel()
+
+	cred := protocol.Credentials{IMEI: "fresh-imei-secret", UserAgent: "ua"}
+	login := func(_ context.Context, sess *protocol.Session, cb protocol.QRCallbacks) (*protocol.Credentials, error) {
+		cb.OnQR([]byte("png"))
+		sess.UID = "zalo-uid"
+		return &cred, nil
+	}
+
+	repo := newFakeRepo()
+	spy := &reloginSpy{err: errors.New("zalo said no")}
+	svc := newTestService(t, repo, ServiceOptions{Login: login, Relogin: spy.relogin})
+	teacherID := uuid.New()
+
+	linkID, err := svc.StartLink(teacherID, testConsentVersion)
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		snap, err := svc.LinkStatus(teacherID, linkID)
+		return err == nil && snap.State == LinkStateError
+	}, 2*time.Second, 5*time.Millisecond)
+
+	// Credentials that cannot restore a session must not be stored: the teacher
+	// would see a linked account whose every send fails.
+	upserts, _, _ := repo.counts()
+	require.Zero(t, upserts)
+	_, cached := svc.cache.Get(teacherID)
+	require.False(t, cached)
 }
 
 func TestUnlinkCancelsAnAttemptStillInFlight(t *testing.T) {

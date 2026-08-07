@@ -61,8 +61,9 @@ type LoginFunc func(ctx context.Context, sess *protocol.Session, cb protocol.QRC
 // before the record flips to LinkStateLinked, so returning an error fails the
 // attempt rather than reporting a link that was never stored. It is called only
 // while the attempt is still the teacher's current one, and Cancel blocks until
-// it returns — so an unlink cannot interleave with the write, and this hook
-// should stay as short as a single store.
+// it returns — so an unlink cannot interleave with the write. The hook proves
+// the credentials with a login before storing them, so anything waiting on
+// Cancel may block for up to persistTimeout, not just a database write.
 type OnLinked func(ctx context.Context, teacherID uuid.UUID, consentVersion string, sess *protocol.Session, cred *protocol.Credentials) error
 
 // LinkOptions tunes attempt lifetimes. The zero value is the production
@@ -317,7 +318,8 @@ func (m *LinkManager) run(ctx context.Context, rec *linkRecord) {
 	})
 }
 
-// persistTimeout bounds the database write that follows a successful scan.
+// persistTimeout bounds the work that follows a successful scan: the login
+// that proves the credentials, then the database write that stores them.
 const persistTimeout = 10 * time.Second
 
 func (m *LinkManager) fail(rec *linkRecord, timedOut bool, msg string, err error) {

@@ -326,7 +326,17 @@ func TestZaloHTTPLinkLifecycleAgainstARealDatabase(t *testing.T) {
 	cipher, err := secrets.New(testCredKey)
 	require.NoError(t, err)
 	login := &scriptedQRLogin{qr: []byte("\x89PNG-not-a-real-image"), release: make(chan struct{})}
-	svc := zalo.NewService(zalo.NewRepository(db), cipher, zalo.ServiceOptions{Login: login.login})
+	// Linking proves the sealed credentials with a cookie login before it
+	// stores them; stub that login too or the test would call Zalo for real.
+	relogin := func(_ context.Context, sess *protocol.Session, _ protocol.Credentials) error {
+		sess.UID = "zalo-uid-1"
+		sess.LoginInfo = &protocol.LoginInfo{ZpwServiceMapV3: protocol.ZpwServiceMapV3{
+			Chat:    []string{"https://chat.example"},
+			Profile: []string{"https://profile.example"},
+		}}
+		return nil
+	}
+	svc := zalo.NewService(zalo.NewRepository(db), cipher, zalo.ServiceOptions{Login: login.login, Relogin: relogin})
 	t.Cleanup(svc.Close)
 
 	gin.SetMode(gin.TestMode)

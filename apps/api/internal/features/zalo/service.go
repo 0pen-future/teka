@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -314,6 +315,17 @@ func (s *Service) persistLink(
 		return err
 	}
 
+	// The QR handshake proves the teacher approved the login, but the session
+	// it leaves behind never fetched Zalo's service map — only a cookie login
+	// does — so it cannot send messages or list friends. Log in from the
+	// credentials now: it proves the blob being persisted actually works, and
+	// yields the session worth caching.
+	live := protocol.NewSession()
+	if err := s.relogin(ctx, live, *cred); err != nil {
+		return fmt.Errorf("zalo: the linked credentials were rejected on their first login: %w", err)
+	}
+	live.DisplayName = sess.DisplayName
+
 	now := time.Now()
 	acc := &Account{
 		TeacherID:            teacherID,
@@ -324,8 +336,13 @@ func (s *Service) persistLink(
 		LinkedAt:             now,
 		LastVerifiedAt:       &now,
 	}
-	if sess.UID != "" {
-		uid := sess.UID
+	// The credential login learns the account's UID from Zalo itself; the QR
+	// session's UID is the fallback for the odd flow that only set it there.
+	uid := live.UID
+	if uid == "" {
+		uid = sess.UID
+	}
+	if uid != "" {
 		acc.ZaloUID = &uid
 	}
 	if sess.DisplayName != "" {
@@ -336,6 +353,6 @@ func (s *Service) persistLink(
 	if err := s.repo.Upsert(ctx, acc); err != nil {
 		return err
 	}
-	s.cache.Put(teacherID, sess)
+	s.cache.Put(teacherID, live)
 	return nil
 }
