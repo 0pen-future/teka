@@ -1123,6 +1123,38 @@ definitions:
     - full_name
     - timezone
     type: object
+  zalo.LinkStartRequest:
+    properties:
+      consent_version:
+        type: string
+    type: object
+  zalo.LinkStartResponse:
+    properties:
+      link_id:
+        type: string
+    type: object
+  zalo.LinkStatusResponse:
+    properties:
+      display_name:
+        type: string
+      error_message:
+        type: string
+      qr_png:
+        type: string
+      state:
+        type: string
+    type: object
+  zalo.StatusResponse:
+    properties:
+      display_name:
+        type: string
+      linked:
+        type: boolean
+      linked_at:
+        type: string
+      status:
+        type: string
+    type: object
 info:
   contact: {}
   description: Backend API for Teka. Every response uses the {success, data, meta,
@@ -3318,6 +3350,156 @@ paths:
       summary: Update current teacher profile
       tags:
       - teachers
+  /me/zalo:
+    delete:
+      description: 'Cancels any attempt in flight, drops the live session, and removes
+        the stored credentials. Idempotent: answers 204 whether or not an account
+        was linked.'
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Unlink the Zalo account
+      tags:
+      - zalo
+    get:
+      description: Reads zalo_accounts only — no request reaches Zalo. Having no linked
+        account is a normal answer ({"linked":false}), not a 404. status is "linked"
+        or "expired"; the background health check keeps it fresh, so a session that
+        died since its last use can already read expired.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/zalo.StatusResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Zalo link status
+      tags:
+      - zalo
+  /me/zalo/link/start:
+    post:
+      consumes:
+      - application/json
+      description: Returns immediately with a link id; the QR login runs in the background
+        and is followed with GET /me/zalo/link/status. consent_version is the consent
+        text the teacher acknowledged — without one no attempt starts. Starting a
+        second attempt supersedes the caller's previous one.
+      parameters:
+      - description: acknowledged consent version
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/zalo.LinkStartRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/zalo.LinkStartResponse'
+              type: object
+        "400":
+          description: consent version missing
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Start linking a Zalo account
+      tags:
+      - zalo
+  /me/zalo/link/status:
+    get:
+      description: state is one of pending, qr_ready, scanned, confirmed, linked,
+        expired, error. qr_png is base64 PNG, present while the code is waiting to
+        be scanned. An id belonging to another teacher, or one that never existed,
+        is a 404 either way.
+      parameters:
+      - description: link attempt id
+        in: query
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/zalo.LinkStatusResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Poll a link attempt
+      tags:
+      - zalo
   /notifications/mark-sent:
     post:
       consumes:

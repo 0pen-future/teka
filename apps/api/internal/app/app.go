@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"teka/apps/api/internal/config"
+	"teka/apps/api/internal/features/zalo"
 	"teka/apps/api/internal/server"
 )
 
@@ -21,6 +22,9 @@ func RunServer(ctx context.Context) error {
 	}
 	defer c.Close()
 
-	router := server.NewRouter(c.Cfg, c.Log, c.DB)
+	// The health probe runs for as long as the server does; c.Close stops it.
+	c.Zalo.StartHealthProbe(ctx, zalo.ProbeOptions{})
+
+	router := server.NewRouter(c.Cfg, c.Log, c.DB, c.Zalo)
 	return server.Run(ctx, c.Cfg, c.Log, router)
 }

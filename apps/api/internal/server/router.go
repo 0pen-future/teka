@@ -26,14 +26,17 @@ import (
 	"teka/apps/api/internal/features/statements"
 	"teka/apps/api/internal/features/students"
 	"teka/apps/api/internal/features/teachers"
+	"teka/apps/api/internal/features/zalo"
 	"teka/apps/api/internal/middleware"
 	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/shared/response"
 )
 
 // NewRouter builds the Gin engine: middleware stack, health probes, and the
-// versioned API group that feature modules mount into.
-func NewRouter(cfg *config.Config, log *slog.Logger, db *gorm.DB) *gin.Engine {
+// versioned API group that feature modules mount into. Every feature is
+// constructed from db here except zalo, which is passed in already built
+// because it owns background goroutines the app lifecycle has to stop.
+func NewRouter(cfg *config.Config, log *slog.Logger, db *gorm.DB, zaloSvc *zalo.Service) *gin.Engine {
 	if cfg.IsProduction() {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -58,7 +61,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *gorm.DB) *gin.Engine {
 	}
 
 	v1 := r.Group("/api/v1")
-	statementsSvc := registerFeatures(v1, cfg, db)
+	statementsSvc := registerFeatures(v1, cfg, db, zaloSvc)
 
 	// Deliberately outside v1 and outside requireAuth: the only unauthenticated
 	// route in the product that serves child/money data.
@@ -76,7 +79,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *gorm.DB) *gin.Engine {
 // decoupled from bootstrap. Returns the statements service so NewRouter can
 // mount its public, unauthenticated route group separately, on the root
 // engine rather than under v1.
-func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB) *statements.Service {
+func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zaloSvc *zalo.Service) *statements.Service {
 	requireAuth := middleware.RequireAuth(cfg.JWT)
 	txMgr := database.NewTxManager(db)
 
@@ -152,6 +155,8 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB) *sta
 
 	notificationsSvc := notifications.NewService(notifications.NewRepository(db), txMgr, statementsSvc, cfg.Notifications)
 	notifications.RegisterRoutes(v1, notifications.NewHandler(notificationsSvc), requireAuth)
+
+	zalo.RegisterRoutes(v1, zalo.NewHandler(zaloSvc), requireAuth)
 
 	return statementsSvc
 }
