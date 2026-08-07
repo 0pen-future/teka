@@ -29,6 +29,11 @@ const (
 	// statement links are signed with. 32 bytes (256 bits) matches
 	// deriveToken's HMAC-SHA256.
 	minStatementTokenKeyLen = 32
+
+	// minZaloCredKeyLen is the minimum decoded key length, in bytes, Zalo
+	// session credentials are encrypted at rest with. 32 bytes (256 bits)
+	// matches the AES-256-GCM envelope in internal/shared/secrets.
+	minZaloCredKeyLen = 32
 )
 
 // HTTPConfig configures the HTTP listener.
@@ -98,6 +103,23 @@ type NotificationsConfig struct {
 	MaxMessageLen int `env:"NOTIFICATIONS_MAX_MESSAGE_LEN" envDefault:"1000"`
 }
 
+// ZaloConfig configures the encryption of linked Zalo session credentials.
+// Those credentials are full account-takeover material, so they are only ever
+// stored sealed under this key.
+type ZaloConfig struct {
+	// CredKeyRaw is the configured secret exactly as read from the
+	// environment — hex or base64, either is accepted (see decodeTokenKey).
+	// Never logged; use CredKey for the decoded bytes.
+	CredKeyRaw string `env:"ZALO_CRED_KEY"`
+
+	// CredKey is the decoded secret, resolved by validateZalo. Not an
+	// environment field itself (env:"-"): production requires CredKeyRaw to
+	// decode to at least minZaloCredKeyLen bytes, because a changed key makes
+	// every already-linked account undecryptable. Every other environment
+	// falls back to a random per-process key when it does not.
+	CredKey []byte `env:"-"`
+}
+
 // Config is the full application configuration, populated from API_-prefixed
 // environment variables.
 type Config struct {
@@ -111,6 +133,7 @@ type Config struct {
 	Statements    StatementsConfig
 	Bank          BankConfig
 	Notifications NotificationsConfig
+	Zalo          ZaloConfig
 }
 
 // Load reads configuration from the environment (prefix API_). In development
@@ -161,7 +184,10 @@ func (c *Config) validate() error {
 			return fmt.Errorf("API_CORS_ORIGINS entry %q must start with http:// or https://", origin)
 		}
 	}
-	return c.validateStatements()
+	if err := c.validateStatements(); err != nil {
+		return err
+	}
+	return c.validateZalo()
 }
 
 // decodeTokenKey resolves a configured secret into raw key bytes. It tries
@@ -211,6 +237,35 @@ func (c *Config) validateStatements() error {
 	c.Statements.TokenKey = fallback
 	fingerprint := sha256.Sum256(fallback)
 	slog.Warn("insecure development statement token key generated",
+		"fingerprint", hex.EncodeToString(fingerprint[:])[:8])
+	return nil
+}
+
+// validateZalo resolves Zalo.CredKey from CredKeyRaw. In production a missing
+// or short key is fatal: it is the only key that can decrypt already-stored
+// session credentials, so starting under a substitute would silently orphan
+// every teacher's linked account and force them all to re-scan a QR code.
+// Outside production, a missing or short key falls back to a random 32-byte
+// key generated once for this process — links made in a previous run stop
+// working, which is the accepted development trade-off. Only a fingerprint
+// (never the key) is logged.
+func (c *Config) validateZalo() error {
+	key := decodeTokenKey(c.Zalo.CredKeyRaw)
+	if len(key) >= minZaloCredKeyLen {
+		c.Zalo.CredKey = key
+		return nil
+	}
+	if c.IsProduction() {
+		return fmt.Errorf("API_ZALO_CRED_KEY must be at least %d bytes", minZaloCredKeyLen)
+	}
+
+	fallback := make([]byte, minZaloCredKeyLen)
+	if _, err := rand.Read(fallback); err != nil {
+		return fmt.Errorf("generate development zalo credential key: %w", err)
+	}
+	c.Zalo.CredKey = fallback
+	fingerprint := sha256.Sum256(fallback)
+	slog.Warn("insecure development zalo credential key generated; previously linked accounts will not decrypt",
 		"fingerprint", hex.EncodeToString(fingerprint[:])[:8])
 	return nil
 }
