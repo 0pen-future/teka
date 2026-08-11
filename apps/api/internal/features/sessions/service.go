@@ -76,7 +76,7 @@ func NewService(repo Repository, classes ClassSource, teachers TeacherSource, en
 // rows first. Generation is idempotent — rerunning the same range only ever
 // fills gaps, never duplicates or moves an existing row (cancelled sessions
 // keep occupying their date and are never regenerated over).
-func (s *Service) ListRange(ctx context.Context, teacherID, classID uuid.UUID, from, to time.Time) ([]Detail, error) {
+func (s *Service) ListRange(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]Detail, error) {
 	if to.Before(from) {
 		return nil, apperror.Invalid("validation failed", map[string]string{"to": "must not be before from"})
 	}
@@ -85,29 +85,29 @@ func (s *Service) ListRange(ctx context.Context, teacherID, classID uuid.UUID, f
 			map[string]string{"to": fmt.Sprintf("range must not exceed %d days", maxRangeDays)})
 	}
 
-	// Sessions has not been re-keyed to center scope yet; this shim carries
-	// only the teacher id, so classes' scoped queries still resolve tenancy by
-	// teacher until sessions gets its own sweep.
-	class, err := s.classes.Get(ctx, authctx.Scope{TeacherID: teacherID}, classID)
+	class, err := s.classes.Get(ctx, sc, classID)
 	if err != nil {
 		return nil, err
 	}
-	schedules, err := s.classes.ListEffectiveSchedules(ctx, authctx.Scope{TeacherID: teacherID}, classID, from, to)
+	schedules, err := s.classes.ListEffectiveSchedules(ctx, sc, classID, from, to)
 	if err != nil {
 		return nil, err
 	}
-	loc, err := s.teacherLocation(ctx, teacherID)
+	// Generation must be viewer-independent — an owner generating a member's
+	// class sees the same dates the member would — so the calendar day comes
+	// from the class's own teacher, never the caller.
+	loc, err := s.teacherLocation(ctx, class.TeacherID)
 	if err != nil {
 		return nil, err
 	}
 
 	windows := make([]ScheduleWindow, len(schedules))
-	for i, sc := range schedules {
+	for i, sched := range schedules {
 		windows[i] = ScheduleWindow{
-			Weekday:       sc.Weekday,
-			StartTime:     string(sc.StartTime),
-			EffectiveFrom: sc.EffectiveFrom,
-			EffectiveTo:   sc.EffectiveTo,
+			Weekday:       sched.Weekday,
+			StartTime:     string(sched.StartTime),
+			EffectiveFrom: sched.EffectiveFrom,
+			EffectiveTo:   sched.EffectiveTo,
 		}
 	}
 
@@ -122,8 +122,14 @@ func (s *Service) ListRange(ctx context.Context, teacherID, classID uuid.UUID, f
 			startTime = &t
 		}
 		candidates = append(candidates, Session{
-			ID:          id.New(),
-			TeacherID:   teacherID,
+			ID: id.New(),
+			// Generated rows inherit the class's own anchors, not the
+			// caller's — an owner generating a member's class sessions must
+			// not silently reassign them to the owner, matching
+			// classes.AddSchedule's rule for a schedule added to a member's
+			// class.
+			TeacherID:   class.TeacherID,
+			CenterID:    class.CenterID,
 			ClassID:     classID,
 			SessionDate: sessionDate,
 			StartTime:   startTime,
@@ -134,13 +140,13 @@ func (s *Service) ListRange(ctx context.Context, teacherID, classID uuid.UUID, f
 		return nil, apperror.Internal(err)
 	}
 
-	listed, err := s.repo.ListByClassAndRange(ctx, teacherID, classID, from, to)
+	listed, err := s.repo.ListByClassAndRange(ctx, sc, classID, from, to)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
 	details := make([]Detail, 0, len(listed))
 	for i := range listed {
-		detail, err := s.toDetail(ctx, teacherID, &listed[i])
+		detail, err := s.toDetail(ctx, sc, &listed[i])
 		if err != nil {
 			return nil, err
 		}
@@ -156,8 +162,8 @@ func (s *Service) ListRange(ctx context.Context, teacherID, classID uuid.UUID, f
 // over. It delegates to ListUnconfirmedInWindow with before=today, so it and
 // plan 04's period-closing gate (which calls ListUnconfirmedInWindow
 // directly with its own before cutoff) share one predicate by construction.
-func (s *Service) ListPending(ctx context.Context, teacherID uuid.UUID, from, to *time.Time, limit int) (*PendingResponse, error) {
-	loc, err := s.teacherLocation(ctx, teacherID)
+func (s *Service) ListPending(ctx context.Context, sc authctx.Scope, from, to *time.Time, limit int) (*PendingResponse, error) {
+	loc, err := s.teacherLocation(ctx, sc.TeacherID)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +171,7 @@ func (s *Service) ListPending(ctx context.Context, teacherID uuid.UUID, from, to
 	// first; dateOnly then re-expresses that Y/M/D at UTC midnight, matching
 	// how session_date is stored (see generator.go's dateOnly doc).
 	today := dateOnly(s.now().In(loc), time.UTC)
-	return s.ListUnconfirmedInWindow(ctx, teacherID, from, to, today, limit)
+	return s.ListUnconfirmedInWindow(ctx, sc, from, to, today, limit)
 }
 
 // ListUnconfirmedInWindow is ListPending's predicate with an explicit
@@ -179,7 +185,7 @@ func (s *Service) ListPending(ctx context.Context, teacherID uuid.UUID, from, to
 // writing its own session query. limit defaults to defaultPendingLimit when
 // unset (zero or negative) and is capped at maxPendingLimit; total always
 // reflects the unlimited count.
-func (s *Service) ListUnconfirmedInWindow(ctx context.Context, teacherID uuid.UUID, from, to *time.Time, before time.Time, limit int) (*PendingResponse, error) {
+func (s *Service) ListUnconfirmedInWindow(ctx context.Context, sc authctx.Scope, from, to *time.Time, before time.Time, limit int) (*PendingResponse, error) {
 	switch {
 	case limit <= 0:
 		limit = defaultPendingLimit
@@ -187,7 +193,7 @@ func (s *Service) ListUnconfirmedInWindow(ctx context.Context, teacherID uuid.UU
 		limit = maxPendingLimit
 	}
 
-	rows, total, err := s.repo.ListPending(ctx, teacherID, before, from, to, limit)
+	rows, total, err := s.repo.ListPending(ctx, sc, before, from, to, limit)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
@@ -201,17 +207,17 @@ func (s *Service) ListUnconfirmedInWindow(ctx context.Context, teacherID uuid.UU
 // CreateAdHoc adds a single session outside any schedule — a make-up class
 // the teacher places by hand. A date already occupied by another (non-deleted)
 // session for the class returns 409, not a silent no-op.
-func (s *Service) CreateAdHoc(ctx context.Context, teacherID, classID uuid.UUID, req CreateSessionRequest) (*Detail, error) {
+func (s *Service) CreateAdHoc(ctx context.Context, sc authctx.Scope, classID uuid.UUID, req CreateSessionRequest) (*Detail, error) {
 	sessionDate, err := parseDate("session_date", req.SessionDate)
 	if err != nil {
 		return nil, err
 	}
 
 	// The composite FK would refuse a foreign class_id anyway; checking first
-	// turns that refusal into a clean 404 instead of a constraint-violation 500.
-	// See the ListRange shim comment above re: sessions not yet being
-	// center-scoped.
-	if _, err := s.classes.Get(ctx, authctx.Scope{TeacherID: teacherID}, classID); err != nil {
+	// turns that refusal into a clean 404 instead of a constraint-violation
+	// 500.
+	class, err := s.classes.Get(ctx, sc, classID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -221,8 +227,13 @@ func (s *Service) CreateAdHoc(ctx context.Context, teacherID, classID uuid.UUID,
 		startTime = &t
 	}
 	session := &Session{
-		ID:          id.New(),
-		TeacherID:   teacherID,
+		ID: id.New(),
+		// An ad-hoc session inherits the class's own anchors, not the
+		// caller's — an owner adding a make-up session to a member's class
+		// must not silently reassign it to the owner. Same rule ListRange's
+		// generation follows.
+		TeacherID:   class.TeacherID,
+		CenterID:    class.CenterID,
 		ClassID:     classID,
 		SessionDate: sessionDate,
 		StartTime:   startTime,
@@ -231,20 +242,20 @@ func (s *Service) CreateAdHoc(ctx context.Context, teacherID, classID uuid.UUID,
 	if err := s.repo.Create(ctx, session); err != nil {
 		return nil, translate(err)
 	}
-	row, err := s.repo.GetByID(ctx, teacherID, session.ID)
+	row, err := s.repo.GetByID(ctx, sc, session.ID)
 	if err != nil {
 		return nil, translate(err)
 	}
-	return s.toDetail(ctx, teacherID, row)
+	return s.toDetail(ctx, sc, row)
 }
 
 // Get returns one session with its class name and roster preview.
-func (s *Service) Get(ctx context.Context, teacherID, sessionID uuid.UUID) (*Detail, error) {
-	row, err := s.repo.GetByID(ctx, teacherID, sessionID)
+func (s *Service) Get(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*Detail, error) {
+	row, err := s.repo.GetByID(ctx, sc, sessionID)
 	if err != nil {
 		return nil, translate(err)
 	}
-	return s.toDetail(ctx, teacherID, row)
+	return s.toDetail(ctx, sc, row)
 }
 
 // GetByID returns one bare session, without the class name and roster
@@ -252,8 +263,8 @@ func (s *Service) Get(ctx context.Context, teacherID, sessionID uuid.UUID) (*Det
 // through a narrow consumer interface (e.g. attendance's SessionStore),
 // which resolve their own related data instead of paying for
 // toDetail's roster query on every call.
-func (s *Service) GetByID(ctx context.Context, teacherID, sessionID uuid.UUID) (*Session, error) {
-	row, err := s.repo.GetByID(ctx, teacherID, sessionID)
+func (s *Service) GetByID(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*Session, error) {
+	row, err := s.repo.GetByID(ctx, sc, sessionID)
 	if err != nil {
 		return nil, translate(err)
 	}
@@ -265,8 +276,8 @@ func (s *Service) GetByID(ctx context.Context, teacherID, sessionID uuid.UUID) (
 // contract; runs against database.FromContext(ctx, ...) so a caller invoking
 // this from inside its own WithinTx block shares that same transaction,
 // committing session status and attendance records atomically.
-func (s *Service) MarkHeldAndConfirmed(ctx context.Context, teacherID, sessionID uuid.UUID, at time.Time) error {
-	return translate(s.repo.MarkHeldAndConfirmed(ctx, teacherID, sessionID, at))
+func (s *Service) MarkHeldAndConfirmed(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID, at time.Time) error {
+	return translate(s.repo.MarkHeldAndConfirmed(ctx, sc, sessionID, at))
 }
 
 // Cancel marks a session cancelled with a reason — the line parents see on
@@ -274,22 +285,22 @@ func (s *Service) MarkHeldAndConfirmed(ctx context.Context, teacherID, sessionID
 // confirmed: the schema's CHECK constraint backs this up, but the service
 // check exists to produce a clear message rather than a constraint-violation
 // 500.
-func (s *Service) Cancel(ctx context.Context, teacherID, sessionID uuid.UUID, reason string) (*Detail, error) {
+func (s *Service) Cancel(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID, reason string) (*Detail, error) {
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		return nil, reasonRequired()
 	}
-	row, err := s.repo.GetByID(ctx, teacherID, sessionID)
+	row, err := s.repo.GetByID(ctx, sc, sessionID)
 	if err != nil {
 		return nil, translate(err)
 	}
 	if row.AttendanceConfirmedAt != nil {
 		return nil, attendanceConfirmedConflict("cancel")
 	}
-	if err := s.repo.UpdateStatus(ctx, teacherID, sessionID, StatusCancelled, &reason); err != nil {
+	if err := s.repo.UpdateStatus(ctx, sc, sessionID, StatusCancelled, &reason); err != nil {
 		return nil, translate(err)
 	}
-	return s.Get(ctx, teacherID, sessionID)
+	return s.Get(ctx, sc, sessionID)
 }
 
 // Uncancel returns a cancelled session to planned and clears its reason. It
@@ -297,57 +308,54 @@ func (s *Service) Cancel(ctx context.Context, teacherID, sessionID uuid.UUID, re
 // would strip status back to planned while leaving any confirmed attendance in
 // place, producing a "planned but confirmed" row that billing (which counts
 // only held sessions) would silently drop.
-func (s *Service) Uncancel(ctx context.Context, teacherID, sessionID uuid.UUID) (*Detail, error) {
-	row, err := s.repo.GetByID(ctx, teacherID, sessionID)
+func (s *Service) Uncancel(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*Detail, error) {
+	row, err := s.repo.GetByID(ctx, sc, sessionID)
 	if err != nil {
 		return nil, translate(err)
 	}
 	if row.Status != StatusCancelled {
 		return nil, invalidTransition("un-cancel a session that is not cancelled")
 	}
-	if err := s.repo.UpdateStatus(ctx, teacherID, sessionID, StatusPlanned, nil); err != nil {
+	if err := s.repo.UpdateStatus(ctx, sc, sessionID, StatusPlanned, nil); err != nil {
 		return nil, translate(err)
 	}
-	return s.Get(ctx, teacherID, sessionID)
+	return s.Get(ctx, sc, sessionID)
 }
 
 // Hold marks a session held — the explicit action a teacher can take ahead of
 // attendance confirmation (phase 2) implicitly doing the same. A cancelled
 // session must be un-cancelled first: holding it directly would resurrect it
 // with its stale cancel reason still attached.
-func (s *Service) Hold(ctx context.Context, teacherID, sessionID uuid.UUID) (*Detail, error) {
-	row, err := s.repo.GetByID(ctx, teacherID, sessionID)
+func (s *Service) Hold(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*Detail, error) {
+	row, err := s.repo.GetByID(ctx, sc, sessionID)
 	if err != nil {
 		return nil, translate(err)
 	}
 	if row.Status == StatusCancelled {
 		return nil, invalidTransition("hold a cancelled session; un-cancel it first")
 	}
-	if err := s.repo.UpdateStatus(ctx, teacherID, sessionID, StatusHeld, nil); err != nil {
+	if err := s.repo.UpdateStatus(ctx, sc, sessionID, StatusHeld, nil); err != nil {
 		return nil, translate(err)
 	}
-	return s.Get(ctx, teacherID, sessionID)
+	return s.Get(ctx, sc, sessionID)
 }
 
 // Delete soft-deletes a session. Refuses (409) a session whose attendance is
 // already confirmed, for the same reason Cancel does.
-func (s *Service) Delete(ctx context.Context, teacherID, sessionID uuid.UUID) error {
-	row, err := s.repo.GetByID(ctx, teacherID, sessionID)
+func (s *Service) Delete(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) error {
+	row, err := s.repo.GetByID(ctx, sc, sessionID)
 	if err != nil {
 		return translate(err)
 	}
 	if row.AttendanceConfirmedAt != nil {
 		return attendanceConfirmedConflict("delete")
 	}
-	return translate(s.repo.SoftDelete(ctx, teacherID, sessionID))
+	return translate(s.repo.SoftDelete(ctx, sc, sessionID))
 }
 
 // toDetail enriches a joined row with the roster size active on its date.
-func (s *Service) toDetail(ctx context.Context, teacherID uuid.UUID, row *Row) (*Detail, error) {
-	// Sessions has not been re-keyed to center scope yet; this shim carries
-	// only the teacher id, so enrollments' scoped query still resolves tenancy
-	// by teacher until sessions gets its own sweep.
-	active, err := s.enrollments.ActiveOn(ctx, authctx.Scope{TeacherID: teacherID}, row.ClassID, row.SessionDate)
+func (s *Service) toDetail(ctx context.Context, sc authctx.Scope, row *Row) (*Detail, error) {
+	active, err := s.enrollments.ActiveOn(ctx, sc, row.ClassID, row.SessionDate)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}

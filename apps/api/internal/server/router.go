@@ -123,7 +123,7 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	// interfaces (ClassSource, TeacherSource, EnrollmentSource) rather than
 	// their repository types, so all three services must exist first.
 	sessionsSvc := sessions.NewService(sessions.NewRepository(db), classesSvc, teachersSvc, enrollmentsSvc)
-	sessions.RegisterRoutes(v1, sessions.NewHandler(sessionsSvc), requireAuth)
+	sessions.RegisterRoutes(v1, sessions.NewHandler(sessionsSvc), requireAuth, resolveScope)
 
 	// attendance consumes enrollments and sessions through consumer
 	// interfaces (RosterSource, SessionStore) rather than their repository

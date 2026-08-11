@@ -26,8 +26,8 @@ type RosterSource interface {
 // resolving one session, and transitioning it to held+confirmed inside the
 // caller's transaction. *sessions.Service satisfies this.
 type SessionStore interface {
-	GetByID(ctx context.Context, teacherID, sessionID uuid.UUID) (*sessions.Session, error)
-	MarkHeldAndConfirmed(ctx context.Context, teacherID, sessionID uuid.UUID, at time.Time) error
+	GetByID(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*sessions.Session, error)
+	MarkHeldAndConfirmed(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID, at time.Time) error
 }
 
 // ReconciliationEntry is one student's carried adjustment produced by a
@@ -177,7 +177,11 @@ func (s *Service) Confirm(ctx context.Context, teacherID, sessionID uuid.UUID, r
 		// Runs inside this same transaction via database.FromContext, so the
 		// session's held+confirmed transition commits atomically with the
 		// attendance rows above.
-		return s.sessions.MarkHeldAndConfirmed(ctx, teacherID, sessionID, now)
+		//
+		// Attendance has not been re-keyed to center scope yet; this shim
+		// carries only the teacher id, so sessions' scoped query still
+		// resolves tenancy by teacher until attendance gets its own sweep.
+		return s.sessions.MarkHeldAndConfirmed(ctx, authctx.Scope{TeacherID: teacherID}, sessionID, now)
 	})
 	if err != nil {
 		return nil, translateTxErr(err)
@@ -268,7 +272,10 @@ func (s *Service) buildResponse(ctx context.Context, teacherID uuid.UUID, sessio
 // from the real sessions.Service, or a raw sessions.ErrNotFound from a test
 // fake) into this package's 404 contract.
 func (s *Service) resolveSession(ctx context.Context, teacherID, sessionID uuid.UUID) (*sessions.Session, error) {
-	session, err := s.sessions.GetByID(ctx, teacherID, sessionID)
+	// Attendance has not been re-keyed to center scope yet; this shim carries
+	// only the teacher id, so sessions' scoped query still resolves tenancy
+	// by teacher until attendance gets its own sweep.
+	session, err := s.sessions.GetByID(ctx, authctx.Scope{TeacherID: teacherID}, sessionID)
 	if err != nil {
 		var appErr *apperror.AppError
 		if errors.As(err, &appErr) {

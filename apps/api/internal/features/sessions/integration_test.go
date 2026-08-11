@@ -49,14 +49,15 @@ func TestListRangeGeneratesAndIsIdempotent(t *testing.T) {
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-01-01")))
 	testutil.Schedule(t, db, class, 2, "18:00") // Tuesday
 
-	first, err := svc.ListRange(ctx, teacher.ID, class.ID, date("2026-01-01"), date("2026-01-31"))
+	first, err := svc.ListRange(ctx, sc, class.ID, date("2026-01-01"), date("2026-01-31"))
 	require.NoError(t, err)
 	require.Len(t, first, 4, "want 4 Tuesdays in January 2026")
 
-	second, err := svc.ListRange(ctx, teacher.ID, class.ID, date("2026-01-01"), date("2026-01-31"))
+	second, err := svc.ListRange(ctx, sc, class.ID, date("2026-01-01"), date("2026-01-31"))
 	require.NoError(t, err)
 	require.Len(t, second, len(first), "regenerating an overlapping range must not duplicate rows")
 
@@ -76,6 +77,7 @@ func TestConcurrentGenerationInsertsExactlyOneRowPerDate(t *testing.T) {
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-01-01")))
 	testutil.Schedule(t, db, class, 2, "18:00")
 
@@ -86,7 +88,7 @@ func TestConcurrentGenerationInsertsExactlyOneRowPerDate(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, err := svc.ListRange(ctx, teacher.ID, class.ID, date("2026-01-01"), date("2026-01-31"))
+			_, err := svc.ListRange(ctx, sc, class.ID, date("2026-01-01"), date("2026-01-31"))
 			errs[i] = err
 		}(i)
 	}
@@ -106,14 +108,15 @@ func TestSoftDeletedSessionIsRegeneratedNextCall(t *testing.T) {
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-01-01")))
 	testutil.Schedule(t, db, class, 2, "18:00")
 
-	rows, err := svc.ListRange(ctx, teacher.ID, class.ID, date("2026-01-01"), date("2026-01-31"))
+	rows, err := svc.ListRange(ctx, sc, class.ID, date("2026-01-01"), date("2026-01-31"))
 	require.NoError(t, err)
-	require.NoError(t, svc.Delete(ctx, teacher.ID, rows[0].ID))
+	require.NoError(t, svc.Delete(ctx, sc, rows[0].ID))
 
-	regenerated, err := svc.ListRange(ctx, teacher.ID, class.ID, date("2026-01-01"), date("2026-01-31"))
+	regenerated, err := svc.ListRange(ctx, sc, class.ID, date("2026-01-01"), date("2026-01-31"))
 	require.NoError(t, err)
 	require.Len(t, regenerated, len(rows), "a soft-deleted date must be regenerated with a fresh row")
 	require.NotEqual(t, rows[0].ID, regenerated[0].ID, "the regenerated row must be a new id, not the deleted one")
@@ -124,15 +127,16 @@ func TestCancelledSessionKeepsItsDateAndIsNotRegenerated(t *testing.T) {
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-01-01")))
 	testutil.Schedule(t, db, class, 2, "18:00")
 
-	rows, err := svc.ListRange(ctx, teacher.ID, class.ID, date("2026-01-01"), date("2026-01-31"))
+	rows, err := svc.ListRange(ctx, sc, class.ID, date("2026-01-01"), date("2026-01-31"))
 	require.NoError(t, err)
-	cancelled, err := svc.Cancel(ctx, teacher.ID, rows[0].ID, "nghỉ lễ")
+	cancelled, err := svc.Cancel(ctx, sc, rows[0].ID, "nghỉ lễ")
 	require.NoError(t, err)
 
-	regenerated, err := svc.ListRange(ctx, teacher.ID, class.ID, date("2026-01-01"), date("2026-01-31"))
+	regenerated, err := svc.ListRange(ctx, sc, class.ID, date("2026-01-01"), date("2026-01-31"))
 	require.NoError(t, err)
 	require.Len(t, regenerated, len(rows))
 	var found *sessions.Detail
@@ -151,9 +155,10 @@ func TestCancelAndDeleteRefuseWhenAttendanceConfirmed(t *testing.T) {
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-01-01")))
 	testutil.Schedule(t, db, class, 2, "18:00")
-	rows, err := svc.ListRange(ctx, teacher.ID, class.ID, date("2026-01-01"), date("2026-01-31"))
+	rows, err := svc.ListRange(ctx, sc, class.ID, date("2026-01-01"), date("2026-01-31"))
 	require.NoError(t, err)
 
 	// Simulate phase 2 confirming attendance via a direct SQL stamp, mirroring
@@ -164,10 +169,10 @@ func TestCancelAndDeleteRefuseWhenAttendanceConfirmed(t *testing.T) {
 		"UPDATE class_sessions SET status = 'held', attendance_confirmed_at = now() WHERE id = ?",
 		rows[0].ID).Error)
 
-	_, err = svc.Cancel(ctx, teacher.ID, rows[0].ID, "nghỉ lễ")
+	_, err = svc.Cancel(ctx, sc, rows[0].ID, "nghỉ lễ")
 	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
 
-	err = svc.Delete(ctx, teacher.ID, rows[0].ID)
+	err = svc.Delete(ctx, sc, rows[0].ID)
 	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
 }
 
@@ -176,18 +181,19 @@ func TestCreateAdHocConflictsWithExistingDate(t *testing.T) {
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-01-01")))
 	testutil.Schedule(t, db, class, 2, "18:00")
-	rows, err := svc.ListRange(ctx, teacher.ID, class.ID, date("2026-01-01"), date("2026-01-31"))
+	rows, err := svc.ListRange(ctx, sc, class.ID, date("2026-01-01"), date("2026-01-31"))
 	require.NoError(t, err)
 
-	_, err = svc.CreateAdHoc(ctx, teacher.ID, class.ID, sessions.CreateSessionRequest{
+	_, err = svc.CreateAdHoc(ctx, sc, class.ID, sessions.CreateSessionRequest{
 		SessionDate: rows[0].SessionDate.Format("2006-01-02"),
 	})
 	require.ErrorIs(t, err, sessions.ErrSessionExists)
 	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
 
-	created, err := svc.CreateAdHoc(ctx, teacher.ID, class.ID, sessions.CreateSessionRequest{
+	created, err := svc.CreateAdHoc(ctx, sc, class.ID, sessions.CreateSessionRequest{
 		SessionDate: "2026-01-15", StartTime: "10:00",
 	})
 	require.NoError(t, err)
@@ -201,15 +207,17 @@ func TestCrossTenantReadsAreNotFound(t *testing.T) {
 	ctx := context.Background()
 	teacherA, _ := testutil.Teacher(t, db)
 	teacherB, _ := testutil.Teacher(t, db)
+	scopeA := testutil.ScopeFor(t, db, teacherA.ID)
+	scopeB := testutil.ScopeFor(t, db, teacherB.ID)
 	class := testutil.Class(t, db, teacherA.ID, testutil.WithClassStartDate(date("2026-01-01")))
 	testutil.Schedule(t, db, class, 2, "18:00")
-	rows, err := svc.ListRange(ctx, teacherA.ID, class.ID, date("2026-01-01"), date("2026-01-31"))
+	rows, err := svc.ListRange(ctx, scopeA, class.ID, date("2026-01-01"), date("2026-01-31"))
 	require.NoError(t, err)
 
-	_, err = svc.Get(ctx, teacherB.ID, rows[0].ID)
+	_, err = svc.Get(ctx, scopeB, rows[0].ID)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
 
-	_, err = svc.ListRange(ctx, teacherB.ID, class.ID, date("2026-01-01"), date("2026-01-31"))
+	_, err = svc.ListRange(ctx, scopeB, class.ID, date("2026-01-01"), date("2026-01-31"))
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code, "teacher B's request against A's class must 404")
 }
 
@@ -218,13 +226,14 @@ func TestGenerationRespectsClassAndScheduleBoundaries(t *testing.T) {
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	classEnd := date("2026-01-20")
 	class := testutil.Class(t, db, teacher.ID,
 		testutil.WithClassStartDate(date("2026-01-06")))
 	require.NoError(t, db.Model(class).Update("end_date", classEnd).Error)
 	testutil.Schedule(t, db, class, 2, "18:00") // Tuesday, effective from class start
 
-	rows, err := svc.ListRange(ctx, teacher.ID, class.ID, date("2026-01-01"), date("2026-01-31"))
+	rows, err := svc.ListRange(ctx, sc, class.ID, date("2026-01-01"), date("2026-01-31"))
 	require.NoError(t, err)
 	for _, r := range rows {
 		require.False(t, r.SessionDate.Before(class.StartDate), "no session before class start_date")
@@ -255,6 +264,7 @@ func TestListPendingIncludesPastPlannedAndHeldExcludesOthers(t *testing.T) {
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2020-01-01")))
 
 	loc, err := time.LoadLocation(teachers.DefaultTimezone)
@@ -270,10 +280,10 @@ func TestListPendingIncludesPastPlannedAndHeldExcludesOthers(t *testing.T) {
 	pastCancelled := testutil.Session(t, db, teacher.ID, class.ID, yesterday.AddDate(0, 0, -3),
 		testutil.WithSessionStatus(sessions.StatusCancelled))
 	toDelete := testutil.Session(t, db, teacher.ID, class.ID, yesterday.AddDate(0, 0, -4))
-	require.NoError(t, svc.Delete(ctx, teacher.ID, toDelete.ID))
+	require.NoError(t, svc.Delete(ctx, sc, toDelete.ID))
 	todaySession := testutil.Session(t, db, teacher.ID, class.ID, today)
 
-	resp, err := svc.ListPending(ctx, teacher.ID, nil, nil, 50)
+	resp, err := svc.ListPending(ctx, sc, nil, nil, 50)
 	require.NoError(t, err)
 
 	require.ElementsMatch(t, []uuid.UUID{pastPlanned.ID, pastHeldUnconfirmed.ID}, pendingIDs(resp),
@@ -302,6 +312,7 @@ func TestListPendingRespectsTeacherTimezoneBoundary(t *testing.T) {
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	const tz = "Pacific/Kiritimati"
 	require.NoError(t, db.Exec("UPDATE teachers SET timezone = ? WHERE id = ?", tz, teacher.ID).Error)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2020-01-01")))
@@ -314,7 +325,7 @@ func TestListPendingRespectsTeacherTimezoneBoundary(t *testing.T) {
 	pending := testutil.Session(t, db, teacher.ID, class.ID, yesterday)
 	notYetPending := testutil.Session(t, db, teacher.ID, class.ID, today)
 
-	resp, err := svc.ListPending(ctx, teacher.ID, nil, nil, 50)
+	resp, err := svc.ListPending(ctx, sc, nil, nil, 50)
 	require.NoError(t, err)
 
 	ids := pendingIDs(resp)
@@ -327,6 +338,7 @@ func TestListPendingFromToFiltersInclusive(t *testing.T) {
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-01-01")))
 
 	s1 := testutil.Session(t, db, teacher.ID, class.ID, date("2026-01-10"))
@@ -335,7 +347,7 @@ func TestListPendingFromToFiltersInclusive(t *testing.T) {
 
 	from := date("2026-01-10")
 	to := date("2026-01-15")
-	resp, err := svc.ListPending(ctx, teacher.ID, &from, &to, 50)
+	resp, err := svc.ListPending(ctx, sc, &from, &to, 50)
 	require.NoError(t, err)
 
 	require.ElementsMatch(t, []uuid.UUID{s1.ID, s2.ID}, pendingIDs(resp), "from and to are both inclusive")
@@ -348,12 +360,13 @@ func TestListPendingIsTeacherScoped(t *testing.T) {
 	ctx := context.Background()
 	teacherA, _ := testutil.Teacher(t, db)
 	teacherB, _ := testutil.Teacher(t, db)
+	scopeA := testutil.ScopeFor(t, db, teacherA.ID)
 	classA := testutil.Class(t, db, teacherA.ID, testutil.WithClassStartDate(date("2026-01-01")))
 	classB := testutil.Class(t, db, teacherB.ID, testutil.WithClassStartDate(date("2026-01-01")))
 	sessA := testutil.Session(t, db, teacherA.ID, classA.ID, date("2026-01-10"))
 	sessB := testutil.Session(t, db, teacherB.ID, classB.ID, date("2026-01-10"))
 
-	resp, err := svc.ListPending(ctx, teacherA.ID, nil, nil, 50)
+	resp, err := svc.ListPending(ctx, scopeA, nil, nil, 50)
 	require.NoError(t, err)
 
 	require.Contains(t, pendingIDs(resp), sessA.ID)
@@ -365,12 +378,13 @@ func TestListPendingTotalCountsAllItemsRespectsLimit(t *testing.T) {
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-01-01")))
 	for i := 1; i <= 5; i++ {
 		testutil.Session(t, db, teacher.ID, class.ID, date(fmt.Sprintf("2026-01-%02d", i)))
 	}
 
-	resp, err := svc.ListPending(ctx, teacher.ID, nil, nil, 2)
+	resp, err := svc.ListPending(ctx, sc, nil, nil, 2)
 	require.NoError(t, err)
 	require.EqualValues(t, 5, resp.Total, "total must count every pending session regardless of limit")
 	require.Len(t, resp.Items, 2, "items must respect the limit")
@@ -381,6 +395,7 @@ func TestListPendingExpectedStudentCountReflectsActiveEnrollmentsOnSessionDate(t
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-01-01")))
 
 	contact1 := testutil.Contact(t, db, teacher.ID)
@@ -401,7 +416,7 @@ func TestListPendingExpectedStudentCountReflectsActiveEnrollmentsOnSessionDate(t
 
 	session := testutil.Session(t, db, teacher.ID, class.ID, sessionDate)
 
-	resp, err := svc.ListPending(ctx, teacher.ID, nil, nil, 50)
+	resp, err := svc.ListPending(ctx, sc, nil, nil, 50)
 	require.NoError(t, err)
 	require.Len(t, resp.Items, 1)
 	require.Equal(t, session.ID, resp.Items[0].SessionID)
@@ -433,11 +448,128 @@ func (c *sqlCounter) Trace(_ context.Context, _ time.Time, _ func() (string, int
 	c.mu.Unlock()
 }
 
+// An owner generates, reads, and manages a member's class sessions — center-
+// wide oversight, not per-teacher isolation. Generated and ad-hoc rows are
+// stamped with the member's own teacher and center, never the owner's — the
+// same rule AddSchedule follows for a schedule added to a member's class.
+func TestOwnerHasFullOversightOfMembersSessions(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, db)
+	member, _ := testutil.Teacher(t, db)
+	ownerCenter := testutil.ScopeFor(t, db, owner.ID).CenterID
+
+	testutil.JoinCenter(t, db, member.ID, ownerCenter)
+	ownerScope := testutil.ScopeFor(t, db, owner.ID)
+	memberScope := testutil.ScopeFor(t, db, member.ID)
+	require.Equal(t, ownerScope.CenterID, memberScope.CenterID, "member must have joined the owner's center")
+
+	class := testutil.Class(t, db, member.ID, testutil.WithClassStartDate(date("2026-01-01")))
+	testutil.Schedule(t, db, class, 2, "18:00") // Tuesday
+
+	rows, err := svc.ListRange(ctx, ownerScope, class.ID, date("2026-01-01"), date("2026-01-31"))
+	require.NoError(t, err, "owner must generate sessions for a member's class")
+	require.Len(t, rows, 4, "want 4 Tuesdays in January 2026")
+	for _, r := range rows {
+		require.Equal(t, member.ID, r.TeacherID, "generated rows must be stamped with the member's own teacher id")
+		require.Equal(t, ownerCenter, r.CenterID)
+	}
+
+	got, err := svc.Get(ctx, ownerScope, rows[0].ID)
+	require.NoError(t, err, "owner must read a member's session")
+	require.Equal(t, rows[0].ID, got.ID)
+
+	cancelled, err := svc.Cancel(ctx, ownerScope, rows[0].ID, "nghỉ lễ")
+	require.NoError(t, err, "owner must cancel a member's session")
+	require.Equal(t, sessions.StatusCancelled, cancelled.Status)
+
+	restored, err := svc.Uncancel(ctx, ownerScope, rows[0].ID)
+	require.NoError(t, err, "owner must restore a member's cancelled session")
+	require.Equal(t, sessions.StatusPlanned, restored.Status)
+
+	created, err := svc.CreateAdHoc(ctx, ownerScope, class.ID, sessions.CreateSessionRequest{
+		SessionDate: "2026-01-15",
+	})
+	require.NoError(t, err, "owner must add an ad-hoc session to a member's class")
+	require.Equal(t, member.ID, created.TeacherID, "ad-hoc session on a member's class must be stamped as the member's own")
+	require.Equal(t, ownerCenter, created.CenterID)
+}
+
+// Two non-owning teachers in the same center are still isolated from each
+// other: center scope grants the owner oversight, not peer-to-peer access.
+func TestPeersInSameCenterCannotSeeEachOthersSessions(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, db)
+	memberB, _ := testutil.Teacher(t, db)
+	memberC, _ := testutil.Teacher(t, db)
+	ownerCenter := testutil.ScopeFor(t, db, owner.ID).CenterID
+
+	testutil.JoinCenter(t, db, memberB.ID, ownerCenter)
+	testutil.JoinCenter(t, db, memberC.ID, ownerCenter)
+	scopeB := testutil.ScopeFor(t, db, memberB.ID)
+	scopeC := testutil.ScopeFor(t, db, memberC.ID)
+
+	classB := testutil.Class(t, db, memberB.ID, testutil.WithClassStartDate(date("2026-01-01")))
+	testutil.Schedule(t, db, classB, 2, "18:00")
+
+	rows, err := svc.ListRange(ctx, scopeB, classB.ID, date("2026-01-01"), date("2026-01-31"))
+	require.NoError(t, err)
+	require.NotEmpty(t, rows)
+
+	_, err = svc.Get(ctx, scopeC, rows[0].ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code, "a peer must not read another member's session")
+
+	_, err = svc.ListRange(ctx, scopeC, classB.ID, date("2026-01-01"), date("2026-01-31"))
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code, "a peer must not generate sessions for another member's class")
+}
+
+// A teacher from a different center is refused on every session operation
+// with 404, never 403 — a 403 would confirm the id exists in another center.
+func TestCrossCenterSessionsAreNotFound(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	teacherA, _ := testutil.Teacher(t, db)
+	teacherB, _ := testutil.Teacher(t, db)
+	scopeA := testutil.ScopeFor(t, db, teacherA.ID)
+	scopeB := testutil.ScopeFor(t, db, teacherB.ID)
+
+	class := testutil.Class(t, db, teacherA.ID, testutil.WithClassStartDate(date("2026-01-01")))
+	testutil.Schedule(t, db, class, 2, "18:00")
+	rows, err := svc.ListRange(ctx, scopeA, class.ID, date("2026-01-01"), date("2026-01-31"))
+	require.NoError(t, err)
+
+	_, err = svc.Get(ctx, scopeB, rows[0].ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+
+	_, err = svc.ListRange(ctx, scopeB, class.ID, date("2026-01-01"), date("2026-01-31"))
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code, "teacher B's request against A's class must 404")
+
+	_, err = svc.Cancel(ctx, scopeB, rows[0].ID, "nghỉ lễ")
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+
+	_, err = svc.Uncancel(ctx, scopeB, rows[0].ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+
+	_, err = svc.Hold(ctx, scopeB, rows[0].ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+
+	err = svc.Delete(ctx, scopeB, rows[0].ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+
+	_, err = svc.CreateAdHoc(ctx, scopeB, class.ID, sessions.CreateSessionRequest{SessionDate: "2026-01-15"})
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+}
+
 func TestListPendingIssuesBoundedQueryCount(t *testing.T) {
 	t.Parallel()
 	db := testutil.StartPostgres(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-01-01")))
 	for i := 1; i <= 3; i++ {
 		testutil.Session(t, db, teacher.ID, class.ID, date(fmt.Sprintf("2026-01-%02d", i)))
@@ -451,7 +583,7 @@ func TestListPendingIssuesBoundedQueryCount(t *testing.T) {
 	counter := &sqlCounter{}
 	repo := sessions.NewRepository(db.Session(&gorm.Session{Logger: counter}))
 	before := time.Now().AddDate(0, 0, 1)
-	_, total, err := repo.ListPending(ctx, teacher.ID, before, nil, nil, 50)
+	_, total, err := repo.ListPending(ctx, sc, before, nil, nil, 50)
 	require.NoError(t, err)
 	require.EqualValues(t, 3, total)
 	require.Equal(t, 2, counter.count,

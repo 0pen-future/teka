@@ -450,7 +450,10 @@ func seedSessionList(ctx context.Context, db *gorm.DB, log *slog.Logger, teacher
 	// avoid the unique (class_id, session_date) constraint.
 	classDates := make(map[uuid.UUID]map[string]bool, len(classIDs))
 	for _, classID := range classIDs {
-		rows, err := sessionsSvc.ListRange(ctx, teacherID, classID, from, to)
+		// Seeds have not been re-keyed to center scope yet; this shim carries
+		// only the teacher id, so sessions' scoped query still resolves
+		// tenancy by teacher until seeds gets its own sweep.
+		rows, err := sessionsSvc.ListRange(ctx, authctx.Scope{TeacherID: teacherID}, classID, from, to)
 		if err != nil {
 			return fmt.Errorf("seed: generate sessions for class %s: %w", classID, err)
 		}
@@ -538,7 +541,10 @@ func seedSessionList(ctx context.Context, db *gorm.DB, log *slog.Logger, teacher
 			}
 			candidate = todayMid
 		}
-		detail, err := sessionsSvc.CreateAdHoc(ctx, teacherID, classID, sessions.CreateSessionRequest{
+		// Seeds have not been re-keyed to center scope yet; this shim carries
+		// only the teacher id, so sessions' scoped query still resolves
+		// tenancy by teacher until seeds gets its own sweep.
+		detail, err := sessionsSvc.CreateAdHoc(ctx, authctx.Scope{TeacherID: teacherID}, classID, sessions.CreateSessionRequest{
 			SessionDate: candidate.Format("2006-01-02"),
 		})
 		if err != nil {

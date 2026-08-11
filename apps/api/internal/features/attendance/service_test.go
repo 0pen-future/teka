@@ -61,18 +61,18 @@ func (f *fakeSessionStore) addSession(teacherID, classID uuid.UUID, on time.Time
 	return sessionID
 }
 
-func (f *fakeSessionStore) GetByID(_ context.Context, teacherID, sessionID uuid.UUID) (*sessions.Session, error) {
+func (f *fakeSessionStore) GetByID(_ context.Context, sc authctx.Scope, sessionID uuid.UUID) (*sessions.Session, error) {
 	r, ok := f.rows[sessionID]
-	if !ok || r.TeacherID != teacherID {
+	if !ok || r.TeacherID != sc.TeacherID {
 		return nil, sessions.ErrNotFound
 	}
 	cp := r.Session
 	return &cp, nil
 }
 
-func (f *fakeSessionStore) MarkHeldAndConfirmed(_ context.Context, teacherID, sessionID uuid.UUID, at time.Time) error {
+func (f *fakeSessionStore) MarkHeldAndConfirmed(_ context.Context, sc authctx.Scope, sessionID uuid.UUID, at time.Time) error {
 	r, ok := f.rows[sessionID]
-	if !ok || r.TeacherID != teacherID {
+	if !ok || r.TeacherID != sc.TeacherID {
 		return sessions.ErrNotFound
 	}
 	r.Status = sessions.StatusHeld

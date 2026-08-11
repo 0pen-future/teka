@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"teka/apps/api/internal/database"
+	"teka/apps/api/internal/shared/authctx"
 )
 
 // Row is a session joined with the class name the responses display.
@@ -31,25 +32,25 @@ type Repository interface {
 	// index violation into ErrSessionExists so the caller sees a clean 409
 	// instead of a silently dropped insert.
 	Create(ctx context.Context, s *Session) error
-	ListByClassAndRange(ctx context.Context, teacherID, classID uuid.UUID, from, to time.Time) ([]Row, error)
-	GetByID(ctx context.Context, teacherID, id uuid.UUID) (*Row, error)
+	ListByClassAndRange(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]Row, error)
+	GetByID(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Row, error)
 	// UpdateStatus transitions a session's status and cancel_reason in one
 	// statement; a nil cancelReason clears the column. Every current caller
 	// supplies the full desired value, so there is no "leave untouched" case.
-	UpdateStatus(ctx context.Context, teacherID, id uuid.UUID, status string, cancelReason *string) error
-	SoftDelete(ctx context.Context, teacherID, id uuid.UUID) error
+	UpdateStatus(ctx context.Context, sc authctx.Scope, id uuid.UUID, status string, cancelReason *string) error
+	SoftDelete(ctx context.Context, sc authctx.Scope, id uuid.UUID) error
 	// MarkHeldAndConfirmed transitions a session to held and stamps
 	// attendance_confirmed_at in one statement — the transition attendance
 	// confirmation performs implicitly, so confirming attendance never
 	// requires a second button press.
-	MarkHeldAndConfirmed(ctx context.Context, teacherID, id uuid.UUID, at time.Time) error
+	MarkHeldAndConfirmed(ctx context.Context, sc authctx.Scope, id uuid.UUID, at time.Time) error
 	// ListPending returns sessions strictly before `before` that are still
 	// unconfirmed and planned or held (cancelled sessions never qualify),
 	// optionally bounded by [from, to] (both inclusive), newest first. total
 	// is the unlimited count; the returned rows respect limit. The expected
 	// student count comes from one grouped join over enrollments, never a
 	// per-row lookup — see pending.go.
-	ListPending(ctx context.Context, teacherID uuid.UUID, before time.Time, from, to *time.Time, limit int) ([]PendingRow, int64, error)
+	ListPending(ctx context.Context, sc authctx.Scope, before time.Time, from, to *time.Time, limit int) ([]PendingRow, int64, error)
 }
 
 type gormRepository struct {
@@ -61,18 +62,25 @@ func NewRepository(db *gorm.DB) Repository {
 	return &gormRepository{db: db}
 }
 
-// scoped returns a query bound to one tenant, qualified because list queries
-// join classes, which carries the same teacher_id column name.
-func (r *gormRepository) scoped(ctx context.Context, teacherID uuid.UUID) *gorm.DB {
-	return database.FromContext(ctx, r.db).Where("class_sessions.teacher_id = ?", teacherID)
+// scoped returns a session query bound to one center. An owner sees every
+// session in their center; a member sees only the rows they teach themselves.
+// Composite FKs stop cross-center writes; only this filter stops cross-tenant
+// reads. The center_id column is qualified because list queries join classes,
+// which carries the same column name.
+func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+	q := database.FromContext(ctx, r.db).Where("class_sessions.center_id = ?", sc.CenterID)
+	if !sc.IsOwner {
+		q = q.Where("class_sessions.teacher_id = ?", sc.TeacherID)
+	}
+	return q
 }
 
-// withClassName joins the display name onto a session query. The same-teacher
-// join condition keeps the composite-key discipline even though the FK
-// already guarantees it.
+// withClassName joins the display name onto a session query. Matching on
+// center_id (not teacher_id) keeps the composite-key discipline while still
+// letting an owner's read of a member's session resolve the class name.
 func withClassName(q *gorm.DB) *gorm.DB {
 	return q.
-		Joins("JOIN classes ON classes.id = class_sessions.class_id AND classes.teacher_id = class_sessions.teacher_id").
+		Joins("JOIN classes ON classes.id = class_sessions.class_id AND classes.center_id = class_sessions.center_id").
 		Select("class_sessions.*, classes.name AS class_name")
 }
 
@@ -101,9 +109,9 @@ func (r *gormRepository) Create(ctx context.Context, s *Session) error {
 	return err
 }
 
-func (r *gormRepository) ListByClassAndRange(ctx context.Context, teacherID, classID uuid.UUID, from, to time.Time) ([]Row, error) {
+func (r *gormRepository) ListByClassAndRange(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]Row, error) {
 	var rows []Row
-	err := withClassName(r.scoped(ctx, teacherID).Model(&Session{})).
+	err := withClassName(r.scoped(ctx, sc).Model(&Session{})).
 		Where("class_sessions.class_id = ?", classID).
 		Where("class_sessions.session_date BETWEEN ? AND ?", from, to).
 		Order("class_sessions.session_date").
@@ -111,9 +119,9 @@ func (r *gormRepository) ListByClassAndRange(ctx context.Context, teacherID, cla
 	return rows, err
 }
 
-func (r *gormRepository) GetByID(ctx context.Context, teacherID, id uuid.UUID) (*Row, error) {
+func (r *gormRepository) GetByID(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Row, error) {
 	var row Row
-	err := withClassName(r.scoped(ctx, teacherID).Model(&Session{})).
+	err := withClassName(r.scoped(ctx, sc).Model(&Session{})).
 		Where("class_sessions.id = ?", id).
 		Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -125,8 +133,8 @@ func (r *gormRepository) GetByID(ctx context.Context, teacherID, id uuid.UUID) (
 	return &row, nil
 }
 
-func (r *gormRepository) UpdateStatus(ctx context.Context, teacherID, id uuid.UUID, status string, cancelReason *string) error {
-	res := r.scoped(ctx, teacherID).
+func (r *gormRepository) UpdateStatus(ctx context.Context, sc authctx.Scope, id uuid.UUID, status string, cancelReason *string) error {
+	res := r.scoped(ctx, sc).
 		Model(&Session{}).
 		Where("class_sessions.id = ?", id).
 		Updates(map[string]any{"status": status, "cancel_reason": cancelReason})
@@ -139,8 +147,8 @@ func (r *gormRepository) UpdateStatus(ctx context.Context, teacherID, id uuid.UU
 	return nil
 }
 
-func (r *gormRepository) SoftDelete(ctx context.Context, teacherID, id uuid.UUID) error {
-	res := r.scoped(ctx, teacherID).Where("class_sessions.id = ?", id).Delete(&Session{})
+func (r *gormRepository) SoftDelete(ctx context.Context, sc authctx.Scope, id uuid.UUID) error {
+	res := r.scoped(ctx, sc).Where("class_sessions.id = ?", id).Delete(&Session{})
 	if res.Error != nil {
 		return res.Error
 	}
@@ -150,8 +158,8 @@ func (r *gormRepository) SoftDelete(ctx context.Context, teacherID, id uuid.UUID
 	return nil
 }
 
-func (r *gormRepository) MarkHeldAndConfirmed(ctx context.Context, teacherID, id uuid.UUID, at time.Time) error {
-	res := r.scoped(ctx, teacherID).
+func (r *gormRepository) MarkHeldAndConfirmed(ctx context.Context, sc authctx.Scope, id uuid.UUID, at time.Time) error {
+	res := r.scoped(ctx, sc).
 		Model(&Session{}).
 		Where("class_sessions.id = ?", id).
 		Updates(map[string]any{"status": StatusHeld, "attendance_confirmed_at": at})

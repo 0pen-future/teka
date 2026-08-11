@@ -513,7 +513,7 @@ func TestCloseBlockedSessionsAgreeWithPendingFeed(t *testing.T) {
 	var blocked *billing.ErrUnconfirmedSessions
 	require.ErrorAs(t, err, &blocked)
 
-	feed, err := sessionsSvc.ListPending(ctx, teacher.ID, &periodStart, &periodEnd, 1000)
+	feed, err := sessionsSvc.ListPending(ctx, testutil.ScopeFor(t, db, teacher.ID), &periodStart, &periodEnd, 1000)
 	require.NoError(t, err)
 
 	closeIDs := make(map[uuid.UUID]struct{}, len(blocked.Sessions))

@@ -11,6 +11,7 @@ import (
 	"teka/apps/api/internal/features/attendance"
 	"teka/apps/api/internal/features/sessions"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/shared/pagination"
 )
@@ -229,7 +230,7 @@ type fakePendingSource struct {
 	respond func(from, to *time.Time, before time.Time) (*sessions.PendingResponse, error)
 }
 
-func (f *fakePendingSource) ListUnconfirmedInWindow(_ context.Context, _ uuid.UUID, from, to *time.Time, before time.Time, _ int) (*sessions.PendingResponse, error) {
+func (f *fakePendingSource) ListUnconfirmedInWindow(_ context.Context, _ authctx.Scope, from, to *time.Time, before time.Time, _ int) (*sessions.PendingResponse, error) {
 	if f.respond == nil {
 		return &sessions.PendingResponse{}, nil
 	}

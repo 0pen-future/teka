@@ -10,6 +10,7 @@ import (
 
 	"teka/apps/api/internal/features/sessions"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 )
 
 // closeFeedLimit is the cap passed to PendingSource.ListUnconfirmedInWindow
@@ -27,7 +28,7 @@ const closeFeedLimit = 1000
 // AttendanceSource — so billing depends on sessions' public service
 // contract, never its repository or a session-scanning query of its own.
 type PendingSource interface {
-	ListUnconfirmedInWindow(ctx context.Context, teacherID uuid.UUID, from, to *time.Time, before time.Time, limit int) (*sessions.PendingResponse, error)
+	ListUnconfirmedInWindow(ctx context.Context, sc authctx.Scope, from, to *time.Time, before time.Time, limit int) (*sessions.PendingResponse, error)
 }
 
 // ErrUnconfirmedSessions is Close's blocking error (R4): the period has at
@@ -78,7 +79,10 @@ func blockingSessions(ctx context.Context, pending PendingSource, teacherID uuid
 	if today.Before(to) {
 		to = today
 	}
-	resp, err := pending.ListUnconfirmedInWindow(ctx, teacherID, &from, &to, today, closeFeedLimit)
+	// Billing has not been re-keyed to center scope yet; this shim carries
+	// only the teacher id, so sessions' scoped query still resolves tenancy
+	// by teacher until billing gets its own sweep.
+	resp, err := pending.ListUnconfirmedInWindow(ctx, authctx.Scope{TeacherID: teacherID}, &from, &to, today, closeFeedLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +104,10 @@ func futureUnconfirmedSessions(ctx context.Context, pending PendingSource, teach
 	}
 	to := period.PeriodEnd
 	before := period.PeriodEnd.AddDate(0, 0, 1)
-	resp, err := pending.ListUnconfirmedInWindow(ctx, teacherID, &from, &to, before, closeFeedLimit)
+	// Billing has not been re-keyed to center scope yet; this shim carries
+	// only the teacher id, so sessions' scoped query still resolves tenancy
+	// by teacher until billing gets its own sweep.
+	resp, err := pending.ListUnconfirmedInWindow(ctx, authctx.Scope{TeacherID: teacherID}, &from, &to, before, closeFeedLimit)
 	if err != nil {
 		return nil, err
 	}
