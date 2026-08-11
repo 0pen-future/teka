@@ -27,15 +27,18 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-// teacherID resolves the authenticated tenant — the only sanctioned source of
-// teacher identity; the path never carries it.
+// teacherID resolves the caller's own teacher id from their center scope —
+// the only sanctioned source of identity; the path never carries it. A Zalo
+// account is personal (keyed by teacher, not center), so only the caller's own
+// id matters here: an owner's oversight rights grant nothing over a member's
+// linked account.
 func (h *Handler) teacherID(c *gin.Context) (uuid.UUID, bool) {
-	teacherID, ok := authctx.TeacherID(c)
+	sc, ok := authctx.ScopeFrom(c)
 	if !ok {
 		response.Err(c, apperror.Unauthorized("authentication required"))
 		return uuid.UUID{}, false
 	}
-	return teacherID, true
+	return sc.TeacherID, true
 }
 
 // status reports whether the caller has a linked Zalo account.
