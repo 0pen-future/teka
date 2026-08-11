@@ -21,6 +21,7 @@ import (
 	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/features/sessions"
 	"teka/apps/api/internal/features/teachers"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 )
 
@@ -473,7 +474,10 @@ func seedSessionList(ctx context.Context, db *gorm.DB, log *slog.Logger, teacher
 	confirmUpTo := max(len(past)-pendingAttendanceCount, 0)
 	var confirmed int
 	for i, ps := range past[:confirmUpTo] {
-		roster, err := enrollmentsSvc.ActiveOn(ctx, teacherID, ps.ClassID, ps.Date)
+		// Seeds have not been re-keyed to center scope yet; this shim carries
+		// only the teacher id, so enrollments' scoped query still resolves
+		// tenancy by teacher until seeds gets its own sweep.
+		roster, err := enrollmentsSvc.ActiveOn(ctx, authctx.Scope{TeacherID: teacherID}, ps.ClassID, ps.Date)
 		if err != nil {
 			return fmt.Errorf("seed: look up roster for session %s: %w", ps.ID, err)
 		}

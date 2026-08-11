@@ -12,6 +12,7 @@ import (
 	"teka/apps/api/internal/features/attendance"
 	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 )
 
@@ -23,7 +24,7 @@ import (
 // PendingSource use — so a reconciliation never hand-rolls its own
 // started_on/ended_on comparison.
 type EnrollmentSource interface {
-	ActiveOn(ctx context.Context, teacherID, classID uuid.UUID, on time.Time) ([]enrollments.Enrollment, error)
+	ActiveOn(ctx context.Context, sc authctx.Scope, classID uuid.UUID, on time.Time) ([]enrollments.Enrollment, error)
 }
 
 // minAdjustmentReasonLen/maxAdjustmentReasonLen mirror AdjustmentRequest's
@@ -318,7 +319,10 @@ func (s *Service) reconcileStudent(
 		// this period happened after close. Roster membership is confirmed
 		// through the sanctioned enrollments.ActiveOn call, never a
 		// hand-written date comparison.
-		roster, rosterErr := s.enrollments.ActiveOn(ctx, teacherID, sessionClassID, sessionDate)
+		// Billing has not been re-keyed to center scope yet; this shim carries
+		// only the teacher id, so enrollments' scoped query still resolves
+		// tenancy by teacher until billing gets its own sweep.
+		roster, rosterErr := s.enrollments.ActiveOn(ctx, authctx.Scope{TeacherID: teacherID}, sessionClassID, sessionDate)
 		if rosterErr != nil {
 			return nil, rosterErr
 		}

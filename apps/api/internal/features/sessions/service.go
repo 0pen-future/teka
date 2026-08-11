@@ -44,7 +44,7 @@ type TeacherSource interface {
 // many students attendance confirmation will cover. *enrollments.Service
 // satisfies this.
 type EnrollmentSource interface {
-	ActiveOn(ctx context.Context, teacherID, classID uuid.UUID, on time.Time) ([]enrollments.Enrollment, error)
+	ActiveOn(ctx context.Context, sc authctx.Scope, classID uuid.UUID, on time.Time) ([]enrollments.Enrollment, error)
 }
 
 // Detail is a session enriched with its class name and the size of the
@@ -344,7 +344,10 @@ func (s *Service) Delete(ctx context.Context, teacherID, sessionID uuid.UUID) er
 
 // toDetail enriches a joined row with the roster size active on its date.
 func (s *Service) toDetail(ctx context.Context, teacherID uuid.UUID, row *Row) (*Detail, error) {
-	active, err := s.enrollments.ActiveOn(ctx, teacherID, row.ClassID, row.SessionDate)
+	// Sessions has not been re-keyed to center scope yet; this shim carries
+	// only the teacher id, so enrollments' scoped query still resolves tenancy
+	// by teacher until sessions gets its own sweep.
+	active, err := s.enrollments.ActiveOn(ctx, authctx.Scope{TeacherID: teacherID}, row.ClassID, row.SessionDate)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}

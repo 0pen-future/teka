@@ -26,18 +26,21 @@ func NewService(repo Repository) *Service {
 
 // Create enrolls a student, copying unit_price from the class's current
 // default. The two lookups exist to produce clean 422s and to read the price;
-// the composite FKs are what actually prevent cross-teacher stitching, and
+// the composite FKs are what actually prevent cross-center stitching, and
 // uq_enrollments_active — not a pre-check — is what refuses a duplicate open
-// enrollment.
-func (s *Service) Create(ctx context.Context, teacherID uuid.UUID, req CreateRequest) (*Row, error) {
-	price, err := s.repo.ClassDefaultPrice(ctx, teacherID, req.ClassID)
+// enrollment. The enrollment is always stamped as the caller's own —
+// including an owner, who creates rows as themselves, never on behalf of
+// another teacher, even though the student/class it references may belong to
+// a member.
+func (s *Service) Create(ctx context.Context, sc authctx.Scope, req CreateRequest) (*Row, error) {
+	price, err := s.repo.ClassDefaultPrice(ctx, sc, req.ClassID)
 	if errors.Is(err, ErrClassNotFound) {
 		return nil, refInvalid("class_id", "must reference one of your classes", err)
 	}
 	if err != nil {
 		return nil, err
 	}
-	ok, err := s.repo.StudentExists(ctx, teacherID, req.StudentID)
+	ok, err := s.repo.StudentExists(ctx, sc, req.StudentID)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +58,8 @@ func (s *Service) Create(ctx context.Context, teacherID uuid.UUID, req CreateReq
 
 	e := &Enrollment{
 		ID:        id.New(),
-		TeacherID: teacherID,
+		TeacherID: sc.TeacherID,
+		CenterID:  sc.CenterID,
 		StudentID: req.StudentID,
 		ClassID:   req.ClassID,
 		StartedOn: startedOn,
@@ -64,13 +68,13 @@ func (s *Service) Create(ctx context.Context, teacherID uuid.UUID, req CreateReq
 	if err := s.repo.Create(ctx, e); err != nil {
 		return nil, translate(err)
 	}
-	return s.repo.GetByID(ctx, teacherID, e.ID)
+	return s.repo.GetByID(ctx, sc, e.ID)
 }
 
 // Get returns one enrollment with its display names; ended enrollments stay
 // retrievable.
-func (s *Service) Get(ctx context.Context, teacherID, enrollmentID uuid.UUID) (*Row, error) {
-	row, err := s.repo.GetByID(ctx, teacherID, enrollmentID)
+func (s *Service) Get(ctx context.Context, sc authctx.Scope, enrollmentID uuid.UUID) (*Row, error) {
+	row, err := s.repo.GetByID(ctx, sc, enrollmentID)
 	if err != nil {
 		return nil, translate(err)
 	}
@@ -79,15 +83,15 @@ func (s *Service) Get(ctx context.Context, teacherID, enrollmentID uuid.UUID) (*
 
 // List returns a page of enrollments, filterable by student, class, and
 // open/ended state.
-func (s *Service) List(ctx context.Context, teacherID uuid.UUID, filter ListFilter, p pagination.Params) ([]Row, int64, error) {
-	return s.repo.List(ctx, teacherID, filter, p)
+func (s *Service) List(ctx context.Context, sc authctx.Scope, filter ListFilter, p pagination.Params) ([]Row, int64, error) {
+	return s.repo.List(ctx, sc, filter, p)
 }
 
 // End closes an enrollment — "nghỉ hẳn giữa chu kỳ", the only mutation V1
 // allows. Ending twice returns 409 so a double-submit cannot silently move
 // the departure date.
-func (s *Service) End(ctx context.Context, teacherID, enrollmentID uuid.UUID, req EndRequest) (*Row, error) {
-	row, err := s.repo.GetByID(ctx, teacherID, enrollmentID)
+func (s *Service) End(ctx context.Context, sc authctx.Scope, enrollmentID uuid.UUID, req EndRequest) (*Row, error) {
+	row, err := s.repo.GetByID(ctx, sc, enrollmentID)
 	if err != nil {
 		return nil, translate(err)
 	}
@@ -107,22 +111,22 @@ func (s *Service) End(ctx context.Context, teacherID, enrollmentID uuid.UUID, re
 			map[string]string{"ended_on": "must not be before started_on"})
 	}
 
-	if err := s.repo.End(ctx, teacherID, enrollmentID, endedOn); err != nil {
+	if err := s.repo.End(ctx, sc, enrollmentID, endedOn); err != nil {
 		return nil, translate(err)
 	}
-	return s.repo.GetByID(ctx, teacherID, enrollmentID)
+	return s.repo.GetByID(ctx, sc, enrollmentID)
 }
 
 // Delete soft-deletes an enrollment created by mistake; leaving is End, not
 // Delete.
-func (s *Service) Delete(ctx context.Context, teacherID, enrollmentID uuid.UUID) error {
-	return translate(s.repo.SoftDelete(ctx, teacherID, enrollmentID))
+func (s *Service) Delete(ctx context.Context, sc authctx.Scope, enrollmentID uuid.UUID) error {
+	return translate(s.repo.SoftDelete(ctx, sc, enrollmentID))
 }
 
 // ActiveOn exposes the attendance-sheet query plan 03 consumes: enrollments
 // open on the given date, inclusive at both boundaries.
-func (s *Service) ActiveOn(ctx context.Context, teacherID, classID uuid.UUID, on time.Time) ([]Enrollment, error) {
-	return s.repo.ActiveOn(ctx, teacherID, classID, on)
+func (s *Service) ActiveOn(ctx context.Context, sc authctx.Scope, classID uuid.UUID, on time.Time) ([]Enrollment, error) {
+	return s.repo.ActiveOn(ctx, sc, classID, on)
 }
 
 // EndOpenEnrollments satisfies students.EnrollmentEnder: the students feature

@@ -114,7 +114,7 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	// enrollments service through students.EnrollmentEnder so deleting a
 	// student closes their open enrollments in the same transaction.
 	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db))
-	enrollments.RegisterRoutes(v1, enrollments.NewHandler(enrollmentsSvc), requireAuth)
+	enrollments.RegisterRoutes(v1, enrollments.NewHandler(enrollmentsSvc), requireAuth, resolveScope)
 
 	studentsSvc := students.NewService(students.NewRepository(db), enrollmentsSvc, txMgr)
 	students.RegisterRoutes(v1, students.NewHandler(studentsSvc), requireAuth, resolveScope)

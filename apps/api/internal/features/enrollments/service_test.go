@@ -18,12 +18,14 @@ import (
 )
 
 type fakeClass struct {
+	centerID  uuid.UUID
 	teacherID uuid.UUID
 	name      string
 	price     int64
 }
 
 type fakeStudent struct {
+	centerID  uuid.UUID
 	teacherID uuid.UUID
 	name      string
 }
@@ -34,8 +36,9 @@ type fakeEnrollment struct {
 }
 
 // fakeRepository is an in-memory Repository enforcing the same invariants the
-// SQL layer does: tenant-scoped reads, soft-delete filtering, and the
-// uq_enrollments_active refusal of a second open enrollment.
+// SQL layer does: center-scoped reads (owner sees the whole center, a member
+// only their own rows), soft-delete filtering, and the uq_enrollments_active
+// refusal of a second open enrollment.
 type fakeRepository struct {
 	rows     map[uuid.UUID]*fakeEnrollment
 	classes  map[uuid.UUID]fakeClass
@@ -50,15 +53,34 @@ func newFakeRepository() *fakeRepository {
 	}
 }
 
+// selfScope returns a scope for a teacher who owns their own center — the
+// fake repository's convention (mirrored from handler_test.go's
+// fakeScopeResolver) is that a self-owned teacher's center id equals their
+// own id.
+func selfScope(teacherID uuid.UUID) authctx.Scope {
+	return authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}
+}
+
+// addClass inserts a fixture class self-owned by teacherID (their own
+// center). addClassFor exists for tests that need a class owned by a
+// specific teacher within a shared, independently-identified center.
 func (f *fakeRepository) addClass(teacherID uuid.UUID, price int64) uuid.UUID {
+	return f.addClassFor(selfScope(teacherID), price)
+}
+
+func (f *fakeRepository) addClassFor(sc authctx.Scope, price int64) uuid.UUID {
 	classID := id.New()
-	f.classes[classID] = fakeClass{teacherID: teacherID, name: "Toán 8", price: price}
+	f.classes[classID] = fakeClass{centerID: sc.CenterID, teacherID: sc.TeacherID, name: "Toán 8", price: price}
 	return classID
 }
 
 func (f *fakeRepository) addStudent(teacherID uuid.UUID) uuid.UUID {
+	return f.addStudentFor(selfScope(teacherID))
+}
+
+func (f *fakeRepository) addStudentFor(sc authctx.Scope) uuid.UUID {
 	studentID := id.New()
-	f.students[studentID] = fakeStudent{teacherID: teacherID, name: "Bé An"}
+	f.students[studentID] = fakeStudent{centerID: sc.CenterID, teacherID: sc.TeacherID, name: "Bé An"}
 	return studentID
 }
 
@@ -68,6 +90,32 @@ func (f *fakeRepository) row(e *fakeEnrollment) Row {
 		StudentName: f.students[e.StudentID].name,
 		ClassName:   f.classes[e.ClassID].name,
 	}
+}
+
+// visibleEnrollment mirrors the real scoped() predicate: always the center,
+// plus the teacher when the caller is not an owner.
+func visibleEnrollment(e *fakeEnrollment, sc authctx.Scope) bool {
+	if e.deleted || e.CenterID != sc.CenterID {
+		return false
+	}
+	return sc.IsOwner || e.TeacherID == sc.TeacherID
+}
+
+// visibleClass is visibleEnrollment's counterpart for the class lookups
+// ClassDefaultPrice performs.
+func visibleClass(c fakeClass, sc authctx.Scope) bool {
+	if c.centerID != sc.CenterID {
+		return false
+	}
+	return sc.IsOwner || c.teacherID == sc.TeacherID
+}
+
+// visibleStudent is visibleEnrollment's counterpart for StudentExists.
+func visibleStudent(s fakeStudent, sc authctx.Scope) bool {
+	if s.centerID != sc.CenterID {
+		return false
+	}
+	return sc.IsOwner || s.teacherID == sc.TeacherID
 }
 
 func (f *fakeRepository) Create(_ context.Context, e *Enrollment) error {
@@ -81,19 +129,19 @@ func (f *fakeRepository) Create(_ context.Context, e *Enrollment) error {
 	return nil
 }
 
-func (f *fakeRepository) GetByID(_ context.Context, teacherID, id uuid.UUID) (*Row, error) {
+func (f *fakeRepository) GetByID(_ context.Context, sc authctx.Scope, id uuid.UUID) (*Row, error) {
 	e, ok := f.rows[id]
-	if !ok || e.deleted || e.TeacherID != teacherID {
+	if !ok || !visibleEnrollment(e, sc) {
 		return nil, ErrNotFound
 	}
 	row := f.row(e)
 	return &row, nil
 }
 
-func (f *fakeRepository) List(_ context.Context, teacherID uuid.UUID, filter ListFilter, _ pagination.Params) ([]Row, int64, error) {
+func (f *fakeRepository) List(_ context.Context, sc authctx.Scope, filter ListFilter, _ pagination.Params) ([]Row, int64, error) {
 	var out []Row
 	for _, e := range f.rows {
-		if e.deleted || e.TeacherID != teacherID {
+		if !visibleEnrollment(e, sc) {
 			continue
 		}
 		if filter.StudentID != uuid.Nil && e.StudentID != filter.StudentID {
@@ -111,9 +159,9 @@ func (f *fakeRepository) List(_ context.Context, teacherID uuid.UUID, filter Lis
 	return out, int64(len(out)), nil
 }
 
-func (f *fakeRepository) End(_ context.Context, teacherID, id uuid.UUID, endedOn time.Time) error {
+func (f *fakeRepository) End(_ context.Context, sc authctx.Scope, id uuid.UUID, endedOn time.Time) error {
 	e, ok := f.rows[id]
-	if !ok || e.deleted || e.TeacherID != teacherID {
+	if !ok || !visibleEnrollment(e, sc) {
 		return ErrNotFound
 	}
 	if e.EndedOn != nil {
@@ -125,19 +173,19 @@ func (f *fakeRepository) End(_ context.Context, teacherID, id uuid.UUID, endedOn
 	return nil
 }
 
-func (f *fakeRepository) SoftDelete(_ context.Context, teacherID, id uuid.UUID) error {
+func (f *fakeRepository) SoftDelete(_ context.Context, sc authctx.Scope, id uuid.UUID) error {
 	e, ok := f.rows[id]
-	if !ok || e.deleted || e.TeacherID != teacherID {
+	if !ok || !visibleEnrollment(e, sc) {
 		return ErrNotFound
 	}
 	e.deleted = true
 	return nil
 }
 
-func (f *fakeRepository) ActiveOn(_ context.Context, teacherID, classID uuid.UUID, on time.Time) ([]Enrollment, error) {
+func (f *fakeRepository) ActiveOn(_ context.Context, sc authctx.Scope, classID uuid.UUID, on time.Time) ([]Enrollment, error) {
 	var out []Enrollment
 	for _, e := range f.rows {
-		if e.deleted || e.TeacherID != teacherID || e.ClassID != classID {
+		if !visibleEnrollment(e, sc) || e.ClassID != classID {
 			continue
 		}
 		if e.StartedOn.After(on) {
@@ -153,7 +201,7 @@ func (f *fakeRepository) ActiveOn(_ context.Context, teacherID, classID uuid.UUI
 
 func (f *fakeRepository) EndOpenEnrollments(_ context.Context, sc authctx.Scope, studentID uuid.UUID, on time.Time) error {
 	for _, e := range f.rows {
-		if !e.deleted && e.TeacherID == sc.TeacherID && e.StudentID == studentID && e.EndedOn == nil {
+		if visibleEnrollment(e, sc) && e.StudentID == studentID && e.EndedOn == nil {
 			ended := on
 			e.EndedOn = &ended
 		}
@@ -161,17 +209,17 @@ func (f *fakeRepository) EndOpenEnrollments(_ context.Context, sc authctx.Scope,
 	return nil
 }
 
-func (f *fakeRepository) ClassDefaultPrice(_ context.Context, teacherID, classID uuid.UUID) (int64, error) {
+func (f *fakeRepository) ClassDefaultPrice(_ context.Context, sc authctx.Scope, classID uuid.UUID) (int64, error) {
 	c, ok := f.classes[classID]
-	if !ok || c.teacherID != teacherID {
+	if !ok || !visibleClass(c, sc) {
 		return 0, ErrClassNotFound
 	}
 	return c.price, nil
 }
 
-func (f *fakeRepository) StudentExists(_ context.Context, teacherID, studentID uuid.UUID) (bool, error) {
+func (f *fakeRepository) StudentExists(_ context.Context, sc authctx.Scope, studentID uuid.UUID) (bool, error) {
 	s, ok := f.students[studentID]
-	return ok && s.teacherID == teacherID, nil
+	return ok && visibleStudent(s, sc), nil
 }
 
 func newTestService() (*Service, *fakeRepository) {
@@ -179,9 +227,9 @@ func newTestService() (*Service, *fakeRepository) {
 	return NewService(repo), repo
 }
 
-func enroll(t *testing.T, svc *Service, teacherID, studentID, classID uuid.UUID, startedOn string) *Row {
+func enroll(t *testing.T, svc *Service, sc authctx.Scope, studentID, classID uuid.UUID, startedOn string) *Row {
 	t.Helper()
-	row, err := svc.Create(context.Background(), teacherID, CreateRequest{
+	row, err := svc.Create(context.Background(), sc, CreateRequest{
 		StudentID: studentID, ClassID: classID, StartedOn: startedOn,
 	})
 	if err != nil {
@@ -193,10 +241,11 @@ func enroll(t *testing.T, svc *Service, teacherID, studentID, classID uuid.UUID,
 func TestCreateCopiesUnitPriceFromClass(t *testing.T) {
 	svc, repo := newTestService()
 	teacherID := id.New()
+	sc := selfScope(teacherID)
 	classID := repo.addClass(teacherID, 150_000)
 	studentID := repo.addStudent(teacherID)
 
-	row := enroll(t, svc, teacherID, studentID, classID, "2026-01-15")
+	row := enroll(t, svc, sc, studentID, classID, "2026-01-15")
 	if row.UnitPrice != 150_000 {
 		t.Fatalf("unit_price must be copied from the class, got %d", row.UnitPrice)
 	}
@@ -228,10 +277,11 @@ func TestWritableDTOsNeverExposeUnitPrice(t *testing.T) {
 func TestCreateDefaultsStartedOnToToday(t *testing.T) {
 	svc, repo := newTestService()
 	teacherID := id.New()
+	sc := selfScope(teacherID)
 	classID := repo.addClass(teacherID, 150_000)
 	studentID := repo.addStudent(teacherID)
 
-	row := enroll(t, svc, teacherID, studentID, classID, "")
+	row := enroll(t, svc, sc, studentID, classID, "")
 	if got, want := row.StartedOn.Format(dateLayout), today().Format(dateLayout); got != want {
 		t.Fatalf("started_on must default to today (%s), got %s", want, got)
 	}
@@ -240,13 +290,14 @@ func TestCreateDefaultsStartedOnToToday(t *testing.T) {
 func TestCreateRejectsForeignReferences(t *testing.T) {
 	svc, repo := newTestService()
 	teacherID := id.New()
+	sc := selfScope(teacherID)
 	stranger := id.New()
 	ownClass := repo.addClass(teacherID, 150_000)
 	ownStudent := repo.addStudent(teacherID)
 	foreignClass := repo.addClass(stranger, 150_000)
 	foreignStudent := repo.addStudent(stranger)
 
-	_, err := svc.Create(context.Background(), teacherID, CreateRequest{
+	_, err := svc.Create(context.Background(), sc, CreateRequest{
 		StudentID: ownStudent, ClassID: foreignClass,
 	})
 	var appErr *apperror.AppError
@@ -257,7 +308,7 @@ func TestCreateRejectsForeignReferences(t *testing.T) {
 		t.Fatalf("want ErrClassNotFound cause, got %v", err)
 	}
 
-	_, err = svc.Create(context.Background(), teacherID, CreateRequest{
+	_, err = svc.Create(context.Background(), sc, CreateRequest{
 		StudentID: foreignStudent, ClassID: ownClass,
 	})
 	if !errors.As(err, &appErr) || appErr.Code != apperror.CodeValidation || appErr.Fields["student_id"] == "" {
@@ -271,11 +322,12 @@ func TestCreateRejectsForeignReferences(t *testing.T) {
 func TestEnrollingTwiceConflicts(t *testing.T) {
 	svc, repo := newTestService()
 	teacherID := id.New()
+	sc := selfScope(teacherID)
 	classID := repo.addClass(teacherID, 150_000)
 	studentID := repo.addStudent(teacherID)
 
-	enroll(t, svc, teacherID, studentID, classID, "2026-01-05")
-	_, err := svc.Create(context.Background(), teacherID, CreateRequest{
+	enroll(t, svc, sc, studentID, classID, "2026-01-05")
+	_, err := svc.Create(context.Background(), sc, CreateRequest{
 		StudentID: studentID, ClassID: classID, StartedOn: "2026-02-01",
 	})
 	var appErr *apperror.AppError
@@ -290,11 +342,12 @@ func TestEnrollingTwiceConflicts(t *testing.T) {
 func TestEndAndReenroll(t *testing.T) {
 	svc, repo := newTestService()
 	teacherID := id.New()
+	sc := selfScope(teacherID)
 	classID := repo.addClass(teacherID, 150_000)
 	studentID := repo.addStudent(teacherID)
 
-	first := enroll(t, svc, teacherID, studentID, classID, "2026-01-05")
-	ended, err := svc.End(context.Background(), teacherID, first.ID, EndRequest{EndedOn: "2026-03-31"})
+	first := enroll(t, svc, sc, studentID, classID, "2026-01-05")
+	ended, err := svc.End(context.Background(), sc, first.ID, EndRequest{EndedOn: "2026-03-31"})
 	if err != nil {
 		t.Fatalf("end: %v", err)
 	}
@@ -303,12 +356,12 @@ func TestEndAndReenroll(t *testing.T) {
 	}
 
 	// Ending twice: 409, and the date does not move.
-	_, err = svc.End(context.Background(), teacherID, first.ID, EndRequest{EndedOn: "2026-04-15"})
+	_, err = svc.End(context.Background(), sc, first.ID, EndRequest{EndedOn: "2026-04-15"})
 	var appErr *apperror.AppError
 	if !errors.As(err, &appErr) || appErr.Code != apperror.CodeConflict || !errors.Is(err, ErrAlreadyEnded) {
 		t.Fatalf("double end must be 409 ErrAlreadyEnded, got %v", err)
 	}
-	unchanged, err := svc.Get(context.Background(), teacherID, first.ID)
+	unchanged, err := svc.Get(context.Background(), sc, first.ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -317,11 +370,11 @@ func TestEndAndReenroll(t *testing.T) {
 	}
 
 	// Re-enrolling after leaving succeeds; the old row survives.
-	second := enroll(t, svc, teacherID, studentID, classID, "2026-05-01")
+	second := enroll(t, svc, sc, studentID, classID, "2026-05-01")
 	if second.ID == first.ID {
 		t.Fatal("re-enrollment must be a new row")
 	}
-	if _, err := svc.Get(context.Background(), teacherID, first.ID); err != nil {
+	if _, err := svc.Get(context.Background(), sc, first.ID); err != nil {
 		t.Fatalf("the ended row must stay readable, got %v", err)
 	}
 }
@@ -329,11 +382,12 @@ func TestEndAndReenroll(t *testing.T) {
 func TestEndBeforeStartIsValidationError(t *testing.T) {
 	svc, repo := newTestService()
 	teacherID := id.New()
+	sc := selfScope(teacherID)
 	classID := repo.addClass(teacherID, 150_000)
 	studentID := repo.addStudent(teacherID)
 
-	row := enroll(t, svc, teacherID, studentID, classID, "2026-02-10")
-	_, err := svc.End(context.Background(), teacherID, row.ID, EndRequest{EndedOn: "2026-02-09"})
+	row := enroll(t, svc, sc, studentID, classID, "2026-02-10")
+	_, err := svc.End(context.Background(), sc, row.ID, EndRequest{EndedOn: "2026-02-09"})
 	var appErr *apperror.AppError
 	if !errors.As(err, &appErr) || appErr.Code != apperror.CodeValidation || appErr.Fields["ended_on"] == "" {
 		t.Fatalf("ended_on before started_on must be 422 naming ended_on, got %v", err)
@@ -341,7 +395,7 @@ func TestEndBeforeStartIsValidationError(t *testing.T) {
 
 	// The boundary itself is allowed: ending on the start date is one paid
 	// session, not an error.
-	if _, err := svc.End(context.Background(), teacherID, row.ID, EndRequest{EndedOn: "2026-02-10"}); err != nil {
+	if _, err := svc.End(context.Background(), sc, row.ID, EndRequest{EndedOn: "2026-02-10"}); err != nil {
 		t.Fatalf("ended_on == started_on must be allowed, got %v", err)
 	}
 }
@@ -349,22 +403,22 @@ func TestEndBeforeStartIsValidationError(t *testing.T) {
 func TestEndOpenEnrollmentsClosesOnlyThatStudent(t *testing.T) {
 	svc, repo := newTestService()
 	teacherID := id.New()
+	sc := selfScope(teacherID)
 	classID := repo.addClass(teacherID, 150_000)
 	leaver := repo.addStudent(teacherID)
 	stayer := repo.addStudent(teacherID)
 
-	leaverRow := enroll(t, svc, teacherID, leaver, classID, "2026-01-05")
-	stayerRow := enroll(t, svc, teacherID, stayer, classID, "2026-01-05")
+	leaverRow := enroll(t, svc, sc, leaver, classID, "2026-01-05")
+	stayerRow := enroll(t, svc, sc, stayer, classID, "2026-01-05")
 
 	on := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	sc := authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}
 	if err := svc.EndOpenEnrollments(context.Background(), sc, leaver, on); err != nil {
 		t.Fatalf("end open enrollments: %v", err)
 	}
-	if row, _ := svc.Get(context.Background(), teacherID, leaverRow.ID); row.EndedOn == nil {
+	if row, _ := svc.Get(context.Background(), sc, leaverRow.ID); row.EndedOn == nil {
 		t.Fatal("the leaver's enrollment must be closed")
 	}
-	if row, _ := svc.Get(context.Background(), teacherID, stayerRow.ID); row.EndedOn != nil {
+	if row, _ := svc.Get(context.Background(), sc, stayerRow.ID); row.EndedOn != nil {
 		t.Fatal("the other student's enrollment must stay open")
 	}
 }
@@ -372,11 +426,12 @@ func TestEndOpenEnrollmentsClosesOnlyThatStudent(t *testing.T) {
 func TestCrossTenantReadsAsNotFound(t *testing.T) {
 	svc, repo := newTestService()
 	owner := id.New()
+	ownerScope := selfScope(owner)
 	classID := repo.addClass(owner, 150_000)
 	studentID := repo.addStudent(owner)
-	row := enroll(t, svc, owner, studentID, classID, "2026-01-05")
+	row := enroll(t, svc, ownerScope, studentID, classID, "2026-01-05")
 
-	stranger := id.New()
+	stranger := selfScope(id.New())
 	var appErr *apperror.AppError
 	if _, err := svc.Get(context.Background(), stranger, row.ID); !errors.As(err, &appErr) || appErr.Code != apperror.CodeNotFound {
 		t.Fatalf("cross-tenant get must be NOT_FOUND, got %v", err)
@@ -386,5 +441,55 @@ func TestCrossTenantReadsAsNotFound(t *testing.T) {
 	}
 	if err := svc.Delete(context.Background(), stranger, row.ID); !errors.As(err, &appErr) || appErr.Code != apperror.CodeNotFound {
 		t.Fatalf("cross-tenant delete must be NOT_FOUND, got %v", err)
+	}
+}
+
+// An owner reads and manages a member's enrollment, and can enroll a member's
+// student into a member's class — center oversight, not per-teacher
+// isolation. The created row is still stamped as the owner's own.
+func TestOwnerScopeSeesAndManagesMembersEnrollment(t *testing.T) {
+	svc, repo := newTestService()
+	center := id.New()
+	member := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
+	owner := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: true}
+
+	classID := repo.addClassFor(member, 150_000)
+	studentID := repo.addStudentFor(member)
+	memberRow := enroll(t, svc, member, studentID, classID, "2026-01-05")
+
+	if _, err := svc.Get(context.Background(), owner, memberRow.ID); err != nil {
+		t.Fatalf("owner must read a member's enrollment, got %v", err)
+	}
+	if _, err := svc.End(context.Background(), owner, memberRow.ID, EndRequest{EndedOn: "2026-03-31"}); err != nil {
+		t.Fatalf("owner must end a member's enrollment, got %v", err)
+	}
+
+	otherStudent := repo.addStudentFor(member)
+	created, err := svc.Create(context.Background(), owner, CreateRequest{
+		StudentID: otherStudent, ClassID: classID, StartedOn: "2026-04-01",
+	})
+	if err != nil {
+		t.Fatalf("owner must enroll a member's student into a member's class, got %v", err)
+	}
+	if created.TeacherID != owner.TeacherID {
+		t.Fatalf("an enrollment created by the owner must be stamped as the owner's own, got %s", created.TeacherID)
+	}
+}
+
+// A peer in the same center but not the creator, and not the owner, must not
+// see the enrollment — center scope alone is not enough, isolation still
+// holds between non-owning members.
+func TestPeerScopeCannotSeeAnotherMembersEnrollment(t *testing.T) {
+	svc, repo := newTestService()
+	center := id.New()
+	author := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
+	peer := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
+
+	classID := repo.addClassFor(author, 150_000)
+	studentID := repo.addStudentFor(author)
+	row := enroll(t, svc, author, studentID, classID, "2026-01-05")
+
+	if _, err := svc.Get(context.Background(), peer, row.ID); apperror.From(err).Code != apperror.CodeNotFound {
+		t.Fatalf("peer must not read another member's enrollment, got %v", err)
 	}
 }

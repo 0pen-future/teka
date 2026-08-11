@@ -50,6 +50,7 @@ func TestActiveOnBoundariesAreInclusive(t *testing.T) {
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	contact := testutil.Contact(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID)
 
@@ -59,22 +60,22 @@ func TestActiveOnBoundariesAreInclusive(t *testing.T) {
 	endsOnD := testutil.Student(t, db, teacher.ID, contact.ID, testutil.WithStudentFullName("Ends On D"))
 	startsAfter := testutil.Student(t, db, teacher.ID, contact.ID, testutil.WithStudentFullName("Starts After"))
 
-	_, err := svc.Create(ctx, teacher.ID, enrollments.CreateRequest{
+	_, err := svc.Create(ctx, sc, enrollments.CreateRequest{
 		StudentID: startsOnD.ID, ClassID: class.ID, StartedOn: "2026-03-14",
 	})
 	require.NoError(t, err)
-	ending, err := svc.Create(ctx, teacher.ID, enrollments.CreateRequest{
+	ending, err := svc.Create(ctx, sc, enrollments.CreateRequest{
 		StudentID: endsOnD.ID, ClassID: class.ID, StartedOn: "2026-01-05",
 	})
 	require.NoError(t, err)
-	_, err = svc.End(ctx, teacher.ID, ending.ID, enrollments.EndRequest{EndedOn: "2026-03-14"})
+	_, err = svc.End(ctx, sc, ending.ID, enrollments.EndRequest{EndedOn: "2026-03-14"})
 	require.NoError(t, err)
-	_, err = svc.Create(ctx, teacher.ID, enrollments.CreateRequest{
+	_, err = svc.Create(ctx, sc, enrollments.CreateRequest{
 		StudentID: startsAfter.ID, ClassID: class.ID, StartedOn: "2026-03-15",
 	})
 	require.NoError(t, err)
 
-	active, err := svc.ActiveOn(ctx, teacher.ID, class.ID, date("2026-03-14"))
+	active, err := svc.ActiveOn(ctx, sc, class.ID, date("2026-03-14"))
 	require.NoError(t, err)
 	require.Len(t, active, 2,
 		"a student starting on D attends that session and a student ending on D attends their last one")
@@ -92,32 +93,33 @@ func TestDuplicateOpenEnrollmentRefusedByIndexThenReenrollAllowed(t *testing.T) 
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	contact := testutil.Contact(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID)
 	student := testutil.Student(t, db, teacher.ID, contact.ID)
 
-	first, err := svc.Create(ctx, teacher.ID, enrollments.CreateRequest{
+	first, err := svc.Create(ctx, sc, enrollments.CreateRequest{
 		StudentID: student.ID, ClassID: class.ID, StartedOn: "2026-01-05",
 	})
 	require.NoError(t, err)
 
 	// uq_enrollments_active — not a pre-check — refuses the duplicate.
-	_, err = svc.Create(ctx, teacher.ID, enrollments.CreateRequest{
+	_, err = svc.Create(ctx, sc, enrollments.CreateRequest{
 		StudentID: student.ID, ClassID: class.ID, StartedOn: "2026-02-01",
 	})
 	require.True(t, errors.Is(err, enrollments.ErrAlreadyEnrolled), "want 409 cause, got %v", err)
 	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
 
-	_, err = svc.End(ctx, teacher.ID, first.ID, enrollments.EndRequest{EndedOn: "2026-03-31"})
+	_, err = svc.End(ctx, sc, first.ID, enrollments.EndRequest{EndedOn: "2026-03-31"})
 	require.NoError(t, err)
 
-	second, err := svc.Create(ctx, teacher.ID, enrollments.CreateRequest{
+	second, err := svc.Create(ctx, sc, enrollments.CreateRequest{
 		StudentID: student.ID, ClassID: class.ID, StartedOn: "2026-05-01",
 	})
 	require.NoError(t, err, "re-enrolling after leaving must succeed")
 
 	// The closed row survives with its history.
-	old, err := svc.Get(ctx, teacher.ID, first.ID)
+	old, err := svc.Get(ctx, sc, first.ID)
 	require.NoError(t, err)
 	require.NotNil(t, old.EndedOn)
 	require.Equal(t, "2026-03-31", old.EndedOn.Format("2006-01-02"))
@@ -129,27 +131,28 @@ func TestRepoEndOnAlreadyEndedIsConflictNotNotFound(t *testing.T) {
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	contact := testutil.Contact(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID)
 	student := testutil.Student(t, db, teacher.ID, contact.ID)
 
-	row, err := svc.Create(ctx, teacher.ID, enrollments.CreateRequest{
+	row, err := svc.Create(ctx, sc, enrollments.CreateRequest{
 		StudentID: student.ID, ClassID: class.ID, StartedOn: "2026-01-05",
 	})
 	require.NoError(t, err)
 
-	_, err = svc.End(ctx, teacher.ID, row.ID, enrollments.EndRequest{EndedOn: "2026-03-31"})
+	_, err = svc.End(ctx, sc, row.ID, enrollments.EndRequest{EndedOn: "2026-03-31"})
 	require.NoError(t, err)
 
 	// Call the repository directly to exercise the concurrent-loser path the
 	// service's pre-check would otherwise hide: the row exists but is closed.
 	repo := enrollments.NewRepository(db)
-	err = repo.End(ctx, teacher.ID, row.ID, date("2026-04-30"))
+	err = repo.End(ctx, sc, row.ID, date("2026-04-30"))
 	require.ErrorIs(t, err, enrollments.ErrAlreadyEnded,
 		"ending an already-closed row is a 409, not a 404")
 
 	// A genuinely absent id still reports not-found.
-	err = repo.End(ctx, teacher.ID, testutil.Student(t, db, teacher.ID, contact.ID).ID, date("2026-04-30"))
+	err = repo.End(ctx, sc, testutil.Student(t, db, teacher.ID, contact.ID).ID, date("2026-04-30"))
 	require.ErrorIs(t, err, enrollments.ErrNotFound)
 }
 
@@ -158,11 +161,12 @@ func TestRaisingClassPriceLeavesEnrollmentsUntouched(t *testing.T) {
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	contact := testutil.Contact(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassUnitPrice(150_000))
 	student := testutil.Student(t, db, teacher.ID, contact.ID)
 
-	row, err := svc.Create(ctx, teacher.ID, enrollments.CreateRequest{
+	row, err := svc.Create(ctx, sc, enrollments.CreateRequest{
 		StudentID: student.ID, ClassID: class.ID, StartedOn: "2026-01-05",
 	})
 	require.NoError(t, err)
@@ -171,14 +175,14 @@ func TestRaisingClassPriceLeavesEnrollmentsUntouched(t *testing.T) {
 	require.NoError(t, db.Exec(
 		"UPDATE classes SET default_unit_price = 999999 WHERE id = ?", class.ID).Error)
 
-	after, err := svc.Get(ctx, teacher.ID, row.ID)
+	after, err := svc.Get(ctx, sc, row.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, 150_000, after.UnitPrice,
 		"a price change must never rewrite what an enrolled student owes")
 
 	// New enrollments do pick up the new default.
 	other := testutil.Student(t, db, teacher.ID, contact.ID)
-	fresh, err := svc.Create(ctx, teacher.ID, enrollments.CreateRequest{
+	fresh, err := svc.Create(ctx, sc, enrollments.CreateRequest{
 		StudentID: other.ID, ClassID: class.ID, StartedOn: "2026-06-01",
 	})
 	require.NoError(t, err)
@@ -190,11 +194,12 @@ func TestDeletingStudentEndsOpenEnrollments(t *testing.T) {
 	enrollSvc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	contact := testutil.Contact(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID)
 	student := testutil.Student(t, db, teacher.ID, contact.ID)
 
-	row, err := enrollSvc.Create(ctx, teacher.ID, enrollments.CreateRequest{
+	row, err := enrollSvc.Create(ctx, sc, enrollments.CreateRequest{
 		StudentID: student.ID, ClassID: class.ID, StartedOn: "2026-01-05",
 	})
 	require.NoError(t, err)
@@ -202,41 +207,169 @@ func TestDeletingStudentEndsOpenEnrollments(t *testing.T) {
 	// The exact wiring router.go uses: the students service consumes the
 	// enrollments service as its EnrollmentEnder.
 	studentsSvc := students.NewService(students.NewRepository(db), enrollSvc, database.NewTxManager(db))
-	require.NoError(t, studentsSvc.Delete(ctx, testutil.ScopeFor(t, db, teacher.ID), student.ID))
+	require.NoError(t, studentsSvc.Delete(ctx, sc, student.ID))
 
 	var endedOn *time.Time
 	require.NoError(t, db.Raw("SELECT ended_on FROM enrollments WHERE id = ?", row.ID).Scan(&endedOn).Error)
 	require.NotNil(t, endedOn, "deleting a student must close their open enrollments")
 }
 
-func TestCrossTenantReadsAreNotFound(t *testing.T) {
+// A teacher from a different center is refused on every operation with 404,
+// never 403 — a 403 would confirm the id exists in another center. Creating
+// against a foreign student or class is a 422 naming the reference field, and
+// the stranger's list stays empty.
+func TestCrossCenterReadsAreNotFound(t *testing.T) {
 	t.Parallel()
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacherA, _ := testutil.Teacher(t, db)
 	teacherB, _ := testutil.Teacher(t, db)
+	scopeA := testutil.ScopeFor(t, db, teacherA.ID)
+	scopeB := testutil.ScopeFor(t, db, teacherB.ID)
 	contact := testutil.Contact(t, db, teacherA.ID)
 	class := testutil.Class(t, db, teacherA.ID)
 	student := testutil.Student(t, db, teacherA.ID, contact.ID)
 
-	row, err := svc.Create(ctx, teacherA.ID, enrollments.CreateRequest{
+	row, err := svc.Create(ctx, scopeA, enrollments.CreateRequest{
 		StudentID: student.ID, ClassID: class.ID, StartedOn: "2026-01-05",
 	})
 	require.NoError(t, err)
 
-	_, err = svc.Get(ctx, teacherB.ID, row.ID)
+	_, err = svc.Get(ctx, scopeB, row.ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+	_, err = svc.End(ctx, scopeB, row.ID, enrollments.EndRequest{})
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+	err = svc.Delete(ctx, scopeB, row.ID)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
 
 	// Teacher B cannot enroll their student into A's class either.
 	contactB := testutil.Contact(t, db, teacherB.ID)
 	studentB := testutil.Student(t, db, teacherB.ID, contactB.ID)
-	_, err = svc.Create(ctx, teacherB.ID, enrollments.CreateRequest{
+	_, err = svc.Create(ctx, scopeB, enrollments.CreateRequest{
 		StudentID: studentB.ID, ClassID: class.ID,
 	})
 	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code)
 
-	rows, total, err := svc.List(ctx, teacherB.ID, enrollments.ListFilter{}, listParams(t))
+	// Nor A's student into a class of B's.
+	classB := testutil.Class(t, db, teacherB.ID)
+	_, err = svc.Create(ctx, scopeB, enrollments.CreateRequest{
+		StudentID: student.ID, ClassID: classB.ID,
+	})
+	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code)
+
+	rows, total, err := svc.List(ctx, scopeB, enrollments.ListFilter{}, listParams(t))
 	require.NoError(t, err)
 	require.Zero(t, total)
 	require.Empty(t, rows)
+
+	// The owner still sees everything intact.
+	got, err := svc.Get(ctx, scopeA, row.ID)
+	require.NoError(t, err)
+	require.Equal(t, row.ID, got.ID)
+}
+
+// An owner reads, ends, and enrolls on behalf of a member's students and
+// classes — center-wide oversight, not per-teacher isolation. An enrollment
+// the owner creates is still stamped as the owner's own, even though the
+// student and class it references belong to a member.
+func TestOwnerHasFullOversightOfMembersEnrollments(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, db)
+	member, _ := testutil.Teacher(t, db)
+	ownerCenter := testutil.ScopeFor(t, db, owner.ID).CenterID
+
+	testutil.JoinCenter(t, db, member.ID, ownerCenter)
+	ownerScope := testutil.ScopeFor(t, db, owner.ID)
+	memberScope := testutil.ScopeFor(t, db, member.ID)
+	require.Equal(t, ownerScope.CenterID, memberScope.CenterID, "member must have joined the owner's center")
+
+	contact := testutil.Contact(t, db, member.ID)
+	class := testutil.Class(t, db, member.ID)
+	student := testutil.Student(t, db, member.ID, contact.ID)
+	memberRow := testutil.Enrollment(t, db, member.ID, student.ID, class.ID, date("2026-01-05"))
+
+	got, err := svc.Get(ctx, ownerScope, memberRow.ID)
+	require.NoError(t, err, "owner must read a member's enrollment")
+	require.Equal(t, memberRow.ID, got.ID)
+
+	rows, total, err := svc.List(ctx, ownerScope, enrollments.ListFilter{}, listParams(t))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Equal(t, memberRow.ID, rows[0].ID, "owner's list must include the member's enrollment")
+
+	ended, err := svc.End(ctx, ownerScope, memberRow.ID, enrollments.EndRequest{EndedOn: "2026-03-31"})
+	require.NoError(t, err, "owner must end a member's enrollment")
+	require.NotNil(t, ended.EndedOn)
+
+	active, err := svc.ActiveOn(ctx, ownerScope, class.ID, date("2026-01-10"))
+	require.NoError(t, err)
+	require.Len(t, active, 1, "owner's ActiveOn must include the member's class roster")
+
+	// The owner enrolls a member's student into a member's class — the created
+	// row is stamped as the owner's own, not the member's.
+	otherStudent := testutil.Student(t, db, member.ID, contact.ID)
+	created, err := svc.Create(ctx, ownerScope, enrollments.CreateRequest{
+		StudentID: otherStudent.ID, ClassID: class.ID, StartedOn: "2026-04-01",
+	})
+	require.NoError(t, err, "owner must enroll a member's student into a member's class")
+	require.Equal(t, owner.ID, created.TeacherID, "owner-created enrollment must be stamped as the owner's own")
+
+	require.NoError(t, svc.Delete(ctx, ownerScope, created.ID), "owner must delete a member's enrollment")
+	_, err = svc.Get(ctx, ownerScope, created.ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+}
+
+// Two non-owning teachers in the same center are still isolated from each
+// other: center scope grants the owner oversight, not peer-to-peer access.
+func TestPeersInSameCenterCannotSeeEachOthersEnrollments(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, db)
+	memberB, _ := testutil.Teacher(t, db)
+	memberC, _ := testutil.Teacher(t, db)
+	ownerCenter := testutil.ScopeFor(t, db, owner.ID).CenterID
+
+	testutil.JoinCenter(t, db, memberB.ID, ownerCenter)
+	testutil.JoinCenter(t, db, memberC.ID, ownerCenter)
+	scopeB := testutil.ScopeFor(t, db, memberB.ID)
+	scopeC := testutil.ScopeFor(t, db, memberC.ID)
+
+	contactB := testutil.Contact(t, db, memberB.ID)
+	classB := testutil.Class(t, db, memberB.ID)
+	studentB := testutil.Student(t, db, memberB.ID, contactB.ID)
+
+	created, err := svc.Create(ctx, scopeB, enrollments.CreateRequest{
+		StudentID: studentB.ID, ClassID: classB.ID, StartedOn: "2026-01-05",
+	})
+	require.NoError(t, err)
+
+	_, err = svc.Get(ctx, scopeC, created.ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code, "a peer must not read another member's enrollment")
+	_, err = svc.End(ctx, scopeC, created.ID, enrollments.EndRequest{})
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code, "a peer must not end another member's enrollment")
+
+	rows, total, err := svc.List(ctx, scopeC, enrollments.ListFilter{}, listParams(t))
+	require.NoError(t, err)
+	require.EqualValues(t, 0, total)
+	for _, r := range rows {
+		require.NotEqual(t, created.ID, r.ID, "a peer's list must not include another member's enrollment")
+	}
+
+	// A peer cannot enroll their own student into another member's class...
+	contactC := testutil.Contact(t, db, memberC.ID)
+	studentC := testutil.Student(t, db, memberC.ID, contactC.ID)
+	_, err = svc.Create(ctx, scopeC, enrollments.CreateRequest{
+		StudentID: studentC.ID, ClassID: classB.ID,
+	})
+	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code, "a peer must not reference another member's class")
+
+	// ...nor another member's student into their own class.
+	classC := testutil.Class(t, db, memberC.ID)
+	_, err = svc.Create(ctx, scopeC, enrollments.CreateRequest{
+		StudentID: studentB.ID, ClassID: classC.ID,
+	})
+	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code, "a peer must not reference another member's student")
 }

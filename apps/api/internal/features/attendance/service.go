@@ -12,13 +12,14 @@ import (
 	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/features/sessions"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 )
 
 // RosterSource is the slice of the enrollments feature attendance needs: the
 // roster active on a session's date. *enrollments.Service satisfies this.
 type RosterSource interface {
-	ActiveOn(ctx context.Context, teacherID, classID uuid.UUID, on time.Time) ([]enrollments.Enrollment, error)
+	ActiveOn(ctx context.Context, sc authctx.Scope, classID uuid.UUID, on time.Time) ([]enrollments.Enrollment, error)
 }
 
 // SessionStore is the slice of the sessions feature attendance needs:
@@ -126,7 +127,10 @@ func (s *Service) Confirm(ctx context.Context, teacherID, sessionID uuid.UUID, r
 		return nil, cancelledConflict()
 	}
 
-	roster, err := s.roster.ActiveOn(ctx, teacherID, session.ClassID, session.SessionDate)
+	// Attendance has not been re-keyed to center scope yet; this shim carries
+	// only the teacher id, so enrollments' scoped query still resolves tenancy
+	// by teacher until attendance gets its own sweep.
+	roster, err := s.roster.ActiveOn(ctx, authctx.Scope{TeacherID: teacherID}, session.ClassID, session.SessionDate)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
@@ -206,7 +210,10 @@ func (s *Service) Confirm(ctx context.Context, teacherID, sessionID uuid.UUID, r
 // buildResponse assembles the roster + attendance-status read model shared
 // by Get and the response of a successful Confirm.
 func (s *Service) buildResponse(ctx context.Context, teacherID uuid.UUID, session *sessions.Session) (*Response, error) {
-	roster, err := s.roster.ActiveOn(ctx, teacherID, session.ClassID, session.SessionDate)
+	// Attendance has not been re-keyed to center scope yet; this shim carries
+	// only the teacher id, so enrollments' scoped query still resolves tenancy
+	// by teacher until attendance gets its own sweep.
+	roster, err := s.roster.ActiveOn(ctx, authctx.Scope{TeacherID: teacherID}, session.ClassID, session.SessionDate)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}

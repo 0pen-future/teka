@@ -146,10 +146,11 @@ func TestMidPeriodJoinerNeedsNoRosterDateFilter(t *testing.T) {
 	// Verify roster membership independently through the sanctioned query:
 	// the joiner is not on the roster for the session before their join date,
 	// and is on it (inclusive boundary) for the session on their join date.
-	rosterBefore, err := enrollmentsSvc.ActiveOn(ctx, teacher.ID, class.ID, before.SessionDate)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
+	rosterBefore, err := enrollmentsSvc.ActiveOn(ctx, sc, class.ID, before.SessionDate)
 	require.NoError(t, err)
 	require.Empty(t, rosterBefore, "the joiner must not be on the roster before their enrollment begins")
-	rosterOnStart, err := enrollmentsSvc.ActiveOn(ctx, teacher.ID, class.ID, after.SessionDate)
+	rosterOnStart, err := enrollmentsSvc.ActiveOn(ctx, sc, class.ID, after.SessionDate)
 	require.NoError(t, err)
 	require.Len(t, rosterOnStart, 1)
 	require.Equal(t, enrollment.ID, rosterOnStart[0].ID)

@@ -11,6 +11,7 @@ import (
 	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/features/sessions"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 )
 
@@ -34,7 +35,7 @@ func (f *fakeRosterSource) addEnrollment(classID, studentID uuid.UUID) enrollmen
 	return e
 }
 
-func (f *fakeRosterSource) ActiveOn(_ context.Context, _, classID uuid.UUID, _ time.Time) ([]enrollments.Enrollment, error) {
+func (f *fakeRosterSource) ActiveOn(_ context.Context, _ authctx.Scope, classID uuid.UUID, _ time.Time) ([]enrollments.Enrollment, error) {
 	return f.rosters[classID], nil
 }
 

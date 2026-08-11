@@ -121,7 +121,7 @@ func newFakeEnrollmentSource() *fakeEnrollmentSource {
 	return &fakeEnrollmentSource{counts: map[uuid.UUID]int{}}
 }
 
-func (f *fakeEnrollmentSource) ActiveOn(_ context.Context, _, classID uuid.UUID, _ time.Time) ([]enrollments.Enrollment, error) {
+func (f *fakeEnrollmentSource) ActiveOn(_ context.Context, _ authctx.Scope, classID uuid.UUID, _ time.Time) ([]enrollments.Enrollment, error) {
 	return make([]enrollments.Enrollment, f.counts[classID]), nil
 }
 
