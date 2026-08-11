@@ -78,15 +78,3 @@ func ScopeFrom(c *gin.Context) (Scope, bool) {
 	s, ok := v.(Scope)
 	return s, ok
 }
-
-// TeacherID returns the tenant id for the authenticated teacher. This is the
-// only sanctioned source of teacher_id for scoping queries — accepting one
-// from a request body, query, or path would be an authorization bypass. ok is
-// false when unauthenticated or when the caller is not a teacher.
-func TeacherID(c *gin.Context) (uuid.UUID, bool) {
-	p, ok := From(c)
-	if !ok || p.Role != RoleTeacher {
-		return uuid.Nil, false
-	}
-	return p.UserID, true
-}
