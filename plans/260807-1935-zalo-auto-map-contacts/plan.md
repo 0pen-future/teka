@@ -6,6 +6,7 @@ priority: P1
 effort: "4d"
 tags: [zalo, contacts, web, protocol]
 created: 2026-08-07
+blocks: [260811-1055-manager-class-oversight]
 ---
 
 # Zalo Auto-Map Contacts
