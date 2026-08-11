@@ -13,6 +13,7 @@ import (
 	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 )
 
@@ -62,17 +63,17 @@ func (f *fakeClassSource) addSchedule(classID uuid.UUID, weekday int16, startTim
 	})
 }
 
-func (f *fakeClassSource) Get(_ context.Context, teacherID, classID uuid.UUID) (*classes.Class, error) {
+func (f *fakeClassSource) Get(_ context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, error) {
 	c, ok := f.rows[classID]
-	if !ok || c.teacherID != teacherID {
+	if !ok || c.teacherID != sc.TeacherID {
 		return nil, apperror.NotFound("class")
 	}
 	return c.class, nil
 }
 
-func (f *fakeClassSource) ListEffectiveSchedules(_ context.Context, teacherID, classID uuid.UUID, from, to time.Time) ([]classes.Schedule, error) {
+func (f *fakeClassSource) ListEffectiveSchedules(_ context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]classes.Schedule, error) {
 	c, ok := f.rows[classID]
-	if !ok || c.teacherID != teacherID {
+	if !ok || c.teacherID != sc.TeacherID {
 		return nil, apperror.NotFound("class")
 	}
 	var out []classes.Schedule

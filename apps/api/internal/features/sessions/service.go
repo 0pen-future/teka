@@ -13,6 +13,7 @@ import (
 	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 )
 
@@ -27,8 +28,8 @@ const maxRangeDays = 400
 // students.EnrollmentEnder) so sessions depends on classes' public service
 // contract, never its repository type.
 type ClassSource interface {
-	Get(ctx context.Context, teacherID, classID uuid.UUID) (*classes.Class, error)
-	ListEffectiveSchedules(ctx context.Context, teacherID, classID uuid.UUID, from, to time.Time) ([]classes.Schedule, error)
+	Get(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, error)
+	ListEffectiveSchedules(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]classes.Schedule, error)
 }
 
 // TeacherSource is the slice of the teachers feature session generation
@@ -84,11 +85,14 @@ func (s *Service) ListRange(ctx context.Context, teacherID, classID uuid.UUID, f
 			map[string]string{"to": fmt.Sprintf("range must not exceed %d days", maxRangeDays)})
 	}
 
-	class, err := s.classes.Get(ctx, teacherID, classID)
+	// Sessions has not been re-keyed to center scope yet; this shim carries
+	// only the teacher id, so classes' scoped queries still resolve tenancy by
+	// teacher until sessions gets its own sweep.
+	class, err := s.classes.Get(ctx, authctx.Scope{TeacherID: teacherID}, classID)
 	if err != nil {
 		return nil, err
 	}
-	schedules, err := s.classes.ListEffectiveSchedules(ctx, teacherID, classID, from, to)
+	schedules, err := s.classes.ListEffectiveSchedules(ctx, authctx.Scope{TeacherID: teacherID}, classID, from, to)
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +209,9 @@ func (s *Service) CreateAdHoc(ctx context.Context, teacherID, classID uuid.UUID,
 
 	// The composite FK would refuse a foreign class_id anyway; checking first
 	// turns that refusal into a clean 404 instead of a constraint-violation 500.
-	if _, err := s.classes.Get(ctx, teacherID, classID); err != nil {
+	// See the ListRange shim comment above re: sessions not yet being
+	// center-scoped.
+	if _, err := s.classes.Get(ctx, authctx.Scope{TeacherID: teacherID}, classID); err != nil {
 		return nil, err
 	}
 

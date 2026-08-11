@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/shared/pagination"
 )
@@ -25,7 +26,8 @@ type fakeSchedule struct {
 }
 
 // fakeRepository is an in-memory Repository enforcing the same invariants the
-// SQL layer does: tenant-scoped reads and soft-delete filtering.
+// SQL layer does: center-scoped reads (owner sees the whole center, a member
+// only their own rows) and soft-delete filtering.
 type fakeRepository struct {
 	classes         map[uuid.UUID]*fakeClass
 	schedules       map[uuid.UUID]*fakeSchedule
@@ -54,6 +56,33 @@ func newTestService() (*Service, *fakeRepository) {
 	return NewService(repo, noopTx{}), repo
 }
 
+// ownerScope returns a scope for a teacher who owns their own center.
+func ownerScope() authctx.Scope {
+	return authctx.Scope{TeacherID: id.New(), CenterID: id.New(), IsOwner: true}
+}
+
+// memberScope returns a scope for a non-owning member of some center.
+func memberScope() authctx.Scope {
+	return authctx.Scope{TeacherID: id.New(), CenterID: id.New(), IsOwner: false}
+}
+
+// visibleClass mirrors the real scoped() predicate: always the center, plus
+// the teacher when the caller is not an owner.
+func visibleClass(c *fakeClass, sc authctx.Scope) bool {
+	if c.deleted || c.CenterID != sc.CenterID {
+		return false
+	}
+	return sc.IsOwner || c.TeacherID == sc.TeacherID
+}
+
+// visibleSchedule is visibleClass's counterpart for schedule rows.
+func visibleSchedule(s *fakeSchedule, sc authctx.Scope) bool {
+	if s.deleted || s.CenterID != sc.CenterID {
+		return false
+	}
+	return sc.IsOwner || s.TeacherID == sc.TeacherID
+}
+
 func (f *fakeRepository) CreateWithSchedules(_ context.Context, class *Class, schedules []Schedule) error {
 	if f.failCreate != nil {
 		return f.failCreate
@@ -76,9 +105,9 @@ func (f *fakeRepository) liveSchedules(classID uuid.UUID) []Schedule {
 	return out
 }
 
-func (f *fakeRepository) GetByID(_ context.Context, teacherID, classID uuid.UUID) (*Class, error) {
+func (f *fakeRepository) GetByID(_ context.Context, sc authctx.Scope, classID uuid.UUID) (*Class, error) {
 	c, ok := f.classes[classID]
-	if !ok || c.deleted || c.TeacherID != teacherID {
+	if !ok || !visibleClass(c, sc) {
 		return nil, ErrNotFound
 	}
 	out := c.Class
@@ -86,10 +115,10 @@ func (f *fakeRepository) GetByID(_ context.Context, teacherID, classID uuid.UUID
 	return &out, nil
 }
 
-func (f *fakeRepository) List(_ context.Context, teacherID uuid.UUID, filter ListFilter, _ pagination.Params) ([]Class, int64, error) {
+func (f *fakeRepository) List(_ context.Context, sc authctx.Scope, filter ListFilter, _ pagination.Params) ([]Class, int64, error) {
 	var out []Class
 	for _, c := range f.classes {
-		if c.deleted || c.TeacherID != teacherID {
+		if !visibleClass(c, sc) {
 			continue
 		}
 		if filter.Status != "" && c.Status != filter.Status {
@@ -110,25 +139,25 @@ func (f *fakeRepository) Update(_ context.Context, class *Class) error {
 	return nil
 }
 
-func (f *fakeRepository) Archive(_ context.Context, teacherID, classID uuid.UUID) error {
+func (f *fakeRepository) Archive(_ context.Context, sc authctx.Scope, classID uuid.UUID) error {
 	c, ok := f.classes[classID]
-	if !ok || c.deleted || c.TeacherID != teacherID {
+	if !ok || !visibleClass(c, sc) {
 		return ErrNotFound
 	}
 	c.Status = StatusArchived
 	return nil
 }
 
-func (f *fakeRepository) SoftDelete(_ context.Context, teacherID, classID uuid.UUID) error {
+func (f *fakeRepository) SoftDelete(_ context.Context, sc authctx.Scope, classID uuid.UUID) error {
 	c, ok := f.classes[classID]
-	if !ok || c.deleted || c.TeacherID != teacherID {
+	if !ok || !visibleClass(c, sc) {
 		return ErrNotFound
 	}
 	c.deleted = true
 	return nil
 }
 
-func (f *fakeRepository) CountOpenEnrollments(_ context.Context, _, classID uuid.UUID) (int64, error) {
+func (f *fakeRepository) CountOpenEnrollments(_ context.Context, _ authctx.Scope, classID uuid.UUID) (int64, error) {
 	return f.openEnrollments[classID], nil
 }
 
@@ -137,9 +166,9 @@ func (f *fakeRepository) AddSchedule(_ context.Context, s *Schedule) error {
 	return nil
 }
 
-func (f *fakeRepository) GetSchedule(_ context.Context, teacherID, classID, scheduleID uuid.UUID) (*Schedule, error) {
+func (f *fakeRepository) GetSchedule(_ context.Context, sc authctx.Scope, classID, scheduleID uuid.UUID) (*Schedule, error) {
 	s, ok := f.schedules[scheduleID]
-	if !ok || s.deleted || s.TeacherID != teacherID || s.ClassID != classID {
+	if !ok || !visibleSchedule(s, sc) || s.ClassID != classID {
 		return nil, ErrScheduleNotFound
 	}
 	out := s.Schedule
@@ -151,19 +180,19 @@ func (f *fakeRepository) UpdateSchedule(_ context.Context, s *Schedule) error {
 	return nil
 }
 
-func (f *fakeRepository) SoftDeleteSchedule(_ context.Context, teacherID, classID, scheduleID uuid.UUID) error {
+func (f *fakeRepository) SoftDeleteSchedule(_ context.Context, sc authctx.Scope, classID, scheduleID uuid.UUID) error {
 	s, ok := f.schedules[scheduleID]
-	if !ok || s.deleted || s.TeacherID != teacherID || s.ClassID != classID {
+	if !ok || !visibleSchedule(s, sc) || s.ClassID != classID {
 		return ErrScheduleNotFound
 	}
 	s.deleted = true
 	return nil
 }
 
-func (f *fakeRepository) ListEffectiveSchedules(_ context.Context, teacherID, classID uuid.UUID, from, to time.Time) ([]Schedule, error) {
+func (f *fakeRepository) ListEffectiveSchedules(_ context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]Schedule, error) {
 	var out []Schedule
 	for _, s := range f.schedules {
-		if s.deleted || s.TeacherID != teacherID || s.ClassID != classID {
+		if !visibleSchedule(s, sc) || s.ClassID != classID {
 			continue
 		}
 		if s.EffectiveFrom.After(to) {
@@ -194,9 +223,9 @@ func validCreateRequest() CreateClassRequest {
 
 func TestCreateDefaultsScheduleEffectiveFrom(t *testing.T) {
 	svc, _ := newTestService()
-	teacherID := id.New()
+	sc := memberScope()
 
-	class, err := svc.Create(context.Background(), teacherID, validCreateRequest())
+	class, err := svc.Create(context.Background(), sc, validCreateRequest())
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -210,8 +239,11 @@ func TestCreateDefaultsScheduleEffectiveFrom(t *testing.T) {
 	if got := s.EffectiveFrom.Format(dateLayout); got != "2026-01-05" {
 		t.Fatalf("effective_from must default to the class start date, got %s", got)
 	}
-	if s.TeacherID != teacherID || s.ClassID != class.ID {
+	if s.TeacherID != sc.TeacherID || s.ClassID != class.ID {
 		t.Fatalf("schedule must carry the class's tenant and id, got %+v", s)
+	}
+	if s.CenterID != sc.CenterID {
+		t.Fatalf("schedule must carry the class's center, got %+v", s)
 	}
 	if s.EffectiveTo != nil {
 		t.Fatalf("schedule must stay open-ended, got %v", s.EffectiveTo)
@@ -223,7 +255,7 @@ func TestCreateKeepsExplicitEffectiveFrom(t *testing.T) {
 	req := validCreateRequest()
 	req.Schedules[0].EffectiveFrom = "2026-02-01"
 
-	class, err := svc.Create(context.Background(), id.New(), req)
+	class, err := svc.Create(context.Background(), memberScope(), req)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -237,7 +269,7 @@ func TestCreatePropagatesRepositoryFailure(t *testing.T) {
 	boom := errors.New("insert failed")
 	repo.failCreate = boom
 
-	if _, err := svc.Create(context.Background(), id.New(), validCreateRequest()); !errors.Is(err, boom) {
+	if _, err := svc.Create(context.Background(), memberScope(), validCreateRequest()); !errors.Is(err, boom) {
 		t.Fatalf("want the repository error, got %v", err)
 	}
 	if len(repo.classes) != 0 {
@@ -247,14 +279,14 @@ func TestCreatePropagatesRepositoryFailure(t *testing.T) {
 
 func TestDeleteBlockedByOpenEnrollments(t *testing.T) {
 	svc, repo := newTestService()
-	teacherID := id.New()
-	class, err := svc.Create(context.Background(), teacherID, validCreateRequest())
+	sc := memberScope()
+	class, err := svc.Create(context.Background(), sc, validCreateRequest())
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	repo.openEnrollments[class.ID] = 3
 
-	err = svc.Delete(context.Background(), teacherID, class.ID)
+	err = svc.Delete(context.Background(), sc, class.ID)
 	if !errors.Is(err, ErrHasOpenEnrollments) {
 		t.Fatalf("want ErrHasOpenEnrollments cause, got %v", err)
 	}
@@ -269,31 +301,31 @@ func TestDeleteBlockedByOpenEnrollments(t *testing.T) {
 
 func TestDeleteWithoutEnrollmentsSoftDeletes(t *testing.T) {
 	svc, _ := newTestService()
-	teacherID := id.New()
-	class, err := svc.Create(context.Background(), teacherID, validCreateRequest())
+	sc := memberScope()
+	class, err := svc.Create(context.Background(), sc, validCreateRequest())
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
-	if err := svc.Delete(context.Background(), teacherID, class.ID); err != nil {
+	if err := svc.Delete(context.Background(), sc, class.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 	var appErr *apperror.AppError
-	if _, err := svc.Get(context.Background(), teacherID, class.ID); !errors.As(err, &appErr) || appErr.Code != apperror.CodeNotFound {
+	if _, err := svc.Get(context.Background(), sc, class.ID); !errors.As(err, &appErr) || appErr.Code != apperror.CodeNotFound {
 		t.Fatalf("deleted class must read as not found, got %v", err)
 	}
 }
 
 func TestArchiveIsIdempotent(t *testing.T) {
 	svc, _ := newTestService()
-	teacherID := id.New()
-	class, err := svc.Create(context.Background(), teacherID, validCreateRequest())
+	sc := memberScope()
+	class, err := svc.Create(context.Background(), sc, validCreateRequest())
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
 	for range 2 {
-		archived, err := svc.Archive(context.Background(), teacherID, class.ID)
+		archived, err := svc.Archive(context.Background(), sc, class.ID)
 		if err != nil {
 			t.Fatalf("archive: %v", err)
 		}
@@ -305,13 +337,13 @@ func TestArchiveIsIdempotent(t *testing.T) {
 
 func TestCrossTenantReadsAsNotFound(t *testing.T) {
 	svc, _ := newTestService()
-	owner := id.New()
+	owner := memberScope()
 	class, err := svc.Create(context.Background(), owner, validCreateRequest())
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
-	stranger := id.New()
+	stranger := memberScope()
 	var appErr *apperror.AppError
 	if _, err := svc.Get(context.Background(), stranger, class.ID); !errors.As(err, &appErr) || appErr.Code != apperror.CodeNotFound {
 		t.Fatalf("cross-tenant get must be not found, got %v", err)
@@ -323,14 +355,14 @@ func TestCrossTenantReadsAsNotFound(t *testing.T) {
 
 func TestUpdateScheduleClosesRow(t *testing.T) {
 	svc, _ := newTestService()
-	teacherID := id.New()
-	class, err := svc.Create(context.Background(), teacherID, validCreateRequest())
+	sc := memberScope()
+	class, err := svc.Create(context.Background(), sc, validCreateRequest())
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	scheduleID := class.Schedules[0].ID
 
-	updated, err := svc.UpdateSchedule(context.Background(), teacherID, class.ID, scheduleID, UpdateScheduleRequest{
+	updated, err := svc.UpdateSchedule(context.Background(), sc, class.ID, scheduleID, UpdateScheduleRequest{
 		Weekday:       int16Ptr(2),
 		StartTime:     "18:00",
 		DurationMin:   90,
@@ -347,13 +379,13 @@ func TestUpdateScheduleClosesRow(t *testing.T) {
 
 func TestAddScheduleDefaultsEffectiveFromToClassStart(t *testing.T) {
 	svc, _ := newTestService()
-	teacherID := id.New()
-	class, err := svc.Create(context.Background(), teacherID, validCreateRequest())
+	sc := memberScope()
+	class, err := svc.Create(context.Background(), sc, validCreateRequest())
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
-	added, err := svc.AddSchedule(context.Background(), teacherID, class.ID, ScheduleRequest{
+	added, err := svc.AddSchedule(context.Background(), sc, class.ID, ScheduleRequest{
 		Weekday: int16Ptr(0), StartTime: "08:30", DurationMin: 60,
 	})
 	if err != nil {
@@ -369,15 +401,63 @@ func TestAddScheduleDefaultsEffectiveFromToClassStart(t *testing.T) {
 
 func TestScheduleOpsOnUnknownScheduleAreNotFound(t *testing.T) {
 	svc, _ := newTestService()
-	teacherID := id.New()
-	class, err := svc.Create(context.Background(), teacherID, validCreateRequest())
+	sc := memberScope()
+	class, err := svc.Create(context.Background(), sc, validCreateRequest())
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
 	var appErr *apperror.AppError
-	err = svc.DeleteSchedule(context.Background(), teacherID, class.ID, id.New())
+	err = svc.DeleteSchedule(context.Background(), sc, class.ID, id.New())
 	if !errors.As(err, &appErr) || appErr.Code != apperror.CodeNotFound {
 		t.Fatalf("unknown schedule delete must be NOT_FOUND, got %v", err)
+	}
+}
+
+// An owner reads, updates, and manages a member's class — center oversight,
+// not per-teacher isolation. A schedule the owner adds still inherits the
+// parent class's own teacher, not the owner's.
+func TestOwnerScopeSeesAndManagesMembersClass(t *testing.T) {
+	svc, _ := newTestService()
+	center := id.New()
+	member := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
+	owner := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: true}
+
+	class, err := svc.Create(context.Background(), member, validCreateRequest())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := svc.Get(context.Background(), owner, class.ID); err != nil {
+		t.Fatalf("owner must read a member's class, got %v", err)
+	}
+	added, err := svc.AddSchedule(context.Background(), owner, class.ID, ScheduleRequest{
+		Weekday: int16Ptr(0), StartTime: "08:30", DurationMin: 60,
+	})
+	if err != nil {
+		t.Fatalf("owner must add a schedule to a member's class, got %v", err)
+	}
+	if added.TeacherID != member.TeacherID {
+		t.Fatalf("a schedule added by the owner must inherit the parent class's own teacher, got %s", added.TeacherID)
+	}
+	if err := svc.Delete(context.Background(), owner, class.ID); err != nil {
+		t.Fatalf("owner must delete a member's class, got %v", err)
+	}
+}
+
+// A peer in the same center but not the creator, and not the owner, must not
+// see the class — center scope alone is not enough, isolation still holds
+// between non-owning members.
+func TestPeerScopeCannotSeeAnotherMembersClass(t *testing.T) {
+	svc, _ := newTestService()
+	center := id.New()
+	author := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
+	peer := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
+
+	class, err := svc.Create(context.Background(), author, validCreateRequest())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := svc.Get(context.Background(), peer, class.ID); apperror.From(err).Code != apperror.CodeNotFound {
+		t.Fatalf("peer must not read another member's class, got %v", err)
 	}
 }

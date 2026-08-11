@@ -108,7 +108,7 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	contacts.RegisterRoutes(v1, contacts.NewHandler(contactsSvc), requireAuth, resolveScope)
 
 	classesSvc := classes.NewService(classes.NewRepository(db), txMgr)
-	classes.RegisterRoutes(v1, classes.NewHandler(classesSvc), requireAuth)
+	classes.RegisterRoutes(v1, classes.NewHandler(classesSvc), requireAuth, resolveScope)
 
 	// Construction order matters: the students service consumes the
 	// enrollments service through students.EnrollmentEnder so deleting a
