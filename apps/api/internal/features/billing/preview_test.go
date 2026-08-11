@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 )
 
@@ -37,11 +38,11 @@ func newPreviewFakeRepository() *previewFakeRepository {
 	}
 }
 
-func (f *previewFakeRepository) TallyAttendance(_ context.Context, _, periodID uuid.UUID) ([]AttendanceTally, error) {
+func (f *previewFakeRepository) TallyAttendance(_ context.Context, _ authctx.Scope, periodID uuid.UUID) ([]AttendanceTally, error) {
 	return f.tallies[periodID], nil
 }
 
-func (f *previewFakeRepository) OpeningBalances(_ context.Context, _, _ uuid.UUID, studentIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
+func (f *previewFakeRepository) OpeningBalances(_ context.Context, _ authctx.Scope, _ uuid.UUID, studentIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
 	out := map[uuid.UUID]int64{}
 	for _, sid := range studentIDs {
 		if v, ok := f.openingBalances[sid]; ok {
@@ -51,7 +52,7 @@ func (f *previewFakeRepository) OpeningBalances(_ context.Context, _, _ uuid.UUI
 	return out, nil
 }
 
-func (f *previewFakeRepository) AdjustmentTotals(_ context.Context, _, periodID uuid.UUID) (map[uuid.UUID]int64, error) {
+func (f *previewFakeRepository) AdjustmentTotals(_ context.Context, _ authctx.Scope, periodID uuid.UUID) (map[uuid.UUID]int64, error) {
 	out := map[uuid.UUID]int64{}
 	for _, inv := range f.invoices {
 		if inv.PeriodID != periodID {
@@ -64,7 +65,7 @@ func (f *previewFakeRepository) AdjustmentTotals(_ context.Context, _, periodID 
 	return out, nil
 }
 
-func (f *previewFakeRepository) CarriedDebtStudents(_ context.Context, _, prevPeriodID uuid.UUID) ([]CarriedDebtStudent, error) {
+func (f *previewFakeRepository) CarriedDebtStudents(_ context.Context, _ authctx.Scope, prevPeriodID uuid.UUID) ([]CarriedDebtStudent, error) {
 	return f.carriedDebt[prevPeriodID], nil
 }
 
@@ -103,7 +104,7 @@ func (f *previewFakeRepository) UpsertInvoiceLine(_ context.Context, line *Invoi
 	return nil
 }
 
-func (f *previewFakeRepository) ZeroUnmatchedLines(_ context.Context, _, invoiceID uuid.UUID, keepEnrollmentIDs []uuid.UUID) error {
+func (f *previewFakeRepository) ZeroUnmatchedLines(_ context.Context, _ authctx.Scope, invoiceID uuid.UUID, keepEnrollmentIDs []uuid.UUID) error {
 	keep := make(map[uuid.UUID]bool, len(keepEnrollmentIDs))
 	for _, eid := range keepEnrollmentIDs {
 		keep[eid] = true
@@ -117,7 +118,7 @@ func (f *previewFakeRepository) ZeroUnmatchedLines(_ context.Context, _, invoice
 	return nil
 }
 
-func (f *previewFakeRepository) ListInvoices(_ context.Context, _, periodID uuid.UUID) ([]Invoice, error) {
+func (f *previewFakeRepository) ListInvoices(_ context.Context, _ authctx.Scope, periodID uuid.UUID) ([]Invoice, error) {
 	var out []Invoice
 	for _, inv := range f.invoices {
 		if inv.PeriodID == periodID {
@@ -127,7 +128,7 @@ func (f *previewFakeRepository) ListInvoices(_ context.Context, _, periodID uuid
 	return out, nil
 }
 
-func (f *previewFakeRepository) GetInvoiceWithLines(_ context.Context, _, invoiceID uuid.UUID) (*Invoice, []InvoiceLine, error) {
+func (f *previewFakeRepository) GetInvoiceWithLines(_ context.Context, _ authctx.Scope, invoiceID uuid.UUID) (*Invoice, []InvoiceLine, error) {
 	inv, ok := f.invoices[invoiceID]
 	if !ok {
 		return nil, nil, ErrInvoiceNotFound
@@ -151,7 +152,7 @@ func newPreviewTestService() (*Service, *previewFakeRepository) {
 // EnsurePeriod so tests control period_start/period_end exactly.
 func openPeriod(repo *previewFakeRepository, teacherID uuid.UUID, start, end time.Time, status string) Period {
 	p := Period{
-		ID: id.New(), TeacherID: teacherID, Year: int16(start.Year()), Month: int16(start.Month()), //nolint:gosec // test fixture, bounded input
+		ID: id.New(), TeacherID: teacherID, CenterID: id.New(), Year: int16(start.Year()), Month: int16(start.Month()), //nolint:gosec // test fixture, bounded input
 		PeriodStart: start, PeriodEnd: end, Status: status,
 	}
 	repo.periods[p.ID] = p
@@ -165,6 +166,7 @@ func TestPreviewIncludesTallyStudentAndCarriedDebtOnlyStudent(t *testing.T) {
 
 	prev := openPeriod(repo, teacherID, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC), PeriodClosed)
 	period := openPeriod(repo, teacherID, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC), PeriodOpen)
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: period.CenterID}
 
 	enrolledStudent := id.New()
 	enrolledContact := id.New()
@@ -186,7 +188,7 @@ func TestPreviewIncludesTallyStudentAndCarriedDebtOnlyStudent(t *testing.T) {
 	}}
 	repo.openingBalances[departedStudent] = 250_000
 
-	resp, err := svc.Preview(ctx, teacherID, period.ID)
+	resp, err := svc.Preview(ctx, sc, period.ID)
 	if err != nil {
 		t.Fatalf("preview: %v", err)
 	}
@@ -245,6 +247,7 @@ func TestPreviewOmitsZeroedLineFromResponse(t *testing.T) {
 	svc, repo := newPreviewTestService()
 	teacherID := id.New()
 	period := openPeriod(repo, teacherID, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC), PeriodOpen)
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: period.CenterID}
 
 	studentID, contactID, enrollmentID, classID := id.New(), id.New(), id.New(), id.New()
 	repo.tallies[period.ID] = []AttendanceTally{{
@@ -254,7 +257,7 @@ func TestPreviewOmitsZeroedLineFromResponse(t *testing.T) {
 		BillableCount: 0, AbsentCount: 0, PresentCount: 0,
 	}}
 
-	resp, err := svc.Preview(ctx, teacherID, period.ID)
+	resp, err := svc.Preview(ctx, sc, period.ID)
 	if err != nil {
 		t.Fatalf("preview: %v", err)
 	}
@@ -272,7 +275,7 @@ func TestPreviewCrossTenantIsNotFound(t *testing.T) {
 	owner, stranger := id.New(), id.New()
 	period := openPeriod(repo, owner, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC), PeriodOpen)
 
-	_, err := svc.Preview(ctx, stranger, period.ID)
+	_, err := svc.Preview(ctx, authctx.Scope{TeacherID: stranger, CenterID: period.CenterID}, period.ID)
 	if apperror.From(err).Code != apperror.CodeNotFound {
 		t.Fatalf("another teacher's period must read as 404, got %v", err)
 	}
@@ -283,8 +286,9 @@ func TestDraftRefusesClosedPeriod(t *testing.T) {
 	svc, repo := newPreviewTestService()
 	teacherID := id.New()
 	period := openPeriod(repo, teacherID, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC), PeriodClosed)
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: period.CenterID}
 
-	_, err := svc.Draft(ctx, teacherID, period.ID)
+	_, err := svc.Draft(ctx, sc, period.ID)
 	if apperror.From(err).Code != apperror.CodeConflict {
 		t.Fatalf("draft on a closed period must be 409, got %v", err)
 	}
@@ -298,6 +302,7 @@ func TestDraftIsIdempotentAcrossCalls(t *testing.T) {
 	svc, repo := newPreviewTestService()
 	teacherID := id.New()
 	period := openPeriod(repo, teacherID, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC), PeriodOpen)
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: period.CenterID}
 
 	studentID, contactID, enrollmentID, classID := id.New(), id.New(), id.New(), id.New()
 	repo.tallies[period.ID] = []AttendanceTally{{
@@ -307,11 +312,11 @@ func TestDraftIsIdempotentAcrossCalls(t *testing.T) {
 		BillableCount: 3, AbsentCount: 0, PresentCount: 3,
 	}}
 
-	first, err := svc.Draft(ctx, teacherID, period.ID)
+	first, err := svc.Draft(ctx, sc, period.ID)
 	if err != nil {
 		t.Fatalf("first draft: %v", err)
 	}
-	second, err := svc.Draft(ctx, teacherID, period.ID)
+	second, err := svc.Draft(ctx, sc, period.ID)
 	if err != nil {
 		t.Fatalf("second draft: %v", err)
 	}
@@ -333,6 +338,14 @@ func TestDraftIsIdempotentAcrossCalls(t *testing.T) {
 		t.Fatalf("total_due must be 3*120000=360000, got %d then %d",
 			first.Invoices[0].TotalDue, second.Invoices[0].TotalDue)
 	}
+
+	invoice, ok := repo.invoices[*first.Invoices[0].InvoiceID]
+	if !ok {
+		t.Fatalf("drafted invoice must be persisted")
+	}
+	if invoice.CenterID != sc.CenterID {
+		t.Fatalf("drafted invoice must inherit the period's own center_id, got %s want %s", invoice.CenterID, sc.CenterID)
+	}
 }
 
 func TestDraftRefusesWhenInvoiceAlreadyIssued(t *testing.T) {
@@ -340,6 +353,7 @@ func TestDraftRefusesWhenInvoiceAlreadyIssued(t *testing.T) {
 	svc, repo := newPreviewTestService()
 	teacherID := id.New()
 	period := openPeriod(repo, teacherID, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC), PeriodOpen)
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: period.CenterID}
 
 	studentID, contactID, enrollmentID, classID := id.New(), id.New(), id.New(), id.New()
 	repo.tallies[period.ID] = []AttendanceTally{{
@@ -349,13 +363,13 @@ func TestDraftRefusesWhenInvoiceAlreadyIssued(t *testing.T) {
 		BillableCount: 2, AbsentCount: 0, PresentCount: 2,
 	}}
 	issued := &Invoice{
-		ID: id.New(), TeacherID: teacherID, PeriodID: period.ID, StudentID: studentID, ContactID: contactID,
+		ID: id.New(), TeacherID: teacherID, CenterID: period.CenterID, PeriodID: period.ID, StudentID: studentID, ContactID: contactID,
 		StudentName: "Vo Em", ContactName: "Mother of Em",
 		CurrentCharge: 200_000, TotalDue: 200_000, Status: InvoiceIssued,
 	}
 	repo.invoices[issued.ID] = issued
 
-	_, err := svc.Draft(ctx, teacherID, period.ID)
+	_, err := svc.Draft(ctx, sc, period.ID)
 	if apperror.From(err).Code != apperror.CodeConflict {
 		t.Fatalf("draft against an issued invoice must be 409, got %v", err)
 	}
@@ -372,6 +386,7 @@ func TestDraftReflectsAdjustmentTotalIntoTotalDue(t *testing.T) {
 	svc, repo := newPreviewTestService()
 	teacherID := id.New()
 	period := openPeriod(repo, teacherID, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC), PeriodOpen)
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: period.CenterID}
 
 	studentID, contactID, enrollmentID, classID := id.New(), id.New(), id.New(), id.New()
 	repo.tallies[period.ID] = []AttendanceTally{{
@@ -381,7 +396,7 @@ func TestDraftReflectsAdjustmentTotalIntoTotalDue(t *testing.T) {
 		BillableCount: 2, AbsentCount: 0, PresentCount: 2,
 	}}
 
-	first, err := svc.Draft(ctx, teacherID, period.ID)
+	first, err := svc.Draft(ctx, sc, period.ID)
 	if err != nil {
 		t.Fatalf("first draft: %v", err)
 	}
@@ -395,7 +410,7 @@ func TestDraftReflectsAdjustmentTotalIntoTotalDue(t *testing.T) {
 	invoiceID := *first.Invoices[0].InvoiceID
 	repo.adjustments[invoiceID] = -20_000
 
-	second, err := svc.Draft(ctx, teacherID, period.ID)
+	second, err := svc.Draft(ctx, sc, period.ID)
 	if err != nil {
 		t.Fatalf("second draft: %v", err)
 	}

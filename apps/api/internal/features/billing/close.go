@@ -72,17 +72,17 @@ func mapUnconfirmedSessions(resp *sessions.PendingResponse) []UnconfirmedSession
 // ListPending resolves for the dashboard) so this call is byte-identical to
 // what the dashboard's own feed would return over the same from/to window;
 // that agreement is what plan 03's contract promises and this package's
-// integration tests assert.
-func blockingSessions(ctx context.Context, pending PendingSource, teacherID uuid.UUID, period *Period, today time.Time) ([]UnconfirmedSession, error) {
+// integration tests assert. periodScope must be the period's own owner
+// scope, never the acting caller's — this is a date-range search with no id
+// anchor, so an owner's caller scope would otherwise widen it to every
+// unconfirmed session in the center.
+func blockingSessions(ctx context.Context, pending PendingSource, periodScope authctx.Scope, period *Period, today time.Time) ([]UnconfirmedSession, error) {
 	from := period.PeriodStart
 	to := period.PeriodEnd
 	if today.Before(to) {
 		to = today
 	}
-	// Billing has not been re-keyed to center scope yet; this shim carries
-	// only the teacher id, so sessions' scoped query still resolves tenancy
-	// by teacher until billing gets its own sweep.
-	resp, err := pending.ListUnconfirmedInWindow(ctx, authctx.Scope{TeacherID: teacherID}, &from, &to, today, closeFeedLimit)
+	resp, err := pending.ListUnconfirmedInWindow(ctx, periodScope, &from, &to, today, closeFeedLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -96,18 +96,16 @@ func blockingSessions(ctx context.Context, pending PendingSource, teacherID uuid
 // still inside the period without confirmed attendance — informational only
 // (Close does not block on these). before=period_end+1 day so a session
 // dated exactly on the period's last day is included (session_date < before
-// == session_date <= period_end).
-func futureUnconfirmedSessions(ctx context.Context, pending PendingSource, teacherID uuid.UUID, period *Period, today time.Time) ([]UnconfirmedSession, error) {
+// == session_date <= period_end). periodScope must be the period's own owner
+// scope, for the same reason blockingSessions requires it.
+func futureUnconfirmedSessions(ctx context.Context, pending PendingSource, periodScope authctx.Scope, period *Period, today time.Time) ([]UnconfirmedSession, error) {
 	from := today.AddDate(0, 0, 1)
 	if from.After(period.PeriodEnd) {
 		return nil, nil
 	}
 	to := period.PeriodEnd
 	before := period.PeriodEnd.AddDate(0, 0, 1)
-	// Billing has not been re-keyed to center scope yet; this shim carries
-	// only the teacher id, so sessions' scoped query still resolves tenancy
-	// by teacher until billing gets its own sweep.
-	resp, err := pending.ListUnconfirmedInWindow(ctx, authctx.Scope{TeacherID: teacherID}, &from, &to, before, closeFeedLimit)
+	resp, err := pending.ListUnconfirmedInWindow(ctx, periodScope, &from, &to, before, closeFeedLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -120,11 +118,23 @@ func futureUnconfirmedSessions(ctx context.Context, pending PendingSource, teach
 // period closed. A failure at any step rolls back everything before it —
 // the period is only ever seen as open or fully closed, never partially so.
 //
-// today is resolved once, from the teacher's timezone, before the
+// today is resolved once, from the period owner's timezone, before the
 // transaction opens, and threaded through every step that needs "now" as a
 // calendar day — nothing inside the pipeline calls time.Now() itself.
-func (s *Service) Close(ctx context.Context, teacherID, periodID uuid.UUID) (*CloseResponse, error) {
-	loc, err := s.teacherLocation(ctx, teacherID)
+func (s *Service) Close(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*CloseResponse, error) {
+	// A preliminary read authorizes the caller against this exact period and
+	// resolves its owner before the transaction opens — Close's timezone and
+	// every downstream write must use the PERIOD's own teacher, not
+	// necessarily the caller's, so an owner closing a member's period
+	// resolves "today" in the member's timezone.
+	period0, err := s.repo.GetPeriod(ctx, sc, periodID)
+	if errors.Is(err, ErrPeriodNotFound) {
+		return nil, apperror.NotFound("billing period")
+	}
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+	loc, err := s.teacherLocation(ctx, period0.TeacherID)
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +150,7 @@ func (s *Service) Close(ctx context.Context, teacherID, periodID uuid.UUID) (*Cl
 	)
 
 	err = s.tx.WithinTx(ctx, func(txCtx context.Context) error {
-		locked, lockErr := s.repo.LockPeriod(txCtx, teacherID, periodID)
+		locked, lockErr := s.repo.LockPeriod(txCtx, sc, periodID)
 		if lockErr != nil {
 			return lockErr
 		}
@@ -148,8 +158,9 @@ func (s *Service) Close(ctx context.Context, teacherID, periodID uuid.UUID) (*Cl
 			return apperror.Conflict("period is not open")
 		}
 		period = locked
+		periodScope := authctx.Scope{TeacherID: period.TeacherID, CenterID: period.CenterID}
 
-		blocked, blockErr := blockingSessions(txCtx, s.pending, teacherID, period, today)
+		blocked, blockErr := blockingSessions(txCtx, s.pending, periodScope, period, today)
 		if blockErr != nil {
 			return blockErr
 		}
@@ -157,30 +168,30 @@ func (s *Service) Close(ctx context.Context, teacherID, periodID uuid.UUID) (*Cl
 			return &ErrUnconfirmedSessions{Sessions: blocked}
 		}
 
-		compute, computeErr := ComputePeriod(txCtx, s.repo, teacherID, periodID)
+		compute, computeErr := ComputePeriod(txCtx, s.repo, periodScope, periodID)
 		if computeErr != nil {
 			return computeErr
 		}
-		if _, draftErr := DraftPeriod(txCtx, s.repo, teacherID, periodID, compute); draftErr != nil {
+		if _, draftErr := DraftPeriod(txCtx, s.repo, periodScope, periodID, compute); draftErr != nil {
 			return draftErr
 		}
 
-		voidedCount, err = s.repo.VoidInvoices(txCtx, teacherID, periodID)
+		voidedCount, err = s.repo.VoidInvoices(txCtx, periodScope, periodID)
 		if err != nil {
 			return err
 		}
-		issuedCount, err = s.repo.IssueDraftInvoices(txCtx, teacherID, periodID)
+		issuedCount, err = s.repo.IssueDraftInvoices(txCtx, periodScope, periodID)
 		if err != nil {
 			return err
 		}
 
-		if closeErr := s.repo.ClosePeriod(txCtx, teacherID, periodID, closedAt); closeErr != nil {
+		if closeErr := s.repo.ClosePeriod(txCtx, periodScope, periodID, closedAt); closeErr != nil {
 			return closeErr
 		}
 		period.Status = PeriodClosed
 		period.ClosedAt = &closedAt
 
-		invoices, listErr := s.repo.ListInvoices(txCtx, teacherID, periodID)
+		invoices, listErr := s.repo.ListInvoices(txCtx, periodScope, periodID)
 		if listErr != nil {
 			return listErr
 		}
@@ -191,7 +202,7 @@ func (s *Service) Close(ctx context.Context, teacherID, periodID uuid.UUID) (*Cl
 		}
 
 		var warnErr error
-		warnings, warnErr = futureUnconfirmedSessions(txCtx, s.pending, teacherID, period, today)
+		warnings, warnErr = futureUnconfirmedSessions(txCtx, s.pending, periodScope, period, today)
 		return warnErr
 	})
 
@@ -224,7 +235,7 @@ func (s *Service) Close(ctx context.Context, teacherID, periodID uuid.UUID) (*Cl
 // (409) an invoice that still carries a payment: the payment must be
 // reversed first (plan 05), or voiding would leave allocated money pointing
 // at a void invoice.
-func (s *Service) VoidInvoice(ctx context.Context, teacherID, invoiceID uuid.UUID, reason string) (*InvoiceResponse, error) {
+func (s *Service) VoidInvoice(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID, reason string) (*InvoiceResponse, error) {
 	// Re-validate the reason for parity with AddAdjustment: invoices.void_reason
 	// has no DB CHECK backstop, so a non-HTTP caller that skips Gin binding must
 	// not be able to persist an empty or over-long void reason.
@@ -232,7 +243,7 @@ func (s *Service) VoidInvoice(ctx context.Context, teacherID, invoiceID uuid.UUI
 		return nil, err
 	}
 
-	inv, err := s.repo.GetInvoice(ctx, teacherID, invoiceID)
+	inv, err := s.repo.GetInvoice(ctx, sc, invoiceID)
 	if errors.Is(err, ErrInvoiceNotFound) {
 		return nil, apperror.NotFound("invoice")
 	}
@@ -247,7 +258,7 @@ func (s *Service) VoidInvoice(ctx context.Context, teacherID, invoiceID uuid.UUI
 	}
 
 	at := s.now()
-	err = s.repo.VoidInvoice(ctx, teacherID, invoiceID, reason, at)
+	err = s.repo.VoidInvoice(ctx, sc, invoiceID, reason, at)
 	if errors.Is(err, ErrInvoiceNotFound) {
 		// The two guards above passed, but the guarded UPDATE still affected
 		// no row — the invoice's status or paid_amount changed concurrently
@@ -259,7 +270,7 @@ func (s *Service) VoidInvoice(ctx context.Context, teacherID, invoiceID uuid.UUI
 		return nil, apperror.Internal(err)
 	}
 
-	updated, err := s.repo.GetInvoice(ctx, teacherID, invoiceID)
+	updated, err := s.repo.GetInvoice(ctx, sc, invoiceID)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}

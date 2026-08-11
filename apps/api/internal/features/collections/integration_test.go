@@ -146,9 +146,9 @@ func TestContactViewMergesFamiliesAndClassViewShowsPerChildStatus(t *testing.T) 
 	contactE := testutil.Contact(t, db, teacher.ID, testutil.WithContactFullName("Contact E"))
 	childE1 := seedChild(t, db, teacher.ID, contactE.ID, "E1", date("2026-01-01"), 1)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 1)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
 	// A overpays by 20 000 — the surplus has nothing left to settle in this
@@ -317,7 +317,7 @@ func TestListRejectsUnknownViewAndMissingClassID(t *testing.T) {
 	collectionsSvc, billingSvc, _, db := newIntegrationDeps(t)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, db)
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 1)
 	require.NoError(t, err)
 
 	_, err = collectionsSvc.List(ctx, teacher.ID, period.ID, "bogus", collections.Filter{}, contactParams(t, ""))
@@ -356,9 +356,9 @@ func TestContactViewFiltersUnpaidWithin500msAt150Students(t *testing.T) {
 		}
 	}
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 1)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
 	started := time.Now()

@@ -21,6 +21,7 @@ import (
 	"teka/apps/api/internal/features/students"
 	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/testutil"
 )
@@ -52,6 +53,100 @@ func newIntegrationDeps(t *testing.T) (*billing.Service, billing.Repository, *en
 	return billingSvc, billingRepo, enrollmentsSvc, sessionsSvc, db
 }
 
+// An owner reads and closes a member's billing period; every invoice the
+// close writes inherits the MEMBER's own teacher and center, never the
+// owner's — the same precedent DraftPeriod's periodScope enforces.
+func TestOwnerHasFullOversightOfMembersBillingPeriods(t *testing.T) {
+	t.Parallel()
+	svc, repo, _, _, db := newIntegrationDeps(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, db)
+	_, member := testutil.Teacher(t, db)
+	ownerCenter := testutil.ScopeFor(t, db, owner.ID).CenterID
+
+	testutil.JoinCenter(t, db, member.ID, ownerCenter)
+	ownerScope := testutil.ScopeFor(t, db, owner.ID)
+	memberScope := testutil.ScopeFor(t, db, member.ID)
+	require.Equal(t, ownerScope.CenterID, memberScope.CenterID, "member must have joined the owner's center")
+
+	contact := testutil.Contact(t, db, member.ID)
+	class := testutil.Class(t, db, member.ID, testutil.WithClassStartDate(date("2026-01-01")))
+	student := testutil.Student(t, db, member.ID, contact.ID)
+	enrollment := testutil.Enrollment(t, db, member.ID, student.ID, class.ID, date("2026-01-01"))
+	sess := testutil.Session(t, db, member.ID, class.ID, date("2026-01-06"),
+		testutil.WithSessionAttendanceConfirmed(time.Now()))
+	testutil.AttendanceRecord(t, db, member.ID, sess.ID, student.ID, enrollment.ID)
+
+	period, err := svc.EnsurePeriod(ctx, memberScope, 2026, 1)
+	require.NoError(t, err, "member must be able to open their own billing period")
+
+	got, err := svc.GetPeriod(ctx, ownerScope, period.ID)
+	require.NoError(t, err, "owner must read a member's billing period")
+	require.Equal(t, period.ID, got.ID)
+
+	resp, err := svc.Close(ctx, ownerScope, period.ID)
+	require.NoError(t, err, "owner must close a member's billing period")
+	require.EqualValues(t, 1, resp.IssuedCount)
+
+	invoices, err := repo.ListInvoices(ctx, memberScope, period.ID)
+	require.NoError(t, err)
+	require.Len(t, invoices, 1)
+	require.Equal(t, member.ID, invoices[0].TeacherID,
+		"the invoice must be stamped with the member's own teacher id, not the closing owner's")
+	require.Equal(t, ownerCenter, invoices[0].CenterID)
+}
+
+// Two non-owning teachers in the same center are still isolated from each
+// other's billing periods — center scope grants the owner oversight, not
+// peer-to-peer access.
+func TestPeersInSameCenterCannotSeeEachOthersBillingPeriods(t *testing.T) {
+	t.Parallel()
+	svc, _, _, _, db := newIntegrationDeps(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, db)
+	memberB, _ := testutil.Teacher(t, db)
+	memberC, _ := testutil.Teacher(t, db)
+	ownerCenter := testutil.ScopeFor(t, db, owner.ID).CenterID
+
+	testutil.JoinCenter(t, db, memberB.ID, ownerCenter)
+	testutil.JoinCenter(t, db, memberC.ID, ownerCenter)
+	scopeB := testutil.ScopeFor(t, db, memberB.ID)
+	scopeC := testutil.ScopeFor(t, db, memberC.ID)
+
+	period, err := svc.EnsurePeriod(ctx, scopeB, 2026, 1)
+	require.NoError(t, err)
+
+	_, err = svc.GetPeriod(ctx, scopeC, period.ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code, "a peer must not read another member's billing period")
+
+	_, err = svc.Close(ctx, scopeC, period.ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code, "a peer must not close another member's billing period")
+}
+
+// A teacher from a different center is refused with 404, never 403 — a 403
+// would confirm the period exists in another center.
+func TestCrossCenterBillingIsNotFound(t *testing.T) {
+	t.Parallel()
+	svc, _, _, _, db := newIntegrationDeps(t)
+	ctx := context.Background()
+	teacherA, _ := testutil.Teacher(t, db)
+	teacherB, _ := testutil.Teacher(t, db)
+	scopeA := testutil.ScopeFor(t, db, teacherA.ID)
+	scopeB := testutil.ScopeFor(t, db, teacherB.ID)
+
+	period, err := svc.EnsurePeriod(ctx, scopeA, 2026, 1)
+	require.NoError(t, err)
+
+	_, err = svc.GetPeriod(ctx, scopeA, period.ID)
+	require.NoError(t, err, "teacher A must read their own period")
+
+	_, err = svc.GetPeriod(ctx, scopeB, period.ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+
+	_, err = svc.Close(ctx, scopeB, period.ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+}
+
 // TestTallyAttendancePlan03ContractExclusions seeds one teacher, one contact,
 // one student, one class with two held+confirmed sessions, then adds a
 // cancelled session, an unconfirmed session, and a soft-deleted attendance
@@ -68,6 +163,7 @@ func TestTallyAttendancePlan03ContractExclusions(t *testing.T) {
 	svc, repo, _, _, db := newIntegrationDeps(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	contact := testutil.Contact(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-01-01")))
 	student := testutil.Student(t, db, teacher.ID, contact.ID)
@@ -103,10 +199,10 @@ func TestTallyAttendancePlan03ContractExclusions(t *testing.T) {
 	softDeleted := testutil.AttendanceRecord(t, db, teacher.ID, heldButRecordDeleted.ID, student.ID, enrollment.ID)
 	require.NoError(t, db.Delete(softDeleted).Error)
 
-	period, err := svc.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	period, err := svc.EnsurePeriod(ctx, sc, 2026, 1)
 	require.NoError(t, err)
 
-	tallies, err := repo.TallyAttendance(ctx, teacher.ID, period.ID)
+	tallies, err := repo.TallyAttendance(ctx, sc, period.ID)
 	require.NoError(t, err)
 	require.Len(t, tallies, 1, "one enrollment must produce exactly one tally row")
 
@@ -132,6 +228,7 @@ func TestMidPeriodJoinerNeedsNoRosterDateFilter(t *testing.T) {
 	svc, repo, enrollmentsSvc, _, db := newIntegrationDeps(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	contact := testutil.Contact(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-01-01")))
 	student := testutil.Student(t, db, teacher.ID, contact.ID)
@@ -146,7 +243,6 @@ func TestMidPeriodJoinerNeedsNoRosterDateFilter(t *testing.T) {
 	// Verify roster membership independently through the sanctioned query:
 	// the joiner is not on the roster for the session before their join date,
 	// and is on it (inclusive boundary) for the session on their join date.
-	sc := testutil.ScopeFor(t, db, teacher.ID)
 	rosterBefore, err := enrollmentsSvc.ActiveOn(ctx, sc, class.ID, before.SessionDate)
 	require.NoError(t, err)
 	require.Empty(t, rosterBefore, "the joiner must not be on the roster before their enrollment begins")
@@ -155,9 +251,9 @@ func TestMidPeriodJoinerNeedsNoRosterDateFilter(t *testing.T) {
 	require.Len(t, rosterOnStart, 1)
 	require.Equal(t, enrollment.ID, rosterOnStart[0].ID)
 
-	period, err := svc.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	period, err := svc.EnsurePeriod(ctx, sc, 2026, 1)
 	require.NoError(t, err)
-	tallies, err := repo.TallyAttendance(ctx, teacher.ID, period.ID)
+	tallies, err := repo.TallyAttendance(ctx, sc, period.ID)
 	require.NoError(t, err)
 	require.Len(t, tallies, 1)
 	require.Equal(t, 1, tallies[0].BillableCount,
@@ -172,10 +268,11 @@ func TestEnsurePeriodIdempotentAcrossCalls(t *testing.T) {
 	svc, _, _, _, db := newIntegrationDeps(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 
-	first, err := svc.EnsurePeriod(ctx, teacher.ID, 2026, 4)
+	first, err := svc.EnsurePeriod(ctx, sc, 2026, 4)
 	require.NoError(t, err)
-	second, err := svc.EnsurePeriod(ctx, teacher.ID, 2026, 4)
+	second, err := svc.EnsurePeriod(ctx, sc, 2026, 4)
 	require.NoError(t, err)
 	require.Equal(t, first.ID, second.ID)
 
@@ -195,10 +292,10 @@ func TestGetPeriodCrossTenantIsNotFound(t *testing.T) {
 	owner, _ := testutil.Teacher(t, db)
 	stranger, _ := testutil.Teacher(t, db)
 
-	period, err := svc.EnsurePeriod(ctx, owner.ID, 2026, 5)
+	period, err := svc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, owner.ID), 2026, 5)
 	require.NoError(t, err)
 
-	_, err = svc.GetPeriod(ctx, stranger.ID, period.ID)
+	_, err = svc.GetPeriod(ctx, testutil.ScopeFor(t, db, stranger.ID), period.ID)
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
 		"another teacher's period must read as 404, not 403 or 200")
@@ -212,12 +309,14 @@ type seededDraftFixture struct {
 	student    *students.Student
 	enrollment *enrollments.Enrollment
 	period     *billing.Period
+	scope      authctx.Scope
 }
 
 func seedDraftFixture(t *testing.T, db *gorm.DB, svc *billing.Service) seededDraftFixture {
 	t.Helper()
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	contact := testutil.Contact(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-01-01")))
 	student := testutil.Student(t, db, teacher.ID, contact.ID)
@@ -230,10 +329,10 @@ func seedDraftFixture(t *testing.T, db *gorm.DB, svc *billing.Service) seededDra
 	testutil.AttendanceRecord(t, db, teacher.ID, held1.ID, student.ID, enrollment.ID)
 	testutil.AttendanceRecord(t, db, teacher.ID, held2.ID, student.ID, enrollment.ID)
 
-	period, err := svc.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	period, err := svc.EnsurePeriod(ctx, sc, 2026, 1)
 	require.NoError(t, err)
 
-	return seededDraftFixture{teacher: teacher, student: student, enrollment: enrollment, period: period}
+	return seededDraftFixture{teacher: teacher, student: student, enrollment: enrollment, period: period, scope: sc}
 }
 
 // TestDraftTwiceProducesNoDuplicateRows proves R4's idempotency contract at
@@ -245,12 +344,12 @@ func TestDraftTwiceProducesNoDuplicateRows(t *testing.T) {
 	fx := seedDraftFixture(t, db, svc)
 	ctx := context.Background()
 
-	first, err := svc.Draft(ctx, fx.teacher.ID, fx.period.ID)
+	first, err := svc.Draft(ctx, fx.scope, fx.period.ID)
 	require.NoError(t, err)
 	require.Len(t, first.Invoices, 1)
 	require.NotNil(t, first.Invoices[0].InvoiceID)
 
-	second, err := svc.Draft(ctx, fx.teacher.ID, fx.period.ID)
+	second, err := svc.Draft(ctx, fx.scope, fx.period.ID)
 	require.NoError(t, err)
 	require.Len(t, second.Invoices, 1)
 	require.Equal(t, *first.Invoices[0].InvoiceID, *second.Invoices[0].InvoiceID,
@@ -275,18 +374,18 @@ func TestDraftPreservesManualAdjustmentAndFoldsItIntoTotalDue(t *testing.T) {
 	fx := seedDraftFixture(t, db, svc)
 	ctx := context.Background()
 
-	first, err := svc.Draft(ctx, fx.teacher.ID, fx.period.ID)
+	first, err := svc.Draft(ctx, fx.scope, fx.period.ID)
 	require.NoError(t, err)
 	invoiceID := *first.Invoices[0].InvoiceID
 	require.EqualValues(t, 200_000, first.Invoices[0].TotalDue)
 
 	adjustment := &billing.InvoiceAdjustment{
-		ID: id.New(), TeacherID: fx.teacher.ID, InvoiceID: invoiceID,
+		ID: id.New(), TeacherID: fx.teacher.ID, CenterID: fx.period.CenterID, InvoiceID: invoiceID,
 		Amount: -20_000, Reason: "hoàn tiền do nghỉ có phép",
 	}
 	require.NoError(t, db.Create(adjustment).Error)
 
-	second, err := svc.Draft(ctx, fx.teacher.ID, fx.period.ID)
+	second, err := svc.Draft(ctx, fx.scope, fx.period.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, invoiceID, *second.Invoices[0].InvoiceID)
 	require.EqualValues(t, -20_000, second.Invoices[0].AdjustmentTotal)
@@ -309,7 +408,7 @@ func TestDraftZeroesLineWhenAttendanceRecordIsSoftDeletedInsteadOfDeletingIt(t *
 	fx := seedDraftFixture(t, db, svc)
 	ctx := context.Background()
 
-	first, err := svc.Draft(ctx, fx.teacher.ID, fx.period.ID)
+	first, err := svc.Draft(ctx, fx.scope, fx.period.ID)
 	require.NoError(t, err)
 	invoiceID := *first.Invoices[0].InvoiceID
 	require.Len(t, first.Invoices[0].Lines, 1)
@@ -322,7 +421,7 @@ func TestDraftZeroesLineWhenAttendanceRecordIsSoftDeletedInsteadOfDeletingIt(t *
 		require.NoError(t, db.Delete(&r).Error)
 	}
 
-	second, err := svc.Draft(ctx, fx.teacher.ID, fx.period.ID)
+	second, err := svc.Draft(ctx, fx.scope, fx.period.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, invoiceID, *second.Invoices[0].InvoiceID)
 	require.Empty(t, second.Invoices[0].Lines,
@@ -359,7 +458,7 @@ func TestDraftOnClosedPeriodIsConflictAndWritesNothing(t *testing.T) {
 	require.NoError(t, db.Table("billing_periods").Where("id = ?", fx.period.ID).
 		Update("status", billing.PeriodClosed).Error)
 
-	_, err := svc.Draft(ctx, fx.teacher.ID, fx.period.ID)
+	_, err := svc.Draft(ctx, fx.scope, fx.period.ID)
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
 
@@ -379,14 +478,14 @@ func TestDraftAgainstIssuedInvoiceIsConflictAndLeavesItUntouched(t *testing.T) {
 	ctx := context.Background()
 
 	issued := &billing.Invoice{
-		ID: id.New(), TeacherID: fx.teacher.ID, PeriodID: fx.period.ID,
+		ID: id.New(), TeacherID: fx.teacher.ID, CenterID: fx.period.CenterID, PeriodID: fx.period.ID,
 		StudentID: fx.student.ID, ContactID: fx.student.ContactID,
 		StudentName: fx.student.FullName, ContactName: "Fixture Contact",
 		CurrentCharge: 200_000, TotalDue: 200_000, Status: billing.InvoiceIssued,
 	}
 	require.NoError(t, db.Create(issued).Error)
 
-	_, err := svc.Draft(ctx, fx.teacher.ID, fx.period.ID)
+	_, err := svc.Draft(ctx, fx.scope, fx.period.ID)
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
 
@@ -421,12 +520,15 @@ func hcmToday(t *testing.T) time.Time {
 // insertOpenPeriod writes a billing_periods row directly, bypassing
 // EnsurePeriod's calendar-month constraint, so a test can set an open period
 // window relative to real time (e.g. spanning both past and future days)
-// without waiting for an actual month boundary.
-func insertOpenPeriod(t *testing.T, db *gorm.DB, teacherID uuid.UUID, start, end time.Time) *billing.Period {
+// without waiting for an actual month boundary. It stamps the period with the
+// given scope's own teacher/center anchors, mirroring EnsurePeriod's
+// create-assigns-self rule.
+func insertOpenPeriod(t *testing.T, db *gorm.DB, sc authctx.Scope, start, end time.Time) *billing.Period {
 	t.Helper()
 	p := &billing.Period{
 		ID:          id.New(),
-		TeacherID:   teacherID,
+		TeacherID:   sc.TeacherID,
+		CenterID:    sc.CenterID,
 		Year:        int16(start.Year()), //nolint:gosec // calendar year, always in range
 		Month:       int16(start.Month()),
 		PeriodStart: start,
@@ -449,6 +551,7 @@ func TestCloseBlocksOnPastUnconfirmedSessionAndLeavesPeriodOpen(t *testing.T) {
 			svc, repo, _, _, db := newIntegrationDeps(t)
 			ctx := context.Background()
 			_, teacher := testutil.Teacher(t, db)
+			sc := testutil.ScopeFor(t, db, teacher.ID)
 			contact := testutil.Contact(t, db, teacher.ID)
 			today := hcmToday(t)
 			periodStart := today.AddDate(0, 0, -10)
@@ -456,12 +559,12 @@ func TestCloseBlocksOnPastUnconfirmedSessionAndLeavesPeriodOpen(t *testing.T) {
 			class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(periodStart.AddDate(0, 0, -30)))
 			student := testutil.Student(t, db, teacher.ID, contact.ID)
 			testutil.Enrollment(t, db, teacher.ID, student.ID, class.ID, periodStart.AddDate(0, 0, -30))
-			period := insertOpenPeriod(t, db, teacher.ID, periodStart, periodEnd)
+			period := insertOpenPeriod(t, db, sc, periodStart, periodEnd)
 
 			overdue := testutil.Session(t, db, teacher.ID, class.ID, today.AddDate(0, 0, -3),
 				testutil.WithSessionStatus(status))
 
-			_, err := svc.Close(ctx, teacher.ID, period.ID)
+			_, err := svc.Close(ctx, sc, period.ID)
 			require.Error(t, err)
 			var blocked *billing.ErrUnconfirmedSessions
 			require.ErrorAs(t, err, &blocked)
@@ -469,7 +572,7 @@ func TestCloseBlocksOnPastUnconfirmedSessionAndLeavesPeriodOpen(t *testing.T) {
 			require.Equal(t, overdue.ID, blocked.Sessions[0].SessionID)
 			require.Equal(t, status, blocked.Sessions[0].Status)
 
-			reloaded, err := repo.GetPeriod(ctx, teacher.ID, period.ID)
+			reloaded, err := repo.GetPeriod(ctx, sc, period.ID)
 			require.NoError(t, err)
 			require.Equal(t, billing.PeriodOpen, reloaded.Status, "a blocked close must leave the period open")
 
@@ -490,6 +593,7 @@ func TestCloseBlockedSessionsAgreeWithPendingFeed(t *testing.T) {
 	svc, _, _, sessionsSvc, db := newIntegrationDeps(t)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	contact := testutil.Contact(t, db, teacher.ID)
 	today := hcmToday(t)
 	periodStart := today.AddDate(0, 0, -10)
@@ -497,7 +601,7 @@ func TestCloseBlockedSessionsAgreeWithPendingFeed(t *testing.T) {
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(periodStart.AddDate(0, 0, -30)))
 	student := testutil.Student(t, db, teacher.ID, contact.ID)
 	testutil.Enrollment(t, db, teacher.ID, student.ID, class.ID, periodStart.AddDate(0, 0, -30))
-	period := insertOpenPeriod(t, db, teacher.ID, periodStart, periodEnd)
+	period := insertOpenPeriod(t, db, sc, periodStart, periodEnd)
 
 	held := testutil.Session(t, db, teacher.ID, class.ID, today.AddDate(0, 0, -5),
 		testutil.WithSessionStatus(sessions.StatusHeld))
@@ -508,12 +612,12 @@ func TestCloseBlockedSessionsAgreeWithPendingFeed(t *testing.T) {
 	testutil.Session(t, db, teacher.ID, class.ID, today.AddDate(0, 0, -6),
 		testutil.WithSessionAttendanceConfirmed(time.Now()))
 
-	_, err := svc.Close(ctx, teacher.ID, period.ID)
+	_, err := svc.Close(ctx, sc, period.ID)
 	require.Error(t, err)
 	var blocked *billing.ErrUnconfirmedSessions
 	require.ErrorAs(t, err, &blocked)
 
-	feed, err := sessionsSvc.ListPending(ctx, testutil.ScopeFor(t, db, teacher.ID), &periodStart, &periodEnd, 1000)
+	feed, err := sessionsSvc.ListPending(ctx, sc, &periodStart, &periodEnd, 1000)
 	require.NoError(t, err)
 
 	closeIDs := make(map[uuid.UUID]struct{}, len(blocked.Sessions))
@@ -540,6 +644,7 @@ func TestCloseIgnoresCancelledAndWarnsOnFutureUnconfirmedSession(t *testing.T) {
 	svc, repo, _, _, db := newIntegrationDeps(t)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	contact := testutil.Contact(t, db, teacher.ID)
 	today := hcmToday(t)
 	periodStart := today.AddDate(0, 0, -10)
@@ -547,7 +652,7 @@ func TestCloseIgnoresCancelledAndWarnsOnFutureUnconfirmedSession(t *testing.T) {
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(periodStart.AddDate(0, 0, -30)))
 	student := testutil.Student(t, db, teacher.ID, contact.ID)
 	enrollment := testutil.Enrollment(t, db, teacher.ID, student.ID, class.ID, periodStart.AddDate(0, 0, -30))
-	period := insertOpenPeriod(t, db, teacher.ID, periodStart, periodEnd)
+	period := insertOpenPeriod(t, db, sc, periodStart, periodEnd)
 
 	confirmed := testutil.Session(t, db, teacher.ID, class.ID, today.AddDate(0, 0, -5),
 		testutil.WithSessionAttendanceConfirmed(time.Now()))
@@ -556,7 +661,7 @@ func TestCloseIgnoresCancelledAndWarnsOnFutureUnconfirmedSession(t *testing.T) {
 		testutil.WithSessionStatus(sessions.StatusCancelled), testutil.WithSessionCancelReason("nghỉ lễ"))
 	future := testutil.Session(t, db, teacher.ID, class.ID, today.AddDate(0, 0, 3))
 
-	resp, err := svc.Close(ctx, teacher.ID, period.ID)
+	resp, err := svc.Close(ctx, sc, period.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, resp.IssuedCount)
 	require.EqualValues(t, 0, resp.VoidedCount)
@@ -564,7 +669,7 @@ func TestCloseIgnoresCancelledAndWarnsOnFutureUnconfirmedSession(t *testing.T) {
 	require.Len(t, resp.Warnings.FutureUnconfirmedSessions, 1)
 	require.Equal(t, future.ID, resp.Warnings.FutureUnconfirmedSessions[0].SessionID)
 
-	reloaded, err := repo.GetPeriod(ctx, teacher.ID, period.ID)
+	reloaded, err := repo.GetPeriod(ctx, sc, period.ID)
 	require.NoError(t, err)
 	require.Equal(t, billing.PeriodClosed, reloaded.Status)
 }
@@ -579,6 +684,7 @@ func TestCloseVariesTotalDuePerStudentAndClassWithNoSessionsAddsNoLine(t *testin
 	svc, repo, _, _, db := newIntegrationDeps(t)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	classB := testutil.Class(t, db, teacher.ID, testutil.WithClassName("B"), testutil.WithClassStartDate(date("2026-01-01")))
 
 	// Each student gets their own class (a class meets at most once per day,
@@ -606,16 +712,16 @@ func TestCloseVariesTotalDuePerStudentAndClassWithNoSessionsAddsNoLine(t *testin
 	// period.
 	testutil.Enrollment(t, db, teacher.ID, student3ID, classB.ID, date("2026-01-01"))
 
-	period, err := svc.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	period, err := svc.EnsurePeriod(ctx, sc, 2026, 1)
 	require.NoError(t, err)
 
-	resp, err := svc.Close(ctx, teacher.ID, period.ID)
+	resp, err := svc.Close(ctx, sc, period.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, 3, resp.IssuedCount)
 	require.EqualValues(t, 0, resp.VoidedCount)
 	require.EqualValues(t, 600_000, resp.TotalDue)
 
-	invoices, err := repo.ListInvoices(ctx, teacher.ID, period.ID)
+	invoices, err := repo.ListInvoices(ctx, sc, period.ID)
 	require.NoError(t, err)
 	byStudent := make(map[uuid.UUID]billing.Invoice, len(invoices))
 	for _, inv := range invoices {
@@ -625,7 +731,7 @@ func TestCloseVariesTotalDuePerStudentAndClassWithNoSessionsAddsNoLine(t *testin
 	require.EqualValues(t, 200_000, byStudent[student2ID].TotalDue)
 	require.EqualValues(t, 300_000, byStudent[student3ID].TotalDue)
 
-	_, lines, err := repo.GetInvoiceWithLines(ctx, teacher.ID, byStudent[student3ID].ID)
+	_, lines, err := repo.GetInvoiceWithLines(ctx, sc, byStudent[student3ID].ID)
 	require.NoError(t, err)
 	require.Len(t, lines, 1, "the class with zero sessions this period must not add a second line")
 	require.Equal(t, "student3-class", lines[0].ClassName)
@@ -639,6 +745,7 @@ func TestCloseStudentInTwoClassesProducesOneInvoiceWithTwoLines(t *testing.T) {
 	svc, repo, _, _, db := newIntegrationDeps(t)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	contact := testutil.Contact(t, db, teacher.ID)
 	student := testutil.Student(t, db, teacher.ID, contact.ID)
 	classA := testutil.Class(t, db, teacher.ID, testutil.WithClassName("A"), testutil.WithClassStartDate(date("2026-01-01")))
@@ -653,19 +760,19 @@ func TestCloseStudentInTwoClassesProducesOneInvoiceWithTwoLines(t *testing.T) {
 		testutil.WithSessionAttendanceConfirmed(time.Now()))
 	testutil.AttendanceRecord(t, db, teacher.ID, sessB.ID, student.ID, enrollB.ID)
 
-	period, err := svc.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	period, err := svc.EnsurePeriod(ctx, sc, 2026, 1)
 	require.NoError(t, err)
 
-	resp, err := svc.Close(ctx, teacher.ID, period.ID)
+	resp, err := svc.Close(ctx, sc, period.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, resp.IssuedCount)
 	require.EqualValues(t, 200_000, resp.TotalDue)
 
-	invoices, err := repo.ListInvoices(ctx, teacher.ID, period.ID)
+	invoices, err := repo.ListInvoices(ctx, sc, period.ID)
 	require.NoError(t, err)
 	require.Len(t, invoices, 1, "one student must produce exactly one invoice, never one per class")
 
-	_, lines, err := repo.GetInvoiceWithLines(ctx, teacher.ID, invoices[0].ID)
+	_, lines, err := repo.GetInvoiceWithLines(ctx, sc, invoices[0].ID)
 	require.NoError(t, err)
 	require.Len(t, lines, 2)
 	require.ElementsMatch(t, []string{"A", "B"}, []string{lines[0].ClassName, lines[1].ClassName})
@@ -680,6 +787,7 @@ func TestCloseVoidsInvoiceThatBecomesEmptyAfterAttendanceCorrection(t *testing.T
 	svc, repo, _, _, db := newIntegrationDeps(t)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	contact := testutil.Contact(t, db, teacher.ID)
 	student := testutil.Student(t, db, teacher.ID, contact.ID)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-01-01")))
@@ -689,10 +797,10 @@ func TestCloseVoidsInvoiceThatBecomesEmptyAfterAttendanceCorrection(t *testing.T
 		testutil.WithSessionAttendanceConfirmed(time.Now()))
 	record := testutil.AttendanceRecord(t, db, teacher.ID, sess.ID, student.ID, enrollment.ID)
 
-	period, err := svc.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	period, err := svc.EnsurePeriod(ctx, sc, 2026, 1)
 	require.NoError(t, err)
 
-	draft, err := svc.Draft(ctx, teacher.ID, period.ID)
+	draft, err := svc.Draft(ctx, sc, period.ID)
 	require.NoError(t, err)
 	require.Len(t, draft.Invoices, 1)
 	invoiceID := *draft.Invoices[0].InvoiceID
@@ -700,13 +808,13 @@ func TestCloseVoidsInvoiceThatBecomesEmptyAfterAttendanceCorrection(t *testing.T
 
 	require.NoError(t, db.Delete(record).Error)
 
-	resp, err := svc.Close(ctx, teacher.ID, period.ID)
+	resp, err := svc.Close(ctx, sc, period.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, 0, resp.IssuedCount)
 	require.EqualValues(t, 1, resp.VoidedCount)
 	require.EqualValues(t, 0, resp.TotalDue)
 
-	voided, _, err := repo.GetInvoiceWithLines(ctx, teacher.ID, invoiceID)
+	voided, _, err := repo.GetInvoiceWithLines(ctx, sc, invoiceID)
 	require.NoError(t, err)
 	require.Equal(t, billing.InvoiceVoid, voided.Status)
 	require.NotNil(t, voided.VoidReason)
@@ -723,6 +831,7 @@ func TestCloseCarriesForwardOpeningBalanceFromPriorClosedPeriod(t *testing.T) {
 	svc, repo, _, _, db := newIntegrationDeps(t)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	contact := testutil.Contact(t, db, teacher.ID)
 	student := testutil.Student(t, db, teacher.ID, contact.ID)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-01-01")))
@@ -732,22 +841,22 @@ func TestCloseCarriesForwardOpeningBalanceFromPriorClosedPeriod(t *testing.T) {
 		testutil.WithSessionAttendanceConfirmed(time.Now()))
 	testutil.AttendanceRecord(t, db, teacher.ID, jan.ID, student.ID, enrollment.ID)
 
-	janPeriod, err := svc.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	janPeriod, err := svc.EnsurePeriod(ctx, sc, 2026, 1)
 	require.NoError(t, err)
-	janClose, err := svc.Close(ctx, teacher.ID, janPeriod.ID)
+	janClose, err := svc.Close(ctx, sc, janPeriod.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, janClose.IssuedCount)
 	require.EqualValues(t, 100_000, janClose.TotalDue)
 
-	febPeriod, err := svc.EnsurePeriod(ctx, teacher.ID, 2026, 2)
+	febPeriod, err := svc.EnsurePeriod(ctx, sc, 2026, 2)
 	require.NoError(t, err)
-	febClose, err := svc.Close(ctx, teacher.ID, febPeriod.ID)
+	febClose, err := svc.Close(ctx, sc, febPeriod.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, febClose.IssuedCount, "carried debt alone must still issue, never void")
 	require.EqualValues(t, 0, febClose.VoidedCount)
 	require.EqualValues(t, 100_000, febClose.TotalDue)
 
-	febInvoices, err := repo.ListInvoices(ctx, teacher.ID, febPeriod.ID)
+	febInvoices, err := repo.ListInvoices(ctx, sc, febPeriod.ID)
 	require.NoError(t, err)
 	require.Len(t, febInvoices, 1)
 	require.EqualValues(t, 100_000, febInvoices[0].OpeningBalance)
@@ -765,14 +874,14 @@ func TestCloseThenDraftIsConflictAndWritesNothing(t *testing.T) {
 	fx := seedDraftFixture(t, db, svc)
 	ctx := context.Background()
 
-	resp, err := svc.Close(ctx, fx.teacher.ID, fx.period.ID)
+	resp, err := svc.Close(ctx, fx.scope, fx.period.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, resp.IssuedCount)
 
 	var invoiceCount int64
 	require.NoError(t, db.Table("invoices").Where("period_id = ?", fx.period.ID).Count(&invoiceCount).Error)
 
-	_, err = svc.Draft(ctx, fx.teacher.ID, fx.period.ID)
+	_, err = svc.Draft(ctx, fx.scope, fx.period.ID)
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
 
@@ -798,7 +907,7 @@ func TestConcurrentCloseExactlyOneSucceeds(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, errs[i] = svc.Close(context.Background(), fx.teacher.ID, fx.period.ID)
+			_, errs[i] = svc.Close(context.Background(), fx.scope, fx.period.ID)
 		}(i)
 	}
 	wg.Wait()
@@ -821,7 +930,7 @@ func TestConcurrentCloseExactlyOneSucceeds(t *testing.T) {
 	require.NoError(t, db.Table("invoices").Where("period_id = ?", fx.period.ID).Count(&invoiceCount).Error)
 	require.EqualValues(t, 1, invoiceCount, "a concurrent double-close must never double-issue invoices")
 
-	reloaded, err := repo.GetPeriod(context.Background(), fx.teacher.ID, fx.period.ID)
+	reloaded, err := repo.GetPeriod(context.Background(), fx.scope, fx.period.ID)
 	require.NoError(t, err)
 	require.Equal(t, billing.PeriodClosed, reloaded.Status)
 }
@@ -835,11 +944,11 @@ func TestVoidInvoiceExcludedFromContactBalanceView(t *testing.T) {
 	fx := seedDraftFixture(t, db, svc)
 	ctx := context.Background()
 
-	resp, err := svc.Close(ctx, fx.teacher.ID, fx.period.ID)
+	resp, err := svc.Close(ctx, fx.scope, fx.period.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, resp.IssuedCount)
 
-	invoices, err := repo.ListInvoices(ctx, fx.teacher.ID, fx.period.ID)
+	invoices, err := repo.ListInvoices(ctx, fx.scope, fx.period.ID)
 	require.NoError(t, err)
 	require.Len(t, invoices, 1)
 	invoiceID := invoices[0].ID
@@ -853,7 +962,7 @@ func TestVoidInvoiceExcludedFromContactBalanceView(t *testing.T) {
 		Select("outstanding").Scan(&before).Error)
 	require.EqualValues(t, 200_000, before.Outstanding)
 
-	_, err = svc.VoidInvoice(ctx, fx.teacher.ID, invoiceID, "phụ huynh chuyển trường")
+	_, err = svc.VoidInvoice(ctx, fx.scope, invoiceID, "phụ huynh chuyển trường")
 	require.NoError(t, err)
 
 	var count int64
@@ -872,18 +981,18 @@ func TestVoidInvoiceWithPaidAmountIsConflict(t *testing.T) {
 	fx := seedDraftFixture(t, db, svc)
 	ctx := context.Background()
 
-	resp, err := svc.Close(ctx, fx.teacher.ID, fx.period.ID)
+	resp, err := svc.Close(ctx, fx.scope, fx.period.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, resp.IssuedCount)
 
-	invoices, err := repo.ListInvoices(ctx, fx.teacher.ID, fx.period.ID)
+	invoices, err := repo.ListInvoices(ctx, fx.scope, fx.period.ID)
 	require.NoError(t, err)
 	require.Len(t, invoices, 1)
 	invoiceID := invoices[0].ID
 
 	require.NoError(t, db.Table("invoices").Where("id = ?", invoiceID).Update("paid_amount", 50_000).Error)
 
-	_, err = svc.VoidInvoice(ctx, fx.teacher.ID, invoiceID, "phụ huynh chuyển trường")
+	_, err = svc.VoidInvoice(ctx, fx.scope, invoiceID, "phụ huynh chuyển trường")
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
 
@@ -907,12 +1016,14 @@ type seededClosedJanuaryFixture struct {
 	session2   *sessions.Session
 	record1    *attendance.Record
 	invoiceID  uuid.UUID
+	scope      authctx.Scope
 }
 
 func seedClosedJanuaryFixture(t *testing.T, db *gorm.DB, svc *billing.Service) seededClosedJanuaryFixture {
 	t.Helper()
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	contact := testutil.Contact(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-01-01")))
 	student := testutil.Student(t, db, teacher.ID, contact.ID)
@@ -925,9 +1036,9 @@ func seedClosedJanuaryFixture(t *testing.T, db *gorm.DB, svc *billing.Service) s
 	record1 := testutil.AttendanceRecord(t, db, teacher.ID, session1.ID, student.ID, enrollment.ID)
 	testutil.AttendanceRecord(t, db, teacher.ID, session2.ID, student.ID, enrollment.ID)
 
-	period, err := svc.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	period, err := svc.EnsurePeriod(ctx, sc, 2026, 1)
 	require.NoError(t, err)
-	resp, err := svc.Close(ctx, teacher.ID, period.ID)
+	resp, err := svc.Close(ctx, sc, period.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, resp.IssuedCount)
 	require.EqualValues(t, 200_000, resp.TotalDue)
@@ -939,7 +1050,7 @@ func seedClosedJanuaryFixture(t *testing.T, db *gorm.DB, svc *billing.Service) s
 
 	return seededClosedJanuaryFixture{
 		teacher: teacher, student: student, class: class, enrollment: enrollment,
-		period: period, session1: session1, session2: session2, record1: record1, invoiceID: invoiceID,
+		period: period, session1: session1, session2: session2, record1: record1, invoiceID: invoiceID, scope: sc,
 	}
 }
 
@@ -967,8 +1078,7 @@ func TestReconcileSessionStatusChangeStillBillableIsNoOp(t *testing.T) {
 	require.NoError(t, db.Model(&attendance.Record{}).
 		Where("id = ?", fx.record1.ID).Update("status", attendance.StatusAbsent).Error)
 
-	sc := testutil.ScopeFor(t, db, fx.teacher.ID)
-	result, err := svc.ReconcileSession(ctx, sc, fx.session1.ID)
+	result, err := svc.ReconcileSession(ctx, fx.scope, fx.session1.ID)
 	require.NoError(t, err)
 	require.Empty(t, result.Adjustments, "present<->absent alone must not move the billable count")
 
@@ -995,15 +1105,14 @@ func TestReconcileSessionBillableFlipToFalsePostsNegativeDeltaWithSourceSessionI
 	require.NoError(t, db.Model(&attendance.Record{}).
 		Where("id = ?", fx.record1.ID).Update("billable", false).Error)
 
-	sc := testutil.ScopeFor(t, db, fx.teacher.ID)
-	result, err := svc.ReconcileSession(ctx, sc, fx.session1.ID)
+	result, err := svc.ReconcileSession(ctx, fx.scope, fx.session1.ID)
 	require.NoError(t, err)
 	require.Len(t, result.Adjustments, 1)
 	require.Equal(t, fx.student.ID, result.Adjustments[0].StudentID)
 	require.EqualValues(t, -100_000, result.Adjustments[0].Amount)
 
 	year, month := currentCalendarPeriod(t)
-	targetPeriod, err := repo.GetPeriodByYearMonth(ctx, fx.teacher.ID, int16(year), int16(month)) //nolint:gosec // calendar year/month, always in range
+	targetPeriod, err := repo.GetPeriodByYearMonth(ctx, fx.scope, int16(year), int16(month)) //nolint:gosec // calendar year/month, always in range
 	require.NoError(t, err)
 	require.NotNil(t, targetPeriod, "the current calendar month's period must have been auto-created")
 	require.Equal(t, targetPeriod.ID, result.Adjustments[0].PeriodID)
@@ -1015,7 +1124,7 @@ func TestReconcileSessionBillableFlipToFalsePostsNegativeDeltaWithSourceSessionI
 	require.Equal(t, fx.session1.ID, *adj.SourceSessionID)
 	require.NotEmpty(t, adj.Reason)
 
-	targetInvoice, _, err := repo.GetInvoiceWithLines(ctx, fx.teacher.ID, result.Adjustments[0].InvoiceID)
+	targetInvoice, _, err := repo.GetInvoiceWithLines(ctx, fx.scope, result.Adjustments[0].InvoiceID)
 	require.NoError(t, err)
 	require.EqualValues(t, -100_000, targetInvoice.AdjustmentTotal)
 	require.EqualValues(t, targetInvoice.OpeningBalance+targetInvoice.CurrentCharge+targetInvoice.AdjustmentTotal, targetInvoice.TotalDue)
@@ -1037,8 +1146,7 @@ func TestReconcileSessionLeavesClosedInvoiceByteIdentical(t *testing.T) {
 
 	require.NoError(t, db.Model(&attendance.Record{}).
 		Where("id = ?", fx.record1.ID).Update("billable", false).Error)
-	sc := testutil.ScopeFor(t, db, fx.teacher.ID)
-	_, err := svc.ReconcileSession(ctx, sc, fx.session1.ID)
+	_, err := svc.ReconcileSession(ctx, fx.scope, fx.session1.ID)
 	require.NoError(t, err)
 
 	var after billing.Invoice
@@ -1065,26 +1173,24 @@ func TestReconcileSessionRepeatedEditsDoNotDoubleCount(t *testing.T) {
 	fx := seedClosedJanuaryFixture(t, db, svc)
 	ctx := context.Background()
 
-	sc := testutil.ScopeFor(t, db, fx.teacher.ID)
-
 	// First edit: session1 flips to non-billable (-100_000).
 	require.NoError(t, db.Model(&attendance.Record{}).
 		Where("id = ?", fx.record1.ID).Update("billable", false).Error)
-	first, err := svc.ReconcileSession(ctx, sc, fx.session1.ID)
+	first, err := svc.ReconcileSession(ctx, fx.scope, fx.session1.ID)
 	require.NoError(t, err)
 	require.Len(t, first.Adjustments, 1)
 	require.EqualValues(t, -100_000, first.Adjustments[0].Amount)
 
 	// Reconciling the same unchanged edit again must be a pure no-op:
 	// already_adj now fully explains the gap.
-	again, err := svc.ReconcileSession(ctx, sc, fx.session1.ID)
+	again, err := svc.ReconcileSession(ctx, fx.scope, fx.session1.ID)
 	require.NoError(t, err)
 	require.Empty(t, again.Adjustments, "reconciling an unchanged edit a second time must not double count")
 
 	// Second real edit: session1 goes back to billable, reverting the first.
 	require.NoError(t, db.Model(&attendance.Record{}).
 		Where("id = ?", fx.record1.ID).Update("billable", true).Error)
-	second, err := svc.ReconcileSession(ctx, sc, fx.session1.ID)
+	second, err := svc.ReconcileSession(ctx, fx.scope, fx.session1.ID)
 	require.NoError(t, err)
 	require.Len(t, second.Adjustments, 1)
 	require.EqualValues(t, 100_000, second.Adjustments[0].Amount, "reverting must post the equal and opposite delta")
@@ -1101,12 +1207,12 @@ func TestReconcileSessionRepeatedEditsDoNotDoubleCount(t *testing.T) {
 	}
 	require.EqualValues(t, 0, sum, "reverting the edit must net the two adjustments to zero")
 
-	trail, err := svc.ListAdjustments(ctx, fx.teacher.ID, first.Adjustments[0].InvoiceID)
+	trail, err := svc.ListAdjustments(ctx, fx.scope, first.Adjustments[0].InvoiceID)
 	require.NoError(t, err)
 	require.Len(t, trail, 2)
 	require.False(t, trail[1].CreatedAt.Before(trail[0].CreatedAt), "the audit trail must be ordered oldest first")
 
-	targetInvoice, _, err := repo.GetInvoiceWithLines(ctx, fx.teacher.ID, first.Adjustments[0].InvoiceID)
+	targetInvoice, _, err := repo.GetInvoiceWithLines(ctx, fx.scope, first.Adjustments[0].InvoiceID)
 	require.NoError(t, err)
 	require.EqualValues(t, 0, targetInvoice.AdjustmentTotal, "the two adjustments must net to zero on the target invoice")
 }
@@ -1131,7 +1237,6 @@ func TestConcurrentReconcileSameStudentDoesNotDoubleCount(t *testing.T) {
 		Where("session_id IN ?", []uuid.UUID{fx.session1.ID, fx.session2.ID}).
 		Update("billable", false).Error)
 
-	sc := testutil.ScopeFor(t, db, fx.teacher.ID)
 	var wg sync.WaitGroup
 	results := make([]attendance.Reconciliation, 2)
 	errs := make([]error, 2)
@@ -1140,7 +1245,7 @@ func TestConcurrentReconcileSameStudentDoesNotDoubleCount(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			results[i], errs[i] = svc.ReconcileSession(context.Background(), sc, sessionIDs[i])
+			results[i], errs[i] = svc.ReconcileSession(context.Background(), fx.scope, sessionIDs[i])
 		}(i)
 	}
 	wg.Wait()
@@ -1169,7 +1274,7 @@ func TestConcurrentReconcileSameStudentDoesNotDoubleCount(t *testing.T) {
 	}
 	require.EqualValues(t, -200_000, sum, "the concurrent carry must net to a single -200_000, never -400_000")
 
-	targetInvoice, _, err := repo.GetInvoiceWithLines(ctx, fx.teacher.ID, targetInvoiceID)
+	targetInvoice, _, err := repo.GetInvoiceWithLines(ctx, fx.scope, targetInvoiceID)
 	require.NoError(t, err)
 	require.EqualValues(t, -200_000, targetInvoice.AdjustmentTotal, "the target invoice's adjustment_total must reflect a single carry")
 }
@@ -1192,23 +1297,22 @@ func TestReconcileSessionCreatesNextPeriodAndDraftInvoiceThenCloseKeepsAdjustmen
 
 	require.NoError(t, db.Model(&attendance.Record{}).
 		Where("id = ?", fx.record1.ID).Update("billable", false).Error)
-	sc := testutil.ScopeFor(t, db, fx.teacher.ID)
-	result, err := svc.ReconcileSession(ctx, sc, fx.session1.ID)
+	result, err := svc.ReconcileSession(ctx, fx.scope, fx.session1.ID)
 	require.NoError(t, err)
 	require.Len(t, result.Adjustments, 1)
 
 	year, month := currentCalendarPeriod(t)
-	targetPeriod, err := repo.GetPeriodByYearMonth(ctx, fx.teacher.ID, int16(year), int16(month)) //nolint:gosec // calendar year/month, always in range
+	targetPeriod, err := repo.GetPeriodByYearMonth(ctx, fx.scope, int16(year), int16(month)) //nolint:gosec // calendar year/month, always in range
 	require.NoError(t, err)
 	require.NotNil(t, targetPeriod, "the current calendar month's period must have been auto-created")
 	require.Equal(t, billing.PeriodOpen, targetPeriod.Status)
 
-	closeResp, err := svc.Close(ctx, fx.teacher.ID, targetPeriod.ID)
+	closeResp, err := svc.Close(ctx, fx.scope, targetPeriod.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, closeResp.IssuedCount,
 		"January's carried debt alone keeps the target invoice non-empty, so it must issue, not void")
 
-	invoices, err := repo.ListInvoices(ctx, fx.teacher.ID, targetPeriod.ID)
+	invoices, err := repo.ListInvoices(ctx, fx.scope, targetPeriod.ID)
 	require.NoError(t, err)
 	require.Len(t, invoices, 1)
 	inv := invoices[0]
@@ -1233,22 +1337,22 @@ func TestManualAdjustmentSurvivesCloseTimeRecomputeAndFoldsIntoTotalDue(t *testi
 	fx := seedDraftFixture(t, db, svc)
 	ctx := context.Background()
 
-	draft, err := svc.Draft(ctx, fx.teacher.ID, fx.period.ID)
+	draft, err := svc.Draft(ctx, fx.scope, fx.period.ID)
 	require.NoError(t, err)
 	invoiceID := *draft.Invoices[0].InvoiceID
 	require.EqualValues(t, 200_000, draft.Invoices[0].TotalDue)
 
-	adjResp, invResp, err := svc.AddAdjustment(ctx, fx.teacher.ID, invoiceID, -30_000, "giảm giá học sinh cũ")
+	adjResp, invResp, err := svc.AddAdjustment(ctx, fx.scope, invoiceID, -30_000, "giảm giá học sinh cũ")
 	require.NoError(t, err)
 	require.EqualValues(t, -30_000, adjResp.Amount)
 	require.EqualValues(t, 170_000, invResp.TotalDue)
 
-	closeResp, err := svc.Close(ctx, fx.teacher.ID, fx.period.ID)
+	closeResp, err := svc.Close(ctx, fx.scope, fx.period.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, closeResp.IssuedCount)
 	require.EqualValues(t, 170_000, closeResp.TotalDue, "the manual adjustment must be folded exactly once into the close totals")
 
-	invoices, err := repo.ListInvoices(ctx, fx.teacher.ID, fx.period.ID)
+	invoices, err := repo.ListInvoices(ctx, fx.scope, fx.period.ID)
 	require.NoError(t, err)
 	require.Len(t, invoices, 1)
 	require.EqualValues(t, invoiceID, invoices[0].ID)
@@ -1269,18 +1373,18 @@ func TestAddAdjustmentOnVoidInvoiceIsConflict(t *testing.T) {
 	fx := seedDraftFixture(t, db, svc)
 	ctx := context.Background()
 
-	resp, err := svc.Close(ctx, fx.teacher.ID, fx.period.ID)
+	resp, err := svc.Close(ctx, fx.scope, fx.period.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, resp.IssuedCount)
 
-	invoices, err := repo.ListInvoices(ctx, fx.teacher.ID, fx.period.ID)
+	invoices, err := repo.ListInvoices(ctx, fx.scope, fx.period.ID)
 	require.NoError(t, err)
 	invoiceID := invoices[0].ID
 
-	_, err = svc.VoidInvoice(ctx, fx.teacher.ID, invoiceID, "phụ huynh chuyển trường")
+	_, err = svc.VoidInvoice(ctx, fx.scope, invoiceID, "phụ huynh chuyển trường")
 	require.NoError(t, err)
 
-	_, _, err = svc.AddAdjustment(ctx, fx.teacher.ID, invoiceID, 10_000, "sửa nhầm")
+	_, _, err = svc.AddAdjustment(ctx, fx.scope, invoiceID, 10_000, "sửa nhầm")
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
 
@@ -1298,18 +1402,18 @@ func TestAddAdjustmentOnPaidInvoiceIsConflict(t *testing.T) {
 	fx := seedDraftFixture(t, db, svc)
 	ctx := context.Background()
 
-	resp, err := svc.Close(ctx, fx.teacher.ID, fx.period.ID)
+	resp, err := svc.Close(ctx, fx.scope, fx.period.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, resp.IssuedCount)
 
-	invoices, err := repo.ListInvoices(ctx, fx.teacher.ID, fx.period.ID)
+	invoices, err := repo.ListInvoices(ctx, fx.scope, fx.period.ID)
 	require.NoError(t, err)
 	invoiceID := invoices[0].ID
 
 	require.NoError(t, db.Table("invoices").Where("id = ?", invoiceID).
 		Updates(map[string]any{"status": billing.InvoicePaid, "paid_amount": invoices[0].TotalDue}).Error)
 
-	_, _, err = svc.AddAdjustment(ctx, fx.teacher.ID, invoiceID, -10_000, "hoàn tiền")
+	_, _, err = svc.AddAdjustment(ctx, fx.scope, invoiceID, -10_000, "hoàn tiền")
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
 
@@ -1327,6 +1431,7 @@ func TestReconcileSessionIsNoOpForSessionInOpenPeriod(t *testing.T) {
 	svc, _, _, _, db := newIntegrationDeps(t)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	contact := testutil.Contact(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-01-01")))
 	student := testutil.Student(t, db, teacher.ID, contact.ID)
@@ -1335,11 +1440,11 @@ func TestReconcileSessionIsNoOpForSessionInOpenPeriod(t *testing.T) {
 		testutil.WithSessionAttendanceConfirmed(time.Now()))
 	testutil.AttendanceRecord(t, db, teacher.ID, sess.ID, student.ID, enrollment.ID)
 
-	_, err := svc.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	_, err := svc.EnsurePeriod(ctx, sc, 2026, 1)
 	require.NoError(t, err)
 	// Deliberately never Close this period: it stays open.
 
-	result, err := svc.ReconcileSession(ctx, testutil.ScopeFor(t, db, teacher.ID), sess.ID)
+	result, err := svc.ReconcileSession(ctx, sc, sess.ID)
 	require.NoError(t, err)
 	require.Empty(t, result.Adjustments, "a session inside a still-open period must never post a reconciliation adjustment")
 
@@ -1359,13 +1464,13 @@ func TestReconcileSessionIsNoOpWhenStudentHasNoInvoiceInClosedPeriod(t *testing.
 	fx := seedClosedJanuaryFixture(t, db, svc)
 	ctx := context.Background()
 
-	_, err := svc.VoidInvoice(ctx, fx.teacher.ID, fx.invoiceID, "phụ huynh chuyển trường")
+	_, err := svc.VoidInvoice(ctx, fx.scope, fx.invoiceID, "phụ huynh chuyển trường")
 	require.NoError(t, err)
 
 	require.NoError(t, db.Model(&attendance.Record{}).
 		Where("id = ?", fx.record1.ID).Update("billable", false).Error)
 
-	result, err := svc.ReconcileSession(ctx, testutil.ScopeFor(t, db, fx.teacher.ID), fx.session1.ID)
+	result, err := svc.ReconcileSession(ctx, fx.scope, fx.session1.ID)
 	require.NoError(t, err)
 	require.Empty(t, result.Adjustments, "a student with no non-void invoice in the closed period must be skipped")
 

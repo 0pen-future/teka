@@ -142,7 +142,7 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	// membership check its post-close reconciliation's rare no-invoice-line
 	// case reuses — so it is constructed after all three.
 	billingSvc := billing.NewService(billing.NewRepository(db, attendanceSvc), txMgr, sessionsSvc, enrollmentsSvc)
-	billing.RegisterRoutes(v1, billing.NewHandler(billingSvc), requireAuth)
+	billing.RegisterRoutes(v1, billing.NewHandler(billingSvc), requireAuth, resolveScope)
 
 	// attendance.Confirm carries a post-close attendance edit's money delta
 	// onto the next open period through billingSvc, which can only be wired in

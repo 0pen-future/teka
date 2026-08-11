@@ -111,9 +111,9 @@ func TestRecordExactPaymentAcrossTwoChildrenBothPaid(t *testing.T) {
 	studentA := seedStudentWithSessions(t, db, teacher.ID, contact.ID, "A", date("2026-01-01"), 1)
 	studentB := seedStudentWithSessions(t, db, teacher.ID, contact.ID, "B", date("2026-01-01"), 2)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 1)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
 	invA := getInvoice(t, db, teacher.ID, studentA)
@@ -149,9 +149,9 @@ func TestRecordUnderpaymentSettlesEarlierClassStartInvoiceFirst(t *testing.T) {
 	earlierStudent := seedStudentWithSessions(t, db, teacher.ID, contact.ID, "Earlier", date("2026-01-01"), 1)
 	laterStudent := seedStudentWithSessions(t, db, teacher.ID, contact.ID, "Later", date("2026-01-10"), 1)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 1)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
 	earlierInvoice := getInvoice(t, db, teacher.ID, earlierStudent)
@@ -184,9 +184,9 @@ func TestRecordOverpaymentReturnsUnallocatedAndCapsAtOutstanding(t *testing.T) {
 	contact := testutil.Contact(t, db, teacher.ID)
 	student := seedStudentWithSessions(t, db, teacher.ID, contact.ID, "Only", date("2026-01-01"), 1)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 1)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
 	invoice := getInvoice(t, db, teacher.ID, student)
@@ -216,9 +216,9 @@ func TestRecordNeverAllocatesToDraftInvoice(t *testing.T) {
 	contact := testutil.Contact(t, db, teacher.ID)
 	student := seedStudentWithSessions(t, db, teacher.ID, contact.ID, "Draft", date("2026-01-01"), 1)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 1)
 	require.NoError(t, err)
-	_, err = billingSvc.Draft(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Draft(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
 	invoice := getInvoice(t, db, teacher.ID, student)
@@ -246,9 +246,9 @@ func TestRecordNeverAllocatesToVoidInvoice(t *testing.T) {
 	contact := testutil.Contact(t, db, teacher.ID)
 	student := seedStudentWithSessions(t, db, teacher.ID, contact.ID, "Void", date("2026-01-01"), 1)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 1)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
 	invoice := getInvoice(t, db, teacher.ID, student)
@@ -304,9 +304,9 @@ func TestConcurrentPaymentsForSameContactNeverOverpayInvoice(t *testing.T) {
 	contact := testutil.Contact(t, db, teacher.ID)
 	student := seedStudentWithSessions(t, db, teacher.ID, contact.ID, "Contested", date("2026-01-01"), 1)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 1)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
 	invoice := getInvoice(t, db, teacher.ID, student)
@@ -363,9 +363,9 @@ func TestConcurrentReallocationsOnSameContactDoNotDeadlock(t *testing.T) {
 	studentEarly := seedStudentWithSessions(t, db, teacher.ID, contact.ID, "Early", date("2026-01-01"), 1)
 	studentLate := seedStudentWithSessions(t, db, teacher.ID, contact.ID, "Late", date("2026-01-10"), 3)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 1)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
 	invEarly := getInvoice(t, db, teacher.ID, studentEarly) // total_due 100 000
@@ -429,9 +429,9 @@ func TestReverseRestoresInvoiceStateAndKeepsBothPaymentRows(t *testing.T) {
 	contact := testutil.Contact(t, db, teacher.ID)
 	student := seedStudentWithSessions(t, db, teacher.ID, contact.ID, "Reversed", date("2026-01-01"), 1)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 1)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
 	original, err := paymentsSvc.Record(ctx, teacher.ID, payments.RecordPaymentRequest{
@@ -480,9 +480,9 @@ func TestReverseTwiceIsConflictAndWritesNoNewRow(t *testing.T) {
 	contact := testutil.Contact(t, db, teacher.ID)
 	seedStudentWithSessions(t, db, teacher.ID, contact.ID, "DoubleReverse", date("2026-01-01"), 1)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 1)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
 	original, err := paymentsSvc.Record(ctx, teacher.ID, payments.RecordPaymentRequest{
@@ -524,9 +524,9 @@ func TestReallocateRebalancesATwoChildSplitOntoOneInvoice(t *testing.T) {
 	studentEarly := seedStudentWithSessions(t, db, teacher.ID, contact.ID, "Early", date("2026-01-01"), 1)
 	studentLate := seedStudentWithSessions(t, db, teacher.ID, contact.ID, "Late", date("2026-01-10"), 3)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 1)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
 	invEarly := getInvoice(t, db, teacher.ID, studentEarly)
@@ -580,9 +580,9 @@ func TestReallocateToAnotherContactsInvoiceIsRejectedAndWritesNothing(t *testing
 	seedStudentWithSessions(t, db, teacher.ID, contactA.ID, "OwnerA", date("2026-01-01"), 1)
 	studentB := seedStudentWithSessions(t, db, teacher.ID, contactB.ID, "OwnerB", date("2026-01-01"), 1)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 1)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
 	invoiceB := getInvoice(t, db, teacher.ID, studentB)
@@ -619,9 +619,9 @@ func TestAutoAllocateRemainderPlacesSurplusOnANewlyIssuedInvoice(t *testing.T) {
 	contact := testutil.Contact(t, db, teacher.ID)
 	studentJan := seedStudentWithSessions(t, db, teacher.ID, contact.ID, "Jan", date("2026-01-01"), 1)
 
-	periodJan, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	periodJan, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 1)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, periodJan.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), periodJan.ID)
 	require.NoError(t, err)
 
 	invoiceJan := getInvoice(t, db, teacher.ID, studentJan)
@@ -635,9 +635,9 @@ func TestAutoAllocateRemainderPlacesSurplusOnANewlyIssuedInvoice(t *testing.T) {
 	assertLedgerInvariant(t, db, teacher.ID)
 
 	studentFeb := seedStudentWithSessions(t, db, teacher.ID, contact.ID, "Feb", date("2026-02-01"), 1)
-	periodFeb, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 2)
+	periodFeb, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 2)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, periodFeb.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), periodFeb.ID)
 	require.NoError(t, err)
 
 	invoiceFeb := getInvoice(t, db, teacher.ID, studentFeb)

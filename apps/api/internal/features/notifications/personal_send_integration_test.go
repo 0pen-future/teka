@@ -89,9 +89,10 @@ func closedPeriodWithContacts(t *testing.T, d *deps, teacherID uuid.UUID, n int)
 		seedChild(t, d.db, teacherID, contact.ID, "PersonalChild"+string(rune('A'+i)), date("2026-06-01"), 1)
 		contactIDs = append(contactIDs, contact.ID)
 	}
-	period, err := d.billing.EnsurePeriod(ctx, teacherID, 2026, 6)
+	sc := testutil.ScopeFor(t, d.db, teacherID)
+	period, err := d.billing.EnsurePeriod(ctx, sc, 2026, 6)
 	require.NoError(t, err)
-	_, err = d.billing.Close(ctx, teacherID, period.ID)
+	_, err = d.billing.Close(ctx, sc, period.ID)
 	require.NoError(t, err)
 	return period.ID, contactIDs
 }
