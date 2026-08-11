@@ -15,7 +15,7 @@ import { formatMoney } from "@/lib/utils";
 import { useClassesList } from "../hooks/use-classes";
 import { useCreateEnrollment } from "../hooks/use-enrollments";
 import { useStudent } from "../hooks/use-students";
-import { formatWeekday } from "../lib/roster-format";
+import { formatScheduleSummary } from "../lib/roster-format";
 import { enrollmentCreateInputSchema } from "../schemas/roster-schemas";
 import type { Class, Enrollment, Student } from "../schemas/roster-schemas";
 
@@ -36,15 +36,6 @@ interface EnrollStudentDialogProps {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-/** "T3 · T5 — 17:30" from a class's weekly schedules, for the class picker option label. */
-function formatSchedule(klass: Class): string {
-  const first = klass.schedules[0];
-  if (!first) {
-    return "";
-  }
-  const days = klass.schedules.map((s) => formatWeekday(s.weekday, { short: true })).join(" · ");
-  return `${days} — ${first.start_time}`;
-}
 
 /** The known student being enrolled, echoed back so the teacher can't mix children up. */
 function StudentChip({ student }: { student: Student }) {
@@ -189,7 +180,8 @@ export function EnrollStudentDialog(props: EnrollStudentDialogProps) {
               <SelectContent>
                 {classOptions.map((klass) => (
                   <SelectItem key={klass.id} value={klass.id}>
-                    {klass.name} — {formatSchedule(klass)} · {formatMoney(klass.default_unit_price)}
+                    {klass.name} — {formatScheduleSummary(klass.schedules, today())} ·{" "}
+                    {formatMoney(klass.default_unit_price)}
                     /buổi
                   </SelectItem>
                 ))}

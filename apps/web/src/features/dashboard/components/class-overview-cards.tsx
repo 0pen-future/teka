@@ -4,37 +4,10 @@ import { HvBadge, ProgressBar } from "@/components/hv";
 import { Spinner } from "@/components/shared/spinner";
 import type { Session } from "@/features/attendance";
 import { useCurrentPeriod } from "@/features/billing";
-import {
-  activeSchedules,
-  formatWeekday,
-  useClassesList,
-  type Class,
-  type Schedule,
-} from "@/features/roster";
+import { formatScheduleSummary, useClassesList, type Class } from "@/features/roster";
 import { cn, formatMoney } from "@/lib/utils";
 
 import { useClassPeriodSessions, useClassStudentCounts } from "../hooks/use-dashboard";
-
-/**
- * "T2 · T4 · T6 — 19:00" — weekday chips in Monday-first order plus the
- * first schedule's start time, matching the prototype's `sched` strings. A
- * class whose schedules differ per day still shows one time; the class
- * settings screen owns the full timetable.
- */
-function scheduleLabel(allSchedules: Schedule[]): string {
-  // Closed rows (effective_to in the past) are how a timetable change is
-  // recorded — showing them would render the pre-change weekdays too.
-  const schedules = activeSchedules(allSchedules, new Date().toISOString().slice(0, 10));
-  const [firstSchedule] = schedules;
-  if (!firstSchedule) {
-    return "";
-  }
-  const mondayFirst = (weekday: number) => (weekday === 0 ? 7 : weekday);
-  const days = [...schedules]
-    .sort((a, b) => mondayFirst(a.weekday) - mondayFirst(b.weekday))
-    .map((schedule) => formatWeekday(schedule.weekday, { short: true }));
-  return `${[...new Set(days)].join(" · ")} — ${firstSchedule.start_time}`;
-}
 
 interface ClassOverviewCardProps {
   cls: Class;
@@ -79,7 +52,8 @@ function ClassOverviewCard({
         ) : null}
       </div>
       <p className="mt-[2px] text-[13px] text-ink-500">
-        {scheduleLabel(cls.schedules)} · {formatMoney(cls.default_unit_price)}/buổi
+        {formatScheduleSummary(cls.schedules, new Date().toISOString().slice(0, 10))} ·{" "}
+        {formatMoney(cls.default_unit_price)}/buổi
       </p>
       <div className="mt-3 flex gap-[14px] text-[13.5px] text-ink-700">
         <p>

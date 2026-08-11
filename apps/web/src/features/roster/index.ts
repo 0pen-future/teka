@@ -22,5 +22,5 @@ export {
 } from "./schemas/roster-schemas";
 export type { Class, Contact, Enrollment, Schedule, Student } from "./schemas/roster-schemas";
 
-export { formatWeekday } from "./lib/roster-format";
+export { formatScheduleSummary, formatWeekday } from "./lib/roster-format";
 export { activeSchedules } from "./lib/schedule-diff";

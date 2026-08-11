@@ -5,6 +5,9 @@
  * a file outside this feature's ownership (see `adr.md`).
  */
 
+import { deriveScheduleSlots } from "./schedule-diff";
+import type { Schedule } from "../schemas/roster-schemas";
+
 /**
  * Parses a thousands-separated đồng string (e.g. `"1.500.000"` or
  * `"1500000"`) back to an integer. Strips every non-digit character, so a
@@ -27,4 +30,23 @@ const weekdayShortLabels = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
 export function formatWeekday(weekday: number, options?: { short?: boolean }): string {
   const labels = options?.short ? weekdayShortLabels : weekdayLabels;
   return labels[weekday] ?? String(weekday);
+}
+
+/**
+ * "T2 · T4 — 18:00, T6 — 20:00" — one segment per khung giờ (start time),
+ * weekdays Monday-first within each. Only rows still in effect count; closed
+ * rows are how a timetable change is recorded and would render the
+ * pre-change weekdays too. Returns "" for a class with no active timetable.
+ */
+export function formatScheduleSummary(schedules: Schedule[], today: string): string {
+  const mondayFirst = (weekday: number) => (weekday === 0 ? 7 : weekday);
+  return deriveScheduleSlots(schedules, today)
+    .map((slot) => {
+      const days = [...slot.days]
+        .sort((a, b) => mondayFirst(a) - mondayFirst(b))
+        .map((day) => formatWeekday(day, { short: true }))
+        .join(" · ");
+      return `${days} — ${slot.start_time}`;
+    })
+    .join(", ");
 }

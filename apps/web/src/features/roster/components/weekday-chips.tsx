@@ -15,67 +15,24 @@ const chipOrder: { weekday: number; label: string }[] = [
   { weekday: 0, label: "CN" },
 ];
 
-export interface WeekdayChipsProps {
-  value: number | null;
-  onChange: (weekday: number) => void;
-  /** Accessible group label; defaults to the modalClass recipe's copy. */
-  label?: string;
-  id?: string;
-}
-
-/**
- * The 7 toggle chips from prototype `modalClass`. Selected: mint-400 fill,
- * white text. Idle: white fill, line-200 border. Each chip is at least 44px
- * tall to stay a comfortable touch target.
- */
-export function WeekdayChips({
-  value,
-  onChange,
-  label = "Ngày trong tuần",
-  id,
-}: WeekdayChipsProps) {
-  return (
-    <div role="group" aria-label={label} id={id} className="flex flex-wrap gap-2">
-      {chipOrder.map((chip) => {
-        const selected = value === chip.weekday;
-        return (
-          <button
-            key={chip.weekday}
-            type="button"
-            aria-pressed={selected}
-            onClick={() => onChange(chip.weekday)}
-            className={cn(
-              "min-h-11 min-w-11 rounded-[var(--radius-md)] border px-3 font-display text-[14px] font-bold transition-colors",
-              selected
-                ? "border-mint-400 bg-mint-400 text-white"
-                : "border-line-200 bg-white text-ink-500 hover:bg-cream-100",
-            )}
-          >
-            {chip.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 export interface WeekdayChipsMultiProps {
   value: number[];
   onChange: (weekdays: number[]) => void;
-  /** Accessible group label; defaults to the classCfg recipe's copy. */
+  /** Accessible group label; defaults to the slot recipe's copy. */
   label?: string;
   id?: string;
 }
 
 /**
- * Multi-select variant for the "Cài đặt lớp" screen (prototype `classCfg`),
- * where a class meets on several weekdays at once. Same chips and states as
- * `WeekdayChips`; toggling adds or removes the weekday from the set.
+ * The 7 pill toggle chips a khung-giờ slot picks its weekdays with
+ * (prototype `sl.dayChips`). Selected: mint-400 fill, white text. Idle:
+ * white fill, line-200 border. The prototype's pills are ~36px tall; each
+ * chip keeps a 44px minimum here to stay a comfortable touch target.
  */
 export function WeekdayChipsMulti({
   value,
   onChange,
-  label = "Lịch trong tuần",
+  label = "Ngày trong tuần",
   id,
 }: WeekdayChipsMultiProps) {
   function toggle(weekday: number) {
@@ -85,7 +42,7 @@ export function WeekdayChipsMulti({
   }
 
   return (
-    <div role="group" aria-label={label} id={id} className="flex flex-wrap gap-2">
+    <div role="group" aria-label={label} id={id} className="flex flex-wrap gap-1.5">
       {chipOrder.map((chip) => {
         const selected = value.includes(chip.weekday);
         return (
@@ -95,7 +52,7 @@ export function WeekdayChipsMulti({
             aria-pressed={selected}
             onClick={() => toggle(chip.weekday)}
             className={cn(
-              "min-h-11 min-w-11 rounded-[var(--radius-md)] border px-3 font-display text-[14px] font-bold transition-colors",
+              "min-h-11 min-w-11 rounded-full border-2 px-3 font-display text-[13px] font-bold transition-colors",
               selected
                 ? "border-mint-400 bg-mint-400 text-white"
                 : "border-line-200 bg-white text-ink-500 hover:bg-cream-100",

@@ -11,7 +11,7 @@ import { formatMoney } from "@/lib/utils";
 import { useApiFormErrors } from "@/lib/forms/use-api-form-errors";
 
 import { MoneyInput } from "../components/money-input";
-import { WeekdayChipsMulti } from "../components/weekday-chips";
+import { ScheduleSlotsEditor } from "../components/schedule-slots-editor";
 import {
   useAddSchedule,
   useClass,
@@ -20,7 +20,12 @@ import {
   useUpdateSchedule,
 } from "../hooks/use-classes";
 import { useEnrollmentsList } from "../hooks/use-enrollments";
-import { deriveScheduleForm, diffSchedules } from "../lib/schedule-diff";
+import {
+  deriveScheduleSlots,
+  diffSchedules,
+  emptySlot,
+  weeklySessionCount,
+} from "../lib/schedule-diff";
 import {
   classSettingsInputSchema,
   type Class,
@@ -46,19 +51,18 @@ function currentMonth() {
 }
 
 function toDefaults(klass: Class): ClassSettingsInput {
-  const { days, start_time } = deriveScheduleForm(klass.schedules, today());
+  const slots = deriveScheduleSlots(klass.schedules, today());
   return {
     name: klass.name,
-    days,
-    start_time,
+    slots: slots.length ? slots : [emptySlot()],
     default_unit_price: klass.default_unit_price,
   };
 }
 
 /**
  * "Cài đặt lớp" screen (prototype `classCfg`, reached from the tab row on
- * "Lớp & học sinh"): one form for name, weekly days, shared start time and
- * unit price. Saving fans out into `PUT /classes/:id` for name/price plus a
+ * "Lớp & học sinh"): one form for name, khung-giờ slots and unit price.
+ * Saving fans out into `PUT /classes/:id` for name/price plus a
  * schedule diff — new rows are added first (`effective_from` = today), then
  * replaced rows are closed with `effective_to` = yesterday per the API's
  * close-and-replace contract — so changes apply from the next session, past
@@ -75,7 +79,7 @@ export function ClassSettingsPage() {
 
   const form = useForm<ClassSettingsInput>({
     resolver: zodResolver(classSettingsInputSchema),
-    defaultValues: { name: "", days: [], start_time: "", default_unit_price: 0 },
+    defaultValues: { name: "", slots: [emptySlot()], default_unit_price: 0 },
   });
   const updateMutation = useUpdateClass(id ?? "");
   const addMutation = useAddSchedule(id ?? "");
@@ -122,10 +126,11 @@ export function ClassSettingsPage() {
     closeMutation.isPending ||
     deleteMutation.isPending;
   const { errors } = form.formState;
+  const slots = form.watch("slots");
 
   const onSubmit = form.handleSubmit(async (values) => {
     const applyFrom = today();
-    const diff = diffSchedules(klass.schedules, values.days, values.start_time, applyFrom);
+    const diff = diffSchedules(klass.schedules, values.slots, applyFrom);
     let applied = false;
     try {
       if (values.name !== klass.name || values.default_unit_price !== klass.default_unit_price) {
@@ -203,44 +208,47 @@ export function ClassSettingsPage() {
               />
               <FieldError errors={[errors.name]} />
             </Field>
-            <Field data-invalid={Boolean(errors.days)}>
-              <FieldLabel htmlFor="class-settings-days">Lịch trong tuần</FieldLabel>
-              <WeekdayChipsMulti
-                id="class-settings-days"
-                value={form.watch("days")}
-                onChange={(days) =>
-                  form.setValue("days", days, { shouldValidate: true, shouldDirty: true })
+            <Field data-invalid={Boolean(errors.slots)}>
+              <div className="flex items-baseline gap-2">
+                <FieldLabel>Lịch học trong tuần</FieldLabel>
+                {weeklySessionCount(slots) > 0 ? (
+                  <span className="text-[12.5px] font-bold text-ink-400">
+                    · {weeklySessionCount(slots)} buổi/tuần
+                  </span>
+                ) : null}
+              </div>
+              <p className="text-[12.5px] text-ink-400">
+                Mỗi khung giờ chọn được nhiều ngày. Lớp học nhiều giờ khác nhau thì thêm khung giờ
+                mới.
+              </p>
+              <ScheduleSlotsEditor
+                idPrefix="class-settings"
+                value={slots}
+                onChange={(next) =>
+                  form.setValue("slots", next, { shouldValidate: true, shouldDirty: true })
+                }
+                slotErrors={slots.map((_, index) => ({
+                  time: errors.slots?.[index]?.start_time?.message,
+                  days: errors.slots?.[index]?.days?.message,
+                }))}
+              />
+              <FieldError errors={[errors.slots?.root]} />
+            </Field>
+            <Field className="max-w-[280px]" data-invalid={Boolean(errors.default_unit_price)}>
+              <FieldLabel htmlFor="class-settings-unit-price">Đơn giá / buổi (đ)</FieldLabel>
+              <MoneyInput
+                id="class-settings-unit-price"
+                aria-invalid={Boolean(errors.default_unit_price)}
+                value={form.watch("default_unit_price")}
+                onChange={(value) =>
+                  form.setValue("default_unit_price", value, {
+                    shouldValidate: true,
+                    shouldDirty: true,
+                  })
                 }
               />
-              <FieldError errors={[errors.days]} />
+              <FieldError errors={[errors.default_unit_price]} />
             </Field>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field data-invalid={Boolean(errors.start_time)}>
-                <FieldLabel htmlFor="class-settings-start-time">Giờ học</FieldLabel>
-                <Input
-                  id="class-settings-start-time"
-                  type="time"
-                  aria-invalid={Boolean(errors.start_time)}
-                  {...form.register("start_time")}
-                />
-                <FieldError errors={[errors.start_time]} />
-              </Field>
-              <Field data-invalid={Boolean(errors.default_unit_price)}>
-                <FieldLabel htmlFor="class-settings-unit-price">Đơn giá / buổi (đ)</FieldLabel>
-                <MoneyInput
-                  id="class-settings-unit-price"
-                  aria-invalid={Boolean(errors.default_unit_price)}
-                  value={form.watch("default_unit_price")}
-                  onChange={(value) =>
-                    form.setValue("default_unit_price", value, {
-                      shouldValidate: true,
-                      shouldDirty: true,
-                    })
-                  }
-                />
-                <FieldError errors={[errors.default_unit_price]} />
-              </Field>
-            </div>
             {rateChanged ? (
               <p className="rounded-[var(--radius-md)] bg-sun-100 px-4 py-3 text-[13px] font-bold text-sun-600">
                 Đơn giá mới chỉ áp cho lượt ghi danh từ nay về sau và buổi học kế tiếp. Học phí đã

@@ -52,7 +52,9 @@ test("roster flow: contact, two students, a class, enroll both, end one", async 
   await page.goto("/students");
   await page.getByRole("button", { name: "+ Tạo lớp mới" }).click();
   await page.getByLabel("Tên lớp").fill(className);
-  await page.getByLabel("Giờ học").fill("18:00");
+  // The starter khung giờ has no weekday preselected — pick T2 first.
+  await page.getByRole("dialog").getByRole("button", { name: "T2" }).click();
+  await page.getByLabel("Giờ học khung 1").fill("18:00");
   await page.getByLabel("Thời lượng (phút)").fill("90");
   await page.getByLabel("Đơn giá / buổi (đ)").fill("150000");
   await page.getByRole("dialog").getByRole("button", { name: "Tạo lớp" }).click();
