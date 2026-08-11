@@ -25,13 +25,18 @@
 --   2. Trạng thái dùng VARCHAR + CHECK thay vì native ENUM.
 --   3. UUID khoá chính, khuyến nghị sinh UUIDv7 ở tầng Go.
 --   4. Công nợ ghi theo HỌC SINH, thu tiền ghi theo NGƯỜI LIÊN HỆ.
---   5. Composite FK (id, teacher_id) chống ghép dữ liệu chéo giáo viên.
+--   5. TENANT = CENTER (từ migration 000007). Composite FK (id, center_id)
+--      chống ghép dữ liệu chéo trung tâm. teacher_id GIỮ LẠI trên mọi bảng
+--      nghiệp vụ làm attribution (ai dạy/ai quản) và scope phụ cho role
+--      teacher; FK guard (teacher_id, center_id) → center_members đảm bảo
+--      teacher trên row đã/đang là thành viên center của row — neo vào lịch
+--      sử membership để giáo viên rời center mà dữ liệu Ở LẠI center cũ.
 -- =============================================================
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- =============================================================
--- 1. ĐỊNH DANH & GIÁO VIÊN
+-- 1. ĐỊNH DANH, GIÁO VIÊN & TRUNG TÂM
 --
 -- Tách IDENTITY (ai đăng nhập được) khỏi HỒ SƠ NGHIỆP VỤ (ai xuất hiện
 -- trong dữ liệu). V1 chỉ giáo viên đăng nhập; phụ huynh dùng link token (R5),
@@ -60,7 +65,8 @@ CREATE UNIQUE INDEX uq_users_phone ON user_accounts(phone) WHERE deleted_at IS N
 CREATE INDEX idx_users_role ON user_accounts(role) WHERE deleted_at IS NULL;
 
 -- Hồ sơ giáo viên. id chính là user_accounts.id nên toàn bộ FK teacher_id
--- ở các bảng phía dưới không phải sửa.
+-- ở các bảng phía dưới không phải sửa. center_id thêm bằng ALTER phía dưới
+-- vì centers.owner_id và teachers.center_id tham chiếu vòng nhau.
 CREATE TABLE teachers (
     id              UUID PRIMARY KEY REFERENCES user_accounts(id) ON DELETE CASCADE,
     full_name       VARCHAR(100) NOT NULL,
@@ -70,6 +76,55 @@ CREATE TABLE teachers (
     deleted_at      TIMESTAMPTZ
 );
 
+-- Tenant của hệ thống (000007). Mọi bảng nghiệp vụ key theo center_id;
+-- teacher_id chỉ còn là attribution trong center. owner là teacher có toàn
+-- quyền đọc/ghi trong center. Bất biến owner.center_id = centers.id là
+-- app-enforced (FK vòng centers.owner_id ↔ teachers.center_id không khai báo
+-- được sạch). owner_id NO ACTION DEFERRABLE (RESTRICT không hoãn được trong
+-- PG): center và owner đầu tiên sinh ra trong cùng một transaction (đăng ký
+-- teacher mới), và chiều ngược — xoá cứng teacher kèm center cá nhân — cũng
+-- đi trọn một transaction; mọi kiểm tra dồn về commit.
+CREATE TABLE centers (
+    id          UUID PRIMARY KEY,
+    name        VARCHAR(255) NOT NULL,
+    owner_id    UUID NOT NULL REFERENCES teachers(id)
+                    ON DELETE NO ACTION DEFERRABLE INITIALLY DEFERRED,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at  TIMESTAMPTZ
+);
+-- Một teacher chỉ own tối đa một center sống (center cá nhân hoặc trung tâm).
+CREATE UNIQUE INDEX uq_centers_owner ON centers(owner_id) WHERE deleted_at IS NULL;
+
+-- Membership HIỆN TẠI là cột trên teachers: một teacher thuộc đúng một center
+-- tại một thời điểm.
+ALTER TABLE teachers ADD COLUMN center_id UUID NOT NULL REFERENCES centers(id);
+CREATE INDEX idx_teachers_center ON teachers(center_id);
+
+-- Lịch sử membership — anchor cho FK guard ở mọi bảng nghiệp vụ. Row sống
+-- (left_at IS NULL) là membership hiện tại; row đã đóng giữ chân dữ liệu cũ:
+-- giáo viên rời center thì dữ liệu Ở LẠI center cũ và vẫn ghi công họ.
+-- Rời center = UPDATE left_at, KHÔNG BAO GIỜ DELETE row membership khi còn
+-- dữ liệu — guard FK sẽ CASCADE xoá toàn bộ dữ liệu của cặp (teacher,
+-- center); DELETE chỉ dành cho đường xoá cứng tài khoản.
+CREATE TABLE center_members (
+    teacher_id  UUID NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
+    center_id   UUID NOT NULL REFERENCES centers(id) ON DELETE CASCADE,
+    joined_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    left_at     TIMESTAMPTZ,
+    PRIMARY KEY (teacher_id, center_id)
+);
+-- Một teacher chỉ có một membership sống tại một thời điểm.
+CREATE UNIQUE INDEX uq_center_members_active ON center_members(teacher_id) WHERE left_at IS NULL;
+CREATE INDEX idx_center_members_center ON center_members(center_id);
+
+-- Center hiện tại của teacher phải có row membership tương ứng (sống hay đã
+-- đóng là việc của query layer). DEFERRABLE: đăng ký teacher mới chèn
+-- teachers trước, center_members ngay sau trong cùng transaction.
+ALTER TABLE teachers ADD CONSTRAINT fk_teachers_membership
+    FOREIGN KEY (id, center_id) REFERENCES center_members(teacher_id, center_id)
+    DEFERRABLE INITIALLY DEFERRED;
+
 -- =============================================================
 -- 2. NGƯỜI LIÊN HỆ & HỌC SINH
 -- Quan hệ 1:n (không tạo thực thể "gia đình").
@@ -77,7 +132,8 @@ CREATE TABLE teachers (
 
 CREATE TABLE contacts (
     id              UUID PRIMARY KEY,
-    teacher_id      UUID         NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
+    teacher_id      UUID         NOT NULL,
+    center_id       UUID         NOT NULL,
     -- NULL ở V1: phụ huynh không đăng nhập, chỉ mở link token (R5).
     user_id         UUID         REFERENCES user_accounts(id) ON DELETE SET NULL,
     full_name       VARCHAR(100) NOT NULL,
@@ -91,10 +147,14 @@ CREATE TABLE contacts (
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
     deleted_at      TIMESTAMPTZ,
-    CONSTRAINT uq_contacts_tid UNIQUE (id, teacher_id)
+    CONSTRAINT fk_contacts_teacher_center
+        FOREIGN KEY (teacher_id, center_id) REFERENCES center_members(teacher_id, center_id) ON DELETE CASCADE,
+    CONSTRAINT uq_contacts_cid UNIQUE (id, center_id)
 );
 -- Trùng số trong cùng giáo viên sẽ làm vỡ việc gộp thông báo và gộp công nợ.
 -- Partial: xoá rồi tạo lại cùng số phải được phép.
+-- GIỮ per-teacher sau 000007 (quyết định 260811): mapping Zalo và gộp thông
+-- báo đi theo tài khoản Zalo cá nhân của từng giáo viên, không theo center.
 -- KHÔNG unique toàn cục — một phụ huynh có con học nhiều thầy là nhiều
 -- bản ghi contacts độc lập.
 CREATE UNIQUE INDEX uq_contacts_phone
@@ -105,11 +165,13 @@ CREATE UNIQUE INDEX uq_contacts_zalo_user
     ON contacts(teacher_id, zalo_user_id)
     WHERE zalo_user_id IS NOT NULL AND deleted_at IS NULL;
 CREATE INDEX idx_contacts_teacher ON contacts(teacher_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_contacts_center ON contacts(center_id) WHERE deleted_at IS NULL;
 CREATE INDEX idx_contacts_user ON contacts(user_id) WHERE user_id IS NOT NULL;
 
 CREATE TABLE students (
     id              UUID PRIMARY KEY,
-    teacher_id      UUID         NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
+    teacher_id      UUID         NOT NULL,
+    center_id       UUID         NOT NULL,
     contact_id      UUID         NOT NULL,
     -- NULL ở V1 và còn NULL rất lâu: học sinh không có mặt trong sản phẩm.
     user_id         UUID         REFERENCES user_accounts(id) ON DELETE SET NULL,
@@ -125,10 +187,14 @@ CREATE TABLE students (
     -- deleted_at chỉ là ẩn khỏi danh sách, dữ liệu vẫn còn nguyên.
     -- Nghị định 13/2023 yêu cầu xoá thật, nên cần cả hai cột.
     anonymized_at   TIMESTAMPTZ,
-    FOREIGN KEY (contact_id, teacher_id) REFERENCES contacts(id, teacher_id) ON DELETE RESTRICT,
-    CONSTRAINT uq_students_tid UNIQUE (id, teacher_id)
+    CONSTRAINT fk_students_teacher_center
+        FOREIGN KEY (teacher_id, center_id) REFERENCES center_members(teacher_id, center_id) ON DELETE CASCADE,
+    CONSTRAINT fk_students_contact_center
+        FOREIGN KEY (contact_id, center_id) REFERENCES contacts(id, center_id) ON DELETE RESTRICT,
+    CONSTRAINT uq_students_cid UNIQUE (id, center_id)
 );
 CREATE INDEX idx_students_teacher ON students(teacher_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_students_center ON students(center_id) WHERE deleted_at IS NULL;
 CREATE INDEX idx_students_contact ON students(contact_id);
 
 -- =============================================================
@@ -137,7 +203,8 @@ CREATE INDEX idx_students_contact ON students(contact_id);
 
 CREATE TABLE classes (
     id                  UUID PRIMARY KEY,
-    teacher_id          UUID         NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
+    teacher_id          UUID         NOT NULL,
+    center_id           UUID         NOT NULL,
     name                VARCHAR(100) NOT NULL,
     start_date          DATE         NOT NULL,   -- ngày khai giảng, mỗi lớp một khác
     end_date            DATE,
@@ -148,14 +215,18 @@ CREATE TABLE classes (
     created_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
     deleted_at          TIMESTAMPTZ,
-    CONSTRAINT uq_classes_tid UNIQUE (id, teacher_id)
+    CONSTRAINT fk_classes_teacher_center
+        FOREIGN KEY (teacher_id, center_id) REFERENCES center_members(teacher_id, center_id) ON DELETE CASCADE,
+    CONSTRAINT uq_classes_cid UNIQUE (id, center_id)
 );
 CREATE INDEX idx_classes_teacher ON classes(teacher_id)
     WHERE deleted_at IS NULL AND status = 'active';
+CREATE INDEX idx_classes_center ON classes(center_id) WHERE deleted_at IS NULL;
 
 CREATE TABLE class_schedules (
     id              UUID PRIMARY KEY,
     teacher_id      UUID        NOT NULL,
+    center_id       UUID        NOT NULL,
     class_id        UUID        NOT NULL,
     weekday         SMALLINT    NOT NULL CHECK (weekday BETWEEN 0 AND 6), -- 0 = CN
     start_time      TIME        NOT NULL,
@@ -165,9 +236,13 @@ CREATE TABLE class_schedules (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at      TIMESTAMPTZ,
-    FOREIGN KEY (class_id, teacher_id) REFERENCES classes(id, teacher_id) ON DELETE CASCADE
+    CONSTRAINT fk_class_schedules_teacher_center
+        FOREIGN KEY (teacher_id, center_id) REFERENCES center_members(teacher_id, center_id) ON DELETE CASCADE,
+    CONSTRAINT fk_class_schedules_class_center
+        FOREIGN KEY (class_id, center_id) REFERENCES classes(id, center_id) ON DELETE CASCADE
 );
 CREATE INDEX idx_class_schedules_class ON class_schedules(class_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_class_schedules_center ON class_schedules(center_id) WHERE deleted_at IS NULL;
 
 -- =============================================================
 -- 4. GHI DANH — nơi đặt ĐƠN GIÁ
@@ -179,6 +254,7 @@ CREATE INDEX idx_class_schedules_class ON class_schedules(class_id) WHERE delete
 CREATE TABLE enrollments (
     id              UUID PRIMARY KEY,
     teacher_id      UUID        NOT NULL,
+    center_id       UUID        NOT NULL,
     student_id      UUID        NOT NULL,
     class_id        UUID        NOT NULL,
     started_on      DATE        NOT NULL,   -- ngày nhập học, có thể giữa chu kỳ
@@ -187,15 +263,20 @@ CREATE TABLE enrollments (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at      TIMESTAMPTZ,
-    FOREIGN KEY (student_id, teacher_id) REFERENCES students(id, teacher_id) ON DELETE CASCADE,
-    FOREIGN KEY (class_id, teacher_id)   REFERENCES classes(id, teacher_id)   ON DELETE CASCADE,
+    CONSTRAINT fk_enrollments_teacher_center
+        FOREIGN KEY (teacher_id, center_id) REFERENCES center_members(teacher_id, center_id) ON DELETE CASCADE,
+    CONSTRAINT fk_enrollments_student_center
+        FOREIGN KEY (student_id, center_id) REFERENCES students(id, center_id) ON DELETE CASCADE,
+    CONSTRAINT fk_enrollments_class_center
+        FOREIGN KEY (class_id, center_id)   REFERENCES classes(id, center_id)  ON DELETE CASCADE,
     CHECK (ended_on IS NULL OR ended_on >= started_on),
-    CONSTRAINT uq_enrollments_tid UNIQUE (id, teacher_id)
+    CONSTRAINT uq_enrollments_cid UNIQUE (id, center_id)
 );
 -- Một học sinh chỉ có MỘT ghi danh đang mở trong một lớp.
 CREATE UNIQUE INDEX uq_enrollments_active
     ON enrollments(student_id, class_id) WHERE ended_on IS NULL AND deleted_at IS NULL;
 CREATE INDEX idx_enrollments_class ON enrollments(class_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_enrollments_center ON enrollments(center_id) WHERE deleted_at IS NULL;
 
 -- =============================================================
 -- 5. BUỔI HỌC & ĐIỂM DANH
@@ -205,6 +286,7 @@ CREATE INDEX idx_enrollments_class ON enrollments(class_id) WHERE deleted_at IS 
 CREATE TABLE class_sessions (
     id                      UUID PRIMARY KEY,
     teacher_id              UUID        NOT NULL,
+    center_id               UUID        NOT NULL,
     class_id                UUID        NOT NULL,
     session_date            DATE        NOT NULL,
     start_time              TIME,
@@ -218,8 +300,11 @@ CREATE TABLE class_sessions (
     -- Huỷ buổi dùng status='cancelled' (giữ được lý do, hiện cho phụ huynh).
     -- deleted_at chỉ dành cho buổi tạo nhầm.
     deleted_at              TIMESTAMPTZ,
-    FOREIGN KEY (class_id, teacher_id) REFERENCES classes(id, teacher_id) ON DELETE CASCADE,
-    CONSTRAINT uq_class_sessions_tid UNIQUE (id, teacher_id),
+    CONSTRAINT fk_class_sessions_teacher_center
+        FOREIGN KEY (teacher_id, center_id) REFERENCES center_members(teacher_id, center_id) ON DELETE CASCADE,
+    CONSTRAINT fk_class_sessions_class_center
+        FOREIGN KEY (class_id, center_id) REFERENCES classes(id, center_id) ON DELETE CASCADE,
+    CONSTRAINT uq_class_sessions_cid UNIQUE (id, center_id),
     CHECK (status <> 'cancelled' OR attendance_confirmed_at IS NULL)
 );
 CREATE UNIQUE INDEX uq_class_sessions_per_day
@@ -228,10 +313,12 @@ CREATE UNIQUE INDEX uq_class_sessions_per_day
 -- (cảnh báo ở R2, điều kiện chặn chốt sổ ở R4). Bao gồm cả 'planned' lẫn
 -- 'held' vì buổi bị quên xác nhận vẫn còn ở 'planned' — đúng trường hợp
 -- cảnh báo tồn tại để bắt (widened bởi migration 000003).
+-- GIỮ theo teacher_id: đây là cảnh báo tác nghiệp của từng giáo viên.
 CREATE INDEX idx_class_sessions_pending
     ON class_sessions(teacher_id, session_date)
     WHERE status IN ('held', 'planned') AND attendance_confirmed_at IS NULL AND deleted_at IS NULL;
 CREATE INDEX idx_class_sessions_class_date ON class_sessions(class_id, session_date);
+CREATE INDEX idx_class_sessions_center ON class_sessions(center_id) WHERE deleted_at IS NULL;
 
 -- Ghi nhận ĐẦY ĐỦ mọi học sinh của buổi, kể cả người có mặt.
 -- Lý do không chỉ lưu người vắng: cần phân biệt "có mặt" với "chưa điểm danh".
@@ -239,6 +326,7 @@ CREATE INDEX idx_class_sessions_class_date ON class_sessions(class_id, session_d
 CREATE TABLE attendance_records (
     id              UUID PRIMARY KEY,
     teacher_id      UUID        NOT NULL,
+    center_id       UUID        NOT NULL,
     session_id      UUID        NOT NULL,
     student_id      UUID        NOT NULL,
     enrollment_id   UUID        NOT NULL,
@@ -253,22 +341,29 @@ CREATE TABLE attendance_records (
     -- KHÔNG phải xoá mềm — dùng status='absent'. Xoá mềm bản ghi điểm danh
     -- làm lệch số buổi tính tiền, tức là làm sai tiền gửi cho phụ huynh.
     deleted_at      TIMESTAMPTZ,
-    FOREIGN KEY (session_id, teacher_id)    REFERENCES class_sessions(id, teacher_id) ON DELETE CASCADE,
-    FOREIGN KEY (student_id, teacher_id)    REFERENCES students(id, teacher_id)       ON DELETE CASCADE,
-    FOREIGN KEY (enrollment_id, teacher_id) REFERENCES enrollments(id, teacher_id)    ON DELETE CASCADE
+    CONSTRAINT fk_attendance_records_teacher_center
+        FOREIGN KEY (teacher_id, center_id)    REFERENCES center_members(teacher_id, center_id) ON DELETE CASCADE,
+    CONSTRAINT fk_attendance_records_session_center
+        FOREIGN KEY (session_id, center_id)    REFERENCES class_sessions(id, center_id) ON DELETE CASCADE,
+    CONSTRAINT fk_attendance_records_student_center
+        FOREIGN KEY (student_id, center_id)    REFERENCES students(id, center_id)       ON DELETE CASCADE,
+    CONSTRAINT fk_attendance_records_enrollment_center
+        FOREIGN KEY (enrollment_id, center_id) REFERENCES enrollments(id, center_id)    ON DELETE CASCADE
 );
 CREATE UNIQUE INDEX uq_attendance_records
     ON attendance_records(session_id, student_id) WHERE deleted_at IS NULL;
 CREATE INDEX idx_attendance_records_enrollment ON attendance_records(enrollment_id) WHERE deleted_at IS NULL;
 CREATE INDEX idx_attendance_records_student ON attendance_records(student_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_attendance_records_center ON attendance_records(center_id) WHERE deleted_at IS NULL;
 
 -- =============================================================
 -- 6. KỲ CHỐT SỔ & CÔNG NỢ
 -- =============================================================
 
 CREATE TABLE billing_periods (
-    id              UUID PRIMARY KEY,
-    teacher_id      UUID        NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
+    id              UUID        PRIMARY KEY,
+    teacher_id      UUID        NOT NULL,
+    center_id       UUID        NOT NULL,
     year            SMALLINT    NOT NULL,
     month           SMALLINT    NOT NULL CHECK (month BETWEEN 1 AND 12),
     period_start    DATE        NOT NULL,
@@ -279,16 +374,22 @@ CREATE TABLE billing_periods (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at      TIMESTAMPTZ,
-    CONSTRAINT uq_billing_periods_tid UNIQUE (id, teacher_id)
+    CONSTRAINT fk_billing_periods_teacher_center
+        FOREIGN KEY (teacher_id, center_id) REFERENCES center_members(teacher_id, center_id) ON DELETE CASCADE,
+    CONSTRAINT uq_billing_periods_cid UNIQUE (id, center_id)
 );
+-- GIỮ per-teacher sau 000007 (quyết định 260811): chu kỳ chốt sổ hiện hành
+-- theo từng giáo viên; đổi sang per-center là đổi ngữ nghĩa nghiệp vụ.
 CREATE UNIQUE INDEX uq_billing_periods
     ON billing_periods(teacher_id, year, month) WHERE deleted_at IS NULL;
+CREATE INDEX idx_billing_periods_center ON billing_periods(center_id) WHERE deleted_at IS NULL;
 
 -- Công nợ theo HỌC SINH. Snapshot bất biến sau khi kỳ đóng.
 -- KHÔNG có deleted_at — huỷ phiếu thu dùng status='void'. Xem ghi chú (i).
 CREATE TABLE invoices (
     id                  UUID PRIMARY KEY,
     teacher_id          UUID        NOT NULL,
+    center_id           UUID        NOT NULL,
     period_id           UUID        NOT NULL,
     student_id          UUID        NOT NULL,
     -- Contact tại thời điểm chốt. Học sinh có thể đổi người liên hệ sau này
@@ -310,11 +411,16 @@ CREATE TABLE invoices (
     voided_at           TIMESTAMPTZ,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    FOREIGN KEY (period_id, teacher_id)  REFERENCES billing_periods(id, teacher_id) ON DELETE CASCADE,
-    FOREIGN KEY (student_id, teacher_id) REFERENCES students(id, teacher_id)        ON DELETE RESTRICT,
-    FOREIGN KEY (contact_id, teacher_id) REFERENCES contacts(id, teacher_id)        ON DELETE RESTRICT,
+    CONSTRAINT fk_invoices_teacher_center
+        FOREIGN KEY (teacher_id, center_id) REFERENCES center_members(teacher_id, center_id) ON DELETE CASCADE,
+    CONSTRAINT fk_invoices_period_center
+        FOREIGN KEY (period_id, center_id)  REFERENCES billing_periods(id, center_id) ON DELETE CASCADE,
+    CONSTRAINT fk_invoices_student_center
+        FOREIGN KEY (student_id, center_id) REFERENCES students(id, center_id)        ON DELETE RESTRICT,
+    CONSTRAINT fk_invoices_contact_center
+        FOREIGN KEY (contact_id, center_id) REFERENCES contacts(id, center_id)        ON DELETE RESTRICT,
     CONSTRAINT uq_invoices     UNIQUE (period_id, student_id),
-    CONSTRAINT uq_invoices_tid UNIQUE (id, teacher_id),
+    CONSTRAINT uq_invoices_cid UNIQUE (id, center_id),
     CHECK (paid_amount >= 0),
     CHECK (total_due = opening_balance + current_charge + adjustment_total),
     CHECK (status <> 'void' OR voided_at IS NOT NULL)
@@ -323,6 +429,7 @@ CREATE INDEX idx_invoices_contact_period ON invoices(contact_id, period_id);
 CREATE INDEX idx_invoices_unpaid
     ON invoices(teacher_id, period_id)
     WHERE status IN ('issued', 'partially_paid');
+CREATE INDEX idx_invoices_center ON invoices(center_id);
 
 -- Một dòng cho mỗi ghi danh. Học sinh học 2 lớp -> 2 dòng, 1 invoices.
 -- KHÔNG có deleted_at: xoá mềm một dòng làm tổng invoices không còn khớp
@@ -331,6 +438,7 @@ CREATE INDEX idx_invoices_unpaid
 CREATE TABLE invoice_lines (
     id              UUID PRIMARY KEY,
     teacher_id      UUID         NOT NULL,
+    center_id       UUID         NOT NULL,
     invoice_id      UUID         NOT NULL,
     enrollment_id   UUID         NOT NULL,
     class_name      VARCHAR(100) NOT NULL,  -- snapshot, phòng khi lớp đổi tên
@@ -339,18 +447,24 @@ CREATE TABLE invoice_lines (
     unit_price      BIGINT       NOT NULL,  -- snapshot đơn giá lúc chốt
     amount          BIGINT       NOT NULL,
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    FOREIGN KEY (invoice_id, teacher_id)    REFERENCES invoices(id, teacher_id)    ON DELETE CASCADE,
-    FOREIGN KEY (enrollment_id, teacher_id) REFERENCES enrollments(id, teacher_id) ON DELETE RESTRICT,
+    CONSTRAINT fk_invoice_lines_teacher_center
+        FOREIGN KEY (teacher_id, center_id)    REFERENCES center_members(teacher_id, center_id) ON DELETE CASCADE,
+    CONSTRAINT fk_invoice_lines_invoice_center
+        FOREIGN KEY (invoice_id, center_id)    REFERENCES invoices(id, center_id)    ON DELETE CASCADE,
+    CONSTRAINT fk_invoice_lines_enrollment_center
+        FOREIGN KEY (enrollment_id, center_id) REFERENCES enrollments(id, center_id) ON DELETE RESTRICT,
     CONSTRAINT uq_invoice_line UNIQUE (invoice_id, enrollment_id),
     CHECK (amount = billable_count * unit_price)
 );
 CREATE INDEX idx_invoice_lines_invoice ON invoice_lines(invoice_id);
+CREATE INDEX idx_invoice_lines_center ON invoice_lines(center_id);
 
 -- Điều chỉnh tay. R4 yêu cầu sửa được từng dòng KÈM LÝ DO.
 -- Cũng là nơi ghi nhận hệ quả của việc sửa điểm danh sau khi kỳ đã đóng (Q5).
 CREATE TABLE invoice_adjustments (
     id                  UUID PRIMARY KEY,
     teacher_id          UUID        NOT NULL,
+    center_id           UUID        NOT NULL,
     invoice_id          UUID        NOT NULL,
     amount              BIGINT      NOT NULL,   -- âm = giảm trừ
     reason              TEXT        NOT NULL,
@@ -360,10 +474,14 @@ CREATE TABLE invoice_adjustments (
     -- Huỷ một điều chỉnh: tạo điều chỉnh ngược dấu, không xoá.
     -- deleted_at chỉ cho trường hợp nhập nhầm và chưa gửi thông báo.
     deleted_at          TIMESTAMPTZ,
-    FOREIGN KEY (invoice_id, teacher_id) REFERENCES invoices(id, teacher_id) ON DELETE CASCADE,
+    CONSTRAINT fk_invoice_adjustments_teacher_center
+        FOREIGN KEY (teacher_id, center_id) REFERENCES center_members(teacher_id, center_id) ON DELETE CASCADE,
+    CONSTRAINT fk_invoice_adjustments_invoice_center
+        FOREIGN KEY (invoice_id, center_id) REFERENCES invoices(id, center_id) ON DELETE CASCADE,
     CHECK (length(btrim(reason)) > 0)
 );
 CREATE INDEX idx_invoice_adjustments_invoice ON invoice_adjustments(invoice_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_invoice_adjustments_center ON invoice_adjustments(center_id) WHERE deleted_at IS NULL;
 
 -- =============================================================
 -- 7. THU TIỀN — trục NGƯỜI LIÊN HỆ
@@ -373,6 +491,7 @@ CREATE INDEX idx_invoice_adjustments_invoice ON invoice_adjustments(invoice_id) 
 CREATE TABLE payments (
     id                  UUID PRIMARY KEY,
     teacher_id          UUID        NOT NULL,
+    center_id           UUID        NOT NULL,
     contact_id          UUID        NOT NULL,
     amount              BIGINT      NOT NULL CHECK (amount > 0),
     method              VARCHAR(16) NOT NULL DEFAULT 'transfer'
@@ -387,16 +506,21 @@ CREATE TABLE payments (
     reversed_at         TIMESTAMPTZ,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    FOREIGN KEY (contact_id, teacher_id) REFERENCES contacts(id, teacher_id) ON DELETE RESTRICT,
-    CONSTRAINT uq_payments_tid UNIQUE (id, teacher_id)
+    CONSTRAINT fk_payments_teacher_center
+        FOREIGN KEY (teacher_id, center_id) REFERENCES center_members(teacher_id, center_id) ON DELETE CASCADE,
+    CONSTRAINT fk_payments_contact_center
+        FOREIGN KEY (contact_id, center_id) REFERENCES contacts(id, center_id) ON DELETE RESTRICT,
+    CONSTRAINT uq_payments_cid UNIQUE (id, center_id)
 );
 CREATE INDEX idx_payments_contact ON payments(contact_id, received_on DESC);
+CREATE INDEX idx_payments_center ON payments(center_id);
 
 -- Cầu nối hai trục: một khoản thu của phụ huynh phân bổ vào nhiều invoices
 -- của nhiều con. Hiện thực hoá quy tắc ở Q8 của PRD.
 CREATE TABLE payment_allocations (
     id              UUID PRIMARY KEY,
     teacher_id      UUID        NOT NULL,
+    center_id       UUID        NOT NULL,
     payment_id      UUID        NOT NULL,
     invoice_id      UUID        NOT NULL,
     amount          BIGINT      NOT NULL CHECK (amount > 0),
@@ -405,11 +529,16 @@ CREATE TABLE payment_allocations (
     allocated_by    VARCHAR(16) NOT NULL DEFAULT 'auto'
                         CHECK (allocated_by IN ('auto', 'manual')),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    FOREIGN KEY (payment_id, teacher_id) REFERENCES payments(id, teacher_id) ON DELETE CASCADE,
-    FOREIGN KEY (invoice_id, teacher_id) REFERENCES invoices(id, teacher_id) ON DELETE RESTRICT,
+    CONSTRAINT fk_payment_allocations_teacher_center
+        FOREIGN KEY (teacher_id, center_id) REFERENCES center_members(teacher_id, center_id) ON DELETE CASCADE,
+    CONSTRAINT fk_payment_allocations_payment_center
+        FOREIGN KEY (payment_id, center_id) REFERENCES payments(id, center_id) ON DELETE CASCADE,
+    CONSTRAINT fk_payment_allocations_invoice_center
+        FOREIGN KEY (invoice_id, center_id) REFERENCES invoices(id, center_id) ON DELETE RESTRICT,
     CONSTRAINT uq_payment_allocations UNIQUE (payment_id, invoice_id)
 );
 CREATE INDEX idx_payment_allocations_invoice ON payment_allocations(invoice_id);
+CREATE INDEX idx_payment_allocations_center ON payment_allocations(center_id);
 
 -- =============================================================
 -- 8. BÁO CÁO GỬI PHỤ HUYNH
@@ -419,6 +548,7 @@ CREATE INDEX idx_payment_allocations_invoice ON payment_allocations(invoice_id);
 CREATE TABLE statements (
     id              UUID PRIMARY KEY,
     teacher_id      UUID        NOT NULL,
+    center_id       UUID        NOT NULL,
     contact_id      UUID        NOT NULL,
     period_id       UUID        NOT NULL,
     -- KHÔNG lưu token thô. Lưu SHA-256; server hash token trong URL rồi tra cứu.
@@ -434,13 +564,18 @@ CREATE TABLE statements (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at      TIMESTAMPTZ,
-    FOREIGN KEY (contact_id, teacher_id) REFERENCES contacts(id, teacher_id)        ON DELETE CASCADE,
-    FOREIGN KEY (period_id, teacher_id)  REFERENCES billing_periods(id, teacher_id) ON DELETE CASCADE,
-    CONSTRAINT uq_statements_tid UNIQUE (id, teacher_id)
+    CONSTRAINT fk_statements_teacher_center
+        FOREIGN KEY (teacher_id, center_id) REFERENCES center_members(teacher_id, center_id) ON DELETE CASCADE,
+    CONSTRAINT fk_statements_contact_center
+        FOREIGN KEY (contact_id, center_id) REFERENCES contacts(id, center_id)        ON DELETE CASCADE,
+    CONSTRAINT fk_statements_period_center
+        FOREIGN KEY (period_id, center_id)  REFERENCES billing_periods(id, center_id) ON DELETE CASCADE,
+    CONSTRAINT uq_statements_cid UNIQUE (id, center_id)
 );
 CREATE UNIQUE INDEX uq_statements
     ON statements(contact_id, period_id) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX uq_statements_token ON statements(token_hash);
+CREATE INDEX idx_statements_center ON statements(center_id) WHERE deleted_at IS NULL;
 
 -- Một batch gửi zalo_personal có nhịp giãn cách (paced). Counters
 -- (total/sent/failed) luôn derive bằng COUNT trên notifications theo run_id —
@@ -448,8 +583,9 @@ CREATE UNIQUE INDEX uq_statements_token ON statements(token_hash);
 -- 'interrupted' = process chết giữa run (rows còn queued, giáo viên resume thủ
 -- công); 'expired' = phiên Zalo chết giữa run (rows còn lại chuyển failed).
 CREATE TABLE notification_runs (
-    id                 UUID PRIMARY KEY,
-    teacher_id         UUID        NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
+    id                 UUID        PRIMARY KEY,
+    teacher_id         UUID        NOT NULL,
+    center_id          UUID        NOT NULL,
     billing_period_id  UUID        NOT NULL,
     purpose            VARCHAR(20) NOT NULL DEFAULT 'statements'
                            CHECK (purpose IN ('statements', 'reminder')),
@@ -457,15 +593,27 @@ CREATE TABLE notification_runs (
                            CHECK (status IN ('running', 'completed', 'interrupted', 'expired')),
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     finished_at        TIMESTAMPTZ,
-    FOREIGN KEY (billing_period_id, teacher_id)
-        REFERENCES billing_periods(id, teacher_id) ON DELETE CASCADE,
-    CONSTRAINT uq_notification_runs_tid UNIQUE (id, teacher_id)
+    CONSTRAINT fk_notification_runs_teacher_center
+        FOREIGN KEY (teacher_id, center_id) REFERENCES center_members(teacher_id, center_id) ON DELETE CASCADE,
+    CONSTRAINT fk_notification_runs_period_center
+        FOREIGN KEY (billing_period_id, center_id)
+        REFERENCES billing_periods(id, center_id) ON DELETE CASCADE,
+    CONSTRAINT uq_notification_runs_cid UNIQUE (id, center_id)
 );
 CREATE INDEX idx_notification_runs_teacher ON notification_runs(teacher_id);
+CREATE INDEX idx_notification_runs_center ON notification_runs(center_id);
+-- Guard trong DB vì in-process guard không thấy instance API thứ hai
+-- (deploy chồng lấn, scale-out nhầm): hai pass chạy song song sẽ DM cùng
+-- phụ huynh hai lần từ tài khoản Zalo cá nhân. GIỮ per-teacher: mỗi giáo
+-- viên gửi từ tài khoản Zalo riêng nên nhịp gửi là của từng người.
+CREATE UNIQUE INDEX uq_notification_runs_one_active
+    ON notification_runs(teacher_id)
+    WHERE status = 'running';
 
 CREATE TABLE notifications (
     id                  UUID PRIMARY KEY,
     teacher_id          UUID        NOT NULL,
+    center_id           UUID        NOT NULL,
     statement_id        UUID        NOT NULL,
     channel             VARCHAR(20) NOT NULL
                             CHECK (channel IN ('zalo_zns', 'zalo_manual', 'sms', 'zalo_personal')),
@@ -483,27 +631,34 @@ CREATE TABLE notifications (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at          TIMESTAMPTZ,
-    FOREIGN KEY (statement_id, teacher_id) REFERENCES statements(id, teacher_id) ON DELETE CASCADE,
-    -- FK composite: DB tự chặn notification trỏ vào run của giáo viên khác —
+    CONSTRAINT fk_notifications_teacher_center
+        FOREIGN KEY (teacher_id, center_id)   REFERENCES center_members(teacher_id, center_id) ON DELETE CASCADE,
+    CONSTRAINT fk_notifications_statement_center
+        FOREIGN KEY (statement_id, center_id) REFERENCES statements(id, center_id) ON DELETE CASCADE,
+    -- FK composite: DB tự chặn notification trỏ vào run của trung tâm khác —
     -- tiến độ run derive bằng COUNT trên các row này nên link chéo tenant sẽ
-    -- trộn số liệu. SET NULL kèm column list (PG >= 15) giữ nguyên teacher_id
+    -- trộn số liệu. SET NULL kèm column list (PG >= 15) giữ nguyên center_id
     -- khi run bị xoá.
-    FOREIGN KEY (run_id, teacher_id)
-        REFERENCES notification_runs(id, teacher_id) ON DELETE SET NULL (run_id)
+    CONSTRAINT fk_notifications_run_center
+        FOREIGN KEY (run_id, center_id)
+        REFERENCES notification_runs(id, center_id) ON DELETE SET NULL (run_id)
 );
 CREATE INDEX idx_notifications_statement ON notifications(statement_id);
 CREATE INDEX idx_notifications_retry ON notifications(status)
     WHERE status IN ('queued','failed') AND deleted_at IS NULL;
 CREATE INDEX idx_notifications_run ON notifications(run_id) WHERE run_id IS NOT NULL;
+CREATE INDEX idx_notifications_center ON notifications(center_id) WHERE deleted_at IS NULL;
 
 -- =============================================================
 -- 9. VIEW HỖ TRỢ
 -- =============================================================
 
 -- Bảng thu tiền chế độ "xem theo người liên hệ" (R7, mặc định).
+-- center_id cho scope owner; teacher_id giữ lại cho drill-down theo giáo viên.
 CREATE VIEW v_contact_balance AS
 SELECT
     i.teacher_id,
+    i.center_id,
     i.period_id,
     i.contact_id,
     count(*)                            AS student_count,
@@ -512,13 +667,14 @@ SELECT
     sum(i.total_due - i.paid_amount)    AS outstanding
 FROM invoices i
 WHERE i.status <> 'void'
-GROUP BY i.teacher_id, i.period_id, i.contact_id;
+GROUP BY i.teacher_id, i.center_id, i.period_id, i.contact_id;
 
 -- Nền tảng cho bảng "tiền đang thất thoát" (P1):
 -- buổi đã dạy, đã điểm danh, nhưng chưa nằm trong invoice_lines nào.
 CREATE VIEW v_unbilled_attendance AS
 SELECT
     a.teacher_id,
+    a.center_id,
     a.enrollment_id,
     a.student_id,
     cs.session_date,
@@ -588,9 +744,10 @@ WHERE a.billable = true
 --     khi khách hàng báo số sai.
 --
 -- (m) ROW LEVEL SECURITY
---     Nên bật trên mọi bảng có teacher_id trước khi có người dùng thật.
---     Policy đơn giản: USING (teacher_id = current_setting('app.teacher_id')::uuid
---                             AND deleted_at IS NULL).
+--     Nên bật trên mọi bảng có center_id trước khi có người dùng thật.
+--     Policy theo tenant mới: USING (center_id = current_setting('app.center_id')::uuid
+--                                    AND deleted_at IS NULL);
+--     role teacher thêm điều kiện teacher_id ở query layer (owner thì không).
 --     Gộp luôn điều kiện soft delete vào policy là cách rẻ nhất để không
 --     phụ thuộc vào việc lập trình viên nhớ.
 --
@@ -600,11 +757,26 @@ WHERE a.billable = true
 --     từ teachers.id và contacts.user_id. Một người vừa dạy thêm vừa có con
 --     học thầy khác sẽ có cả hai vai — đừng tin vào cột role đơn.
 --
--- (o) ĐƯỜNG NÂNG CẤP TRỢ GIẢNG (P1)
---     Không đổi teacher_id ở bảng nào. Thêm staff_login(teacher_id, phone,
---     role) và dùng RLS chặn invoices/payments/statements.
---     Đánh đổi đã chấp nhận: V1 không có created_by/confirmed_by nên dữ liệu
---     cũ không truy vết được ai thao tác.
+-- (o) TENANT = CENTER (migration 000007)
+--     Hướng nâng cấp trợ giảng/quản lý cũ đã hiện thực hoá bằng centers:
+--       - Mỗi teacher hiện có được backfill một center cá nhân (owner = chính
+--         họ) nên hành vi cũ không đổi; teachers.center_id NOT NULL,
+--         1 teacher = 1 center.
+--       - Ranh giới toàn vẹn DB là center: FK con (x_id, center_id) +
+--         FK guard (teacher_id, center_id) → center_members. Guard neo vào
+--         LỊCH SỬ membership, không phải teachers: giáo viên rời center thì
+--         dữ liệu Ở LẠI center cũ (row membership đóng bằng left_at giữ chân
+--         FK), còn membership sống hay không do query layer kiểm khi ghi mới.
+--         Cross-teacher TRONG CÙNG center hợp lệ ở DB (chủ đích — owner
+--         đọc/ghi thay giáo viên); isolation teacher-với-teacher trong center
+--         enforce ở query layer.
+--       - Unique NGHIỆP VỤ giữ per-teacher (uq_contacts_phone,
+--         uq_billing_periods, uq_contacts_zalo_user): billing và mapping Zalo
+--         hiện hành theo từng giáo viên, đổi sang center là đổi ngữ nghĩa.
+--       - Đánh đổi đã chấp nhận: V1 không có created_by/confirmed_by nên dữ
+--         liệu cũ không truy vết được ai thao tác.
+--     Ngoại lệ không re-key: user_accounts, refresh_tokens (identity);
+--     zalo_accounts (tài khoản Zalo cá nhân, đi theo người).
 --
 -- (q) JOB XOÁ DỮ LIỆU CÁ NHÂN (chạy ở backend, không đặt trong DB)
 --
