@@ -331,9 +331,12 @@ export function DashboardLayout() {
   return (
     <div className="flex min-h-svh bg-cream-100">
       <aside className="hidden lg:flex lg:w-[236px] lg:shrink-0 lg:flex-col lg:border-r lg:border-line-200 lg:bg-white">
-        <div className="p-6">
-          <p className="font-display text-[22px] font-extrabold text-ink-900">Teka</p>
-          <p className="text-[12px] text-ink-400">Quản lý lớp học</p>
+        <div className="flex items-center gap-3 p-6">
+          <img src="/favicon.svg" alt="" aria-hidden="true" className="h-10 w-10 shrink-0" />
+          <div>
+            <p className="font-display text-[22px] font-extrabold text-ink-900">Teka</p>
+            <p className="text-[12px] text-ink-400">Quản lý lớp học</p>
+          </div>
         </div>
         <nav aria-label="Main" className="flex flex-1 flex-col gap-1 px-4">
           {entries.map((entry) => (
@@ -345,7 +348,8 @@ export function DashboardLayout() {
       </aside>
 
       <aside className="hidden md:flex md:w-[72px] md:shrink-0 md:flex-col md:items-center md:border-r md:border-line-200 md:bg-white lg:hidden">
-        <nav aria-label="Main" className="flex flex-1 flex-col items-center gap-2 py-6">
+        <img src="/favicon.svg" alt="Teka" className="mt-6 h-9 w-9 shrink-0" />
+        <nav aria-label="Main" className="flex flex-1 flex-col items-center gap-2 pb-6 pt-4">
           {entries.map((entry) => (
             <RailNavItem key={entry.label} {...entry} />
           ))}
