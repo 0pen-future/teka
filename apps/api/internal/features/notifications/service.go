@@ -14,6 +14,7 @@ import (
 	"teka/apps/api/internal/features/statements"
 	"teka/apps/api/internal/features/zalo"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 )
 
@@ -27,8 +28,8 @@ import (
 // interface, so notifications depends on statements' public service
 // contract, never a second implementation of its sums.
 type StatementsSource interface {
-	Generate(ctx context.Context, teacherID, periodID uuid.UUID) (*statements.GenerateResult, error)
-	PeriodFigures(ctx context.Context, teacherID, periodID uuid.UUID) (map[uuid.UUID]statements.ContactFigures, error)
+	Generate(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*statements.GenerateResult, error)
+	PeriodFigures(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (map[uuid.UUID]statements.ContactFigures, error)
 	ToResponse(row statements.Row) statements.StatementResponse
 }
 
@@ -130,12 +131,13 @@ func (s *Service) BulkSend(ctx context.Context, teacherID, periodID uuid.UUID, r
 	var runItems []RunItem
 	var resp BulkSendResponse
 	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
-		genResult, err := s.statements.Generate(ctx, teacherID, periodID)
+		// Temporary zero-CenterID scope until this package is re-keyed to center tenancy.
+		genResult, err := s.statements.Generate(ctx, authctx.Scope{TeacherID: teacherID}, periodID)
 		if err != nil {
 			return err
 		}
 
-		figures, err := s.statements.PeriodFigures(ctx, teacherID, periodID)
+		figures, err := s.statements.PeriodFigures(ctx, authctx.Scope{TeacherID: teacherID}, periodID)
 		if err != nil {
 			return err
 		}
@@ -415,11 +417,11 @@ func (s *Service) ResumeRun(ctx context.Context, teacherID, periodID uuid.UUID) 
 
 	var items []RunItem
 	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
-		genResult, err := s.statements.Generate(ctx, teacherID, periodID)
+		genResult, err := s.statements.Generate(ctx, authctx.Scope{TeacherID: teacherID}, periodID)
 		if err != nil {
 			return err
 		}
-		figures, err := s.statements.PeriodFigures(ctx, teacherID, periodID)
+		figures, err := s.statements.PeriodFigures(ctx, authctx.Scope{TeacherID: teacherID}, periodID)
 		if err != nil {
 			return err
 		}

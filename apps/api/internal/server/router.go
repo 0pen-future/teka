@@ -160,7 +160,7 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	collectionsSvc := collections.NewService(collections.NewRepository(db))
 	collections.RegisterRoutes(v1, collections.NewHandler(collectionsSvc), requireAuth, resolveScope)
 
-	statements.RegisterRoutes(v1, statements.NewHandler(statementsSvc), requireAuth)
+	statements.RegisterRoutes(v1, statements.NewHandler(statementsSvc), requireAuth, resolveScope)
 
 	notifications.RegisterRoutes(v1, notifications.NewHandler(notificationsSvc), requireAuth)
 

@@ -122,7 +122,7 @@ func TestPublicGetValidTokenReturnsBothChildrenAndFamilyTotal(t *testing.T) {
 	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
-	result, err := statementsSvc.Generate(ctx, teacher.ID, period.ID)
+	result, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 	require.Len(t, result.Statements, 1)
 	token := tokenOf(t, statementsSvc, result.Statements[0])
@@ -173,7 +173,7 @@ func TestPublicGet404ForEveryInvalidTokenReasonReturnsByteIdenticalBody(t *testi
 		require.NoError(t, err)
 		_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 		require.NoError(t, err)
-		result, err := statementsSvc.Generate(ctx, teacher.ID, period.ID)
+		result, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 		require.NoError(t, err)
 		for _, row := range result.Statements {
 			if row.ContactID == contact.ID {
@@ -185,7 +185,7 @@ func TestPublicGet404ForEveryInvalidTokenReasonReturnsByteIdenticalBody(t *testi
 	}
 
 	revokedID, revokedToken := makeStatement(1, "2026-01-01", "Revoked")
-	require.NoError(t, statementsSvc.Revoke(ctx, teacher.ID, revokedID))
+	require.NoError(t, statementsSvc.Revoke(ctx, testutil.ScopeFor(t, db, teacher.ID), revokedID))
 
 	expiredID, expiredToken := makeStatement(2, "2026-02-01", "Expired")
 	require.NoError(t, db.Table("statements").Where("id = ?", expiredID).
@@ -200,7 +200,7 @@ func TestPublicGet404ForEveryInvalidTokenReasonReturnsByteIdenticalBody(t *testi
 	require.NoError(t, err)
 	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), paidPeriod.ID)
 	require.NoError(t, err)
-	paidResult, err := statementsSvc.Generate(ctx, teacher.ID, paidPeriod.ID)
+	paidResult, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), paidPeriod.ID)
 	require.NoError(t, err)
 	var paidRow statements.Row
 	for _, row := range paidResult.Statements {
@@ -272,7 +272,7 @@ func TestPublicPostCloseAttendanceCorrectionShowsLiveSessionsAndCarriedAdjustmen
 	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
-	result, err := statementsSvc.Generate(ctx, teacher.ID, period.ID)
+	result, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, 200_000, result.Statements[0].TotalDue)
 	token := tokenOf(t, statementsSvc, result.Statements[0])
@@ -326,7 +326,7 @@ func TestPublicViewTrackingCountsOnlyJSONGetNotQRImage(t *testing.T) {
 	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
-	result, err := statementsSvc.Generate(ctx, teacher.ID, period.ID)
+	result, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 	row := result.Statements[0]
 	token := tokenOf(t, statementsSvc, row)
@@ -389,7 +389,7 @@ func TestPublicTwoFamiliesDataIsolation(t *testing.T) {
 	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
-	result, err := statementsSvc.Generate(ctx, teacher.ID, period.ID)
+	result, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 	require.Len(t, result.Statements, 2)
 
@@ -438,7 +438,7 @@ func TestPublicAdjustmentReasonNeverAppearsInResponseBody(t *testing.T) {
 	_, _, err = billingSvc.AddAdjustment(ctx, testutil.ScopeFor(t, db, teacher.ID), invoiceRow.ID, -15_000, secretReason)
 	require.NoError(t, err)
 
-	result, err := statementsSvc.Generate(ctx, teacher.ID, period.ID)
+	result, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 	token := tokenOf(t, statementsSvc, result.Statements[0])
 
@@ -474,7 +474,7 @@ func TestPublicPaymentsByInvoiceMatchesD8UnderpaymentSplit(t *testing.T) {
 	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
-	result, err := statementsSvc.Generate(ctx, teacher.ID, period.ID)
+	result, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 	require.Len(t, result.Statements, 1)
 	require.EqualValues(t, 200_000, result.Statements[0].TotalDue)
@@ -519,7 +519,7 @@ func TestPublicQRImageServesWithBankConfigAndReturnsNeutral404WithoutIt(t *testi
 	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
-	result, err := statementsSvc.Generate(ctx, teacher.ID, period.ID)
+	result, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 	token := tokenOf(t, statementsSvc, result.Statements[0])
 
@@ -594,7 +594,7 @@ func TestPublicRenderIssuesTheSameQueryCountRegardlessOfFamilySize(t *testing.T)
 	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
-	result, err := statementsSvc.Generate(ctx, teacher.ID, period.ID)
+	result, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 	require.Len(t, result.Statements, 2)
 
