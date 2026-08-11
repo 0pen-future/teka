@@ -154,14 +154,14 @@ func TestContactViewMergesFamiliesAndClassViewShowsPerChildStatus(t *testing.T) 
 	// A overpays by 20 000 — the surplus has nothing left to settle in this
 	// period, so it must surface as summary.unallocated_credit rather than
 	// vanish.
-	_, err = paymentsSvc.Record(ctx, teacher.ID, payments.RecordPaymentRequest{
+	_, err = paymentsSvc.Record(ctx, testutil.ScopeFor(t, db, teacher.ID), payments.RecordPaymentRequest{
 		ContactID: contactA.ID, Amount: 320_000, Method: payments.MethodCash, ReceivedOn: "2026-01-20",
 	})
 	require.NoError(t, err)
 
 	// B pays enough to clear the earlier-starting class but not the later
 	// one — D8's tie-break settles B1 in full and leaves B2 short by 50 000.
-	_, err = paymentsSvc.Record(ctx, teacher.ID, payments.RecordPaymentRequest{
+	_, err = paymentsSvc.Record(ctx, testutil.ScopeFor(t, db, teacher.ID), payments.RecordPaymentRequest{
 		ContactID: contactB.ID, Amount: 150_000, Method: payments.MethodTransfer, ReceivedOn: "2026-01-20",
 	})
 	require.NoError(t, err)

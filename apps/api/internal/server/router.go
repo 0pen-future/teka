@@ -153,7 +153,7 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	attendanceSvc.SetReconciler(billingSvc)
 
 	paymentsSvc := payments.NewService(payments.NewRepository(db), txMgr)
-	payments.RegisterRoutes(v1, payments.NewHandler(paymentsSvc), requireAuth)
+	payments.RegisterRoutes(v1, payments.NewHandler(paymentsSvc), requireAuth, resolveScope)
 
 	// collections is read-only reporting over billing_periods/invoices/
 	// payments — no writes, so no transaction manager.

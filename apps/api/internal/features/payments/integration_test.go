@@ -21,6 +21,7 @@ import (
 	"teka/apps/api/internal/features/sessions"
 	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/pagination"
 	"teka/apps/api/internal/testutil"
 )
 
@@ -121,7 +122,7 @@ func TestRecordExactPaymentAcrossTwoChildrenBothPaid(t *testing.T) {
 	require.EqualValues(t, 100_000, invA.TotalDue)
 	require.EqualValues(t, 200_000, invB.TotalDue)
 
-	detail, err := paymentsSvc.Record(ctx, teacher.ID, payments.RecordPaymentRequest{
+	detail, err := paymentsSvc.Record(ctx, testutil.ScopeFor(t, db, teacher.ID), payments.RecordPaymentRequest{
 		ContactID: contact.ID, Amount: 300_000, Method: payments.MethodCash, ReceivedOn: "2026-01-20",
 	})
 	require.NoError(t, err)
@@ -159,7 +160,7 @@ func TestRecordUnderpaymentSettlesEarlierClassStartInvoiceFirst(t *testing.T) {
 	require.EqualValues(t, 100_000, earlierInvoice.TotalDue)
 	require.EqualValues(t, 100_000, laterInvoice.TotalDue)
 
-	detail, err := paymentsSvc.Record(ctx, teacher.ID, payments.RecordPaymentRequest{
+	detail, err := paymentsSvc.Record(ctx, testutil.ScopeFor(t, db, teacher.ID), payments.RecordPaymentRequest{
 		ContactID: contact.ID, Amount: 150_000, Method: payments.MethodTransfer, ReceivedOn: "2026-01-20",
 	})
 	require.NoError(t, err)
@@ -192,7 +193,7 @@ func TestRecordOverpaymentReturnsUnallocatedAndCapsAtOutstanding(t *testing.T) {
 	invoice := getInvoice(t, db, teacher.ID, student)
 	require.EqualValues(t, 100_000, invoice.TotalDue)
 
-	detail, err := paymentsSvc.Record(ctx, teacher.ID, payments.RecordPaymentRequest{
+	detail, err := paymentsSvc.Record(ctx, testutil.ScopeFor(t, db, teacher.ID), payments.RecordPaymentRequest{
 		ContactID: contact.ID, Amount: 150_000, Method: payments.MethodCash, ReceivedOn: "2026-01-20",
 	})
 	require.NoError(t, err)
@@ -224,7 +225,7 @@ func TestRecordNeverAllocatesToDraftInvoice(t *testing.T) {
 	invoice := getInvoice(t, db, teacher.ID, student)
 	require.Equal(t, billing.InvoiceDraft, invoice.Status)
 
-	detail, err := paymentsSvc.Record(ctx, teacher.ID, payments.RecordPaymentRequest{
+	detail, err := paymentsSvc.Record(ctx, testutil.ScopeFor(t, db, teacher.ID), payments.RecordPaymentRequest{
 		ContactID: contact.ID, Amount: 100_000, Method: payments.MethodCash, ReceivedOn: "2026-01-20",
 	})
 	require.NoError(t, err)
@@ -258,7 +259,7 @@ func TestRecordNeverAllocatesToVoidInvoice(t *testing.T) {
 		"status": billing.InvoiceVoid, "void_reason": voidReason, "voided_at": voidedAt,
 	}).Error)
 
-	detail, err := paymentsSvc.Record(ctx, teacher.ID, payments.RecordPaymentRequest{
+	detail, err := paymentsSvc.Record(ctx, testutil.ScopeFor(t, db, teacher.ID), payments.RecordPaymentRequest{
 		ContactID: contact.ID, Amount: 100_000, Method: payments.MethodCash, ReceivedOn: "2026-01-20",
 	})
 	require.NoError(t, err)
@@ -281,7 +282,7 @@ func TestRecordAgainstAnotherTeachersContactIsNotFoundAndWritesNothing(t *testin
 	_, stranger := testutil.Teacher(t, db)
 	contact := testutil.Contact(t, db, owner.ID)
 
-	_, err := paymentsSvc.Record(ctx, stranger.ID, payments.RecordPaymentRequest{
+	_, err := paymentsSvc.Record(ctx, testutil.ScopeFor(t, db, stranger.ID), payments.RecordPaymentRequest{
 		ContactID: contact.ID, Amount: 100_000, Method: payments.MethodCash, ReceivedOn: "2026-01-20",
 	})
 	require.Error(t, err)
@@ -313,6 +314,10 @@ func TestConcurrentPaymentsForSameContactNeverOverpayInvoice(t *testing.T) {
 	require.EqualValues(t, 100_000, invoice.TotalDue)
 
 	const perPayment = 80_000
+	// Resolved once on the main goroutine: testutil.ScopeFor calls t.Fatalf
+	// internally, which is unsafe to invoke for the first time from a spawned
+	// goroutine.
+	teacherScope := testutil.ScopeFor(t, db, teacher.ID)
 	details := make([]*payments.PaymentDetail, 2)
 	errs := make([]error, 2)
 	var wg sync.WaitGroup
@@ -320,7 +325,7 @@ func TestConcurrentPaymentsForSameContactNeverOverpayInvoice(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			details[i], errs[i] = paymentsSvc.Record(context.Background(), teacher.ID, payments.RecordPaymentRequest{
+			details[i], errs[i] = paymentsSvc.Record(context.Background(), teacherScope, payments.RecordPaymentRequest{
 				ContactID: contact.ID, Amount: perPayment, Method: payments.MethodCash, ReceivedOn: "2026-01-20",
 			})
 		}(i)
@@ -373,20 +378,20 @@ func TestConcurrentReallocationsOnSameContactDoNotDeadlock(t *testing.T) {
 
 	// Two payments, each manually spread 40 000 / 40 000 across both invoices,
 	// so both later reallocations must lock invEarly and invLate together.
-	p1, err := paymentsSvc.Record(ctx, teacher.ID, payments.RecordPaymentRequest{
+	p1, err := paymentsSvc.Record(ctx, testutil.ScopeFor(t, db, teacher.ID), payments.RecordPaymentRequest{
 		ContactID: contact.ID, Amount: 80_000, Method: payments.MethodCash, ReceivedOn: "2026-01-20",
 	})
 	require.NoError(t, err)
-	_, err = paymentsSvc.Reallocate(ctx, teacher.ID, p1.Payment.ID, payments.ReallocateRequest{
+	_, err = paymentsSvc.Reallocate(ctx, testutil.ScopeFor(t, db, teacher.ID), p1.Payment.ID, payments.ReallocateRequest{
 		Allocations: []payments.ReallocationLine{{InvoiceID: invEarly.ID, Amount: 40_000}, {InvoiceID: invLate.ID, Amount: 40_000}},
 	})
 	require.NoError(t, err)
 
-	p2, err := paymentsSvc.Record(ctx, teacher.ID, payments.RecordPaymentRequest{
+	p2, err := paymentsSvc.Record(ctx, testutil.ScopeFor(t, db, teacher.ID), payments.RecordPaymentRequest{
 		ContactID: contact.ID, Amount: 80_000, Method: payments.MethodCash, ReceivedOn: "2026-01-20",
 	})
 	require.NoError(t, err)
-	_, err = paymentsSvc.Reallocate(ctx, teacher.ID, p2.Payment.ID, payments.ReallocateRequest{
+	_, err = paymentsSvc.Reallocate(ctx, testutil.ScopeFor(t, db, teacher.ID), p2.Payment.ID, payments.ReallocateRequest{
 		Allocations: []payments.ReallocationLine{{InvoiceID: invEarly.ID, Amount: 40_000}, {InvoiceID: invLate.ID, Amount: 40_000}},
 	})
 	require.NoError(t, err)
@@ -396,13 +401,17 @@ func TestConcurrentReallocationsOnSameContactDoNotDeadlock(t *testing.T) {
 		{Allocations: []payments.ReallocationLine{{InvoiceID: invLate.ID, Amount: 30_000}, {InvoiceID: invEarly.ID, Amount: 50_000}}},
 	}
 	ids := []uuid.UUID{p1.Payment.ID, p2.Payment.ID}
+	// Resolved once on the main goroutine: testutil.ScopeFor calls t.Fatalf
+	// internally, which is unsafe to invoke for the first time from a spawned
+	// goroutine.
+	teacherScope := testutil.ScopeFor(t, db, teacher.ID)
 	errs := make([]error, 2)
 	var wg sync.WaitGroup
 	for i := range errs {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, errs[i] = paymentsSvc.Reallocate(context.Background(), teacher.ID, ids[i], reqs[i])
+			_, errs[i] = paymentsSvc.Reallocate(context.Background(), teacherScope, ids[i], reqs[i])
 		}(i)
 	}
 	wg.Wait()
@@ -434,7 +443,7 @@ func TestReverseRestoresInvoiceStateAndKeepsBothPaymentRows(t *testing.T) {
 	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
-	original, err := paymentsSvc.Record(ctx, teacher.ID, payments.RecordPaymentRequest{
+	original, err := paymentsSvc.Record(ctx, testutil.ScopeFor(t, db, teacher.ID), payments.RecordPaymentRequest{
 		ContactID: contact.ID, Amount: 100_000, Method: payments.MethodCash, ReceivedOn: "2026-01-20",
 	})
 	require.NoError(t, err)
@@ -444,7 +453,7 @@ func TestReverseRestoresInvoiceStateAndKeepsBothPaymentRows(t *testing.T) {
 	require.EqualValues(t, 100_000, paid.PaidAmount)
 	assertLedgerInvariant(t, db, teacher.ID)
 
-	reversal, err := paymentsSvc.Reverse(ctx, teacher.ID, original.Payment.ID, payments.ReverseRequest{
+	reversal, err := paymentsSvc.Reverse(ctx, testutil.ScopeFor(t, db, teacher.ID), original.Payment.ID, payments.ReverseRequest{
 		Reason: "recorded against the wrong contact",
 	})
 	require.NoError(t, err)
@@ -457,11 +466,11 @@ func TestReverseRestoresInvoiceStateAndKeepsBothPaymentRows(t *testing.T) {
 	require.Equal(t, billing.InvoiceIssued, restored.Status, "reversing the only payment must return the invoice to issued")
 	require.EqualValues(t, 0, restored.PaidAmount)
 
-	originalDetail, err := paymentsSvc.Get(ctx, teacher.ID, original.Payment.ID)
+	originalDetail, err := paymentsSvc.Get(ctx, testutil.ScopeFor(t, db, teacher.ID), original.Payment.ID)
 	require.NoError(t, err, "the original payment row must still exist after being reversed")
 	require.NotNil(t, originalDetail.Payment.ReversedAt)
 
-	reversalDetail, err := paymentsSvc.Get(ctx, teacher.ID, reversal.Payment.ID)
+	reversalDetail, err := paymentsSvc.Get(ctx, testutil.ScopeFor(t, db, teacher.ID), reversal.Payment.ID)
 	require.NoError(t, err, "the reversal payment row must exist in its own right")
 	require.NotNil(t, reversalDetail.Payment.ReversesPaymentID)
 	require.Equal(t, original.Payment.ID, *reversalDetail.Payment.ReversesPaymentID)
@@ -485,19 +494,19 @@ func TestReverseTwiceIsConflictAndWritesNoNewRow(t *testing.T) {
 	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
-	original, err := paymentsSvc.Record(ctx, teacher.ID, payments.RecordPaymentRequest{
+	original, err := paymentsSvc.Record(ctx, testutil.ScopeFor(t, db, teacher.ID), payments.RecordPaymentRequest{
 		ContactID: contact.ID, Amount: 100_000, Method: payments.MethodCash, ReceivedOn: "2026-01-20",
 	})
 	require.NoError(t, err)
 
-	_, err = paymentsSvc.Reverse(ctx, teacher.ID, original.Payment.ID, payments.ReverseRequest{Reason: "first reversal"})
+	_, err = paymentsSvc.Reverse(ctx, testutil.ScopeFor(t, db, teacher.ID), original.Payment.ID, payments.ReverseRequest{Reason: "first reversal"})
 	require.NoError(t, err)
 
 	var countBefore int64
 	require.NoError(t, db.Table("payments").Where("contact_id = ?", contact.ID).Count(&countBefore).Error)
 	require.EqualValues(t, 2, countBefore, "original plus one reversal")
 
-	_, err = paymentsSvc.Reverse(ctx, teacher.ID, original.Payment.ID, payments.ReverseRequest{Reason: "second attempt"})
+	_, err = paymentsSvc.Reverse(ctx, testutil.ScopeFor(t, db, teacher.ID), original.Payment.ID, payments.ReverseRequest{Reason: "second attempt"})
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
 
@@ -534,7 +543,7 @@ func TestReallocateRebalancesATwoChildSplitOntoOneInvoice(t *testing.T) {
 	require.EqualValues(t, 100_000, invEarly.TotalDue)
 	require.EqualValues(t, 300_000, invLate.TotalDue)
 
-	detail, err := paymentsSvc.Record(ctx, teacher.ID, payments.RecordPaymentRequest{
+	detail, err := paymentsSvc.Record(ctx, testutil.ScopeFor(t, db, teacher.ID), payments.RecordPaymentRequest{
 		ContactID: contact.ID, Amount: 130_000, Method: payments.MethodCash, ReceivedOn: "2026-01-20",
 	})
 	require.NoError(t, err)
@@ -548,7 +557,7 @@ func TestReallocateRebalancesATwoChildSplitOntoOneInvoice(t *testing.T) {
 	require.EqualValues(t, 30_000, splitLate.PaidAmount)
 	assertLedgerInvariant(t, db, teacher.ID)
 
-	reallocated, err := paymentsSvc.Reallocate(ctx, teacher.ID, detail.Payment.ID, payments.ReallocateRequest{
+	reallocated, err := paymentsSvc.Reallocate(ctx, testutil.ScopeFor(t, db, teacher.ID), detail.Payment.ID, payments.ReallocateRequest{
 		Allocations: []payments.ReallocationLine{{InvoiceID: invLate.ID, Amount: 130_000}},
 	})
 	require.NoError(t, err)
@@ -587,19 +596,19 @@ func TestReallocateToAnotherContactsInvoiceIsRejectedAndWritesNothing(t *testing
 
 	invoiceB := getInvoice(t, db, teacher.ID, studentB)
 
-	detail, err := paymentsSvc.Record(ctx, teacher.ID, payments.RecordPaymentRequest{
+	detail, err := paymentsSvc.Record(ctx, testutil.ScopeFor(t, db, teacher.ID), payments.RecordPaymentRequest{
 		ContactID: contactA.ID, Amount: 100_000, Method: payments.MethodCash, ReceivedOn: "2026-01-20",
 	})
 	require.NoError(t, err)
 	require.Len(t, detail.Allocations, 1)
 
-	_, err = paymentsSvc.Reallocate(ctx, teacher.ID, detail.Payment.ID, payments.ReallocateRequest{
+	_, err = paymentsSvc.Reallocate(ctx, testutil.ScopeFor(t, db, teacher.ID), detail.Payment.ID, payments.ReallocateRequest{
 		Allocations: []payments.ReallocationLine{{InvoiceID: invoiceB.ID, Amount: 100_000}},
 	})
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code)
 
-	unchanged, err := paymentsSvc.Get(ctx, teacher.ID, detail.Payment.ID)
+	unchanged, err := paymentsSvc.Get(ctx, testutil.ScopeFor(t, db, teacher.ID), detail.Payment.ID)
 	require.NoError(t, err)
 	require.Len(t, unchanged.Allocations, 1, "a rejected reallocation must leave the payment's existing allocation untouched")
 	require.Equal(t, detail.Allocations[0].InvoiceID, unchanged.Allocations[0].InvoiceID)
@@ -627,7 +636,7 @@ func TestAutoAllocateRemainderPlacesSurplusOnANewlyIssuedInvoice(t *testing.T) {
 	invoiceJan := getInvoice(t, db, teacher.ID, studentJan)
 	require.EqualValues(t, 100_000, invoiceJan.TotalDue)
 
-	detail, err := paymentsSvc.Record(ctx, teacher.ID, payments.RecordPaymentRequest{
+	detail, err := paymentsSvc.Record(ctx, testutil.ScopeFor(t, db, teacher.ID), payments.RecordPaymentRequest{
 		ContactID: contact.ID, Amount: 150_000, Method: payments.MethodCash, ReceivedOn: "2026-01-20",
 	})
 	require.NoError(t, err)
@@ -644,7 +653,7 @@ func TestAutoAllocateRemainderPlacesSurplusOnANewlyIssuedInvoice(t *testing.T) {
 	require.Equal(t, billing.InvoiceIssued, invoiceFeb.Status)
 	require.EqualValues(t, 100_000, invoiceFeb.TotalDue)
 
-	reallocated, err := paymentsSvc.AutoAllocateRemainder(ctx, teacher.ID, detail.Payment.ID)
+	reallocated, err := paymentsSvc.AutoAllocateRemainder(ctx, testutil.ScopeFor(t, db, teacher.ID), detail.Payment.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, 0, reallocated.UnallocatedAmount)
 	require.Len(t, reallocated.Allocations, 2)
@@ -654,9 +663,156 @@ func TestAutoAllocateRemainderPlacesSurplusOnANewlyIssuedInvoice(t *testing.T) {
 	require.EqualValues(t, 50_000, settledFeb.PaidAmount)
 
 	// Re-running with nothing left to place is a conflict, not a silent no-op.
-	_, err = paymentsSvc.AutoAllocateRemainder(ctx, teacher.ID, detail.Payment.ID)
+	_, err = paymentsSvc.AutoAllocateRemainder(ctx, testutil.ScopeFor(t, db, teacher.ID), detail.Payment.ID)
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
 
 	assertLedgerInvariant(t, db, teacher.ID)
+}
+
+// TestOwnerHasFullOversightOfMembersPayments proves an owner can record,
+// read, list, and reverse a payment against a member's own contact — and
+// that recording it anchors the row on the member (the contact's own owning
+// teacher and center), never silently reassigning it to the acting owner.
+func TestOwnerHasFullOversightOfMembersPayments(t *testing.T) {
+	t.Parallel()
+	paymentsSvc, billingSvc, db := newIntegrationDeps(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, db)
+	_, member := testutil.Teacher(t, db)
+	ownerCenter := testutil.ScopeFor(t, db, owner.ID).CenterID
+	testutil.JoinCenter(t, db, member.ID, ownerCenter)
+
+	ownerScope := testutil.ScopeFor(t, db, owner.ID)
+	memberScope := testutil.ScopeFor(t, db, member.ID)
+	require.Equal(t, ownerScope.CenterID, memberScope.CenterID, "member must have joined the owner's center")
+	require.True(t, ownerScope.IsOwner)
+	require.False(t, memberScope.IsOwner)
+
+	contact := testutil.Contact(t, db, member.ID)
+	student := seedStudentWithSessions(t, db, member.ID, contact.ID, "MemberOwned", date("2026-01-01"), 1)
+
+	period, err := billingSvc.EnsurePeriod(ctx, memberScope, 2026, 1)
+	require.NoError(t, err, "member must be able to open their own billing period")
+	_, err = billingSvc.Close(ctx, memberScope, period.ID)
+	require.NoError(t, err, "member must be able to close their own billing period")
+
+	invoice := getInvoice(t, db, member.ID, student)
+	require.EqualValues(t, 100_000, invoice.TotalDue)
+
+	detail, err := paymentsSvc.Record(ctx, ownerScope, payments.RecordPaymentRequest{
+		ContactID: contact.ID, Amount: 100_000, Method: payments.MethodCash, ReceivedOn: "2026-01-20",
+	})
+	require.NoError(t, err, "owner must be able to record a payment for a member's contact")
+
+	// Direct DB read: the row must be anchored on the member, not the owner
+	// who recorded it — the owner-records-member's-payment invariant.
+	var row struct {
+		TeacherID uuid.UUID
+		CenterID  uuid.UUID
+	}
+	require.NoError(t, db.Table("payments").
+		Select("teacher_id, center_id").
+		Where("id = ?", detail.Payment.ID).
+		Scan(&row).Error)
+	require.Equal(t, member.ID, row.TeacherID, "an owner recording a member's payment must not silently reassign it to the owner")
+	require.Equal(t, ownerCenter, row.CenterID)
+
+	// Owner's own scoped read-back must agree.
+	readBack, err := paymentsSvc.Get(ctx, ownerScope, detail.Payment.ID)
+	require.NoError(t, err, "owner must be able to read a member's payment")
+	require.Equal(t, member.ID, readBack.Payment.TeacherID, "the owner's scoped read-back must still show the member as the anchor")
+
+	list, total, err := paymentsSvc.List(ctx, ownerScope, payments.ListFilter{}, pagination.Params{Page: 1, PerPage: 20})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, list, 1)
+
+	reversal, err := paymentsSvc.Reverse(ctx, ownerScope, detail.Payment.ID, payments.ReverseRequest{Reason: "owner oversight reversal"})
+	require.NoError(t, err, "owner must be able to reverse a member's payment")
+	require.Equal(t, member.ID, reversal.Payment.TeacherID, "the reversal entry must inherit the original's member anchor, not the owner's")
+}
+
+// TestPeersInSameCenterCannotSeeEachOthersPayments proves membership in the
+// same center is not by itself enough to see another member's payments — only
+// the owner has that oversight.
+func TestPeersInSameCenterCannotSeeEachOthersPayments(t *testing.T) {
+	t.Parallel()
+	paymentsSvc, billingSvc, db := newIntegrationDeps(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, db)
+	_, memberB := testutil.Teacher(t, db)
+	_, memberC := testutil.Teacher(t, db)
+	ownerCenter := testutil.ScopeFor(t, db, owner.ID).CenterID
+	testutil.JoinCenter(t, db, memberB.ID, ownerCenter)
+	testutil.JoinCenter(t, db, memberC.ID, ownerCenter)
+
+	scopeB := testutil.ScopeFor(t, db, memberB.ID)
+	scopeC := testutil.ScopeFor(t, db, memberC.ID)
+
+	contact := testutil.Contact(t, db, memberB.ID)
+	student := seedStudentWithSessions(t, db, memberB.ID, contact.ID, "PeerB", date("2026-01-01"), 1)
+
+	period, err := billingSvc.EnsurePeriod(ctx, scopeB, 2026, 1)
+	require.NoError(t, err)
+	_, err = billingSvc.Close(ctx, scopeB, period.ID)
+	require.NoError(t, err)
+	_ = getInvoice(t, db, memberB.ID, student)
+
+	detail, err := paymentsSvc.Record(ctx, scopeB, payments.RecordPaymentRequest{
+		ContactID: contact.ID, Amount: 100_000, Method: payments.MethodCash, ReceivedOn: "2026-01-20",
+	})
+	require.NoError(t, err)
+
+	_, err = paymentsSvc.Get(ctx, scopeC, detail.Payment.ID)
+	require.Error(t, err)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code, "a peer must not read another member's payment")
+
+	_, err = paymentsSvc.Reverse(ctx, scopeC, detail.Payment.ID, payments.ReverseRequest{Reason: "peer attempt"})
+	require.Error(t, err)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code, "a peer must not reverse another member's payment")
+
+	list, total, err := paymentsSvc.List(ctx, scopeC, payments.ListFilter{}, pagination.Params{Page: 1, PerPage: 20})
+	require.NoError(t, err)
+	require.EqualValues(t, 0, total, "a peer's list must not surface another member's payment")
+	require.Empty(t, list)
+}
+
+// TestCrossCenterPaymentsAreNotFound proves a teacher in a wholly separate
+// center gets a 404, never a 403, for another center's payment — cross-tenant
+// isolation, not an access-denied signal that would leak the row's existence.
+func TestCrossCenterPaymentsAreNotFound(t *testing.T) {
+	t.Parallel()
+	paymentsSvc, billingSvc, db := newIntegrationDeps(t)
+	ctx := context.Background()
+	_, teacherA := testutil.Teacher(t, db)
+	_, teacherB := testutil.Teacher(t, db)
+	scopeA := testutil.ScopeFor(t, db, teacherA.ID)
+	scopeB := testutil.ScopeFor(t, db, teacherB.ID)
+	require.NotEqual(t, scopeA.CenterID, scopeB.CenterID, "the two teachers must be in separate centers")
+
+	contact := testutil.Contact(t, db, teacherA.ID)
+	student := seedStudentWithSessions(t, db, teacherA.ID, contact.ID, "CrossCenter", date("2026-01-01"), 1)
+
+	period, err := billingSvc.EnsurePeriod(ctx, scopeA, 2026, 1)
+	require.NoError(t, err)
+	_, err = billingSvc.Close(ctx, scopeA, period.ID)
+	require.NoError(t, err)
+	_ = getInvoice(t, db, teacherA.ID, student)
+
+	detail, err := paymentsSvc.Record(ctx, scopeA, payments.RecordPaymentRequest{
+		ContactID: contact.ID, Amount: 100_000, Method: payments.MethodCash, ReceivedOn: "2026-01-20",
+	})
+	require.NoError(t, err)
+
+	_, err = paymentsSvc.Get(ctx, scopeA, detail.Payment.ID)
+	require.NoError(t, err, "teacher A must read their own payment")
+
+	_, err = paymentsSvc.Get(ctx, scopeB, detail.Payment.ID)
+	require.Error(t, err)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+
+	_, err = paymentsSvc.Reverse(ctx, scopeB, detail.Payment.ID, payments.ReverseRequest{Reason: "cross-center attempt"})
+	require.Error(t, err)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
 }

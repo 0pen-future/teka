@@ -224,7 +224,7 @@ func TestBulkSendStatementsTargetsUnpaidPaidAndOldDebtButSkipsVoided(t *testing.
 	require.NoError(t, d.db.Table("invoices").Select("id, total_due").
 		Where("teacher_id = ? AND contact_id = ? AND period_id = ?", teacher.ID, contactB.ID, periodFeb.ID).
 		Take(&betaInvoice).Error)
-	_, err = d.payments.Record(ctx, teacher.ID, payments.RecordPaymentRequest{
+	_, err = d.payments.Record(ctx, testutil.ScopeFor(t, d.db, teacher.ID), payments.RecordPaymentRequest{
 		ContactID:  contactB.ID,
 		Amount:     betaInvoice.TotalDue,
 		Method:     "cash",

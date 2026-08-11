@@ -210,7 +210,7 @@ func TestPublicGet404ForEveryInvalidTokenReasonReturnsByteIdenticalBody(t *testi
 	}
 	require.NotEqual(t, uuid.Nil, paidRow.ID, "expected a statement for the paid contact")
 	paidToken := tokenOf(t, statementsSvc, paidRow)
-	_, err = paymentsSvc.Record(ctx, teacher.ID, payments.RecordPaymentRequest{
+	_, err = paymentsSvc.Record(ctx, testutil.ScopeFor(t, db, teacher.ID), payments.RecordPaymentRequest{
 		ContactID: paidContact.ID, Amount: 100_000, Method: payments.MethodCash, ReceivedOn: "2026-04-15",
 	})
 	require.NoError(t, err)
@@ -480,7 +480,7 @@ func TestPublicPaymentsByInvoiceMatchesD8UnderpaymentSplit(t *testing.T) {
 	require.EqualValues(t, 200_000, result.Statements[0].TotalDue)
 	token := tokenOf(t, statementsSvc, result.Statements[0])
 
-	_, err = paymentsSvc.Record(ctx, teacher.ID, payments.RecordPaymentRequest{
+	_, err = paymentsSvc.Record(ctx, testutil.ScopeFor(t, db, teacher.ID), payments.RecordPaymentRequest{
 		ContactID: contact.ID, Amount: 150_000, Method: payments.MethodCash, ReceivedOn: "2026-09-15",
 	})
 	require.NoError(t, err)
