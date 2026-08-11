@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/shared/pagination"
 	"teka/apps/api/internal/shared/validation"
@@ -30,11 +31,14 @@ func NewService(repo Repository) *Service {
 }
 
 // Create inserts a contact with a normalised E.164 phone. Duplicate phones are
-// detected by the partial unique index, never by a pre-check SELECT.
-func (s *Service) Create(ctx context.Context, teacherID uuid.UUID, req CreateRequest) (*Row, error) {
+// detected by the partial unique index, never by a pre-check SELECT. The
+// contact is always stamped as the caller's own — including an owner, who
+// creates rows as themselves, never on behalf of another teacher.
+func (s *Service) Create(ctx context.Context, sc authctx.Scope, req CreateRequest) (*Row, error) {
 	c := &Contact{
 		ID:        id.New(),
-		TeacherID: teacherID,
+		TeacherID: sc.TeacherID,
+		CenterID:  sc.CenterID,
 		FullName:  req.FullName,
 		Phone:     validation.NormalizePhone(req.Phone),
 	}
@@ -46,8 +50,8 @@ func (s *Service) Create(ctx context.Context, teacherID uuid.UUID, req CreateReq
 }
 
 // Get returns one contact with its live-student count.
-func (s *Service) Get(ctx context.Context, teacherID, contactID uuid.UUID) (*Row, error) {
-	row, err := s.repo.GetByID(ctx, teacherID, contactID)
+func (s *Service) Get(ctx context.Context, sc authctx.Scope, contactID uuid.UUID) (*Row, error) {
+	row, err := s.repo.GetByID(ctx, sc, contactID)
 	if err != nil {
 		return nil, translate(err)
 	}
@@ -55,13 +59,13 @@ func (s *Service) Get(ctx context.Context, teacherID, contactID uuid.UUID) (*Row
 }
 
 // List returns a page of contacts with student counts.
-func (s *Service) List(ctx context.Context, teacherID uuid.UUID, filter ListFilter, p pagination.Params) ([]Row, int64, error) {
-	return s.repo.List(ctx, teacherID, filter, p)
+func (s *Service) List(ctx context.Context, sc authctx.Scope, filter ListFilter, p pagination.Params) ([]Row, int64, error) {
+	return s.repo.List(ctx, sc, filter, p)
 }
 
 // Update replaces both editable fields, re-normalising the phone.
-func (s *Service) Update(ctx context.Context, teacherID, contactID uuid.UUID, req UpdateRequest) (*Row, error) {
-	row, err := s.repo.GetByID(ctx, teacherID, contactID)
+func (s *Service) Update(ctx context.Context, sc authctx.Scope, contactID uuid.UUID, req UpdateRequest) (*Row, error) {
+	row, err := s.repo.GetByID(ctx, sc, contactID)
 	if err != nil {
 		return nil, translate(err)
 	}
@@ -80,16 +84,16 @@ func (s *Service) Update(ctx context.Context, teacherID, contactID uuid.UUID, re
 // only restricts hard deletes, the count exists for a helpful error, and the
 // worst case (soft-deleted contact with a live student) is visible and
 // reversible. Do not add locking for a single-teacher workload.
-func (s *Service) Delete(ctx context.Context, teacherID, contactID uuid.UUID) error {
-	if _, err := s.repo.GetByID(ctx, teacherID, contactID); err != nil {
+func (s *Service) Delete(ctx context.Context, sc authctx.Scope, contactID uuid.UUID) error {
+	if _, err := s.repo.GetByID(ctx, sc, contactID); err != nil {
 		return translate(err)
 	}
-	total, err := s.repo.CountActiveStudents(ctx, teacherID, contactID)
+	total, err := s.repo.CountActiveStudents(ctx, sc, contactID)
 	if err != nil {
 		return err
 	}
 	if total > 0 {
-		names, err := s.repo.ListStudentNames(ctx, teacherID, contactID, blockingNamesShown)
+		names, err := s.repo.ListStudentNames(ctx, sc, contactID, blockingNamesShown)
 		if err != nil {
 			return err
 		}
@@ -97,14 +101,14 @@ func (s *Service) Delete(ctx context.Context, teacherID, contactID uuid.UUID) er
 		appErr.Err = ErrHasStudents
 		return appErr
 	}
-	return translate(s.repo.SoftDelete(ctx, teacherID, contactID))
+	return translate(s.repo.SoftDelete(ctx, sc, contactID))
 }
 
 // UpdateZaloMapping binds the contact to the Zalo friend the teacher picked
 // and returns the updated row. Values are stored trimmed: the id is compared
 // byte-for-byte when the sender resolves a contact, and the required binding
 // tag cannot see that a padded value is really blank.
-func (s *Service) UpdateZaloMapping(ctx context.Context, teacherID, contactID uuid.UUID, req ZaloMappingRequest) (*Row, error) {
+func (s *Service) UpdateZaloMapping(ctx context.Context, sc authctx.Scope, contactID uuid.UUID, req ZaloMappingRequest) (*Row, error) {
 	req.ZaloUserID = strings.TrimSpace(req.ZaloUserID)
 	req.ZaloName = strings.TrimSpace(req.ZaloName)
 	fields := map[string]string{}
@@ -117,10 +121,10 @@ func (s *Service) UpdateZaloMapping(ctx context.Context, teacherID, contactID uu
 	if len(fields) > 0 {
 		return nil, apperror.Invalid("validation failed", fields)
 	}
-	if err := s.repo.UpdateZaloMapping(ctx, teacherID, contactID, req.ZaloUserID, req.ZaloName); err != nil {
+	if err := s.repo.UpdateZaloMapping(ctx, sc, contactID, req.ZaloUserID, req.ZaloName); err != nil {
 		return nil, translate(err)
 	}
-	row, err := s.repo.GetByID(ctx, teacherID, contactID)
+	row, err := s.repo.GetByID(ctx, sc, contactID)
 	if err != nil {
 		return nil, translate(err)
 	}
@@ -129,8 +133,8 @@ func (s *Service) UpdateZaloMapping(ctx context.Context, teacherID, contactID uu
 
 // ClearZaloMapping detaches the contact from its Zalo friend. Clearing an
 // unmapped contact succeeds — the caller's intent is already true.
-func (s *Service) ClearZaloMapping(ctx context.Context, teacherID, contactID uuid.UUID) error {
-	return translate(s.repo.ClearZaloMapping(ctx, teacherID, contactID))
+func (s *Service) ClearZaloMapping(ctx context.Context, sc authctx.Scope, contactID uuid.UUID) error {
+	return translate(s.repo.ClearZaloMapping(ctx, sc, contactID))
 }
 
 // blockingDetail renders "3 student(s): An, Bình, Chi" with an "and N more"

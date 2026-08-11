@@ -23,12 +23,12 @@ type ScopeResolver interface {
 // gains) their center on the very next request, not at token expiry.
 func ResolveScope(resolver ScopeResolver) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		teacherID, ok := authctx.TeacherID(c)
-		if !ok {
+		p, ok := authctx.From(c)
+		if !ok || p.Role != authctx.RoleTeacher {
 			response.Err(c, apperror.Unauthorized("authentication required"))
 			return
 		}
-		scope, err := resolver.ResolveScope(c.Request.Context(), teacherID)
+		scope, err := resolver.ResolveScope(c.Request.Context(), p.UserID)
 		if err != nil {
 			response.Err(c, err)
 			return

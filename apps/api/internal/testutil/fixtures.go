@@ -116,6 +116,71 @@ func randomPhone() string {
 	return fmt.Sprintf("+849%08d", binary.BigEndian.Uint32(u[0:4])%100000000)
 }
 
+// centerOf resolves the teacher's current center; business fixtures anchor
+// their rows in it the same way the scoped services do.
+func centerOf(t *testing.T, db *gorm.DB, teacherID uuid.UUID) uuid.UUID {
+	t.Helper()
+	// Scanning straight into a bare uuid.UUID skips its sql.Scanner and hits
+	// GORM's element-wise array path instead; wrap it in a struct field, the
+	// same shape ScopeFor scans into.
+	var row struct{ CenterID uuid.UUID }
+	err := db.Raw("SELECT center_id FROM teachers WHERE id = ?", teacherID).Scan(&row).Error
+	if err != nil || row.CenterID == uuid.Nil {
+		t.Fatalf("resolve fixture teacher %s center: %v", teacherID, err)
+	}
+	return row.CenterID
+}
+
+// ScopeFor resolves the teacher's live scope straight from the database the
+// way the scope middleware does, so service-level tests call scoped services
+// with the same tenant context a request would carry.
+func ScopeFor(t *testing.T, db *gorm.DB, teacherID uuid.UUID) authctx.Scope {
+	t.Helper()
+	var row struct {
+		CenterID uuid.UUID
+		IsOwner  bool
+	}
+	err := db.Raw(`
+		SELECT t.center_id, (c.owner_id = t.id) AS is_owner
+		FROM teachers t
+		JOIN centers c ON c.id = t.center_id
+		WHERE t.id = ?`, teacherID).Scan(&row).Error
+	if err != nil || row.CenterID == uuid.Nil {
+		t.Fatalf("resolve fixture scope for %s: %v", teacherID, err)
+	}
+	return authctx.Scope{TeacherID: teacherID, CenterID: row.CenterID, IsOwner: row.IsOwner}
+}
+
+// JoinCenter moves the teacher into the target center directly (bypassing the
+// service): closes their live membership stint, opens one in the target,
+// re-points teachers.center_id, and retires their vacated personal center.
+func JoinCenter(t *testing.T, db *gorm.DB, teacherID, centerID uuid.UUID) {
+	t.Helper()
+	err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(
+			"UPDATE center_members SET left_at = now() WHERE teacher_id = ? AND left_at IS NULL",
+			teacherID).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`
+			INSERT INTO center_members (teacher_id, center_id) VALUES (?, ?)
+			ON CONFLICT (teacher_id, center_id) DO UPDATE SET left_at = NULL, joined_at = now()`,
+			teacherID, centerID).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(
+			"UPDATE teachers SET center_id = ? WHERE id = ?", centerID, teacherID).Error; err != nil {
+			return err
+		}
+		return tx.Exec(
+			"UPDATE centers SET deleted_at = now() WHERE owner_id = ? AND deleted_at IS NULL",
+			teacherID).Error
+	})
+	if err != nil {
+		t.Fatalf("move fixture teacher %s into center %s: %v", teacherID, centerID, err)
+	}
+}
+
 // ContactOption customizes a fixture contact before insertion.
 type ContactOption func(c *contacts.Contact)
 
@@ -136,6 +201,7 @@ func Contact(t *testing.T, db *gorm.DB, teacherID uuid.UUID, opts ...ContactOpti
 	c := &contacts.Contact{
 		ID:        id.New(),
 		TeacherID: teacherID,
+		CenterID:  centerOf(t, db, teacherID),
 		FullName:  "Fixture Contact",
 		Phone:     randomPhone(),
 	}

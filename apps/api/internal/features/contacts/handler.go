@@ -29,15 +29,16 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-// teacherID resolves the authenticated tenant — the only sanctioned source of
-// teacher identity; request bodies and paths never carry it.
-func (h *Handler) teacherID(c *gin.Context) (uuid.UUID, bool) {
-	teacherID, ok := authctx.TeacherID(c)
+// scope resolves the authenticated caller's center scope — the only
+// sanctioned source of tenant identity; request bodies and paths never carry
+// it.
+func (h *Handler) scope(c *gin.Context) (authctx.Scope, bool) {
+	sc, ok := authctx.ScopeFrom(c)
 	if !ok {
 		response.Err(c, apperror.Unauthorized("authentication required"))
-		return uuid.UUID{}, false
+		return authctx.Scope{}, false
 	}
-	return teacherID, true
+	return sc, true
 }
 
 // contactID parses the :id path parameter.
@@ -64,7 +65,7 @@ func contactID(c *gin.Context) (uuid.UUID, bool) {
 //	@Security		BearerAuth
 //	@Router			/contacts [post]
 func (h *Handler) create(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -73,7 +74,7 @@ func (h *Handler) create(c *gin.Context) {
 		response.Err(c, validation.BindError(err))
 		return
 	}
-	row, err := h.svc.Create(c.Request.Context(), teacherID, req)
+	row, err := h.svc.Create(c.Request.Context(), sc, req)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -96,12 +97,12 @@ func (h *Handler) create(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/contacts [get]
 func (h *Handler) list(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
 	params := pagination.Parse(c, "full_name", listSorts)
-	rows, total, err := h.svc.List(c.Request.Context(), teacherID, ListFilter{Query: c.Query("query")}, params)
+	rows, total, err := h.svc.List(c.Request.Context(), sc, ListFilter{Query: c.Query("query")}, params)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -125,7 +126,7 @@ func (h *Handler) list(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/contacts/{id} [get]
 func (h *Handler) get(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -133,7 +134,7 @@ func (h *Handler) get(c *gin.Context) {
 	if !ok {
 		return
 	}
-	row, err := h.svc.Get(c.Request.Context(), teacherID, cid)
+	row, err := h.svc.Get(c.Request.Context(), sc, cid)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -157,7 +158,7 @@ func (h *Handler) get(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/contacts/{id} [put]
 func (h *Handler) update(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -170,7 +171,7 @@ func (h *Handler) update(c *gin.Context) {
 		response.Err(c, validation.BindError(err))
 		return
 	}
-	row, err := h.svc.Update(c.Request.Context(), teacherID, cid, req)
+	row, err := h.svc.Update(c.Request.Context(), sc, cid, req)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -192,7 +193,7 @@ func (h *Handler) update(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/contacts/{id} [delete]
 func (h *Handler) remove(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -200,7 +201,7 @@ func (h *Handler) remove(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.svc.Delete(c.Request.Context(), teacherID, cid); err != nil {
+	if err := h.svc.Delete(c.Request.Context(), sc, cid); err != nil {
 		response.Err(c, err)
 		return
 	}
@@ -224,7 +225,7 @@ func (h *Handler) remove(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/contacts/{id}/zalo-mapping [put]
 func (h *Handler) setZaloMapping(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -237,7 +238,7 @@ func (h *Handler) setZaloMapping(c *gin.Context) {
 		response.Err(c, validation.BindError(err))
 		return
 	}
-	row, err := h.svc.UpdateZaloMapping(c.Request.Context(), teacherID, cid, req)
+	row, err := h.svc.UpdateZaloMapping(c.Request.Context(), sc, cid, req)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -258,7 +259,7 @@ func (h *Handler) setZaloMapping(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/contacts/{id}/zalo-mapping [delete]
 func (h *Handler) clearZaloMapping(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -266,7 +267,7 @@ func (h *Handler) clearZaloMapping(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.svc.ClearZaloMapping(c.Request.Context(), teacherID, cid); err != nil {
+	if err := h.svc.ClearZaloMapping(c.Request.Context(), sc, cid); err != nil {
 		response.Err(c, err)
 		return
 	}

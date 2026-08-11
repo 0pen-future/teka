@@ -102,10 +102,10 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 
 	authSvc := auth.NewService(teachersSvc, auth.NewRepository(db), auth.NewTokenIssuer(cfg.JWT), txMgr)
 	auth.RegisterRoutes(v1, auth.NewHandler(authSvc, cfg))
-	teachers.RegisterRoutes(v1, teachers.NewHandler(teachersSvc), requireAuth)
+	teachers.RegisterRoutes(v1, teachers.NewHandler(teachersSvc), requireAuth, resolveScope)
 
 	contactsSvc := contacts.NewService(contacts.NewRepository(db))
-	contacts.RegisterRoutes(v1, contacts.NewHandler(contactsSvc), requireAuth)
+	contacts.RegisterRoutes(v1, contacts.NewHandler(contactsSvc), requireAuth, resolveScope)
 
 	classesSvc := classes.NewService(classes.NewRepository(db), txMgr)
 	classes.RegisterRoutes(v1, classes.NewHandler(classesSvc), requireAuth)
