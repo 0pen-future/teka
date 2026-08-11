@@ -222,6 +222,7 @@ func Enrollment(t *testing.T, db *gorm.DB, teacherID, studentID, classID uuid.UU
 	e := &enrollments.Enrollment{
 		ID:        id.New(),
 		TeacherID: teacherID,
+		CenterID:  centerOf(t, db, teacherID),
 		StudentID: studentID,
 		ClassID:   classID,
 		StartedOn: startedOn,
@@ -254,6 +255,7 @@ func Student(t *testing.T, db *gorm.DB, teacherID, contactID uuid.UUID, opts ...
 	s := &students.Student{
 		ID:        id.New(),
 		TeacherID: teacherID,
+		CenterID:  centerOf(t, db, teacherID),
 		ContactID: contactID,
 		FullName:  "Fixture Student",
 	}
@@ -296,6 +298,7 @@ func Class(t *testing.T, db *gorm.DB, teacherID uuid.UUID, opts ...ClassOption) 
 	c := &classes.Class{
 		ID:               id.New(),
 		TeacherID:        teacherID,
+		CenterID:         centerOf(t, db, teacherID),
 		Name:             "Fixture Class",
 		StartDate:        time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC),
 		DefaultUnitPrice: 100_000,
@@ -317,6 +320,7 @@ func Schedule(t *testing.T, db *gorm.DB, class *classes.Class, weekday int16, st
 	s := &classes.Schedule{
 		ID:            id.New(),
 		TeacherID:     class.TeacherID,
+		CenterID:      class.CenterID,
 		ClassID:       class.ID,
 		Weekday:       weekday,
 		StartTime:     classes.TimeOfDay(startTime),
@@ -368,6 +372,7 @@ func Session(t *testing.T, db *gorm.DB, teacherID, classID uuid.UUID, date time.
 	s := &sessions.Session{
 		ID:          id.New(),
 		TeacherID:   teacherID,
+		CenterID:    centerOf(t, db, teacherID),
 		ClassID:     classID,
 		SessionDate: date,
 		Status:      sessions.StatusPlanned,
@@ -415,6 +420,7 @@ func AttendanceRecord(t *testing.T, db *gorm.DB, teacherID, sessionID, studentID
 	r := &attendance.Record{
 		ID:           id.New(),
 		TeacherID:    teacherID,
+		CenterID:     centerOf(t, db, teacherID),
 		SessionID:    sessionID,
 		StudentID:    studentID,
 		EnrollmentID: enrollmentID,
