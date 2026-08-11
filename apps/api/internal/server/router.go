@@ -117,7 +117,7 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	enrollments.RegisterRoutes(v1, enrollments.NewHandler(enrollmentsSvc), requireAuth)
 
 	studentsSvc := students.NewService(students.NewRepository(db), enrollmentsSvc, txMgr)
-	students.RegisterRoutes(v1, students.NewHandler(studentsSvc), requireAuth)
+	students.RegisterRoutes(v1, students.NewHandler(studentsSvc), requireAuth, resolveScope)
 
 	// sessions consumes classes, teachers, and enrollments through consumer
 	// interfaces (ClassSource, TeacherSource, EnrollmentSource) rather than

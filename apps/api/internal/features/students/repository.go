@@ -8,6 +8,7 @@ import (
 	"gorm.io/gorm"
 
 	"teka/apps/api/internal/database"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/pagination"
 )
 
@@ -34,18 +35,18 @@ type Row struct {
 // this interface, tests supply a fake.
 type Repository interface {
 	Create(ctx context.Context, s *Student) error
-	GetByID(ctx context.Context, teacherID, studentID uuid.UUID) (*Row, error)
-	List(ctx context.Context, teacherID uuid.UUID, filter ListFilter, p pagination.Params) ([]Row, int64, error)
+	GetByID(ctx context.Context, sc authctx.Scope, studentID uuid.UUID) (*Row, error)
+	List(ctx context.Context, sc authctx.Scope, filter ListFilter, p pagination.Params) ([]Row, int64, error)
 	Update(ctx context.Context, s *Student) error
-	// ContactExists reports whether the contact is live under this teacher —
+	// ContactExists reports whether the contact is live under this scope —
 	// the clean-422 check in front of the composite-FK safety net.
-	ContactExists(ctx context.Context, teacherID, contactID uuid.UUID) (bool, error)
+	ContactExists(ctx context.Context, sc authctx.Scope, contactID uuid.UUID) (bool, error)
 	// AnonymizeAndDelete scrubs PII and hides the row in one scoped UPDATE:
 	// full_name becomes the placeholder, display_note goes NULL, and both
 	// anonymized_at and deleted_at are stamped. The row itself survives so
 	// financial foreign keys keep holding. Runs on the context transaction so
 	// the caller can close enrollments atomically alongside it.
-	AnonymizeAndDelete(ctx context.Context, teacherID, studentID uuid.UUID, placeholder string) error
+	AnonymizeAndDelete(ctx context.Context, sc authctx.Scope, studentID uuid.UUID, placeholder string) error
 }
 
 type gormRepository struct {
@@ -57,37 +58,38 @@ func NewRepository(db *gorm.DB) Repository {
 	return &gormRepository{db: db}
 }
 
-// scoped returns a query bound to one tenant. Every read is scoped to one
-// teacher and skips soft-deleted rows (via gorm.DeletedAt on model queries —
-// raw SQL and Table() queries must add deleted_at IS NULL by hand). The
-// teacher_id column is qualified because reads here join contacts, which also
-// carries one. Composite FKs stop cross-teacher writes; only this filter stops
-// cross-teacher reads.
-func (r *gormRepository) scoped(ctx context.Context, teacherID uuid.UUID) *gorm.DB {
-	return database.FromContext(ctx, r.db).Where("students.teacher_id = ?", teacherID)
+// scoped returns a query bound to one center. An owner sees every student in
+// their center; a member sees only the rows they created themselves. Composite
+// FKs stop cross-center writes; only this filter stops cross-tenant reads.
+func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+	q := database.FromContext(ctx, r.db).Where("students.center_id = ?", sc.CenterID)
+	if !sc.IsOwner {
+		q = q.Where("students.teacher_id = ?", sc.TeacherID)
+	}
+	return q
 }
 
 // withContact joins the owning contact and selects its name and phone
 // alongside the student columns.
 func withContact(q *gorm.DB) *gorm.DB {
 	return q.
-		Joins("JOIN contacts ON contacts.id = students.contact_id AND contacts.teacher_id = students.teacher_id").
+		Joins("JOIN contacts ON contacts.id = students.contact_id AND contacts.center_id = students.center_id").
 		Select("students.*, contacts.full_name AS contact_name, contacts.phone AS contact_phone")
 }
 
 func (r *gormRepository) Create(ctx context.Context, s *Student) error {
 	err := database.FromContext(ctx, r.db).Create(s).Error
 	if errors.Is(err, gorm.ErrForeignKeyViolated) {
-		// The composite FK (contact_id, teacher_id) refused the insert — the
-		// contact is not this teacher's. Reached only when the pre-check raced.
+		// The composite FK (contact_id, center_id) refused the insert — the
+		// contact is not this center's. Reached only when the pre-check raced.
 		return ErrContactNotOwned
 	}
 	return err
 }
 
-func (r *gormRepository) GetByID(ctx context.Context, teacherID, studentID uuid.UUID) (*Row, error) {
+func (r *gormRepository) GetByID(ctx context.Context, sc authctx.Scope, studentID uuid.UUID) (*Row, error) {
 	var row Row
-	err := withContact(r.scoped(ctx, teacherID).Model(&Student{})).
+	err := withContact(r.scoped(ctx, sc).Model(&Student{})).
 		Where("students.id = ?", studentID).
 		Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -99,8 +101,8 @@ func (r *gormRepository) GetByID(ctx context.Context, teacherID, studentID uuid.
 	return &row, nil
 }
 
-func (r *gormRepository) List(ctx context.Context, teacherID uuid.UUID, filter ListFilter, p pagination.Params) ([]Row, int64, error) {
-	q := r.scoped(ctx, teacherID).Model(&Student{})
+func (r *gormRepository) List(ctx context.Context, sc authctx.Scope, filter ListFilter, p pagination.Params) ([]Row, int64, error) {
+	q := r.scoped(ctx, sc).Model(&Student{})
 	if filter.Query != "" {
 		q = q.Where("students.full_name ILIKE ?", "%"+filter.Query+"%")
 	}
@@ -140,19 +142,22 @@ func (r *gormRepository) Update(ctx context.Context, s *Student) error {
 	return err
 }
 
-func (r *gormRepository) ContactExists(ctx context.Context, teacherID, contactID uuid.UUID) (bool, error) {
+func (r *gormRepository) ContactExists(ctx context.Context, sc authctx.Scope, contactID uuid.UUID) (bool, error) {
 	var n int64
-	err := database.FromContext(ctx, r.db).
+	q := database.FromContext(ctx, r.db).
 		Table("contacts").
-		Where("id = ? AND teacher_id = ? AND deleted_at IS NULL", contactID, teacherID).
-		Count(&n).Error
+		Where("id = ? AND center_id = ? AND deleted_at IS NULL", contactID, sc.CenterID)
+	if !sc.IsOwner {
+		q = q.Where("teacher_id = ?", sc.TeacherID)
+	}
+	err := q.Count(&n).Error
 	return n > 0, err
 }
 
-func (r *gormRepository) AnonymizeAndDelete(ctx context.Context, teacherID, studentID uuid.UUID, placeholder string) error {
-	res := database.FromContext(ctx, r.db).
+func (r *gormRepository) AnonymizeAndDelete(ctx context.Context, sc authctx.Scope, studentID uuid.UUID, placeholder string) error {
+	res := r.scoped(ctx, sc).
 		Model(&Student{}).
-		Where("id = ? AND teacher_id = ?", studentID, teacherID).
+		Where("students.id = ?", studentID).
 		Updates(map[string]any{
 			"full_name":     placeholder,
 			"display_note":  nil,

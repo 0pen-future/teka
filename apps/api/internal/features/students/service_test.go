@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/shared/pagination"
 )
@@ -21,13 +22,15 @@ type fakeStudent struct {
 
 type fakeContact struct {
 	teacherID uuid.UUID
+	centerID  uuid.UUID
 	name      string
 	phone     string
 }
 
 // fakeRepository is an in-memory Repository enforcing the same invariants the
-// SQL layer does: tenant-scoped reads, soft-delete filtering, and the
-// composite-FK refusal of foreign contacts.
+// SQL layer does: center-scoped reads (owner sees the whole center, a member
+// only their own rows), soft-delete filtering, and the composite-FK refusal
+// of foreign contacts.
 type fakeRepository struct {
 	rows     map[uuid.UUID]*fakeStudent
 	contacts map[uuid.UUID]fakeContact
@@ -38,8 +41,14 @@ func newFakeRepository() *fakeRepository {
 }
 
 func (f *fakeRepository) addContact(teacherID uuid.UUID) uuid.UUID {
+	return f.addContactIn(teacherID, teacherID)
+}
+
+// addContactIn registers a fixture contact under an explicit center, letting
+// tests build an owner/member scope pair that shares one center.
+func (f *fakeRepository) addContactIn(teacherID, centerID uuid.UUID) uuid.UUID {
 	contactID := id.New()
-	f.contacts[contactID] = fakeContact{teacherID: teacherID, name: "Chị Hoa", phone: "+84912345678"}
+	f.contacts[contactID] = fakeContact{teacherID: teacherID, centerID: centerID, name: "Chị Hoa", phone: "+84912345678"}
 	return contactID
 }
 
@@ -48,27 +57,36 @@ func (f *fakeRepository) row(s *fakeStudent) Row {
 	return Row{Student: s.Student, ContactName: c.name, ContactPhone: c.phone}
 }
 
+// visible mirrors the real scoped() predicate: always the center, plus the
+// teacher when the caller is not an owner.
+func visible(s *fakeStudent, sc authctx.Scope) bool {
+	if s.deleted || s.CenterID != sc.CenterID {
+		return false
+	}
+	return sc.IsOwner || s.TeacherID == sc.TeacherID
+}
+
 func (f *fakeRepository) Create(_ context.Context, s *Student) error {
-	if c, ok := f.contacts[s.ContactID]; !ok || c.teacherID != s.TeacherID {
+	if c, ok := f.contacts[s.ContactID]; !ok || c.centerID != s.CenterID {
 		return ErrContactNotOwned
 	}
 	f.rows[s.ID] = &fakeStudent{Student: *s}
 	return nil
 }
 
-func (f *fakeRepository) GetByID(_ context.Context, teacherID, studentID uuid.UUID) (*Row, error) {
+func (f *fakeRepository) GetByID(_ context.Context, sc authctx.Scope, studentID uuid.UUID) (*Row, error) {
 	s, ok := f.rows[studentID]
-	if !ok || s.deleted || s.TeacherID != teacherID {
+	if !ok || !visible(s, sc) {
 		return nil, ErrNotFound
 	}
 	row := f.row(s)
 	return &row, nil
 }
 
-func (f *fakeRepository) List(_ context.Context, teacherID uuid.UUID, filter ListFilter, _ pagination.Params) ([]Row, int64, error) {
+func (f *fakeRepository) List(_ context.Context, sc authctx.Scope, filter ListFilter, _ pagination.Params) ([]Row, int64, error) {
 	var out []Row
 	for _, s := range f.rows {
-		if s.deleted || s.TeacherID != teacherID {
+		if !visible(s, sc) {
 			continue
 		}
 		if filter.ContactID != uuid.Nil && s.ContactID != filter.ContactID {
@@ -81,21 +99,24 @@ func (f *fakeRepository) List(_ context.Context, teacherID uuid.UUID, filter Lis
 }
 
 func (f *fakeRepository) Update(_ context.Context, s *Student) error {
-	if c, ok := f.contacts[s.ContactID]; !ok || c.teacherID != s.TeacherID {
+	if c, ok := f.contacts[s.ContactID]; !ok || c.centerID != s.CenterID {
 		return ErrContactNotOwned
 	}
 	f.rows[s.ID] = &fakeStudent{Student: *s}
 	return nil
 }
 
-func (f *fakeRepository) ContactExists(_ context.Context, teacherID, contactID uuid.UUID) (bool, error) {
+func (f *fakeRepository) ContactExists(_ context.Context, sc authctx.Scope, contactID uuid.UUID) (bool, error) {
 	c, ok := f.contacts[contactID]
-	return ok && c.teacherID == teacherID, nil
+	if !ok || c.centerID != sc.CenterID {
+		return false, nil
+	}
+	return sc.IsOwner || c.teacherID == sc.TeacherID, nil
 }
 
-func (f *fakeRepository) AnonymizeAndDelete(_ context.Context, teacherID, studentID uuid.UUID, placeholder string) error {
+func (f *fakeRepository) AnonymizeAndDelete(_ context.Context, sc authctx.Scope, studentID uuid.UUID, placeholder string) error {
 	s, ok := f.rows[studentID]
-	if !ok || s.deleted || s.TeacherID != teacherID {
+	if !ok || !visible(s, sc) {
 		return ErrNotFound
 	}
 	now := time.Now()
@@ -113,7 +134,7 @@ type fakeEnder struct {
 	err   error
 }
 
-func (f *fakeEnder) EndOpenEnrollments(_ context.Context, _, studentID uuid.UUID, _ time.Time) error {
+func (f *fakeEnder) EndOpenEnrollments(_ context.Context, _ authctx.Scope, studentID uuid.UUID, _ time.Time) error {
 	if f.err != nil {
 		return f.err
 	}
@@ -133,12 +154,22 @@ func newTestService() (*Service, *fakeRepository, *fakeEnder) {
 	return NewService(repo, ender, noopTx{}), repo, ender
 }
 
+// ownerScope returns a scope for a teacher who owns their own center.
+func ownerScope() authctx.Scope {
+	return authctx.Scope{TeacherID: id.New(), CenterID: id.New(), IsOwner: true}
+}
+
+// memberScope returns a scope for a non-owning member of some center.
+func memberScope() authctx.Scope {
+	return authctx.Scope{TeacherID: id.New(), CenterID: id.New(), IsOwner: false}
+}
+
 func TestCreateRejectsForeignContact(t *testing.T) {
 	svc, repo, _ := newTestService()
-	teacherID := id.New()
+	sc := memberScope()
 	foreignContact := repo.addContact(id.New())
 
-	_, err := svc.Create(context.Background(), teacherID, CreateRequest{
+	_, err := svc.Create(context.Background(), sc, CreateRequest{
 		FullName: "Bé An", ContactID: foreignContact,
 	})
 	if !errors.Is(err, ErrContactNotOwned) {
@@ -153,12 +184,12 @@ func TestCreateRejectsForeignContact(t *testing.T) {
 	}
 }
 
-func TestCreateReturnsContactDetails(t *testing.T) {
+func TestCreateReturnsContactDetailsAndStampsScope(t *testing.T) {
 	svc, repo, _ := newTestService()
-	teacherID := id.New()
-	contactID := repo.addContact(teacherID)
+	sc := memberScope()
+	contactID := repo.addContactIn(sc.TeacherID, sc.CenterID)
 
-	row, err := svc.Create(context.Background(), teacherID, CreateRequest{
+	row, err := svc.Create(context.Background(), sc, CreateRequest{
 		FullName: "Bé An", ContactID: contactID, DisplayNote: "An lớp 9A",
 	})
 	if err != nil {
@@ -170,19 +201,25 @@ func TestCreateReturnsContactDetails(t *testing.T) {
 	if row.DisplayNote == nil || *row.DisplayNote != "An lớp 9A" {
 		t.Fatalf("display note must persist, got %v", row.DisplayNote)
 	}
+	if row.TeacherID != sc.TeacherID {
+		t.Fatalf("teacher id must come from the caller's scope, got %s", row.TeacherID)
+	}
+	if row.CenterID != sc.CenterID {
+		t.Fatalf("center id must come from the caller's scope, got %s", row.CenterID)
+	}
 }
 
 func TestUpdateRechecksContactOnlyWhenChanged(t *testing.T) {
 	svc, repo, _ := newTestService()
-	teacherID := id.New()
-	contactID := repo.addContact(teacherID)
-	row, err := svc.Create(context.Background(), teacherID, CreateRequest{FullName: "Bé An", ContactID: contactID})
+	sc := memberScope()
+	contactID := repo.addContactIn(sc.TeacherID, sc.CenterID)
+	row, err := svc.Create(context.Background(), sc, CreateRequest{FullName: "Bé An", ContactID: contactID})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
 	// Same contact: fine.
-	if _, err := svc.Update(context.Background(), teacherID, row.ID, UpdateRequest{
+	if _, err := svc.Update(context.Background(), sc, row.ID, UpdateRequest{
 		FullName: "Bé An (sửa)", ContactID: contactID,
 	}); err != nil {
 		t.Fatalf("update: %v", err)
@@ -190,7 +227,7 @@ func TestUpdateRechecksContactOnlyWhenChanged(t *testing.T) {
 
 	// Switching to a foreign contact: 422.
 	foreignContact := repo.addContact(id.New())
-	_, err = svc.Update(context.Background(), teacherID, row.ID, UpdateRequest{
+	_, err = svc.Update(context.Background(), sc, row.ID, UpdateRequest{
 		FullName: "Bé An", ContactID: foreignContact,
 	})
 	var appErr *apperror.AppError
@@ -201,16 +238,16 @@ func TestUpdateRechecksContactOnlyWhenChanged(t *testing.T) {
 
 func TestDeleteScrubsAndEndsEnrollments(t *testing.T) {
 	svc, repo, ender := newTestService()
-	teacherID := id.New()
-	contactID := repo.addContact(teacherID)
-	row, err := svc.Create(context.Background(), teacherID, CreateRequest{
+	sc := memberScope()
+	contactID := repo.addContactIn(sc.TeacherID, sc.CenterID)
+	row, err := svc.Create(context.Background(), sc, CreateRequest{
 		FullName: "Bé An", ContactID: contactID, DisplayNote: "An lớp 9A",
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
-	if err := svc.Delete(context.Background(), teacherID, row.ID); err != nil {
+	if err := svc.Delete(context.Background(), sc, row.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 	stored := repo.rows[row.ID]
@@ -233,16 +270,16 @@ func TestDeleteScrubsAndEndsEnrollments(t *testing.T) {
 
 func TestDeleteAbortsWhenEnrollmentClosureFails(t *testing.T) {
 	svc, repo, ender := newTestService()
-	teacherID := id.New()
-	contactID := repo.addContact(teacherID)
-	row, err := svc.Create(context.Background(), teacherID, CreateRequest{FullName: "Bé An", ContactID: contactID})
+	sc := memberScope()
+	contactID := repo.addContactIn(sc.TeacherID, sc.CenterID)
+	row, err := svc.Create(context.Background(), sc, CreateRequest{FullName: "Bé An", ContactID: contactID})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	boom := errors.New("enrollments unavailable")
 	ender.err = boom
 
-	if err := svc.Delete(context.Background(), teacherID, row.ID); !errors.Is(err, boom) {
+	if err := svc.Delete(context.Background(), sc, row.ID); !errors.Is(err, boom) {
 		t.Fatalf("want the ender error, got %v", err)
 	}
 	if repo.rows[row.ID].FullName != "Bé An" {
@@ -252,19 +289,59 @@ func TestDeleteAbortsWhenEnrollmentClosureFails(t *testing.T) {
 
 func TestCrossTenantReadsAsNotFound(t *testing.T) {
 	svc, repo, _ := newTestService()
-	owner := id.New()
-	contactID := repo.addContact(owner)
+	owner := memberScope()
+	contactID := repo.addContactIn(owner.TeacherID, owner.CenterID)
 	row, err := svc.Create(context.Background(), owner, CreateRequest{FullName: "Bé An", ContactID: contactID})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
-	stranger := id.New()
+	stranger := memberScope()
 	var appErr *apperror.AppError
 	if _, err := svc.Get(context.Background(), stranger, row.ID); !errors.As(err, &appErr) || appErr.Code != apperror.CodeNotFound {
 		t.Fatalf("cross-tenant get must be NOT_FOUND, got %v", err)
 	}
 	if err := svc.Delete(context.Background(), stranger, row.ID); !errors.As(err, &appErr) || appErr.Code != apperror.CodeNotFound {
 		t.Fatalf("cross-tenant delete must be NOT_FOUND, got %v", err)
+	}
+}
+
+// An owner reads and manages a member's student — center oversight, not
+// per-teacher isolation.
+func TestOwnerScopeSeesAndDeletesMembersStudent(t *testing.T) {
+	svc, repo, _ := newTestService()
+	center := id.New()
+	member := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
+	owner := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: true}
+	contactID := repo.addContactIn(member.TeacherID, center)
+
+	row, err := svc.Create(context.Background(), member, CreateRequest{FullName: "Bé An", ContactID: contactID})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := svc.Get(context.Background(), owner, row.ID); err != nil {
+		t.Fatalf("owner must read a member's student, got %v", err)
+	}
+	if err := svc.Delete(context.Background(), owner, row.ID); err != nil {
+		t.Fatalf("owner must delete a member's student, got %v", err)
+	}
+}
+
+// A peer in the same center but not the creator, and not the owner, must not
+// see the student — center scope alone is not enough, isolation still holds
+// between non-owning members.
+func TestPeerScopeCannotSeeAnotherMembersStudent(t *testing.T) {
+	svc, repo, _ := newTestService()
+	center := id.New()
+	author := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
+	peer := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
+	contactID := repo.addContactIn(author.TeacherID, center)
+
+	row, err := svc.Create(context.Background(), author, CreateRequest{FullName: "Bé An", ContactID: contactID})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := svc.Get(context.Background(), peer, row.ID); apperror.From(err).Code != apperror.CodeNotFound {
+		t.Fatalf("peer must not read another member's student, got %v", err)
 	}
 }

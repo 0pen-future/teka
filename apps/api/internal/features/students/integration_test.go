@@ -19,20 +19,28 @@ import (
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/students"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/shared/pagination"
 	"teka/apps/api/internal/testutil"
 )
 
 // sqlEnder closes open enrollments with the same UPDATE the enrollments
-// feature will issue (phase 4). Running through database.FromContext proves
-// the closure joins the delete transaction.
+// feature issues. Running through database.FromContext proves the closure
+// joins the delete transaction.
 type sqlEnder struct{ db *gorm.DB }
 
-func (e sqlEnder) EndOpenEnrollments(ctx context.Context, teacherID, studentID uuid.UUID, on time.Time) error {
-	return database.FromContext(ctx, e.db).Exec(
-		"UPDATE enrollments SET ended_on = ? WHERE teacher_id = ? AND student_id = ? AND ended_on IS NULL AND deleted_at IS NULL",
-		on, teacherID, studentID,
+func (e sqlEnder) EndOpenEnrollments(ctx context.Context, sc authctx.Scope, studentID uuid.UUID, on time.Time) error {
+	db := database.FromContext(ctx, e.db)
+	if sc.IsOwner {
+		return db.Exec(
+			"UPDATE enrollments SET ended_on = ? WHERE center_id = ? AND student_id = ? AND ended_on IS NULL AND deleted_at IS NULL",
+			on, sc.CenterID, studentID,
+		).Error
+	}
+	return db.Exec(
+		"UPDATE enrollments SET ended_on = ? WHERE center_id = ? AND teacher_id = ? AND student_id = ? AND ended_on IS NULL AND deleted_at IS NULL",
+		on, sc.CenterID, sc.TeacherID, studentID,
 	).Error
 }
 
@@ -52,12 +60,14 @@ func listParams(t *testing.T) pagination.Params {
 	return pagination.Parse(c, "full_name", map[string]string{"full_name": "students.full_name"})
 }
 
-func insertEnrollment(t *testing.T, db *gorm.DB, teacherID, studentID, classID uuid.UUID) uuid.UUID {
+// insertEnrollment writes an enrollments row directly, stamped with the
+// student's own center so the composite FKs hold.
+func insertEnrollment(t *testing.T, db *gorm.DB, centerID, teacherID, studentID, classID uuid.UUID) uuid.UUID {
 	t.Helper()
 	eid := id.New()
 	require.NoError(t, db.Exec(
-		"INSERT INTO enrollments (id, teacher_id, student_id, class_id, unit_price, started_on) VALUES (?, ?, ?, ?, 150000, '2026-01-05')",
-		eid, teacherID, studentID, classID,
+		"INSERT INTO enrollments (id, teacher_id, center_id, student_id, class_id, unit_price, started_on) VALUES (?, ?, ?, ?, ?, 150000, '2026-01-05')",
+		eid, teacherID, centerID, studentID, classID,
 	).Error)
 	return eid
 }
@@ -67,42 +77,43 @@ func TestDeleteAnonymisesButPreservesFinancialRecords(t *testing.T) {
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	contact := testutil.Contact(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID)
 
-	created, err := svc.Create(ctx, teacher.ID, students.CreateRequest{
+	created, err := svc.Create(ctx, sc, students.CreateRequest{
 		FullName: "Bé An", ContactID: contact.ID, DisplayNote: "An lớp 9A",
 	})
 	require.NoError(t, err)
 
-	enrollmentID := insertEnrollment(t, db, teacher.ID, created.ID, class.ID)
+	enrollmentID := insertEnrollment(t, db, sc.CenterID, teacher.ID, created.ID, class.ID)
 
 	// A held session with a billable attendance record — the history that must
 	// survive the delete because it backs money already reported to a parent.
 	sessionID := id.New()
 	require.NoError(t, db.Exec(
-		"INSERT INTO class_sessions (id, teacher_id, class_id, session_date, status) VALUES (?, ?, ?, '2026-01-06', 'held')",
-		sessionID, teacher.ID, class.ID,
+		"INSERT INTO class_sessions (id, teacher_id, center_id, class_id, session_date, status) VALUES (?, ?, ?, ?, '2026-01-06', 'held')",
+		sessionID, teacher.ID, sc.CenterID, class.ID,
 	).Error)
 	attendanceID := id.New()
 	require.NoError(t, db.Exec(
-		"INSERT INTO attendance_records (id, teacher_id, session_id, student_id, enrollment_id, status) VALUES (?, ?, ?, ?, ?, 'present')",
-		attendanceID, teacher.ID, sessionID, created.ID, enrollmentID,
+		"INSERT INTO attendance_records (id, teacher_id, center_id, session_id, student_id, enrollment_id, status) VALUES (?, ?, ?, ?, ?, ?, 'present')",
+		attendanceID, teacher.ID, sc.CenterID, sessionID, created.ID, enrollmentID,
 	).Error)
 
 	// A closed-period invoice holding the name snapshot.
 	periodID := id.New()
 	require.NoError(t, db.Exec(
-		"INSERT INTO billing_periods (id, teacher_id, year, month, period_start, period_end, status, closed_at) VALUES (?, ?, 2026, 1, '2026-01-01', '2026-01-31', 'closed', now())",
-		periodID, teacher.ID,
+		"INSERT INTO billing_periods (id, teacher_id, center_id, year, month, period_start, period_end, status, closed_at) VALUES (?, ?, ?, 2026, 1, '2026-01-01', '2026-01-31', 'closed', now())",
+		periodID, teacher.ID, sc.CenterID,
 	).Error)
 	invoiceID := id.New()
 	require.NoError(t, db.Exec(
-		"INSERT INTO invoices (id, teacher_id, period_id, student_id, contact_id, student_name, contact_name, current_charge, total_due) VALUES (?, ?, ?, ?, ?, ?, ?, 150000, 150000)",
-		invoiceID, teacher.ID, periodID, created.ID, contact.ID, "Bé An", contact.FullName,
+		"INSERT INTO invoices (id, teacher_id, center_id, period_id, student_id, contact_id, student_name, contact_name, current_charge, total_due) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 150000, 150000)",
+		invoiceID, teacher.ID, sc.CenterID, periodID, created.ID, contact.ID, "Bé An", contact.FullName,
 	).Error)
 
-	require.NoError(t, svc.Delete(ctx, teacher.ID, created.ID))
+	require.NoError(t, svc.Delete(ctx, sc, created.ID))
 
 	// The student row survives, scrubbed and stamped.
 	var scrubbed struct {
@@ -153,9 +164,10 @@ func TestCreateRejectsForeignContact(t *testing.T) {
 	ctx := context.Background()
 	teacherA, _ := testutil.Teacher(t, db)
 	teacherB, _ := testutil.Teacher(t, db)
+	scopeA := testutil.ScopeFor(t, db, teacherA.ID)
 	foreignContact := testutil.Contact(t, db, teacherB.ID)
 
-	_, err := svc.Create(ctx, teacherA.ID, students.CreateRequest{
+	_, err := svc.Create(ctx, scopeA, students.CreateRequest{
 		FullName: "Bé An", ContactID: foreignContact.ID,
 	})
 	appErr := apperror.From(err)
@@ -163,24 +175,107 @@ func TestCreateRejectsForeignContact(t *testing.T) {
 	require.NotEmpty(t, appErr.Fields["contact_id"])
 }
 
-func TestCrossTenantReadsAreNotFound(t *testing.T) {
+func TestCrossCenterReadsAreNotFound(t *testing.T) {
 	t.Parallel()
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacherA, _ := testutil.Teacher(t, db)
 	teacherB, _ := testutil.Teacher(t, db)
+	scopeA := testutil.ScopeFor(t, db, teacherA.ID)
+	scopeB := testutil.ScopeFor(t, db, teacherB.ID)
 	contact := testutil.Contact(t, db, teacherA.ID)
 
-	created, err := svc.Create(ctx, teacherA.ID, students.CreateRequest{FullName: "Bé An", ContactID: contact.ID})
+	created, err := svc.Create(ctx, scopeA, students.CreateRequest{FullName: "Bé An", ContactID: contact.ID})
 	require.NoError(t, err)
 
-	_, err = svc.Get(ctx, teacherB.ID, created.ID)
+	// 404, never 403: a 403 would confirm the id exists in another center.
+	_, err = svc.Get(ctx, scopeB, created.ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+	_, err = svc.Update(ctx, scopeB, created.ID, students.UpdateRequest{FullName: "X", ContactID: contact.ID})
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+	err = svc.Delete(ctx, scopeB, created.ID)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
 
-	rows, total, err := svc.List(ctx, teacherB.ID, students.ListFilter{}, listParams(t))
+	rows, total, err := svc.List(ctx, scopeB, students.ListFilter{}, listParams(t))
 	require.NoError(t, err)
 	require.Zero(t, total)
 	require.Empty(t, rows)
+}
+
+// An owner sees, updates, and deletes a student created by a teacher who
+// joined their center — center-wide oversight, not per-teacher isolation. An
+// owner-created student is stamped as the owner's own, never on behalf of a
+// member.
+func TestOwnerHasFullOversightOfMembersStudents(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, db)
+	member, _ := testutil.Teacher(t, db)
+	ownerCenter := testutil.ScopeFor(t, db, owner.ID).CenterID
+
+	testutil.JoinCenter(t, db, member.ID, ownerCenter)
+	ownerScope := testutil.ScopeFor(t, db, owner.ID)
+	memberScope := testutil.ScopeFor(t, db, member.ID)
+	require.Equal(t, ownerScope.CenterID, memberScope.CenterID, "member must have joined the owner's center")
+
+	memberContact := testutil.Contact(t, db, member.ID)
+	row, err := svc.Create(ctx, memberScope, students.CreateRequest{FullName: "Bé An", ContactID: memberContact.ID})
+	require.NoError(t, err)
+
+	got, err := svc.Get(ctx, ownerScope, row.ID)
+	require.NoError(t, err, "owner must read a member's student")
+	require.Equal(t, row.ID, got.ID)
+
+	rows, total, err := svc.List(ctx, ownerScope, students.ListFilter{}, listParams(t))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Equal(t, row.ID, rows[0].ID, "owner's list must include the member's student")
+
+	updated, err := svc.Update(ctx, ownerScope, row.ID, students.UpdateRequest{FullName: "Bé An (updated)", ContactID: memberContact.ID})
+	require.NoError(t, err, "owner must update a member's student")
+	require.Equal(t, "Bé An (updated)", updated.FullName)
+
+	require.NoError(t, svc.Delete(ctx, ownerScope, row.ID), "owner must delete a member's student")
+	_, err = svc.Get(ctx, ownerScope, row.ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+
+	// An owner creates rows as themselves, never on behalf of a member.
+	ownerContact := testutil.Contact(t, db, owner.ID)
+	ownerRow, err := svc.Create(ctx, ownerScope, students.CreateRequest{FullName: "Bé Bình", ContactID: ownerContact.ID})
+	require.NoError(t, err)
+	require.Equal(t, owner.ID, ownerRow.TeacherID, "owner-created student must be stamped as the owner's own")
+}
+
+// Two non-owning teachers in the same center are still isolated from each
+// other: center scope grants the owner oversight, not peer-to-peer access.
+func TestPeersInSameCenterCannotSeeEachOthersStudents(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, db)
+	memberB, _ := testutil.Teacher(t, db)
+	memberC, _ := testutil.Teacher(t, db)
+	ownerCenter := testutil.ScopeFor(t, db, owner.ID).CenterID
+
+	testutil.JoinCenter(t, db, memberB.ID, ownerCenter)
+	testutil.JoinCenter(t, db, memberC.ID, ownerCenter)
+	scopeB := testutil.ScopeFor(t, db, memberB.ID)
+	scopeC := testutil.ScopeFor(t, db, memberC.ID)
+
+	contactB := testutil.Contact(t, db, memberB.ID)
+	row, err := svc.Create(ctx, scopeB, students.CreateRequest{FullName: "Bé An", ContactID: contactB.ID})
+	require.NoError(t, err)
+
+	_, err = svc.Get(ctx, scopeC, row.ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code, "a peer must not read another member's student")
+
+	rows, total, err := svc.List(ctx, scopeC, students.ListFilter{}, listParams(t))
+	require.NoError(t, err)
+	require.EqualValues(t, 0, total)
+	for _, r := range rows {
+		require.NotEqual(t, row.ID, r.ID, "a peer's list must not include another member's student")
+	}
 }
 
 func TestListByClassFiltersThroughOpenEnrollmentsBounded(t *testing.T) {
@@ -188,18 +283,19 @@ func TestListByClassFiltersThroughOpenEnrollmentsBounded(t *testing.T) {
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	contact := testutil.Contact(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID)
 
-	enrolled, err := svc.Create(ctx, teacher.ID, students.CreateRequest{FullName: "Bé An", ContactID: contact.ID})
+	enrolled, err := svc.Create(ctx, sc, students.CreateRequest{FullName: "Bé An", ContactID: contact.ID})
 	require.NoError(t, err)
-	departed, err := svc.Create(ctx, teacher.ID, students.CreateRequest{FullName: "Bé Bình", ContactID: contact.ID})
+	departed, err := svc.Create(ctx, sc, students.CreateRequest{FullName: "Bé Bình", ContactID: contact.ID})
 	require.NoError(t, err)
-	_, err = svc.Create(ctx, teacher.ID, students.CreateRequest{FullName: "Bé Cường", ContactID: contact.ID})
+	_, err = svc.Create(ctx, sc, students.CreateRequest{FullName: "Bé Cường", ContactID: contact.ID})
 	require.NoError(t, err)
 
-	insertEnrollment(t, db, teacher.ID, enrolled.ID, class.ID)
-	endedID := insertEnrollment(t, db, teacher.ID, departed.ID, class.ID)
+	insertEnrollment(t, db, sc.CenterID, teacher.ID, enrolled.ID, class.ID)
+	endedID := insertEnrollment(t, db, sc.CenterID, teacher.ID, departed.ID, class.ID)
 	require.NoError(t, db.Exec("UPDATE enrollments SET ended_on = '2026-02-01' WHERE id = ?", endedID).Error)
 
 	counter := &sqlCounter{Interface: gormlogger.Discard}
@@ -207,7 +303,7 @@ func TestListByClassFiltersThroughOpenEnrollmentsBounded(t *testing.T) {
 		students.NewRepository(db.Session(&gorm.Session{Logger: counter})),
 		sqlEnder{db: db}, database.NewTxManager(db))
 
-	rows, total, err := counted.List(ctx, teacher.ID, students.ListFilter{ClassID: class.ID}, listParams(t))
+	rows, total, err := counted.List(ctx, sc, students.ListFilter{ClassID: class.ID}, listParams(t))
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total, "only the open enrollment counts")
 	require.Len(t, rows, 1)
@@ -222,21 +318,22 @@ func TestListUnenrolledExcludesOpenEnrollments(t *testing.T) {
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	contact := testutil.Contact(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID)
 
-	enrolled, err := svc.Create(ctx, teacher.ID, students.CreateRequest{FullName: "Bé An", ContactID: contact.ID})
+	enrolled, err := svc.Create(ctx, sc, students.CreateRequest{FullName: "Bé An", ContactID: contact.ID})
 	require.NoError(t, err)
-	departed, err := svc.Create(ctx, teacher.ID, students.CreateRequest{FullName: "Bé Bình", ContactID: contact.ID})
+	departed, err := svc.Create(ctx, sc, students.CreateRequest{FullName: "Bé Bình", ContactID: contact.ID})
 	require.NoError(t, err)
-	never, err := svc.Create(ctx, teacher.ID, students.CreateRequest{FullName: "Bé Cường", ContactID: contact.ID})
+	never, err := svc.Create(ctx, sc, students.CreateRequest{FullName: "Bé Cường", ContactID: contact.ID})
 	require.NoError(t, err)
 
-	insertEnrollment(t, db, teacher.ID, enrolled.ID, class.ID)
-	endedID := insertEnrollment(t, db, teacher.ID, departed.ID, class.ID)
+	insertEnrollment(t, db, sc.CenterID, teacher.ID, enrolled.ID, class.ID)
+	endedID := insertEnrollment(t, db, sc.CenterID, teacher.ID, departed.ID, class.ID)
 	require.NoError(t, db.Exec("UPDATE enrollments SET ended_on = '2026-02-01' WHERE id = ?", endedID).Error)
 
-	rows, total, err := svc.List(ctx, teacher.ID, students.ListFilter{Unenrolled: true}, listParams(t))
+	rows, total, err := svc.List(ctx, sc, students.ListFilter{Unenrolled: true}, listParams(t))
 	require.NoError(t, err)
 	require.EqualValues(t, 2, total, "an ended enrollment leaves the student unenrolled again")
 	ids := []uuid.UUID{rows[0].ID, rows[1].ID}

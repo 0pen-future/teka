@@ -202,7 +202,7 @@ func TestDeletingStudentEndsOpenEnrollments(t *testing.T) {
 	// The exact wiring router.go uses: the students service consumes the
 	// enrollments service as its EnrollmentEnder.
 	studentsSvc := students.NewService(students.NewRepository(db), enrollSvc, database.NewTxManager(db))
-	require.NoError(t, studentsSvc.Delete(ctx, teacher.ID, student.ID))
+	require.NoError(t, studentsSvc.Delete(ctx, testutil.ScopeFor(t, db, teacher.ID), student.ID))
 
 	var endedOn *time.Time
 	require.NoError(t, db.Raw("SELECT ended_on FROM enrollments WHERE id = ?", row.ID).Scan(&endedOn).Error)

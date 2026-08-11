@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/shared/pagination"
 )
@@ -150,9 +151,9 @@ func (f *fakeRepository) ActiveOn(_ context.Context, teacherID, classID uuid.UUI
 	return out, nil
 }
 
-func (f *fakeRepository) EndOpenEnrollments(_ context.Context, teacherID, studentID uuid.UUID, on time.Time) error {
+func (f *fakeRepository) EndOpenEnrollments(_ context.Context, sc authctx.Scope, studentID uuid.UUID, on time.Time) error {
 	for _, e := range f.rows {
-		if !e.deleted && e.TeacherID == teacherID && e.StudentID == studentID && e.EndedOn == nil {
+		if !e.deleted && e.TeacherID == sc.TeacherID && e.StudentID == studentID && e.EndedOn == nil {
 			ended := on
 			e.EndedOn = &ended
 		}
@@ -356,7 +357,8 @@ func TestEndOpenEnrollmentsClosesOnlyThatStudent(t *testing.T) {
 	stayerRow := enroll(t, svc, teacherID, stayer, classID, "2026-01-05")
 
 	on := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	if err := svc.EndOpenEnrollments(context.Background(), teacherID, leaver, on); err != nil {
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}
+	if err := svc.EndOpenEnrollments(context.Background(), sc, leaver, on); err != nil {
 		t.Fatalf("end open enrollments: %v", err)
 	}
 	if row, _ := svc.Get(context.Background(), teacherID, leaverRow.ID); row.EndedOn == nil {

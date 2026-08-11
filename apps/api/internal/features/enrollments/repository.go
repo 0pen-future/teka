@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"teka/apps/api/internal/database"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/pagination"
 )
 
@@ -49,7 +50,7 @@ type Repository interface {
 	// EndOpenEnrollments closes every open enrollment the student holds,
 	// effective on the given date — the students feature calls this while
 	// anonymising a deleted student.
-	EndOpenEnrollments(ctx context.Context, teacherID, studentID uuid.UUID, on time.Time) error
+	EndOpenEnrollments(ctx context.Context, sc authctx.Scope, studentID uuid.UUID, on time.Time) error
 	// ClassDefaultPrice reads the class's default_unit_price — the value
 	// copied onto new enrollments — returning ErrClassNotFound for a missing
 	// or foreign class.
@@ -185,8 +186,12 @@ func (r *gormRepository) ActiveOn(ctx context.Context, teacherID, classID uuid.U
 	return rows, nil
 }
 
-func (r *gormRepository) EndOpenEnrollments(ctx context.Context, teacherID, studentID uuid.UUID, on time.Time) error {
-	return r.scoped(ctx, teacherID).
+func (r *gormRepository) EndOpenEnrollments(ctx context.Context, sc authctx.Scope, studentID uuid.UUID, on time.Time) error {
+	q := database.FromContext(ctx, r.db).Where("enrollments.center_id = ?", sc.CenterID)
+	if !sc.IsOwner {
+		q = q.Where("enrollments.teacher_id = ?", sc.TeacherID)
+	}
+	return q.
 		Model(&Enrollment{}).
 		Where("enrollments.student_id = ? AND enrollments.ended_on IS NULL", studentID).
 		Update("ended_on", on).Error

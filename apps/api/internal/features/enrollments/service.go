@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/shared/pagination"
 )
@@ -126,8 +127,8 @@ func (s *Service) ActiveOn(ctx context.Context, teacherID, classID uuid.UUID, on
 
 // EndOpenEnrollments satisfies students.EnrollmentEnder: the students feature
 // calls it inside the delete transaction while anonymising a student.
-func (s *Service) EndOpenEnrollments(ctx context.Context, teacherID, studentID uuid.UUID, on time.Time) error {
-	return s.repo.EndOpenEnrollments(ctx, teacherID, studentID, on)
+func (s *Service) EndOpenEnrollments(ctx context.Context, sc authctx.Scope, studentID uuid.UUID, on time.Time) error {
+	return s.repo.EndOpenEnrollments(ctx, sc, studentID, on)
 }
 
 // today returns the current date at UTC midnight, matching how request dates
