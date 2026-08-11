@@ -1,76 +1,86 @@
 ---
 phase: 3
-title: "Delegation Grants UI"
+title: "Backend Re-key Sweep"
 status: pending
 priority: P1
-effort: "1d"
+effort: "3d"
 dependencies: [2]
 ---
 
-# Phase 3: Delegation Grants UI
+# Phase 3: Backend Re-key Sweep
+
+<!-- Updated: Validation Session 1 - owner không tạo hộ; create luôn gán chính caller -->
+
 
 ## Overview
 
-Web UI (React, `apps/web`) cho tính năng delegation grants của Phase 2: giáo viên cấp quyền giám sát cho manager theo SĐT, xem hai chiều grant (đã cấp / được nhận), và thu hồi. Chỉ phủ 3 endpoint grants — dashboard giám sát của manager (Phase 4) vẫn là UI plan riêng.
+Sweep cơ học nhưng lớn nhất plan: chuyển toàn bộ feature packages từ scope `teacher_id` sang `authctx.Scope` (center + role). Teacher giữ nguyên hành vi (thấy/ghi đúng dữ liệu của mình); owner đọc + ghi toàn center. Kết thúc sweep: `authctx.TeacherID` bị xoá — `ScopeFrom` là accessor duy nhất.
 
 ## Requirements
 
-- Functional: form cấp grant theo SĐT; danh sách `given` (manager tôi đã cấp) và `received` (GV tôi được quản); thu hồi từ cả hai danh sách với confirm.
-- Non-functional: theo đúng feature-folder pattern hiện có của `apps/web`; UI copy phản ánh đúng ràng buộc bảo mật của API (201 không trả tên manager — không được hiển thị/hứa hẹn tên ở bước tạo).
+- Functional: owner CRUD được mọi resource trong center; teacher không đổi một li hành vi (mọi integration test cũ pass với fixture bổ sung center).
+- Non-functional: không endpoint nào nhận `center_id` hay `teacher_id` từ request — create luôn gán chính caller (quyết định validate 260811: owner không tạo hộ).
 
 ## Architecture
 
-- Feature folder mới `apps/web/src/features/oversight/` theo đúng bố cục các feature hiện có (đối chiếu `apps/web/src/features/profile/`): `api/`, `hooks/`, `components/`, `pages/`, `schemas/`, `__tests__/`, `routes.tsx`, `index.ts`.
-- **Data layer**: TanStack Query. `useGrants` (GET `/oversight/grants`), `useCreateGrant`, `useRevokeGrant` — mutation xong invalidate query key `["oversight","grants"]`. Axios client dùng `@/lib/api` như các feature khác.
-- **Routing**: `routes.tsx` export `oversightRoutes` (lazy như các feature khác), mount trong `apps/web/src/app/router.tsx` dưới `DashboardLayout` (path `/oversight`). Thêm nav item vào `apps/web/src/layouts/dashboard-layout.tsx` theo pattern nav hiện có.
-- **Contract phản chiếu Phase 2** (schemas zod validate response):
-  - `POST /oversight/grants` `{manager_phone}` → `201 {id, manager_phone, created_at}` — response chỉ echo phone caller nhập, **không có tên manager** (chống oracle dò danh bạ). UI hiển thị toast thành công với phone, kèm giải thích "tên manager sẽ hiện trong danh sách sau khi cấp".
-  - `GET /oversight/grants` → `{given: [{id, manager: {id, full_name, phone}, created_at}], received: [{id, managed: {...}, created_at}]}`.
-  - `DELETE /oversight/grants/:id` → `204`; `404` cho mọi case không-thuộc-mình/đã-thu-hồi → UI xử lý như "đã thu hồi", refetch, không hiện lỗi đỏ.
-- **Phone validation**: schema zod feature-local mirror rule `vnphone` backend — theo pattern `phoneField` tại `apps/web/src/features/roster/schemas/roster-schemas.ts:12` (nhận `0xxxxxxxxx` và E.164). Backend là chốt chặn cuối; client chỉ chặn sớm cho UX.
-- **Error mapping** (dùng `@/lib/forms/use-api-form-errors.ts` như các form hiện có): 404 → "Không tìm thấy tài khoản giáo viên với số này" (message chung — API cố ý không phân biệt không-tồn-tại/không-active); 409 → "Đã cấp quyền cho số này rồi"; 422 → "Không thể tự cấp quyền cho chính mình".
+### Quy tắc scope thống nhất (áp vào từng repo)
 
-## UI Design
+```go
+// scoped: mọi read bound vào tenant center; role teacher siết thêm teacher_id.
+// Copy helper này per-repo như pattern hiện có (teachers/repository.go:48-53);
+// raw/Table() query phải tự thêm deleted_at IS NULL bằng tay.
+func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+    q := database.FromContext(ctx, r.db).Where("center_id = ?", sc.CenterID)
+    if !sc.IsOwner {
+        q = q.Where("teacher_id = ?", sc.TeacherID)
+    }
+    return q
+}
+```
 
-Trang `Quyền giám sát` (`/oversight`):
+- **Write**: update/delete đi qua cùng `scoped()` (WHERE mang scope — không fetch-then-check): owner sửa/xoá được row của mọi teacher trong center, teacher chỉ row của mình. Create: row luôn nhận `CenterID = sc.CenterID` và `TeacherID = sc.TeacherID` — **mọi role, kể cả owner** (quyết định validate 260811: owner không tạo hộ; owner cũng là teacher bình thường với resource của mình). Các bảng con (enrollments, sessions, attendance, billing...) suy ra `teacher_id` từ parent row. Không DTO nào nhận `teacher_id`/`center_id`; composite FK `(teacher_id, center_id)` vẫn là chốt toàn vẹn DB.
+- **Models**: thêm field `CenterID`; giữ `TeacherID`.
+- **Services**: chữ ký nhận `authctx.Scope` thay `teacherID uuid.UUID` (đổi kiểu tham số, logic giữ nguyên trừ điểm create ở trên).
+- **Handlers**: `authctx.ScopeFrom(c)` thay `authctx.TeacherID(c)`.
 
-1. **Section "Manager của tôi"** (`given`): danh sách card/row — tên + phone manager, ngày cấp, nút Thu hồi (confirm dialog radix `AlertDialog` theo pattern `anonymize-student-dialog.tsx`). Empty state: giải thích ngắn cơ chế cấp quyền + CTA mở form cấp.
-2. **Nút "Cấp quyền giám sát"**: dialog form 1 field SĐT (react-hook-form + zod resolver, pattern `contact-dialog.tsx`), submit → toast sonner.
-3. **Section "Giáo viên tôi quản lý"** (`received`): tên + phone GV được quản, ngày nhận, nút Thu hồi (managed hoặc manager đều thu hồi được — API cho phép cả hai phía).
-4. Loading skeleton + error state theo component shared hiện có.
+### Phạm vi package (sweep theo thứ tự dependency)
+
+`teachers` (profile), `contacts`, `students`, `classes`, `enrollments`, `sessions`, `attendance`, `billing`, `payments`, `collections`, `statements`, `notifications`, `zalo`.
+
+Ngoại lệ: `zalo` — `zalo_accounts` key theo teacher (tài khoản cá nhân, Phase 1 không re-key); các đường notification runs của zalo scope theo center như thường. `auth` — không tenant scope, đã đụng ở Phase 2.
+
+### Điểm không-cơ-học phải soi tay khi sweep
+
+- Query raw/Table()/JOIN nhiều bảng (collections, statements, sessions pending, views): thêm `center_id` vào **từng bảng tham gia** + `deleted_at IS NULL` viết tay — house rule `teachers/repository.go:48-53`.
+- `sessions` generate path (`service.go:75-131`): generate session mới phải mang `center_id` của class; index pending 000003/000006 đã rà ở Phase 1.
+- Public/unauthenticated đường `statements.public_handler.go`: scope theo token riêng của nó — kiểm không lộ cross-center.
+- Uniqueness nghiệp vụ per-teacher (billing period, contact phone) giữ per-teacher — Phase 1 đã chốt; service message giữ nguyên.
 
 ## Related Code Files
 
-- Create: `apps/web/src/features/oversight/{index.ts,routes.tsx}`
-- Create: `apps/web/src/features/oversight/api/grants-api.ts`
-- Create: `apps/web/src/features/oversight/hooks/use-grants.ts`
-- Create: `apps/web/src/features/oversight/schemas/grant-schemas.ts`
-- Create: `apps/web/src/features/oversight/pages/grants-page.tsx`
-- Create: `apps/web/src/features/oversight/components/{create-grant-dialog.tsx,revoke-grant-dialog.tsx,grant-list.tsx}`
-- Create: `apps/web/src/features/oversight/__tests__/` (page + dialogs + schemas, kèm test handlers theo pattern `features/profile/__tests__/zalo-handlers.ts`)
-- Modify: `apps/web/src/app/router.tsx` (mount `oversightRoutes`)
-- Modify: `apps/web/src/layouts/dashboard-layout.tsx` (nav item)
+- Modify: `apps/api/internal/shared/authctx/authctx.go` — xoá `TeacherID()` (cuối sweep)
+- Modify: mọi `apps/api/internal/features/<pkg>/{model,repository,service,handler}.go` của 13 packages trên + integration/service tests từng package
+- Modify: `apps/api/internal/server/router.go` nếu chữ ký constructor đổi
+- Modify: swagger regenerate
 
 ## Implementation Steps
 
-1. Schemas zod (request + response shapes, `phoneField` mirror `vnphone`).
-2. `grants-api.ts` + hooks TanStack Query (list/create/revoke + invalidation).
-3. `grants-page.tsx` với hai section + empty/loading/error states.
-4. `create-grant-dialog.tsx` (form + error mapping 404/409/422) và `revoke-grant-dialog.tsx` (confirm, 404 → coi như đã thu hồi).
-5. Routes + nav; kiểm tra lazy chunk hoạt động.
-6. Tests: render hai danh sách từ fixture; create happy path + từng nhánh lỗi; revoke happy + 404-idempotent; validation phone client.
-7. `npm run lint && npm run typecheck && npm run test` trong `apps/web`.
+1. Sweep từng package theo thứ tự dependency (teachers → contacts → students → classes → ... → collections/statements); mỗi package: model + repo `scoped()` + service signature + handler + test fixture (thêm center), chạy test package đó xanh rồi mới sang package kế.
+2. Thêm test mới per package: (i) owner đọc/sửa/xoá resource của teacher khác cùng center — và create của owner luôn gán chính owner; (ii) teacher A **không** thấy resource teacher B cùng center; (iii) cross-center → 403/404/rỗng.
+3. Xoá `authctx.TeacherID`; `grep -rn "authctx.TeacherID" apps/api` = 0.
+4. Full test suite + swagger regenerate.
 
 ## Success Criteria
 
-- [ ] GV cấp grant bằng SĐT; danh sách `given` cập nhật không cần reload
-- [ ] Thu hồi từ cả hai section; revoke lần 2 (404) không hiện lỗi — trạng thái hội tụ về "đã thu hồi"
-- [ ] Không chỗ nào trong flow tạo grant hiển thị tên manager trước khi grant tồn tại
-- [ ] Ba nhánh lỗi 404/409/422 hiện message tiếng Việt đúng ngữ nghĩa
-- [ ] Lint + typecheck + vitest pass; route lazy-load đúng pattern
+- [ ] Toàn bộ test suite cũ pass (fixture thêm center — hành vi teacher không đổi)
+- [ ] Ba case mới (owner-cross-teacher, teacher-isolation-trong-center, cross-center-deny) pass ở từng package
+- [ ] `authctx.TeacherID` không còn tồn tại; không query nào thiếu vế `center_id`
+- [ ] Không endpoint nào nhận `center_id`/`teacher_id` từ request; create của mọi role gán chính caller
+- [ ] Swagger cập nhật
 
 ## Risk Assessment
 
-- **UI lộ thông tin hơn API cho phép**: rủi ro chính là copy/hiển thị "hứa" tên manager ở bước tạo — chốt bằng success criterion và test assert nội dung toast.
-- **Lệch contract khi Phase 2 đổi DTO**: schemas zod validate response lúc runtime → fail sớm và rõ thay vì render sai; sửa schema là một chỗ.
-- **Drift validation phone client/server**: client chỉ là UX, backend `vnphone` là chốt chặn; test giữ một fixture số hợp lệ/không hợp lệ đồng bộ với backend test.
+- **Bỏ sót query ngoài `scoped()`** (raw SQL, Table(), preload): grep `Table(\|Raw(\|Joins(` per package làm checklist; test cross-center per package là chốt chặn hành vi.
+- **Nới bất biến ghi cho owner mở lối confused-deputy** (owner center A ghi vào center B qua id): mọi write WHERE mang `center_id` — test (iii) phủ cả write.
+- **Sweep dở dang khó review**: đi từng package, mỗi package một commit xanh test — không commit nửa package.
+- **Đụng độ với Phase 4** trên `sessions`: sweep xong package sessions trước khi Phase 4 thêm `ListRangeReadOnly` (dependency 4←3 đã phản ánh).
