@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"teka/apps/api/internal/features/zalo"
+	"teka/apps/api/internal/shared/authctx"
 )
 
 // ErrRunBusy reports that the manager cannot start another run for this
@@ -53,11 +54,13 @@ type RunItem struct {
 }
 
 // RunStore is the slice of Repository a run needs to record progress. Tests
-// supply a fake; *gormRepository satisfies it.
+// supply a fake; *gormRepository satisfies it. Every method is the strict,
+// never-owner-bypassed run-occupancy write: a background run only ever
+// touches the rows of the teacher whose Zalo session it is sending through.
 type RunStore interface {
-	MarkOutcome(ctx context.Context, teacherID, id uuid.UUID, status string, providerMsgID, errorMessage *string) error
-	FailQueuedInRun(ctx context.Context, teacherID, runID uuid.UUID, reason string) error
-	UpdateRunStatus(ctx context.Context, teacherID, runID uuid.UUID, status string) error
+	MarkOutcome(ctx context.Context, sc authctx.Scope, id uuid.UUID, status string, providerMsgID, errorMessage *string) error
+	FailQueuedInRun(ctx context.Context, sc authctx.Scope, runID uuid.UUID, reason string) error
+	UpdateRunStatus(ctx context.Context, sc authctx.Scope, runID uuid.UUID, status string) error
 }
 
 // DMSender is the consumer-defined slice of the Zalo service a run sends
@@ -68,9 +71,16 @@ type DMSender interface {
 
 type runJob struct {
 	teacherID uuid.UUID
+	centerID  uuid.UUID
 	runID     uuid.UUID
 	cancel    context.CancelFunc
 	done      chan struct{}
+}
+
+// scope is job's owning teacher/center, the strict (never owner-bypassed)
+// scope every RunStore write is made under.
+func (j *runJob) scope() authctx.Scope {
+	return authctx.Scope{TeacherID: j.teacherID, CenterID: j.centerID}
 }
 
 // RunManager drives paced background sending passes. One run per teacher is
@@ -149,13 +159,18 @@ type RunReservation struct {
 	settled bool
 }
 
-// Reserve claims teacherID's run slot without starting anything. ErrRunBusy
-// means a run is already sending for this teacher, or the process is shutting
-// down — either way the caller must not create a run.
-func (m *RunManager) Reserve(teacherID uuid.UUID) (*RunReservation, error) {
+// Reserve claims teacherID's run slot without starting anything. The slot
+// itself stays keyed purely by teacherID (one run per teacher, center-
+// independent — matching notification_runs' own partial unique index), but
+// the reservation also carries centerID so every RunStore write the run
+// eventually makes can be scoped to it. ErrRunBusy means a run is already
+// sending for this teacher, or the process is shutting down — either way the
+// caller must not create a run.
+func (m *RunManager) Reserve(teacherID, centerID uuid.UUID) (*RunReservation, error) {
 	ctx, cancel := context.WithCancel(m.baseCtx)
 	job := &runJob{
 		teacherID: teacherID,
+		centerID:  centerID,
 		cancel:    cancel,
 		done:      make(chan struct{}),
 	}
@@ -199,8 +214,8 @@ func (r *RunReservation) Release() {
 
 // Start reserves and immediately starts in one call, for callers whose items
 // already exist. ErrRunBusy as in Reserve.
-func (m *RunManager) Start(teacherID, runID uuid.UUID, items []RunItem) error {
-	res, err := m.Reserve(teacherID)
+func (m *RunManager) Start(teacherID, centerID, runID uuid.UUID, items []RunItem) error {
+	res, err := m.Reserve(teacherID, centerID)
 	if err != nil {
 		return err
 	}
@@ -296,7 +311,7 @@ func (m *RunManager) gap() time.Duration {
 func (m *RunManager) markOutcome(ctx context.Context, job *runJob, id uuid.UUID, status string, providerMsgID, errorMessage *string) {
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runWriteTimeout)
 	defer cancel()
-	if err := m.store.MarkOutcome(writeCtx, job.teacherID, id, status, providerMsgID, errorMessage); err != nil {
+	if err := m.store.MarkOutcome(writeCtx, job.scope(), id, status, providerMsgID, errorMessage); err != nil {
 		m.log.Error("notification run: recording outcome failed",
 			"teacher_id", job.teacherID, "notification_id", id, "error", err)
 	}
@@ -308,11 +323,11 @@ func (m *RunManager) markOutcome(ctx context.Context, job *runJob, id uuid.UUID,
 func (m *RunManager) expireRun(ctx context.Context, job *runJob) {
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runWriteTimeout)
 	defer cancel()
-	if err := m.store.FailQueuedInRun(writeCtx, job.teacherID, job.runID, runExpiredFailureMessage); err != nil {
+	if err := m.store.FailQueuedInRun(writeCtx, job.scope(), job.runID, runExpiredFailureMessage); err != nil {
 		m.log.Error("notification run: sweeping rows after session expiry failed",
 			"teacher_id", job.teacherID, "run_id", job.runID, "error", err)
 	}
-	if err := m.store.UpdateRunStatus(writeCtx, job.teacherID, job.runID, RunStatusExpired); err != nil {
+	if err := m.store.UpdateRunStatus(writeCtx, job.scope(), job.runID, RunStatusExpired); err != nil {
 		m.log.Error("notification run: marking run expired failed",
 			"teacher_id", job.teacherID, "run_id", job.runID, "error", err)
 	}
@@ -321,7 +336,7 @@ func (m *RunManager) expireRun(ctx context.Context, job *runJob) {
 func (m *RunManager) finishRun(ctx context.Context, job *runJob, status string) {
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runWriteTimeout)
 	defer cancel()
-	if err := m.store.UpdateRunStatus(writeCtx, job.teacherID, job.runID, status); err != nil {
+	if err := m.store.UpdateRunStatus(writeCtx, job.scope(), job.runID, status); err != nil {
 		m.log.Error("notification run: marking run finished failed",
 			"teacher_id", job.teacherID, "run_id", job.runID, "error", err)
 	}

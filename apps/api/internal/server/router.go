@@ -162,7 +162,7 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 
 	statements.RegisterRoutes(v1, statements.NewHandler(statementsSvc), requireAuth, resolveScope)
 
-	notifications.RegisterRoutes(v1, notifications.NewHandler(notificationsSvc), requireAuth)
+	notifications.RegisterRoutes(v1, notifications.NewHandler(notificationsSvc), requireAuth, resolveScope)
 
 	zalo.RegisterRoutes(v1, zalo.NewHandler(zaloSvc), requireAuth)
 }

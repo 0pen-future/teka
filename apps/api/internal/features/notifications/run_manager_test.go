@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"teka/apps/api/internal/features/zalo"
+	"teka/apps/api/internal/shared/authctx"
 )
 
 type outcomeCall struct {
@@ -30,21 +31,21 @@ type fakeRunStore struct {
 	statuses []string // statuses passed to UpdateRunStatus
 }
 
-func (s *fakeRunStore) MarkOutcome(_ context.Context, _, id uuid.UUID, status string, providerMsgID, errorMessage *string) error {
+func (s *fakeRunStore) MarkOutcome(_ context.Context, _ authctx.Scope, id uuid.UUID, status string, providerMsgID, errorMessage *string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.outcomes = append(s.outcomes, outcomeCall{id, status, providerMsgID, errorMessage})
 	return nil
 }
 
-func (s *fakeRunStore) FailQueuedInRun(_ context.Context, _, _ uuid.UUID, reason string) error {
+func (s *fakeRunStore) FailQueuedInRun(_ context.Context, _ authctx.Scope, _ uuid.UUID, reason string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.failed = append(s.failed, reason)
 	return nil
 }
 
-func (s *fakeRunStore) UpdateRunStatus(_ context.Context, _, _ uuid.UUID, status string) error {
+func (s *fakeRunStore) UpdateRunStatus(_ context.Context, _ authctx.Scope, _ uuid.UUID, status string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.statuses = append(s.statuses, status)
@@ -139,7 +140,7 @@ func TestRunManagerSendsEveryItemWithAPacedGapBetween(t *testing.T) {
 	m.sleep = sleeper.hook
 
 	items := testItems(3)
-	require.NoError(t, m.Start(uuid.New(), uuid.New(), items))
+	require.NoError(t, m.Start(uuid.New(), uuid.New(), uuid.New(), items))
 	waitForTerminalStatus(t, store)
 
 	outcomes, failed, statuses := store.snapshot()
@@ -169,7 +170,7 @@ func TestRunManagerRecordsAMissingMessageIDAsSentAllTheSame(t *testing.T) {
 	m := newTestRunManager(t, store, dm, time.Second, time.Second)
 	m.sleep = (&recordedSleep{}).hook
 
-	require.NoError(t, m.Start(uuid.New(), uuid.New(), testItems(1)))
+	require.NoError(t, m.Start(uuid.New(), uuid.New(), uuid.New(), testItems(1)))
 	waitForTerminalStatus(t, store)
 
 	outcomes, _, _ := store.snapshot()
@@ -191,7 +192,7 @@ func TestRunManagerFailsOneRowAndKeepsGoing(t *testing.T) {
 	m.sleep = (&recordedSleep{}).hook
 
 	items := testItems(3)
-	require.NoError(t, m.Start(uuid.New(), uuid.New(), items))
+	require.NoError(t, m.Start(uuid.New(), uuid.New(), uuid.New(), items))
 	waitForTerminalStatus(t, store)
 
 	outcomes, failed, statuses := store.snapshot()
@@ -219,7 +220,7 @@ func TestRunManagerExpiresTheRunWhenTheSessionDies(t *testing.T) {
 		m := newTestRunManager(t, store, dm, time.Second, time.Second)
 		m.sleep = (&recordedSleep{}).hook
 
-		require.NoError(t, m.Start(uuid.New(), uuid.New(), testItems(3)))
+		require.NoError(t, m.Start(uuid.New(), uuid.New(), uuid.New(), testItems(3)))
 		waitForTerminalStatus(t, store)
 
 		outcomes, failed, statuses := store.snapshot()
@@ -243,9 +244,9 @@ func TestRunManagerRefusesASecondConcurrentRunPerTeacher(t *testing.T) {
 	m.sleep = (&recordedSleep{}).hook
 
 	teacherID := uuid.New()
-	require.NoError(t, m.Start(teacherID, uuid.New(), testItems(1)))
-	require.ErrorIs(t, m.Start(teacherID, uuid.New(), testItems(1)), ErrRunBusy)
-	require.NoError(t, m.Start(uuid.New(), uuid.New(), testItems(1)),
+	require.NoError(t, m.Start(teacherID, uuid.New(), uuid.New(), testItems(1)))
+	require.ErrorIs(t, m.Start(teacherID, uuid.New(), uuid.New(), testItems(1)), ErrRunBusy)
+	require.NoError(t, m.Start(uuid.New(), uuid.New(), uuid.New(), testItems(1)),
 		"another teacher's run is not this teacher's business")
 	close(release)
 	waitForTerminalStatus(t, store)
@@ -258,7 +259,7 @@ func TestCloseStopsARunMidGapAndLeavesTheRestQueued(t *testing.T) {
 	// Real sleep hook with an hour-long gap: Close must cut it short.
 	m := NewRunManager(store, dm, slog.New(slog.DiscardHandler), time.Hour, time.Hour)
 
-	require.NoError(t, m.Start(uuid.New(), uuid.New(), testItems(3)))
+	require.NoError(t, m.Start(uuid.New(), uuid.New(), uuid.New(), testItems(3)))
 	require.Eventually(t, func() bool { return len(dm.sent()) == 1 }, 5*time.Second, 5*time.Millisecond)
 	m.Close()
 
@@ -269,7 +270,7 @@ func TestCloseStopsARunMidGapAndLeavesTheRestQueued(t *testing.T) {
 	require.Empty(t, statuses, "the run stays running in the DB; boot reconcile marks it interrupted")
 	require.Len(t, dm.sent(), 1)
 
-	require.ErrorIs(t, m.Start(uuid.New(), uuid.New(), testItems(1)), ErrRunBusy,
+	require.ErrorIs(t, m.Start(uuid.New(), uuid.New(), uuid.New(), testItems(1)), ErrRunBusy,
 		"a closed manager starts nothing")
 }
 
@@ -295,17 +296,17 @@ func TestReserveHoldsTheTeacherSlotUntilReleasedOrStarted(t *testing.T) {
 	m.sleep = sleeper.hook
 	teacherID := uuid.New()
 
-	res, err := m.Reserve(teacherID)
+	res, err := m.Reserve(teacherID, uuid.New())
 	require.NoError(t, err)
 
-	_, err = m.Reserve(teacherID)
+	_, err = m.Reserve(teacherID, uuid.New())
 	require.ErrorIs(t, err, ErrRunBusy, "the slot is taken from Reserve, not from Start")
 	require.Empty(t, dm.sent(), "a reservation alone sends nothing")
 
 	res.Release()
 	res.Release() // releasing twice must be harmless
 
-	res2, err := m.Reserve(teacherID)
+	res2, err := m.Reserve(teacherID, uuid.New())
 	require.NoError(t, err, "a released slot is free again")
 	res2.Start(uuid.New(), testItems(1))
 	res2.Release() // a no-op after Start: it must not kill the running send
@@ -324,7 +325,7 @@ func TestRunManagerTripsAfterConsecutiveSendFailures(t *testing.T) {
 	m := newTestRunManager(t, store, dm, time.Second, time.Second)
 	m.sleep = (&recordedSleep{}).hook
 
-	require.NoError(t, m.Start(uuid.New(), uuid.New(), testItems(5)))
+	require.NoError(t, m.Start(uuid.New(), uuid.New(), uuid.New(), testItems(5)))
 	waitForTerminalStatus(t, store)
 
 	outcomes, failed, statuses := store.snapshot()
@@ -353,7 +354,7 @@ func TestRunManagerBreakerResetsOnASuccessfulSend(t *testing.T) {
 	m.sleep = (&recordedSleep{}).hook
 
 	items := testItems(6)
-	require.NoError(t, m.Start(uuid.New(), uuid.New(), items))
+	require.NoError(t, m.Start(uuid.New(), uuid.New(), uuid.New(), items))
 	waitForTerminalStatus(t, store)
 
 	outcomes, failed, statuses := store.snapshot()
@@ -367,7 +368,7 @@ func TestCloseDoesNotHangOnAPendingReservation(t *testing.T) {
 	t.Parallel()
 	m := newTestRunManager(t, &fakeRunStore{}, &fakeDM{}, time.Second, time.Second)
 
-	res, err := m.Reserve(uuid.New())
+	res, err := m.Reserve(uuid.New(), uuid.New())
 	require.NoError(t, err)
 
 	closed := make(chan struct{})

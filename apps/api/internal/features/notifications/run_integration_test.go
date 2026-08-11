@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"teka/apps/api/internal/features/notifications"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/testutil"
 )
@@ -21,9 +22,17 @@ import (
 // what is a persistence-layer test.
 type statementFixture struct {
 	teacherID   uuid.UUID
+	centerID    uuid.UUID
 	contactID   uuid.UUID
 	periodID    uuid.UUID
 	statementID uuid.UUID
+}
+
+// scope is the fixture's own teacher/center scope, IsOwner false — the run
+// lifecycle tests exercise ordinary member behavior; oversight is covered by
+// the auth integration tests.
+func (f statementFixture) scope() authctx.Scope {
+	return authctx.Scope{TeacherID: f.teacherID, CenterID: f.centerID}
 }
 
 func seedStatement(t *testing.T, db *gorm.DB) statementFixture {
@@ -32,18 +41,19 @@ func seedStatement(t *testing.T, db *gorm.DB) statementFixture {
 	contact := testutil.Contact(t, db, teacher.ID)
 	f := statementFixture{
 		teacherID:   teacher.ID,
+		centerID:    teacher.CenterID,
 		contactID:   contact.ID,
 		periodID:    id.New(),
 		statementID: id.New(),
 	}
 	require.NoError(t, db.Exec(
-		`INSERT INTO billing_periods (id, teacher_id, year, month, period_start, period_end)
-		 VALUES (?, ?, 2026, 8, '2026-08-01', '2026-08-31')`,
-		f.periodID, f.teacherID).Error)
+		`INSERT INTO billing_periods (id, teacher_id, center_id, year, month, period_start, period_end)
+		 VALUES (?, ?, ?, 2026, 8, '2026-08-01', '2026-08-31')`,
+		f.periodID, f.teacherID, f.centerID).Error)
 	require.NoError(t, db.Exec(
-		`INSERT INTO statements (id, teacher_id, contact_id, period_id, token_hash, expires_at, total_due)
-		 VALUES (?, ?, ?, ?, ?, now() + interval '7 days', 100000)`,
-		f.statementID, f.teacherID, f.contactID, f.periodID, []byte("hash-"+contact.Phone)).Error)
+		`INSERT INTO statements (id, teacher_id, center_id, contact_id, period_id, token_hash, expires_at, total_due)
+		 VALUES (?, ?, ?, ?, ?, ?, now() + interval '7 days', 100000)`,
+		f.statementID, f.teacherID, f.centerID, f.contactID, f.periodID, []byte("hash-"+contact.Phone)).Error)
 	return f
 }
 
@@ -55,18 +65,19 @@ func seedSecondPeriodStatement(t *testing.T, db *gorm.DB, f statementFixture) st
 	contact := testutil.Contact(t, db, f.teacherID)
 	second := statementFixture{
 		teacherID:   f.teacherID,
+		centerID:    f.centerID,
 		contactID:   contact.ID,
 		periodID:    id.New(),
 		statementID: id.New(),
 	}
 	require.NoError(t, db.Exec(
-		`INSERT INTO billing_periods (id, teacher_id, year, month, period_start, period_end)
-		 VALUES (?, ?, 2026, 9, '2026-09-01', '2026-09-30')`,
-		second.periodID, second.teacherID).Error)
+		`INSERT INTO billing_periods (id, teacher_id, center_id, year, month, period_start, period_end)
+		 VALUES (?, ?, ?, 2026, 9, '2026-09-01', '2026-09-30')`,
+		second.periodID, second.teacherID, second.centerID).Error)
 	require.NoError(t, db.Exec(
-		`INSERT INTO statements (id, teacher_id, contact_id, period_id, token_hash, expires_at, total_due)
-		 VALUES (?, ?, ?, ?, ?, now() + interval '7 days', 100000)`,
-		second.statementID, second.teacherID, second.contactID, second.periodID, []byte("hash-"+contact.Phone)).Error)
+		`INSERT INTO statements (id, teacher_id, center_id, contact_id, period_id, token_hash, expires_at, total_due)
+		 VALUES (?, ?, ?, ?, ?, ?, now() + interval '7 days', 100000)`,
+		second.statementID, second.teacherID, second.centerID, second.contactID, second.periodID, []byte("hash-"+contact.Phone)).Error)
 	return second
 }
 
@@ -76,6 +87,7 @@ func seedRun(t *testing.T, repo notifications.Repository, f statementFixture) *n
 	run := &notifications.Run{
 		ID:              id.New(),
 		TeacherID:       f.teacherID,
+		CenterID:        f.centerID,
 		BillingPeriodID: f.periodID,
 		Purpose:         notifications.PurposeStatements,
 		Status:          notifications.RunStatusRunning,
@@ -90,6 +102,7 @@ func seedRunRow(t *testing.T, repo notifications.Repository, f statementFixture,
 	n := &notifications.Notification{
 		ID:          id.New(),
 		TeacherID:   f.teacherID,
+		CenterID:    f.centerID,
 		StatementID: f.statementID,
 		Channel:     notifications.ChannelZaloPersonal,
 		Purpose:     notifications.PurposeStatements,
@@ -108,12 +121,13 @@ func TestRunLifecycleIsDBBacked(t *testing.T) {
 	repo := notifications.NewRepository(db)
 	ctx := context.Background()
 	f := seedStatement(t, db)
+	sc := f.scope()
 
 	// No run yet: nothing active, nothing to snapshot.
-	active, err := repo.HasActiveRun(ctx, f.teacherID)
+	active, err := repo.HasActiveRun(ctx, sc)
 	require.NoError(t, err)
 	require.False(t, active)
-	_, err = repo.LatestRunByPeriod(ctx, f.teacherID, f.periodID)
+	_, err = repo.LatestRunByPeriod(ctx, sc, f.periodID)
 	require.ErrorIs(t, err, notifications.ErrRunNotFound)
 
 	run := seedRun(t, repo, f)
@@ -121,41 +135,41 @@ func TestRunLifecycleIsDBBacked(t *testing.T) {
 	rowFailed := seedRunRow(t, repo, f, run.ID)
 	seedRunRow(t, repo, f, run.ID)
 
-	active, err = repo.HasActiveRun(ctx, f.teacherID)
+	active, err = repo.HasActiveRun(ctx, sc)
 	require.NoError(t, err)
 	require.True(t, active)
 	// Another teacher's run must not read as this teacher's.
 	other := seedStatement(t, db)
-	active, err = repo.HasActiveRun(ctx, other.teacherID)
+	active, err = repo.HasActiveRun(ctx, other.scope())
 	require.NoError(t, err)
 	require.False(t, active)
 
-	require.NoError(t, repo.MarkOutcome(ctx, f.teacherID, rowSent, notifications.StatusSent, strPtr("msg-1"), nil))
-	require.NoError(t, repo.MarkOutcome(ctx, f.teacherID, rowFailed, notifications.StatusFailed, nil, strPtr("friend refused")))
+	require.NoError(t, repo.MarkOutcome(ctx, sc, rowSent, notifications.StatusSent, strPtr("msg-1"), nil))
+	require.NoError(t, repo.MarkOutcome(ctx, sc, rowFailed, notifications.StatusFailed, nil, strPtr("friend refused")))
 
-	counts, err := repo.RunCounts(ctx, f.teacherID, run.ID)
+	counts, err := repo.RunCounts(ctx, sc, run.ID)
 	require.NoError(t, err)
 	require.Equal(t, notifications.RunCounts{Total: 3, Sent: 1, Failed: 1}, counts)
 
-	require.NoError(t, repo.UpdateRunStatus(ctx, f.teacherID, run.ID, notifications.RunStatusCompleted))
-	active, err = repo.HasActiveRun(ctx, f.teacherID)
+	require.NoError(t, repo.UpdateRunStatus(ctx, sc, run.ID, notifications.RunStatusCompleted))
+	active, err = repo.HasActiveRun(ctx, sc)
 	require.NoError(t, err)
 	require.False(t, active, "a completed run is no longer active")
 
-	got, err := repo.LatestRunByPeriod(ctx, f.teacherID, f.periodID)
+	got, err := repo.LatestRunByPeriod(ctx, sc, f.periodID)
 	require.NoError(t, err)
 	require.Equal(t, run.ID, got.ID)
 	require.Equal(t, notifications.RunStatusCompleted, got.Status)
 	require.NotNil(t, got.FinishedAt, "a terminal status must stamp finished_at")
 
 	// Reopening the run (manual resume) clears the finish stamp.
-	require.NoError(t, repo.UpdateRunStatus(ctx, f.teacherID, run.ID, notifications.RunStatusRunning))
-	got, err = repo.LatestRunByPeriod(ctx, f.teacherID, f.periodID)
+	require.NoError(t, repo.UpdateRunStatus(ctx, sc, run.ID, notifications.RunStatusRunning))
+	got, err = repo.LatestRunByPeriod(ctx, sc, f.periodID)
 	require.NoError(t, err)
 	require.Nil(t, got.FinishedAt)
 
 	// The other teacher can neither read nor move this run.
-	_, err = repo.LatestRunByPeriod(ctx, other.teacherID, f.periodID)
+	_, err = repo.LatestRunByPeriod(ctx, other.scope(), f.periodID)
 	require.ErrorIs(t, err, notifications.ErrRunNotFound)
 }
 
@@ -170,12 +184,12 @@ func TestMarkOutcomeOnlyMovesQueuedRowsOfTheirOwnTeacher(t *testing.T) {
 
 	// Another teacher marking this row must change nothing.
 	other := seedStatement(t, db)
-	require.NoError(t, repo.MarkOutcome(ctx, other.teacherID, rowID, notifications.StatusSent, strPtr("stolen"), nil))
+	require.NoError(t, repo.MarkOutcome(ctx, other.scope(), rowID, notifications.StatusSent, strPtr("stolen"), nil))
 	var status string
 	require.NoError(t, db.Table("notifications").Select("status").Where("id = ?", rowID).Take(&status).Error)
 	require.Equal(t, notifications.StatusQueued, status)
 
-	require.NoError(t, repo.MarkOutcome(ctx, f.teacherID, rowID, notifications.StatusSent, strPtr("msg-9"), nil))
+	require.NoError(t, repo.MarkOutcome(ctx, f.scope(), rowID, notifications.StatusSent, strPtr("msg-9"), nil))
 	var row struct {
 		Status        string
 		ProviderMsgID *string
@@ -191,7 +205,7 @@ func TestMarkOutcomeOnlyMovesQueuedRowsOfTheirOwnTeacher(t *testing.T) {
 	require.NotNil(t, row.SentAt, "a sent outcome must stamp sent_at")
 
 	// A row already sent is final: a late failed outcome must not rewrite it.
-	require.NoError(t, repo.MarkOutcome(ctx, f.teacherID, rowID, notifications.StatusFailed, nil, strPtr("late error")))
+	require.NoError(t, repo.MarkOutcome(ctx, f.scope(), rowID, notifications.StatusFailed, nil, strPtr("late error")))
 	require.NoError(t, db.Table("notifications").Select("status").Where("id = ?", rowID).Take(&status).Error)
 	require.Equal(t, notifications.StatusSent, status)
 }
@@ -205,17 +219,17 @@ func TestFailQueuedInRunSparesFinishedRowsAndOtherRuns(t *testing.T) {
 	run := seedRun(t, repo, f)
 	sentRow := seedRunRow(t, repo, f, run.ID)
 	queuedRow := seedRunRow(t, repo, f, run.ID)
-	require.NoError(t, repo.MarkOutcome(ctx, f.teacherID, sentRow, notifications.StatusSent, nil, nil))
+	require.NoError(t, repo.MarkOutcome(ctx, f.scope(), sentRow, notifications.StatusSent, nil, nil))
 
 	// A second run of the SAME teacher keeps its queued rows — the sweep is
 	// scoped by run, not by teacher. The first run steps aside (only one may
 	// be running per teacher) but its queued rows stay swept-able.
-	require.NoError(t, repo.UpdateRunStatus(ctx, f.teacherID, run.ID, notifications.RunStatusInterrupted))
+	require.NoError(t, repo.UpdateRunStatus(ctx, f.scope(), run.ID, notifications.RunStatusInterrupted))
 	otherPeriod := seedSecondPeriodStatement(t, db, f)
 	otherRun := seedRun(t, repo, otherPeriod)
 	otherRow := seedRunRow(t, repo, otherPeriod, otherRun.ID)
 
-	require.NoError(t, repo.FailQueuedInRun(ctx, f.teacherID, run.ID, "phiên Zalo hết hạn"))
+	require.NoError(t, repo.FailQueuedInRun(ctx, f.scope(), run.ID, "phiên Zalo hết hạn"))
 
 	var got struct {
 		Status       string
@@ -234,7 +248,7 @@ func TestFailQueuedInRunSparesFinishedRowsAndOtherRuns(t *testing.T) {
 
 	// The ledger read must surface the failure reason — it is the only place
 	// a teacher can learn why a row was not delivered.
-	listed, err := repo.ListByPeriod(ctx, f.teacherID, f.periodID, notifications.ListFilter{Status: notifications.StatusFailed})
+	listed, err := repo.ListByPeriod(ctx, f.scope(), f.periodID, notifications.ListFilter{Status: notifications.StatusFailed})
 	require.NoError(t, err)
 	require.Len(t, listed, 1)
 	require.NotNil(t, listed[0].ErrorMessage)
@@ -254,9 +268,9 @@ func TestQueuedRunRowsReturnsOnlyTheRunsQueuedRows(t *testing.T) {
 	run := seedRun(t, repo, f)
 	queuedRow := seedRunRow(t, repo, f, run.ID)
 	sentRow := seedRunRow(t, repo, f, run.ID)
-	require.NoError(t, repo.MarkOutcome(ctx, f.teacherID, sentRow, notifications.StatusSent, nil, nil))
+	require.NoError(t, repo.MarkOutcome(ctx, f.scope(), sentRow, notifications.StatusSent, nil, nil))
 
-	rows, err := repo.QueuedRunRows(ctx, f.teacherID, run.ID)
+	rows, err := repo.QueuedRunRows(ctx, f.scope(), run.ID)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Equal(t, queuedRow, rows[0].NotificationID)
@@ -271,6 +285,7 @@ func TestZaloMappingsReturnsLiveMappedContactsOnly(t *testing.T) {
 	ctx := context.Background()
 
 	_, teacher := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	mapped := testutil.Contact(t, db, teacher.ID)
 	unmapped := testutil.Contact(t, db, teacher.ID)
 	deleted := testutil.Contact(t, db, teacher.ID)
@@ -282,7 +297,7 @@ func TestZaloMappingsReturnsLiveMappedContactsOnly(t *testing.T) {
 	otherContact := testutil.Contact(t, db, otherTeacher.ID)
 	require.NoError(t, db.Exec(`UPDATE contacts SET zalo_user_id = 'uid-1', zalo_name = 'Khác' WHERE id = ?`, otherContact.ID).Error)
 
-	got, err := repo.ZaloMappings(ctx, teacher.ID, []uuid.UUID{mapped.ID, unmapped.ID, deleted.ID, otherContact.ID})
+	got, err := repo.ZaloMappings(ctx, sc, []uuid.UUID{mapped.ID, unmapped.ID, deleted.ID, otherContact.ID})
 	require.NoError(t, err)
 	require.Equal(t, map[uuid.UUID]string{mapped.ID: "uid-1"}, got)
 }
@@ -302,6 +317,7 @@ func TestRunWritesSurfaceTheActiveRunConflict(t *testing.T) {
 	second := &notifications.Run{
 		ID:              id.New(),
 		TeacherID:       f.teacherID,
+		CenterID:        f.centerID,
 		BillingPeriodID: f.periodID,
 		Purpose:         notifications.PurposeStatements,
 		Status:          notifications.RunStatusRunning,
@@ -310,10 +326,10 @@ func TestRunWritesSurfaceTheActiveRunConflict(t *testing.T) {
 
 	// Reopening an interrupted run while another run is live must refuse the
 	// same way — that is resume racing a fresh bulk send across processes.
-	require.NoError(t, repo.UpdateRunStatus(ctx, f.teacherID, first.ID, notifications.RunStatusInterrupted))
+	require.NoError(t, repo.UpdateRunStatus(ctx, f.scope(), first.ID, notifications.RunStatusInterrupted))
 	otherPeriod := seedSecondPeriodStatement(t, db, f)
 	seedRun(t, repo, otherPeriod)
-	require.ErrorIs(t, repo.UpdateRunStatus(ctx, f.teacherID, first.ID, notifications.RunStatusRunning),
+	require.ErrorIs(t, repo.UpdateRunStatus(ctx, f.scope(), first.ID, notifications.RunStatusRunning),
 		notifications.ErrRunActive)
 }
 
@@ -329,13 +345,13 @@ func TestMarkInterruptedReconcilesEveryRunningRun(t *testing.T) {
 
 	finished := seedStatement(t, db)
 	finishedRun := seedRun(t, repo, finished)
-	require.NoError(t, repo.UpdateRunStatus(ctx, finished.teacherID, finishedRun.ID, notifications.RunStatusCompleted))
+	require.NoError(t, repo.UpdateRunStatus(ctx, finished.scope(), finishedRun.ID, notifications.RunStatusCompleted))
 
 	n, err := repo.MarkInterrupted(ctx)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, n)
 
-	got, err := repo.LatestRunByPeriod(ctx, running.teacherID, running.periodID)
+	got, err := repo.LatestRunByPeriod(ctx, running.scope(), running.periodID)
 	require.NoError(t, err)
 	require.Equal(t, notifications.RunStatusInterrupted, got.Status)
 	// Its rows stay queued: interruption is the process dying, not the sends failing.
@@ -343,7 +359,7 @@ func TestMarkInterruptedReconcilesEveryRunningRun(t *testing.T) {
 	require.NoError(t, db.Table("notifications").Select("status").Where("run_id = ?", runningRun.ID).Take(&status).Error)
 	require.Equal(t, notifications.StatusQueued, status)
 
-	got, err = repo.LatestRunByPeriod(ctx, finished.teacherID, finished.periodID)
+	got, err = repo.LatestRunByPeriod(ctx, finished.scope(), finished.periodID)
 	require.NoError(t, err)
 	require.Equal(t, notifications.RunStatusCompleted, got.Status, "a finished run is not the reconciler's business")
 }

@@ -103,13 +103,14 @@ func TestBulkSendPersonalSplitsMappedAndUnmappedContacts(t *testing.T) {
 	d := newDepsWithZalo(t, testutil.StartPostgres(t), fake)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, d.db)
+	sc := testutil.ScopeFor(t, d.db, teacher.ID)
 
 	periodID, contacts := closedPeriodWithContacts(t, d, teacher.ID, 3)
 	mapContact(t, d.db, contacts[0], "uid-first")
 	mapContact(t, d.db, contacts[1], "uid-second")
 	// contacts[2] stays unmapped and must fall back to copy-paste.
 
-	resp, err := d.notifications.BulkSend(ctx, teacher.ID, periodID, notifications.BulkSendRequest{
+	resp, err := d.notifications.BulkSend(ctx, sc, periodID, notifications.BulkSendRequest{
 		Purpose: "statement",
 		Channel: notifications.ChannelZaloPersonal,
 	})
@@ -166,10 +167,11 @@ func TestBulkSendPersonalWithNoMappedContactStartsNoRun(t *testing.T) {
 	d := newDepsWithZalo(t, testutil.StartPostgres(t), fake)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, d.db)
+	sc := testutil.ScopeFor(t, d.db, teacher.ID)
 
 	periodID, _ := closedPeriodWithContacts(t, d, teacher.ID, 2)
 
-	resp, err := d.notifications.BulkSend(ctx, teacher.ID, periodID, notifications.BulkSendRequest{
+	resp, err := d.notifications.BulkSend(ctx, sc, periodID, notifications.BulkSendRequest{
 		Purpose: "statement",
 		Channel: notifications.ChannelZaloPersonal,
 	})
@@ -202,10 +204,11 @@ func TestBulkSendPersonalRejectsAnUnhealthySessionBeforeWritingAnything(t *testi
 			d := newDepsWithZalo(t, testutil.StartPostgres(t), &fakeZaloSender{verifyErr: tc.verifyErr})
 			ctx := context.Background()
 			_, teacher := testutil.Teacher(t, d.db)
+			sc := testutil.ScopeFor(t, d.db, teacher.ID)
 			periodID, contacts := closedPeriodWithContacts(t, d, teacher.ID, 1)
 			mapContact(t, d.db, contacts[0], "uid-any")
 
-			_, err := d.notifications.BulkSend(ctx, teacher.ID, periodID, notifications.BulkSendRequest{
+			_, err := d.notifications.BulkSend(ctx, sc, periodID, notifications.BulkSendRequest{
 				Purpose: "statement",
 				Channel: notifications.ChannelZaloPersonal,
 			})
@@ -222,11 +225,12 @@ func TestBulkSendPersonalOverTheRunSizeCapWritesNothing(t *testing.T) {
 	d := newDepsWithZaloAndRunCap(t, testutil.StartPostgres(t), &fakeZaloSender{}, 1)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, d.db)
+	sc := testutil.ScopeFor(t, d.db, teacher.ID)
 	periodID, contacts := closedPeriodWithContacts(t, d, teacher.ID, 2)
 	mapContact(t, d.db, contacts[0], "uid-one")
 	mapContact(t, d.db, contacts[1], "uid-two")
 
-	_, err := d.notifications.BulkSend(ctx, teacher.ID, periodID, notifications.BulkSendRequest{
+	_, err := d.notifications.BulkSend(ctx, sc, periodID, notifications.BulkSendRequest{
 		Purpose: "statement",
 		Channel: notifications.ChannelZaloPersonal,
 	})
@@ -248,11 +252,12 @@ func TestBulkSendPersonalRefusesWhileARunIsStillSending(t *testing.T) {
 	d := newDepsWithZalo(t, testutil.StartPostgres(t), fake)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, d.db)
+	sc := testutil.ScopeFor(t, d.db, teacher.ID)
 
 	periodID, contacts := closedPeriodWithContacts(t, d, teacher.ID, 1)
 	mapContact(t, d.db, contacts[0], "uid-slow")
 
-	first, err := d.notifications.BulkSend(ctx, teacher.ID, periodID, notifications.BulkSendRequest{
+	first, err := d.notifications.BulkSend(ctx, sc, periodID, notifications.BulkSendRequest{
 		Purpose: "statement",
 		Channel: notifications.ChannelZaloPersonal,
 	})
@@ -260,7 +265,7 @@ func TestBulkSendPersonalRefusesWhileARunIsStillSending(t *testing.T) {
 	require.NotNil(t, first.RunID)
 
 	countBefore := notificationCount(t, d.db, periodID)
-	_, err = d.notifications.BulkSend(ctx, teacher.ID, periodID, notifications.BulkSendRequest{
+	_, err = d.notifications.BulkSend(ctx, sc, periodID, notifications.BulkSendRequest{
 		Purpose: "statement",
 		Channel: notifications.ChannelZaloPersonal,
 	})
@@ -273,7 +278,7 @@ func TestBulkSendPersonalRefusesWhileARunIsStillSending(t *testing.T) {
 	require.Equal(t, notifications.RunStatusCompleted, waitForRunOutcome(t, d.db, *first.RunID))
 
 	// Once the run has finished, a new personal send is allowed again.
-	third, err := d.notifications.BulkSend(ctx, teacher.ID, periodID, notifications.BulkSendRequest{
+	third, err := d.notifications.BulkSend(ctx, sc, periodID, notifications.BulkSendRequest{
 		Purpose: "reminder",
 		Channel: notifications.ChannelZaloPersonal,
 	})
@@ -293,13 +298,14 @@ func TestBulkSendPersonalExpiringMidRunFailsTheRemainingRows(t *testing.T) {
 	d := newDepsWithZalo(t, testutil.StartPostgres(t), fake)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, d.db)
+	sc := testutil.ScopeFor(t, d.db, teacher.ID)
 
 	periodID, contacts := closedPeriodWithContacts(t, d, teacher.ID, 3)
 	for i, c := range contacts {
 		mapContact(t, d.db, c, "uid-"+string(rune('a'+i)))
 	}
 
-	resp, err := d.notifications.BulkSend(ctx, teacher.ID, periodID, notifications.BulkSendRequest{
+	resp, err := d.notifications.BulkSend(ctx, sc, periodID, notifications.BulkSendRequest{
 		Purpose: "statement",
 		Channel: notifications.ChannelZaloPersonal,
 	})

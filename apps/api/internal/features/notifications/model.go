@@ -50,8 +50,12 @@ const (
 // Service.BulkSend). A notification's contact is reached indirectly, through
 // statement_id -> statements.contact_id.
 type Notification struct {
-	ID            uuid.UUID `gorm:"primaryKey"`
+	ID uuid.UUID `gorm:"primaryKey"`
+	// TeacherID is the sender: the teacher who triggered this send, which for
+	// an owner acting on a member's period is the owner, not the period's own
+	// teacher — see Service.BulkSend.
 	TeacherID     uuid.UUID
+	CenterID      uuid.UUID
 	StatementID   uuid.UUID
 	Channel       string
 	Purpose       string
@@ -90,8 +94,12 @@ const (
 // are derived by counting the notifications rows that carry this run's ID, so
 // a crash can never leave a counter lying about the rows.
 type Run struct {
-	ID              uuid.UUID `gorm:"primaryKey"`
+	ID uuid.UUID `gorm:"primaryKey"`
+	// TeacherID is the sender that owns this run's Zalo session and pacing
+	// slot — see Service.BulkSend and the no-owner-bypass invariant documented
+	// on gormRepository.runsOwnScoped.
 	TeacherID       uuid.UUID
+	CenterID        uuid.UUID
 	BillingPeriodID uuid.UUID
 	Purpose         string
 	Status          string
