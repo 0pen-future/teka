@@ -294,6 +294,58 @@ definitions:
     required:
     - reason
     type: object
+  centers.CenterResponse:
+    properties:
+      id:
+        type: string
+      is_owner:
+        type: boolean
+      name:
+        type: string
+    type: object
+  centers.JoinRequest:
+    properties:
+      owner_phone:
+        type: string
+    required:
+    - owner_phone
+    type: object
+  centers.JoinResponse:
+    properties:
+      center_id:
+        type: string
+      joined_at:
+        type: string
+    type: object
+  centers.MeResponse:
+    properties:
+      center:
+        $ref: '#/definitions/centers.CenterResponse'
+      members:
+        items:
+          $ref: '#/definitions/centers.MemberResponse'
+        type: array
+    type: object
+  centers.MemberResponse:
+    properties:
+      full_name:
+        type: string
+      id:
+        type: string
+      is_owner:
+        type: boolean
+      phone:
+        type: string
+    type: object
+  centers.RenameRequest:
+    properties:
+      name:
+        maxLength: 255
+        minLength: 1
+        type: string
+    required:
+    - name
+    type: object
   classes.ClassResponse:
     properties:
       created_at:
@@ -2165,6 +2217,207 @@ paths:
       summary: Generate statements for a billing period
       tags:
       - statements
+  /centers/join:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: owner phone
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/centers.JoinRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/centers.JoinResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: no joinable center behind that phone
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: current center not empty, or already a member
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: validation failed or joining own center
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Join a center by its owner's phone
+      tags:
+      - centers
+  /centers/me:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/centers.MeResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get my center
+      tags:
+      - centers
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: new name
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/centers.RenameRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/centers.MeResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: not the owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: validation failed
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Rename my center
+      tags:
+      - centers
+  /centers/me/members/{teacherId}:
+    delete:
+      parameters:
+      - description: teacher id
+        format: uuid
+        in: path
+        name: teacherId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: neither owner nor self
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: not a member of this center
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: owner cannot leave
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Remove a member (or leave the center)
+      tags:
+      - centers
   /classes:
     get:
       description: 'status filters the list: active (default), archived, or all.'

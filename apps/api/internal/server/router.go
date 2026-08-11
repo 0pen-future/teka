@@ -16,6 +16,7 @@ import (
 	"teka/apps/api/internal/features/attendance"
 	"teka/apps/api/internal/features/auth"
 	"teka/apps/api/internal/features/billing"
+	"teka/apps/api/internal/features/centers"
 	"teka/apps/api/internal/features/classes"
 	"teka/apps/api/internal/features/collections"
 	"teka/apps/api/internal/features/contacts"
@@ -86,6 +87,18 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	txMgr := database.NewTxManager(db)
 
 	teachersSvc := teachers.NewService(teachers.NewRepository(db))
+
+	// centers consumes teachers through centers.TeacherLookup (owner-phone
+	// resolution), and teachers consumes centers back through
+	// teachers.CenterProvisioner so registering a teacher provisions their
+	// personal center in the same transaction — a setter breaks that cycle,
+	// same as attendance.SetReconciler below.
+	centersSvc := centers.NewService(centers.NewRepository(db), teachersSvc, txMgr)
+	teachersSvc.SetCenterProvisioner(centersSvc)
+	// resolveScope re-reads center membership from the database on every
+	// request (never from JWT claims) so kicks and leaves bite immediately.
+	resolveScope := middleware.ResolveScope(centersSvc)
+	centers.RegisterRoutes(v1, centers.NewHandler(centersSvc), requireAuth, resolveScope)
 
 	authSvc := auth.NewService(teachersSvc, auth.NewRepository(db), auth.NewTokenIssuer(cfg.JWT), txMgr)
 	auth.RegisterRoutes(v1, auth.NewHandler(authSvc, cfg))

@@ -14,6 +14,7 @@ import (
 	"teka/apps/api/internal/config"
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/auth"
+	"teka/apps/api/internal/features/centers"
 	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/testutil"
@@ -23,6 +24,8 @@ func newIntegrationService(t *testing.T) (*auth.Service, *gorm.DB) {
 	t.Helper()
 	db := testutil.StartPostgres(t)
 	teachersSvc := teachers.NewService(teachers.NewRepository(db))
+	teachersSvc.SetCenterProvisioner(
+		centers.NewService(centers.NewRepository(db), teachersSvc, database.NewTxManager(db)))
 	issuer := auth.NewTokenIssuer(config.JWTConfig{
 		Secret:     testutil.JWTSecret,
 		AccessTTL:  15 * time.Minute,

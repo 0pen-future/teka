@@ -25,10 +25,22 @@ type CreateRequest struct {
 	FullName string
 }
 
+// CenterProvisioner supplies the personal center a brand-new teacher starts
+// in (consumer-defined interface; implemented by *centers.Service). It is
+// two calls, not one, because of foreign-key ordering inside the registration
+// transaction: the centers row must exist before the teachers row (immediate
+// FK on teachers.center_id, while centers.owner_id is deferred), and the
+// membership row can only follow the teachers row.
+type CenterProvisioner interface {
+	CreatePersonalCenter(ctx context.Context, ownerID uuid.UUID, name string) (uuid.UUID, error)
+	OpenMembership(ctx context.Context, teacherID, centerID uuid.UUID) error
+}
+
 // Service implements teacher identity business logic over the repository.
 type Service struct {
-	repo Repository
-	now  func() time.Time
+	repo    Repository
+	centers CenterProvisioner
+	now     func() time.Time
 }
 
 // NewService builds the teachers service.
@@ -36,9 +48,19 @@ func NewService(repo Repository) *Service {
 	return &Service{repo: repo, now: time.Now}
 }
 
-// CreateTeacher registers a teacher: one user_accounts row and one teachers
-// row sharing a UUIDv7 id, inserted on the ambient transaction. The unique
-// phone index is the concurrency guard — no pre-check SELECT (TOCTOU).
+// SetCenterProvisioner wires the centers dependency after construction — a
+// NewService parameter would cycle: centers needs this service for its
+// owner-phone lookup (same pattern as attendance.SetReconciler).
+func (s *Service) SetCenterProvisioner(p CenterProvisioner) {
+	s.centers = p
+}
+
+// CreateTeacher registers a teacher: their personal centers row, one
+// user_accounts row and one teachers row sharing a UUIDv7 id, and the live
+// center_members row — all on the ambient transaction, which is REQUIRED
+// here: centers.owner_id is a deferred FK pointing at a teachers row that
+// only exists later in the same transaction. The unique phone index is the
+// concurrency guard — no pre-check SELECT (TOCTOU).
 func (s *Service) CreateTeacher(ctx context.Context, req CreateRequest) (*Profile, error) {
 	// The binding max=72 counts runes but bcrypt rejects inputs over 72
 	// BYTES, so a long multibyte password passes validation and would blow
@@ -47,6 +69,9 @@ func (s *Service) CreateTeacher(ctx context.Context, req CreateRequest) (*Profil
 		return nil, apperror.Invalid("validation failed",
 			map[string]string{"password": "must be at most 72 bytes"})
 	}
+	if s.centers == nil {
+		return nil, apperror.Internal(errors.New("teachers: center provisioner not wired"))
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcryptCost)
 	if err != nil {
 		return nil, apperror.Internal(err)
@@ -54,6 +79,10 @@ func (s *Service) CreateTeacher(ctx context.Context, req CreateRequest) (*Profil
 	hashStr := string(hash)
 
 	accountID := id.New()
+	centerID, err := s.centers.CreatePersonalCenter(ctx, accountID, req.FullName)
+	if err != nil {
+		return nil, err
+	}
 	acct := &Account{
 		ID:           accountID,
 		Role:         authctx.RoleTeacher,
@@ -61,13 +90,16 @@ func (s *Service) CreateTeacher(ctx context.Context, req CreateRequest) (*Profil
 		PasswordHash: &hashStr,
 		Status:       StatusActive,
 	}
-	t := &Teacher{ID: accountID, FullName: req.FullName, Timezone: DefaultTimezone}
+	t := &Teacher{ID: accountID, FullName: req.FullName, Timezone: DefaultTimezone, CenterID: centerID}
 
 	if err := s.repo.CreateAccountWithProfile(ctx, acct, t); err != nil {
 		if errors.Is(err, ErrDuplicatePhone) {
 			return nil, apperror.Conflict("phone already registered")
 		}
 		return nil, apperror.Internal(err)
+	}
+	if err := s.centers.OpenMembership(ctx, accountID, centerID); err != nil {
+		return nil, err
 	}
 	return &Profile{Account: *acct, Teacher: *t}, nil
 }

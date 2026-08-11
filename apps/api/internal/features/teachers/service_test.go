@@ -69,6 +69,25 @@ func (r *fakeRepository) TouchLastLogin(_ context.Context, id uuid.UUID, at time
 	return nil
 }
 
+// fakeProvisioner implements CenterProvisioner in memory: CreateTeacher
+// refuses to run without one, since every teacher needs a personal center.
+type fakeProvisioner struct {
+	memberships map[uuid.UUID]uuid.UUID // teacher id → center id
+}
+
+func newFakeProvisioner() *fakeProvisioner {
+	return &fakeProvisioner{memberships: map[uuid.UUID]uuid.UUID{}}
+}
+
+func (p *fakeProvisioner) CreatePersonalCenter(_ context.Context, _ uuid.UUID, _ string) (uuid.UUID, error) {
+	return uuid.New(), nil
+}
+
+func (p *fakeProvisioner) OpenMembership(_ context.Context, teacherID, centerID uuid.UUID) error {
+	p.memberships[teacherID] = centerID
+	return nil
+}
+
 func seedProfile(repo *fakeRepository, phone string) *Profile {
 	accountID := uuid.New()
 	p := &Profile{
@@ -90,6 +109,8 @@ func wantFieldError(t *testing.T, err error, field string) {
 func TestCreateTeacherNormalizesAndPairsRows(t *testing.T) {
 	repo := newFakeRepository()
 	svc := NewService(repo)
+	provisioner := newFakeProvisioner()
+	svc.SetCenterProvisioner(provisioner)
 
 	p, err := svc.CreateTeacher(context.Background(), CreateRequest{
 		Phone: "0901234567", Password: "password-123", FullName: "Cô Lan",
@@ -105,6 +126,9 @@ func TestCreateTeacherNormalizesAndPairsRows(t *testing.T) {
 	}
 	if p.Account.PasswordHash == nil || *p.Account.PasswordHash == "password-123" {
 		t.Fatal("password must be stored hashed")
+	}
+	if p.Teacher.CenterID == uuid.Nil || provisioner.memberships[p.Account.ID] != p.Teacher.CenterID {
+		t.Fatalf("teacher must join their provisioned personal center, got %s", p.Teacher.CenterID)
 	}
 
 	_, err = svc.CreateTeacher(context.Background(), CreateRequest{

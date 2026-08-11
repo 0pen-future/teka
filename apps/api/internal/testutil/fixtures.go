@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"teka/apps/api/internal/features/attendance"
+	"teka/apps/api/internal/features/centers"
 	"teka/apps/api/internal/features/classes"
 	"teka/apps/api/internal/features/contacts"
 	"teka/apps/api/internal/features/enrollments"
@@ -52,9 +53,13 @@ func WithPassword(plaintext string) TeacherOption {
 	return func(_ *teachers.Account, _ *teachers.Teacher, pw *string) { *pw = plaintext }
 }
 
-// Teacher inserts a user_accounts + teachers row pair directly (bypassing the
-// service) and returns both. Passwords hash at bcrypt.MinCost so fixtures stay
-// fast; phones default to a unique random +84 number so tests never collide.
+// Teacher inserts a fixture teacher directly (bypassing the service): their
+// personal centers row, the user_accounts + teachers pair, and the live
+// center_members row — one transaction, because the center's owner FK is
+// deferred until the teachers row exists. The teacher's center is available
+// as the returned Teacher.CenterID. Passwords hash at bcrypt.MinCost so
+// fixtures stay fast; phones default to a unique random +84 number so tests
+// never collide.
 func Teacher(t *testing.T, db *gorm.DB, opts ...TeacherOption) (*teachers.Account, *teachers.Teacher) {
 	t.Helper()
 	accountID := id.New()
@@ -68,6 +73,7 @@ func Teacher(t *testing.T, db *gorm.DB, opts ...TeacherOption) (*teachers.Accoun
 		ID:       accountID,
 		FullName: "Fixture Teacher",
 		Timezone: teachers.DefaultTimezone,
+		CenterID: id.New(),
 	}
 	password := DefaultPassword
 	for _, opt := range opts {
@@ -79,10 +85,25 @@ func Teacher(t *testing.T, db *gorm.DB, opts ...TeacherOption) (*teachers.Accoun
 	}
 	hashStr := string(hash)
 	acct.PasswordHash = &hashStr
-	if err := db.Create(acct).Error; err != nil {
-		t.Fatalf("insert fixture account %s: %v", acct.Phone, err)
-	}
-	if err := db.Create(teacher).Error; err != nil {
+	err = db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&centers.Center{
+			ID:      teacher.CenterID,
+			Name:    teacher.FullName,
+			OwnerID: accountID,
+		}).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(acct).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(teacher).Error; err != nil {
+			return err
+		}
+		return tx.Exec(
+			"INSERT INTO center_members (teacher_id, center_id) VALUES (?, ?)",
+			accountID, teacher.CenterID).Error
+	})
+	if err != nil {
 		t.Fatalf("insert fixture teacher %s: %v", acct.Phone, err)
 	}
 	return acct, teacher
