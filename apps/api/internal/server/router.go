@@ -158,7 +158,7 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	// collections is read-only reporting over billing_periods/invoices/
 	// payments — no writes, so no transaction manager.
 	collectionsSvc := collections.NewService(collections.NewRepository(db))
-	collections.RegisterRoutes(v1, collections.NewHandler(collectionsSvc), requireAuth)
+	collections.RegisterRoutes(v1, collections.NewHandler(collectionsSvc), requireAuth, resolveScope)
 
 	statements.RegisterRoutes(v1, statements.NewHandler(statementsSvc), requireAuth)
 

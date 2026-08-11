@@ -128,6 +128,7 @@ func TestContactViewMergesFamiliesAndClassViewShowsPerChildStatus(t *testing.T) 
 	collectionsSvc, billingSvc, paymentsSvc, db := newIntegrationDeps(t)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, db)
+	scope := testutil.ScopeFor(t, db, teacher.ID)
 
 	contactA := testutil.Contact(t, db, teacher.ID, testutil.WithContactFullName("Contact A"))
 	childA1 := seedChild(t, db, teacher.ID, contactA.ID, "A1", date("2026-01-01"), 1)
@@ -146,22 +147,22 @@ func TestContactViewMergesFamiliesAndClassViewShowsPerChildStatus(t *testing.T) 
 	contactE := testutil.Contact(t, db, teacher.ID, testutil.WithContactFullName("Contact E"))
 	childE1 := seedChild(t, db, teacher.ID, contactE.ID, "E1", date("2026-01-01"), 1)
 
-	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 1)
+	period, err := billingSvc.EnsurePeriod(ctx, scope, 2026, 1)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
+	_, err = billingSvc.Close(ctx, scope, period.ID)
 	require.NoError(t, err)
 
 	// A overpays by 20 000 — the surplus has nothing left to settle in this
 	// period, so it must surface as summary.unallocated_credit rather than
 	// vanish.
-	_, err = paymentsSvc.Record(ctx, testutil.ScopeFor(t, db, teacher.ID), payments.RecordPaymentRequest{
+	_, err = paymentsSvc.Record(ctx, scope, payments.RecordPaymentRequest{
 		ContactID: contactA.ID, Amount: 320_000, Method: payments.MethodCash, ReceivedOn: "2026-01-20",
 	})
 	require.NoError(t, err)
 
 	// B pays enough to clear the earlier-starting class but not the later
 	// one — D8's tie-break settles B1 in full and leaves B2 short by 50 000.
-	_, err = paymentsSvc.Record(ctx, testutil.ScopeFor(t, db, teacher.ID), payments.RecordPaymentRequest{
+	_, err = paymentsSvc.Record(ctx, scope, payments.RecordPaymentRequest{
 		ContactID: contactB.ID, Amount: 150_000, Method: payments.MethodTransfer, ReceivedOn: "2026-01-20",
 	})
 	require.NoError(t, err)
@@ -180,7 +181,7 @@ func TestContactViewMergesFamiliesAndClassViewShowsPerChildStatus(t *testing.T) 
 	}).Error)
 
 	// --- default (contact) view merges every family into one row ---
-	listAll, err := collectionsSvc.List(ctx, teacher.ID, period.ID, collections.ViewContact, collections.Filter{}, contactParams(t, ""))
+	listAll, err := collectionsSvc.List(ctx, scope, period.ID, collections.ViewContact, collections.Filter{}, contactParams(t, ""))
 	require.NoError(t, err)
 	require.Len(t, listAll.ContactRows, 4, "contact E's only invoice is void and must not appear")
 
@@ -216,14 +217,14 @@ func TestContactViewMergesFamiliesAndClassViewShowsPerChildStatus(t *testing.T) 
 	require.True(t, rowD.ContactArchived, "a soft-deleted contact with debt must stay visible and flagged")
 
 	// --- by-class view: A's two children each read paid in their own room ---
-	resultA1, err := collectionsSvc.List(ctx, teacher.ID, period.ID, collections.ViewClass,
+	resultA1, err := collectionsSvc.List(ctx, scope, period.ID, collections.ViewClass,
 		collections.Filter{ClassID: &childA1.ClassID}, classParams(t, ""))
 	require.NoError(t, err)
 	require.Len(t, resultA1.ClassRows, 1)
 	require.Equal(t, collections.StatusPaid, resultA1.ClassRows[0].PaymentStatus)
 	require.EqualValues(t, 0, resultA1.ClassRows[0].InvoiceOutstanding)
 
-	resultA2, err := collectionsSvc.List(ctx, teacher.ID, period.ID, collections.ViewClass,
+	resultA2, err := collectionsSvc.List(ctx, scope, period.ID, collections.ViewClass,
 		collections.Filter{ClassID: &childA2.ClassID}, classParams(t, ""))
 	require.NoError(t, err)
 	require.Len(t, resultA2.ClassRows, 1)
@@ -232,7 +233,7 @@ func TestContactViewMergesFamiliesAndClassViewShowsPerChildStatus(t *testing.T) 
 	require.EqualValues(t, 0, resultA2.ClassRows[0].InvoiceOutstanding)
 
 	// --- by-class view: B's shortfall is visible on the specific child ---
-	resultB1, err := collectionsSvc.List(ctx, teacher.ID, period.ID, collections.ViewClass,
+	resultB1, err := collectionsSvc.List(ctx, scope, period.ID, collections.ViewClass,
 		collections.Filter{ClassID: &childB1.ClassID}, classParams(t, ""))
 	require.NoError(t, err)
 	require.Len(t, resultB1.ClassRows, 1)
@@ -240,7 +241,7 @@ func TestContactViewMergesFamiliesAndClassViewShowsPerChildStatus(t *testing.T) 
 	require.EqualValues(t, 100_000, resultB1.ClassRows[0].InvoicePaidAmount)
 	require.EqualValues(t, 0, resultB1.ClassRows[0].InvoiceOutstanding)
 
-	resultB2, err := collectionsSvc.List(ctx, teacher.ID, period.ID, collections.ViewClass,
+	resultB2, err := collectionsSvc.List(ctx, scope, period.ID, collections.ViewClass,
 		collections.Filter{ClassID: &childB2.ClassID}, classParams(t, ""))
 	require.NoError(t, err)
 	require.Len(t, resultB2.ClassRows, 1)
@@ -250,7 +251,7 @@ func TestContactViewMergesFamiliesAndClassViewShowsPerChildStatus(t *testing.T) 
 	require.EqualValues(t, 50_000, resultB2.ClassRows[0].InvoiceOutstanding, "B2 must show it is short by exactly 50 000")
 
 	// --- E's voided invoice is absent from its own classroom's view too ---
-	resultE, err := collectionsSvc.List(ctx, teacher.ID, period.ID, collections.ViewClass,
+	resultE, err := collectionsSvc.List(ctx, scope, period.ID, collections.ViewClass,
 		collections.Filter{ClassID: &childE1.ClassID}, classParams(t, ""))
 	require.NoError(t, err)
 	require.Empty(t, resultE.ClassRows)
@@ -263,23 +264,23 @@ func TestContactViewMergesFamiliesAndClassViewShowsPerChildStatus(t *testing.T) 
 	// one of its children individually reading partially_paid. Filtered here
 	// against that derivation rather than against the "B, C, D" grouping a
 	// contact-level "underpaid" description might suggest.
-	paidOnly, err := collectionsSvc.List(ctx, teacher.ID, period.ID, collections.ViewContact,
+	paidOnly, err := collectionsSvc.List(ctx, scope, period.ID, collections.ViewContact,
 		collections.Filter{Status: collections.StatusPaid}, contactParams(t, "status=paid"))
 	require.NoError(t, err)
 	require.ElementsMatch(t, []uuid.UUID{contactA.ID}, contactIDs(paidOnly.ContactRows))
 
-	partialOnly, err := collectionsSvc.List(ctx, teacher.ID, period.ID, collections.ViewContact,
+	partialOnly, err := collectionsSvc.List(ctx, scope, period.ID, collections.ViewContact,
 		collections.Filter{Status: collections.StatusPartial}, contactParams(t, "status=partial"))
 	require.NoError(t, err)
 	require.ElementsMatch(t, []uuid.UUID{contactB.ID}, contactIDs(partialOnly.ContactRows))
 
-	unpaidOnly, err := collectionsSvc.List(ctx, teacher.ID, period.ID, collections.ViewContact,
+	unpaidOnly, err := collectionsSvc.List(ctx, scope, period.ID, collections.ViewContact,
 		collections.Filter{Status: collections.StatusUnpaid}, contactParams(t, "status=unpaid"))
 	require.NoError(t, err)
 	require.ElementsMatch(t, []uuid.UUID{contactC.ID, contactD.ID}, contactIDs(unpaidOnly.ContactRows))
 
 	// --- summary reconciles with the contact view's own row totals ---
-	summary, err := collectionsSvc.Summary(ctx, teacher.ID, period.ID)
+	summary, err := collectionsSvc.Summary(ctx, scope, period.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, 6, summary.StudentCount)
 	require.EqualValues(t, 4, summary.ContactCount)
@@ -298,13 +299,14 @@ func TestContactViewMergesFamiliesAndClassViewShowsPerChildStatus(t *testing.T) 
 	require.Equal(t, sumPaid, summary.TotalPaid)
 	require.Equal(t, sumOutstanding, summary.TotalOutstanding)
 
-	// --- a period id belonging to another teacher is not found ---
+	// --- a period id belonging to another teacher, in another center, is not found ---
 	_, stranger := testutil.Teacher(t, db)
-	_, err = collectionsSvc.List(ctx, stranger.ID, period.ID, collections.ViewContact, collections.Filter{}, contactParams(t, ""))
+	strangerScope := testutil.ScopeFor(t, db, stranger.ID)
+	_, err = collectionsSvc.List(ctx, strangerScope, period.ID, collections.ViewContact, collections.Filter{}, contactParams(t, ""))
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
 
-	_, err = collectionsSvc.Summary(ctx, stranger.ID, period.ID)
+	_, err = collectionsSvc.Summary(ctx, strangerScope, period.ID)
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
 }
@@ -317,14 +319,15 @@ func TestListRejectsUnknownViewAndMissingClassID(t *testing.T) {
 	collectionsSvc, billingSvc, _, db := newIntegrationDeps(t)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, db)
-	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 1)
+	scope := testutil.ScopeFor(t, db, teacher.ID)
+	period, err := billingSvc.EnsurePeriod(ctx, scope, 2026, 1)
 	require.NoError(t, err)
 
-	_, err = collectionsSvc.List(ctx, teacher.ID, period.ID, "bogus", collections.Filter{}, contactParams(t, ""))
+	_, err = collectionsSvc.List(ctx, scope, period.ID, "bogus", collections.Filter{}, contactParams(t, ""))
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code)
 
-	_, err = collectionsSvc.List(ctx, teacher.ID, period.ID, collections.ViewClass, collections.Filter{}, classParams(t, ""))
+	_, err = collectionsSvc.List(ctx, scope, period.ID, collections.ViewClass, collections.Filter{}, classParams(t, ""))
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code)
 }
@@ -337,6 +340,7 @@ func TestContactViewFiltersUnpaidWithin500msAt150Students(t *testing.T) {
 	collectionsSvc, billingSvc, _, db := newIntegrationDeps(t)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, db)
+	scope := testutil.ScopeFor(t, db, teacher.ID)
 
 	const classCount = 5
 	const studentsPerClass = 30
@@ -356,13 +360,13 @@ func TestContactViewFiltersUnpaidWithin500msAt150Students(t *testing.T) {
 		}
 	}
 
-	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 1)
+	period, err := billingSvc.EnsurePeriod(ctx, scope, 2026, 1)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
+	_, err = billingSvc.Close(ctx, scope, period.ID)
 	require.NoError(t, err)
 
 	started := time.Now()
-	result, err := collectionsSvc.List(ctx, teacher.ID, period.ID, collections.ViewContact,
+	result, err := collectionsSvc.List(ctx, scope, period.ID, collections.ViewContact,
 		collections.Filter{Status: collections.StatusUnpaid}, contactParams(t, "status=unpaid&per_page=100"))
 	elapsed := time.Since(started)
 
@@ -370,4 +374,134 @@ func TestContactViewFiltersUnpaidWithin500msAt150Students(t *testing.T) {
 	require.NotEmpty(t, result.ContactRows)
 	require.EqualValues(t, classCount*studentsPerClass, result.Total)
 	require.Less(t, elapsed, 500*time.Millisecond, "the unpaid filter must return within 500ms at 150 students")
+}
+
+// TestOwnerSeesMembersCollectionsWithFullContent proves center scope grants
+// the center owner oversight of a member's billing period: the owner reads
+// back the member's own contact balance and summary content, not merely a
+// non-empty count — a blank result here would mean the owner bypass only
+// widened the tenant filter without actually letting the query resolve the
+// member's rows.
+func TestOwnerSeesMembersCollectionsWithFullContent(t *testing.T) {
+	t.Parallel()
+	collectionsSvc, billingSvc, paymentsSvc, db := newIntegrationDeps(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, db)
+	member, _ := testutil.Teacher(t, db)
+	ownerScope := testutil.ScopeFor(t, db, owner.ID)
+	testutil.JoinCenter(t, db, member.ID, ownerScope.CenterID)
+	memberScope := testutil.ScopeFor(t, db, member.ID)
+	require.Equal(t, ownerScope.CenterID, memberScope.CenterID, "member must have joined the owner's center")
+
+	contact := testutil.Contact(t, db, member.ID, testutil.WithContactFullName("Member Contact"))
+	seedChild(t, db, member.ID, contact.ID, "M1", date("2026-01-01"), 1)
+
+	period, err := billingSvc.EnsurePeriod(ctx, memberScope, 2026, 1)
+	require.NoError(t, err)
+	_, err = billingSvc.Close(ctx, memberScope, period.ID)
+	require.NoError(t, err)
+
+	_, err = paymentsSvc.Record(ctx, memberScope, payments.RecordPaymentRequest{
+		ContactID: contact.ID, Amount: 60_000, Method: payments.MethodCash, ReceivedOn: "2026-01-20",
+	})
+	require.NoError(t, err)
+
+	// The owner reads the member's period id under their own (owning) scope.
+	result, err := collectionsSvc.List(ctx, ownerScope, period.ID, collections.ViewContact, collections.Filter{}, contactParams(t, ""))
+	require.NoError(t, err, "the center owner must read a member's billing period")
+	require.Len(t, result.ContactRows, 1, "owner's read-back must not come back blank")
+	row := result.ContactRows[0]
+	require.Equal(t, contact.ID, row.ContactID)
+	require.Equal(t, "Member Contact", row.FullName)
+	require.EqualValues(t, 100_000, row.TotalDue)
+	require.EqualValues(t, 60_000, row.TotalPaid)
+	require.EqualValues(t, 40_000, row.Outstanding)
+	require.Len(t, row.Invoices, 1, "owner's read-back must resolve the member's child invoice")
+
+	summary, err := collectionsSvc.Summary(ctx, ownerScope, period.ID)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, summary.ContactCount)
+	require.EqualValues(t, 100_000, summary.TotalDue)
+	require.EqualValues(t, 60_000, summary.TotalPaid)
+	require.EqualValues(t, 40_000, summary.TotalOutstanding)
+}
+
+// TestPeersInSameCenterCannotSeeEachOthersCollections proves center scope
+// grants oversight to the center's owner only — a plain member gets no
+// visibility into another member's billing period, even inside the same
+// center.
+func TestPeersInSameCenterCannotSeeEachOthersCollections(t *testing.T) {
+	t.Parallel()
+	collectionsSvc, billingSvc, _, db := newIntegrationDeps(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, db)
+	memberB, _ := testutil.Teacher(t, db)
+	memberC, _ := testutil.Teacher(t, db)
+	ownerCenter := testutil.ScopeFor(t, db, owner.ID).CenterID
+	testutil.JoinCenter(t, db, memberB.ID, ownerCenter)
+	testutil.JoinCenter(t, db, memberC.ID, ownerCenter)
+	scopeB := testutil.ScopeFor(t, db, memberB.ID)
+	scopeC := testutil.ScopeFor(t, db, memberC.ID)
+	require.False(t, scopeB.IsOwner)
+	require.False(t, scopeC.IsOwner)
+
+	contact := testutil.Contact(t, db, memberB.ID)
+	seedChild(t, db, memberB.ID, contact.ID, "B1", date("2026-01-01"), 1)
+
+	period, err := billingSvc.EnsurePeriod(ctx, scopeB, 2026, 1)
+	require.NoError(t, err)
+	_, err = billingSvc.Close(ctx, scopeB, period.ID)
+	require.NoError(t, err)
+
+	// B reads their own period fine.
+	own, err := collectionsSvc.List(ctx, scopeB, period.ID, collections.ViewContact, collections.Filter{}, contactParams(t, ""))
+	require.NoError(t, err)
+	require.Len(t, own.ContactRows, 1)
+
+	// C, a non-owning peer in the same center, gets no oversight over B's
+	// period — the period id resolves to not-found under C's own scope.
+	_, err = collectionsSvc.List(ctx, scopeC, period.ID, collections.ViewContact, collections.Filter{}, contactParams(t, ""))
+	require.Error(t, err, "a peer must not read another member's billing period")
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+
+	_, err = collectionsSvc.Summary(ctx, scopeC, period.ID)
+	require.Error(t, err, "a peer must not read another member's period summary")
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+}
+
+// TestCrossCenterCollectionsAreNotFound proves a teacher entirely outside the
+// center — not merely a non-owning peer inside it — is refused with the same
+// not-found result, never a 403 that would leak the period's existence.
+func TestCrossCenterCollectionsAreNotFound(t *testing.T) {
+	t.Parallel()
+	collectionsSvc, billingSvc, _, db := newIntegrationDeps(t)
+	ctx := context.Background()
+	teacherA, _ := testutil.Teacher(t, db)
+	teacherB, _ := testutil.Teacher(t, db)
+	scopeA := testutil.ScopeFor(t, db, teacherA.ID)
+	scopeB := testutil.ScopeFor(t, db, teacherB.ID)
+	require.NotEqual(t, scopeA.CenterID, scopeB.CenterID, "fixture teachers must start in separate centers")
+
+	contact := testutil.Contact(t, db, teacherA.ID)
+	seedChild(t, db, teacherA.ID, contact.ID, "A1", date("2026-01-01"), 1)
+
+	period, err := billingSvc.EnsurePeriod(ctx, scopeA, 2026, 1)
+	require.NoError(t, err)
+	_, err = billingSvc.Close(ctx, scopeA, period.ID)
+	require.NoError(t, err)
+
+	_, err = collectionsSvc.List(ctx, scopeA, period.ID, collections.ViewContact, collections.Filter{}, contactParams(t, ""))
+	require.NoError(t, err, "teacher A must read their own period")
+
+	_, err = collectionsSvc.List(ctx, scopeB, period.ID, collections.ViewContact, collections.Filter{}, contactParams(t, ""))
+	require.Error(t, err)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+
+	_, err = collectionsSvc.Summary(ctx, scopeB, period.ID)
+	require.Error(t, err)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+
+	// scopeB is not even an owner of their own center, but that must not
+	// matter here: cross-center is invisible regardless of IsOwner.
+	require.True(t, scopeB.IsOwner, "a fresh fixture teacher owns their own personal center")
 }
