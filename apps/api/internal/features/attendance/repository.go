@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"teka/apps/api/internal/database"
+	"teka/apps/api/internal/shared/authctx"
 )
 
 // StudentName is the display shape the attendance sheet needs from the
@@ -41,26 +42,26 @@ type Repository interface {
 	UpsertMany(ctx context.Context, records []Record) error
 	// ListBySession returns the non-deleted attendance rows already recorded
 	// for a session — empty for a session never confirmed.
-	ListBySession(ctx context.Context, teacherID, sessionID uuid.UUID) ([]Record, error)
+	ListBySession(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) ([]Record, error)
 	// SoftDeleteMissing soft-deletes a session's records for students not in
 	// keepStudentIDs — the one legitimate soft delete this package performs
 	// (a student removed from the roster since the last confirmation).
 	// Absent students are never touched by this: they are kept in
 	// keepStudentIDs by the caller because they are still on the roster,
 	// merely marked status='absent'.
-	SoftDeleteMissing(ctx context.Context, teacherID, sessionID uuid.UUID, keepStudentIDs []uuid.UUID) error
+	SoftDeleteMissing(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID, keepStudentIDs []uuid.UUID) error
 	// StudentNames resolves the display name and disambiguation note for a
 	// set of student ids. The join skips the deleted_at filter on students
 	// deliberately: an anonymised student's attendance history must stay
 	// readable under the placeholder name.
-	StudentNames(ctx context.Context, teacherID uuid.UUID, studentIDs []uuid.UUID) (map[uuid.UUID]StudentName, error)
+	StudentNames(ctx context.Context, sc authctx.Scope, studentIDs []uuid.UUID) (map[uuid.UUID]StudentName, error)
 	// TallyByEnrollment groups non-deleted attendance rows by enrollment for
 	// every session within [from, to] whose attendance was actually
-	// confirmed — one grouped query, teacher-scoped — into billable, absent,
+	// confirmed — one grouped query, center-scoped — into billable, absent,
 	// and present counts. This is plan 04's sole entry point for pricing a
 	// billing period: billing calls this once per period and joins its own
 	// metadata on the result; it never aggregates attendance_records itself.
-	TallyByEnrollment(ctx context.Context, teacherID uuid.UUID, from, to time.Time) ([]EnrollmentTally, error)
+	TallyByEnrollment(ctx context.Context, sc authctx.Scope, from, to time.Time) ([]EnrollmentTally, error)
 }
 
 type gormRepository struct {
@@ -72,11 +73,16 @@ func NewRepository(db *gorm.DB) Repository {
 	return &gormRepository{db: db}
 }
 
-// scoped returns a query bound to one tenant, qualified because
-// TallyByEnrollment joins class_sessions, which carries the same teacher_id
-// column name.
-func (r *gormRepository) scoped(ctx context.Context, teacherID uuid.UUID) *gorm.DB {
-	return database.FromContext(ctx, r.db).Where("attendance_records.teacher_id = ?", teacherID)
+// scoped returns a query bound to one center, further narrowed to one
+// teacher's own rows unless the caller is the center's owner. Columns are
+// table-qualified because TallyByEnrollment joins class_sessions, which
+// carries the same center_id/teacher_id column names.
+func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+	q := database.FromContext(ctx, r.db).Where("attendance_records.center_id = ?", sc.CenterID)
+	if !sc.IsOwner {
+		q = q.Where("attendance_records.teacher_id = ?", sc.TeacherID)
+	}
+	return q
 }
 
 func (r *gormRepository) UpsertMany(ctx context.Context, records []Record) error {
@@ -105,23 +111,23 @@ func (r *gormRepository) UpsertMany(ctx context.Context, records []Record) error
 		Create(&records).Error
 }
 
-func (r *gormRepository) ListBySession(ctx context.Context, teacherID, sessionID uuid.UUID) ([]Record, error) {
+func (r *gormRepository) ListBySession(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) ([]Record, error) {
 	var records []Record
-	err := r.scoped(ctx, teacherID).
+	err := r.scoped(ctx, sc).
 		Where("attendance_records.session_id = ?", sessionID).
 		Find(&records).Error
 	return records, err
 }
 
-func (r *gormRepository) SoftDeleteMissing(ctx context.Context, teacherID, sessionID uuid.UUID, keepStudentIDs []uuid.UUID) error {
-	q := r.scoped(ctx, teacherID).Where("attendance_records.session_id = ?", sessionID)
+func (r *gormRepository) SoftDeleteMissing(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID, keepStudentIDs []uuid.UUID) error {
+	q := r.scoped(ctx, sc).Where("attendance_records.session_id = ?", sessionID)
 	if len(keepStudentIDs) > 0 {
 		q = q.Where("attendance_records.student_id NOT IN ?", keepStudentIDs)
 	}
 	return q.Delete(&Record{}).Error
 }
 
-func (r *gormRepository) StudentNames(ctx context.Context, teacherID uuid.UUID, studentIDs []uuid.UUID) (map[uuid.UUID]StudentName, error) {
+func (r *gormRepository) StudentNames(ctx context.Context, sc authctx.Scope, studentIDs []uuid.UUID) (map[uuid.UUID]StudentName, error) {
 	out := make(map[uuid.UUID]StudentName, len(studentIDs))
 	if len(studentIDs) == 0 {
 		return out, nil
@@ -134,13 +140,16 @@ func (r *gormRepository) StudentNames(ctx context.Context, teacherID uuid.UUID, 
 	var rows []row
 	// No deleted_at filter: an anonymised student's history must stay
 	// readable under the placeholder name, mirroring
-	// enrollments/repository.go's withNames join.
-	err := database.FromContext(ctx, r.db).
+	// enrollments/repository.go's withNames join. center_id (not teacher_id)
+	// so an owner can still resolve names for a member's roster.
+	q := database.FromContext(ctx, r.db).
 		Table("students").
 		Select("id, full_name, display_note").
-		Where("teacher_id = ? AND id IN ?", teacherID, studentIDs).
-		Find(&rows).Error
-	if err != nil {
+		Where("center_id = ? AND id IN ?", sc.CenterID, studentIDs)
+	if !sc.IsOwner {
+		q = q.Where("teacher_id = ?", sc.TeacherID)
+	}
+	if err := q.Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	for _, rr := range rows {
@@ -149,15 +158,15 @@ func (r *gormRepository) StudentNames(ctx context.Context, teacherID uuid.UUID, 
 	return out, nil
 }
 
-func (r *gormRepository) TallyByEnrollment(ctx context.Context, teacherID uuid.UUID, from, to time.Time) ([]EnrollmentTally, error) {
+func (r *gormRepository) TallyByEnrollment(ctx context.Context, sc authctx.Scope, from, to time.Time) ([]EnrollmentTally, error) {
 	var rows []EnrollmentTally
-	err := r.scoped(ctx, teacherID).
+	err := r.scoped(ctx, sc).
 		Model(&Record{}).
 		Select(`attendance_records.enrollment_id AS enrollment_id,
 			COUNT(*) FILTER (WHERE attendance_records.billable = true) AS billable_count,
 			COUNT(*) FILTER (WHERE attendance_records.status = 'absent') AS absent_count,
 			COUNT(*) FILTER (WHERE attendance_records.status = 'present') AS present_count`).
-		Joins("JOIN class_sessions ON class_sessions.id = attendance_records.session_id AND class_sessions.teacher_id = attendance_records.teacher_id").
+		Joins("JOIN class_sessions ON class_sessions.id = attendance_records.session_id AND class_sessions.center_id = attendance_records.center_id").
 		Where("class_sessions.deleted_at IS NULL").
 		Where("class_sessions.status = 'held'").
 		Where("class_sessions.attendance_confirmed_at IS NOT NULL").

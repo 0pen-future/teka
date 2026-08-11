@@ -11,6 +11,7 @@ import (
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/attendance"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/pagination"
 )
 
@@ -69,13 +70,13 @@ type CarriedDebtStudent struct {
 // upstream dependencies — so billing depends on attendance's public service
 // contract, never its repository type.
 type AttendanceSource interface {
-	TallyByEnrollment(ctx context.Context, teacherID uuid.UUID, from, to time.Time) ([]attendance.EnrollmentTally, error)
+	TallyByEnrollment(ctx context.Context, sc authctx.Scope, from, to time.Time) ([]attendance.EnrollmentTally, error)
 	// SessionAttendance returns the attendance rows already recorded for one
 	// session — plan 04's entry point for discovering which students a
 	// post-close reconciliation must consider. It performs no aggregation;
 	// LiveBillableCounts (built on TallyByEnrollment) remains the sole
 	// counting query.
-	SessionAttendance(ctx context.Context, teacherID, sessionID uuid.UUID) ([]attendance.Record, error)
+	SessionAttendance(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) ([]attendance.Record, error)
 }
 
 // Repository is the persistence contract for billing periods and the
@@ -331,7 +332,10 @@ func (r *gormRepository) TallyAttendance(ctx context.Context, teacherID, periodI
 		return nil, err
 	}
 
-	counts, err := r.attendance.TallyByEnrollment(ctx, teacherID, period.PeriodStart, period.PeriodEnd)
+	// Billing has not been re-keyed to center scope yet; this shim carries
+	// only the teacher id, so attendance's scoped query still resolves
+	// tenancy by teacher until billing gets its own sweep.
+	counts, err := r.attendance.TallyByEnrollment(ctx, authctx.Scope{TeacherID: teacherID}, period.PeriodStart, period.PeriodEnd)
 	if err != nil {
 		return nil, err
 	}
@@ -790,7 +794,10 @@ func (r *gormRepository) LiveBillableCounts(ctx context.Context, teacherID uuid.
 	for _, eid := range enrollmentIDs {
 		want[eid] = true
 	}
-	tallies, err := r.attendance.TallyByEnrollment(ctx, teacherID, period.PeriodStart, period.PeriodEnd)
+	// Billing has not been re-keyed to center scope yet; this shim carries
+	// only the teacher id, so attendance's scoped query still resolves
+	// tenancy by teacher until billing gets its own sweep.
+	tallies, err := r.attendance.TallyByEnrollment(ctx, authctx.Scope{TeacherID: teacherID}, period.PeriodStart, period.PeriodEnd)
 	if err != nil {
 		return nil, err
 	}
@@ -847,5 +854,8 @@ func (r *gormRepository) StudentSnapshot(ctx context.Context, teacherID, student
 }
 
 func (r *gormRepository) SessionAttendance(ctx context.Context, teacherID, sessionID uuid.UUID) ([]attendance.Record, error) {
-	return r.attendance.SessionAttendance(ctx, teacherID, sessionID)
+	// Billing has not been re-keyed to center scope yet; this shim carries
+	// only the teacher id, so attendance's scoped query still resolves
+	// tenancy by teacher until billing gets its own sweep.
+	return r.attendance.SessionAttendance(ctx, authctx.Scope{TeacherID: teacherID}, sessionID)
 }

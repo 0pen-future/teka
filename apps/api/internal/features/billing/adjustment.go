@@ -180,7 +180,11 @@ func adjustmentReason(sessionDate time.Time, className string, period *Period) s
 // invoice (PRD R4, D7). Returns an empty Reconciliation (not an error) when
 // the session's date is still inside an open period, has no closed period at
 // all, or has no attendance recorded yet.
-func (s *Service) ReconcileSession(ctx context.Context, teacherID, sessionID uuid.UUID) (attendance.Reconciliation, error) {
+func (s *Service) ReconcileSession(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (attendance.Reconciliation, error) {
+	// Billing has not been re-keyed to center scope yet; this shim carries
+	// only the teacher id, so billing's own repository queries still resolve
+	// tenancy by teacher until billing gets its own sweep.
+	teacherID := sc.TeacherID
 	classID, className, sessionDate, err := s.repo.SessionMeta(ctx, teacherID, sessionID)
 	if errors.Is(err, ErrSessionNotFound) {
 		return attendance.Reconciliation{}, nil

@@ -967,7 +967,8 @@ func TestReconcileSessionStatusChangeStillBillableIsNoOp(t *testing.T) {
 	require.NoError(t, db.Model(&attendance.Record{}).
 		Where("id = ?", fx.record1.ID).Update("status", attendance.StatusAbsent).Error)
 
-	result, err := svc.ReconcileSession(ctx, fx.teacher.ID, fx.session1.ID)
+	sc := testutil.ScopeFor(t, db, fx.teacher.ID)
+	result, err := svc.ReconcileSession(ctx, sc, fx.session1.ID)
 	require.NoError(t, err)
 	require.Empty(t, result.Adjustments, "present<->absent alone must not move the billable count")
 
@@ -994,7 +995,8 @@ func TestReconcileSessionBillableFlipToFalsePostsNegativeDeltaWithSourceSessionI
 	require.NoError(t, db.Model(&attendance.Record{}).
 		Where("id = ?", fx.record1.ID).Update("billable", false).Error)
 
-	result, err := svc.ReconcileSession(ctx, fx.teacher.ID, fx.session1.ID)
+	sc := testutil.ScopeFor(t, db, fx.teacher.ID)
+	result, err := svc.ReconcileSession(ctx, sc, fx.session1.ID)
 	require.NoError(t, err)
 	require.Len(t, result.Adjustments, 1)
 	require.Equal(t, fx.student.ID, result.Adjustments[0].StudentID)
@@ -1035,7 +1037,8 @@ func TestReconcileSessionLeavesClosedInvoiceByteIdentical(t *testing.T) {
 
 	require.NoError(t, db.Model(&attendance.Record{}).
 		Where("id = ?", fx.record1.ID).Update("billable", false).Error)
-	_, err := svc.ReconcileSession(ctx, fx.teacher.ID, fx.session1.ID)
+	sc := testutil.ScopeFor(t, db, fx.teacher.ID)
+	_, err := svc.ReconcileSession(ctx, sc, fx.session1.ID)
 	require.NoError(t, err)
 
 	var after billing.Invoice
@@ -1062,24 +1065,26 @@ func TestReconcileSessionRepeatedEditsDoNotDoubleCount(t *testing.T) {
 	fx := seedClosedJanuaryFixture(t, db, svc)
 	ctx := context.Background()
 
+	sc := testutil.ScopeFor(t, db, fx.teacher.ID)
+
 	// First edit: session1 flips to non-billable (-100_000).
 	require.NoError(t, db.Model(&attendance.Record{}).
 		Where("id = ?", fx.record1.ID).Update("billable", false).Error)
-	first, err := svc.ReconcileSession(ctx, fx.teacher.ID, fx.session1.ID)
+	first, err := svc.ReconcileSession(ctx, sc, fx.session1.ID)
 	require.NoError(t, err)
 	require.Len(t, first.Adjustments, 1)
 	require.EqualValues(t, -100_000, first.Adjustments[0].Amount)
 
 	// Reconciling the same unchanged edit again must be a pure no-op:
 	// already_adj now fully explains the gap.
-	again, err := svc.ReconcileSession(ctx, fx.teacher.ID, fx.session1.ID)
+	again, err := svc.ReconcileSession(ctx, sc, fx.session1.ID)
 	require.NoError(t, err)
 	require.Empty(t, again.Adjustments, "reconciling an unchanged edit a second time must not double count")
 
 	// Second real edit: session1 goes back to billable, reverting the first.
 	require.NoError(t, db.Model(&attendance.Record{}).
 		Where("id = ?", fx.record1.ID).Update("billable", true).Error)
-	second, err := svc.ReconcileSession(ctx, fx.teacher.ID, fx.session1.ID)
+	second, err := svc.ReconcileSession(ctx, sc, fx.session1.ID)
 	require.NoError(t, err)
 	require.Len(t, second.Adjustments, 1)
 	require.EqualValues(t, 100_000, second.Adjustments[0].Amount, "reverting must post the equal and opposite delta")
@@ -1126,6 +1131,7 @@ func TestConcurrentReconcileSameStudentDoesNotDoubleCount(t *testing.T) {
 		Where("session_id IN ?", []uuid.UUID{fx.session1.ID, fx.session2.ID}).
 		Update("billable", false).Error)
 
+	sc := testutil.ScopeFor(t, db, fx.teacher.ID)
 	var wg sync.WaitGroup
 	results := make([]attendance.Reconciliation, 2)
 	errs := make([]error, 2)
@@ -1134,7 +1140,7 @@ func TestConcurrentReconcileSameStudentDoesNotDoubleCount(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			results[i], errs[i] = svc.ReconcileSession(context.Background(), fx.teacher.ID, sessionIDs[i])
+			results[i], errs[i] = svc.ReconcileSession(context.Background(), sc, sessionIDs[i])
 		}(i)
 	}
 	wg.Wait()
@@ -1186,7 +1192,8 @@ func TestReconcileSessionCreatesNextPeriodAndDraftInvoiceThenCloseKeepsAdjustmen
 
 	require.NoError(t, db.Model(&attendance.Record{}).
 		Where("id = ?", fx.record1.ID).Update("billable", false).Error)
-	result, err := svc.ReconcileSession(ctx, fx.teacher.ID, fx.session1.ID)
+	sc := testutil.ScopeFor(t, db, fx.teacher.ID)
+	result, err := svc.ReconcileSession(ctx, sc, fx.session1.ID)
 	require.NoError(t, err)
 	require.Len(t, result.Adjustments, 1)
 
@@ -1332,7 +1339,7 @@ func TestReconcileSessionIsNoOpForSessionInOpenPeriod(t *testing.T) {
 	require.NoError(t, err)
 	// Deliberately never Close this period: it stays open.
 
-	result, err := svc.ReconcileSession(ctx, teacher.ID, sess.ID)
+	result, err := svc.ReconcileSession(ctx, testutil.ScopeFor(t, db, teacher.ID), sess.ID)
 	require.NoError(t, err)
 	require.Empty(t, result.Adjustments, "a session inside a still-open period must never post a reconciliation adjustment")
 
@@ -1358,7 +1365,7 @@ func TestReconcileSessionIsNoOpWhenStudentHasNoInvoiceInClosedPeriod(t *testing.
 	require.NoError(t, db.Model(&attendance.Record{}).
 		Where("id = ?", fx.record1.ID).Update("billable", false).Error)
 
-	result, err := svc.ReconcileSession(ctx, fx.teacher.ID, fx.session1.ID)
+	result, err := svc.ReconcileSession(ctx, testutil.ScopeFor(t, db, fx.teacher.ID), fx.session1.ID)
 	require.NoError(t, err)
 	require.Empty(t, result.Adjustments, "a student with no non-void invoice in the closed period must be skipped")
 

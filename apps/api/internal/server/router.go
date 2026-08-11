@@ -132,7 +132,7 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	// attendance records and the session's held+confirmed status commit
 	// atomically.
 	attendanceSvc := attendance.NewService(attendance.NewRepository(db), enrollmentsSvc, sessionsSvc, txMgr)
-	attendance.RegisterRoutes(v1, attendance.NewHandler(attendanceSvc), requireAuth)
+	attendance.RegisterRoutes(v1, attendance.NewHandler(attendanceSvc), requireAuth, resolveScope)
 
 	// billing consumes attendance through billing.AttendanceSource — the
 	// batched per-enrollment tally — rather than re-aggregating

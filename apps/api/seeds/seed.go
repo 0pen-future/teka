@@ -494,7 +494,10 @@ func seedSessionList(ctx context.Context, db *gorm.DB, log *slog.Logger, teacher
 			}
 		}
 		req := attendance.ConfirmRequest{AbsentStudentIDs: absentIDs}
-		if _, err := attendanceSvc.Confirm(ctx, teacherID, ps.ID, req); err != nil {
+		// Seeds have not been re-keyed to center scope yet; this shim carries
+		// only the teacher id, so attendance's scoped query still resolves
+		// tenancy by teacher until seeds gets its own sweep.
+		if _, err := attendanceSvc.Confirm(ctx, authctx.Scope{TeacherID: teacherID}, ps.ID, req); err != nil {
 			return fmt.Errorf("seed: confirm attendance for session %s: %w", ps.ID, err)
 		}
 		confirmed++
@@ -550,7 +553,10 @@ func seedSessionList(ctx context.Context, db *gorm.DB, log *slog.Logger, teacher
 		if err != nil {
 			return fmt.Errorf("seed: backfill session for class %s: %w", classID, err)
 		}
-		if _, err := attendanceSvc.Confirm(ctx, teacherID, detail.ID, attendance.ConfirmRequest{}); err != nil {
+		// Seeds have not been re-keyed to center scope yet; this shim carries
+		// only the teacher id, so attendance's scoped query still resolves
+		// tenancy by teacher until seeds gets its own sweep.
+		if _, err := attendanceSvc.Confirm(ctx, authctx.Scope{TeacherID: teacherID}, detail.ID, attendance.ConfirmRequest{}); err != nil {
 			return fmt.Errorf("seed: confirm backfilled session %s: %w", detail.ID, err)
 		}
 		generated++

@@ -290,7 +290,7 @@ func TestPublicPostCloseAttendanceCorrectionShowsLiveSessionsAndCarriedAdjustmen
 
 	require.NoError(t, db.Model(&attendance.Record{}).
 		Where("id = ?", record1.ID).Update("billable", false).Error)
-	_, err = billingSvc.ReconcileSession(ctx, teacher.ID, session1.ID)
+	_, err = billingSvc.ReconcileSession(ctx, testutil.ScopeFor(t, db, teacher.ID), session1.ID)
 	require.NoError(t, err)
 
 	after := getPublic(t, router, token)
