@@ -125,8 +125,11 @@ func centerOf(t *testing.T, db *gorm.DB, teacherID uuid.UUID) uuid.UUID {
 	// same shape ScopeFor scans into.
 	var row struct{ CenterID uuid.UUID }
 	err := db.Raw("SELECT center_id FROM teachers WHERE id = ?", teacherID).Scan(&row).Error
-	if err != nil || row.CenterID == uuid.Nil {
+	if err != nil {
 		t.Fatalf("resolve fixture teacher %s center: %v", teacherID, err)
+	}
+	if row.CenterID == uuid.Nil {
+		t.Fatalf("fixture teacher %s has no center row", teacherID)
 	}
 	return row.CenterID
 }
@@ -145,8 +148,11 @@ func ScopeFor(t *testing.T, db *gorm.DB, teacherID uuid.UUID) authctx.Scope {
 		FROM teachers t
 		JOIN centers c ON c.id = t.center_id
 		WHERE t.id = ?`, teacherID).Scan(&row).Error
-	if err != nil || row.CenterID == uuid.Nil {
+	if err != nil {
 		t.Fatalf("resolve fixture scope for %s: %v", teacherID, err)
+	}
+	if row.CenterID == uuid.Nil {
+		t.Fatalf("fixture teacher %s has no center row", teacherID)
 	}
 	return authctx.Scope{TeacherID: teacherID, CenterID: row.CenterID, IsOwner: row.IsOwner}
 }

@@ -307,7 +307,8 @@ func TestCrossTenantReadsAsNotFound(t *testing.T) {
 }
 
 // An owner reads and manages a member's student — center oversight, not
-// per-teacher isolation.
+// per-teacher isolation. Creating is stricter: the row is always stamped as
+// the caller's own, so the owner may only reference their own contacts.
 func TestOwnerScopeSeesAndDeletesMembersStudent(t *testing.T) {
 	svc, repo, _ := newTestService()
 	center := id.New()
@@ -324,6 +325,20 @@ func TestOwnerScopeSeesAndDeletesMembersStudent(t *testing.T) {
 	}
 	if err := svc.Delete(context.Background(), owner, row.ID); err != nil {
 		t.Fatalf("owner must delete a member's student, got %v", err)
+	}
+
+	// A member's contact is view-only for creation: the owner gets the same
+	// 422 a foreign contact would produce.
+	if _, err := svc.Create(context.Background(), owner, CreateRequest{FullName: "Bé Bình", ContactID: contactID}); apperror.From(err).Code != apperror.CodeValidation {
+		t.Fatalf("owner creating under a member's contact must be a 422, got %v", err)
+	}
+	ownContact := repo.addContactIn(owner.TeacherID, center)
+	created, err := svc.Create(context.Background(), owner, CreateRequest{FullName: "Bé Bình", ContactID: ownContact})
+	if err != nil {
+		t.Fatalf("owner must still create under their own contact, got %v", err)
+	}
+	if created.TeacherID != owner.TeacherID {
+		t.Fatalf("owner-created student must be stamped as the owner's own, got %s", created.TeacherID)
 	}
 }
 

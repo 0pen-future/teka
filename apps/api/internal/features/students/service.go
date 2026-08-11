@@ -38,10 +38,13 @@ func NewService(repo Repository, ender EnrollmentEnder, tx database.TxManager) *
 // Create inserts a student after checking the contact is in scope. The
 // composite FK would refuse a foreign contact anyway; the check exists to turn
 // that refusal into a clean 422 instead of a 500. The student is always
-// stamped as the caller's own — including an owner, who creates rows as
-// themselves, never on behalf of another teacher.
+// stamped as the caller's own, so the contact check runs with owner rights
+// stripped: a student created under a member's contact would carry the
+// owner's anchor while the contact stays the member's. A member's contacts
+// are view-only for creation; the owner creates only under their own.
 func (s *Service) Create(ctx context.Context, sc authctx.Scope, req CreateRequest) (*Row, error) {
-	if err := s.checkContact(ctx, sc, req.ContactID); err != nil {
+	ownScope := authctx.Scope{TeacherID: sc.TeacherID, CenterID: sc.CenterID}
+	if err := s.checkContact(ctx, ownScope, req.ContactID); err != nil {
 		return nil, err
 	}
 	student := &Student{

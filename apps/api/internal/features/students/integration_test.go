@@ -203,9 +203,10 @@ func TestCrossCenterReadsAreNotFound(t *testing.T) {
 }
 
 // An owner sees, updates, and deletes a student created by a teacher who
-// joined their center — center-wide oversight, not per-teacher isolation. An
-// owner-created student is stamped as the owner's own, never on behalf of a
-// member.
+// joined their center — center-wide oversight, not per-teacher isolation.
+// Creating is stricter: a student is always stamped as the caller's own, so
+// the owner may only reference their own contacts; a member's contacts are
+// view-only for creation and refused with the same 422 a stranger's would be.
 func TestOwnerHasFullOversightOfMembersStudents(t *testing.T) {
 	t.Parallel()
 	svc, db := newIntegrationService(t)
@@ -240,7 +241,13 @@ func TestOwnerHasFullOversightOfMembersStudents(t *testing.T) {
 	_, err = svc.Get(ctx, ownerScope, row.ID)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
 
-	// An owner creates rows as themselves, never on behalf of a member.
+	// Creating against a member's contact is refused: the row would carry the
+	// owner's anchor while the contact stays the member's.
+	_, err = svc.Create(ctx, ownerScope, students.CreateRequest{FullName: "Bé Bình", ContactID: memberContact.ID})
+	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code,
+		"owner must not create a student under a member's contact")
+
+	// An owner still creates rows against their own contacts, as themselves.
 	ownerContact := testutil.Contact(t, db, owner.ID)
 	ownerRow, err := svc.Create(ctx, ownerScope, students.CreateRequest{FullName: "Bé Bình", ContactID: ownerContact.ID})
 	require.NoError(t, err)

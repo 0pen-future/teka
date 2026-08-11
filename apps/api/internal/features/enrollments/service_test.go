@@ -444,9 +444,10 @@ func TestCrossTenantReadsAsNotFound(t *testing.T) {
 	}
 }
 
-// An owner reads and manages a member's enrollment, and can enroll a member's
-// student into a member's class — center oversight, not per-teacher
-// isolation. The created row is still stamped as the owner's own.
+// An owner reads and manages a member's existing enrollment — center
+// oversight. Creating is stricter: a row is always stamped as the caller's
+// own, so the owner may only reference their own students and classes; a
+// member's rows are view-only for creation and refused with a 422.
 func TestOwnerScopeSeesAndManagesMembersEnrollment(t *testing.T) {
 	svc, repo := newTestService()
 	center := id.New()
@@ -465,14 +466,27 @@ func TestOwnerScopeSeesAndManagesMembersEnrollment(t *testing.T) {
 	}
 
 	otherStudent := repo.addStudentFor(member)
-	created, err := svc.Create(context.Background(), owner, CreateRequest{
+	if _, err := svc.Create(context.Background(), owner, CreateRequest{
 		StudentID: otherStudent, ClassID: classID, StartedOn: "2026-04-01",
+	}); apperror.From(err).Code != apperror.CodeValidation {
+		t.Fatalf("owner enrolling into a member's class must be a 422, got %v", err)
+	}
+
+	ownClass := repo.addClassFor(owner, 150_000)
+	ownStudent := repo.addStudentFor(owner)
+	created, err := svc.Create(context.Background(), owner, CreateRequest{
+		StudentID: ownStudent, ClassID: ownClass, StartedOn: "2026-04-01",
 	})
 	if err != nil {
-		t.Fatalf("owner must enroll a member's student into a member's class, got %v", err)
+		t.Fatalf("owner must still enroll their own student into their own class, got %v", err)
 	}
 	if created.TeacherID != owner.TeacherID {
 		t.Fatalf("an enrollment created by the owner must be stamped as the owner's own, got %s", created.TeacherID)
+	}
+	if _, err := svc.Create(context.Background(), owner, CreateRequest{
+		StudentID: otherStudent, ClassID: ownClass,
+	}); apperror.From(err).Code != apperror.CodeValidation {
+		t.Fatalf("owner referencing a member's student must be a 422, got %v", err)
 	}
 }
 

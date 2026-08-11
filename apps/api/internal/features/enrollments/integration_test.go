@@ -268,10 +268,13 @@ func TestCrossCenterReadsAreNotFound(t *testing.T) {
 	require.Equal(t, row.ID, got.ID)
 }
 
-// An owner reads, ends, and enrolls on behalf of a member's students and
-// classes — center-wide oversight, not per-teacher isolation. An enrollment
-// the owner creates is still stamped as the owner's own, even though the
-// student and class it references belong to a member.
+// An owner reads, ends, and deletes a member's enrollments — center-wide
+// oversight over existing rows. Creating is stricter: an enrollment is always
+// stamped as the caller's own, so a row created against a member's student or
+// class would carry the owner's anchor while living in the member's roster —
+// invisible to the member's own attendance and billing. The owner therefore
+// enrolls only into their own classes; a member's rows are view-only for
+// creation and get the same 422 a stranger's would.
 func TestOwnerHasFullOversightOfMembersEnrollments(t *testing.T) {
 	t.Parallel()
 	svc, db := newIntegrationService(t)
@@ -307,17 +310,34 @@ func TestOwnerHasFullOversightOfMembersEnrollments(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, active, 1, "owner's ActiveOn must include the member's class roster")
 
-	// The owner enrolls a member's student into a member's class — the created
-	// row is stamped as the owner's own, not the member's.
+	// Creating against a member's student or class is refused with the same
+	// 422 a foreign reference gets — never silently stamped as the owner's.
 	otherStudent := testutil.Student(t, db, member.ID, contact.ID)
-	created, err := svc.Create(ctx, ownerScope, enrollments.CreateRequest{
+	_, err = svc.Create(ctx, ownerScope, enrollments.CreateRequest{
 		StudentID: otherStudent.ID, ClassID: class.ID, StartedOn: "2026-04-01",
 	})
-	require.NoError(t, err, "owner must enroll a member's student into a member's class")
-	require.Equal(t, owner.ID, created.TeacherID, "owner-created enrollment must be stamped as the owner's own")
+	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code,
+		"owner must not enroll into a member's class")
 
-	require.NoError(t, svc.Delete(ctx, ownerScope, created.ID), "owner must delete a member's enrollment")
-	_, err = svc.Get(ctx, ownerScope, created.ID)
+	// The owner still enrolls into their own classes like any teacher.
+	ownContact := testutil.Contact(t, db, owner.ID)
+	ownClass := testutil.Class(t, db, owner.ID)
+	ownStudent := testutil.Student(t, db, owner.ID, ownContact.ID)
+	created, err := svc.Create(ctx, ownerScope, enrollments.CreateRequest{
+		StudentID: ownStudent.ID, ClassID: ownClass.ID, StartedOn: "2026-04-01",
+	})
+	require.NoError(t, err, "owner must still enroll their own student into their own class")
+	require.Equal(t, owner.ID, created.TeacherID)
+
+	// Mixed anchors are refused too: a member's student in the owner's class.
+	_, err = svc.Create(ctx, ownerScope, enrollments.CreateRequest{
+		StudentID: otherStudent.ID, ClassID: ownClass.ID,
+	})
+	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code,
+		"owner must not enroll a member's student")
+
+	require.NoError(t, svc.Delete(ctx, ownerScope, memberRow.ID), "owner must delete a member's enrollment")
+	_, err = svc.Get(ctx, ownerScope, memberRow.ID)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
 }
 

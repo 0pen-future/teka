@@ -91,6 +91,9 @@ func (s *Service) Close() {
 // commit, unmapped contacts fall back to zalo_manual copy-paste rows exactly
 // as if the manual channel had been chosen for them. BulkText then carries
 // only the fallback rows — the auto-sent messages have nothing to copy.
+// zalo_personal also refuses a period owned by another teacher with a 409:
+// the linked account is personal, so only the period's own teacher can DM its
+// parents — an owner reaches a member's period through manual channels only.
 func (s *Service) BulkSend(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, req BulkSendRequest) (*BulkSendResponse, error) {
 	purpose := normalizePurpose(req.Purpose)
 	channel := req.Channel
@@ -134,6 +137,17 @@ func (s *Service) BulkSend(ctx context.Context, sc authctx.Scope, periodID uuid.
 		genResult, err := s.statements.Generate(ctx, sc, periodID)
 		if err != nil {
 			return err
+		}
+
+		// A Zalo account is personal: DMs go out from the caller's own linked
+		// session, but a member's contacts live in the member's strict scope,
+		// so an owner opening a member's period here would find no mappings
+		// and the whole batch would silently fall back to copy-paste. Refuse
+		// the combination instead — the rollback also undoes the statement
+		// refresh, so nothing is written. Statements are anchored on the
+		// period's own teacher, which is what identifies whose period this is.
+		if personal && len(genResult.Statements) > 0 && genResult.Statements[0].TeacherID != sc.TeacherID {
+			return apperror.Conflict("this period belongs to another teacher; zalo_personal sends only their own periods — ask them to send it, or use zalo_manual")
 		}
 
 		figures, err := s.statements.PeriodFigures(ctx, sc, periodID)
@@ -193,8 +207,9 @@ func (s *Service) BulkSend(ctx context.Context, sc authctx.Scope, periodID uuid.
 			n := &Notification{
 				ID: id.New(),
 				// Stamps the caller as sender, not the statement's own
-				// teacher — an owner sending for a member's period sends as
-				// itself (see the package's tenancy design notes).
+				// teacher — an owner sending a member's period (manual
+				// channels only; zalo_personal refuses that combination
+				// above) sends as itself.
 				TeacherID:   sc.TeacherID,
 				CenterID:    sc.CenterID,
 				StatementID: target.ID,

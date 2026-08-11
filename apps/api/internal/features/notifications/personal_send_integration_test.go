@@ -188,6 +188,53 @@ func TestBulkSendPersonalWithNoMappedContactStartsNoRun(t *testing.T) {
 	require.Empty(t, uids)
 }
 
+// A Zalo account is personal: messages go out from the caller's own linked
+// session. An owner opening a member's period under zalo_personal would
+// therefore DM the member's parents from the owner's account — every mapped
+// contact belongs to the member's strict scope, so the whole batch would
+// silently fall back to copy-paste. Refuse the combination outright; the
+// owner's own periods keep working unchanged.
+func TestBulkSendPersonalRefusesAMembersPeriod(t *testing.T) {
+	t.Parallel()
+	fake := &fakeZaloSender{}
+	d := newDepsWithZalo(t, testutil.StartPostgres(t), fake)
+	ctx := context.Background()
+	_, owner := testutil.Teacher(t, d.db)
+	_, member := testutil.Teacher(t, d.db)
+	ownerCenter := testutil.ScopeFor(t, d.db, owner.ID).CenterID
+	testutil.JoinCenter(t, d.db, member.ID, ownerCenter)
+	ownerScope := testutil.ScopeFor(t, d.db, owner.ID)
+
+	memberPeriod, memberContacts := closedPeriodWithContacts(t, d, member.ID, 1)
+	mapContact(t, d.db, memberContacts[0], "uid-member")
+
+	_, err := d.notifications.BulkSend(ctx, ownerScope, memberPeriod, notifications.BulkSendRequest{
+		Purpose: "statement",
+		Channel: notifications.ChannelZaloPersonal,
+	})
+	require.Error(t, err)
+	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
+	require.Zero(t, notificationCount(t, d.db, memberPeriod),
+		"the refused send must write nothing — not even the statement refresh's notifications")
+	var runCount int64
+	require.NoError(t, d.db.Table("notification_runs").Where("teacher_id = ?", owner.ID).Count(&runCount).Error)
+	require.Zero(t, runCount)
+	uids, _ := fake.sent()
+	require.Empty(t, uids)
+
+	// The owner's own period still sends from their own account.
+	ownPeriod, ownContacts := closedPeriodWithContacts(t, d, owner.ID, 1)
+	mapContact(t, d.db, ownContacts[0], "uid-own")
+	resp, err := d.notifications.BulkSend(ctx, ownerScope, ownPeriod, notifications.BulkSendRequest{
+		Purpose: "statement",
+		Channel: notifications.ChannelZaloPersonal,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp.RunID)
+	require.Equal(t, 1, resp.PersonalQueuedCount)
+	require.Equal(t, notifications.RunStatusCompleted, waitForRunOutcome(t, d.db, *resp.RunID))
+}
+
 func TestBulkSendPersonalRejectsAnUnhealthySessionBeforeWritingAnything(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

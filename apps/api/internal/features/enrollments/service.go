@@ -28,19 +28,23 @@ func NewService(repo Repository) *Service {
 // default. The two lookups exist to produce clean 422s and to read the price;
 // the composite FKs are what actually prevent cross-center stitching, and
 // uq_enrollments_active — not a pre-check — is what refuses a duplicate open
-// enrollment. The enrollment is always stamped as the caller's own —
-// including an owner, who creates rows as themselves, never on behalf of
-// another teacher, even though the student/class it references may belong to
-// a member.
+// enrollment. The enrollment is always stamped as the caller's own, so the
+// reference checks run with owner rights stripped: a row created against a
+// member's class or student would carry the owner's anchor while living in
+// the member's roster — invisible to the member's own attendance and billing,
+// and unrepeatable for them under uq_enrollments_active. A member's rows are
+// therefore view-only for creation; the owner enrolls only into their own
+// classes.
 func (s *Service) Create(ctx context.Context, sc authctx.Scope, req CreateRequest) (*Row, error) {
-	price, err := s.repo.ClassDefaultPrice(ctx, sc, req.ClassID)
+	ownScope := authctx.Scope{TeacherID: sc.TeacherID, CenterID: sc.CenterID}
+	price, err := s.repo.ClassDefaultPrice(ctx, ownScope, req.ClassID)
 	if errors.Is(err, ErrClassNotFound) {
 		return nil, refInvalid("class_id", "must reference one of your classes", err)
 	}
 	if err != nil {
 		return nil, err
 	}
-	ok, err := s.repo.StudentExists(ctx, sc, req.StudentID)
+	ok, err := s.repo.StudentExists(ctx, ownScope, req.StudentID)
 	if err != nil {
 		return nil, err
 	}
