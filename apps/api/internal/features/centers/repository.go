@@ -44,6 +44,38 @@ type TeacherRow struct {
 	FullName string
 }
 
+// TeacherStatsRow is one dashboard roster row with activity counts.
+type TeacherStatsRow struct {
+	ID             uuid.UUID
+	FullName       string
+	Phone          string
+	IsOwner        bool
+	ActiveClasses  int
+	ActiveStudents int
+}
+
+// OverviewClassRow is one class's raw monthly aggregates; the service turns
+// the counters into rates.
+type OverviewClassRow struct {
+	ClassID          uuid.UUID
+	ClassName        string
+	TeacherID        uuid.UUID
+	TeacherName      string
+	HeldSessions     int
+	AttendanceTotal  int
+	PresentCount     int
+	EstimatedRevenue int64
+	FirstDayCount    int
+	RetainedCount    int
+}
+
+// SessionStatsRow is one session's attendance counters.
+type SessionStatsRow struct {
+	Total     int
+	Present   int
+	Estimated int64
+}
+
 // Repository is the persistence contract for centers and memberships; the
 // service depends on this interface, tests supply a fake.
 type Repository interface {
@@ -88,6 +120,30 @@ type Repository interface {
 	// still has the center as their current one — retiring it under them
 	// would leave scopes that can never resolve again.
 	SoftDeleteCenter(ctx context.Context, centerID, ownerID uuid.UUID) error
+	// WasEverMember reports whether the teacher is a current member of the
+	// center or ever had a membership stint in it. Drill-down authorization
+	// uses this so a removed teacher's left-behind data stays reachable.
+	WasEverMember(ctx context.Context, centerID, teacherID uuid.UUID) (bool, error)
+	// DashboardTeacherStats returns the current roster with per-teacher
+	// activity counts, owner first.
+	DashboardTeacherStats(ctx context.Context, centerID uuid.UUID) ([]TeacherStatsRow, error)
+	// OverviewClassStats aggregates one row per live class of the center over
+	// [from, to], ordered by teacher name then class name.
+	OverviewClassStats(ctx context.Context, centerID uuid.UUID, from, to time.Time) ([]OverviewClassRow, error)
+	// InvoicedByClass sums the given closed month's non-void invoice lines
+	// (attributed to a class via their enrollment) and session-sourced
+	// adjustments per class. Classes without invoiced money are absent.
+	InvoicedByClass(ctx context.Context, centerID uuid.UUID, year, month int) (map[uuid.UUID]int64, error)
+	// ClosedPeriodTeachers returns the teachers whose billing period for the
+	// month is closed — the only ones whose invoiced numbers are final.
+	ClosedPeriodTeachers(ctx context.Context, centerID uuid.UUID, year, month int) (map[uuid.UUID]struct{}, error)
+	// SessionStats returns attendance counters per session id; sessions
+	// without live records are absent from the map.
+	SessionStats(ctx context.Context, centerID uuid.UUID, sessionIDs []uuid.UUID) (map[uuid.UUID]SessionStatsRow, error)
+	// SessionInvoiced computes one session's invoiced revenue, or nil while
+	// no closed billing period covers its date; ErrNotFound when the session
+	// is not a live session of the center.
+	SessionInvoiced(ctx context.Context, centerID, sessionID uuid.UUID) (*int64, error)
 }
 
 type gormRepository struct {
@@ -283,6 +339,228 @@ func (r *gormRepository) SoftDeleteCenter(ctx context.Context, centerID, ownerID
 		return ErrNotFound
 	}
 	return nil
+}
+
+func (r *gormRepository) WasEverMember(ctx context.Context, centerID, teacherID uuid.UUID) (bool, error) {
+	var ok bool
+	// Every membership — current or ended — leaves a center_members row; the
+	// teachers check additionally covers the owner of a fresh center whose
+	// stint row and current pointer must agree.
+	err := database.FromContext(ctx, r.db).Raw(`
+		SELECT EXISTS (
+			SELECT 1 FROM center_members WHERE center_id = @cid AND teacher_id = @tid
+			UNION ALL
+			SELECT 1 FROM teachers WHERE id = @tid AND center_id = @cid AND deleted_at IS NULL
+		)`, map[string]any{"cid": centerID, "tid": teacherID}).Scan(&ok).Error
+	return ok, err
+}
+
+func (r *gormRepository) DashboardTeacherStats(ctx context.Context, centerID uuid.UUID) ([]TeacherStatsRow, error) {
+	var rows []TeacherStatsRow
+	// Same roster semantics as ListMembers (disabled accounts stay,
+	// soft-deleted drop), plus per-teacher activity counts. "Active student"
+	// means an enrollment live today into a live class.
+	err := database.FromContext(ctx, r.db).Raw(`
+		SELECT t.id, t.full_name, ua.phone, (c.owner_id = t.id) AS is_owner,
+			(SELECT COUNT(*) FROM classes cl
+			 WHERE cl.teacher_id = t.id AND cl.center_id = t.center_id
+			   AND cl.status = 'active' AND cl.deleted_at IS NULL) AS active_classes,
+			(SELECT COUNT(DISTINCT e.student_id) FROM enrollments e
+			 JOIN classes cl ON cl.id = e.class_id AND cl.center_id = e.center_id AND cl.deleted_at IS NULL
+			 WHERE e.teacher_id = t.id AND e.center_id = t.center_id AND e.deleted_at IS NULL
+			   AND e.started_on <= CURRENT_DATE
+			   AND (e.ended_on IS NULL OR e.ended_on >= CURRENT_DATE)) AS active_students
+		FROM teachers t
+		JOIN user_accounts ua ON ua.id = t.id AND ua.deleted_at IS NULL
+		JOIN centers c ON c.id = t.center_id
+		WHERE t.center_id = ? AND t.deleted_at IS NULL
+		ORDER BY is_owner DESC, t.full_name, t.id`, centerID).Scan(&rows).Error
+	return rows, err
+}
+
+func (r *gormRepository) OverviewClassStats(ctx context.Context, centerID uuid.UUID, from, to time.Time) ([]OverviewClassRow, error) {
+	var rows []OverviewClassRow
+	// One row per live class of the center, teacher left-joined for the name
+	// only so classes of removed teachers keep reporting. Attendance counters
+	// come from held sessions in range; estimated revenue additionally
+	// requires the session confirmed and the record billable. Retention
+	// counts enrollments active on the range's first day, and among those the
+	// ones still active on its last day.
+	err := database.FromContext(ctx, r.db).Raw(`
+		SELECT c.id AS class_id, c.name AS class_name, c.teacher_id,
+			COALESCE(t.full_name, '') AS teacher_name,
+			st.held_sessions, st.attendance_total, st.present_count, st.estimated_revenue,
+			re.first_day_count, re.retained_count
+		FROM classes c
+		LEFT JOIN teachers t ON t.id = c.teacher_id AND t.deleted_at IS NULL
+		CROSS JOIN LATERAL (
+			SELECT COUNT(DISTINCT s.id) AS held_sessions,
+				COUNT(ar.id) AS attendance_total,
+				COUNT(ar.id) FILTER (WHERE ar.status = 'present') AS present_count,
+				COALESCE(SUM(e.unit_price) FILTER (
+					WHERE ar.billable AND s.attendance_confirmed_at IS NOT NULL), 0) AS estimated_revenue
+			FROM class_sessions s
+			LEFT JOIN attendance_records ar ON ar.session_id = s.id AND ar.center_id = s.center_id
+				AND ar.deleted_at IS NULL
+			LEFT JOIN enrollments e ON e.id = ar.enrollment_id AND e.center_id = ar.center_id
+				AND e.deleted_at IS NULL
+			WHERE s.class_id = c.id AND s.center_id = c.center_id AND s.deleted_at IS NULL
+				AND s.status = 'held' AND s.session_date BETWEEN @from AND @to
+		) st
+		CROSS JOIN LATERAL (
+			SELECT COUNT(*) FILTER (
+					WHERE en.started_on <= @from
+					  AND (en.ended_on IS NULL OR en.ended_on >= @from)) AS first_day_count,
+				COUNT(*) FILTER (
+					WHERE en.started_on <= @from
+					  AND (en.ended_on IS NULL OR en.ended_on >= @to)) AS retained_count
+			FROM enrollments en
+			WHERE en.class_id = c.id AND en.center_id = c.center_id AND en.deleted_at IS NULL
+		) re
+		WHERE c.center_id = @cid AND c.deleted_at IS NULL
+		ORDER BY teacher_name, c.teacher_id, c.name, c.id`,
+		map[string]any{"cid": centerID, "from": from, "to": to}).Scan(&rows).Error
+	return rows, err
+}
+
+func (r *gormRepository) InvoicedByClass(ctx context.Context, centerID uuid.UUID, year, month int) (map[uuid.UUID]int64, error) {
+	var rows []struct {
+		ClassID uuid.UUID
+		Total   int64
+	}
+	// Lines attribute to a class through their enrollment; adjustments only
+	// through an explicit source session — an adjustment without one belongs
+	// to no class and is deliberately absent here. Void invoices never count;
+	// invoices and lines have no deleted_at column.
+	err := database.FromContext(ctx, r.db).Raw(`
+		SELECT class_id, SUM(amount)::bigint AS total FROM (
+			SELECT cl.id AS class_id, il.amount
+			FROM invoice_lines il
+			JOIN enrollments e ON e.id = il.enrollment_id AND e.center_id = il.center_id AND e.deleted_at IS NULL
+			JOIN classes cl ON cl.id = e.class_id AND cl.center_id = e.center_id AND cl.deleted_at IS NULL
+			JOIN invoices i ON i.id = il.invoice_id AND i.center_id = il.center_id AND i.status <> 'void'
+			JOIN billing_periods p ON p.id = i.period_id AND p.center_id = i.center_id AND p.deleted_at IS NULL
+				AND p.status = 'closed' AND p.year = @y AND p.month = @m
+			WHERE il.center_id = @cid
+			UNION ALL
+			SELECT cl.id, a.amount
+			FROM invoice_adjustments a
+			JOIN class_sessions s ON s.id = a.source_session_id AND s.center_id = a.center_id AND s.deleted_at IS NULL
+			JOIN classes cl ON cl.id = s.class_id AND cl.center_id = s.center_id AND cl.deleted_at IS NULL
+			JOIN invoices i ON i.id = a.invoice_id AND i.center_id = a.center_id AND i.status <> 'void'
+			JOIN billing_periods p ON p.id = i.period_id AND p.center_id = i.center_id AND p.deleted_at IS NULL
+				AND p.status = 'closed' AND p.year = @y AND p.month = @m
+			WHERE a.center_id = @cid AND a.deleted_at IS NULL
+		) x GROUP BY class_id`,
+		map[string]any{"cid": centerID, "y": year, "m": month}).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID]int64, len(rows))
+	for _, row := range rows {
+		out[row.ClassID] = row.Total
+	}
+	return out, nil
+}
+
+func (r *gormRepository) ClosedPeriodTeachers(ctx context.Context, centerID uuid.UUID, year, month int) (map[uuid.UUID]struct{}, error) {
+	var rows []struct {
+		TeacherID uuid.UUID
+	}
+	err := database.FromContext(ctx, r.db).Raw(`
+		SELECT teacher_id FROM billing_periods
+		WHERE center_id = ? AND year = ? AND month = ? AND status = 'closed' AND deleted_at IS NULL`,
+		centerID, year, month).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID]struct{}, len(rows))
+	for _, row := range rows {
+		out[row.TeacherID] = struct{}{}
+	}
+	return out, nil
+}
+
+func (r *gormRepository) SessionStats(ctx context.Context, centerID uuid.UUID, sessionIDs []uuid.UUID) (map[uuid.UUID]SessionStatsRow, error) {
+	out := make(map[uuid.UUID]SessionStatsRow, len(sessionIDs))
+	if len(sessionIDs) == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		SessionID uuid.UUID
+		SessionStatsRow
+	}
+	// Estimated revenue only materialises once the session is confirmed;
+	// billable absences still bill.
+	err := database.FromContext(ctx, r.db).Raw(`
+		SELECT s.id AS session_id,
+			COUNT(ar.id) AS total,
+			COUNT(ar.id) FILTER (WHERE ar.status = 'present') AS present,
+			COALESCE(SUM(e.unit_price) FILTER (
+				WHERE ar.billable AND s.attendance_confirmed_at IS NOT NULL), 0) AS estimated
+		FROM class_sessions s
+		LEFT JOIN attendance_records ar ON ar.session_id = s.id AND ar.center_id = s.center_id
+			AND ar.deleted_at IS NULL
+		LEFT JOIN enrollments e ON e.id = ar.enrollment_id AND e.center_id = ar.center_id
+			AND e.deleted_at IS NULL
+		WHERE s.center_id = ? AND s.id IN ? AND s.deleted_at IS NULL
+		GROUP BY s.id`, centerID, sessionIDs).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		out[row.SessionID] = row.SessionStatsRow
+	}
+	return out, nil
+}
+
+func (r *gormRepository) SessionInvoiced(ctx context.Context, centerID, sessionID uuid.UUID) (*int64, error) {
+	var row struct {
+		Covered bool
+		Total   int64
+	}
+	// A record's unit price counts once its enrollment carries a non-void
+	// line in a closed period covering the session's date. Session-sourced
+	// adjustments are deliberately NOT added: they exist only as the
+	// reconciler's post-close deltas, and the live records already embody the
+	// edited state those deltas paid for — adding both would double-count.
+	// No covering closed period for the session teacher's books → the number
+	// is not final → nil.
+	res := database.FromContext(ctx, r.db).Raw(`
+		SELECT EXISTS (
+			SELECT 1 FROM billing_periods p
+			WHERE p.teacher_id = s.teacher_id AND p.center_id = s.center_id
+				AND p.status = 'closed' AND p.deleted_at IS NULL
+				AND s.session_date BETWEEN p.period_start AND p.period_end
+		) AS covered,
+		(
+			SELECT COALESCE(SUM(e.unit_price), 0)
+			FROM attendance_records ar
+			JOIN enrollments e ON e.id = ar.enrollment_id AND e.center_id = ar.center_id AND e.deleted_at IS NULL
+			WHERE ar.session_id = s.id AND ar.center_id = s.center_id
+				AND ar.deleted_at IS NULL AND ar.billable
+				AND EXISTS (
+					SELECT 1 FROM invoice_lines il
+					JOIN invoices i ON i.id = il.invoice_id AND i.center_id = il.center_id AND i.status <> 'void'
+					JOIN billing_periods p ON p.id = i.period_id AND p.center_id = i.center_id
+						AND p.deleted_at IS NULL AND p.status = 'closed'
+						AND s.session_date BETWEEN p.period_start AND p.period_end
+					WHERE il.enrollment_id = e.id AND il.center_id = e.center_id
+				)
+		) AS total
+		FROM class_sessions s
+		WHERE s.id = ? AND s.center_id = ? AND s.deleted_at IS NULL`,
+		sessionID, centerID).Scan(&row)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return nil, ErrNotFound
+	}
+	if !row.Covered {
+		return nil, nil
+	}
+	return &row.Total, nil
 }
 
 // translateError maps constraint violations onto sentinel errors so callers

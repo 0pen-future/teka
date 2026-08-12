@@ -337,6 +337,49 @@ definitions:
       phone:
         type: string
     type: object
+  centers.OverviewClassResponse:
+    properties:
+      avg_attendance:
+        description: AvgAttendance is attendance records per held session.
+        type: number
+      class_id:
+        type: string
+      class_name:
+        type: string
+      estimated_revenue:
+        description: |-
+          EstimatedRevenue sums unit prices of billable records on confirmed
+          held sessions — the number that moves as attendance is taken.
+        type: integer
+      invoiced_revenue:
+        description: |-
+          InvoicedRevenue is the closed-books number: non-void invoice lines
+          plus session-attributed adjustments of the month's closed period.
+          Null until the teacher's period for the month is closed. Adjustments
+          without a source session belong to no class and are excluded here.
+        type: integer
+      present_rate:
+        description: PresentRate is the share of attendance records marked present.
+        type: number
+      retention_rate:
+        description: |-
+          RetentionRate is the share of enrollments active on the month's first
+          day still active on its last day.
+        type: number
+      sessions_held:
+        type: integer
+    type: object
+  centers.OverviewTeacherResponse:
+    properties:
+      classes:
+        items:
+          $ref: '#/definitions/centers.OverviewClassResponse'
+        type: array
+      teacher_id:
+        type: string
+      teacher_name:
+        type: string
+    type: object
   centers.RenameRequest:
     properties:
       name:
@@ -345,6 +388,82 @@ definitions:
         type: string
     required:
     - name
+    type: object
+  centers.SessionAttendanceRow:
+    properties:
+      billable:
+        type: boolean
+      display_note:
+        type: string
+      note:
+        type: string
+      status:
+        type: string
+      student_id:
+        type: string
+      student_name:
+        type: string
+    type: object
+  centers.SessionDetailResponse:
+    properties:
+      attendance:
+        items:
+          $ref: '#/definitions/centers.SessionAttendanceRow'
+        type: array
+      estimated_revenue:
+        type: integer
+      invoiced_revenue:
+        description: |-
+          InvoicedRevenue is null while no closed billing period covers the
+          session's date.
+        type: integer
+      session:
+        $ref: '#/definitions/centers.SessionSummaryResponse'
+    type: object
+  centers.SessionRowResponse:
+    properties:
+      attendance_total:
+        type: integer
+      estimated_revenue:
+        type: integer
+      present_count:
+        type: integer
+      session_date:
+        type: string
+      session_id:
+        type: string
+      status:
+        type: string
+    type: object
+  centers.SessionSummaryResponse:
+    properties:
+      attendance_confirmed_at:
+        type: string
+      class_id:
+        type: string
+      class_name:
+        type: string
+      id:
+        type: string
+      session_date:
+        type: string
+      status:
+        type: string
+      teacher_id:
+        type: string
+    type: object
+  centers.TeacherStatsResponse:
+    properties:
+      active_classes:
+        description: ActiveClasses counts their live classes with status active.
+        type: integer
+      active_students:
+        description: |-
+          ActiveStudents counts distinct students with an enrollment of theirs
+          active today.
+        type: integer
+      teacher:
+        $ref: '#/definitions/centers.MemberResponse'
     type: object
   classes.ClassResponse:
     properties:
@@ -2217,6 +2336,286 @@ paths:
       summary: Generate statements for a billing period
       tags:
       - statements
+  /centers/dashboard/overview:
+    get:
+      parameters:
+      - description: month as YYYY-MM, default current month
+        in: query
+        name: month
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/centers.OverviewTeacherResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: not the owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: invalid month
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 'Dashboard: monthly per-class KPIs grouped by teacher'
+      tags:
+      - centers
+  /centers/dashboard/sessions/{sessionId}:
+    get:
+      parameters:
+      - description: session id
+        format: uuid
+        in: path
+        name: sessionId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/centers.SessionDetailResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: not the owner, or session outside this center
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 'Dashboard: get one session with its attendance sheet'
+      tags:
+      - centers
+  /centers/dashboard/teachers:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/centers.TeacherStatsResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: not the owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 'Dashboard: list teachers with activity counts'
+      tags:
+      - centers
+  /centers/dashboard/teachers/{teacherId}/classes:
+    get:
+      parameters:
+      - description: teacher id
+        format: uuid
+        in: path
+        name: teacherId
+        required: true
+        type: string
+      - description: active (default), archived, or all
+        in: query
+        name: status
+        type: string
+      - description: page number, default 1
+        in: query
+        name: page
+        type: integer
+      - description: page size, default 20
+        in: query
+        name: per_page
+        type: integer
+      - description: 'sort key: name, start_date, created_at'
+        in: query
+        name: sort
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/classes.ClassResponse'
+                  type: array
+                meta:
+                  $ref: '#/definitions/response.Meta'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: not the owner, or teacher not in this center
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: invalid status
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 'Dashboard: list a teacher''s classes'
+      tags:
+      - centers
+  /centers/dashboard/teachers/{teacherId}/classes/{classId}/sessions:
+    get:
+      parameters:
+      - description: teacher id
+        format: uuid
+        in: path
+        name: teacherId
+        required: true
+        type: string
+      - description: class id
+        format: uuid
+        in: path
+        name: classId
+        required: true
+        type: string
+      - description: range start, YYYY-MM-DD
+        in: query
+        name: from
+        required: true
+        type: string
+      - description: range end, YYYY-MM-DD
+        in: query
+        name: to
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/centers.SessionRowResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: not the owner, or ids outside this center
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: invalid range
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 'Dashboard: list a class''s sessions with attendance stats'
+      tags:
+      - centers
   /centers/join:
     post:
       consumes:

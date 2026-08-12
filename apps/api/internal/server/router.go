@@ -134,6 +134,12 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	attendanceSvc := attendance.NewService(attendance.NewRepository(db), enrollmentsSvc, sessionsSvc, txMgr)
 	attendance.RegisterRoutes(v1, attendance.NewHandler(attendanceSvc), requireAuth, resolveScope)
 
+	// The owner dashboard reads through classes, sessions, and attendance
+	// (ClassReader, SessionReader, AttendanceReader), so it mounts here —
+	// after all three exist — rather than next to the membership routes.
+	centersDashboard := centers.NewDashboard(centers.NewRepository(db), classesSvc, sessionsSvc, attendanceSvc)
+	centers.RegisterDashboardRoutes(v1, centers.NewDashboardHandler(centersDashboard), requireAuth, resolveScope)
+
 	// billing consumes attendance through billing.AttendanceSource — the
 	// batched per-enrollment tally — rather than re-aggregating
 	// attendance_records itself, sessions through billing.PendingSource — the
