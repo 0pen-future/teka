@@ -67,6 +67,40 @@ func TestListRangeGeneratesAndIsIdempotent(t *testing.T) {
 	require.EqualValues(t, 4, count)
 }
 
+// TestListRangeReadOnlyNeverInserts pins the read-only listing contract: it
+// returns only rows that already exist and never materialises missing dates —
+// a viewer's GET must not write, unlike ListRange's generate-then-list.
+func TestListRangeReadOnlyNeverInserts(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
+	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-01-01")))
+	testutil.Schedule(t, db, class, 2, "18:00")
+
+	// Nothing generated yet: the missing Tuesdays must stay missing.
+	empty, err := svc.ListRangeReadOnly(ctx, sc, class.ID, date("2026-01-01"), date("2026-01-31"))
+	require.NoError(t, err)
+	require.Empty(t, empty)
+
+	var count int64
+	require.NoError(t, db.Table("class_sessions").
+		Where("class_id = ?", class.ID).Count(&count).Error)
+	require.Zero(t, count, "a read-only listing must not insert sessions")
+
+	// After a real generation the read-only path sees the same rows.
+	generated, err := svc.ListRange(ctx, sc, class.ID, date("2026-01-01"), date("2026-01-31"))
+	require.NoError(t, err)
+	readBack, err := svc.ListRangeReadOnly(ctx, sc, class.ID, date("2026-01-01"), date("2026-01-31"))
+	require.NoError(t, err)
+	require.Len(t, readBack, len(generated))
+
+	_, err = svc.ListRangeReadOnly(ctx, sc, class.ID, date("2026-01-31"), date("2026-01-01"))
+	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code,
+		"an inverted range must fail the same validation as ListRange")
+}
+
 // TestConcurrentGenerationInsertsExactlyOneRowPerDate empirically verifies
 // that clause.OnConflict{TargetWhere: "deleted_at IS NULL"} targets the
 // partial unique index uq_class_sessions_per_day: two goroutines racing to

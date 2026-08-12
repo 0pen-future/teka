@@ -155,6 +155,22 @@ func (s *Service) ListRange(ctx context.Context, sc authctx.Scope, classID uuid.
 	return details, nil
 }
 
+// ListRangeReadOnly returns a class's already-materialised sessions in
+// [from, to] without generating missing ones — the listing path for viewers
+// (an owner browsing a member's calendar) whose GET must never write. It
+// deliberately skips toDetail's roster lookup: callers that need per-session
+// student counts batch them on their side instead of paying one query per row.
+func (s *Service) ListRangeReadOnly(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]Row, error) {
+	if to.Before(from) {
+		return nil, apperror.Invalid("validation failed", map[string]string{"to": "must not be before from"})
+	}
+	rows, err := s.repo.ListByClassAndRange(ctx, sc, classID, from, to)
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+	return rows, nil
+}
+
 // ListPending returns the teacher's unconfirmed past sessions — the feed the
 // dashboard's pending-attendance warning renders from. "Past" is evaluated
 // against today in the teacher's timezone (teachers.Timezone), not the
