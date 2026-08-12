@@ -63,23 +63,39 @@ transaction. Services own transaction boundaries.
 
 ## Tenancy
 
-Every domain table carries a `teacher_id`; the composite foreign keys in the
-schema stop cross-teacher **writes**, but nothing except a `WHERE` clause stops
-cross-teacher **reads**. Two rules, applied without exception:
+The tenant is the **center** (migration 000007). Every domain table carries a
+`center_id`; `teacher_id` remains as attribution within the center. Composite
+foreign keys `(id, center_id)` stop cross-center **writes**, but nothing except
+a `WHERE` clause stops cross-center **reads** — and teacher-vs-teacher
+isolation inside one center exists *only* at the query layer. Rules, applied
+without exception:
 
-- Handlers learn the tenant only from `authctx.TeacherID(c)` — never from a
-  request body, query string, or path segment. A client-supplied `teacher_id`
-  is an authorization bypass, and it looks completely ordinary in a diff.
-- Every repository over a `teacher_id` table funnels reads through a `scoped`
-  helper (reference implementation:
-  `apps/api/internal/features/teachers/repository.go`):
+- Handlers learn the tenant only from `authctx.ScopeFrom(c)` — never from a
+  request body, query string, or path segment. A client-supplied `center_id`
+  or `teacher_id` is an authorization bypass, and it looks completely ordinary
+  in a diff.
+- `Scope{TeacherID, CenterID, IsOwner}` is resolved fresh from the database on
+  every request by `middleware.ResolveScope` and never cached in the JWT, so a
+  membership change (kick, leave, join) takes effect on the very next request.
+- Every repository over a tenant table funnels reads through a `scoped`
+  helper: always filter by center; non-owners additionally filter by their own
+  `teacher_id` (reference implementation:
+  `apps/api/internal/features/students/repository.go`):
 
 ```go
-// Every read is scoped to one teacher and skips soft-deleted rows.
-func (r *gormRepository) scoped(ctx context.Context, teacherID uuid.UUID) *gorm.DB {
-    return database.FromContext(ctx, r.db).Where("teacher_id = ?", teacherID)
+// scoped returns a query bound to one center. An owner sees every student in
+// their center; a member sees only the rows they created themselves.
+func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+    q := database.FromContext(ctx, r.db).Where("students.center_id = ?", sc.CenterID)
+    if !sc.IsOwner {
+        q = q.Where("students.teacher_id = ?", sc.TeacherID)
+    }
+    return q
 }
 ```
+
+- Writes keep the invariant `teacher_id = $self` for the teacher role; owners
+  may write on behalf of any teacher in their center.
 
 `deleted_at IS NULL` comes free from `gorm.DeletedAt` on model-based queries;
 raw SQL and `Table()` queries must add it by hand. Postgres row-level security
