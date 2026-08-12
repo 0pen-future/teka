@@ -1,4 +1,10 @@
-import { BookUserIcon, EllipsisIcon, LogOutIcon, type LucideProps } from "lucide-react";
+import {
+  BookUserIcon,
+  Building2Icon,
+  EllipsisIcon,
+  LogOutIcon,
+  type LucideProps,
+} from "lucide-react";
 import { useState, type ComponentType } from "react";
 import { NavLink, Outlet, Link, useLocation } from "react-router";
 
@@ -48,6 +54,7 @@ function useNavEntries(): NavEntry[] {
       Icon: HvSendIcon,
     },
     { label: "Thu tiền", to: periodId ? `/collections/${periodId}` : null, Icon: HvWalletIcon },
+    { label: "Trung tâm", to: "/center", Icon: Building2Icon },
   ];
 }
 
@@ -57,20 +64,26 @@ function useNavEntries(): NavEntry[] {
  * setup-time Phụ huynh entry live behind the Thêm sheet so the bar holds five
  * slots at 360px.
  */
-const OVERFLOW_LABELS = new Set(["Chốt sổ", "Gửi thông báo", "Phụ huynh"]);
+const OVERFLOW_LABELS = new Set(["Chốt sổ", "Gửi thông báo", "Phụ huynh", "Trung tâm"]);
 
 /**
  * Route families reachable only through the Thêm sheet. Static prefixes, not
  * the entries' `to` values, because the period-scoped links are `null` until
  * the current period resolves — the tab must still light up on their routes.
  */
-const OVERFLOW_PATH_PREFIXES = ["/billing", "/notifications", "/contacts"];
+const OVERFLOW_PATH_PREFIXES = ["/billing", "/notifications", "/contacts", "/center"];
 
 function PendingDot() {
   return <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-coral-400" />;
 }
 
-function SidebarNavItem({ to, label, Icon, pending, onNavigate }: NavEntry & { onNavigate?: () => void }) {
+function SidebarNavItem({
+  to,
+  label,
+  Icon,
+  pending,
+  onNavigate,
+}: NavEntry & { onNavigate?: () => void }) {
   if (!to) {
     return (
       <span

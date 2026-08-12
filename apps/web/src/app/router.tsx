@@ -5,6 +5,7 @@ import { ProtectedRoute } from "@/features/auth";
 import { authRoutes } from "@/features/auth/routes";
 import { attendanceRoutes } from "@/features/attendance/routes";
 import { billingRoutes } from "@/features/billing/routes";
+import { centerRoutes } from "@/features/center/routes";
 import { collectionsRoutes } from "@/features/collections/routes";
 import { dashboardRoutes } from "@/features/dashboard/routes";
 import { profileRoutes } from "@/features/profile/routes";
@@ -41,6 +42,7 @@ export const router = createBrowserRouter([
           ...billingRoutes,
           ...collectionsRoutes,
           ...profileRoutes,
+          ...centerRoutes,
         ],
       },
       {
