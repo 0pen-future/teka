@@ -1,12 +1,12 @@
 ---
 title: "Center Tenancy"
 description: "Chuyển tenant từ teacher sang center: bảng centers mới, re-key toàn schema sang center_id, owner full quyền trong center, teacher/student giữ nguyên hành vi; kèm centers API + UI quản lý trung tâm + dashboard owner"
-status: in-progress
+status: done
 priority: P1
 effort: "9d"
 tags: [api, authz, tenancy, migration, web]
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-08-12
 blockedBy: [260807-1935-zalo-auto-map-contacts]
 ---
 
@@ -48,10 +48,10 @@ Chuyển mô hình tenancy từ **teacher-là-tenant** sang **center-là-tenant*
 | # | Phase | Status |
 |---|-------|--------|
 | 1 | [Phase 1: Centers Migration (re-key center_id)](./phase-01-centers-migration.md) | Done |
-| 2 | [Phase 2: Auth Scope and Centers Feature](./phase-02-auth-scope-and-centers-feature.md) | Pending |
-| 3 | [Phase 3: Backend Re-key Sweep](./phase-03-backend-rekey-sweep.md) | Pending |
-| 4 | [Phase 4: Owner Dashboard API](./phase-04-owner-dashboard-api.md) | Pending |
-| 5 | [Phase 5: Center Management UI](./phase-05-center-management-ui.md) | Pending |
+| 2 | [Phase 2: Auth Scope and Centers Feature](./phase-02-auth-scope-and-centers-feature.md) | Done |
+| 3 | [Phase 3: Backend Re-key Sweep](./phase-03-backend-rekey-sweep.md) | Done |
+| 4 | [Phase 4: Owner Dashboard API](./phase-04-owner-dashboard-api.md) | Done |
+| 5 | [Phase 5: Center Management UI](./phase-05-center-management-ui.md) | Done |
 
 Dependencies: 2←1, 3←2, 4←3, 5←2. Phase 5 (UI) song song được với Phase 3/4.
 
@@ -59,6 +59,7 @@ Dependencies: 2←1, 3←2, 4←3, 5←2. Phase 5 (UI) song song được với 
 
 - **Scope đọc**: owner → `center_id = $ctx.center`; teacher → `center_id = $ctx.center AND teacher_id = $self`. Không query nào thiếu vế center.
 - **Scope ghi**: create luôn gán `teacher_id = $self` cho MỌI role — owner cũng là teacher bình thường với resource của mình, **không tạo hộ** (quyết định validate 260811); owner sửa/xoá được mọi row đã tồn tại trong center. Không endpoint nào nhận `teacher_id`/`center_id` từ request. Composite FK `(teacher_id, center_id) REFERENCES teachers(id, center_id)` vẫn là chốt chặn toàn vẹn DB.
+- **Reference check khi create strip IsOwner** (quyết định review gate 260812): row mới luôn gán caller, nên mọi tham chiếu (class/student/contact) phải là **của chính caller** — owner tham chiếu row của member → 422 y như row lạ; row của member là view-only cho create. `zalo_personal` từ chối kỳ của teacher khác bằng 409 (tài khoản Zalo là cá nhân); owner gửi kỳ member qua kênh manual.
 - **Nguồn scope duy nhất** = `authctx` + membership resolve từ DB mỗi request. Không bao giờ tin `center_id`/`teacher_id` từ request để scope.
 - **GET không được ghi** — carried finding: `sessions.Service.ListRange` generate + INSERT session (`sessions/service.go:75-131`); mọi đường đọc dashboard phải dùng `ListRangeReadOnly`.
 
@@ -73,14 +74,14 @@ Mọi metric lọc `deleted_at IS NULL` trên **từng bảng tham gia** — raw
 
 ## Success Criteria
 
-- [ ] Migration 000007 up/down/up sạch trên DB seed; mỗi teacher hiện có đúng 1 center cá nhân, mọi row nghiệp vụ có `center_id` khớp; `domainTables` + `docs/schema_design.sql` cập nhật
-- [ ] Cross-center deny: mọi endpoint với id thuộc center khác → 403/404/tập rỗng; test phủ từng feature package
-- [ ] Teacher A không thấy dữ liệu teacher B **cùng center** (hành vi cũ giữ nguyên); owner thấy và ghi được cả hai
-- [ ] Remove/kick member hiệu lực ngay request kế tiếp (không cache membership trong JWT)
-- [ ] Đăng ký teacher mới tự tạo center cá nhân; mọi integration test cũ pass sau sweep (fixture thêm center)
+- [x] Migration 000007 up/down/up sạch trên DB seed; mỗi teacher hiện có đúng 1 center cá nhân, mọi row nghiệp vụ có `center_id` khớp; `domainTables` + `docs/schema_design.sql` cập nhật
+- [x] Cross-center deny: mọi endpoint với id thuộc center khác → 403/404/tập rỗng; test phủ từng feature package
+- [x] Teacher A không thấy dữ liệu teacher B **cùng center** (hành vi cũ giữ nguyên); owner thấy và ghi được cả hai
+- [x] Remove/kick member hiệu lực ngay request kế tiếp (không cache membership trong JWT)
+- [x] Đăng ký teacher mới tự tạo center cá nhân; mọi integration test cũ pass sau sweep (fixture thêm center)
 - [ ] Owner dashboard: overview roll-up theo tháng, drill-down teacher → lớp → buổi, hai số doanh thu; GET không ghi row nào (assert COUNT)
 - [ ] Web UI: xem center + members, join theo SĐT owner, rời/remove với confirm; lint + typecheck + vitest pass
-- [ ] Swagger regenerate; `grep authctx.TeacherID` ngoài authctx = 0 sau sweep (thay bằng Scope)
+- [x] Swagger regenerate; `grep authctx.TeacherID` ngoài authctx = 0 sau sweep (hàm đã xoá khỏi authctx, `ScopeFrom` là accessor duy nhất)
 
 ## Open Questions
 
@@ -95,6 +96,13 @@ Mọi metric lọc `deleted_at IS NULL` trên **từng bảng tham gia** — raw
 | Unique nghiệp vụ `contacts(teacher_id, phone)`, `billing_periods(teacher_id, year, month)` | **Giữ per-teacher** — không đổi ngữ nghĩa; 2 teacher cùng center có thể trùng SĐT contact; billing chốt sổ per teacher như hiện tại |
 | Điều kiện join center V1 | **Center cá nhân rỗng mới được join** (không member khác, không classes/students/contacts) — có dữ liệu → 409; chuyển dữ liệu giữa centers là plan riêng |
 | Owner tạo resource hộ teacher khác | **Không tạo hộ** — create luôn gán chính người tạo (owner cũng là teacher); owner chỉ đọc + sửa/xoá row tồn tại của teacher khác. Đơn giản hoá Phase 3: không DTO nào nhận `teacher_id` |
+
+### Session 2 — 260812 (review gate Phase 3, 2 câu H1/M1)
+
+| Câu hỏi | Quyết định user |
+|---|---|
+| Owner tạo enrollment/student tham chiếu class/contact/student của member (row gán owner nhưng nằm ngoài scope member → member không thấy khi điểm danh/billing) | **"Chỉ enroll được vào lớp của mình. Các lớp của teacher khác chỉ được xem"** — reference check khi create strip IsOwner: owner tham chiếu row member → 422; owner với row của chính mình giữ nguyên mọi khả năng |
+| Owner bulk-send `zalo_personal` cho kỳ của member (mapping thuộc scope member → 100% rơi thầm lặng về manual) | Cùng nguyên tắc — từ chối sớm bằng **409** kèm lý do; kỳ của chính owner gửi bình thường; kênh manual cho kỳ member không đổi |
 
 ### Verification Results
 

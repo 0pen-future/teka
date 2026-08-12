@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Owner Dashboard API"
-status: pending
+status: done
 priority: P2
 effort: "1.5d"
 dependencies: [3]
@@ -71,11 +71,13 @@ Errors: `:teacherId` không thuộc center → 403 message chung (không tiết 
 
 ## Success Criteria
 
-- [ ] Toàn bộ authz matrix pass (gồm no-write assert + fixture soft-deleted/cross-center)
-- [ ] Số liệu overview khớp tính tay (sĩ số, present_rate, retention, hai số doanh thu)
-- [ ] Không handler dashboard nào ghi DB — enforced bằng test assert COUNT
-- [ ] Roll-up 1 tháng × 10 teacher × 20 lớp < 500ms trên seed local (không N+1); drill-down sessions bị chặn số query
-- [ ] Swagger cập nhật
+- [x] Toàn bộ authz matrix pass (gồm no-write assert + fixture soft-deleted/cross-center, và test HTTP e2e: 401/403/422 đúng thứ tự authz trước validation)
+- [x] Số liệu overview khớp tính tay (sĩ số, present_rate, retention, hai số doanh thu)
+- [x] Không handler dashboard nào ghi DB — enforced bằng test assert COUNT
+- [x] Không N+1: Teachers 1 query, Overview 3, ClassSessions 3, Session ~8 hằng số (reviewer xác nhận)
+- [x] Swagger cập nhật (5 route dashboard)
+
+Kết quả chi tiết: `plans/reports/phase-260812-0723-owner-dashboard-api.md` (gồm quyết định ngữ nghĩa `invoiced_revenue` tầng buổi — bỏ vế adjustment nguồn buổi để tránh đếm trùng với record live sau reconciliation).
 
 ## Risk Assessment
 

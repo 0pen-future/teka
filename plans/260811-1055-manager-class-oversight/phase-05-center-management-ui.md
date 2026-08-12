@@ -1,7 +1,7 @@
 ---
 phase: 5
 title: "Center Management UI"
-status: pending
+status: done
 priority: P2
 effort: "1.5d"
 dependencies: [2]
@@ -65,11 +65,13 @@ Trang `Trung tâm` (`/center`):
 
 ## Success Criteria
 
-- [ ] Member list đúng theo role; nút owner-only không render cho member (và backend 403 nếu gọi lách)
-- [ ] Join thành công → toàn bộ app phản ánh center mới không cần đăng nhập lại (cache invalidate sạch)
-- [ ] Rời/remove: confirm nêu rõ dữ liệu ở lại; thao tác lần 2 (404) hội tụ về trạng thái "đã rời", không lỗi đỏ
-- [ ] Ba nhánh lỗi join 404/409/422 hiện message tiếng Việt đúng ngữ nghĩa
-- [ ] Lint + typecheck + vitest pass; route lazy-load đúng pattern
+- [x] Member list đúng theo role; nút owner-only không render cho member (và backend 403 nếu gọi lách)
+- [x] Join thành công → toàn bộ app phản ánh center mới không cần đăng nhập lại (dùng `removeQueries()` — evict hẳn thay vì invalidate, vì invalidate không xoá data inactive; quyết định theo review)
+- [x] Rời/remove: confirm nêu rõ dữ liệu ở lại; thao tác lần 2 (404) hội tụ về trạng thái "đã rời", không lỗi đỏ
+- [x] Ba nhánh lỗi join 404/409/422 hiện message tiếng Việt đúng ngữ nghĩa (copy 409 kèm gợi ý thử lại — cùng code cho race retryable)
+- [x] Lint + typecheck + vitest pass (227/227); route lazy-load đúng pattern
+
+Sai khác so với thiết kế: join là form inline trong section (`join-center-form.tsx`) thay vì dialog — section đã là ngữ cảnh đủ, bớt một lớp modal. Kết quả chi tiết + xử lý review: `plans/reports/phase-260812-0752-center-management-ui.md`.
 
 ## Risk Assessment
 

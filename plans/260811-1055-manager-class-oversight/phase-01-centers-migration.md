@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Centers Migration (re-key center_id)"
-status: completed
+status: done
 priority: P1
 effort: "1.5d"
 dependencies: []
