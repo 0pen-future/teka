@@ -1,7 +1,10 @@
 import {
+  BookOpenIcon,
   BookUserIcon,
   Building2Icon,
+  ClipboardCheckIcon,
   EllipsisIcon,
+  IdCardIcon,
   LogOutIcon,
   type LucideProps,
 } from "lucide-react";
@@ -19,8 +22,8 @@ import {
 } from "@/components/hv";
 import { useAuthStore, useLogout } from "@/features/auth";
 import { useCurrentPeriod } from "@/features/billing";
-import { useCenter } from "@/features/center";
 import { usePendingSessions } from "@/features/dashboard/hooks/use-dashboard";
+import { useCenterContext, usePendingPlanCount } from "@/features/teaching";
 import { cn, nameInitial } from "@/lib/utils";
 
 interface NavEntry {
@@ -48,6 +51,8 @@ interface NavGroup {
 function useNavGroups(): NavGroup[] {
   const { data: period } = useCurrentPeriod();
   const { data: pendingSessionsResponse } = usePendingSessions();
+  const { centerId, isOwner, isResolved } = useCenterContext();
+  const pendingPlanCount = usePendingPlanCount(centerId);
   const periodId = period?.id ?? null;
   const hasPending = (pendingSessionsResponse?.total ?? 0) > 0;
 
@@ -57,6 +62,8 @@ function useNavGroups(): NavGroup[] {
       header: "Dạy học",
       entries: [
         { label: "Điểm danh", to: "/sessions", Icon: HvCheckIcon, pending: hasPending },
+        { label: "Quản lý lớp học", to: "/classbook", Icon: BookOpenIcon },
+        { label: "Hồ sơ học sinh", to: "/records", Icon: IdCardIcon },
         { label: "Lớp & học sinh", to: "/students", Icon: HvUsersIcon },
         { label: "Phụ huynh", to: "/contacts", Icon: BookUserIcon },
       ],
@@ -75,7 +82,21 @@ function useNavGroups(): NavGroup[] {
     },
     {
       header: "Trung tâm",
-      entries: [{ label: "Cài đặt trung tâm", to: "/center", Icon: Building2Icon }],
+      entries: [
+        // Owner-gated, and only after /centers/me resolves — rendering it
+        // optimistically would flash the entry for members on load.
+        ...(isResolved && isOwner
+          ? [
+              {
+                label: "Duyệt giáo án",
+                to: "/lesson-plans",
+                Icon: ClipboardCheckIcon,
+                pending: pendingPlanCount > 0,
+              },
+            ]
+          : []),
+        { label: "Cài đặt trung tâm", to: "/center", Icon: Building2Icon },
+      ],
     },
   ];
 }
@@ -86,14 +107,30 @@ function useNavGroups(): NavGroup[] {
  * (Chốt sổ, Gửi thông báo) and the setup-time Phụ huynh and Cài đặt trung tâm
  * entries live behind the Thêm sheet so the bar holds five slots at 360px.
  */
-const OVERFLOW_LABELS = new Set(["Chốt sổ", "Gửi thông báo", "Phụ huynh", "Cài đặt trung tâm"]);
+const OVERFLOW_LABELS = new Set([
+  "Quản lý lớp học",
+  "Hồ sơ học sinh",
+  "Chốt sổ",
+  "Gửi thông báo",
+  "Phụ huynh",
+  "Duyệt giáo án",
+  "Cài đặt trung tâm",
+]);
 
 /**
  * Route families reachable only through the Thêm sheet. Static prefixes, not
  * the entries' `to` values, because the period-scoped links are `null` until
  * the current period resolves — the tab must still light up on their routes.
  */
-const OVERFLOW_PATH_PREFIXES = ["/billing", "/notifications", "/contacts", "/center"];
+const OVERFLOW_PATH_PREFIXES = [
+  "/classbook",
+  "/records",
+  "/billing",
+  "/notifications",
+  "/contacts",
+  "/lesson-plans",
+  "/center",
+];
 
 function PendingDot() {
   return <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-coral-400" />;
@@ -249,15 +286,13 @@ function centerInitial(name: string) {
 
 /**
  * Prototype tenant card under the logo: center initial disc, center name,
- * and the caller's role. `GET /centers/me` is role-shaped with no
- * discriminant, so owner-ness is `"members" in data` (owner shape only).
- * While the query resolves (or after it fails) the card keeps its box with
- * placeholder text so the nav below never shifts.
+ * and the caller's role — derived through `useCenterContext`, the one owner
+ * of the role-shaped `/centers/me` narrowing. While the query resolves (or
+ * after it fails) the card keeps its box with placeholder text so the nav
+ * below never shifts.
  */
 function CenterCard() {
-  const { data } = useCenter();
-  const isOwner = data ? "members" in data : false;
-  const name = data ? ("members" in data ? data.center.name : data.center_name) : null;
+  const { centerName: name, isOwner } = useCenterContext();
   return (
     <div className="mx-4 mb-2 flex items-center gap-2.5 rounded-2xl border-[1.5px] border-line-200 bg-cream-100 px-2.5 py-2">
       <span
@@ -415,7 +450,9 @@ export function DashboardLayout() {
           </div>
         </div>
         <CenterCard />
-        <nav aria-label="Main" className="flex flex-1 flex-col px-4">
+        {/* min-h-0 + overflow so short viewports scroll the nav instead of
+            clipping the period card and footer below it. */}
+        <nav aria-label="Main" className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4">
           {groups.map((group) => (
             <div
               key={group.header ?? "top"}
@@ -443,7 +480,10 @@ export function DashboardLayout() {
 
       <aside className="hidden md:flex md:w-[72px] md:shrink-0 md:flex-col md:items-center md:border-r md:border-line-200 md:bg-white lg:hidden">
         <img src="/favicon.svg" alt="Teka" className="mt-6 h-9 w-9 shrink-0" />
-        <nav aria-label="Main" className="flex flex-1 flex-col items-center gap-4 pb-6 pt-4">
+        <nav
+          aria-label="Main"
+          className="flex min-h-0 flex-1 flex-col items-center gap-4 overflow-y-auto pb-6 pt-4"
+        >
           {groups.map((group) => (
             <div
               key={group.header ?? "top"}

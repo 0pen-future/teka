@@ -4,11 +4,23 @@ import { http, HttpResponse } from "msw";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
-import { API_URL, fail } from "@/test/msw/handlers";
+import {
+  lessonPlanKey,
+  resetTeachingStoreForTests,
+  updateTeachingState,
+} from "@/features/teaching";
+import { API_URL, fail, ok } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
 
 import { DashboardLayout } from "../dashboard-layout";
+
+/**
+ * Teaching-store key for the default /centers/me handler: the center NAME,
+ * not the id — the member shape exposes no id, so the name is the one value
+ * both roles share and the review loop needs a role-independent key.
+ */
+const TEACHING_CENTER_KEY = "Trung Tâm Bình Minh";
 
 function renderLayout(route = "/") {
   signInAs(testPrimaryTeacher);
@@ -26,6 +38,8 @@ async function findBottomNav() {
 
 afterEach(() => {
   useAuthStore.getState().clearSession();
+  resetTeachingStoreForTests();
+  localStorage.clear();
 });
 
 describe("Phụ huynh nav entry", () => {
@@ -61,12 +75,13 @@ describe("grouped sidebar", () => {
   it("renders each prototype section as a group owning its entries", async () => {
     renderLayout();
     const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
-    await within(sidebarNav).findByRole("link", { name: "Phụ huynh" });
+    // Duyệt giáo án is owner-gated behind /centers/me — the slowest entry to appear.
+    await within(sidebarNav).findByRole("link", { name: "Duyệt giáo án" });
 
     const expected: Record<string, string[]> = {
-      "Dạy học": ["Điểm danh", "Lớp & học sinh", "Phụ huynh"],
+      "Dạy học": ["Điểm danh", "Quản lý lớp học", "Hồ sơ học sinh", "Lớp & học sinh", "Phụ huynh"],
       "Học phí": ["Chốt sổ", "Gửi thông báo", "Thu tiền"],
-      "Trung tâm": ["Cài đặt trung tâm"],
+      "Trung tâm": ["Duyệt giáo án", "Cài đặt trung tâm"],
     };
     for (const [header, labels] of Object.entries(expected)) {
       const group = within(sidebarNav).getByRole("group", { name: header });
@@ -149,6 +164,28 @@ describe("bottom tab bar", () => {
     expect(moreTab).not.toHaveClass("text-mint-600");
   });
 
+  it("lists the teaching v2 entries inside the Thêm sheet", async () => {
+    const user = userEvent.setup();
+    renderLayout();
+    const { moreTab } = await findBottomNav();
+
+    await user.click(moreTab);
+    const sheet = await screen.findByRole("dialog");
+
+    expect(within(sheet).getByRole("link", { name: "Quản lý lớp học" })).toHaveAttribute(
+      "href",
+      "/classbook",
+    );
+    expect(within(sheet).getByRole("link", { name: "Hồ sơ học sinh" })).toHaveAttribute(
+      "href",
+      "/records",
+    );
+    expect(await within(sheet).findByRole("link", { name: "Duyệt giáo án" })).toHaveAttribute(
+      "href",
+      "/lesson-plans",
+    );
+  });
+
   it("renders period-scoped sheet entries disabled while no period resolves", async () => {
     server.use(
       http.post(`${API_URL}/billing-periods`, () =>
@@ -167,5 +204,83 @@ describe("bottom tab bar", () => {
     expect(within(sheet).queryByRole("link", { name: "Gửi thông báo" })).not.toBeInTheDocument();
     // Phụ huynh is not period-scoped and stays a live link.
     expect(within(sheet).getByRole("link", { name: "Phụ huynh" })).toBeInTheDocument();
+  });
+});
+
+describe("teaching v2 nav", () => {
+  it("orders Dạy học per the prototype and links the new entries", async () => {
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+    await within(sidebarNav).findByRole("link", { name: "Quản lý lớp học" });
+
+    const group = within(sidebarNav).getByRole("group", { name: "Dạy học" });
+    const labels = within(group)
+      .getAllByRole("link")
+      .map((link) => link.textContent);
+    expect(labels).toEqual([
+      "Điểm danh",
+      "Quản lý lớp học",
+      "Hồ sơ học sinh",
+      "Lớp & học sinh",
+      "Phụ huynh",
+    ]);
+    expect(within(group).getByRole("link", { name: "Quản lý lớp học" })).toHaveAttribute(
+      "href",
+      "/classbook",
+    );
+    expect(within(group).getByRole("link", { name: "Hồ sơ học sinh" })).toHaveAttribute(
+      "href",
+      "/records",
+    );
+  });
+
+  it("shows Duyệt giáo án to owners before Cài đặt trung tâm", async () => {
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+    const link = await within(sidebarNav).findByRole("link", { name: "Duyệt giáo án" });
+    expect(link).toHaveAttribute("href", "/lesson-plans");
+
+    const group = within(sidebarNav).getByRole("group", { name: "Trung tâm" });
+    const labels = within(group)
+      .getAllByRole("link")
+      .map((l) => l.textContent);
+    expect(labels).toEqual(["Duyệt giáo án", "Cài đặt trung tâm"]);
+  });
+
+  it("hides Duyệt giáo án from non-owner members", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh" })),
+      ),
+    );
+    renderLayout();
+    // Member role label proves /centers/me resolved member-shaped.
+    await screen.findByText("Giáo viên");
+    expect(screen.queryByRole("link", { name: "Duyệt giáo án" })).not.toBeInTheDocument();
+  });
+
+  it("marks Duyệt giáo án pending while a plan awaits review", async () => {
+    updateTeachingState(TEACHING_CENTER_KEY, (state) => ({
+      ...state,
+      lessonPlans: {
+        [lessonPlanKey("class-1", 0)]: {
+          goal: "Ôn tập",
+          activities: [],
+          homework: "",
+          status: "pending",
+        },
+      },
+    }));
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+    const link = await within(sidebarNav).findByRole("link", { name: "Duyệt giáo án" });
+    expect(link.querySelector(".bg-coral-400")).not.toBeNull();
+  });
+
+  it("shows no pending dot on Duyệt giáo án when nothing awaits review", async () => {
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+    const link = await within(sidebarNav).findByRole("link", { name: "Duyệt giáo án" });
+    expect(link.querySelector(".bg-coral-400")).toBeNull();
   });
 });

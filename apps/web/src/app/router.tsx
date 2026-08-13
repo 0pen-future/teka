@@ -12,6 +12,7 @@ import { invitationRoutes } from "@/features/invitation";
 import { profileRoutes } from "@/features/profile/routes";
 import { rosterRoutes } from "@/features/roster/routes";
 import { statementRoutes } from "@/features/statement";
+import { teachingRoutes } from "@/features/teaching/routes";
 import { AuthLayout } from "@/layouts/auth-layout";
 import { DashboardLayout } from "@/layouts/dashboard-layout";
 import { PublicLayout } from "@/layouts/public-layout";
@@ -38,6 +39,7 @@ export const router = createBrowserRouter([
         path: "/",
         children: [
           ...dashboardRoutes,
+          ...teachingRoutes,
           ...rosterRoutes,
           ...attendanceRoutes,
           ...billingRoutes,
