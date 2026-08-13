@@ -6,20 +6,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// JoinRequest is the payload for POST /centers/join. The phone is the join
-// handshake: the owner hands their number to the teacher, the teacher
-// initiates. Accepts local (0xxxxxxxxx) or E.164 (+84xxxxxxxxx) form.
-type JoinRequest struct {
-	OwnerPhone string `json:"owner_phone" binding:"required,vnphone"`
-}
-
-// JoinResponse confirms the move; nothing about the center beyond its id —
-// the new member reads the rest through GET /centers/me.
-type JoinResponse struct {
-	CenterID uuid.UUID `json:"center_id"`
-	JoinedAt time.Time `json:"joined_at"`
-}
-
 // RenameRequest is the payload for PATCH /centers/me. Max mirrors the
 // VARCHAR(255) column.
 type RenameRequest struct {
@@ -41,10 +27,17 @@ type MemberResponse struct {
 	IsOwner  bool      `json:"is_owner"`
 }
 
-// MeResponse is the body of GET /centers/me.
+// MeResponse is the body of GET /centers/me for the owner: the center plus
+// its full member roster.
 type MeResponse struct {
 	Center  CenterResponse   `json:"center"`
 	Members []MemberResponse `json:"members"`
+}
+
+// MemberMeResponse is the body of GET /centers/me for a non-owner member —
+// the roster is owner-only data, so a member sees only the center's name.
+type MemberMeResponse struct {
+	CenterName string `json:"center_name"`
 }
 
 // TeacherStatsResponse is one roster row of GET /centers/dashboard/teachers:

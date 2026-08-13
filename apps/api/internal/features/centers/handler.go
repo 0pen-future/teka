@@ -37,9 +37,11 @@ func (h *Handler) scope(c *gin.Context) (authctx.Scope, bool) {
 	return s, true
 }
 
-// me returns the caller's center and member roster.
+// me returns the caller's center read model: the owner sees the full member
+// roster (MeResponse), a member sees only the center's name (MemberMeResponse).
 //
 //	@Summary		Get my center
+//	@Description	Owner gets the full member roster; a non-owner member gets only the center's name.
 //	@Tags			centers
 //	@Produce		json
 //	@Success		200	{object}	response.Envelope{data=MeResponse}
@@ -94,49 +96,19 @@ func (h *Handler) rename(c *gin.Context) {
 	response.OK(c, http.StatusOK, resp)
 }
 
-// join moves the caller into the center owned by the phone's teacher.
+// removeMember offboards a member: owner-only. Closes the membership,
+// disables the account, and revokes its refresh tokens — no new center is
+// created.
 //
-//	@Summary		Join a center by its owner's phone
-//	@Tags			centers
-//	@Accept			json
-//	@Produce		json
-//	@Param			request	body		JoinRequest	true	"owner phone"
-//	@Success		201		{object}	response.Envelope{data=JoinResponse}
-//	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
-//	@Failure		404		{object}	response.Envelope{error=response.ErrorBody}	"no joinable center behind that phone"
-//	@Failure		409		{object}	response.Envelope{error=response.ErrorBody}	"current center not empty, or already a member"
-//	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}	"validation failed or joining own center"
-//	@Security		BearerAuth
-//	@Router			/centers/join [post]
-func (h *Handler) join(c *gin.Context) {
-	scope, ok := h.scope(c)
-	if !ok {
-		return
-	}
-	var req JoinRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Err(c, validation.BindError(err))
-		return
-	}
-	resp, err := h.svc.Join(c.Request.Context(), scope, req)
-	if err != nil {
-		response.Err(c, err)
-		return
-	}
-	response.OK(c, http.StatusCreated, resp)
-}
-
-// removeMember ends a membership: owner removes a member, or a member leaves.
-//
-//	@Summary		Remove a member (or leave the center)
+//	@Summary		Remove a member (owner-only)
 //	@Tags			centers
 //	@Produce		json
 //	@Param			teacherId	path	string	true	"teacher id"	format(uuid)
 //	@Success		204
 //	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
-//	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}	"neither owner nor self"
+//	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}	"not the owner"
 //	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}	"not a member of this center"
-//	@Failure		422	{object}	response.Envelope{error=response.ErrorBody}	"owner cannot leave"
+//	@Failure		422	{object}	response.Envelope{error=response.ErrorBody}	"owner cannot remove themselves"
 //	@Security		BearerAuth
 //	@Router			/centers/me/members/{teacherId} [delete]
 func (h *Handler) removeMember(c *gin.Context) {

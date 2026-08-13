@@ -4,7 +4,6 @@ package centers_test
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -34,11 +33,25 @@ import (
 	"teka/apps/api/internal/testutil"
 )
 
+// noopDMSender satisfies auth.ResetDMSender for tests in this package that
+// never exercise the forgot-password DM path — every call fails closed with
+// ok=false so ForgotPassword's generic no-op branch is taken.
+type noopDMSender struct{}
+
+func (noopDMSender) LookupPhone(_ context.Context, _ uuid.UUID, _ string) (string, bool, error) {
+	return "", false, nil
+}
+
+func (noopDMSender) SendDM(_ context.Context, _ uuid.UUID, _, _ string) (string, error) {
+	return "", nil
+}
+
 type env struct {
 	db          *gorm.DB
 	tx          database.TxManager
 	teachersSvc *teachers.Service
 	centersSvc  *centers.Service
+	authSvc     *auth.Service
 }
 
 func newEnv(t *testing.T) *env {
@@ -46,9 +59,17 @@ func newEnv(t *testing.T) *env {
 	db := testutil.StartPostgres(t)
 	txMgr := database.NewTxManager(db)
 	teachersSvc := teachers.NewService(teachers.NewRepository(db))
-	centersSvc := centers.NewService(centers.NewRepository(db), teachersSvc, txMgr)
-	teachersSvc.SetCenterProvisioner(centersSvc)
-	return &env{db: db, tx: txMgr, teachersSvc: teachersSvc, centersSvc: centersSvc}
+	centersSvc := centers.NewService(centers.NewRepository(db), txMgr)
+	jwtCfg := config.JWTConfig{Secret: testutil.JWTSecret, AccessTTL: 15 * time.Minute}
+	onboardingCfg := config.OnboardingConfig{ResetTTL: 48 * time.Hour, ResetCooldown: 15 * time.Minute}
+	authSvc := auth.NewService(teachersSvc, auth.NewRepository(db), auth.NewTokenIssuer(jwtCfg), txMgr,
+		centersSvc, noopDMSender{}, onboardingCfg, "https://app.example.com")
+	// centersSvc consumes authSvc to offboard a removed member (disable +
+	// revoke refresh tokens); teachersSvc consumes it to invalidate old
+	// sessions on reactivate — the same wiring router.go does in production.
+	centersSvc.SetAccountDisabler(authSvc)
+	teachersSvc.SetTokenRevoker(authSvc)
+	return &env{db: db, tx: txMgr, teachersSvc: teachersSvc, centersSvc: centersSvc, authSvc: authSvc}
 }
 
 // scope resolves the caller's scope the way the middleware would, straight
@@ -60,13 +81,13 @@ func (e *env) scope(t *testing.T, teacherID uuid.UUID) authctx.Scope {
 	return s
 }
 
-// join is the happy-path shorthand: teacher joins the center owned by the
-// account with ownerPhone.
-func (e *env) join(t *testing.T, teacherID uuid.UUID, ownerPhone string) *centers.JoinResponse {
+// join is the happy-path shorthand: teacher moves into the center owned by
+// ownerID, via the same direct-insert path other fixtures use — the real
+// production path (an invitation's accept) is exercised in the invitations
+// package; centers tests only need a live membership to already exist.
+func (e *env) join(t *testing.T, teacherID, ownerID uuid.UUID) {
 	t.Helper()
-	resp, err := e.centersSvc.Join(context.Background(), e.scope(t, teacherID), centers.JoinRequest{OwnerPhone: ownerPhone})
-	require.NoError(t, err)
-	return resp
+	testutil.JoinCenter(t, e.db, teacherID, e.scope(t, ownerID).CenterID)
 }
 
 func (e *env) liveMembership(t *testing.T, teacherID uuid.UUID) centers.Member {
@@ -107,35 +128,6 @@ func insertClass(t *testing.T, db *gorm.DB, teacherID, centerID uuid.UUID) uuid.
 	return rowID
 }
 
-func TestCreateTeacherProvisionsPersonalCenter(t *testing.T) {
-	t.Parallel()
-	e := newEnv(t)
-	ctx := context.Background()
-
-	var p *teachers.Profile
-	require.NoError(t, e.tx.WithinTx(ctx, func(ctx context.Context) error {
-		var err error
-		p, err = e.teachersSvc.CreateTeacher(ctx, teachers.CreateRequest{
-			Phone: "0901234567", Password: "password-123", FullName: "Cô Lan",
-		})
-		return err
-	}))
-
-	require.NotEqual(t, uuid.Nil, p.Teacher.CenterID, "new teacher must land in a center")
-
-	var center centers.Center
-	require.NoError(t, e.db.First(&center, "id = ?", p.Teacher.CenterID).Error)
-	require.Equal(t, p.Account.ID, center.OwnerID, "personal center is owned by its teacher")
-	require.Equal(t, "Cô Lan", center.Name)
-
-	m := e.liveMembership(t, p.Account.ID)
-	require.Equal(t, center.ID, m.CenterID)
-
-	s := e.scope(t, p.Account.ID)
-	require.Equal(t, center.ID, s.CenterID)
-	require.True(t, s.IsOwner)
-}
-
 func TestResolveScopeRejectsDeadAccountsAndDeadCenters(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -161,154 +153,6 @@ func TestResolveScopeRejectsDeadAccountsAndDeadCenters(t *testing.T) {
 	_ = teacher
 }
 
-func TestJoinMovesTeacherAndRetiresPersonalCenter(t *testing.T) {
-	t.Parallel()
-	e := newEnv(t)
-
-	owner, ownerTeacher := testutil.Teacher(t, e.db, testutil.WithFullName("Chủ Trung Tâm"))
-	member, memberTeacher := testutil.Teacher(t, e.db, testutil.WithFullName("Giáo Viên B"))
-	oldPersonal := memberTeacher.CenterID
-
-	resp := e.join(t, member.ID, owner.Phone)
-	require.Equal(t, ownerTeacher.CenterID, resp.CenterID)
-	require.False(t, resp.JoinedAt.IsZero())
-
-	var reloaded teachers.Teacher
-	require.NoError(t, e.db.First(&reloaded, "id = ?", member.ID).Error)
-	require.Equal(t, ownerTeacher.CenterID, reloaded.CenterID)
-
-	// Old membership row closed, new one live.
-	var closed centers.Member
-	require.NoError(t, e.db.First(&closed, "teacher_id = ? AND center_id = ?", member.ID, oldPersonal).Error)
-	require.NotNil(t, closed.LeftAt)
-	require.Equal(t, ownerTeacher.CenterID, e.liveMembership(t, member.ID).CenterID)
-
-	// The empty personal center is retired, not deleted.
-	var gone int64
-	require.NoError(t, e.db.Table("centers").Where("id = ? AND deleted_at IS NOT NULL", oldPersonal).Count(&gone).Error)
-	require.EqualValues(t, 1, gone)
-
-	// Membership is effective immediately: the very next scope resolve sees it.
-	s := e.scope(t, member.ID)
-	require.Equal(t, ownerTeacher.CenterID, s.CenterID)
-	require.False(t, s.IsOwner)
-}
-
-func TestJoinRejectsWhenCallerCenterStillHasData(t *testing.T) {
-	t.Parallel()
-	e := newEnv(t)
-	ctx := context.Background()
-
-	owner, _ := testutil.Teacher(t, e.db)
-	caller, callerTeacher := testutil.Teacher(t, e.db)
-
-	contactID := insertContact(t, e.db, caller.ID, callerTeacher.CenterID)
-	studentID := insertStudent(t, e.db, caller.ID, callerTeacher.CenterID, contactID)
-	classID := insertClass(t, e.db, caller.ID, callerTeacher.CenterID)
-
-	join := func() error {
-		_, err := e.centersSvc.Join(ctx, e.scope(t, caller.ID), centers.JoinRequest{OwnerPhone: owner.Phone})
-		return err
-	}
-
-	// Any of the three root business tables blocks the move.
-	require.Equal(t, apperror.CodeConflict, apperror.From(join()).Code)
-	require.NoError(t, e.db.Exec("UPDATE classes SET deleted_at = now() WHERE id = ?", classID).Error)
-	require.Equal(t, apperror.CodeConflict, apperror.From(join()).Code)
-	require.NoError(t, e.db.Exec("UPDATE students SET deleted_at = now() WHERE id = ?", studentID).Error)
-	require.Equal(t, apperror.CodeConflict, apperror.From(join()).Code)
-
-	// Soft-deleted rows do not hold the teacher hostage: once everything live
-	// is gone the join goes through.
-	require.NoError(t, e.db.Exec("UPDATE contacts SET deleted_at = now() WHERE id = ?", contactID).Error)
-	require.NoError(t, join())
-}
-
-func TestJoinErrorMatrix(t *testing.T) {
-	t.Parallel()
-	e := newEnv(t)
-	ctx := context.Background()
-
-	owner, ownerTeacher := testutil.Teacher(t, e.db, testutil.WithFullName("Chủ A"))
-	member, _ := testutil.Teacher(t, e.db, testutil.WithFullName("Thành Viên B"))
-	outsider, _ := testutil.Teacher(t, e.db, testutil.WithFullName("Người Ngoài C"))
-	e.join(t, member.ID, owner.Phone)
-
-	joinAs := func(callerID uuid.UUID, phone string) *apperror.AppError {
-		_, err := e.centersSvc.Join(ctx, e.scope(t, callerID), centers.JoinRequest{OwnerPhone: phone})
-		return apperror.From(err)
-	}
-
-	// Unknown phone → generic 404, indistinguishable from the cases below.
-	require.Equal(t, apperror.CodeNotFound, joinAs(outsider.ID, "0999999999").Code)
-
-	// A teacher who is a plain member owns no live center → same 404.
-	require.Equal(t, apperror.CodeNotFound, joinAs(outsider.ID, member.Phone).Code)
-
-	// Disabled owner → same 404.
-	disabled, _ := testutil.Teacher(t, e.db, testutil.WithStatus(teachers.StatusDisabled))
-	require.Equal(t, apperror.CodeNotFound, joinAs(outsider.ID, disabled.Phone).Code)
-
-	// Joining your own center is a semantic error, not a conflict.
-	require.Equal(t, apperror.CodeValidation, joinAs(outsider.ID, outsider.Phone).Code)
-
-	// Already in that owner's center → 409.
-	require.Equal(t, apperror.CodeConflict, joinAs(member.ID, owner.Phone).Code)
-
-	// A member of another center must leave before joining anywhere else.
-	require.Equal(t, apperror.CodeConflict, joinAs(member.ID, outsider.Phone).Code)
-
-	// An owner whose center still has members cannot walk away into another.
-	_ = ownerTeacher
-	require.Equal(t, apperror.CodeConflict, joinAs(owner.ID, outsider.Phone).Code)
-
-	// Caller-side ineligibility is decided before the phone is even looked
-	// up, so an ineligible caller cannot use the 404-vs-409 split to probe
-	// which phones own live centers: with a nonsense phone they still get
-	// their own 409, not the 404 an eligible caller would see.
-	require.Equal(t, apperror.CodeConflict, joinAs(member.ID, "0999999999").Code)
-	require.Equal(t, apperror.CodeConflict, joinAs(owner.ID, "0999999999").Code)
-}
-
-// TestJoinIgnoresGhostMembers: a member whose account was soft-deleted is
-// gone for good — their leftover teachers row must not hold the owner's
-// center hostage, and the center can still be retired around it.
-func TestJoinIgnoresGhostMembers(t *testing.T) {
-	t.Parallel()
-	e := newEnv(t)
-
-	owner, ownerTeacher := testutil.Teacher(t, e.db)
-	ghost, _ := testutil.Teacher(t, e.db)
-	other, otherTeacher := testutil.Teacher(t, e.db)
-	e.join(t, ghost.ID, owner.Phone)
-	require.NoError(t, e.db.Delete(&teachers.Account{ID: ghost.ID}).Error)
-
-	resp := e.join(t, owner.ID, other.Phone)
-	require.Equal(t, otherTeacher.CenterID, resp.CenterID)
-
-	// The old center is retired even though the ghost's teachers row still
-	// points at it.
-	var retired int64
-	require.NoError(t, e.db.Table("centers").
-		Where("id = ? AND deleted_at IS NOT NULL", ownerTeacher.CenterID).Count(&retired).Error)
-	require.EqualValues(t, 1, retired)
-}
-
-// TestRetireCenterRefusesWhileTeachersRemain pins the row-level guard that
-// keeps the join race from bricking accounts: a center with any live teacher
-// still inside can never be retired, not even by its owner.
-func TestRetireCenterRefusesWhileTeachersRemain(t *testing.T) {
-	t.Parallel()
-	e := newEnv(t)
-	ctx := context.Background()
-
-	owner, ownerTeacher := testutil.Teacher(t, e.db)
-	repo := centers.NewRepository(e.db)
-	err := repo.SoftDeleteCenter(ctx, ownerTeacher.CenterID, owner.ID)
-	require.ErrorIs(t, err, centers.ErrNotFound,
-		"a center whose owner still lives in it must refuse retirement")
-}
-
 func TestMeShowsCenterAndMembers(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -316,12 +160,22 @@ func TestMeShowsCenterAndMembers(t *testing.T) {
 
 	owner, ownerTeacher := testutil.Teacher(t, e.db, testutil.WithFullName("Chủ Trung Tâm"))
 	member, _ := testutil.Teacher(t, e.db, testutil.WithFullName("Giáo Viên B"))
-	e.join(t, member.ID, owner.Phone)
+	e.join(t, member.ID, owner.ID)
 
-	me, err := e.centersSvc.Me(ctx, e.scope(t, member.ID))
+	// A plain member sees only the center's name — the roster is owner-only
+	// data.
+	memberMe, err := e.centersSvc.Me(ctx, e.scope(t, member.ID))
 	require.NoError(t, err)
+	memberResp, ok := memberMe.(*centers.MemberMeResponse)
+	require.True(t, ok, "a non-owner must get the member shape")
+	require.Equal(t, "Chủ Trung Tâm", memberResp.CenterName)
+
+	ownerMe, err := e.centersSvc.Me(ctx, e.scope(t, owner.ID))
+	require.NoError(t, err)
+	me, ok := ownerMe.(*centers.MeResponse)
+	require.True(t, ok, "an owner must get the full roster shape")
 	require.Equal(t, ownerTeacher.CenterID, me.Center.ID)
-	require.False(t, me.Center.IsOwner)
+	require.True(t, me.Center.IsOwner)
 	require.Len(t, me.Members, 2)
 
 	byID := map[uuid.UUID]centers.MemberResponse{}
@@ -333,27 +187,26 @@ func TestMeShowsCenterAndMembers(t *testing.T) {
 	require.Equal(t, owner.Phone, byID[owner.ID].Phone)
 	require.Equal(t, "Chủ Trung Tâm", byID[owner.ID].FullName)
 
-	ownerMe, err := e.centersSvc.Me(ctx, e.scope(t, owner.ID))
-	require.NoError(t, err)
-	require.True(t, ownerMe.Center.IsOwner)
-
-	// A disabled member is a temporary lock, still part of the roster; a
-	// soft-deleted account is gone for good and must disappear from it.
+	// A disabled account only ever exists because RemoveMember offboarded it,
+	// so it must drop off the roster exactly like a soft-deleted account —
+	// same as ListMembers' active-only filter.
 	disabledMember, _ := testutil.Teacher(t, e.db, testutil.WithFullName("Giáo Viên Bị Khoá"))
 	deletedMember, _ := testutil.Teacher(t, e.db, testutil.WithFullName("Giáo Viên Đã Xoá"))
-	e.join(t, disabledMember.ID, owner.Phone)
-	e.join(t, deletedMember.ID, owner.Phone)
+	e.join(t, disabledMember.ID, owner.ID)
+	e.join(t, deletedMember.ID, owner.ID)
 	require.NoError(t, e.db.Model(&teachers.Account{ID: disabledMember.ID}).Update("status", teachers.StatusDisabled).Error)
 	require.NoError(t, e.db.Delete(&teachers.Account{ID: deletedMember.ID}).Error)
 
-	me, err = e.centersSvc.Me(ctx, e.scope(t, owner.ID))
+	ownerMe, err = e.centersSvc.Me(ctx, e.scope(t, owner.ID))
 	require.NoError(t, err)
-	require.Len(t, me.Members, 3)
+	me, ok = ownerMe.(*centers.MeResponse)
+	require.True(t, ok)
+	require.Len(t, me.Members, 2)
 	ids := map[uuid.UUID]bool{}
 	for _, m := range me.Members {
 		ids[m.ID] = true
 	}
-	require.True(t, ids[disabledMember.ID], "disabled member must stay on the roster")
+	require.False(t, ids[disabledMember.ID], "disabled (removed) member must leave the roster")
 	require.False(t, ids[deletedMember.ID], "soft-deleted account must leave the roster")
 }
 
@@ -364,7 +217,7 @@ func TestRenameIsOwnerOnly(t *testing.T) {
 
 	owner, ownerTeacher := testutil.Teacher(t, e.db)
 	member, _ := testutil.Teacher(t, e.db)
-	e.join(t, member.ID, owner.Phone)
+	e.join(t, member.ID, owner.ID)
 
 	err := e.centersSvc.Rename(ctx, e.scope(t, member.ID), centers.RenameRequest{Name: "Trung Tâm Bình Minh"})
 	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code)
@@ -375,6 +228,11 @@ func TestRenameIsOwnerOnly(t *testing.T) {
 	require.Equal(t, "Trung Tâm Bình Minh", reloaded.Name)
 }
 
+// TestRemoveMemberByOwnerDataStaysBehind pins the offboarding contract: no
+// new center is provisioned for the removed member, their membership closes,
+// their account is disabled and every refresh token they held stops working,
+// teachers.center_id is left pointing at the center they were just removed
+// from, and their teaching history stays reachable there under their name.
 func TestRemoveMemberByOwnerDataStaysBehind(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -382,20 +240,40 @@ func TestRemoveMemberByOwnerDataStaysBehind(t *testing.T) {
 
 	owner, ownerTeacher := testutil.Teacher(t, e.db)
 	member, _ := testutil.Teacher(t, e.db, testutil.WithFullName("Giáo Viên B"))
-	e.join(t, member.ID, owner.Phone)
+	e.join(t, member.ID, owner.ID)
 	classID := insertClass(t, e.db, member.ID, ownerTeacher.CenterID)
+
+	sess, err := e.authSvc.Login(ctx, auth.LoginRequest{Phone: member.Phone, Password: testutil.DefaultPassword})
+	require.NoError(t, err)
 
 	require.NoError(t, e.centersSvc.RemoveMember(ctx, e.scope(t, owner.ID), member.ID))
 
-	// The removed teacher owns a fresh personal center and is its live member.
-	s := e.scope(t, member.ID)
-	require.NotEqual(t, ownerTeacher.CenterID, s.CenterID)
-	require.True(t, s.IsOwner)
-	var personal centers.Center
-	require.NoError(t, e.db.First(&personal, "id = ?", s.CenterID).Error)
-	require.Equal(t, member.ID, personal.OwnerID)
-	require.Equal(t, "Giáo Viên B", personal.Name)
-	require.Equal(t, s.CenterID, e.liveMembership(t, member.ID).CenterID)
+	// The membership stint closed; no new center is provisioned.
+	var closed centers.Member
+	require.NoError(t, e.db.First(&closed, "teacher_id = ? AND center_id = ?", member.ID, ownerTeacher.CenterID).Error)
+	require.NotNil(t, closed.LeftAt)
+
+	var centerCount int64
+	require.NoError(t, e.db.Table("centers").
+		Where("owner_id = ? AND deleted_at IS NULL", member.ID).Count(&centerCount).Error)
+	require.Zero(t, centerCount, "removal must not provision a new center")
+
+	// teachers.center_id is left pointing at the center they were removed
+	// from — only a later reactivate moves it.
+	var reloaded teachers.Teacher
+	require.NoError(t, e.db.First(&reloaded, "id = ?", member.ID).Error)
+	require.Equal(t, ownerTeacher.CenterID, reloaded.CenterID)
+
+	// The account is disabled and can no longer resolve a scope.
+	var acct teachers.Account
+	require.NoError(t, e.db.First(&acct, "id = ?", member.ID).Error)
+	require.Equal(t, teachers.StatusDisabled, acct.Status)
+	_, err = e.centersSvc.ResolveScope(ctx, member.ID)
+	require.Equal(t, apperror.CodeUnauthorized, apperror.From(err).Code)
+
+	// Their refresh token from before the removal no longer works.
+	_, err = e.authSvc.Refresh(ctx, sess.RefreshToken)
+	require.Error(t, err)
 
 	// Their teaching history stays in the old center under their name.
 	var stayed int64
@@ -403,21 +281,6 @@ func TestRemoveMemberByOwnerDataStaysBehind(t *testing.T) {
 		Where("id = ? AND center_id = ? AND teacher_id = ?", classID, ownerTeacher.CenterID, member.ID).
 		Count(&stayed).Error)
 	require.EqualValues(t, 1, stayed)
-}
-
-func TestMemberLeavesOnTheirOwn(t *testing.T) {
-	t.Parallel()
-	e := newEnv(t)
-	ctx := context.Background()
-
-	owner, ownerTeacher := testutil.Teacher(t, e.db)
-	member, _ := testutil.Teacher(t, e.db)
-	e.join(t, member.ID, owner.Phone)
-
-	require.NoError(t, e.centersSvc.RemoveMember(ctx, e.scope(t, member.ID), member.ID))
-	s := e.scope(t, member.ID)
-	require.NotEqual(t, ownerTeacher.CenterID, s.CenterID)
-	require.True(t, s.IsOwner)
 }
 
 func TestRemoveMemberAuthorizationMatrix(t *testing.T) {
@@ -428,18 +291,22 @@ func TestRemoveMemberAuthorizationMatrix(t *testing.T) {
 	owner, _ := testutil.Teacher(t, e.db)
 	memberB, _ := testutil.Teacher(t, e.db)
 	memberC, _ := testutil.Teacher(t, e.db)
-	e.join(t, memberB.ID, owner.Phone)
-	e.join(t, memberC.ID, owner.Phone)
+	e.join(t, memberB.ID, owner.ID)
+	e.join(t, memberC.ID, owner.ID)
 
-	// A plain member cannot remove anyone but themselves.
+	// A plain member cannot remove anyone — not another member, and not even
+	// themselves; offboarding is owner-only.
 	err := e.centersSvc.RemoveMember(ctx, e.scope(t, memberB.ID), memberC.ID)
 	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code)
+	err = e.centersSvc.RemoveMember(ctx, e.scope(t, memberB.ID), memberB.ID)
+	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code)
 
-	// The owner cannot leave while the center still has members…
+	// The owner cannot remove themselves while the center still has other
+	// members…
 	err = e.centersSvc.RemoveMember(ctx, e.scope(t, owner.ID), owner.ID)
 	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code)
 
-	// …and cannot leave their own center even once it is empty.
+	// …and cannot remove themselves even once it is empty.
 	require.NoError(t, e.centersSvc.RemoveMember(ctx, e.scope(t, owner.ID), memberB.ID))
 	require.NoError(t, e.centersSvc.RemoveMember(ctx, e.scope(t, owner.ID), memberC.ID))
 	err = e.centersSvc.RemoveMember(ctx, e.scope(t, owner.ID), owner.ID)
@@ -456,8 +323,8 @@ func TestRemoveMemberAuthorizationMatrix(t *testing.T) {
 
 // TestKickIsEffectiveOnTheNextRequest proves the no-JWT-caching decision end
 // to end: the same principal, run through the real middleware twice, sees the
-// old center before the kick and the new personal center right after —
-// without ever reissuing a token.
+// old center before the kick and 401s right after — offboarding disables the
+// account outright, so the kicked member never lands in a scope of their own.
 func TestKickIsEffectiveOnTheNextRequest(t *testing.T) {
 	t.Parallel()
 	gin.SetMode(gin.TestMode)
@@ -466,7 +333,7 @@ func TestKickIsEffectiveOnTheNextRequest(t *testing.T) {
 
 	owner, ownerTeacher := testutil.Teacher(t, e.db)
 	member, _ := testutil.Teacher(t, e.db)
-	e.join(t, member.ID, owner.Phone)
+	e.join(t, member.ID, owner.ID)
 
 	resolve := middleware.ResolveScope(e.centersSvc)
 	scopeVia := func(teacherID uuid.UUID) (authctx.Scope, int) {
@@ -485,15 +352,8 @@ func TestKickIsEffectiveOnTheNextRequest(t *testing.T) {
 
 	require.NoError(t, e.centersSvc.RemoveMember(ctx, e.scope(t, owner.ID), member.ID))
 
-	after, code := scopeVia(member.ID)
-	require.Equal(t, http.StatusOK, code)
-	require.NotEqual(t, ownerTeacher.CenterID, after.CenterID, "kick must bite on the very next request")
-	require.True(t, after.IsOwner)
-
-	// And a dead account stops at the middleware with a 401.
-	require.NoError(t, e.db.Model(&teachers.Account{ID: member.ID}).Update("status", teachers.StatusDisabled).Error)
 	_, code = scopeVia(member.ID)
-	require.Equal(t, http.StatusUnauthorized, code)
+	require.Equal(t, http.StatusUnauthorized, code, "kick must bite on the very next request")
 }
 
 // TestCentersRoutesEndToEnd drives the mounted routes with real bearer
@@ -510,8 +370,9 @@ func TestCentersRoutesEndToEnd(t *testing.T) {
 	centers.RegisterRoutes(r.Group("/api/v1"), centers.NewHandler(e.centersSvc),
 		middleware.RequireAuth(jwtCfg), middleware.ResolveScope(e.centersSvc))
 
-	owner, ownerTeacher := testutil.Teacher(t, e.db, testutil.WithFullName("Chủ Trung Tâm"))
+	owner, _ := testutil.Teacher(t, e.db, testutil.WithFullName("Chủ Trung Tâm"))
 	member, _ := testutil.Teacher(t, e.db)
+	e.join(t, member.ID, owner.ID)
 	tokenFor := func(id uuid.UUID) string {
 		token, err := issuer.IssueAccess(id, authctx.RoleTeacher)
 		require.NoError(t, err)
@@ -531,26 +392,17 @@ func TestCentersRoutesEndToEnd(t *testing.T) {
 		return w
 	}
 
-	// Join accepts the local phone form (0…) thanks to the vnphone binding +
-	// normalization, and answers 201 with the new center id.
-	localPhone := "0" + strings.TrimPrefix(owner.Phone, "+84")
-	w := do(tokenFor(member.ID), http.MethodPost, "/api/v1/centers/join",
-		`{"owner_phone":"`+localPhone+`"}`)
-	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
-	var joined struct {
-		Data centers.JoinResponse `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &joined))
-	require.Equal(t, ownerTeacher.CenterID, joined.Data.CenterID)
-
-	// A malformed phone never reaches the service.
-	w = do(tokenFor(owner.ID), http.MethodPost, "/api/v1/centers/join", `{"owner_phone":"12345"}`)
-	require.Equal(t, http.StatusUnprocessableEntity, w.Code, w.Body.String())
-
-	// GET /centers/me shows the shared roster to the new member.
-	w = do(tokenFor(member.ID), http.MethodGet, "/api/v1/centers/me", "")
-	require.Equal(t, http.StatusOK, w.Code)
+	// GET /centers/me shows the full roster to the owner…
+	w := do(tokenFor(owner.ID), http.MethodGet, "/api/v1/centers/me", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "Chủ Trung Tâm")
+	require.Contains(t, w.Body.String(), "members")
+
+	// …and only the center's name to a plain member — no roster leaks.
+	w = do(tokenFor(member.ID), http.MethodGet, "/api/v1/centers/me", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "Chủ Trung Tâm")
+	require.NotContains(t, w.Body.String(), "members")
 
 	// Rename is owner-only over HTTP too.
 	w = do(tokenFor(member.ID), http.MethodPatch, "/api/v1/centers/me", `{"name":"Đổi Tên"}`)
@@ -560,9 +412,21 @@ func TestCentersRoutesEndToEnd(t *testing.T) {
 	w = do(tokenFor(owner.ID), http.MethodDelete, "/api/v1/centers/me/members/not-a-uuid", "")
 	require.Equal(t, http.StatusNotFound, w.Code)
 
+	// A plain member cannot remove anyone.
+	w = do(tokenFor(member.ID), http.MethodDelete, "/api/v1/centers/me/members/"+owner.ID.String(), "")
+	require.Equal(t, http.StatusForbidden, w.Code)
+
 	// The owner removes the member: 204, no body.
 	w = do(tokenFor(owner.ID), http.MethodDelete, "/api/v1/centers/me/members/"+member.ID.String(), "")
 	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+
+	// The removed member's account is disabled and their very next request
+	// 401s — offboarding bites immediately, not just at the next login.
+	var acct teachers.Account
+	require.NoError(t, e.db.First(&acct, "id = ?", member.ID).Error)
+	require.Equal(t, teachers.StatusDisabled, acct.Status)
+	w = do(tokenFor(member.ID), http.MethodGet, "/api/v1/centers/me", "")
+	require.Equal(t, http.StatusUnauthorized, w.Code)
 
 	// No token → 401 before any handler runs.
 	w = do("", http.MethodGet, "/api/v1/centers/me", "")
@@ -992,7 +856,7 @@ func TestDashboardRoutesEndToEnd(t *testing.T) {
 
 	owner, _ := testutil.Teacher(t, e.db, testutil.WithFullName("Chủ Trung Tâm"))
 	member, _ := testutil.Teacher(t, e.db)
-	e.join(t, member.ID, owner.Phone)
+	e.join(t, member.ID, owner.ID)
 	tokenFor := func(id uuid.UUID) string {
 		token, err := issuer.IssueAccess(id, authctx.RoleTeacher)
 		require.NoError(t, err)

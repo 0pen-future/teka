@@ -6,6 +6,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
@@ -16,45 +17,49 @@ import (
 	"teka/apps/api/internal/testutil"
 )
 
-// newTeachersService wires the service the way the router does: the centers
-// provisioner supplies the personal center CreateTeacher now requires, and
-// creation runs inside a transaction (deferred owner FK).
-func newTeachersService(t *testing.T, db *gorm.DB) (*teachers.Service, database.TxManager) {
+// createInCenter mirrors how invitations.Accept actually drives
+// AccountOnboarder.CreateInCenter: paired with MembershipOpener.OpenMembership
+// inside one ambient transaction. teachers.center_id carries a DEFERRABLE FK
+// into center_members (fk_teachers_membership) checked at commit, so calling
+// CreateInCenter on its own — outside a transaction that also opens the
+// membership — violates that constraint by design; CreateInCenter is not
+// meant to be a self-contained membership grant.
+func createInCenter(t *testing.T, db *gorm.DB, txMgr database.TxManager, centersSvc *centers.Service, phone, fullName, password string, centerID uuid.UUID) (uuid.UUID, error) {
 	t.Helper()
-	svc := teachers.NewService(teachers.NewRepository(db))
-	txMgr := database.NewTxManager(db)
-	svc.SetCenterProvisioner(centers.NewService(centers.NewRepository(db), svc, txMgr))
-	return svc, txMgr
-}
-
-func createTeacher(svc *teachers.Service, txMgr database.TxManager, req teachers.CreateRequest) (*teachers.Profile, error) {
-	var p *teachers.Profile
+	var accountID uuid.UUID
 	err := txMgr.WithinTx(context.Background(), func(ctx context.Context) error {
-		var err error
-		p, err = svc.CreateTeacher(ctx, req)
-		return err
+		teachersSvc := teachers.NewService(teachers.NewRepository(db))
+		id, cerr := teachersSvc.CreateInCenter(ctx, phone, fullName, password, centerID)
+		if cerr != nil {
+			return cerr
+		}
+		accountID = id
+		return centersSvc.OpenMembership(ctx, id, centerID)
 	})
-	return p, err
+	return accountID, err
 }
 
-func TestCreateTeacherPhoneFormsCollide(t *testing.T) {
+func TestCreateInCenterPhoneFormsCollide(t *testing.T) {
 	t.Parallel()
 	db := testutil.StartPostgres(t)
-	svc, txMgr := newTeachersService(t, db)
+	svc := teachers.NewService(teachers.NewRepository(db))
+	txMgr := database.NewTxManager(db)
+	centersSvc := centers.NewService(centers.NewRepository(db), txMgr)
+	ctx := context.Background()
+	_, owner := testutil.Teacher(t, db)
 
-	p, err := createTeacher(svc, txMgr, teachers.CreateRequest{
-		Phone: "0901234567", Password: "password-123", FullName: "One",
-	})
+	accountID, err := createInCenter(t, db, txMgr, centersSvc, "0901234567", "One", "password-123", owner.CenterID)
+	require.NoError(t, err)
+	p, err := svc.GetByID(ctx, accountID)
 	require.NoError(t, err)
 	require.Equal(t, "+84901234567", p.Account.Phone)
 	require.Equal(t, p.Account.ID, p.Teacher.ID, "account and teacher must share one id")
+	require.Equal(t, owner.CenterID, p.Teacher.CenterID)
 
-	// Both accepted spellings normalize to one stored number, so the second
+	// Both accepted spellings normalize to one stored number, so a second
 	// registration must hit the unique index regardless of input form.
 	for _, phone := range []string{"0901234567", "+84901234567"} {
-		_, err := createTeacher(svc, txMgr, teachers.CreateRequest{
-			Phone: phone, Password: "password-123", FullName: "Two",
-		})
+		_, err := createInCenter(t, db, txMgr, centersSvc, phone, "Two", "password-123", owner.CenterID)
 		require.Equal(t, apperror.CodeConflict, apperror.From(err).Code, "phone form %q", phone)
 	}
 }

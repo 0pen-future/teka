@@ -30,6 +30,13 @@ type ScopeRow struct {
 	IsOwner  bool
 }
 
+// OwnerRow is the current center owner of one teacher, and whether that
+// teacher IS the owner.
+type OwnerRow struct {
+	OwnerID uuid.UUID
+	IsOwner bool
+}
+
 // MemberRow is one member of a center joined with their account phone.
 type MemberRow struct {
 	ID       uuid.UUID
@@ -82,26 +89,19 @@ type Repository interface {
 	// ResolveScope returns the live scope for an active, non-deleted account
 	// whose center is itself alive; ErrNotFound covers every dead variant.
 	ResolveScope(ctx context.Context, teacherID uuid.UUID) (*ScopeRow, error)
+	// CenterOwner returns the owner teacher id of teacherID's current center,
+	// and whether teacherID IS that owner. Unlike ResolveScope it does not
+	// filter on the account's own status: it deliberately answers for a
+	// disabled account too, since ForgotPassword's owner-exclusion check must
+	// run before it knows whether the account is active.
+	CenterOwner(ctx context.Context, teacherID uuid.UUID) (*OwnerRow, error)
 	GetCenter(ctx context.Context, centerID uuid.UUID) (*Center, error)
-	GetLiveCenterByOwner(ctx context.Context, ownerID uuid.UUID) (*Center, error)
 	ListMembers(ctx context.Context, centerID uuid.UUID) ([]MemberRow, error)
 	// GetTeacherInCenter loads a live teacher currently belonging to the
 	// center; ErrNotFound also for members of other centers (no existence
 	// leak).
 	GetTeacherInCenter(ctx context.Context, centerID, teacherID uuid.UUID) (*TeacherRow, error)
 	Rename(ctx context.Context, centerID uuid.UUID, name string) error
-	// LockLiveCenter takes a FOR UPDATE row lock on a live center so
-	// concurrent membership moves serialize; ErrNotFound when the center is
-	// already retired. Only meaningful inside a transaction.
-	LockLiveCenter(ctx context.Context, centerID uuid.UUID) error
-	// CountOtherMembers counts the center's live members besides the given
-	// teacher. A teacher whose account was soft-deleted is gone for good and
-	// does not count.
-	CountOtherMembers(ctx context.Context, centerID, exceptTeacherID uuid.UUID) (int64, error)
-	// CountBusinessRows tallies the live rows of the three root business
-	// tables (classes, students, contacts); every other business table hangs
-	// off one of them, so zero here means the center is empty.
-	CountBusinessRows(ctx context.Context, centerID uuid.UUID) (int64, error)
 	CreateCenter(ctx context.Context, c *Center) error
 	// OpenMembership inserts the live stint, reopening a closed row from an
 	// earlier stint in the same center instead of duplicating the key. The
@@ -111,15 +111,10 @@ type Repository interface {
 	// CloseMembership stamps left_at on the live stint; ErrNotFound when a
 	// concurrent transaction already closed it.
 	CloseMembership(ctx context.Context, teacherID, centerID uuid.UUID) error
-	// SwitchTeacherCenter moves teachers.center_id from exactly `from` to
-	// `to`; ErrNotFound when a concurrent move won the race (from no longer
-	// matches).
-	SwitchTeacherCenter(ctx context.Context, teacherID, from, to uuid.UUID) error
-	// SoftDeleteCenter retires a center; membership history and the data
-	// anchored on it stay. It refuses (ErrNotFound) while any live teacher
-	// still has the center as their current one — retiring it under them
-	// would leave scopes that can never resolve again.
-	SoftDeleteCenter(ctx context.Context, centerID, ownerID uuid.UUID) error
+	// SwitchTeacherCenter moves teachers.center_id to centerID
+	// unconditionally; ErrNotFound when the teacher is unknown or
+	// soft-deleted.
+	SwitchTeacherCenter(ctx context.Context, teacherID, centerID uuid.UUID) error
 	// WasEverMember reports whether the teacher is a current member of the
 	// center or ever had a membership stint in it. Drill-down authorization
 	// uses this so a removed teacher's left-behind data stays reachable.
@@ -173,6 +168,23 @@ func (r *gormRepository) ResolveScope(ctx context.Context, teacherID uuid.UUID) 
 	return &row, nil
 }
 
+func (r *gormRepository) CenterOwner(ctx context.Context, teacherID uuid.UUID) (*OwnerRow, error) {
+	var row OwnerRow
+	res := database.FromContext(ctx, r.db).Raw(`
+		SELECT c.owner_id, (c.owner_id = t.id) AS is_owner
+		FROM teachers t
+		JOIN centers c ON c.id = t.center_id AND c.deleted_at IS NULL
+		WHERE t.id = ? AND t.deleted_at IS NULL`,
+		teacherID).Scan(&row)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return nil, ErrNotFound
+	}
+	return &row, nil
+}
+
 func (r *gormRepository) GetCenter(ctx context.Context, centerID uuid.UUID) (*Center, error) {
 	var c Center
 	err := database.FromContext(ctx, r.db).First(&c, "id = ?", centerID).Error
@@ -185,38 +197,34 @@ func (r *gormRepository) GetCenter(ctx context.Context, centerID uuid.UUID) (*Ce
 	return &c, nil
 }
 
-func (r *gormRepository) GetLiveCenterByOwner(ctx context.Context, ownerID uuid.UUID) (*Center, error) {
-	var c Center
-	err := database.FromContext(ctx, r.db).First(&c, "owner_id = ?", ownerID).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &c, nil
-}
-
 func (r *gormRepository) ListMembers(ctx context.Context, centerID uuid.UUID) ([]MemberRow, error) {
 	var rows []MemberRow
-	// Disabled accounts stay on the roster (a temporary lock is still a
-	// member); soft-deleted accounts are gone for good and drop off.
+	// Offboarding (RemoveMember) is the only path onto status='disabled', and
+	// it always pairs with closing the membership — so a disabled account is
+	// a removed member and drops off the live roster exactly like a
+	// soft-deleted one. teachers.center_id is not the source of truth here on
+	// its own: it stays pointing at a removed member's last center until they
+	// are reactivated elsewhere.
 	err := database.FromContext(ctx, r.db).Raw(`
 		SELECT t.id, t.full_name, ua.phone, (c.owner_id = t.id) AS is_owner
 		FROM teachers t
-		JOIN user_accounts ua ON ua.id = t.id AND ua.deleted_at IS NULL
+		JOIN user_accounts ua ON ua.id = t.id AND ua.deleted_at IS NULL AND ua.status = ?
 		JOIN centers c ON c.id = t.center_id
 		WHERE t.center_id = ? AND t.deleted_at IS NULL
-		ORDER BY is_owner DESC, t.full_name, t.id`, centerID).Scan(&rows).Error
+		ORDER BY is_owner DESC, t.full_name, t.id`, teachers.StatusActive, centerID).Scan(&rows).Error
 	return rows, err
 }
 
 func (r *gormRepository) GetTeacherInCenter(ctx context.Context, centerID, teacherID uuid.UUID) (*TeacherRow, error) {
 	var row TeacherRow
+	// Same active-only membership rule as ListMembers: an already-removed
+	// (disabled) teacher is not found here even though their teachers.center_id
+	// still points at this center.
 	res := database.FromContext(ctx, r.db).Raw(`
-		SELECT id, full_name FROM teachers
-		WHERE id = ? AND center_id = ? AND deleted_at IS NULL`,
-		teacherID, centerID).Scan(&row)
+		SELECT t.id, t.full_name FROM teachers t
+		JOIN user_accounts ua ON ua.id = t.id AND ua.deleted_at IS NULL AND ua.status = ?
+		WHERE t.id = ? AND t.center_id = ? AND t.deleted_at IS NULL`,
+		teachers.StatusActive, teacherID, centerID).Scan(&row)
 	if res.Error != nil {
 		return nil, res.Error
 	}
@@ -238,41 +246,6 @@ func (r *gormRepository) Rename(ctx context.Context, centerID uuid.UUID, name st
 		return ErrNotFound
 	}
 	return nil
-}
-
-func (r *gormRepository) CountOtherMembers(ctx context.Context, centerID, exceptTeacherID uuid.UUID) (int64, error) {
-	var n int64
-	err := database.FromContext(ctx, r.db).Raw(`
-		SELECT COUNT(*)
-		FROM teachers t
-		JOIN user_accounts ua ON ua.id = t.id AND ua.deleted_at IS NULL
-		WHERE t.center_id = ? AND t.id <> ? AND t.deleted_at IS NULL`,
-		centerID, exceptTeacherID).Scan(&n).Error
-	return n, err
-}
-
-func (r *gormRepository) LockLiveCenter(ctx context.Context, centerID uuid.UUID) error {
-	var one int
-	res := database.FromContext(ctx, r.db).Raw(`
-		SELECT 1 FROM centers WHERE id = ? AND deleted_at IS NULL FOR UPDATE`,
-		centerID).Scan(&one)
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (r *gormRepository) CountBusinessRows(ctx context.Context, centerID uuid.UUID) (int64, error) {
-	var n int64
-	err := database.FromContext(ctx, r.db).Raw(`
-		SELECT (SELECT COUNT(*) FROM classes  WHERE center_id = @cid AND deleted_at IS NULL)
-		     + (SELECT COUNT(*) FROM students WHERE center_id = @cid AND deleted_at IS NULL)
-		     + (SELECT COUNT(*) FROM contacts WHERE center_id = @cid AND deleted_at IS NULL)`,
-		map[string]any{"cid": centerID}).Scan(&n).Error
-	return n, err
 }
 
 func (r *gormRepository) CreateCenter(ctx context.Context, c *Center) error {
@@ -306,32 +279,11 @@ func (r *gormRepository) CloseMembership(ctx context.Context, teacherID, centerI
 	return nil
 }
 
-func (r *gormRepository) SwitchTeacherCenter(ctx context.Context, teacherID, from, to uuid.UUID) error {
+func (r *gormRepository) SwitchTeacherCenter(ctx context.Context, teacherID, centerID uuid.UUID) error {
 	res := database.FromContext(ctx, r.db).Exec(`
 		UPDATE teachers SET center_id = ?, updated_at = now()
-		WHERE id = ? AND center_id = ? AND deleted_at IS NULL`,
-		to, teacherID, from)
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (r *gormRepository) SoftDeleteCenter(ctx context.Context, centerID, ownerID uuid.UUID) error {
-	// The NOT EXISTS clause is the last line of defense against retiring a
-	// center someone still lives in; teachers whose accounts are soft-deleted
-	// no longer count as living there.
-	res := database.FromContext(ctx, r.db).Exec(`
-		UPDATE centers SET deleted_at = now()
-		WHERE id = ? AND owner_id = ? AND deleted_at IS NULL
-		  AND NOT EXISTS (
-			SELECT 1 FROM teachers t
-			JOIN user_accounts ua ON ua.id = t.id AND ua.deleted_at IS NULL
-			WHERE t.center_id = centers.id AND t.deleted_at IS NULL)`,
-		centerID, ownerID)
+		WHERE id = ? AND deleted_at IS NULL`,
+		centerID, teacherID)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -357,9 +309,12 @@ func (r *gormRepository) WasEverMember(ctx context.Context, centerID, teacherID 
 
 func (r *gormRepository) DashboardTeacherStats(ctx context.Context, centerID uuid.UUID) ([]TeacherStatsRow, error) {
 	var rows []TeacherStatsRow
-	// Same roster semantics as ListMembers (disabled accounts stay,
-	// soft-deleted drop), plus per-teacher activity counts. "Active student"
-	// means an enrollment live today into a live class.
+	// Same roster semantics as ListMembers (a disabled account is a removed
+	// member and drops off same as soft-deleted), plus per-teacher activity
+	// counts. "Active student" means an enrollment live today into a live
+	// class. Removed teachers' historical classes/sessions stay reachable
+	// through the drill-down endpoints below — only this top-level roster is
+	// membership-filtered.
 	err := database.FromContext(ctx, r.db).Raw(`
 		SELECT t.id, t.full_name, ua.phone, (c.owner_id = t.id) AS is_owner,
 			(SELECT COUNT(*) FROM classes cl
@@ -371,10 +326,10 @@ func (r *gormRepository) DashboardTeacherStats(ctx context.Context, centerID uui
 			   AND e.started_on <= CURRENT_DATE
 			   AND (e.ended_on IS NULL OR e.ended_on >= CURRENT_DATE)) AS active_students
 		FROM teachers t
-		JOIN user_accounts ua ON ua.id = t.id AND ua.deleted_at IS NULL
+		JOIN user_accounts ua ON ua.id = t.id AND ua.deleted_at IS NULL AND ua.status = ?
 		JOIN centers c ON c.id = t.center_id
 		WHERE t.center_id = ? AND t.deleted_at IS NULL
-		ORDER BY is_owner DESC, t.full_name, t.id`, centerID).Scan(&rows).Error
+		ORDER BY is_owner DESC, t.full_name, t.id`, teachers.StatusActive, centerID).Scan(&rows).Error
 	return rows, err
 }
 

@@ -1,38 +1,44 @@
 package centers
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"time"
 
 	"github.com/google/uuid"
 
 	"teka/apps/api/internal/database"
-	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/shared/authctx"
-	"teka/apps/api/internal/shared/id"
 )
 
-// TeacherLookup is the slice of the teachers feature this service consumes
-// (consumer-defined interface; implemented by *teachers.Service). GetByPhone
-// deliberately stays behind this seam — it performs no authorization and
-// must never back an endpoint directly.
-type TeacherLookup interface {
-	GetByPhone(ctx context.Context, phone string) (*teachers.Profile, error)
+// AccountDisabler is the slice of account lifecycle this service consumes to
+// offboard a removed member (consumer-defined interface; implemented by
+// *auth.Service — it must both flip the account to disabled AND revoke every
+// refresh token it holds, atomically, so a removed member cannot keep using
+// an old access token). Centers never touches user_accounts directly.
+type AccountDisabler interface {
+	Disable(ctx context.Context, accountID uuid.UUID) error
 }
 
 // Service implements center membership business logic.
 type Service struct {
 	repo     Repository
-	teachers TeacherLookup
+	disabler AccountDisabler
 	tx       database.TxManager
 }
 
 // NewService builds the centers service.
-func NewService(repo Repository, lookup TeacherLookup, tx database.TxManager) *Service {
-	return &Service{repo: repo, teachers: lookup, tx: tx}
+func NewService(repo Repository, tx database.TxManager) *Service {
+	return &Service{repo: repo, tx: tx}
+}
+
+// SetAccountDisabler wires the auth dependency after construction — a
+// setter, not a NewService parameter, because auth.Service itself depends on
+// teachers.Service as its AccountService, and router.go constructs centers
+// before auth; a direct parameter here would cycle (same pattern as
+// teachers.SetTokenRevoker).
+func (s *Service) SetAccountDisabler(d AccountDisabler) {
+	s.disabler = d
 }
 
 // ResolveScope loads the caller's center scope; it satisfies
@@ -50,22 +56,26 @@ func (s *Service) ResolveScope(ctx context.Context, teacherID uuid.UUID) (authct
 	return authctx.Scope{TeacherID: teacherID, CenterID: row.CenterID, IsOwner: row.IsOwner}, nil
 }
 
-// CreatePersonalCenter inserts the centers row for a brand-new teacher; it
-// satisfies teachers.CenterProvisioner and must run on the registration
-// transaction (the owner FK is deferred until the teachers row follows).
-func (s *Service) CreatePersonalCenter(ctx context.Context, ownerID uuid.UUID, name string) (uuid.UUID, error) {
-	c := &Center{ID: id.New(), Name: name, OwnerID: ownerID}
-	if err := s.repo.CreateCenter(ctx, c); err != nil {
-		if errors.Is(err, ErrOwnerHasLiveCenter) {
-			return uuid.Nil, apperror.Conflict("teacher already owns a center")
-		}
-		return uuid.Nil, apperror.Internal(err)
+// CenterOwner returns the owner teacher id of teacherID's current center, and
+// whether teacherID IS that owner; it satisfies auth.OwnerResolver so
+// ForgotPassword can exclude a center owner from self-service reset (owners
+// recover via operator CLI only). ErrNotFound — unknown teacher, or one whose
+// center is gone — maps to apperror.NotFound rather than the 401 ResolveScope
+// uses: this is an internal lookup, not a request-authentication check.
+func (s *Service) CenterOwner(ctx context.Context, teacherID uuid.UUID) (ownerID uuid.UUID, isOwner bool, err error) {
+	row, err := s.repo.CenterOwner(ctx, teacherID)
+	if errors.Is(err, ErrNotFound) {
+		return uuid.Nil, false, apperror.NotFound("teacher")
 	}
-	return c.ID, nil
+	if err != nil {
+		return uuid.Nil, false, apperror.Internal(err)
+	}
+	return row.OwnerID, row.IsOwner, nil
 }
 
-// OpenMembership records the live membership stint for a freshly created
-// teacher; it satisfies teachers.CenterProvisioner.
+// OpenMembership records a live membership stint for a teacher in a center;
+// it satisfies invitations.MembershipOpener for both the new-account and the
+// reactivate branches of the accept flow.
 func (s *Service) OpenMembership(ctx context.Context, teacherID, centerID uuid.UUID) error {
 	if _, err := s.repo.OpenMembership(ctx, teacherID, centerID); err != nil {
 		return apperror.Internal(err)
@@ -73,9 +83,37 @@ func (s *Service) OpenMembership(ctx context.Context, teacherID, centerID uuid.U
 	return nil
 }
 
-// Me returns the caller's center and its member roster; every member may
-// look.
-func (s *Service) Me(ctx context.Context, scope authctx.Scope) (*MeResponse, error) {
+// SwitchTeacherCenter moves teachers.center_id to centerID unconditionally;
+// it satisfies invitations.MembershipOpener for the accept flow's reactivate
+// path. The account's previous membership is already closed by the time it
+// reactivates (RemoveMember closes it at disable time), so there is no "from"
+// to guard against.
+func (s *Service) SwitchTeacherCenter(ctx context.Context, teacherID, centerID uuid.UUID) error {
+	if err := s.repo.SwitchTeacherCenter(ctx, teacherID, centerID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return apperror.NotFound("teacher")
+		}
+		return apperror.Internal(err)
+	}
+	return nil
+}
+
+// WasEverMember reports whether the teacher is a current or past member of
+// the center; it satisfies invitations.MembershipOpener so the accept flow
+// can gate a disabled account's reactivation on real prior membership in the
+// inviting center, instead of trusting the token alone.
+func (s *Service) WasEverMember(ctx context.Context, teacherID, centerID uuid.UUID) (bool, error) {
+	ok, err := s.repo.WasEverMember(ctx, centerID, teacherID)
+	if err != nil {
+		return false, apperror.Internal(err)
+	}
+	return ok, nil
+}
+
+// Me returns the caller's center read model: the owner sees the full member
+// roster, a member sees only the center's name — the roster is owner-only
+// data.
+func (s *Service) Me(ctx context.Context, scope authctx.Scope) (any, error) {
 	center, err := s.repo.GetCenter(ctx, scope.CenterID)
 	if errors.Is(err, ErrNotFound) {
 		return nil, apperror.NotFound("center")
@@ -83,12 +121,15 @@ func (s *Service) Me(ctx context.Context, scope authctx.Scope) (*MeResponse, err
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
+	if !scope.IsOwner {
+		return &MemberMeResponse{CenterName: center.Name}, nil
+	}
 	members, err := s.repo.ListMembers(ctx, scope.CenterID)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
 	resp := &MeResponse{
-		Center: CenterResponse{ID: center.ID, Name: center.Name, IsOwner: scope.IsOwner},
+		Center: CenterResponse{ID: center.ID, Name: center.Name, IsOwner: true},
 	}
 	for _, m := range members {
 		resp.Members = append(resp.Members, MemberResponse(m))
@@ -111,166 +152,37 @@ func (s *Service) Rename(ctx context.Context, scope authctx.Scope, req RenameReq
 	return nil
 }
 
-// errLostRace marks an in-transaction re-check that no longer holds: a
-// concurrent request changed the caller's center between the friendly
-// pre-checks and the locked ones.
-var errLostRace = errors.New("centers: state changed concurrently")
-
-// Join moves the caller into the center owned by the teacher behind
-// owner_phone. Consent flows from the caller (they initiate with a phone the
-// owner gave them); every way the phone cannot be joined — unknown, not a
-// teacher, disabled, or not currently an owner — collapses into one generic
-// 404 so the endpoint cannot be used to probe who is registered. The
-// caller-side eligibility checks run BEFORE the phone lookup for the same
-// reason: an ineligible caller gets their 409 regardless of what they typed,
-// so the 404-vs-409 split never confirms a phone.
-//
-// V1 keeps the move simple: the caller must still be alone in their own
-// empty personal center. Their old center is retired (soft delete), never
-// deleted — its membership history stays as the anchor for any future data
-// rules.
-func (s *Service) Join(ctx context.Context, scope authctx.Scope, req JoinRequest) (*JoinResponse, error) {
-	if !scope.IsOwner {
-		return nil, apperror.Conflict("leave your current center before joining another")
-	}
-	others, err := s.repo.CountOtherMembers(ctx, scope.CenterID, scope.TeacherID)
-	if err != nil {
-		return nil, apperror.Internal(err)
-	}
-	if others > 0 {
-		return nil, apperror.Conflict("your center still has other members")
-	}
-	rows, err := s.repo.CountBusinessRows(ctx, scope.CenterID)
-	if err != nil {
-		return nil, apperror.Internal(err)
-	}
-	if rows > 0 {
-		return nil, apperror.Conflict("your center still has classes, students, or contacts")
-	}
-
-	notFound := apperror.NotFound("center owner")
-	p, err := s.teachers.GetByPhone(ctx, req.OwnerPhone)
-	if err != nil {
-		if apperror.From(err).Code == apperror.CodeNotFound {
-			return nil, notFound
-		}
-		return nil, err
-	}
-	if p.Account.Status != teachers.StatusActive {
-		return nil, notFound
-	}
-	if p.Account.ID == scope.TeacherID {
-		return nil, apperror.Invalid("cannot join using your own phone number", nil)
-	}
-	target, err := s.repo.GetLiveCenterByOwner(ctx, p.Account.ID)
-	if errors.Is(err, ErrNotFound) {
-		return nil, notFound
-	}
-	if err != nil {
-		return nil, apperror.Internal(err)
-	}
-
-	var joinedAt time.Time
-	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
-		// Serialize concurrent moves on the two centers rows (stable lock
-		// order to avoid deadlocks) and repeat the eligibility checks under
-		// the lock. Without this, a request joining the caller's center in
-		// parallel could land its teacher inside the center this transaction
-		// is about to retire — a dead scope the account could never leave.
-		if err := s.lockBothLiveCenters(ctx, scope.CenterID, target.ID); err != nil {
-			return err
-		}
-		others, err := s.repo.CountOtherMembers(ctx, scope.CenterID, scope.TeacherID)
-		if err != nil {
-			return err
-		}
-		rows, err := s.repo.CountBusinessRows(ctx, scope.CenterID)
-		if err != nil {
-			return err
-		}
-		if others > 0 || rows > 0 {
-			return errLostRace
-		}
-		// Close before open: uq_center_members_active is checked per
-		// statement, so the live stint must end before the next begins.
-		if err := s.repo.CloseMembership(ctx, scope.TeacherID, scope.CenterID); err != nil {
-			return err
-		}
-		ja, err := s.repo.OpenMembership(ctx, scope.TeacherID, target.ID)
-		if err != nil {
-			return err
-		}
-		joinedAt = ja
-		if err := s.repo.SwitchTeacherCenter(ctx, scope.TeacherID, scope.CenterID, target.ID); err != nil {
-			return err
-		}
-		return s.repo.SoftDeleteCenter(ctx, scope.CenterID, scope.TeacherID)
-	})
-	if err != nil {
-		// Losing any of the guarded writes means a concurrent request moved
-		// the caller (or retired the target center) first.
-		if errors.Is(err, ErrNotFound) || errors.Is(err, ErrActiveMembershipExists) || errors.Is(err, errLostRace) {
-			return nil, apperror.Conflict("membership changed concurrently, retry")
-		}
-		return nil, apperror.From(err)
-	}
-	return &JoinResponse{CenterID: target.ID, JoinedAt: joinedAt}, nil
-}
-
-// lockBothLiveCenters takes FOR UPDATE row locks on both centers in a
-// deterministic order so two opposite joins cannot deadlock; either center
-// being retired already surfaces as ErrNotFound.
-func (s *Service) lockBothLiveCenters(ctx context.Context, a, b uuid.UUID) error {
-	first, second := a, b
-	if bytes.Compare(second[:], first[:]) < 0 {
-		first, second = second, first
-	}
-	if err := s.repo.LockLiveCenter(ctx, first); err != nil {
-		return err
-	}
-	return s.repo.LockLiveCenter(ctx, second)
-}
-
-// RemoveMember ends a membership: the owner may remove any member, a member
-// may remove themselves (leave). The removed teacher lands in a fresh
-// personal center; everything they created stays in the old center, anchored
-// by the closed membership stint.
+// RemoveMember offboards a member: owner-only. The membership stint closes
+// and the account is disabled — status flips to disabled and every refresh
+// token it holds is revoked, via AccountDisabler (*auth.Service.Disable) — no
+// new center is provisioned; the member simply loses access until re-invited.
+// teachers.center_id is left pointing at this center: ResolveScope already
+// 401s a disabled account, and the accept flow's reactivate path is what
+// eventually moves it on re-invite. The owner cannot remove themselves: with
+// members around it would orphan the center, and alone there is nothing to
+// remove.
 func (s *Service) RemoveMember(ctx context.Context, scope authctx.Scope, targetID uuid.UUID) error {
-	if !scope.IsOwner && targetID != scope.TeacherID {
-		return apperror.Forbidden("only the owner or the member themselves can end a membership")
+	if !scope.IsOwner {
+		return apperror.Forbidden("only the owner can remove a member")
 	}
-	target, err := s.repo.GetTeacherInCenter(ctx, scope.CenterID, targetID)
-	if errors.Is(err, ErrNotFound) {
-		return apperror.NotFound("member")
+	if targetID == scope.TeacherID {
+		return apperror.Invalid("the owner cannot remove themselves", nil)
 	}
-	if err != nil {
-		return apperror.Internal(err)
-	}
-	if scope.IsOwner && targetID == scope.TeacherID {
-		// The owner IS the center: with members around, kicking themselves
-		// would orphan everyone; alone, "leaving" their own center means
-		// nothing — there is nowhere to go that they are not already.
-		return apperror.Invalid("the owner cannot leave their own center", nil)
-	}
-
-	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
-		personal := &Center{ID: id.New(), Name: target.FullName, OwnerID: targetID}
-		if err := s.repo.CreateCenter(ctx, personal); err != nil {
-			return err
-		}
-		if err := s.repo.CloseMembership(ctx, targetID, scope.CenterID); err != nil {
-			return err
-		}
-		if _, err := s.repo.OpenMembership(ctx, targetID, personal.ID); err != nil {
-			return err
-		}
-		return s.repo.SwitchTeacherCenter(ctx, targetID, scope.CenterID, personal.ID)
-	})
-	if err != nil {
+	if _, err := s.repo.GetTeacherInCenter(ctx, scope.CenterID, targetID); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return apperror.NotFound("member")
 		}
-		if errors.Is(err, ErrOwnerHasLiveCenter) || errors.Is(err, ErrActiveMembershipExists) {
+		return apperror.Internal(err)
+	}
+
+	err := s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		if err := s.repo.CloseMembership(ctx, targetID, scope.CenterID); err != nil {
+			return err
+		}
+		return s.disabler.Disable(ctx, targetID)
+	})
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
 			return apperror.Conflict("membership changed concurrently, retry")
 		}
 		return apperror.From(err)

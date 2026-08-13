@@ -23,6 +23,26 @@ type Repository interface {
 	CreateAccountWithProfile(ctx context.Context, acct *Account, t *Teacher) error
 	Update(ctx context.Context, t *Teacher) error
 	TouchLastLogin(ctx context.Context, id uuid.UUID, at time.Time) error
+	// SetStatus flips a live account's status; ErrNotFound when no live
+	// account matches (already soft-deleted, or unknown id).
+	SetStatus(ctx context.Context, id uuid.UUID, status string) error
+	// ReactivateAccount rewrites the password hash and flips status to active
+	// in one statement, guarded to only ever act on a currently-disabled
+	// account; ErrNotFound when the account is not disabled (a concurrent
+	// reactivation, or it was never disabled — the race guard for Reactivate).
+	ReactivateAccount(ctx context.Context, id uuid.UUID, passwordHash string, at time.Time) error
+	// SetPasswordHash rewrites the password hash of a currently-active
+	// account; ErrNotFound when the account is not active (unknown id,
+	// soft-deleted, or disabled) — the guard for password reset, which must
+	// never resurrect a disabled account.
+	SetPasswordHash(ctx context.Context, id uuid.UUID, passwordHash string, at time.Time) error
+	// SetPasswordHashForRecovery rewrites the password hash of a live
+	// (not soft-deleted) account regardless of active/disabled status,
+	// without touching status — the operator `reset-password` CLI's write
+	// path, which must be able to recover a disabled account (e.g. a
+	// locked-out owner) without silently reactivating it. ErrNotFound when no
+	// live account matches.
+	SetPasswordHashForRecovery(ctx context.Context, id uuid.UUID, passwordHash string, at time.Time) error
 }
 
 type gormRepository struct {
@@ -103,6 +123,75 @@ func (r *gormRepository) TouchLastLogin(ctx context.Context, id uuid.UUID, at ti
 		Model(&Account{}).
 		Where("id = ?", id).
 		Update("last_login_at", at).Error
+}
+
+func (r *gormRepository) SetStatus(ctx context.Context, id uuid.UUID, status string) error {
+	res := database.FromContext(ctx, r.db).
+		Model(&Account{}).
+		Where("id = ?", id).
+		Update("status", status)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *gormRepository) ReactivateAccount(ctx context.Context, id uuid.UUID, passwordHash string, at time.Time) error {
+	res := database.FromContext(ctx, r.db).
+		Model(&Account{}).
+		Where("id = ? AND status = ?", id, StatusDisabled).
+		Updates(map[string]any{
+			"password_hash": passwordHash,
+			"status":        StatusActive,
+			"updated_at":    at,
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *gormRepository) SetPasswordHash(ctx context.Context, id uuid.UUID, passwordHash string, at time.Time) error {
+	res := database.FromContext(ctx, r.db).
+		Model(&Account{}).
+		Where("id = ? AND status = ?", id, StatusActive).
+		Updates(map[string]any{
+			"password_hash": passwordHash,
+			"updated_at":    at,
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *gormRepository) SetPasswordHashForRecovery(ctx context.Context, id uuid.UUID, passwordHash string, at time.Time) error {
+	// No status filter (GORM's soft-delete scope still excludes a
+	// soft-deleted row) — unlike SetPasswordHash, this must reach a disabled
+	// account too, without changing its status.
+	res := database.FromContext(ctx, r.db).
+		Model(&Account{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"password_hash": passwordHash,
+			"updated_at":    at,
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // translateError maps the partial unique phone index violation onto

@@ -29,7 +29,7 @@ import (
 func mountProfileRoutes(db *gorm.DB, jwtCfg config.JWTConfig) *gin.Engine {
 	r := gin.New()
 	svc := teachers.NewService(teachers.NewRepository(db))
-	centersSvc := centers.NewService(centers.NewRepository(db), svc, database.NewTxManager(db))
+	centersSvc := centers.NewService(centers.NewRepository(db), database.NewTxManager(db))
 	teachers.RegisterRoutes(r.Group("/api/v1"), teachers.NewHandler(svc),
 		middleware.RequireAuth(jwtCfg), middleware.ResolveScope(centersSvc))
 	return r
