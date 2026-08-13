@@ -5,9 +5,11 @@ package auth_test
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
@@ -20,19 +22,57 @@ import (
 	"teka/apps/api/internal/testutil"
 )
 
-func newIntegrationService(t *testing.T) (*auth.Service, *gorm.DB) {
+// capturingDMSender is a scripted auth.ResetDMSender that records the last
+// message text so a test can recover the plaintext reset token from the link
+// it carries — the only place it's observable, since ForgotPassword's own
+// response never carries it.
+type capturingDMSender struct {
+	lookupOK     bool
+	lookupCalled bool
+	sendCalled   bool
+	lastText     string
+}
+
+func (s *capturingDMSender) LookupPhone(_ context.Context, _ uuid.UUID, _ string) (string, bool, error) {
+	s.lookupCalled = true
+	return "u1", s.lookupOK, nil
+}
+
+func (s *capturingDMSender) SendDM(_ context.Context, _ uuid.UUID, _, text string) (string, error) {
+	s.sendCalled = true
+	s.lastText = text
+	return "msg-1", nil
+}
+
+// extractResetToken recovers the plaintext token from the message text
+// attemptResetDM sent.
+func extractResetToken(t *testing.T, text string) string {
+	t.Helper()
+	const marker = "/reset-password/"
+	i := strings.Index(text, marker)
+	require.NotEqual(t, -1, i, "dm text missing reset link: %s", text)
+	return text[i+len(marker):]
+}
+
+// newIntegrationService wires auth the way the router does: teachersSvc is
+// its AccountService, centersSvc is its OwnerResolver (owner-exclusion + DM
+// anchor for forgot-password), and the returned capturingDMSender is a
+// scripted ResetDMSender a test can inspect afterward.
+func newIntegrationService(t *testing.T) (*auth.Service, *gorm.DB, *centers.Service, *capturingDMSender) {
 	t.Helper()
 	db := testutil.StartPostgres(t)
+	txMgr := database.NewTxManager(db)
 	teachersSvc := teachers.NewService(teachers.NewRepository(db))
-	teachersSvc.SetCenterProvisioner(
-		centers.NewService(centers.NewRepository(db), teachersSvc, database.NewTxManager(db)))
+	centersSvc := centers.NewService(centers.NewRepository(db), txMgr)
+	dmSender := &capturingDMSender{lookupOK: true}
 	issuer := auth.NewTokenIssuer(config.JWTConfig{
 		Secret:     testutil.JWTSecret,
 		AccessTTL:  15 * time.Minute,
 		RefreshTTL: 720 * time.Hour,
 	})
-	svc := auth.NewService(teachersSvc, auth.NewRepository(db), issuer, database.NewTxManager(db))
-	return svc, db
+	cfg := config.OnboardingConfig{ResetTTL: 48 * time.Hour, ResetCooldown: 15 * time.Minute}
+	svc := auth.NewService(teachersSvc, auth.NewRepository(db), issuer, txMgr, centersSvc, dmSender, cfg, "https://app.example.com")
+	return svc, db, centersSvc, dmSender
 }
 
 func liveTokenCount(t *testing.T, db *gorm.DB) int64 {
@@ -50,12 +90,11 @@ func requireUnauthorized(t *testing.T, err error) {
 
 func TestRefreshRotationAndReuseAgainstRealSQL(t *testing.T) {
 	t.Parallel()
-	svc, db := newIntegrationService(t)
+	svc, db, _, _ := newIntegrationService(t)
 	ctx := context.Background()
 
-	sess, err := svc.Register(ctx, auth.RegisterRequest{
-		Phone: "0901234567", Password: "password-123", FullName: "Rotate",
-	})
+	acct, _ := testutil.Teacher(t, db, testutil.WithPassword("password-123"))
+	sess, err := svc.Login(ctx, auth.LoginRequest{Phone: acct.Phone, Password: "password-123"})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, liveTokenCount(t, db))
 
@@ -73,78 +112,9 @@ func TestRefreshRotationAndReuseAgainstRealSQL(t *testing.T) {
 	requireUnauthorized(t, err)
 }
 
-func TestRegisterDuplicatePhoneRollsBack(t *testing.T) {
-	t.Parallel()
-	svc, db := newIntegrationService(t)
-	ctx := context.Background()
-
-	sess, err := svc.Register(ctx, auth.RegisterRequest{
-		Phone: "0901234567", Password: "password-123", FullName: "Once",
-	})
-	require.NoError(t, err)
-	require.Equal(t, "+84901234567", sess.Teacher.Account.Phone,
-		"local-form input must be stored as E.164")
-
-	// The E.164 spelling of the same number must collide with the local-form
-	// registration above — one number, one account.
-	_, err = svc.Register(ctx, auth.RegisterRequest{
-		Phone: "+84901234567", Password: "password-123", FullName: "Twice",
-	})
-	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
-
-	var accountCount, teacherCount int64
-	require.NoError(t, db.Model(&teachers.Account{}).Count(&accountCount).Error)
-	require.NoError(t, db.Model(&teachers.Teacher{}).Count(&teacherCount).Error)
-	require.EqualValues(t, 1, accountCount, "failed register must persist no account")
-	require.EqualValues(t, 1, teacherCount, "failed register must persist no teacher profile")
-	require.EqualValues(t, 1, liveTokenCount(t, db))
-}
-
-func TestRegisterRollsBackAccountWhenTeacherInsertFails(t *testing.T) {
-	t.Parallel()
-	svc, db := newIntegrationService(t)
-	ctx := context.Background()
-
-	// Calling the service directly bypasses the handler's max=100 binding tag.
-	// 101 characters exceeds teachers.full_name VARCHAR(100), so the second
-	// INSERT of the transaction fails after the user_accounts row is written —
-	// the only path that actually exercises the rollback.
-	_, err := svc.Register(ctx, auth.RegisterRequest{
-		Phone: "0901234567", Password: "password-123", FullName: strings.Repeat("x", 101),
-	})
-	require.Error(t, err, "over-length full_name must fail the teachers insert")
-
-	var accountCount int64
-	require.NoError(t, db.Unscoped().Model(&teachers.Account{}).
-		Where("phone = ?", "+84901234567").Count(&accountCount).Error)
-	require.EqualValues(t, 0, accountCount,
-		"failed teachers insert must roll back the user_accounts row")
-	require.EqualValues(t, 0, liveTokenCount(t, db))
-}
-
-func TestRegisterCreatesMatchingAccountAndTeacherRows(t *testing.T) {
-	t.Parallel()
-	svc, db := newIntegrationService(t)
-	ctx := context.Background()
-
-	sess, err := svc.Register(ctx, auth.RegisterRequest{
-		Phone: "0912345678", Password: "password-123", FullName: "Cô Lan",
-	})
-	require.NoError(t, err)
-
-	var acct teachers.Account
-	require.NoError(t, db.First(&acct, "phone = ?", "+84912345678").Error)
-	var teacher teachers.Teacher
-	require.NoError(t, db.First(&teacher, "id = ?", acct.ID).Error)
-	require.Equal(t, acct.ID, teacher.ID, "account and teacher must share one id")
-	require.Equal(t, sess.Teacher.Account.ID, acct.ID)
-	require.Equal(t, "Cô Lan", teacher.FullName)
-	require.Equal(t, teachers.DefaultTimezone, teacher.Timezone)
-}
-
 func TestLoginAgainstStoredHash(t *testing.T) {
 	t.Parallel()
-	svc, db := newIntegrationService(t)
+	svc, db, _, _ := newIntegrationService(t)
 	ctx := context.Background()
 
 	acct, _ := testutil.Teacher(t, db, testutil.WithPassword("s3cret-pass!"))
@@ -164,11 +134,164 @@ func TestLoginAgainstStoredHash(t *testing.T) {
 
 func TestLoginRejectsDisabledAccountAgainstRealSQL(t *testing.T) {
 	t.Parallel()
-	svc, db := newIntegrationService(t)
+	svc, db, _, _ := newIntegrationService(t)
 	ctx := context.Background()
 
 	acct, _ := testutil.Teacher(t, db, testutil.WithStatus(teachers.StatusDisabled))
 
 	_, err := svc.Login(ctx, auth.LoginRequest{Phone: acct.Phone, Password: testutil.DefaultPassword})
 	requireUnauthorized(t, err)
+}
+
+func TestDisableAgainstRealSQLFlipsStatusAndRevokesTokens(t *testing.T) {
+	t.Parallel()
+	svc, db, _, _ := newIntegrationService(t)
+	ctx := context.Background()
+
+	acct, _ := testutil.Teacher(t, db, testutil.WithPassword("password-123"))
+	sess, err := svc.Login(ctx, auth.LoginRequest{Phone: acct.Phone, Password: "password-123"})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, liveTokenCount(t, db))
+
+	require.NoError(t, svc.Disable(ctx, acct.ID))
+
+	var reloaded teachers.Account
+	require.NoError(t, db.First(&reloaded, "id = ?", acct.ID).Error)
+	require.Equal(t, teachers.StatusDisabled, reloaded.Status)
+	require.EqualValues(t, 0, liveTokenCount(t, db), "disable must revoke every live token")
+
+	_, err = svc.Refresh(ctx, sess.RefreshToken)
+	requireUnauthorized(t, err)
+}
+
+// TestForgotPasswordAndResetRoundTripAgainstRealSQL proves the full member
+// forgot -> reset -> login path against real Postgres: the mailed link's
+// token resets the password and revokes every pre-existing session.
+func TestForgotPasswordAndResetRoundTripAgainstRealSQL(t *testing.T) {
+	t.Parallel()
+	svc, db, _, dmSender := newIntegrationService(t)
+	ctx := context.Background()
+
+	_, ownerTeacher := testutil.Teacher(t, db)
+	member, _ := testutil.Teacher(t, db, testutil.WithPassword("old-password-1"))
+	testutil.JoinCenter(t, db, member.ID, ownerTeacher.CenterID)
+
+	oldSess, err := svc.Login(ctx, auth.LoginRequest{Phone: member.Phone, Password: "old-password-1"})
+	require.NoError(t, err)
+
+	require.NoError(t, svc.ForgotPassword(ctx, auth.ForgotPasswordRequest{Phone: member.Phone}))
+	require.True(t, dmSender.lookupCalled)
+	require.True(t, dmSender.sendCalled)
+	plaintext := extractResetToken(t, dmSender.lastText)
+
+	require.NoError(t, svc.ResetPassword(ctx, auth.ResetPasswordRequest{Token: plaintext, Password: "new-password-1"}))
+
+	_, err = svc.Login(ctx, auth.LoginRequest{Phone: member.Phone, Password: "old-password-1"})
+	require.Error(t, err, "the old password must be rejected after a reset")
+
+	sess, err := svc.Login(ctx, auth.LoginRequest{Phone: member.Phone, Password: "new-password-1"})
+	require.NoError(t, err, "the new password must work after a reset")
+	require.Equal(t, member.ID, sess.Teacher.Account.ID)
+
+	_, err = svc.Refresh(ctx, oldSess.RefreshToken)
+	requireUnauthorized(t, err)
+}
+
+// TestForgotPasswordExcludesCenterOwnerAgainstRealSQL proves an owner's own
+// phone never mints a reset token or triggers a DM — owners recover via
+// operator CLI only.
+func TestForgotPasswordExcludesCenterOwnerAgainstRealSQL(t *testing.T) {
+	t.Parallel()
+	svc, db, _, dmSender := newIntegrationService(t)
+	ctx := context.Background()
+
+	owner, _ := testutil.Teacher(t, db)
+
+	require.NoError(t, svc.ForgotPassword(ctx, auth.ForgotPasswordRequest{Phone: owner.Phone}))
+	require.False(t, dmSender.lookupCalled, "a center owner must never trigger a reset DM")
+
+	var tokenCount int64
+	require.NoError(t, db.Raw(
+		"SELECT count(*) FROM password_reset_tokens WHERE user_id = ?", owner.ID,
+	).Scan(&tokenCount).Error)
+	require.Equal(t, int64(0), tokenCount, "a center owner must never receive a reset token")
+}
+
+// TestForgotPasswordConcurrentRequestsLeaveExactlyOneLiveToken proves the
+// partial unique index uq_password_reset_active is honored under a real
+// race: two concurrent forgot-password requests for the same account never
+// leave two live token rows.
+func TestForgotPasswordConcurrentRequestsLeaveExactlyOneLiveToken(t *testing.T) {
+	t.Parallel()
+	svc, db, _, _ := newIntegrationService(t)
+	ctx := context.Background()
+
+	_, ownerTeacher := testutil.Teacher(t, db)
+	member, _ := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, member.ID, ownerTeacher.CenterID)
+
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for i := range 2 {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errs[i] = svc.ForgotPassword(ctx, auth.ForgotPasswordRequest{Phone: member.Phone})
+		}(i)
+	}
+	wg.Wait()
+
+	require.NoError(t, errs[0], "a concurrent forgot-password race must never surface as an error")
+	require.NoError(t, errs[1], "a concurrent forgot-password race must never surface as an error")
+
+	var liveCount int64
+	require.NoError(t, db.Raw(
+		"SELECT count(*) FROM password_reset_tokens WHERE user_id = ? AND used_at IS NULL AND superseded_at IS NULL",
+		member.ID,
+	).Scan(&liveCount).Error)
+	require.Equal(t, int64(1), liveCount, "exactly one live token must survive the race")
+}
+
+// TestResetPasswordConcurrentDoubleConsumeOnlyOneWins proves the
+// SELECT ... FOR UPDATE lock on the reset token row: two goroutines racing to
+// redeem the same token against real Postgres serialize, and exactly one
+// wins the live->used transition.
+func TestResetPasswordConcurrentDoubleConsumeOnlyOneWins(t *testing.T) {
+	t.Parallel()
+	svc, db, _, dmSender := newIntegrationService(t)
+	ctx := context.Background()
+
+	_, ownerTeacher := testutil.Teacher(t, db)
+	member, _ := testutil.Teacher(t, db, testutil.WithPassword("old-password-1"))
+	testutil.JoinCenter(t, db, member.ID, ownerTeacher.CenterID)
+
+	require.NoError(t, svc.ForgotPassword(ctx, auth.ForgotPasswordRequest{Phone: member.Phone}))
+	plaintext := extractResetToken(t, dmSender.lastText)
+
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for i := range 2 {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errs[i] = svc.ResetPassword(ctx, auth.ResetPasswordRequest{
+				Token: plaintext, Password: "new-password-1",
+			})
+		}(i)
+	}
+	wg.Wait()
+
+	successes, failures := 0, 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			successes++
+		default:
+			failures++
+			require.Equal(t, apperror.CodeBadRequest, apperror.From(err).Code,
+				"the losing reset must answer the generic rejection, not a race artifact")
+		}
+	}
+	require.Equal(t, 1, successes, "exactly one concurrent redemption of the same token must win")
+	require.Equal(t, 1, failures)
 }
