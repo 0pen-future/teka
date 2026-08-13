@@ -45,14 +45,51 @@ describe("Phụ huynh nav entry", () => {
     renderLayout();
     await screen.findAllByRole("link", { name: "Phụ huynh" });
 
-    // Each sidebar nav child is one entry (link or disabled span) whose only
-    // text is its label — icons are svg-only.
+    // Entry links keep their document order inside the grouped sidebar nav.
     const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
-    const labels = Array.from(sidebarNav.children).map((el) => el.textContent);
+    const labels = within(sidebarNav)
+      .getAllByRole("link")
+      .map((link) => link.textContent);
     const students = labels.indexOf("Lớp & học sinh");
     const contacts = labels.indexOf("Phụ huynh");
     expect(students).toBeGreaterThanOrEqual(0);
     expect(contacts).toBe(students + 1);
+  });
+});
+
+describe("grouped sidebar", () => {
+  it("renders each prototype section as a group owning its entries", async () => {
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+    await within(sidebarNav).findByRole("link", { name: "Phụ huynh" });
+
+    const expected: Record<string, string[]> = {
+      "Dạy học": ["Điểm danh", "Lớp & học sinh", "Phụ huynh"],
+      "Học phí": ["Chốt sổ", "Gửi thông báo", "Thu tiền"],
+      "Trung tâm": ["Cài đặt trung tâm"],
+    };
+    for (const [header, labels] of Object.entries(expected)) {
+      const group = within(sidebarNav).getByRole("group", { name: header });
+      // Every entry (live link or disabled span) sits inside its own group.
+      for (const label of labels) {
+        expect(within(group).getByText(label)).toBeInTheDocument();
+      }
+    }
+    // The center entry is the renamed settings link.
+    expect(within(sidebarNav).getByRole("link", { name: "Cài đặt trung tâm" })).toHaveAttribute(
+      "href",
+      "/center",
+    );
+    expect(within(sidebarNav).queryByRole("link", { name: "Trung tâm" })).not.toBeInTheDocument();
+  });
+
+  it("shows the center card with name, prefix-stripped initial, and owner role", async () => {
+    renderLayout();
+    // Default /centers/me handler is owner-shaped for Trung Tâm Bình Minh.
+    expect(await screen.findByText("Trung Tâm Bình Minh")).toBeInTheDocument();
+    expect(screen.getByText("Chủ trung tâm")).toBeInTheDocument();
+    // The disc drops the generic "Trung Tâm" prefix: Bình Minh → B.
+    expect(screen.getByText("B")).toBeInTheDocument();
   });
 });
 
@@ -90,6 +127,10 @@ describe("bottom tab bar", () => {
     ).toMatch(/^\/notifications\//);
     const contacts = within(sheet).getByRole("link", { name: "Phụ huynh" });
     expect(contacts).toHaveAttribute("href", "/contacts");
+    expect(within(sheet).getByRole("link", { name: "Cài đặt trung tâm" })).toHaveAttribute(
+      "href",
+      "/center",
+    );
 
     await user.click(contacts);
     await waitFor(() => expect(router.state.location.pathname).toBe("/contacts"));

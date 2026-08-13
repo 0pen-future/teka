@@ -433,6 +433,20 @@ export const handlers = [
     HttpResponse.json(ok({ message: "if this phone is registered, a reset link has been sent" })),
   ),
   http.post(`${API_URL}/auth/reset-password`, () => new HttpResponse(null, { status: 204 })),
+  // Owner-shaped by default — the signed-in teacher owns their center, so the
+  // layout's center card resolves everywhere; member-shaped tests override.
+  http.get(`${API_URL}/centers/me`, () =>
+    HttpResponse.json(
+      ok({
+        center: {
+          id: "30000000-0000-4000-8000-000000000001",
+          name: "Trung Tâm Bình Minh",
+          is_owner: true,
+        },
+        members: [],
+      }),
+    ),
+  ),
   http.post(`${API_URL}/centers/me/invitations`, () =>
     HttpResponse.json(
       ok({
