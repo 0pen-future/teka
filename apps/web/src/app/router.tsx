@@ -8,6 +8,7 @@ import { billingRoutes } from "@/features/billing/routes";
 import { centerRoutes } from "@/features/center/routes";
 import { collectionsRoutes } from "@/features/collections/routes";
 import { dashboardRoutes } from "@/features/dashboard/routes";
+import { invitationRoutes } from "@/features/invitation";
 import { profileRoutes } from "@/features/profile/routes";
 import { rosterRoutes } from "@/features/roster/routes";
 import { statementRoutes } from "@/features/statement";
@@ -26,7 +27,7 @@ export const router = createBrowserRouter([
     children: [
       {
         element: <AuthLayout />,
-        children: authRoutes,
+        children: [...authRoutes, ...invitationRoutes],
       },
       {
         element: (

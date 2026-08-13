@@ -1,9 +1,14 @@
 import { http, HttpResponse } from "msw";
 
-import { API_URL, fail, ok } from "@/test/msw/handlers";
+import { API_URL, ok } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 
-import type { CenterMe, CenterMember } from "../schemas/center-schemas";
+import type {
+  CenterMe,
+  CenterMeMember,
+  CenterMeOwner,
+  CenterMember,
+} from "../schemas/center-schemas";
 
 let memberCounter = 0;
 
@@ -18,7 +23,8 @@ export function makeMember(overrides: Partial<CenterMember> = {}): CenterMember 
   };
 }
 
-export function makeCenterMe(overrides: Partial<CenterMe> = {}): CenterMe {
+/** `centers.MeResponse` — the owner's read model. */
+export function makeCenterMeOwner(overrides: Partial<CenterMeOwner> = {}): CenterMeOwner {
   return {
     center: {
       id: "30000000-0000-4000-8000-000000000001",
@@ -27,6 +33,14 @@ export function makeCenterMe(overrides: Partial<CenterMe> = {}): CenterMe {
       ...overrides.center,
     },
     members: overrides.members ?? [makeMember({ is_owner: true })],
+  };
+}
+
+/** `centers.MemberMeResponse` — a non-owner member's read model. */
+export function makeCenterMeMember(overrides: Partial<CenterMeMember> = {}): CenterMeMember {
+  return {
+    center_name: "Trung Tâm Bình Minh",
+    ...overrides,
   };
 }
 
@@ -45,18 +59,4 @@ export function mockCenterMe(...payloads: CenterMe[]): { calls: number } {
     }),
   );
   return record;
-}
-
-/** Overrides `POST /centers/join` with a scripted error envelope. */
-export function mockJoinFailure(
-  status: number,
-  code: string,
-  message: string,
-  fields?: Record<string, string>,
-) {
-  server.use(
-    http.post(`${API_URL}/centers/join`, () =>
-      HttpResponse.json(fail(code, message, fields), { status }),
-    ),
-  );
 }

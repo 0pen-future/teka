@@ -3,11 +3,10 @@ import { parseData } from "@/lib/api/envelope";
 import { ApiError } from "@/lib/api/errors";
 
 import {
+  centerMeOwnerSchema,
   centerMeSchema,
-  joinCenterResponseSchema,
   type CenterMe,
-  type JoinCenterInput,
-  type JoinCenterResponse,
+  type CenterMeOwner,
   type RenameCenterInput,
 } from "../schemas/center-schemas";
 
@@ -16,15 +15,14 @@ export async function getCenterMe(): Promise<CenterMe> {
   return parseData(centerMeSchema, res.data);
 }
 
-/** Rename returns the full MeResponse, so the cache can be replaced, not refetched. */
-export async function renameCenter(input: RenameCenterInput): Promise<CenterMe> {
+/**
+ * Rename is owner-only, so it always answers the full owner-shaped
+ * `MeResponse` — parsing that shape directly (not the role-shaped union)
+ * lets the cache be replaced outright instead of refetched.
+ */
+export async function renameCenter(input: RenameCenterInput): Promise<CenterMeOwner> {
   const res = await apiClient.patch<unknown>("/centers/me", input);
-  return parseData(centerMeSchema, res.data);
-}
-
-export async function joinCenter(input: JoinCenterInput): Promise<JoinCenterResponse> {
-  const res = await apiClient.post<unknown>("/centers/join", input);
-  return parseData(joinCenterResponseSchema, res.data);
+  return parseData(centerMeOwnerSchema, res.data);
 }
 
 /**

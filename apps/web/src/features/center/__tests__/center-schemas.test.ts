@@ -1,13 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  centerMeSchema,
-  joinCenterInputSchema,
-  renameCenterInputSchema,
-} from "../schemas/center-schemas";
+import { centerMeSchema, renameCenterInputSchema } from "../schemas/center-schemas";
 
 describe("centerMeSchema", () => {
-  it("parses the GET /centers/me contract", () => {
+  it("parses the owner-shaped GET /centers/me contract", () => {
     const me = centerMeSchema.parse({
       center: { id: "c1", name: "Trung Tâm Bình Minh", is_owner: true },
       members: [
@@ -15,33 +11,24 @@ describe("centerMeSchema", () => {
         { id: "t2", full_name: "Giáo Viên A", phone: "+84901000002", is_owner: false },
       ],
     });
+    if (!("members" in me)) {
+      throw new Error("expected the owner shape");
+    }
     expect(me.center.is_owner).toBe(true);
     expect(me.members).toHaveLength(2);
   });
 
-  it("rejects a payload missing is_owner — the role-gating anchor", () => {
-    expect(() =>
-      centerMeSchema.parse({
-        center: { id: "c1", name: "X" },
-        members: [],
-      }),
-    ).toThrow();
-  });
-});
-
-describe("joinCenterInputSchema", () => {
-  it("accepts both local and E.164 phone forms", () => {
-    expect(joinCenterInputSchema.parse({ owner_phone: "0901234567" }).owner_phone).toBe(
-      "0901234567",
-    );
-    expect(joinCenterInputSchema.parse({ owner_phone: "+84901234567" }).owner_phone).toBe(
-      "+84901234567",
-    );
+  it("parses the member-shaped GET /centers/me contract", () => {
+    const me = centerMeSchema.parse({ center_name: "Trung Tâm Bình Minh" });
+    if ("members" in me) {
+      throw new Error("expected the member shape");
+    }
+    expect(me.center_name).toBe("Trung Tâm Bình Minh");
   });
 
-  it("rejects garbage before it round-trips", () => {
-    expect(joinCenterInputSchema.safeParse({ owner_phone: "12345" }).success).toBe(false);
-    expect(joinCenterInputSchema.safeParse({ owner_phone: "" }).success).toBe(false);
+  it("rejects a payload matching neither role shape", () => {
+    expect(() => centerMeSchema.parse({ center: { id: "c1", name: "X" } })).toThrow();
+    expect(centerMeSchema.safeParse({}).success).toBe(false);
   });
 });
 

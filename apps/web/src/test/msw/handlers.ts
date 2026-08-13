@@ -405,11 +405,6 @@ const publicStatementFixturesByToken: Record<string, unknown> = {
 
 export const handlers = [
   http.post(`${API_URL}/auth/login`, () => HttpResponse.json(ok(makeSession(primaryTeacher)))),
-  http.post(`${API_URL}/auth/register`, async ({ request }) => {
-    const body = (await request.json()) as { full_name: string; phone: string };
-    const teacher = makeTeacher({ full_name: body.full_name, phone: body.phone });
-    return HttpResponse.json(ok(makeSession(teacher)), { status: 201 });
-  }),
   // No refresh cookie in tests by default: a fresh visitor has no session.
   http.post(`${API_URL}/auth/refresh`, () =>
     HttpResponse.json(fail("UNAUTHORIZED", "invalid refresh token"), { status: 401 }),
@@ -432,6 +427,36 @@ export const handlers = [
   http.get(`${API_URL}/billing-periods/:id/collections/summary`, () =>
     HttpResponse.json(ok(makeCollectionsSummary())),
   ),
+  // Always the same generic body — the real endpoint never reveals whether
+  // the phone matched an eligible account (anti-enumeration).
+  http.post(`${API_URL}/auth/forgot-password`, () =>
+    HttpResponse.json(ok({ message: "if this phone is registered, a reset link has been sent" })),
+  ),
+  http.post(`${API_URL}/auth/reset-password`, () => new HttpResponse(null, { status: 204 })),
+  http.post(`${API_URL}/centers/me/invitations`, () =>
+    HttpResponse.json(
+      ok({
+        id: "40000000-0000-4000-8000-000000000001",
+        phone: "+84901234567",
+        expires_at: "2026-08-19T10:00:00Z",
+        link: "https://app.teka.dev/invite/test-invite-token",
+        dm_status: "sent",
+      }),
+      { status: 201 },
+    ),
+  ),
+  http.get(`${API_URL}/centers/me/invitations`, () => HttpResponse.json(ok([]))),
+  http.delete(
+    `${API_URL}/centers/me/invitations/:id`,
+    () => new HttpResponse(null, { status: 204 }),
+  ),
+  // Anti-enumeration: every rejection reason (unknown/expired/revoked/used
+  // token) collapses to the same generic 404 on the real API; tests override
+  // this default with a fixture keyed to a specific token.
+  http.post(`${API_URL}/invitations/preview`, () =>
+    HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh", phone_masked: "+84******567" })),
+  ),
+  http.post(`${API_URL}/invitations/accept`, () => new HttpResponse(null, { status: 204 })),
   // Every failure mode (unknown, malformed, revoked, expired, already-paid,
   // soft-deleted) collapses to a plain 404 — the real API has no other error
   // code for this endpoint.

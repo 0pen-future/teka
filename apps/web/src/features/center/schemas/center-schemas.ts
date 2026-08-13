@@ -1,14 +1,5 @@
 import { z } from "zod";
 
-/**
- * Vietnamese phone, accepting both local (`0xxxxxxxxx`) and E.164
- * (`+84xxxxxxxxx`) input forms — mirrors `vnPhonePattern`
- * (`apps/api/internal/shared/validation/validation.go`). The server
- * normalizes to E.164 on write; the client only needs to reject garbage
- * before it round-trips.
- */
-const vnPhonePattern = /^(0|\+84)(3|5|7|8|9)\d{8}$/;
-
 /** `centers.MemberResponse` (`apps/api/internal/features/centers/dto.go`). */
 export const centerMemberSchema = z.object({
   id: z.string(),
@@ -29,31 +20,35 @@ export const centerSchema = z.object({
   is_owner: z.boolean(),
 });
 
-/** `centers.MeResponse` — the one payload the page renders from. */
-export const centerMeSchema = z.object({
+/**
+ * `centers.MeResponse` — the owner's read model: the full center plus its
+ * member roster.
+ */
+export const centerMeOwnerSchema = z.object({
   center: centerSchema,
   members: z.array(centerMemberSchema),
 });
 
+export type CenterMeOwner = z.infer<typeof centerMeOwnerSchema>;
+
+/**
+ * `centers.MemberMeResponse` — a non-owner's read model: the roster is
+ * owner-only data, so a member sees only the center's name.
+ */
+export const centerMeMemberSchema = z.object({
+  center_name: z.string(),
+});
+
+export type CenterMeMember = z.infer<typeof centerMeMemberSchema>;
+
+/**
+ * `GET /centers/me` is role-shaped: the two response bodies share no
+ * discriminant field, so callers narrow on `"members" in data` (present only
+ * on the owner shape) rather than reading a role flag.
+ */
+export const centerMeSchema = z.union([centerMeOwnerSchema, centerMeMemberSchema]);
+
 export type CenterMe = z.infer<typeof centerMeSchema>;
-
-/** `centers.JoinRequest` — the target center is addressed by its owner's phone. */
-export const joinCenterInputSchema = z.object({
-  owner_phone: z
-    .string()
-    .trim()
-    .min(1, "Bắt buộc nhập số điện thoại")
-    .regex(vnPhonePattern, "Số điện thoại không hợp lệ"),
-});
-
-export type JoinCenterInput = z.infer<typeof joinCenterInputSchema>;
-
-export const joinCenterResponseSchema = z.object({
-  center_id: z.string(),
-  joined_at: z.string(),
-});
-
-export type JoinCenterResponse = z.infer<typeof joinCenterResponseSchema>;
 
 /** `centers.RenameRequest` — server caps at 255 (`binding:"max=255"`). */
 export const renameCenterInputSchema = z.object({
