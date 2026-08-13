@@ -2,6 +2,7 @@ package server
 
 import (
 	"log/slog"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
@@ -21,6 +22,7 @@ import (
 	"teka/apps/api/internal/features/collections"
 	"teka/apps/api/internal/features/contacts"
 	"teka/apps/api/internal/features/enrollments"
+	"teka/apps/api/internal/features/invitations"
 	"teka/apps/api/internal/features/notifications"
 	"teka/apps/api/internal/features/payments"
 	"teka/apps/api/internal/features/sessions"
@@ -35,11 +37,14 @@ import (
 
 // NewRouter builds the Gin engine: middleware stack, health probes, and the
 // versioned API group that feature modules mount into. Every feature is
-// constructed from db here except zalo, statements, and notifications, which
-// are passed in already built: zalo and notifications own background
-// goroutines the app lifecycle has to stop, and statements is a constructor
-// dependency of notifications.
-func NewRouter(cfg *config.Config, log *slog.Logger, db *gorm.DB, zaloSvc *zalo.Service, statementsSvc *statements.Service, notificationsSvc *notifications.Service) *gin.Engine {
+// constructed from db here except zalo, statements, notifications, teachers,
+// centers, and auth, which are passed in already built: zalo and
+// notifications own background goroutines the app lifecycle has to stop,
+// statements is a constructor dependency of notifications, and
+// teachers/centers/auth are built once in app.Container so the operator
+// CLI's onboarding commands share the exact same identity wiring instead of
+// duplicating it.
+func NewRouter(cfg *config.Config, log *slog.Logger, db *gorm.DB, zaloSvc *zalo.Service, statementsSvc *statements.Service, notificationsSvc *notifications.Service, teachersSvc *teachers.Service, centersSvc *centers.Service, authSvc *auth.Service) *gin.Engine {
 	if cfg.IsProduction() {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -64,7 +69,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *gorm.DB, zaloSvc *zalo.
 	}
 
 	v1 := r.Group("/api/v1")
-	registerFeatures(v1, cfg, db, zaloSvc, statementsSvc, notificationsSvc)
+	registerFeatures(v1, cfg, db, zaloSvc, statementsSvc, notificationsSvc, teachersSvc, centersSvc, authSvc)
 
 	// Deliberately outside v1 and outside requireAuth: the only unauthenticated
 	// route in the product that serves child/money data.
@@ -82,26 +87,28 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *gorm.DB, zaloSvc *zalo.
 // decoupled from bootstrap; the process-lifetime services (zalo, statements,
 // notifications) arrive already built from the container and are only
 // mounted.
-func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zaloSvc *zalo.Service, statementsSvc *statements.Service, notificationsSvc *notifications.Service) {
+func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zaloSvc *zalo.Service, statementsSvc *statements.Service, notificationsSvc *notifications.Service, teachersSvc *teachers.Service, centersSvc *centers.Service, authSvc *auth.Service) {
 	requireAuth := middleware.RequireAuth(cfg.JWT)
 	txMgr := database.NewTxManager(db)
 
-	teachersSvc := teachers.NewService(teachers.NewRepository(db))
-
-	// centers consumes teachers through centers.TeacherLookup (owner-phone
-	// resolution), and teachers consumes centers back through
-	// teachers.CenterProvisioner so registering a teacher provisions their
-	// personal center in the same transaction — a setter breaks that cycle,
-	// same as attendance.SetReconciler below.
-	centersSvc := centers.NewService(centers.NewRepository(db), teachersSvc, txMgr)
-	teachersSvc.SetCenterProvisioner(centersSvc)
+	// teachersSvc, centersSvc, and authSvc arrive already built and
+	// cross-wired (SetAccountDisabler/SetTokenRevoker) from app.Container —
+	// see its NewContainer for that wiring; only route registration happens
+	// here.
 	// resolveScope re-reads center membership from the database on every
-	// request (never from JWT claims) so kicks and leaves bite immediately.
+	// request (never from JWT claims) so removals bite immediately.
 	resolveScope := middleware.ResolveScope(centersSvc)
 	centers.RegisterRoutes(v1, centers.NewHandler(centersSvc), requireAuth, resolveScope)
 
-	authSvc := auth.NewService(teachersSvc, auth.NewRepository(db), auth.NewTokenIssuer(cfg.JWT), txMgr)
-	auth.RegisterRoutes(v1, auth.NewHandler(authSvc, cfg))
+	authHandler := auth.NewHandler(authSvc, cfg)
+	auth.RegisterRoutes(v1, authHandler)
+	// The reset token and the target phone are the only credentials guarding
+	// these two routes — the caller has no session yet, so each gets its own
+	// rate limit keyed on the request body, not the caller's IP (same
+	// reasoning as invitations.RegisterPublicRoutes below).
+	auth.RegisterPublicRoutes(v1, authHandler,
+		middleware.RateLimit(middleware.JSONBodyKey("phone"), 5, time.Minute),
+		middleware.RateLimit(middleware.JSONBodyKey("token"), 10, time.Minute))
 	teachers.RegisterRoutes(v1, teachers.NewHandler(teachersSvc), requireAuth, resolveScope)
 
 	contactsSvc := contacts.NewService(contacts.NewRepository(db))
@@ -171,4 +178,23 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	notifications.RegisterRoutes(v1, notifications.NewHandler(notificationsSvc), requireAuth, resolveScope)
 
 	zalo.RegisterRoutes(v1, zalo.NewHandler(zaloSvc), requireAuth, resolveScope)
+
+	// invitations consumes zaloSvc through invitations.ZaloSender (its
+	// LookupPhone adapter) for the best-effort DM, teachersSvc as
+	// AccountOnboarder and centersSvc as MembershipOpener for the accept flow
+	// (both already exist by this point, so these are plain constructor
+	// parameters, not setters — no construction cycle to break), and reuses
+	// Statements.PublicBaseURL rather than a second base-URL env var.
+	invitationsSvc := invitations.NewService(
+		invitations.NewRepository(db), zaloSvc, teachersSvc, centersSvc, txMgr, cfg.Onboarding, cfg.Statements.PublicBaseURL)
+	invitationsHandler := invitations.NewHandler(invitationsSvc)
+	invitations.RegisterRoutes(v1, invitationsHandler, requireAuth, resolveScope)
+	// The token is the only credential guarding an accept — these two routes
+	// are the sole unauthenticated write surface in the product, so each gets
+	// its own per-token rate limit keyed on the request body, not the caller's
+	// IP (an invitee is not authenticated yet, so IP is the only other option
+	// and is far easier to spoof/rotate than the random token itself).
+	invitations.RegisterPublicRoutes(v1, invitationsHandler,
+		middleware.RateLimit(middleware.JSONBodyKey("token"), 20, time.Minute),
+		middleware.RateLimit(middleware.JSONBodyKey("token"), 10, time.Minute))
 }

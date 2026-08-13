@@ -373,7 +373,7 @@ func normalizePhone(raw string) string {
 // defaultPace sleeps one to three seconds, honouring cancellation, so chunked
 // lookups read like a person paging through results rather than a scraper.
 func defaultPace(ctx context.Context) {
-	timer := time.NewTimer(time.Second + rand.N(2*time.Second))
+	timer := time.NewTimer(time.Second + rand.N(2*time.Second)) //nolint:gosec // pacing jitter, not a security context
 	defer timer.Stop()
 	select {
 	case <-timer.C:
@@ -476,6 +476,24 @@ func (s *Service) MatchFriends(ctx context.Context, teacherID uuid.UUID, phones 
 		"phones", len(phones), "looked_up", len(lookup), "chunks", chunks,
 		"found", len(found), "duration", time.Since(start))
 	return rows, nil
+}
+
+// LookupPhone resolves one invitee's Zalo UID from the owner's friend list —
+// the narrow phone→UID seam invitations and password-reset delivery need,
+// without exposing the whole friend-matching contract. ok=false when the
+// phone isn't a friend, whether or not Zalo resolved it to an account at
+// all; a missing or expired Zalo session surfaces as ErrNotLinked, same as
+// every other seam here.
+func (s *Service) LookupPhone(ctx context.Context, teacherID uuid.UUID, phone string) (string, bool, error) {
+	rows, err := s.MatchFriends(ctx, teacherID, []string{phone})
+	if err != nil {
+		return "", false, err
+	}
+	row := rows[0]
+	if !row.Matched || !row.IsFriend {
+		return "", false, nil
+	}
+	return row.UserID, true, nil
 }
 
 // SendRequest sends exactly one friend request as the teacher. One call, one

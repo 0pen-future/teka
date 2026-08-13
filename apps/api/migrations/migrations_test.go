@@ -27,7 +27,7 @@ var domainTables = []string{
 	"billing_periods", "invoices", "invoice_lines", "invoice_adjustments",
 	"payments", "payment_allocations", "statements", "notifications",
 	"refresh_tokens", "zalo_accounts", "notification_runs", "centers",
-	"center_members",
+	"center_members", "invitations", "password_reset_tokens",
 }
 
 // centerTables is every business table 000007 re-keyed to the center tenant.
@@ -311,7 +311,9 @@ func TestDownFoldsPersonalChannelIntoManual(t *testing.T) {
 		 VALUES (?, ?, ?, ?, 'zalo_personal')`,
 		notifID, f.teacherID, f.centerID, f.statementID).Error)
 
-	require.NoError(t, database.MigrateDown(m, 5))
+	// Roll back through 000005 (zalo_personal_mapping): six steps now that the
+	// additive 000008 sits on top of the seven migrations this test predates.
+	require.NoError(t, database.MigrateDown(m, 6))
 
 	var channel string
 	require.NoError(t, db.Raw(
@@ -463,8 +465,9 @@ func TestCenterTenancyBackfill(t *testing.T) {
 	t.Cleanup(func() { m.Close() })
 	require.NoError(t, database.MigrateUp(m))
 	// Step back below 000007, seed the old teacher-tenant shape, then migrate
-	// up again so the backfill runs over that data.
-	require.NoError(t, database.MigrateDown(m, 1))
+	// up again so the backfill runs over that data. Two steps: 000008 (additive
+	// invite/reset tables) then 000007 (the center tenancy migration).
+	require.NoError(t, database.MigrateDown(m, 2))
 
 	db := openDB(t, url)
 	teacherFull := seedLegacyTenant(t, db, "+84900000101", true)
@@ -647,6 +650,72 @@ func TestTeacherHardDeleteInOneTransaction(t *testing.T) {
 		require.NoError(t, db.Raw(fmt.Sprintf(`SELECT count(*) FROM %s`, tbl)).Scan(&n).Error)
 		require.Zerof(t, n, "table %s must be empty after the hard delete", tbl)
 	}
+}
+
+// The 000008 partial unique indexes enforce the invite/reset invariants at the
+// database, not just in service logic: at most one live (pending) invitation
+// per (center, phone), and at most one live reset token per account.
+func TestInviteOnlyOnboardingSchemaInvariants(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+
+	db := openDB(t, url)
+	a := seedNotificationParents(t, db, "+84900000501")
+	b := seedNotificationParents(t, db, "+84900000502")
+
+	insertInvite := func(centerID uuid.UUID, phone, hash, status string) error {
+		return db.Exec(
+			`INSERT INTO invitations (center_id, phone, token_hash, status, expires_at)
+			 VALUES (?, ?, ?, ?, now() + interval '72 hours')`,
+			centerID, phone, hash, status).Error
+	}
+
+	// One pending invite per (center, phone); a second pending for the same pair
+	// trips uq_invitations_pending_phone.
+	require.NoError(t, insertInvite(a.centerID, "+84911111111", "invhash-1", "pending"))
+	require.ErrorContains(t,
+		insertInvite(a.centerID, "+84911111111", "invhash-2", "pending"),
+		"uq_invitations_pending_phone",
+		"a second pending invite for the same (center, phone) must be rejected")
+	// The same phone in a *different* center is unrelated.
+	require.NoError(t, insertInvite(b.centerID, "+84911111111", "invhash-3", "pending"),
+		"a pending invite for the same phone in another center is allowed")
+	// A revoked invite frees the slot for a fresh pending one (re-invite).
+	require.NoError(t, db.Exec(
+		`UPDATE invitations SET status = 'revoked', revoked_at = now()
+		 WHERE center_id = ? AND phone = '+84911111111'`, a.centerID).Error)
+	require.NoError(t, insertInvite(a.centerID, "+84911111111", "invhash-4", "pending"),
+		"once the prior invite is revoked, a new pending invite is allowed")
+
+	insertReset := func(userID uuid.UUID, hash string) error {
+		return db.Exec(
+			`INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+			 VALUES (?, ?, now() + interval '48 hours')`,
+			userID, hash).Error
+	}
+
+	// One live reset token per account; a second live one trips
+	// uq_password_reset_active.
+	require.NoError(t, insertReset(a.teacherID, "resethash-1"))
+	require.ErrorContains(t, insertReset(a.teacherID, "resethash-2"),
+		"uq_password_reset_active",
+		"a second live reset token for one account must be rejected")
+	// Superseding the first frees the slot; so does consuming it.
+	require.NoError(t, db.Exec(
+		`UPDATE password_reset_tokens SET superseded_at = now()
+		 WHERE user_id = ? AND token_hash = 'resethash-1'`, a.teacherID).Error)
+	require.NoError(t, insertReset(a.teacherID, "resethash-3"),
+		"once the prior token is superseded, a new live token is allowed")
+	require.NoError(t, db.Exec(
+		`UPDATE password_reset_tokens SET used_at = now()
+		 WHERE user_id = ? AND token_hash = 'resethash-3'`, a.teacherID).Error)
+	require.NoError(t, insertReset(a.teacherID, "resethash-4"),
+		"once the prior token is consumed, a new live token is allowed")
 }
 
 func TestRefreshTokensFKTargetsUserAccounts(t *testing.T) {

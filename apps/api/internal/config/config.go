@@ -131,6 +131,23 @@ type ZaloConfig struct {
 	CredKey []byte `env:"-"`
 }
 
+// OnboardingConfig configures the invite-only onboarding lifecycle: how long
+// an owner-created invitation and a password-reset link stay valid, and the
+// minimum gap between two reset requests for one account. The public link base
+// is deliberately absent — invite/reset links reuse Statements.PublicBaseURL,
+// which is already set in every deployed env; a second base-URL key would
+// silently emit localhost links in prod if forgotten.
+type OnboardingConfig struct {
+	// InviteTTL is how long an owner-created invitation stays acceptable
+	// before it derives to 'expired'.
+	InviteTTL time.Duration `env:"INVITE_TTL" envDefault:"72h"`
+	// ResetTTL is how long a password-reset link stays valid.
+	ResetTTL time.Duration `env:"RESET_TTL" envDefault:"48h"`
+	// ResetCooldown is the minimum gap between two reset requests for one
+	// account; a request inside the window is refused rather than superseding.
+	ResetCooldown time.Duration `env:"RESET_COOLDOWN" envDefault:"15m"`
+}
+
 // Config is the full application configuration, populated from API_-prefixed
 // environment variables.
 type Config struct {
@@ -145,6 +162,7 @@ type Config struct {
 	Bank          BankConfig
 	Notifications NotificationsConfig
 	Zalo          ZaloConfig
+	Onboarding    OnboardingConfig
 }
 
 // Load reads configuration from the environment (prefix API_). In development
@@ -201,7 +219,27 @@ func (c *Config) validate() error {
 	if err := c.validateStatements(); err != nil {
 		return err
 	}
+	if err := c.validateOnboarding(); err != nil {
+		return err
+	}
 	return c.validateZalo()
+}
+
+// validateOnboarding rejects non-positive lifetimes: a zero or negative invite
+// or reset TTL would mint links that are already dead, and a negative cooldown
+// is meaningless. (Unparseable durations already fail earlier in env.Parse.)
+func (c *Config) validateOnboarding() error {
+	o := c.Onboarding
+	if o.InviteTTL <= 0 {
+		return fmt.Errorf("API_INVITE_TTL must be positive, got %v", o.InviteTTL)
+	}
+	if o.ResetTTL <= 0 {
+		return fmt.Errorf("API_RESET_TTL must be positive, got %v", o.ResetTTL)
+	}
+	if o.ResetCooldown < 0 {
+		return fmt.Errorf("API_RESET_COOLDOWN must not be negative, got %v", o.ResetCooldown)
+	}
+	return nil
 }
 
 // validateNotifications guards the zalo_personal pacing guardrail: a zero or

@@ -1150,3 +1150,62 @@ func TestMatchFriendsNeverSendsANonPhoneToZalo(t *testing.T) {
 		{Phone: "0901234567"},
 	}, rows)
 }
+
+// LookupPhone is the narrow phone→UID seam invitations and password-reset
+// delivery consume; these cover its three answers on top of MatchFriends'
+// already-covered normalization/chunking/session behaviour.
+func TestLookupPhoneReturnsTheUIDOfAMatchedFriend(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	teacherID := storeLinkedAccount(t, repo)
+
+	findUser := func(_ context.Context, _ *protocol.Session, _ []string) (map[string]protocol.FoundUser, error) {
+		return map[string]protocol.FoundUser{"84901234567": {UID: "111", DisplayName: "Lan Nguyễn"}}, nil
+	}
+	friends := func(_ context.Context, _ *protocol.Session) ([]protocol.FriendInfo, error) {
+		return []protocol.FriendInfo{{UserID: "111", DisplayName: "Lan Nguyễn"}}, nil
+	}
+	svc := newTestService(t, repo, ServiceOptions{
+		Relogin: (&reloginSpy{}).relogin, FindUser: findUser, Friends: friends,
+	})
+
+	uid, ok, err := svc.LookupPhone(context.Background(), teacherID, "0901234567")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, "111", uid)
+}
+
+func TestLookupPhoneReportsNotOkWhenThePhoneIsNotAFriend(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	teacherID := storeLinkedAccount(t, repo)
+
+	// Zalo resolves the phone to an account, but it is not (yet) a friend —
+	// the same "matched but not a friend" shape MatchFriends already labels.
+	findUser := func(_ context.Context, _ *protocol.Session, _ []string) (map[string]protocol.FoundUser, error) {
+		return map[string]protocol.FoundUser{"84901234567": {UID: "111", DisplayName: "Lan Nguyễn"}}, nil
+	}
+	friends := func(_ context.Context, _ *protocol.Session) ([]protocol.FriendInfo, error) {
+		return nil, nil
+	}
+	svc := newTestService(t, repo, ServiceOptions{
+		Relogin: (&reloginSpy{}).relogin, FindUser: findUser, Friends: friends,
+	})
+
+	uid, ok, err := svc.LookupPhone(context.Background(), teacherID, "0901234567")
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Empty(t, uid)
+}
+
+func TestLookupPhoneForAnUnlinkedTeacherReportsNotLinked(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t, newFakeRepo(), ServiceOptions{Relogin: (&reloginSpy{}).relogin})
+
+	_, ok, err := svc.LookupPhone(context.Background(), uuid.New(), "0901234567")
+	require.ErrorIs(t, err, ErrNotLinked)
+	require.False(t, ok)
+}

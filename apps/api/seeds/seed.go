@@ -37,6 +37,11 @@ type seedTeacher struct {
 }
 
 // Development credentials only — never used outside seeded local databases.
+// The first teacher owns the center; every following teacher joins that same
+// center as a member instead of owning a center of their own — the invite-only
+// onboarding funnel has no self-registration or join-by-phone path anymore, so
+// a stable owner+member pair in one center is what the web and e2e specs need
+// to log in as.
 var seedTeachers = []seedTeacher{
 	{Phone: "+84901000001", Password: "lan-password", FullName: "Cô Lan"},
 	{Phone: "+84901000002", Password: "minh-password", FullName: "Thầy Minh"},
@@ -126,18 +131,20 @@ var seedClasses = []seedClass{
 	},
 }
 
-// Run inserts the seed teachers that do not exist yet, then demo roster data
-// for the first teacher, and reports each outcome.
+// Run inserts the seed teachers that do not exist yet — the first as the
+// center's owner, every following one as a member of that same center — then
+// demo roster data for the owner, and reports each outcome.
 func Run(ctx context.Context, db *gorm.DB, log *slog.Logger) error {
-	teacherIDs := make([]uuid.UUID, 0, len(seedTeachers))
-	for _, s := range seedTeachers {
-		teacherID, err := ensureTeacher(ctx, db, log, s)
-		if err != nil {
+	ownerID, centerID, err := ensureOwner(ctx, db, log, seedTeachers[0])
+	if err != nil {
+		return err
+	}
+	for _, s := range seedTeachers[1:] {
+		if _, err := ensureMember(ctx, db, log, s, centerID); err != nil {
 			return err
 		}
-		teacherIDs = append(teacherIDs, teacherID)
 	}
-	sc, err := scopeFor(ctx, db, teacherIDs[0])
+	sc, err := scopeFor(ctx, db, ownerID)
 	if err != nil {
 		return err
 	}
@@ -180,24 +187,45 @@ func scopeFor(ctx context.Context, db *gorm.DB, teacherID uuid.UUID) (authctx.Sc
 	return authctx.Scope{TeacherID: teacherID, CenterID: row.CenterID, IsOwner: row.IsOwner}, nil
 }
 
-// ensureTeacher returns the id of the teacher with s.Phone, creating the
-// user_accounts + teachers row pair in one transaction when absent.
-func ensureTeacher(ctx context.Context, db *gorm.DB, log *slog.Logger, s seedTeacher) (uuid.UUID, error) {
+// accountExists looks up an account by phone, so both ensureOwner and
+// ensureMember can share the same idempotency check.
+func accountExists(ctx context.Context, db *gorm.DB, phone string) (uuid.UUID, bool, error) {
 	var existing []uuid.UUID
 	err := db.WithContext(ctx).
-		Raw("SELECT id FROM user_accounts WHERE phone = ? AND deleted_at IS NULL", s.Phone).
+		Raw("SELECT id FROM user_accounts WHERE phone = ? AND deleted_at IS NULL", phone).
 		Scan(&existing).Error
 	if err != nil {
-		return uuid.UUID{}, fmt.Errorf("seed: look up %s: %w", s.Phone, err)
+		return uuid.UUID{}, false, fmt.Errorf("seed: look up %s: %w", phone, err)
 	}
 	if len(existing) > 0 {
+		return existing[0], true, nil
+	}
+	return uuid.UUID{}, false, nil
+}
+
+// ensureOwner returns the id of the teacher with s.Phone and the id of the
+// center they own, creating both the center and the user_accounts + teachers
+// row pair in one transaction when the account is absent.
+func ensureOwner(ctx context.Context, db *gorm.DB, log *slog.Logger, s seedTeacher) (uuid.UUID, uuid.UUID, error) {
+	if existingID, ok, err := accountExists(ctx, db, s.Phone); err != nil {
+		return uuid.UUID{}, uuid.UUID{}, err
+	} else if ok {
 		log.Info("seed: teacher exists, skipping", "phone", s.Phone)
-		return existing[0], nil
+		// Scanning straight into a bare uuid.UUID skips its sql.Scanner and hits
+		// GORM's element-wise array path instead; wrap it in a struct field, same
+		// as scopeFor below.
+		var row struct{ CenterID uuid.UUID }
+		if err := db.WithContext(ctx).
+			Raw("SELECT center_id FROM teachers WHERE id = ?", existingID).
+			Scan(&row).Error; err != nil {
+			return uuid.UUID{}, uuid.UUID{}, fmt.Errorf("seed: resolve center for %s: %w", s.Phone, err)
+		}
+		return existingID, row.CenterID, nil
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(s.Password), bcryptCost)
 	if err != nil {
-		return uuid.UUID{}, fmt.Errorf("seed: hash password for %s: %w", s.Phone, err)
+		return uuid.UUID{}, uuid.UUID{}, fmt.Errorf("seed: hash password for %s: %w", s.Phone, err)
 	}
 	accountID := id.New()
 	centerID := id.New()
@@ -229,9 +257,51 @@ func ensureTeacher(ctx context.Context, db *gorm.DB, log *slog.Logger, s seedTea
 		).Error
 	})
 	if err != nil {
+		return uuid.UUID{}, uuid.UUID{}, fmt.Errorf("seed: create %s: %w", s.Phone, err)
+	}
+	log.Info("seed: owner created", "phone", s.Phone, "full_name", s.FullName)
+	return accountID, centerID, nil
+}
+
+// ensureMember returns the id of the teacher with s.Phone, creating the
+// user_accounts + teachers row pair as a member of centerID (no center of
+// their own) when absent — mirroring what invitation-accept produces, without
+// the token round-trip.
+func ensureMember(ctx context.Context, db *gorm.DB, log *slog.Logger, s seedTeacher, centerID uuid.UUID) (uuid.UUID, error) {
+	if existingID, ok, err := accountExists(ctx, db, s.Phone); err != nil {
+		return uuid.UUID{}, err
+	} else if ok {
+		log.Info("seed: teacher exists, skipping", "phone", s.Phone)
+		return existingID, nil
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(s.Password), bcryptCost)
+	if err != nil {
+		return uuid.UUID{}, fmt.Errorf("seed: hash password for %s: %w", s.Phone, err)
+	}
+	accountID := id.New()
+	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(
+			"INSERT INTO user_accounts (id, role, phone, password_hash, status) VALUES (?, 'teachers', ?, ?, 'active')",
+			accountID, s.Phone, string(hash),
+		).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(
+			"INSERT INTO teachers (id, full_name, timezone, center_id) VALUES (?, ?, ?, ?)",
+			accountID, s.FullName, defaultTimezone, centerID,
+		).Error; err != nil {
+			return err
+		}
+		return tx.Exec(
+			"INSERT INTO center_members (teacher_id, center_id) VALUES (?, ?)",
+			accountID, centerID,
+		).Error
+	})
+	if err != nil {
 		return uuid.UUID{}, fmt.Errorf("seed: create %s: %w", s.Phone, err)
 	}
-	log.Info("seed: teacher created", "phone", s.Phone, "full_name", s.FullName)
+	log.Info("seed: member created", "phone", s.Phone, "full_name", s.FullName, "center_id", centerID)
 	return accountID, nil
 }
 

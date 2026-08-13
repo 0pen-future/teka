@@ -53,6 +53,78 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Notifications.MaxRunSize != 50 {
 		t.Errorf("Notifications.MaxRunSize = %d, want 50", cfg.Notifications.MaxRunSize)
 	}
+	if cfg.Onboarding.InviteTTL != 72*time.Hour {
+		t.Errorf("Onboarding.InviteTTL = %v, want 72h", cfg.Onboarding.InviteTTL)
+	}
+	if cfg.Onboarding.ResetTTL != 48*time.Hour {
+		t.Errorf("Onboarding.ResetTTL = %v, want 48h", cfg.Onboarding.ResetTTL)
+	}
+	if cfg.Onboarding.ResetCooldown != 15*time.Minute {
+		t.Errorf("Onboarding.ResetCooldown = %v, want 15m", cfg.Onboarding.ResetCooldown)
+	}
+}
+
+// TestOnboardingConfigOverrides proves the three onboarding knobs parse from
+// their env vars, and that an unparseable or non-positive TTL is fatal rather
+// than silently minting dead links.
+func TestOnboardingConfigOverrides(t *testing.T) {
+	setRequired(t)
+	t.Setenv("API_INVITE_TTL", "24h")
+	t.Setenv("API_RESET_TTL", "1h")
+	t.Setenv("API_RESET_COOLDOWN", "5m")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Onboarding.InviteTTL != 24*time.Hour {
+		t.Errorf("Onboarding.InviteTTL = %v, want 24h", cfg.Onboarding.InviteTTL)
+	}
+	if cfg.Onboarding.ResetTTL != time.Hour {
+		t.Errorf("Onboarding.ResetTTL = %v, want 1h", cfg.Onboarding.ResetTTL)
+	}
+	if cfg.Onboarding.ResetCooldown != 5*time.Minute {
+		t.Errorf("Onboarding.ResetCooldown = %v, want 5m", cfg.Onboarding.ResetCooldown)
+	}
+}
+
+func TestOnboardingConfigErrors(t *testing.T) {
+	cases := []struct {
+		name    string
+		mutate  func(t *testing.T)
+		wantSub string
+	}{
+		{
+			// The env library raises the parse error under the Go field name
+			// before our validation runs; either way the failure is fatal.
+			name:    "unparseable invite ttl",
+			mutate:  func(t *testing.T) { t.Setenv("API_INVITE_TTL", "notaduration") },
+			wantSub: "InviteTTL",
+		},
+		{
+			name:    "non-positive reset ttl",
+			mutate:  func(t *testing.T) { t.Setenv("API_RESET_TTL", "0s") },
+			wantSub: "API_RESET_TTL",
+		},
+		{
+			name:    "negative cooldown",
+			mutate:  func(t *testing.T) { t.Setenv("API_RESET_COOLDOWN", "-1m") },
+			wantSub: "API_RESET_COOLDOWN",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setRequired(t)
+			tc.mutate(t)
+			_, err := Load()
+			if err == nil {
+				t.Fatalf("Load() error = nil, want error containing %q", tc.wantSub)
+			}
+			if !strings.Contains(err.Error(), tc.wantSub) {
+				t.Errorf("Load() error = %q, want substring %q", err, tc.wantSub)
+			}
+		})
+	}
 }
 
 func TestLoadErrors(t *testing.T) {

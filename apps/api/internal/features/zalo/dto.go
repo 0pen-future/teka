@@ -84,15 +84,7 @@ type FriendMatchResponse struct {
 func newFriendMatchResponses(rows []FriendMatch) []FriendMatchResponse {
 	out := make([]FriendMatchResponse, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, FriendMatchResponse{
-			Phone:       r.Phone,
-			Matched:     r.Matched,
-			UserID:      r.UserID,
-			DisplayName: r.DisplayName,
-			ZaloName:    r.ZaloName,
-			Avatar:      r.Avatar,
-			IsFriend:    r.IsFriend,
-		})
+		out = append(out, FriendMatchResponse(r))
 	}
 	return out
 }
