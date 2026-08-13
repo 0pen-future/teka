@@ -5,7 +5,10 @@
 # "address already in use", stop the stale owner (lsof -i :PORT), never remap.
 services:
   postgres:
-    image: postgres:17-alpine
+    # Same major as the operator-run production instance
+    # (infrastructure/postgres/docker-compose.yml) so migrations and SQL are
+    # exercised against the version they will actually run on.
+    image: postgres:16-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-teka}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-teka_dev_password}
