@@ -50,6 +50,18 @@ definitions:
       student_name:
         type: string
     type: object
+  auth.ForgotPasswordRequest:
+    properties:
+      phone:
+        type: string
+    required:
+    - phone
+    type: object
+  auth.ForgotPasswordResponse:
+    properties:
+      message:
+        type: string
+    type: object
   auth.LoginRequest:
     properties:
       password:
@@ -60,22 +72,17 @@ definitions:
     - password
     - phone
     type: object
-  auth.RegisterRequest:
+  auth.ResetPasswordRequest:
     properties:
-      full_name:
-        maxLength: 100
-        minLength: 1
-        type: string
       password:
         maxLength: 72
         minLength: 8
         type: string
-      phone:
+      token:
         type: string
     required:
-    - full_name
     - password
-    - phone
+    - token
     type: object
   auth.TokenResponse:
     properties:
@@ -301,20 +308,6 @@ definitions:
       is_owner:
         type: boolean
       name:
-        type: string
-    type: object
-  centers.JoinRequest:
-    properties:
-      owner_phone:
-        type: string
-    required:
-    - owner_phone
-    type: object
-  centers.JoinResponse:
-    properties:
-      center_id:
-        type: string
-      joined_at:
         type: string
     type: object
   centers.MeResponse:
@@ -770,6 +763,70 @@ definitions:
         type: string
       unit_price:
         type: integer
+    type: object
+  invitations.AcceptRequest:
+    properties:
+      full_name:
+        maxLength: 100
+        minLength: 1
+        type: string
+      password:
+        maxLength: 72
+        minLength: 8
+        type: string
+      token:
+        type: string
+    required:
+    - full_name
+    - password
+    - token
+    type: object
+  invitations.CreateRequest:
+    properties:
+      phone:
+        type: string
+    required:
+    - phone
+    type: object
+  invitations.CreateResponse:
+    properties:
+      dm_status:
+        type: string
+      expires_at:
+        type: string
+      id:
+        type: string
+      link:
+        type: string
+      phone:
+        type: string
+    type: object
+  invitations.InvitationResponse:
+    properties:
+      created_at:
+        type: string
+      expires_at:
+        type: string
+      id:
+        type: string
+      phone:
+        type: string
+      status:
+        type: string
+    type: object
+  invitations.PreviewRequest:
+    properties:
+      token:
+        type: string
+    required:
+    - token
+    type: object
+  invitations.PreviewResponse:
+    properties:
+      center_name:
+        type: string
+      phone_masked:
+        type: string
     type: object
   notifications.BulkSendRequest:
     properties:
@@ -1436,6 +1493,54 @@ info:
   title: Teka API
   version: "1.0"
 paths:
+  /auth/forgot-password:
+    post:
+      consumes:
+      - application/json
+      description: 'Public, unauthenticated. Always returns the same generic body:
+        whether the phone matched an eligible account (an active, non-owner member)
+        is never revealed. Delivery is best-effort over the center owner''s linked
+        Zalo — owners themselves are excluded and recover via operator CLI only.'
+      parameters:
+      - description: phone
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/auth.ForgotPasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/auth.ForgotPasswordResponse'
+              type: object
+        "422":
+          description: validation failed
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      summary: Request a password reset
+      tags:
+      - auth
   /auth/login:
     post:
       consumes:
@@ -1524,34 +1629,28 @@ paths:
       summary: Refresh the session
       tags:
       - auth
-  /auth/register:
+  /auth/reset-password:
     post:
       consumes:
       - application/json
-      description: Creates a teacher account from a Vietnamese phone number (0xxxxxxxxx
-        or +84xxxxxxxxx) and returns an access token; the refresh token is set as
-        an httpOnly cookie.
+      description: Public, unauthenticated. Token travels in the body. Every rejection
+        reason — unknown/used/expired/superseded token, or an account no longer active
+        — answers the same generic 400 body, by design (anti-enumeration). On success,
+        every refresh token the account held is revoked.
       parameters:
-      - description: registration payload
+      - description: token and new password
         in: body
         name: request
         required: true
         schema:
-          $ref: '#/definitions/auth.RegisterRequest'
+          $ref: '#/definitions/auth.ResetPasswordRequest'
       produces:
       - application/json
       responses:
-        "201":
-          description: Created
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                data:
-                  $ref: '#/definitions/auth.TokenResponse'
-              type: object
-        "409":
-          description: phone already registered
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'
@@ -1568,7 +1667,16 @@ paths:
                 error:
                   $ref: '#/definitions/response.ErrorBody'
               type: object
-      summary: Register a new teacher
+        "429":
+          description: Too Many Requests
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      summary: Reset password
       tags:
       - auth
   /billing-periods:
@@ -2616,72 +2724,10 @@ paths:
       summary: 'Dashboard: list a class''s sessions with attendance stats'
       tags:
       - centers
-  /centers/join:
-    post:
-      consumes:
-      - application/json
-      parameters:
-      - description: owner phone
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/centers.JoinRequest'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                data:
-                  $ref: '#/definitions/centers.JoinResponse'
-              type: object
-        "401":
-          description: Unauthorized
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-        "404":
-          description: no joinable center behind that phone
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-        "409":
-          description: current center not empty, or already a member
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-        "422":
-          description: validation failed or joining own center
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-      security:
-      - BearerAuth: []
-      summary: Join a center by its owner's phone
-      tags:
-      - centers
   /centers/me:
     get:
+      description: Owner gets the full member roster; a non-owner member gets only
+        the center's name.
       produces:
       - application/json
       responses:
@@ -2762,6 +2808,152 @@ paths:
       summary: Rename my center
       tags:
       - centers
+  /centers/me/invitations:
+    get:
+      description: Owner-only. status is "pending", "accepted", "revoked", or the
+        derived "expired" (pending past its deadline).
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/invitations.InvitationResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: not the center owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List invitations
+      tags:
+      - invitations
+    post:
+      consumes:
+      - application/json
+      description: Owner-only. Supersedes any pending invite already outstanding for
+        the phone. Always returns a copy-link; dm_status ("skipped"/"failed"/"sent")
+        reports a best-effort Zalo DM attempt that never blocks or fails the create.
+      parameters:
+      - description: invitee phone
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/invitations.CreateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/invitations.CreateResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: not the center owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: validation failed
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Create an invitation
+      tags:
+      - invitations
+  /centers/me/invitations/{id}:
+    delete:
+      description: 'Owner-only. Idempotent: revoking an already-revoked invite still
+        succeeds. An id belonging to another center answers 404, the same as one that
+        never existed.'
+      parameters:
+      - description: invitation id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: not the center owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Revoke an invitation
+      tags:
+      - invitations
   /centers/me/members/{teacherId}:
     delete:
       parameters:
@@ -2786,7 +2978,7 @@ paths:
                   $ref: '#/definitions/response.ErrorBody'
               type: object
         "403":
-          description: neither owner nor self
+          description: not the owner
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'
@@ -2804,7 +2996,7 @@ paths:
                   $ref: '#/definitions/response.ErrorBody'
               type: object
         "422":
-          description: owner cannot leave
+          description: owner cannot remove themselves
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'
@@ -2814,7 +3006,7 @@ paths:
               type: object
       security:
       - BearerAuth: []
-      summary: Remove a member (or leave the center)
+      summary: Remove a member (owner-only)
       tags:
       - centers
   /classes:
@@ -4066,6 +4258,112 @@ paths:
       summary: End enrollment
       tags:
       - enrollments
+  /invitations/accept:
+    post:
+      consumes:
+      - application/json
+      description: Public, unauthenticated. Token travels in the body. Every rejection
+        reason — unknown/used/expired/revoked token, an already-active account, or
+        a disabled account that was never a member of this center — answers the same
+        generic 400 body, by design (anti-enumeration).
+      parameters:
+      - description: token, full name, and new password
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/invitations.AcceptRequest'
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: validation failed
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      summary: Accept an invitation
+      tags:
+      - invitations
+  /invitations/preview:
+    post:
+      consumes:
+      - application/json
+      description: Public, unauthenticated. Token travels in the body, never the path,
+        so it never appears in an access log. Any invalid/used/expired/revoked token
+        answers the same generic 404.
+      parameters:
+      - description: invite token
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/invitations.PreviewRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/invitations.PreviewResponse'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: validation failed
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      summary: Preview an invitation
+      tags:
+      - invitations
   /invoices/{id}/adjustments:
     get:
       parameters:

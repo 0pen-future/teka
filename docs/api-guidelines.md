@@ -164,9 +164,22 @@ per-field messages, anything else (malformed JSON) becomes a 400.
   immediately. Introduce a token denylist only if the product ever needs
   instant revocation.
 
-**Extension points (deliberately out of scope):** password reset, phone (OTP)
-verification, and parent/student portal auth are not implemented. They slot in
-as new endpoints on the `auth` feature without changing the token model;
+**Invitation and reset-token discipline**: teacher onboarding
+(`POST /centers/me/invitations`) and self-service password reset
+(`POST /auth/forgot-password`) both mint an opaque 256-bit token
+(`internal/shared/token`) — plaintext handed to the client once, only its
+sha256 digest stored at rest. Invitations stay acceptable for `API_INVITE_TTL`
+(default 72h); reset links expire after `API_RESET_TTL` (default 48h) and are
+rate-limited by `API_RESET_COOLDOWN` (default 15m, one live token per
+account). Both tokens are single-use and travel in the request body, never a
+path segment, so they never land in an access log. Owners are excluded from
+`forgot-password` by design — their phone gets the same generic response as
+any other request, no token minted, no DM sent; their only recovery path is
+the operator CLI's `reset-password`.
+
+**Extension points (deliberately out of scope):** phone (OTP) verification and
+parent/student portal auth are not implemented. They slot in as new endpoints
+on the `auth` feature without changing the token model;
 `user_accounts.password_hash` is already nullable for future OTP-only
 accounts.
 
@@ -174,8 +187,13 @@ accounts.
 
 `api seed` inserts the development dataset idempotently (keyed by phone,
 existing rows never modified) and refuses `API_ENV=production` without
-`--force`. There is no separate admin bootstrap — every account is a teacher
-created via `/auth/register` or the seeder.
+`--force`. There is no public self-registration: teacher accounts come to
+exist only via invitation accept (`POST /invitations/accept`), and the first
+center/owner pair on a fresh database is bootstrapped by the operator CLI
+(`api create-center`, atomic — center + owner land together or neither does).
+`api reset-password` rewrites any account's password (including an owner's)
+and revokes its refresh tokens; both are Cobra subcommands on the `cmd/api`
+binary (`internal/cli`), alongside `serve`/`migrate`/`seed`.
 
 ## Testing
 
