@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Lớp & học sinh v2 alignment"
-status: pending
+status: completed
 priority: P1
 effort: "0.5d"
 dependencies: [1]
@@ -41,9 +41,9 @@ Align the existing roster students page (`/students`) with the Prototype v2 "L�
 
 ## Success Criteria
 
-- [ ] Screen matches v2 layout (header, subtitle, tabs, table grid, action styles) using tokens only.
-- [ ] All pre-existing roster tests pass (updated only where markup/labels changed).
-- [ ] Only one new query (`listClassSessions` for the selected class + current month); no per-student request fan-out.
+- [x] Screen matches v2 layout (header, subtitle, tabs, table grid, action styles) using tokens only.
+- [x] All pre-existing roster tests pass (updated only where markup/labels changed).
+- [x] Only one new query (`listClassSessions` for the selected class + current month); no per-student request fan-out.
 
 ## Risk Assessment
 

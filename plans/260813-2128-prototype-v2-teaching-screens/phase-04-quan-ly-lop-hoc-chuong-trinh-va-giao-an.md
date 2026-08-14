@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Quản lý lớp học — chương trình & giáo án"
-status: pending
+status: completed
 priority: P1
 effort: "1d"
 dependencies: [1, 3]
@@ -46,10 +46,10 @@ Build the second view tab of `/classbook` (prototype lines 293–392): the CHƯ�
 
 ## Success Criteria
 
-- [ ] Both cards + chart match prototype layout, chips, and interaction styles.
-- [ ] Status machine transitions verified by unit tests; illegal transitions rejected.
-- [ ] Submit-for-review is visible to Phase 6's queue and the nav dot without a reload.
-- [ ] Suite green.
+- [x] Both cards + chart match prototype layout, chips, and interaction styles.
+- [x] Status machine transitions verified by unit tests; illegal transitions rejected.
+- [x] Submit-for-review is visible to Phase 6's queue and the nav dot without a reload.
+- [x] Suite green.
 
 ## Risk Assessment
 

@@ -1,7 +1,7 @@
 ---
 title: "Prototype v2 teaching screens"
 description: "Implement 4 screens from So Lop Prototype v2 (Quản lý lớp học, Hồ sơ học sinh, Lớp & học sinh, Duyệt giáo án) in apps/web, 100% on the Học Vui Mỗi Ngày design system"
-status: in-progress
+status: completed
 priority: P1
 effort: "5d"
 tags: [web, ui, design-system, teaching]
@@ -55,24 +55,24 @@ Supporting decision (Phase 1 review): the teaching store's per-center key is the
 | # | Phase | Status |
 |---|-------|--------|
 | 1 | [Phase 1: Teaching foundation — store, feature scaffold, nav](./phase-01-start.md) | Completed |
-| 2 | [Phase 2: Lớp & học sinh v2 alignment](./phase-02-lop-va-hoc-sinh-v2-alignment.md) | Pending |
-| 3 | [Phase 3: Quản lý lớp học — buổi học & nhận xét](./phase-03-quan-ly-lop-hoc-buoi-hoc-va-nhan-xet.md) | Pending |
-| 4 | [Phase 4: Quản lý lớp học — chương trình & giáo án](./phase-04-quan-ly-lop-hoc-chuong-trinh-va-giao-an.md) | Pending |
-| 5 | [Phase 5: Hồ sơ học sinh & chi tiết](./phase-05-ho-so-hoc-sinh-va-chi-tiet.md) | Pending |
-| 6 | [Phase 6: Duyệt giáo án](./phase-06-duyet-giao-an.md) | Pending |
-| 7 | [Phase 7: Verification & consistency](./phase-07-verification-and-consistency.md) | Pending |
+| 2 | [Phase 2: Lớp & học sinh v2 alignment](./phase-02-lop-va-hoc-sinh-v2-alignment.md) | Completed |
+| 3 | [Phase 3: Quản lý lớp học — buổi học & nhận xét](./phase-03-quan-ly-lop-hoc-buoi-hoc-va-nhan-xet.md) | Completed |
+| 4 | [Phase 4: Quản lý lớp học — chương trình & giáo án](./phase-04-quan-ly-lop-hoc-chuong-trinh-va-giao-an.md) | Completed |
+| 5 | [Phase 5: Hồ sơ học sinh & chi tiết](./phase-05-ho-so-hoc-sinh-va-chi-tiet.md) | Completed |
+| 6 | [Phase 6: Duyệt giáo án](./phase-06-duyet-giao-an.md) | Completed |
+| 7 | [Phase 7: Verification & consistency](./phase-07-verification-and-consistency.md) | Completed |
 
 Dependency shape: Phase 1 blocks everything. Phases 3→4 are sequential (same page, two view tabs). Phases 2, 3+4, 5, 6 are otherwise independent of each other; Phase 6 reads plan state written by Phase 4's store shape (defined in Phase 1). Phase 7 last.
 
 ## Success Criteria
 
-- [ ] Nav: DẠY HỌC shows Điểm danh, Quản lý lớp học, Hồ sơ học sinh, Lớp & học sinh in that order; TRUNG TÂM shows Duyệt giáo án (with pending-count dot) only for owners.
-- [ ] `/classbook` renders class tabs, 5 stat cards, both view tabs, session detail panel (nhận xét / giáo án / điểm), and CSV export.
-- [ ] `/records` + `/records/:studentId` render list, trends, bar chart, inline notes, CSV exports; NGÀY SINH shows "—".
-- [ ] `/students` matches v2 layout without breaking existing roster flows/tests.
-- [ ] `/lesson-plans` (owner only) supports duyệt / yêu cầu sửa (comment required) / mở lại / nhắc giáo viên; teacher side sees redo note + status chip on the classbook screen.
-- [ ] Teaching store persists per center across reloads; switching center never leaks another center's data.
-- [ ] Full web suite green, eslint 0 errors, tsc clean; no non-token colors introduced.
+- [x] Nav: DẠY HỌC shows Điểm danh, Quản lý lớp học, Hồ sơ học sinh, Lớp & học sinh in that order; TRUNG TÂM shows Duyệt giáo án (with pending-count dot) only for owners.
+- [x] `/classbook` renders class tabs, 5 stat cards, both view tabs, session detail panel (nhận xét / giáo án / điểm), and CSV export.
+- [x] `/records` + `/records/:studentId` render list, trends, bar chart, inline notes, CSV exports; NGÀY SINH shows "—".
+- [x] `/students` matches v2 layout without breaking existing roster flows/tests.
+- [x] `/lesson-plans` (owner only) supports duyệt / yêu cầu sửa (comment required) / mở lại / nhắc giáo viên; teacher side sees redo note + status chip on the classbook screen.
+- [x] Teaching store persists per center across reloads; switching center never leaks another center's data.
+- [x] Full web suite green, eslint 0 errors, tsc clean; no non-token colors introduced.
 
 ## Open questions
 

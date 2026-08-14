@@ -69,6 +69,35 @@ export type TeachingState = z.infer<typeof teachingStateSchema>;
  */
 const envelopeSchema = z.object({ version: z.literal(1), state: teachingStateSchema });
 
+export type LessonPlanAction = "save" | "submit" | "approve" | "requestRedo" | "reopen";
+
+/**
+ * The giáo án review loop, shared by the teacher (save/submit) and owner
+ * (approve/requestRedo/reopen) screens so the two can never disagree on what
+ * a status allows. Saving from `redo` keeps `redo` — the plan stays
+ * submittable and the owner's note stays visible until resubmission.
+ * Reopening from `redo` is the owner withdrawing their own request; the
+ * teacher's path out of `redo` stays submit-only.
+ */
+const lessonPlanTransitions: Record<
+  LessonPlanStatus,
+  Partial<Record<LessonPlanAction, LessonPlanStatus>>
+> = {
+  none: { save: "draft" },
+  draft: { save: "draft", submit: "pending" },
+  pending: { approve: "approved", requestRedo: "redo" },
+  redo: { save: "redo", submit: "pending", reopen: "pending" },
+  approved: { reopen: "pending" },
+};
+
+/** Next status for a legal move, null for an illegal one — callers must not coerce. */
+export function transitionLessonPlanStatus(
+  status: LessonPlanStatus,
+  action: LessonPlanAction,
+): LessonPlanStatus | null {
+  return lessonPlanTransitions[status][action] ?? null;
+}
+
 export function lessonPlanKey(classId: string, lessonIndex: number): string {
   return `${classId}#${lessonIndex}`;
 }

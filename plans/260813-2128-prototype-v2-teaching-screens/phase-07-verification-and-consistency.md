@@ -1,7 +1,7 @@
 ---
 phase: 7
 title: "Verification & consistency"
-status: pending
+status: completed
 priority: P1
 effort: "0.5d"
 dependencies: [2, 3, 4, 5, 6]
@@ -44,11 +44,11 @@ Verification-only phase — no new product code. Fixes discovered here land in t
 
 ## Success Criteria
 
-- [ ] All plan-level success criteria in `plan.md` check off against live behavior.
-- [ ] Suite green, eslint 0 errors, tsc clean, build passes.
-- [ ] Responsive + a11y checks pass at all three breakpoints; no color-only status signaling.
-- [ ] No stray hardcoded colors; DS audit clean.
-- [ ] Docs updated; journal written.
+- [x] All plan-level success criteria in `plan.md` check off against live behavior.
+- [x] Suite green, eslint 0 errors, tsc clean, build passes.
+- [x] Responsive + a11y checks pass at all three breakpoints; no color-only status signaling.
+- [x] No stray hardcoded colors; DS audit clean.
+- [x] Docs updated; journal written.
 
 ## Risk Assessment
 

@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Quản lý lớp học — buổi học & nhận xét"
-status: pending
+status: completed
 priority: P1
 effort: "1d"
 dependencies: [1]
@@ -47,10 +47,10 @@ Build the default view of `/classbook` (prototype lines 263–292, 393–481): c
 
 ## Success Criteria
 
-- [ ] View matches prototype layout/styling; plan-status chips render all five states.
-- [ ] Stats and revenue math verified by unit tests, including the −300.000đ rule and negative (coral) rendering.
-- [ ] Detail tabs read/write the store; data survives reload.
-- [ ] No unbounded request fan-out; suite green.
+- [x] View matches prototype layout/styling; plan-status chips render all five states.
+- [x] Stats and revenue math verified by unit tests, including the −300.000đ rule and negative (coral) rendering.
+- [x] Detail tabs read/write the store; data survives reload.
+- [x] No unbounded request fan-out; suite green.
 
 ## Risk Assessment
 

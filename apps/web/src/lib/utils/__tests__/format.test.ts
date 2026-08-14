@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { formatMoney, formatPhoneLocal, formatSessionDate, nameInitial } from "../format";
+import {
+  formatDayMonth,
+  formatMoney,
+  formatPhoneLocal,
+  formatSessionDate,
+  nameInitial,
+} from "../format";
 
 describe("formatMoney", () => {
   it("renders zero with the đồng symbol", () => {
@@ -25,6 +31,16 @@ describe("formatSessionDate", () => {
 
   it("passes an invalid date string through unchanged", () => {
     expect(formatSessionDate("not-a-date")).toBe("not-a-date");
+  });
+});
+
+describe("formatDayMonth", () => {
+  it("renders dd/MM from an ISO date", () => {
+    expect(formatDayMonth("2026-01-05")).toBe("05/01");
+  });
+
+  it("passes a malformed value through unchanged", () => {
+    expect(formatDayMonth("chưa rõ")).toBe("chưa rõ");
   });
 });
 

@@ -1,7 +1,7 @@
 ---
 phase: 6
 title: "Duyệt giáo án"
-status: pending
+status: completed
 priority: P1
 effort: "0.5d"
 dependencies: [1, 4]
@@ -45,10 +45,10 @@ Build the owner-only `/lesson-plans` review screen (prototype lines 581–644): 
 
 ## Success Criteria
 
-- [ ] Screen matches prototype layout for all four status states.
-- [ ] Yêu cầu sửa requires a comment; approve/reopen/remind behave per prototype; toast copy does not claim a real Zalo message was sent.
-- [ ] Full loop verified: submit (Phase 4) → pending here → redo note visible to teacher → resubmit → approve.
-- [ ] Owner gating tested at route level; suite green.
+- [x] Screen matches prototype layout for all four status states.
+- [x] Yêu cầu sửa requires a comment; approve/reopen/remind behave per prototype; toast copy does not claim a real Zalo message was sent.
+- [x] Full loop verified: submit (Phase 4) → pending here → redo note visible to teacher → resubmit → approve.
+- [x] Owner gating tested at route level; suite green.
 
 ## Risk Assessment
 

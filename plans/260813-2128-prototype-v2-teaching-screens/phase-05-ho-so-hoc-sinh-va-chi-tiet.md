@@ -1,7 +1,7 @@
 ---
 phase: 5
 title: "Hồ sơ học sinh & chi tiết"
-status: pending
+status: completed
 priority: P1
 effort: "1d"
 dependencies: [1]
@@ -45,11 +45,11 @@ Build `/records` (student records list, prototype lines 486–523) and `/records
 
 ## Success Criteria
 
-- [ ] Both screens match prototype layout/styles; trend arrows and score bands colored per DS tokens.
-- [ ] Trend/absence math unit-tested including boundaries; empty states render.
-- [ ] Inline notes persist per student+session across reloads.
-- [ ] NGÀY SINH shows "—"; no dob field is read, stored, or requested anywhere.
-- [ ] Suite green.
+- [x] Both screens match prototype layout/styles; trend arrows and score bands colored per DS tokens.
+- [x] Trend/absence math unit-tested including boundaries; empty states render.
+- [x] Inline notes persist per student+session across reloads.
+- [x] NGÀY SINH shows "—"; no dob field is read, stored, or requested anywhere.
+- [x] Suite green.
 
 ## Risk Assessment
 
