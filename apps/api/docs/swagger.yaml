@@ -1414,6 +1414,141 @@ definitions:
     - full_name
     - timezone
     type: object
+  teaching.CurriculumResponse:
+    properties:
+      current_index:
+        type: integer
+      lessons:
+        items:
+          type: string
+        type: array
+    type: object
+  teaching.MarkEntryRequest:
+    properties:
+      personal_note:
+        type: string
+      score:
+        type: number
+      student_id:
+        type: string
+    required:
+    - student_id
+    type: object
+  teaching.MarkResponse:
+    properties:
+      personal_note:
+        type: string
+      score:
+        type: number
+      session_id:
+        type: string
+      student_id:
+        type: string
+    type: object
+  teaching.MonthMarksResponse:
+    properties:
+      marks:
+        items:
+          $ref: '#/definitions/teaching.MarkResponse'
+        type: array
+      session_notes:
+        items:
+          $ref: '#/definitions/teaching.NoteResponse'
+        type: array
+    type: object
+  teaching.NoteResponse:
+    properties:
+      body:
+        type: string
+      session_id:
+        type: string
+    type: object
+  teaching.PlanResponse:
+    properties:
+      activities:
+        items:
+          type: string
+        type: array
+      class_id:
+        type: string
+      file_name:
+        type: string
+      goal:
+        type: string
+      homework:
+        type: string
+      lesson_index:
+        type: integer
+      owner_comment:
+        type: string
+      redo_note:
+        type: string
+      status:
+        type: string
+      submitted_at:
+        type: string
+      submitted_by:
+        type: string
+      submitted_by_name:
+        type: string
+    type: object
+  teaching.PutCurriculumRequest:
+    properties:
+      current_index:
+        minimum: 0
+        type: integer
+      lessons:
+        items:
+          type: string
+        maxItems: 100
+        type: array
+    type: object
+  teaching.PutNoteRequest:
+    properties:
+      body:
+        maxLength: 2000
+        type: string
+    type: object
+  teaching.QueueItemResponse:
+    properties:
+      class_id:
+        type: string
+      class_name:
+        type: string
+      lesson_index:
+        type: integer
+      lesson_title:
+        type: string
+      plan_id:
+        type: string
+      submitted_at:
+        type: string
+      teacher_name:
+        type: string
+    type: object
+  teaching.ReviewRequest:
+    properties:
+      comment:
+        maxLength: 1000
+        type: string
+    type: object
+  teaching.SavePlanRequest:
+    properties:
+      activities:
+        items:
+          type: string
+        maxItems: 50
+        type: array
+      file_name:
+        maxLength: 255
+        type: string
+      goal:
+        maxLength: 2000
+        type: string
+      homework:
+        maxLength: 2000
+        type: string
+    type: object
   zalo.FriendMatchResponse:
     properties:
       avatar:
@@ -3310,6 +3445,619 @@ paths:
       summary: Archive class
       tags:
       - classes
+  /classes/{id}/curriculum:
+    get:
+      description: 'Returns the class''s giáo trình: ordered lesson titles and the
+        progress pointer. A class that never saved one returns the empty default (lessons:
+        [], current_index: 0), not a 404.'
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/teaching.CurriculumResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get class curriculum
+      tags:
+      - teaching
+    put:
+      consumes:
+      - application/json
+      description: Whole-list replace of the giáo trình (the editor always saves the
+        entire list). current_index is clamped into the new list's range server-side.
+        Class-teacher only — the owner reads but never edits another teacher's content.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: lessons and progress pointer
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/teaching.PutCurriculumRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/teaching.CurriculumResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: caller is not the class teacher
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Replace class curriculum
+      tags:
+      - teaching
+  /classes/{id}/lesson-plans:
+    get:
+      description: Every saved giáo án of the class, ordered by lesson index, submitter
+        names resolved. Lessons never saved have no entry — the client maps a missing
+        index to its virtual "none" status.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/teaching.PlanResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List class lesson plans
+      tags:
+      - teaching
+  /classes/{id}/lesson-plans/{index}:
+    put:
+      consumes:
+      - application/json
+      description: Full content replace (goal, activities, homework, file metadata);
+        status moves per the review state machine — first save creates the row as
+        draft, saving under redo keeps redo, a plan under or after review has no legal
+        save (409).
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: lesson index
+        in: path
+        name: index
+        required: true
+        type: integer
+      - description: plan content
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/teaching.SavePlanRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/teaching.PlanResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: caller is not the class teacher
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: no legal save from the current status
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: lesson index outside the curriculum
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Save a lesson plan
+      tags:
+      - teaching
+  /classes/{id}/lesson-plans/{index}/approve:
+    post:
+      consumes:
+      - application/json
+      description: pending → approved. The optional comment whole-replaces owner_comment
+        (empty clears it). Owner only; owners approve their own plans too — no higher
+        tier exists.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: lesson index
+        in: path
+        name: index
+        required: true
+        type: integer
+      - description: optional comment
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/teaching.ReviewRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/teaching.PlanResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: caller is not the center owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: plan is not pending
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Approve a lesson plan
+      tags:
+      - teaching
+  /classes/{id}/lesson-plans/{index}/reopen:
+    post:
+      description: 'approved/redo → pending: re-examine an approved plan, or withdraw
+        the owner''s own redo request. Clears both owner notes — the review starts
+        fresh.'
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: lesson index
+        in: path
+        name: index
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/teaching.PlanResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: caller is not the center owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: plan is neither approved nor redo
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Reopen a lesson plan
+      tags:
+      - teaching
+  /classes/{id}/lesson-plans/{index}/request-redo:
+    post:
+      consumes:
+      - application/json
+      description: pending → redo. The comment is required (422 otherwise) and becomes
+        the redo note the teacher sees; the plan stays submittable and the note stays
+        visible until resubmission.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: lesson index
+        in: path
+        name: index
+        required: true
+        type: integer
+      - description: required comment
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/teaching.ReviewRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/teaching.PlanResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: caller is not the center owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: plan is not pending
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: comment is required
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Request lesson plan redo
+      tags:
+      - teaching
+  /classes/{id}/lesson-plans/{index}/submit:
+    post:
+      description: 'draft/redo → pending: hands the giáo án to the owner, consumes
+        the redo note, and stamps who submitted and when.'
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: lesson index
+        in: path
+        name: index
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/teaching.PlanResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: caller is not the class teacher
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: no legal submit from the current status
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: lesson index outside the curriculum
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Submit a lesson plan
+      tags:
+      - teaching
+  /classes/{id}/marks:
+    get:
+      description: Every session note (nhận xét buổi) and per-student mark (điểm +
+        ghi chú riêng) of the class's sessions in the requested month, in one response.
+        No session-status filter — the client already holds the month's session list
+        and correlates by session_id.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: month, YYYY-MM
+        in: query
+        name: month
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/teaching.MonthMarksResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: month is not YYYY-MM
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Month batch read of session notes and marks
+      tags:
+      - teaching
   /classes/{id}/schedules:
     post:
       consumes:
@@ -5747,6 +6495,149 @@ paths:
       summary: Hold session
       tags:
       - sessions
+  /sessions/{id}/marks:
+    put:
+      consumes:
+      - application/json
+      description: 'Batch merge of per-student marks. Per entry, score and personal_note
+        are tri-state: omitted leaves the stored value, null clears it, a value sets
+        it; a row whose resulting fields are both NULL is deleted. A new row requires
+        the student to have been on the session''s roster; a student''s existing row
+        stays editable and clearable after their enrollment ends. Returns the session''s
+        full mark set after the write. Session-teacher only.'
+      parameters:
+      - description: session id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: mark entries
+        in: body
+        name: request
+        required: true
+        schema:
+          items:
+            $ref: '#/definitions/teaching.MarkEntryRequest'
+          type: array
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/teaching.MarkResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: caller is not the session's teacher
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: duplicate student, score outside 0–10, or student not on the
+            roster
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Save session marks
+      tags:
+      - teaching
+  /sessions/{id}/note:
+    put:
+      consumes:
+      - application/json
+      description: Upserts the session's whole-class nhận xét; an empty (or whitespace-only)
+        body deletes the note instead of storing an empty string. Session-teacher
+        only.
+      parameters:
+      - description: session id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: note body; empty deletes
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/teaching.PutNoteRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/teaching.NoteResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: caller is not the session's teacher
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Save a session note
+      tags:
+      - teaching
   /sessions/{id}/uncancel:
     post:
       parameters:
@@ -6184,6 +7075,48 @@ paths:
       summary: Update student
       tags:
       - students
+  /teaching/review-queue:
+    get:
+      description: Every pending giáo án in the center with class name, submitter,
+        lesson title (null-safe against a shrunken curriculum), oldest submission
+        first. Its length is the nav-dot count.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/teaching.QueueItemResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: caller is not the center owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Owner review queue
+      tags:
+      - teaching
 securityDefinitions:
   BearerAuth:
     description: Type "Bearer" followed by a space and the access token.
