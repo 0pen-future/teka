@@ -17,10 +17,9 @@ export interface CenterContext {
  * share no discriminant field).
  *
  * `centerId` is the center NAME for both roles: the member shape exposes no
- * center id, and the teaching store needs one role-independent key so the
- * lesson-plan review loop (teacher submits → owner approves) works across
- * accounts on the same device. Name collisions across different centers on
- * one device are acceptable for this device-local, non-authoritative store.
+ * center id, and the name is the one role-independent value both `/centers/me`
+ * shapes share. Teaching data itself is server-persisted and center-scoped by
+ * the API; this value only feeds display and presence checks.
  */
 export function useCenterContext(): CenterContext {
   const { data, isError } = useCenter();

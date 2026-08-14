@@ -7,11 +7,11 @@ import { cn, formatSessionDate } from "@/lib/utils";
 
 import type { SessionDerived } from "../lib/classbook-stats";
 import { parseScoreInput } from "../lib/classbook-stats";
-import {
-  lessonPlanKey,
-  updateTeachingState,
-  useTeachingStore,
-} from "../lib/teaching-store";
+import { useClassMarks } from "../hooks/use-class-marks";
+import { useClassTeaching } from "../hooks/use-class-teaching";
+import { useSaveMarks, useSaveSessionNote } from "../hooks/use-teaching-mutations";
+import { lessonPlanKey } from "../lib/teaching-store";
+import type { MarkEntryInput } from "../schemas/teaching-schemas";
 import { vnd } from "../lib/vnd";
 import { PlanStatusPill } from "./plan-status-pill";
 import { PlanSummary } from "./plan-summary";
@@ -39,7 +39,8 @@ const saveButtonIdle =
 
 /**
  * Slide-in card for one session: whole-class note, giáo án read view, and
- * per-student scores. All writes go to the device-local teaching store; the
+ * per-student scores. Notes and scores read from the month batch and save
+ * through optimistic mutations, so a save reflects in the same render; the
  * parent keys this component by session id so drafts and the active tab
  * reset when the selection changes.
  */
@@ -51,7 +52,13 @@ export function SessionDetailPanel({
   onClose,
 }: SessionDetailPanelProps) {
   const { session } = derived;
-  const teaching = useTeachingStore(centerId);
+  // The sessions list is month-scoped, so this key always joins the
+  // classbook page's batch read instead of spawning a second cache entry.
+  const month = session.session_date.slice(0, 7);
+  const { curriculum, lessonPlans } = useClassTeaching(classId);
+  const classMarks = useClassMarks(classId, month);
+  const saveNoteMutation = useSaveSessionNote(classId, month);
+  const saveMarksMutation = useSaveMarks(classId, month);
   const rosterQuery = useSessionRoster(session.id);
 
   const [tab, setTab] = useState<DetailTab>("note");
@@ -61,18 +68,17 @@ export function SessionDetailPanel({
   const sessionLabel = formatSessionDate(session.session_date);
   const held = session.status === "held";
 
-  const storedNote = teaching.sessionNotes[session.id]?.text ?? "";
+  const storedNote = classMarks.sessionNotes[session.id]?.text ?? "";
   const noteValue = noteDraft ?? storedNote;
   const noteDirty = noteDraft !== null && noteDraft !== storedNote;
 
-  const storedScores = teaching.sessionScores[session.id] ?? {};
+  const storedScores = classMarks.sessionScores[session.id] ?? {};
   const scoresDirty = Object.keys(scoreDraft).length > 0;
 
-  const curriculum = teaching.curricula[classId];
   const plan =
     derived.lessonIndex === null
       ? undefined
-      : teaching.lessonPlans[lessonPlanKey(classId, derived.lessonIndex)];
+      : lessonPlans[lessonPlanKey(classId, derived.lessonIndex)];
   const lessonTitle =
     derived.lessonIndex === null ? undefined : curriculum?.lessons[derived.lessonIndex];
 
@@ -92,37 +98,51 @@ export function SessionDetailPanel({
         ]
       : [];
 
+  // Draft reset and the success toast wait for the server: on failure the
+  // mutation's onError reverts the cache, and the still-held draft keeps the
+  // user's text editable for a retry instead of silently discarding it.
   function saveNote() {
     if (!centerId || !noteDirty || noteDraft === null) {
       return;
     }
-    updateTeachingState(centerId, (state) => ({
-      ...state,
-      sessionNotes: { ...state.sessionNotes, [session.id]: { text: noteDraft } },
-    }));
-    setNoteDraft(null);
-    hvToast(`Đã lưu nhận xét buổi ${sessionLabel} — ${classTitle}`);
+    saveNoteMutation.mutate(
+      { sessionId: session.id, body: noteDraft },
+      {
+        onSuccess: () => {
+          setNoteDraft(null);
+          hvToast(`Đã lưu nhận xét buổi ${sessionLabel} — ${classTitle}`);
+        },
+      },
+    );
   }
 
   function saveScores() {
     if (!centerId || !scoresDirty) {
       return;
     }
-    const next: Record<string, number> = { ...storedScores };
-    let saved = 0;
+    const entries: MarkEntryInput[] = [];
     for (const [studentId, raw] of Object.entries(scoreDraft)) {
       const score = parseScoreInput(raw);
       if (score !== null) {
-        next[studentId] = score;
-        saved += 1;
+        // Score-only entry: the tri-state batch leaves the student's
+        // personal note untouched because the key is simply absent.
+        entries.push({ student_id: studentId, score });
       }
     }
-    updateTeachingState(centerId, (state) => ({
-      ...state,
-      sessionScores: { ...state.sessionScores, [session.id]: next },
-    }));
-    setScoreDraft({});
-    hvToast(`Đã lưu điểm ${saved} học sinh — buổi ${sessionLabel}`);
+    if (entries.length === 0) {
+      // Nothing parseable to send — just drop the unusable draft.
+      setScoreDraft({});
+      return;
+    }
+    saveMarksMutation.mutate(
+      { sessionId: session.id, entries },
+      {
+        onSuccess: () => {
+          setScoreDraft({});
+          hvToast(`Đã lưu điểm ${entries.length} học sinh — buổi ${sessionLabel}`);
+        },
+      },
+    );
   }
 
   return (

@@ -6,28 +6,24 @@ import { hvToast } from "@/components/hv";
 import { listClassSessions, sessionsKeys } from "@/features/attendance";
 import { currentMonth, useClassesList } from "@/features/roster";
 
+import { getCurriculum, listPlans } from "../api/teaching-api";
 import { PlanReviewPanel } from "../components/plan-review-panel";
 import { ReviewQueueTable, type ReviewQueueRow } from "../components/review-queue-table";
 import { useCenterContext } from "../hooks/use-center-context";
+import { toLessonPlan } from "../hooks/use-class-teaching";
+import { teachingKeys } from "../hooks/teaching-keys";
+import { usePlanAction } from "../hooks/use-teaching-mutations";
 import { nextLessonIndex } from "../lib/classbook-stats";
-import {
-  lessonPlanKey,
-  transitionLessonPlanStatus,
-  updateTeachingState,
-  useTeachingStore,
-  type LessonPlan,
-  type LessonPlanAction,
-} from "../lib/teaching-store";
+import { transitionLessonPlanStatus, type LessonPlanAction } from "../lib/teaching-store";
 
 /**
  * Duyệt giáo án — owner-only review queue across all active classes, closing
- * the loop Phase 4's teacher screen opens. Nav hiding alone is not a guard:
- * non-owners landing here (deep link, stale bookmark) are routed back to the
- * classbook once the role resolves.
+ * the loop the teacher's classbook screen opens. Nav hiding alone is not a
+ * guard: non-owners landing here (deep link, stale bookmark) are routed back
+ * to the classbook once the role resolves.
  */
 export function LessonPlansPage() {
   const { centerId, isOwner, isResolved, isError } = useCenterContext();
-  const teaching = useTeachingStore(centerId);
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
 
   const month = currentMonth();
@@ -42,15 +38,33 @@ export function LessonPlansPage() {
       queryFn: () => listClassSessions(klass.id, { from: month.from, to: month.to }),
     })),
   });
+  // Curricula and plans share the classbook's query keys, so a teacher tab on
+  // the same client and this queue read one cache.
+  const curriculumQueries = useQueries({
+    queries: classes.map((klass) => ({
+      queryKey: teachingKeys.curriculum(klass.id),
+      queryFn: () => getCurriculum(klass.id),
+    })),
+  });
+  const planQueries = useQueries({
+    queries: classes.map((klass) => ({
+      queryKey: teachingKeys.plans(klass.id),
+      queryFn: () => listPlans(klass.id),
+    })),
+  });
 
   const queue = classes.map((klass, index) => {
     const sessions = sessionQueries[index]?.data ?? [];
     const doneCount = sessions.filter((session) => session.status === "held").length;
-    const curriculum = teaching.curricula[klass.id];
+    const curriculumData = curriculumQueries[index]?.data;
+    const curriculum =
+      curriculumData && curriculumData.lessons.length > 0 ? curriculumData : undefined;
     const total = curriculum?.lessons.length ?? 0;
     const nextIndex = nextLessonIndex(total, doneCount);
-    const planKey = lessonPlanKey(klass.id, nextIndex);
-    const plan = teaching.lessonPlans[planKey];
+    const wirePlan = (planQueries[index]?.data ?? []).find(
+      (plan) => plan.lesson_index === nextIndex,
+    );
+    const plan = wirePlan ? toLessonPlan(wirePlan) : undefined;
     const lessonTitle = curriculum?.lessons[nextIndex];
     const lessonNumber = curriculum ? `Bài ${nextIndex + 1}/${total}` : "";
     const row: ReviewQueueRow = {
@@ -62,7 +76,7 @@ export function LessonPlansPage() {
         : "Chưa có chương trình học",
       status: plan?.status ?? "none",
     };
-    return { row, planKey, plan, lessonTitle, lessonNumber };
+    return { row, nextIndex, plan, lessonTitle, lessonNumber };
   });
 
   const pendingCount = queue.filter((entry) => entry.row.status === "pending").length;
@@ -71,34 +85,28 @@ export function LessonPlansPage() {
     queue.find((entry) => entry.row.status === "pending") ??
     queue[0];
 
-  /** Runs one review action through the shared transition table; false = no-op. */
-  function applyAction(action: LessonPlanAction, mutate: (plan: LessonPlan) => LessonPlan) {
+  const planActionMutation = usePlanAction(selected?.row.classId ?? "");
+
+  /** Runs one review action after the shared transition table allows it; false = no-op. */
+  function applyAction(action: LessonPlanAction, comment?: string) {
     if (!centerId || !selected?.plan) {
       return false;
     }
-    const next = transitionLessonPlanStatus(selected.plan.status, action);
-    if (next === null) {
+    // The server enforces the same table (409 on an illegal move); this gate
+    // just avoids a doomed call from a stale click.
+    if (transitionLessonPlanStatus(selected.plan.status, action) === null) {
       return false;
     }
-    const { planKey } = selected;
-    updateTeachingState(centerId, (state) => {
-      const current = state.lessonPlans[planKey];
-      if (!current) {
-        return state;
-      }
-      return {
-        ...state,
-        lessonPlans: { ...state.lessonPlans, [planKey]: { ...mutate(current), status: next } },
-      };
-    });
+    const wireAction = action === "requestRedo" ? "request-redo" : action;
+    if (wireAction === "save" || wireAction === "submit") {
+      return false;
+    }
+    planActionMutation.mutate({ lessonIndex: selected.nextIndex, action: wireAction, comment });
     return true;
   }
 
   function approve(comment: string) {
-    if (
-      selected &&
-      applyAction("approve", (plan) => ({ ...plan, ownerComment: comment || undefined }))
-    ) {
+    if (selected && applyAction("approve", comment || undefined)) {
       hvToast(
         `Đã duyệt giáo án ${selected.row.className} — giáo viên thấy trạng thái trong sổ lớp`,
       );
@@ -109,13 +117,13 @@ export function LessonPlansPage() {
     if (!comment || !selected) {
       return;
     }
-    if (applyAction("requestRedo", (plan) => ({ ...plan, redoNote: comment }))) {
+    if (applyAction("requestRedo", comment)) {
       hvToast(`Đã yêu cầu sửa giáo án ${selected.row.className} — ghi chú hiển thị trong sổ lớp`);
     }
   }
 
   function reopen() {
-    applyAction("reopen", (plan) => ({ ...plan, redoNote: undefined, ownerComment: undefined }));
+    applyAction("reopen");
   }
 
   function remind() {

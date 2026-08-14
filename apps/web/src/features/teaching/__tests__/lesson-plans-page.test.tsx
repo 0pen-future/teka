@@ -13,42 +13,30 @@ import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils"
 
 import { ClassbookPage } from "../pages/classbook-page";
 import { LessonPlansPage } from "../pages/lesson-plans-page";
+import { lessonPlanKey } from "../lib/teaching-store";
 import {
-  countPendingPlans,
-  getTeachingSnapshot,
-  lessonPlanKey,
-  resetTeachingStoreForTests,
-  updateTeachingState,
-  type LessonPlan,
-} from "../lib/teaching-store";
+  getTeachingApiStore,
+  resetTeachingApiStore,
+  seedCurriculum,
+  seedPlan,
+  teachingHandlers,
+} from "./teaching-handlers";
+import type { PlanResponse } from "../schemas/teaching-schemas";
 
-const CENTER = "Trung Tâm Bình Minh";
 const CLASS_ID = classWithSchedule.id;
 const LESSONS = ["Số tự nhiên", "Phân số", "Số thập phân", "Hình học", "Tỉ số", "Ôn tập"];
 // Two held sessions in the frozen August window → the upcoming lesson is
 // index 2, the same key the teacher's next-plan card writes.
 const PLAN_KEY = lessonPlanKey(CLASS_ID, 2);
 
-function seedCurriculum() {
-  updateTeachingState(CENTER, (state) => ({
-    ...state,
-    curricula: { [CLASS_ID]: { lessons: LESSONS, currentIndex: 0 } },
-  }));
-}
-
-function seedPlan(overrides: Partial<LessonPlan> & Pick<LessonPlan, "status">) {
-  updateTeachingState(CENTER, (state) => ({
-    ...state,
-    lessonPlans: {
-      [PLAN_KEY]: {
-        goal: "Hiểu số thập phân",
-        activities: ["Khởi động 10'", "Luyện tập 30'"],
-        homework: "Phiếu 12",
-        submittedBy: "Cô Lan",
-        ...overrides,
-      },
-    },
-  }));
+function seedNextPlan(overrides: Partial<PlanResponse> & Pick<PlanResponse, "status">) {
+  seedPlan(CLASS_ID, 2, {
+    goal: "Hiểu số thập phân",
+    activities: ["Khởi động 10'", "Luyện tập 30'"],
+    homework: "Phiếu 12",
+    submitted_by_name: "Cô Lan",
+    ...overrides,
+  });
 }
 
 function renderPage() {
@@ -63,9 +51,9 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-08-20T10:00:00"));
   resetRosterStore();
-  server.use(...rosterHandlers);
+  resetTeachingApiStore();
+  server.use(...rosterHandlers, ...teachingHandlers);
   localStorage.clear();
-  resetTeachingStoreForTests();
 });
 
 afterEach(() => {
@@ -75,8 +63,8 @@ afterEach(() => {
 
 describe("LessonPlansPage queue", () => {
   it("lists the class with its next lesson, teacher and pending chip", async () => {
-    seedCurriculum();
-    seedPlan({ status: "pending" });
+    seedCurriculum(CLASS_ID, LESSONS);
+    seedNextPlan({ status: "pending" });
     renderPage();
 
     expect(
@@ -101,8 +89,8 @@ describe("LessonPlansPage queue", () => {
 
 describe("LessonPlansPage review actions", () => {
   it("approves with a comment, then reopens back to pending", async () => {
-    seedCurriculum();
-    seedPlan({ status: "pending" });
+    seedCurriculum(CLASS_ID, LESSONS);
+    seedNextPlan({ status: "pending" });
     const user = userEvent.setup();
     renderPage();
 
@@ -113,24 +101,25 @@ describe("LessonPlansPage review actions", () => {
     expect(
       await screen.findByText("Đã duyệt giáo án Toán 6A — giáo viên thấy trạng thái trong sổ lớp"),
     ).toBeInTheDocument();
+    expect(await screen.findByText("Không có giáo án nào chờ duyệt.")).toBeInTheDocument();
     expect(screen.getAllByText("Đã duyệt").length).toBeGreaterThanOrEqual(1);
-    const approved = getTeachingSnapshot(CENTER).lessonPlans[PLAN_KEY]!;
+    const approved = getTeachingApiStore().plans.get(PLAN_KEY)!;
     expect(approved.status).toBe("approved");
-    expect(approved.ownerComment).toBe("Tốt lắm");
-    expect(countPendingPlans(getTeachingSnapshot(CENTER))).toBe(0);
-    expect(screen.getByText("Không có giáo án nào chờ duyệt.")).toBeInTheDocument();
+    expect(approved.owner_comment).toBe("Tốt lắm");
 
     await user.click(screen.getByRole("button", { name: "Mở lại để duyệt lại" }));
-    const reopened = getTeachingSnapshot(CENTER).lessonPlans[PLAN_KEY]!;
-    expect(reopened.status).toBe("pending");
-    expect(reopened.ownerComment).toBeUndefined();
-    expect(countPendingPlans(getTeachingSnapshot(CENTER))).toBe(1);
     expect(await screen.findByLabelText("NHẬN XÉT CỦA CHỦ TRUNG TÂM")).toBeInTheDocument();
+    const reopened = getTeachingApiStore().plans.get(PLAN_KEY)!;
+    expect(reopened.status).toBe("pending");
+    expect(reopened.owner_comment).toBeNull();
+    expect(
+      screen.getByText("Còn 1 giáo án buổi tới chờ duyệt — duyệt xong giáo viên mới lên lớp."),
+    ).toBeInTheDocument();
   });
 
   it("blocks Yêu cầu sửa until a comment exists, then stores the redo note", async () => {
-    seedCurriculum();
-    seedPlan({ status: "pending" });
+    seedCurriculum(CLASS_ID, LESSONS);
+    seedNextPlan({ status: "pending" });
     const user = userEvent.setup();
     renderPage();
 
@@ -150,17 +139,17 @@ describe("LessonPlansPage review actions", () => {
     expect(
       await screen.findByText("Đã yêu cầu sửa giáo án Toán 6A — ghi chú hiển thị trong sổ lớp"),
     ).toBeInTheDocument();
-    const plan = getTeachingSnapshot(CENTER).lessonPlans[PLAN_KEY]!;
-    expect(plan.status).toBe("redo");
-    expect(plan.redoNote).toBe("Thiếu phần luyện tập");
-    expect(screen.getAllByText("Cần sửa lại").length).toBeGreaterThanOrEqual(1);
     // The coral box quotes the note back, and the owner can withdraw it.
-    expect(screen.getByText("Thiếu phần luyện tập")).toBeInTheDocument();
+    expect(await screen.findByText("Thiếu phần luyện tập")).toBeInTheDocument();
+    const plan = getTeachingApiStore().plans.get(PLAN_KEY)!;
+    expect(plan.status).toBe("redo");
+    expect(plan.redo_note).toBe("Thiếu phần luyện tập");
+    expect(screen.getAllByText("Cần sửa lại").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole("button", { name: "Mở lại để duyệt lại" })).toBeInTheDocument();
   });
 
   it("shows the not-submitted state with an honest reminder toast", async () => {
-    seedCurriculum();
+    seedCurriculum(CLASS_ID, LESSONS);
     const user = userEvent.setup();
     renderPage();
 
@@ -180,8 +169,8 @@ describe("LessonPlansPage review actions", () => {
 
 describe("review loop across pages", () => {
   it("makes the owner's redo note visible on the teacher's classbook", async () => {
-    seedCurriculum();
-    seedPlan({ status: "pending" });
+    seedCurriculum(CLASS_ID, LESSONS);
+    seedNextPlan({ status: "pending" });
     const user = userEvent.setup();
     const ownerView = renderPage();
 
@@ -193,7 +182,9 @@ describe("review loop across pages", () => {
     await screen.findByText("Đã yêu cầu sửa giáo án Toán 6A — ghi chú hiển thị trong sổ lớp");
     ownerView.unmount();
 
-    // Same device, same store: the teacher's classbook reads the note.
+    // The redo note round-trips through the API: the teacher's classbook
+    // fetches it fresh in its own render.
+    signInAs(testPrimaryTeacher);
     renderWithProviders(<ClassbookPage />, { route: "/classbook", path: "/classbook" });
     await screen.findByRole("button", { name: /Th 4, 05\/08/ });
     await user.click(screen.getByRole("tab", { name: "Chương trình & giáo án" }));

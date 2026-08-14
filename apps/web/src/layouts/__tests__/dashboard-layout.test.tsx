@@ -5,22 +5,15 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
 import {
-  lessonPlanKey,
-  resetTeachingStoreForTests,
-  updateTeachingState,
-} from "@/features/teaching";
+  resetTeachingApiStore,
+  seedPlan,
+  teachingHandlers,
+} from "@/features/teaching/__tests__/teaching-handlers";
 import { API_URL, fail, ok } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
 
 import { DashboardLayout } from "../dashboard-layout";
-
-/**
- * Teaching-store key for the default /centers/me handler: the center NAME,
- * not the id — the member shape exposes no id, so the name is the one value
- * both roles share and the review loop needs a role-independent key.
- */
-const TEACHING_CENTER_KEY = "Trung Tâm Bình Minh";
 
 function renderLayout(route = "/") {
   signInAs(testPrimaryTeacher);
@@ -38,7 +31,6 @@ async function findBottomNav() {
 
 afterEach(() => {
   useAuthStore.getState().clearSession();
-  resetTeachingStoreForTests();
   localStorage.clear();
 });
 
@@ -247,34 +239,34 @@ describe("teaching v2 nav", () => {
     expect(labels).toEqual(["Duyệt giáo án", "Cài đặt trung tâm"]);
   });
 
-  it("hides Duyệt giáo án from non-owner members", async () => {
+  it("hides Duyệt giáo án from non-owner members and never fetches their queue", async () => {
+    let queueRequests = 0;
     server.use(
       http.get(`${API_URL}/centers/me`, () =>
         HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh" })),
       ),
+      http.get(`${API_URL}/teaching/review-queue`, () => {
+        queueRequests += 1;
+        return HttpResponse.json(fail("FORBIDDEN", "owner only"), { status: 403 });
+      }),
     );
     renderLayout();
     // Member role label proves /centers/me resolved member-shaped.
     await screen.findByText("Giáo viên");
     expect(screen.queryByRole("link", { name: "Duyệt giáo án" })).not.toBeInTheDocument();
+    // The nav-dot query is role-gated: a member must never hit the endpoint.
+    expect(queueRequests).toBe(0);
   });
 
   it("marks Duyệt giáo án pending while a plan awaits review", async () => {
-    updateTeachingState(TEACHING_CENTER_KEY, (state) => ({
-      ...state,
-      lessonPlans: {
-        [lessonPlanKey("class-1", 0)]: {
-          goal: "Ôn tập",
-          activities: [],
-          homework: "",
-          status: "pending",
-        },
-      },
-    }));
+    resetTeachingApiStore();
+    server.use(...teachingHandlers);
+    seedPlan("class-1", 0, { status: "pending" });
     renderLayout();
     const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
     const link = await within(sidebarNav).findByRole("link", { name: "Duyệt giáo án" });
-    expect(link.querySelector(".bg-coral-400")).not.toBeNull();
+    // The dot appears once the review-queue query resolves, after the link.
+    await waitFor(() => expect(link.querySelector(".bg-coral-400")).not.toBeNull());
   });
 
   it("shows no pending dot on Duyệt giáo án when nothing awaits review", async () => {

@@ -14,12 +14,11 @@ import {
   StudentRecordsTable,
   type StudentRecordSummary,
 } from "../components/student-records-table";
-import { useCenterContext } from "../hooks/use-center-context";
+import { useClassMarks } from "../hooks/use-class-marks";
 import { useMonthSessions } from "../hooks/use-month-sessions";
 import { downloadCsv, type CsvCell } from "../lib/csv";
 import { meanScore } from "../lib/classbook-stats";
 import { aggregateStudent, studentSessionRows, trendOf } from "../lib/student-stats";
-import { useTeachingStore } from "../lib/teaching-store";
 
 /**
  * Hồ sơ học sinh — per-student averages, trends and absence counts for the
@@ -31,9 +30,6 @@ export function RecordsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeClassId = searchParams.get("class_id") ?? "";
 
-  const { centerId } = useCenterContext();
-  const teaching = useTeachingStore(centerId);
-
   const { data: classesPage } = useClassesList({ status: "active", per_page: 100 });
   const classes = classesPage?.items ?? [];
   const classSearch = useClassSearch(classes);
@@ -42,6 +38,7 @@ export function RecordsPage() {
   const selectedClassId = selectedClass?.id;
 
   const { month, sessions, rosters, sessionsPending } = useMonthSessions(selectedClassId);
+  const { sessionScores } = useClassMarks(selectedClassId, month.from.slice(0, 7));
 
   const { data: enrollmentsPage } = useEnrollmentsList(
     { class_id: selectedClassId, active: true, per_page: 100 },
@@ -51,7 +48,7 @@ export function RecordsPage() {
 
   const rows: StudentRecordSummary[] = enrollments.map((enrollment) => {
     const aggregate = aggregateStudent(
-      studentSessionRows(sessions, rosters, teaching.sessionScores, enrollment.student_id),
+      studentSessionRows(sessions, rosters, sessionScores, enrollment.student_id),
     );
     return {
       studentId: enrollment.student_id,

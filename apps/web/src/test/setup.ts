@@ -4,7 +4,6 @@ import { cleanup } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
-import { resetTeachingStoreForTests } from "@/features/teaching";
 import { markRefreshAlive } from "@/lib/api/auth-bridge";
 
 import { server } from "./msw/server";
@@ -24,9 +23,6 @@ beforeEach(() => {
   useAuthStore.setState({ user: null, accessToken: null });
   markRefreshAlive();
   window.localStorage.clear();
-  // The teaching store caches per-center snapshots at module scope; clearing
-  // localStorage alone would leave stale in-memory state between tests.
-  resetTeachingStoreForTests();
 });
 
 // --- jsdom shims for browser APIs used by ThemeProvider and Radix ---

@@ -22,8 +22,10 @@ import {
   retentionStat,
 } from "../lib/classbook-stats";
 import { downloadCsv, type CsvCell } from "../lib/csv";
-import { SESSION_COST_VND, useTeachingStore } from "../lib/teaching-store";
+import { SESSION_COST_VND, type TeachingState } from "../lib/teaching-store";
 import { useCenterContext } from "../hooks/use-center-context";
+import { useClassMarks } from "../hooks/use-class-marks";
+import { useClassTeaching } from "../hooks/use-class-teaching";
 import { useMonthSessions } from "../hooks/use-month-sessions";
 import { vnd } from "../lib/vnd";
 
@@ -36,9 +38,9 @@ const viewTabs: { id: ClassbookView; label: string }[] = [
 
 /**
  * Quản lý lớp học — the teaching screen's default view: per-class stat
- * cards, the month's session table, and the session detail panel. Server
- * data (sessions, rosters, enrollments) comes from React Query; scores,
- * notes, and giáo án state come from the device-local teaching store.
+ * cards, the month's session table, and the session detail panel. Everything
+ * is server data through React Query: sessions, rosters, and enrollments
+ * from their features; scores, notes, and giáo án from the teaching API.
  */
 export function ClassbookPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -47,7 +49,6 @@ export function ClassbookPage() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
 
   const { centerId } = useCenterContext();
-  const teaching = useTeachingStore(centerId);
 
   // per_page mirrors the students page: the class-search empty note asserts
   // over the full active-class list, so it must not be a truncated page.
@@ -64,6 +65,18 @@ export function ClassbookPage() {
     useMonthSessions(selectedClassId);
   const monthNumber = Number(month.label);
   const previousMonthNumber = monthNumber === 1 ? 12 : monthNumber - 1;
+
+  // Server-backed teaching data, reassembled into the store-shaped slice the
+  // table/CSV code and the child components were written against.
+  const { curriculum, lessonPlans } = useClassTeaching(selectedClassId);
+  const classMarks = useClassMarks(selectedClassId, month.from.slice(0, 7));
+  const teaching: TeachingState = {
+    curricula: selectedClassId && curriculum ? { [selectedClassId]: curriculum } : {},
+    lessonPlans,
+    sessionNotes: classMarks.sessionNotes,
+    sessionScores: classMarks.sessionScores,
+    personalNotes: classMarks.personalNotes,
+  };
 
   // No `active` filter: ended enrollments still price past sessions and feed
   // the retention windows; `activeHeadcount` filters for the SĨ SỐ card.

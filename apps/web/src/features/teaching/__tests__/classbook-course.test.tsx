@@ -13,14 +13,13 @@ import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils"
 
 import { ClassbookPage } from "../pages/classbook-page";
 import {
-  countPendingPlans,
-  getTeachingSnapshot,
-  lessonPlanKey,
-  resetTeachingStoreForTests,
-  updateTeachingState,
-} from "../lib/teaching-store";
+  getTeachingApiStore,
+  resetTeachingApiStore,
+  seedCurriculum as seedApiCurriculum,
+  seedPlan,
+  teachingHandlers,
+} from "./teaching-handlers";
 
-const CENTER = "Trung Tâm Bình Minh";
 const CLASS_ID = classWithSchedule.id;
 const LESSONS = [
   "Số tự nhiên",
@@ -32,29 +31,29 @@ const LESSONS = [
 ];
 
 function seedCurriculum(lessons: string[] = LESSONS) {
-  updateTeachingState(CENTER, (state) => ({
-    ...state,
-    curricula: { ...state.curricula, [CLASS_ID]: { lessons, currentIndex: 0 } },
-  }));
+  seedApiCurriculum(CLASS_ID, lessons);
 }
 
 async function renderCourseView() {
   signInAs(testPrimaryTeacher);
   const user = userEvent.setup();
-  renderWithProviders(<ClassbookPage />, { route: "/classbook", path: "/classbook" });
+  const { queryClient } = renderWithProviders(<ClassbookPage />, {
+    route: "/classbook",
+    path: "/classbook",
+  });
   // Wait for sessions to load: doneCount (2 held) drives every progress number.
   await screen.findByRole("button", { name: /Th 4, 05\/08/ });
   await user.click(screen.getByRole("tab", { name: "Chương trình & giáo án" }));
-  return user;
+  return { user, queryClient };
 }
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-08-20T10:00:00"));
   resetRosterStore();
-  server.use(...rosterHandlers);
+  resetTeachingApiStore();
+  server.use(...rosterHandlers, ...teachingHandlers);
   localStorage.clear();
-  resetTeachingStoreForTests();
 });
 
 afterEach(() => {
@@ -64,7 +63,7 @@ afterEach(() => {
 
 describe("ClassbookPage course view — curriculum", () => {
   it("creates a curriculum through the editor and shows held-session progress", async () => {
-    const user = await renderCourseView();
+    const { user } = await renderCourseView();
 
     expect(screen.getByText(/Chưa có chương trình cho lớp Toán 6A/)).toBeInTheDocument();
 
@@ -99,7 +98,7 @@ describe("ClassbookPage course view — curriculum", () => {
 describe("ClassbookPage course view — giáo án", () => {
   it("saves a draft, submits it for review, and flips the planned row's chip", async () => {
     seedCurriculum();
-    const user = await renderCourseView();
+    const { user } = await renderCourseView();
 
     // nextIndex = done (2) → Bài 3 — the same lesson index the sessions table
     // assigns to the upcoming planned session.
@@ -124,7 +123,7 @@ describe("ClassbookPage course view — giáo án", () => {
       await screen.findByText("Đã nộp giáo án Toán 6A — chờ chủ trung tâm duyệt"),
     ).toBeInTheDocument();
     expect(screen.getByText("Chờ duyệt")).toBeInTheDocument();
-    expect(countPendingPlans(getTeachingSnapshot(CENTER))).toBe(1);
+    expect(getTeachingApiStore().plans.get(`${CLASS_ID}#2`)?.status).toBe("pending");
 
     // The same pending status shows on the upcoming session row without reload.
     await user.click(screen.getByRole("tab", { name: "Buổi học & nhận xét" }));
@@ -134,18 +133,13 @@ describe("ClassbookPage course view — giáo án", () => {
 
   it("shows the owner's redo note and keeps the submit path open", async () => {
     seedCurriculum();
-    updateTeachingState(CENTER, (state) => ({
-      ...state,
-      lessonPlans: {
-        [lessonPlanKey(CLASS_ID, 2)]: {
-          goal: "Đọc và viết số thập phân",
-          activities: ["Khởi động"],
-          homework: "Phiếu số 3",
-          status: "redo",
-          redoNote: "Thiếu phần luyện tập",
-        },
-      },
-    }));
+    seedPlan(CLASS_ID, 2, {
+      goal: "Đọc và viết số thập phân",
+      activities: ["Khởi động"],
+      homework: "Phiếu số 3",
+      status: "redo",
+      redo_note: "Thiếu phần luyện tập",
+    });
     await renderCourseView();
 
     expect(await screen.findByText("Cần sửa lại")).toBeInTheDocument();
@@ -155,19 +149,14 @@ describe("ClassbookPage course view — giáo án", () => {
 
   it("locks editing while the plan is under or after review", async () => {
     seedCurriculum();
-    updateTeachingState(CENTER, (state) => ({
-      ...state,
-      lessonPlans: {
-        [lessonPlanKey(CLASS_ID, 2)]: {
-          goal: "Đọc và viết số thập phân",
-          activities: ["Khởi động"],
-          homework: "Phiếu số 3",
-          status: "pending",
-          submittedBy: "Cô Lan",
-        },
-      },
-    }));
-    await renderCourseView();
+    seedPlan(CLASS_ID, 2, {
+      goal: "Đọc và viết số thập phân",
+      activities: ["Khởi động"],
+      homework: "Phiếu số 3",
+      status: "pending",
+      submitted_by_name: "Cô Lan",
+    });
+    const { queryClient } = await renderCourseView();
 
     // No save transition exists from pending: both edit paths disappear.
     expect(await screen.findByText("Chờ duyệt")).toBeInTheDocument();
@@ -179,16 +168,17 @@ describe("ClassbookPage course view — giáo án", () => {
       screen.getByText("Đã nộp duyệt — chờ chủ trung tâm phản hồi trước khi sửa."),
     ).toBeInTheDocument();
 
-    act(() => {
-      updateTeachingState(CENTER, (state) => ({
-        ...state,
-        lessonPlans: {
-          [lessonPlanKey(CLASS_ID, 2)]: {
-            ...state.lessonPlans[lessonPlanKey(CLASS_ID, 2)]!,
-            status: "approved",
-          },
-        },
-      }));
+    // The owner approves elsewhere; the classbook re-reads on invalidation
+    // (in the app: refetch-on-focus) and the lock message flips.
+    seedPlan(CLASS_ID, 2, {
+      goal: "Đọc và viết số thập phân",
+      activities: ["Khởi động"],
+      homework: "Phiếu số 3",
+      status: "approved",
+      submitted_by_name: "Cô Lan",
+    });
+    await act(async () => {
+      await queryClient.invalidateQueries();
     });
     expect(
       await screen.findByText("Đã duyệt — cần sửa thì nhờ chủ trung tâm mở lại để duyệt lại."),
@@ -200,7 +190,7 @@ describe("ClassbookPage course view — giáo án", () => {
 
   it("renders the monthly headcount chart and attaches a plan file by name", async () => {
     seedCurriculum();
-    const user = await renderCourseView();
+    const { user } = await renderCourseView();
 
     const chart = screen.getByText("SĨ SỐ THEO THÁNG").parentElement!;
     // One enrollment since January → a count of 1 in each of the 5 months.

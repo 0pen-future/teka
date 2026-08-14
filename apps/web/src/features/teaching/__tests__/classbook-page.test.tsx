@@ -1,9 +1,12 @@
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
+import { API_URL } from "@/test/msw/handlers";
 import {
+  getRosterStore,
   resetRosterStore,
   rosterHandlers,
 } from "@/features/roster/__tests__/roster-handlers";
@@ -11,7 +14,11 @@ import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
 
 import { ClassbookPage } from "../pages/classbook-page";
-import { resetTeachingStoreForTests } from "../lib/teaching-store";
+import {
+  resetTeachingApiStore,
+  seedTeachingSession,
+  teachingHandlers,
+} from "./teaching-handlers";
 
 function renderClassbookPage(route = "/classbook") {
   signInAs(testPrimaryTeacher);
@@ -34,11 +41,18 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-08-20T10:00:00"));
   resetRosterStore();
-  server.use(...rosterHandlers);
-  // The teaching store persists per center name; a leftover note/score from
-  // one test would leak into the next through localStorage.
+  resetTeachingApiStore();
+  server.use(...rosterHandlers, ...teachingHandlers);
+  // The marks month-read only sees notes/scores of sessions it knows about —
+  // register the roster fixtures' sessions so save → re-read round-trips.
+  for (const session of getRosterStore().sessions) {
+    seedTeachingSession({
+      id: session.id,
+      class_id: session.class_id,
+      session_date: session.session_date,
+    });
+  }
   localStorage.clear();
-  resetTeachingStoreForTests();
 });
 
 afterEach(() => {
@@ -128,6 +142,31 @@ describe("ClassbookPage sessions table", () => {
     // Table row shows the saved note too (panel textarea + row cell).
     const heldRow = await findHeldRow();
     expect(within(heldRow).getByText("Lớp sôi nổi, cần ôn phân số")).toBeInTheDocument();
+  });
+
+  it("keeps the typed note draft editable when the save fails", async () => {
+    const user = userEvent.setup();
+    renderClassbookPage();
+
+    await user.click(await findHeldRow());
+    const textarea = await screen.findByLabelText("NHẬN XÉT CHUNG CỦA BUỔI");
+    await user.type(textarea, "Bản nháp quan trọng");
+
+    server.use(
+      http.put(`${API_URL}/sessions/:id/note`, () =>
+        HttpResponse.json({ error: { message: "boom" } }, { status: 500 }),
+      ),
+    );
+    await user.click(screen.getByRole("button", { name: "Lưu nhận xét" }));
+
+    expect(
+      await screen.findByText("Không lưu được nhận xét — vui lòng thử lại"),
+    ).toBeInTheDocument();
+    // No success toast, the draft survives for a retry, and the dirty marker
+    // stays — the failed save must not silently discard the user's text.
+    expect(screen.queryByText(/Đã lưu nhận xét buổi/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("NHẬN XÉT CHUNG CỦA BUỔI")).toHaveValue("Bản nháp quan trọng");
+    expect(screen.getByText("Chưa lưu")).toBeInTheDocument();
   });
 
   it("saves scores and recomputes the session and class averages", async () => {

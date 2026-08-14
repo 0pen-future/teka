@@ -15,17 +15,21 @@ import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils"
 import { RecordsPage } from "../pages/records-page";
 import { StudentRecordPage } from "../pages/student-record-page";
 import {
-  getTeachingSnapshot,
-  personalNoteKey,
-  resetTeachingStoreForTests,
-  updateTeachingState,
-} from "../lib/teaching-store";
+  getTeachingApiStore,
+  resetTeachingApiStore,
+  seedMark,
+  seedTeachingSession,
+  teachingHandlers,
+} from "./teaching-handlers";
 
-const CENTER = "Trung Tâm Bình Minh";
 const AN = studentSiblingOne.id;
 
 function seedScores(scores: Record<string, Record<string, number>>) {
-  updateTeachingState(CENTER, (state) => ({ ...state, sessionScores: scores }));
+  for (const [sessionId, byStudent] of Object.entries(scores)) {
+    for (const [studentId, score] of Object.entries(byStudent)) {
+      seedMark(sessionId, studentId, { score });
+    }
+  }
 }
 
 function renderRecordsPage() {
@@ -49,9 +53,17 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-08-20T10:00:00"));
   resetRosterStore();
-  server.use(...rosterHandlers);
+  resetTeachingApiStore();
+  server.use(...rosterHandlers, ...teachingHandlers);
+  // The month-marks read only attributes rows to sessions it knows about.
+  for (const session of getRosterStore().sessions) {
+    seedTeachingSession({
+      id: session.id,
+      class_id: session.class_id,
+      session_date: session.session_date,
+    });
+  }
   localStorage.clear();
-  resetTeachingStoreForTests();
 });
 
 afterEach(() => {
@@ -90,6 +102,7 @@ describe("RecordsPage", () => {
     const user = userEvent.setup();
     renderRecordsPage();
     await screen.findByText("Nguyễn Văn An");
+    await screen.findByText("8.8");
 
     await user.click(screen.getByRole("button", { name: /Tải danh sách \(CSV\)/ }));
     expect(await screen.findByText("Đã tải HocSinh_Toán_6A.csv")).toBeInTheDocument();
@@ -147,7 +160,7 @@ describe("StudentRecordPage", () => {
     expect(within(attendanceCard).getByText("1 buổi vắng")).toBeInTheDocument();
   });
 
-  it("saves an inline personal note on blur and persists it in the store", async () => {
+  it("saves an inline personal note on blur and persists it through the API", async () => {
     const user = userEvent.setup();
     renderStudentRecordPage();
 
@@ -156,7 +169,7 @@ describe("StudentRecordPage", () => {
     await user.tab();
 
     expect(await screen.findByText("Đã lưu nhận xét cho Nguyễn Văn An")).toBeInTheDocument();
-    expect(getTeachingSnapshot(CENTER).personalNotes[personalNoteKey("session-05", AN)]).toBe(
+    expect(getTeachingApiStore().marks.get(`session-05#${AN}`)?.personal_note).toBe(
       "Hăng hái phát biểu",
     );
 
@@ -170,13 +183,11 @@ describe("StudentRecordPage", () => {
     const createObjectURL = vi.fn<(blob: Blob) => string>(() => "blob:student");
     Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() });
     seedScores({ "session-05": { [AN]: 8.5 } });
-    updateTeachingState(CENTER, (state) => ({
-      ...state,
-      personalNotes: { [personalNoteKey("session-05", AN)]: "Cần luyện thêm" },
-    }));
+    seedMark("session-05", AN, { score: 8.5, personal_note: "Cần luyện thêm" });
     const user = userEvent.setup();
     renderStudentRecordPage();
     await screen.findByLabelText("Nhận xét buổi Th 4, 05/08");
+    await screen.findByDisplayValue("Cần luyện thêm");
 
     await user.click(screen.getByRole("button", { name: "Tải hồ sơ (CSV)" }));
 

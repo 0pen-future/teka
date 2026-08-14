@@ -1,17 +1,12 @@
 import { useState } from "react";
 
 import { hvToast } from "@/components/hv";
-import { useAuthStore } from "@/features/auth";
 import type { Enrollment } from "@/features/roster";
 
+import { useClassTeaching } from "../hooks/use-class-teaching";
+import { usePlanAction, useSaveCurriculum, useSavePlan } from "../hooks/use-teaching-mutations";
 import { monthlyHeadcount, nextLessonIndex, retentionStat } from "../lib/classbook-stats";
-import {
-  lessonPlanKey,
-  transitionLessonPlanStatus,
-  updateTeachingState,
-  useTeachingStore,
-  type LessonPlan,
-} from "../lib/teaching-store";
+import { lessonPlanKey, transitionLessonPlanStatus } from "../lib/teaching-store";
 import { CurriculumCard } from "./curriculum-card";
 import { CurriculumEditorModal } from "./curriculum-editor-modal";
 import { MonthlyHeadcountCard } from "./monthly-headcount-card";
@@ -48,80 +43,67 @@ export function CourseView({
   monthNumber,
   previousMonthNumber,
 }: CourseViewProps) {
-  const teaching = useTeachingStore(centerId);
-  const teacherName = useAuthStore((state) => state.user?.full_name);
+  const { curriculum, lessonPlans } = useClassTeaching(classId);
+  const saveCurriculumMutation = useSaveCurriculum(classId);
+  const savePlanMutation = useSavePlan(classId);
+  const planActionMutation = usePlanAction(classId);
   const [openModal, setOpenModal] = useState<"plan" | "curriculum" | null>(null);
 
-  const curriculum = teaching.curricula[classId];
   const total = curriculum?.lessons.length ?? 0;
   const done = Math.min(doneCount, total);
   const nextIndex = nextLessonIndex(total, done);
   const planKey = lessonPlanKey(classId, nextIndex);
-  const plan = teaching.lessonPlans[planKey];
+  const plan = lessonPlans[planKey];
   const lessonTitle = curriculum?.lessons[nextIndex];
   const lessonLabel = `Bài ${nextIndex + 1}${lessonTitle ? ` · ${lessonTitle}` : ""}`;
-
-  function writePlan(recipe: (current: LessonPlan | undefined) => LessonPlan) {
-    if (!centerId) {
-      return;
-    }
-    updateTeachingState(centerId, (state) => ({
-      ...state,
-      lessonPlans: { ...state.lessonPlans, [planKey]: recipe(state.lessonPlans[planKey]) },
-    }));
-  }
 
   function savePlan(draft: PlanEditorDraft) {
     // A plan under or after review has no legal "save" — editing must go
     // through the owner (mở lại) so approved content can't drift silently.
+    // The server enforces the same table; this gate just avoids a doomed call.
     const next = transitionLessonPlanStatus(plan?.status ?? "none", "save");
-    if (next === null) {
+    if (!centerId || next === null) {
       return;
     }
-    writePlan((current) => ({
-      ...current,
-      goal: draft.goal.trim(),
-      activities: draft.activities
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean),
-      homework: draft.homework.trim(),
-      status: next,
-    }));
+    savePlanMutation.mutate({
+      lessonIndex: nextIndex,
+      input: {
+        goal: draft.goal.trim(),
+        activities: draft.activities
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean),
+        homework: draft.homework.trim(),
+        file_name: plan?.fileName ?? null,
+      },
+    });
     setOpenModal(null);
     hvToast(`Đã lưu giáo án ${classTitle} — nộp duyệt khi sẵn sàng`);
   }
 
   function attachFile(fileName: string) {
     const next = transitionLessonPlanStatus(plan?.status ?? "none", "save");
-    if (next === null) {
+    if (!centerId || next === null) {
       return;
     }
-    writePlan((current) => ({
-      goal: "",
-      activities: [],
-      homework: "",
-      ...current,
-      fileName,
-      status: next,
-    }));
+    savePlanMutation.mutate({
+      lessonIndex: nextIndex,
+      input: {
+        goal: plan?.goal ?? "",
+        activities: plan?.activities ?? [],
+        homework: plan?.homework ?? "",
+        file_name: fileName,
+      },
+    });
   }
 
   function submitPlan() {
-    if (!plan) {
+    if (!centerId || !plan || transitionLessonPlanStatus(plan.status, "submit") === null) {
       return;
     }
-    const next = transitionLessonPlanStatus(plan.status, "submit");
-    if (next === null) {
-      return;
-    }
-    writePlan((current) => ({
-      ...(current ?? plan),
-      status: next,
-      redoNote: undefined,
-      // The owner's review queue shows who submitted; falls back to "—" there.
-      submittedBy: teacherName,
-    }));
+    // The server stamps submitted_by(_name) from the caller's token; the
+    // owner's review queue reads it from the response.
+    planActionMutation.mutate({ lessonIndex: nextIndex, action: "submit" });
     hvToast(`Đã nộp giáo án ${classTitle} — chờ chủ trung tâm duyệt`);
   }
 
@@ -129,16 +111,13 @@ export function CourseView({
     if (!centerId) {
       return;
     }
-    updateTeachingState(centerId, (state) => {
-      // Clamp so removing lessons can never leave the pointer past the end
-      // (or below 0 — a negative index fails the schema and would drop the
-      // whole stored state on next load).
-      const currentIndex = Math.max(
-        0,
-        Math.min(state.curricula[classId]?.currentIndex ?? 0, lessons.length - 1),
-      );
-      return { ...state, curricula: { ...state.curricula, [classId]: { lessons, currentIndex } } };
-    });
+    // Clamp so removing lessons can never leave the pointer past the end;
+    // the server clamps identically.
+    const currentIndex = Math.max(
+      0,
+      Math.min(curriculum?.currentIndex ?? 0, lessons.length - 1),
+    );
+    saveCurriculumMutation.mutate({ lessons, current_index: currentIndex });
     setOpenModal(null);
     hvToast(`Đã lưu chương trình ${classTitle} — khóa ${lessons.length} buổi`);
   }

@@ -6,12 +6,14 @@ import { formatSessionDate, nameInitial } from "@/lib/utils";
 
 import { ScoreBarChart } from "../components/score-bar-chart";
 import { StudentSessionsTable } from "../components/student-sessions-table";
-import { useCenterContext } from "../hooks/use-center-context";
+import { useClassMarks } from "../hooks/use-class-marks";
+import { useClassTeaching } from "../hooks/use-class-teaching";
 import { useMonthSessions } from "../hooks/use-month-sessions";
+import { useSaveMarks } from "../hooks/use-teaching-mutations";
 import { downloadCsv, type CsvCell } from "../lib/csv";
 import { meanScore } from "../lib/classbook-stats";
 import { aggregateStudent, studentSessionRows, trendOf } from "../lib/student-stats";
-import { personalNoteKey, updateTeachingState, useTeachingStore } from "../lib/teaching-store";
+import { personalNoteKey } from "../lib/teaching-store";
 
 function formatFullDate(isoDate: string): string {
   const [year, month, day] = isoDate.split("-");
@@ -26,8 +28,6 @@ function formatFullDate(isoDate: string): string {
  */
 export function StudentRecordPage() {
   const { studentId } = useParams();
-  const { centerId } = useCenterContext();
-  const teaching = useTeachingStore(centerId);
 
   const { data: enrollmentsPage } = useEnrollmentsList(
     { student_id: studentId, per_page: 100 },
@@ -41,10 +41,12 @@ export function StudentRecordPage() {
 
   const { month, sessions, rosters, sessionsPending } = useMonthSessions(enrollment?.class_id);
   const monthNumber = Number(month.label);
+  const monthKey = month.from.slice(0, 7);
+  const { sessionScores, personalNotes } = useClassMarks(enrollment?.class_id, monthKey);
+  const { curriculum } = useClassTeaching(enrollment?.class_id);
+  const saveMarks = useSaveMarks(enrollment?.class_id ?? "", monthKey);
 
-  const rows = studentId
-    ? studentSessionRows(sessions, rosters, teaching.sessionScores, studentId)
-    : [];
+  const rows = studentId ? studentSessionRows(sessions, rosters, sessionScores, studentId) : [];
   const aggregate = aggregateStudent(rows);
   const average = meanScore(aggregate.scores);
   const trend = trendOf(aggregate.scores);
@@ -56,7 +58,7 @@ export function StudentRecordPage() {
   const notes: Record<string, string> = {};
   for (const row of rows) {
     const note = studentId
-      ? teaching.personalNotes[personalNoteKey(row.session.id, studentId)]
+      ? personalNotes[personalNoteKey(row.session.id, studentId)]
       : undefined;
     if (note !== undefined) {
       notes[row.session.id] = note;
@@ -64,21 +66,28 @@ export function StudentRecordPage() {
   }
 
   function saveNote(sessionId: string, text: string) {
-    if (!centerId || !studentId || !enrollment) {
+    if (!studentId || !enrollment) {
       return;
     }
-    updateTeachingState(centerId, (state) => ({
-      ...state,
-      personalNotes: { ...state.personalNotes, [personalNoteKey(sessionId, studentId)]: text },
-    }));
-    hvToast(`Đã lưu nhận xét cho ${enrollment.student_name}`);
+    // Blur-save with an empty field clears the stored note (tri-state wire:
+    // `null` deletes, a value sets). The success toast waits for the server —
+    // on failure the mutation's onError already surfaces the danger toast.
+    const studentName = enrollment.student_name;
+    saveMarks.mutate(
+      {
+        sessionId,
+        entries: [{ student_id: studentId, personal_note: text === "" ? null : text }],
+      },
+      {
+        onSuccess: () => hvToast(`Đã lưu nhận xét cho ${studentName}`),
+      },
+    );
   }
 
   function exportCsv() {
     if (!enrollment) {
       return;
     }
-    const curriculum = teaching.curricula[enrollment.class_id];
     const csvRows: CsvCell[][] = [
       ["Buổi", "Bài học", "Trạng thái", "Điểm", "Nhận xét"],
       ...rows.map((row) => [

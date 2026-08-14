@@ -51,8 +51,8 @@ interface NavGroup {
 function useNavGroups(): NavGroup[] {
   const { data: period } = useCurrentPeriod();
   const { data: pendingSessionsResponse } = usePendingSessions();
-  const { centerId, isOwner, isResolved } = useCenterContext();
-  const pendingPlanCount = usePendingPlanCount(centerId);
+  const { isOwner, isResolved } = useCenterContext();
+  const pendingPlanCount = usePendingPlanCount();
   const periodId = period?.id ?? null;
   const hasPending = (pendingSessionsResponse?.total ?? 0) > 0;
 
