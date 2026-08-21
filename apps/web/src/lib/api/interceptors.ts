@@ -79,7 +79,27 @@ export function setupInterceptors(client: AxiosInstance): void {
           }
         }
       }
-      throw toApiError(error);
+      throw toApiError(await decodeBlobErrorBody(error));
     },
   );
+}
+
+/**
+ * A request made with `responseType: "blob"` gets a Blob back on failure too,
+ * so the JSON envelope arrives as an opaque binary and `toApiError` — which
+ * is synchronous and cannot await a read — would collapse every such failure
+ * to UNKNOWN_ERROR. Read it back to JSON here, where awaiting is allowed, so
+ * a blob endpoint's 403 carries the same code and message as any other.
+ */
+async function decodeBlobErrorBody(error: unknown): Promise<unknown> {
+  if (!isAxiosError(error) || !(error.response?.data instanceof Blob)) {
+    return error;
+  }
+  try {
+    error.response.data = JSON.parse(await error.response.data.text()) as unknown;
+  } catch {
+    // Not the envelope — an HTML proxy page, a truncated body. Leave it be;
+    // toApiError already falls back to UNKNOWN_ERROR for anything unparsable.
+  }
+  return error;
 }

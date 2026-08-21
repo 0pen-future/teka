@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/response"
 )
 
@@ -127,5 +128,23 @@ func JSONBodyKey(field string) KeyFunc {
 		}
 		v, _ := payload[field].(string)
 		return v
+	}
+}
+
+// TeacherKey rate-limits on the authenticated caller's teacher id. Use it on
+// authenticated routes whose cost is high enough that one account's retry loop
+// degrades service for other tenants — the database connection pool is shared
+// across every center.
+//
+// Unlike JSONBodyKey this reads nothing from the request, so it cannot be
+// spoofed by the caller. It returns "" (no limiting) on an unauthenticated
+// request, which cannot happen on a route mounted behind RequireAuth.
+func TeacherKey() KeyFunc {
+	return func(c *gin.Context) string {
+		sc, ok := authctx.ScopeFrom(c)
+		if !ok {
+			return ""
+		}
+		return sc.TeacherID.String()
 	}
 }

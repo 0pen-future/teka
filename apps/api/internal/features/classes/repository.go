@@ -41,6 +41,13 @@ type Repository interface {
 	// NULL effective_to as open-ended. This is the contract session
 	// generation (plan 03) consumes.
 	ListEffectiveSchedules(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]Schedule, error)
+	// FindActiveByName resolves a live, active class by its exact name within
+	// the scope. Bulk flows need it to decide create-or-reuse; there is no
+	// unique index on classes.name, so this is a lookup, not a constraint.
+	FindActiveByName(ctx context.Context, sc authctx.Scope, name string) (*Class, error)
+	// ScheduleExists reports whether the class already carries this exact
+	// weekly slot, including its effective_from.
+	ScheduleExists(ctx context.Context, sc authctx.Scope, classID uuid.UUID, weekday int16, startTime TimeOfDay, effectiveFrom time.Time) (bool, error)
 }
 
 type gormRepository struct {
@@ -208,4 +215,34 @@ func (r *gormRepository) ListEffectiveSchedules(ctx context.Context, sc authctx.
 		Order("effective_from, weekday, start_time").
 		Find(&rows).Error
 	return rows, err
+}
+
+// FindActiveByName resolves a class by exact name inside the scope. status is
+// part of the match: an archived class still has deleted_at IS NULL, so a
+// name-only lookup would hand a bulk importer a class the teacher closed last
+// term and quietly enrol this year's students into it.
+func (r *gormRepository) FindActiveByName(ctx context.Context, sc authctx.Scope, name string) (*Class, error) {
+	var class Class
+	err := r.scoped(ctx, sc).
+		Where("classes.name = ? AND classes.status = ?", name, StatusActive).
+		Take(&class).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &class, nil
+}
+
+// ScheduleExists reports whether an identical live slot is already on the
+// class. effective_from is part of the identity because the same weekday and
+// time can legitimately recur after a timetable change closes the old row.
+func (r *gormRepository) ScheduleExists(ctx context.Context, sc authctx.Scope, classID uuid.UUID, weekday int16, startTime TimeOfDay, effectiveFrom time.Time) (bool, error) {
+	var count int64
+	err := r.scopedSchedules(ctx, sc).Model(&Schedule{}).
+		Where("class_schedules.class_id = ? AND class_schedules.weekday = ?", classID, weekday).
+		Where("class_schedules.start_time = ? AND class_schedules.effective_from = ?", startTime, effectiveFrom).
+		Count(&count).Error
+	return count > 0, err
 }

@@ -3,12 +3,14 @@ package centers
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/shared/authctx"
+	"teka/apps/api/internal/shared/validation"
 )
 
 // AccountDisabler is the slice of account lifecycle this service consumes to
@@ -108,6 +110,42 @@ func (s *Service) WasEverMember(ctx context.Context, teacherID, centerID uuid.UU
 		return false, apperror.Internal(err)
 	}
 	return ok, nil
+}
+
+// MemberIDsByPhone returns this center's phone -> teacher_id directory, keyed
+// by the E.164 storage form. It exists for bulk flows that name teachers by
+// phone rather than by id — chiefly the roster import, where the workbook
+// carries phone numbers an operator typed.
+//
+// The scope parameter is the authorization check itself: there is no way to
+// ask for another center's directory, so no separate "is this teacher mine?"
+// test exists that a caller could forget. Callers must not report the
+// difference between "not a member here" and "no such account" — that
+// distinction is an account-enumeration oracle. Removed teachers are absent by
+// construction, because ListMembers joins user_accounts on status = active.
+//
+// This runs on a process-lifetime service that also backs middleware
+// ResolveScope on every authenticated request, so it stays a query per call.
+// Never memoize the result on the service: a cached per-center map here would
+// be a cross-tenant leak with a very quiet diff.
+func (s *Service) MemberIDsByPhone(ctx context.Context, scope authctx.Scope) (map[string]uuid.UUID, error) {
+	rows, err := s.repo.ListMembers(ctx, scope.CenterID)
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+	out := make(map[string]uuid.UUID, len(rows))
+	for _, r := range rows {
+		phone := validation.NormalizePhone(r.Phone)
+		if prev, dup := out[phone]; dup && prev != r.ID {
+			// uq_users_phone should make this unreachable. If it ever happens,
+			// keeping the last row would anchor imported data on an arbitrary
+			// one of two teachers, so fail rather than guess.
+			return nil, apperror.Internal(fmt.Errorf(
+				"centers: two active members of center %s share phone %s", scope.CenterID, phone))
+		}
+		out[phone] = r.ID
+	}
+	return out, nil
 }
 
 // Me returns the caller's center read model: the owner sees the full member

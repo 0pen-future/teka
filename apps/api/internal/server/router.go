@@ -22,6 +22,7 @@ import (
 	"teka/apps/api/internal/features/collections"
 	"teka/apps/api/internal/features/contacts"
 	"teka/apps/api/internal/features/enrollments"
+	"teka/apps/api/internal/features/imports"
 	"teka/apps/api/internal/features/invitations"
 	"teka/apps/api/internal/features/notifications"
 	"teka/apps/api/internal/features/payments"
@@ -125,6 +126,22 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 
 	studentsSvc := students.NewService(students.NewRepository(db), enrollmentsSvc, txMgr)
 	students.RegisterRoutes(v1, students.NewHandler(studentsSvc), requireAuth, resolveScope)
+
+	// The roster import drives classes, contacts, students and enrollments
+	// through their own services, so it mounts after all four exist. It writes
+	// nothing directly: every row goes through the feature that owns the
+	// table, under an anchor scope naming the class's teacher. It reads
+	// the center's phone -> teacher directory through centers.MemberDirectory:
+	// that lookup is scoped to the caller's own center, which is what keeps an
+	// owner's workbook from naming a teacher outside it.
+	//
+	// The upload is the most expensive endpoint in the product and the
+	// connection pool is shared across every tenant, so it carries its own
+	// per-teacher rate limit rather than relying on the caller to behave.
+	importsSvc := imports.NewService(centersSvc, classesSvc, contactsSvc, studentsSvc, enrollmentsSvc,
+		imports.NewLocker(db), txMgr)
+	imports.RegisterRoutes(v1, imports.NewHandler(importsSvc), requireAuth, resolveScope,
+		middleware.RateLimit(middleware.TeacherKey(), 10, time.Minute))
 
 	// sessions consumes classes, teachers, and enrollments through consumer
 	// interfaces (ClassSource, TeacherSource, EnrollmentSource) rather than

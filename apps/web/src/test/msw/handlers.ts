@@ -19,11 +19,25 @@ export function ok<T>(data: T, meta?: Meta) {
   return meta === undefined ? { success: true, data } : { success: true, data, meta };
 }
 
-export function fail(code: string, message: string, fields?: Record<string, string>) {
-  return {
-    success: false,
-    error: fields === undefined ? { code, message } : { code, message, fields },
-  };
+/**
+ * `details` mirrors `response.ErrWithDetails` — structured context the flat
+ * `fields` map cannot carry (the roster import's per-row error list). Both
+ * are omitted when unset, exactly as the Go envelope's `omitempty` does.
+ */
+export function fail(
+  code: string,
+  message: string,
+  fields?: Record<string, string>,
+  details?: unknown,
+) {
+  const error: Record<string, unknown> = { code, message };
+  if (fields !== undefined) {
+    error.fields = fields;
+  }
+  if (details !== undefined) {
+    error.details = details;
+  }
+  return { success: false, error };
 }
 
 export function listMeta(total: number, page = 1, perPage = 20): Meta {
@@ -411,6 +425,21 @@ export const handlers = [
   ),
   http.post(`${API_URL}/auth/logout`, () => HttpResponse.json(ok({ message: "logged out" }))),
   http.get(`${API_URL}/me`, () => HttpResponse.json(ok(primaryTeacher))),
+  // `GET /centers/me` is role-shaped; the default is the owner body, since
+  // any page that role-gates renders its owner branch by default. Tests that
+  // need the member body (`{center_name}`) override this with server.use.
+  http.get(`${API_URL}/centers/me`, () =>
+    HttpResponse.json(
+      ok({
+        center: {
+          id: "30000000-0000-4000-8000-000000000001",
+          name: "Trung Tâm Bình Minh",
+          is_owner: true,
+        },
+        members: [],
+      }),
+    ),
+  ),
   // A test teacher has no linked Zalo account unless the test says otherwise.
   http.get(`${API_URL}/me/zalo`, () => HttpResponse.json(ok({ linked: false }))),
   http.get(`${API_URL}/sessions/pending`, () =>

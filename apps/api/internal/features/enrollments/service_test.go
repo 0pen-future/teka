@@ -507,3 +507,76 @@ func TestPeerScopeCannotSeeAnotherMembersEnrollment(t *testing.T) {
 		t.Fatalf("peer must not read another member's enrollment, got %v", err)
 	}
 }
+
+// FindByStudentAndClass mirrors the SQL predicate: scope-visible, not
+// soft-deleted, and open OR ended — the ended case is the whole point, since
+// uq_enrollments_active cannot see it.
+func (f *fakeRepository) FindByStudentAndClass(_ context.Context, sc authctx.Scope, studentID, classID uuid.UUID) (*Enrollment, error) {
+	var newest *fakeEnrollment
+	for _, e := range f.rows {
+		if !visibleEnrollment(e, sc) || e.StudentID != studentID || e.ClassID != classID {
+			continue
+		}
+		if newest == nil || e.StartedOn.After(newest.StartedOn) {
+			newest = e
+		}
+	}
+	if newest == nil {
+		return nil, ErrNotFound
+	}
+	out := newest.Enrollment
+	return &out, nil
+}
+
+// FindByStudentAndClass is the bulk-import lookup. It deliberately returns
+// ended rows too: uq_enrollments_active is partial on ended_on IS NULL, so a
+// caller that only saw open rows would re-enrol a student who left, backdating
+// started_on and invoicing every session since.
+
+func TestFindByStudentAndClassReturnsAnEndedEnrollment(t *testing.T) {
+	svc, repo := newTestService()
+	teacherID := id.New()
+	sc := selfScope(teacherID)
+	classID := repo.addClass(teacherID, 150_000)
+	studentID := repo.addStudent(teacherID)
+
+	row := enroll(t, svc, sc, studentID, classID, "2026-01-05")
+	if _, err := svc.End(context.Background(), sc, row.ID, EndRequest{EndedOn: "2026-03-31"}); err != nil {
+		t.Fatalf("end: %v", err)
+	}
+
+	got, found, err := svc.FindByStudentAndClass(context.Background(), sc, studentID, classID)
+	if err != nil || !found {
+		t.Fatalf("an ended enrollment must still be found, got found=%v err=%v", found, err)
+	}
+	if got.EndedOn == nil {
+		t.Fatal("the caller decides what to do about a departure, so ended_on must survive the lookup")
+	}
+}
+
+func TestFindByStudentAndClassMissesWhenThereIsNone(t *testing.T) {
+	svc, repo := newTestService()
+	teacherID := id.New()
+	sc := selfScope(teacherID)
+
+	_, found, err := svc.FindByStudentAndClass(context.Background(), sc,
+		repo.addStudent(teacherID), repo.addClass(teacherID, 150_000))
+	if err != nil || found {
+		t.Fatalf("an unenrolled pair must miss, got found=%v err=%v", found, err)
+	}
+}
+
+func TestFindByStudentAndClassStaysWithinTheAnchorTeacher(t *testing.T) {
+	svc, repo := newTestService()
+	center := id.New()
+	author := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
+	peer := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
+
+	classID := repo.addClassFor(author, 150_000)
+	studentID := repo.addStudentFor(author)
+	enroll(t, svc, author, studentID, classID, "2026-01-05")
+
+	if _, found, err := svc.FindByStudentAndClass(context.Background(), peer, studentID, classID); err != nil || found {
+		t.Fatalf("another teacher's enrollment must not be found, got found=%v err=%v", found, err)
+	}
+}

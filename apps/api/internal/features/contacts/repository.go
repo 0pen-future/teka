@@ -45,6 +45,9 @@ type Repository interface {
 	// ClearZaloMapping nulls both mapping columns. Clearing an unmapped
 	// contact succeeds; a missing contact is still ErrNotFound.
 	ClearZaloMapping(ctx context.Context, sc authctx.Scope, contactID uuid.UUID) error
+	// FindIDByPhone resolves a live contact by its exact E.164 phone within
+	// the scope — the same shape as uq_contacts_phone(teacher_id, phone).
+	FindIDByPhone(ctx context.Context, sc authctx.Scope, phone string) (uuid.UUID, bool, error)
 }
 
 type gormRepository struct {
@@ -197,4 +200,24 @@ func translateError(err error) error {
 		return ErrDuplicateZaloMapping
 	}
 	return ErrDuplicatePhone
+}
+
+// FindIDByPhone resolves a contact by exact phone. It is deliberately not the
+// Query filter on List, which is an ILIKE '%...%' search built for a person
+// typing into a search box: as an identity lookup that would match any contact
+// whose number merely contains this one.
+func (r *gormRepository) FindIDByPhone(ctx context.Context, sc authctx.Scope, phone string) (uuid.UUID, bool, error) {
+	// Scanning into a bare uuid.UUID would skip its sql.Scanner and hit
+	// GORM's element-wise array path ([16]byte); the id has to land in a
+	// struct field.
+	var row struct{ ID uuid.UUID }
+	err := r.scoped(ctx, sc).Model(&Contact{}).
+		Where("contacts.phone = ?", phone).
+		Limit(1).
+		Select("contacts.id").
+		Scan(&row).Error
+	if err != nil {
+		return uuid.Nil, false, err
+	}
+	return row.ID, row.ID != uuid.Nil, nil
 }

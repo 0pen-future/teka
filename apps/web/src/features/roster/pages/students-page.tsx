@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 
 import { HvBadge, HvButton, HvCard, hvToast } from "@/components/hv";
+import { useCenter } from "@/features/center";
 import { cn, formatPhoneLocal } from "@/lib/utils";
 
 import { AnonymizeStudentDialog } from "../components/anonymize-student-dialog";
@@ -49,6 +50,11 @@ export function StudentsPage() {
   /** Step 2 of the add-student wizard, or a direct enroll from the unenrolled tab. */
   const [enrolling, setEnrolling] = useState<Student | undefined>(undefined);
   const [enrollFromWizard, setEnrollFromWizard] = useState(false);
+  // `GET /centers/me` is role-shaped and carries no role flag: only the
+  // owner body has `members`. Import is owner-only server-side, so a member
+  // is not offered a link that would only answer 403.
+  const { data: center } = useCenter();
+  const isOwner = center !== undefined && "members" in center;
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -127,6 +133,17 @@ export function StudentsPage() {
               }}
             >
               ⚙ Cài đặt lớp
+            </HvButton>
+          ) : null}
+          {isOwner ? (
+            <HvButton
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                void navigate("/students/import");
+              }}
+            >
+              Nhập từ Excel
             </HvButton>
           ) : null}
           <HvButton variant="secondary" size="sm" onClick={() => setClassDialogOpen(true)}>

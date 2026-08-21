@@ -47,6 +47,9 @@ type Repository interface {
 	// financial foreign keys keep holding. Runs on the context transaction so
 	// the caller can close enrollments atomically alongside it.
 	AnonymizeAndDelete(ctx context.Context, sc authctx.Scope, studentID uuid.UUID, placeholder string) error
+	// FindIDByName resolves a live student by contact, exact name, and note.
+	// note is a pointer because display_note is NULL when unset.
+	FindIDByName(ctx context.Context, sc authctx.Scope, contactID uuid.UUID, fullName string, note *string) (uuid.UUID, bool, error)
 }
 
 type gormRepository struct {
@@ -171,4 +174,28 @@ func (r *gormRepository) AnonymizeAndDelete(ctx context.Context, sc authctx.Scop
 		return ErrNotFound
 	}
 	return nil
+}
+
+// FindIDByName resolves a student by their identity within one contact: the
+// exact name plus the note that distinguishes same-named siblings.
+//
+// The note comparison is IS NOT DISTINCT FROM, not =. display_note is NULL
+// when unset (notePtr), and `display_note = ”` never matches NULL in SQL —
+// with an equality test a bulk importer would miss every note-less student,
+// which is nearly all of them, and duplicate the entire roster on re-import.
+func (r *gormRepository) FindIDByName(ctx context.Context, sc authctx.Scope, contactID uuid.UUID, fullName string, note *string) (uuid.UUID, bool, error) {
+	// Scanning into a bare uuid.UUID would skip its sql.Scanner and hit
+	// GORM's element-wise array path ([16]byte); the id has to land in a
+	// struct field.
+	var row struct{ ID uuid.UUID }
+	err := r.scoped(ctx, sc).Model(&Student{}).
+		Where("students.contact_id = ? AND students.full_name = ?", contactID, fullName).
+		Where("students.display_note IS NOT DISTINCT FROM ?", note).
+		Limit(1).
+		Select("students.id").
+		Scan(&row).Error
+	if err != nil {
+		return uuid.Nil, false, err
+	}
+	return row.ID, row.ID != uuid.Nil, nil
 }

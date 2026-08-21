@@ -37,6 +37,11 @@ type Repository interface {
 	Create(ctx context.Context, e *Enrollment) error
 	GetByID(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Row, error)
 	List(ctx context.Context, sc authctx.Scope, filter ListFilter, p pagination.Params) ([]Row, int64, error)
+	// FindByStudentAndClass returns the enrollment linking this student to
+	// this class, open or already ended. Bulk flows need the ended case: it is
+	// invisible to uq_enrollments_active, so a caller that only looked for
+	// open rows would silently re-enrol a student who left.
+	FindByStudentAndClass(ctx context.Context, sc authctx.Scope, studentID, classID uuid.UUID) (*Enrollment, error)
 	// End stamps ended_on on one open enrollment; the row survives.
 	End(ctx context.Context, sc authctx.Scope, id uuid.UUID, endedOn time.Time) error
 	SoftDelete(ctx context.Context, sc authctx.Scope, id uuid.UUID) error
@@ -227,4 +232,22 @@ func (r *gormRepository) StudentExists(ctx context.Context, sc authctx.Scope, st
 	}
 	err := q.Count(&n).Error
 	return n > 0, err
+}
+
+// FindByStudentAndClass returns the newest enrollment for the pair regardless
+// of whether it is still open. Ordering is explicit so a student who left and
+// was re-admitted resolves to their current row rather than an arbitrary one.
+func (r *gormRepository) FindByStudentAndClass(ctx context.Context, sc authctx.Scope, studentID, classID uuid.UUID) (*Enrollment, error) {
+	var e Enrollment
+	err := r.scoped(ctx, sc).
+		Where("enrollments.student_id = ? AND enrollments.class_id = ?", studentID, classID).
+		Order("enrollments.started_on DESC, enrollments.id DESC").
+		Take(&e).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &e, nil
 }

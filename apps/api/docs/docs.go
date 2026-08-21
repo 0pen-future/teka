@@ -5000,6 +5000,128 @@ const docTemplate = `{
                 }
             }
         },
+        "/imports/roster": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Đọc file .xlsx và tạo lớp, lịch học, phụ huynh, học sinh, ghi danh. dry_run=true chỉ kiểm tra, không ghi. Chỉ chủ trung tâm được gọi.",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "imports"
+                ],
+                "summary": "Import lớp và học sinh từ file Excel",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "File .xlsx theo mẫu",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "true = chỉ kiểm tra, không ghi dữ liệu",
+                        "name": "dry_run",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/imports.Report"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Envelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.Envelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/response.Envelope"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/response.Envelope"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/imports/roster/template": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Trả về file .xlsx gồm 2 sheet (Lop, HocSinh) với dòng tiêu đề và một dòng ví dụ.",
+                "produces": [
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                ],
+                "tags": [
+                    "imports"
+                ],
+                "summary": "Tải file Excel mẫu để import lớp và học sinh",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.Envelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
         "/invitations/accept": {
             "post": {
                 "description": "Public, unauthenticated. Token travels in the body. Every rejection reason — unknown/used/expired/revoked token, an already-active account, or a disabled account that was never a member of this center — answers the same generic 400 body, by design (anti-enumeration).",
@@ -9538,6 +9660,40 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "unit_price": {
+                    "type": "integer"
+                }
+            }
+        },
+        "imports.Report": {
+            "type": "object",
+            "properties": {
+                "classes": {
+                    "$ref": "#/definitions/imports.ReportEntity"
+                },
+                "committed": {
+                    "type": "boolean"
+                },
+                "contacts": {
+                    "$ref": "#/definitions/imports.ReportEntity"
+                },
+                "enrollments": {
+                    "$ref": "#/definitions/imports.ReportEntity"
+                },
+                "schedules": {
+                    "$ref": "#/definitions/imports.ReportEntity"
+                },
+                "students": {
+                    "$ref": "#/definitions/imports.ReportEntity"
+                }
+            }
+        },
+        "imports.ReportEntity": {
+            "type": "object",
+            "properties": {
+                "created": {
+                    "type": "integer"
+                },
+                "reused": {
                     "type": "integer"
                 }
             }
