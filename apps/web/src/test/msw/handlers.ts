@@ -451,6 +451,17 @@ export const handlers = [
   // Dashboard aggregation defaults: an empty roster with nothing billed.
   http.get(`${API_URL}/classes`, () => HttpResponse.json(ok([], listMeta(0)))),
   http.get(`${API_URL}/classes/:id/sessions`, () => HttpResponse.json(ok([]))),
+  // Teaching defaults: nothing saved yet. Stateful round-trip handlers live in
+  // `@/features/teaching/__tests__/teaching-handlers.ts`; tests that write
+  // register those with server.use().
+  http.get(`${API_URL}/classes/:id/curriculum`, () =>
+    HttpResponse.json(ok({ lessons: [], current_index: 0 })),
+  ),
+  http.get(`${API_URL}/classes/:id/lesson-plans`, () => HttpResponse.json(ok([]))),
+  http.get(`${API_URL}/classes/:id/marks`, () =>
+    HttpResponse.json(ok({ session_notes: [], marks: [] })),
+  ),
+  http.get(`${API_URL}/teaching/review-queue`, () => HttpResponse.json(ok([]))),
   http.get(`${API_URL}/students`, () => HttpResponse.json(ok([], listMeta(0)))),
   http.get(`${API_URL}/billing-periods/:id/preview`, () => HttpResponse.json(ok(makePreview()))),
   http.get(`${API_URL}/billing-periods/:id/collections/summary`, () =>
@@ -462,6 +473,20 @@ export const handlers = [
     HttpResponse.json(ok({ message: "if this phone is registered, a reset link has been sent" })),
   ),
   http.post(`${API_URL}/auth/reset-password`, () => new HttpResponse(null, { status: 204 })),
+  // Owner-shaped by default — the signed-in teacher owns their center, so the
+  // layout's center card resolves everywhere; member-shaped tests override.
+  http.get(`${API_URL}/centers/me`, () =>
+    HttpResponse.json(
+      ok({
+        center: {
+          id: "30000000-0000-4000-8000-000000000001",
+          name: "Trung Tâm Bình Minh",
+          is_owner: true,
+        },
+        members: [],
+      }),
+    ),
+  ),
   http.post(`${API_URL}/centers/me/invitations`, () =>
     HttpResponse.json(
       ok({

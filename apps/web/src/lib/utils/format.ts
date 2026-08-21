@@ -39,6 +39,19 @@ export function formatSessionDate(sessionDate: string): string {
   return `${weekday}, ${day}/${month}`;
 }
 
+/**
+ * Renders a `YYYY-MM-DD` date as bare `dd/MM` (e.g. `"05/01"`) for dense
+ * table cells that carry no weekday. Malformed input passes through
+ * unchanged, same degradation contract as `formatSessionDate`.
+ */
+export function formatDayMonth(isoDate: string): string {
+  const [, month, day] = isoDate.split("-");
+  if (!month || !day) {
+    return isoDate;
+  }
+  return `${day}/${month}`;
+}
+
 /** Converts a stored E.164 Vietnamese number back to the local `0…` display form. */
 export function formatPhoneLocal(phone: string): string {
   return phone.startsWith("+84") ? `0${phone.slice(3)}` : phone;

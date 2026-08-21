@@ -13,11 +13,15 @@ import { classesKeys, enrollmentsKeys, studentsKeys } from "./roster-keys";
 
 export { enrollmentsKeys };
 
-export function useEnrollmentsList(params: ListEnrollmentsParams = {}) {
+export function useEnrollmentsList(
+  params: ListEnrollmentsParams = {},
+  options: { enabled?: boolean } = {},
+) {
   return useQuery({
     queryKey: enrollmentsKeys.list(params),
     queryFn: () => listEnrollments(params),
     placeholderData: keepPreviousData,
+    enabled: options.enabled ?? true,
   });
 }
 

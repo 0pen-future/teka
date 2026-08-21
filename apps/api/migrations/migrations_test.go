@@ -28,6 +28,7 @@ var domainTables = []string{
 	"payments", "payment_allocations", "statements", "notifications",
 	"refresh_tokens", "zalo_accounts", "notification_runs", "centers",
 	"center_members", "invitations", "password_reset_tokens",
+	"class_curricula", "lesson_plans", "session_notes", "session_marks",
 }
 
 // centerTables is every business table 000007 re-keyed to the center tenant.
@@ -464,10 +465,11 @@ func TestCenterTenancyBackfill(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { m.Close() })
 	require.NoError(t, database.MigrateUp(m))
-	// Step back below 000007, seed the old teacher-tenant shape, then migrate
-	// up again so the backfill runs over that data. Two steps: 000008 (additive
-	// invite/reset tables) then 000007 (the center tenancy migration).
-	require.NoError(t, database.MigrateDown(m, 2))
+	// Step back below 000007 (the center tenancy migration), seed the old
+	// teacher-tenant shape, then migrate up again so the backfill runs over
+	// that data. Targeting version 6 directly keeps this stable as later
+	// migrations land on top.
+	require.NoError(t, m.Migrate(6))
 
 	db := openDB(t, url)
 	teacherFull := seedLegacyTenant(t, db, "+84900000101", true)
@@ -716,6 +718,132 @@ func TestInviteOnlyOnboardingSchemaInvariants(t *testing.T) {
 		 WHERE user_id = ? AND token_hash = 'resethash-3'`, a.teacherID).Error)
 	require.NoError(t, insertReset(a.teacherID, "resethash-4"),
 		"once the prior token is consumed, a new live token is allowed")
+}
+
+// teachingFixture extends the notification parent chain with the class /
+// session / student rows the 000009 teaching tables hang off of.
+type teachingFixture struct {
+	notificationFixture
+	classID   uuid.UUID
+	sessionID uuid.UUID
+	studentID uuid.UUID
+}
+
+func seedTeachingParents(t *testing.T, db *gorm.DB, phone string) teachingFixture {
+	t.Helper()
+	f := teachingFixture{
+		notificationFixture: seedNotificationParents(t, db, phone),
+		classID:             uuid.New(),
+		sessionID:           uuid.New(),
+		studentID:           uuid.New(),
+	}
+	require.NoError(t, db.Exec(
+		`INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price)
+		 VALUES (?, ?, ?, 'Lớp Toán 9', '2026-01-05', 100000)`,
+		f.classID, f.teacherID, f.centerID).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO class_sessions (id, teacher_id, center_id, class_id, session_date)
+		 VALUES (?, ?, ?, ?, '2026-08-10')`,
+		f.sessionID, f.teacherID, f.centerID, f.classID).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO students (id, teacher_id, center_id, contact_id, full_name)
+		 VALUES (?, ?, ?, ?, 'Bé An')`,
+		f.studentID, f.teacherID, f.centerID, f.contactID).Error)
+	return f
+}
+
+// The 000009 teaching tables carry the same center integrity as every other
+// business table: the membership guard rejects cross-center rows, the CHECKs
+// hold the UI's value ranges, and rows follow their parents on hard delete.
+func TestTeachingTablesIntegrity(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+
+	db := openDB(t, url)
+	a := seedTeachingParents(t, db, "+84900000601")
+	b := seedTeachingParents(t, db, "+84900000602")
+
+	// Membership guard: a row pairing a's teacher with b's center must fail.
+	err = db.Exec(
+		`INSERT INTO class_curricula (id, class_id, teacher_id, center_id)
+		 VALUES (?, ?, ?, ?)`,
+		uuid.New(), b.classID, a.teacherID, b.centerID).Error
+	require.ErrorContains(t, err, "teacher_center",
+		"a teaching row pairing a teacher with another center must be rejected")
+
+	// One curriculum per class.
+	require.NoError(t, db.Exec(
+		`INSERT INTO class_curricula (id, class_id, teacher_id, center_id, lessons, current_index)
+		 VALUES (?, ?, ?, ?, '["Bài 1", "Bài 2"]', 1)`,
+		uuid.New(), a.classID, a.teacherID, a.centerID).Error)
+	require.Error(t, db.Exec(
+		`INSERT INTO class_curricula (id, class_id, teacher_id, center_id)
+		 VALUES (?, ?, ?, ?)`,
+		uuid.New(), a.classID, a.teacherID, a.centerID).Error,
+		"a second curriculum for the same class must be rejected")
+
+	// Lesson plans: status is the four persisted states only ('none' is the
+	// absence of a row), one plan per (class, lesson_index).
+	planID := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO lesson_plans (id, class_id, lesson_index, teacher_id, center_id, status, submitted_by, submitted_at)
+		 VALUES (?, ?, 0, ?, ?, 'pending', ?, now())`,
+		planID, a.classID, a.teacherID, a.centerID, a.teacherID).Error)
+	require.Error(t, db.Exec(
+		`INSERT INTO lesson_plans (id, class_id, lesson_index, teacher_id, center_id, status)
+		 VALUES (?, ?, 0, ?, ?, 'draft')`,
+		uuid.New(), a.classID, a.teacherID, a.centerID).Error,
+		"a second plan for the same (class, lesson_index) must be rejected")
+	require.Error(t, db.Exec(
+		`INSERT INTO lesson_plans (id, class_id, lesson_index, teacher_id, center_id, status)
+		 VALUES (?, ?, 1, ?, ?, 'none')`,
+		uuid.New(), a.classID, a.teacherID, a.centerID).Error,
+		"'none' is not a persisted status")
+	require.Error(t, db.Exec(
+		`INSERT INTO lesson_plans (id, class_id, lesson_index, teacher_id, center_id, status)
+		 VALUES (?, ?, -1, ?, ?, 'draft')`,
+		uuid.New(), a.classID, a.teacherID, a.centerID).Error,
+		"negative lesson_index must be rejected")
+
+	// Session note is 1:1 with its session (PK), marks unique per student and
+	// score capped at the UI's 0–10 scale.
+	require.NoError(t, db.Exec(
+		`INSERT INTO session_notes (session_id, teacher_id, center_id, body)
+		 VALUES (?, ?, ?, 'Cả lớp học tốt')`,
+		a.sessionID, a.teacherID, a.centerID).Error)
+	require.Error(t, db.Exec(
+		`INSERT INTO session_notes (session_id, teacher_id, center_id, body)
+		 VALUES (?, ?, ?, 'trùng buổi')`,
+		a.sessionID, a.teacherID, a.centerID).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO session_marks (id, session_id, student_id, teacher_id, center_id, score, personal_note)
+		 VALUES (?, ?, ?, ?, ?, 8.5, 'Tiến bộ')`,
+		uuid.New(), a.sessionID, a.studentID, a.teacherID, a.centerID).Error)
+	require.Error(t, db.Exec(
+		`INSERT INTO session_marks (id, session_id, student_id, teacher_id, center_id, score)
+		 VALUES (?, ?, ?, ?, ?, 7)`,
+		uuid.New(), a.sessionID, a.studentID, a.teacherID, a.centerID).Error,
+		"a second mark row for the same (session, student) must be rejected")
+	require.Error(t, db.Exec(
+		`INSERT INTO session_marks (id, session_id, student_id, teacher_id, center_id, score)
+		 VALUES (?, ?, ?, ?, ?, 10.5)`,
+		uuid.New(), b.sessionID, b.studentID, b.teacherID, b.centerID).Error,
+		"score above 10 must be rejected")
+
+	// Hard-deleting the class takes its curriculum, plans, sessions and their
+	// notes/marks along — teaching data has no life of its own.
+	require.NoError(t, db.Exec(`DELETE FROM classes WHERE id = ?`, a.classID).Error)
+	var n int64
+	for _, tbl := range []string{"class_curricula", "lesson_plans", "session_notes", "session_marks"} {
+		require.NoError(t, db.Raw(fmt.Sprintf(
+			`SELECT count(*) FROM %s WHERE center_id = ?`, tbl), a.centerID).Scan(&n).Error)
+		require.Zerof(t, n, "table %s must be empty after the class hard delete", tbl)
+	}
 }
 
 func TestRefreshTokensFKTargetsUserAccounts(t *testing.T) {

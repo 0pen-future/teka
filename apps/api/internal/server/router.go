@@ -30,6 +30,7 @@ import (
 	"teka/apps/api/internal/features/statements"
 	"teka/apps/api/internal/features/students"
 	"teka/apps/api/internal/features/teachers"
+	"teka/apps/api/internal/features/teaching"
 	"teka/apps/api/internal/features/zalo"
 	"teka/apps/api/internal/middleware"
 	"teka/apps/api/internal/shared/apperror"
@@ -157,6 +158,14 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	// atomically.
 	attendanceSvc := attendance.NewService(attendance.NewRepository(db), enrollmentsSvc, sessionsSvc, txMgr)
 	attendance.RegisterRoutes(v1, attendance.NewHandler(attendanceSvc), requireAuth, resolveScope)
+
+	// teaching consumes classes, sessions, and enrollments through consumer
+	// interfaces (ClassSource, SessionSource, RosterSource) — class/session
+	// resolution doubles as its authorization gates — so all three services
+	// must exist first. The marks batch upserts and deletes rows inside one
+	// transaction via txMgr.
+	teachingSvc := teaching.NewService(teaching.NewRepository(db), classesSvc, sessionsSvc, enrollmentsSvc, txMgr)
+	teaching.RegisterRoutes(v1, teaching.NewHandler(teachingSvc), requireAuth, resolveScope)
 
 	// The owner dashboard reads through classes, sessions, and attendance
 	// (ClassReader, SessionReader, AttendanceReader), so it mounts here —

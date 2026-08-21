@@ -20,6 +20,7 @@ import {
   useUpdateSchedule,
 } from "../hooks/use-classes";
 import { useEnrollmentsList } from "../hooks/use-enrollments";
+import { currentMonth } from "../lib/current-month";
 import {
   deriveScheduleSlots,
   diffSchedules,
@@ -33,22 +34,6 @@ import {
 } from "../schemas/roster-schemas";
 
 const today = () => new Date().toISOString().slice(0, 10);
-
-/**
- * Month-start → today, plus the month's "07" label. The stat range must stop
- * at today: `GET /classes/:id/sessions` materializes every session in the
- * requested range, and rows written for future dates would freeze the old
- * timetable before the save can change it.
- */
-function currentMonth() {
-  const now = new Date();
-  const first = new Date(now.getFullYear(), now.getMonth(), 1);
-  const iso = (date: Date) =>
-    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
-      date.getDate(),
-    ).padStart(2, "0")}`;
-  return { from: iso(first), to: iso(now), label: String(now.getMonth() + 1).padStart(2, "0") };
-}
 
 function toDefaults(klass: Class): ClassSettingsInput {
   const slots = deriveScheduleSlots(klass.schedules, today());
