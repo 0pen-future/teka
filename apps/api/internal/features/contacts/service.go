@@ -167,3 +167,10 @@ func translate(err error) error {
 		return err
 	}
 }
+
+// FindIDByPhone resolves a live contact by its exact E.164 phone inside the
+// scope — the create-or-reuse seam for bulk flows, matching the shape of
+// uq_contacts_phone(teacher_id, phone).
+func (s *Service) FindIDByPhone(ctx context.Context, sc authctx.Scope, phone string) (uuid.UUID, bool, error) {
+	return s.repo.FindIDByPhone(ctx, sc, validation.NormalizePhone(phone))
+}

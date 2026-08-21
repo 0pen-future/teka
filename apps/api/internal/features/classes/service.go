@@ -247,3 +247,31 @@ func translate(err error) error {
 		return err
 	}
 }
+
+// FindActiveByName resolves a live, active class by its exact name inside the
+// scope. It is the create-or-reuse seam for bulk flows; classes.name carries
+// no unique index, so this is a lookup and the caller decides what a hit means.
+//
+// An archived class is deliberately not a hit: it still has deleted_at IS NULL,
+// so a name-only match would enrol this year's students into a class the
+// teacher closed last term.
+func (s *Service) FindActiveByName(ctx context.Context, sc authctx.Scope, name string) (*Class, bool, error) {
+	class, err := s.repo.FindActiveByName(ctx, sc, name)
+	if errors.Is(err, ErrNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return class, true, nil
+}
+
+// ScheduleExists reports whether the class already carries this exact weekly
+// slot. Callers must pass the same effective_from they intend to write:
+// AddSchedule defaults a blank one to the stored class's start_date, so a
+// caller that checked with one date and wrote with another would append a
+// duplicate slot on every run, and class_schedules has no unique index to
+// stop it.
+func (s *Service) ScheduleExists(ctx context.Context, sc authctx.Scope, classID uuid.UUID, weekday int16, startTime TimeOfDay, effectiveFrom time.Time) (bool, error) {
+	return s.repo.ScheduleExists(ctx, sc, classID, weekday, startTime, effectiveFrom)
+}

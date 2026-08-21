@@ -764,6 +764,28 @@ definitions:
       unit_price:
         type: integer
     type: object
+  imports.Report:
+    properties:
+      classes:
+        $ref: '#/definitions/imports.ReportEntity'
+      committed:
+        type: boolean
+      contacts:
+        $ref: '#/definitions/imports.ReportEntity'
+      enrollments:
+        $ref: '#/definitions/imports.ReportEntity'
+      schedules:
+        $ref: '#/definitions/imports.ReportEntity'
+      students:
+        $ref: '#/definitions/imports.ReportEntity'
+    type: object
+  imports.ReportEntity:
+    properties:
+      created:
+        type: integer
+      reused:
+        type: integer
+    type: object
   invitations.AcceptRequest:
     properties:
       full_name:
@@ -5006,6 +5028,83 @@ paths:
       summary: End enrollment
       tags:
       - enrollments
+  /imports/roster:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Đọc file .xlsx và tạo lớp, lịch học, phụ huynh, học sinh, ghi danh.
+        dry_run=true chỉ kiểm tra, không ghi. Chỉ chủ trung tâm được gọi.
+      parameters:
+      - description: File .xlsx theo mẫu
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: true = chỉ kiểm tra, không ghi dữ liệu
+        in: formData
+        name: dry_run
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/imports.Report'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Envelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.Envelope'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.Envelope'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/response.Envelope'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/response.Envelope'
+      security:
+      - BearerAuth: []
+      summary: Import lớp và học sinh từ file Excel
+      tags:
+      - imports
+  /imports/roster/template:
+    get:
+      description: Trả về file .xlsx gồm 2 sheet (Lop, HocSinh) với dòng tiêu đề và
+        một dòng ví dụ.
+      produces:
+      - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.Envelope'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.Envelope'
+      security:
+      - BearerAuth: []
+      summary: Tải file Excel mẫu để import lớp và học sinh
+      tags:
+      - imports
   /invitations/accept:
     post:
       consumes:

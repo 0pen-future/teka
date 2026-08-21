@@ -127,11 +127,9 @@ describe("bottom tab bar", () => {
 
     const billing = await within(sheet).findByRole("link", { name: "Chốt sổ" });
     expect(billing.getAttribute("href")).toMatch(/^\/billing\//);
-    expect(
-      within(sheet)
-        .getByRole("link", { name: "Gửi thông báo" })
-        .getAttribute("href"),
-    ).toMatch(/^\/notifications\//);
+    expect(within(sheet).getByRole("link", { name: "Gửi thông báo" }).getAttribute("href")).toMatch(
+      /^\/notifications\//,
+    );
     const contacts = within(sheet).getByRole("link", { name: "Phụ huynh" });
     expect(contacts).toHaveAttribute("href", "/contacts");
     expect(within(sheet).getByRole("link", { name: "Cài đặt trung tâm" })).toHaveAttribute(

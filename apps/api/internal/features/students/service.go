@@ -149,3 +149,11 @@ func translate(err error) error {
 		return err
 	}
 }
+
+// FindIDByName resolves a live student by their identity within one contact:
+// exact name plus the note that distinguishes same-named siblings. note is a
+// pointer, and nil means "no note" rather than "any note" — display_note is
+// NULL when unset, which is the common case.
+func (s *Service) FindIDByName(ctx context.Context, sc authctx.Scope, contactID uuid.UUID, fullName string, note *string) (uuid.UUID, bool, error) {
+	return s.repo.FindIDByName(ctx, sc, contactID, fullName, note)
+}

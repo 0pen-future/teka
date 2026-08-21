@@ -133,9 +133,10 @@ describe("auto-map trigger on the contacts page", () => {
     await screen.findByText("Nguyễn Thị Lan");
     expect(trigger).toBeDisabled();
     // Tooltips never surface on touch, so the reason lives in the page.
-    expect(
-      await screen.findByRole("link", { name: "Kết nối Zalo ở trang Hồ sơ" }),
-    ).toHaveAttribute("href", "/profile");
+    expect(await screen.findByRole("link", { name: "Kết nối Zalo ở trang Hồ sơ" })).toHaveAttribute(
+      "href",
+      "/profile",
+    );
   });
 
   it("stays disabled while the stored session expired", async () => {

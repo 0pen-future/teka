@@ -456,3 +456,75 @@ func TestClearZaloMappingUnknownContactIsNotFound(t *testing.T) {
 		t.Fatalf("unknown contact must be NOT_FOUND, got %v", err)
 	}
 }
+
+// FindIDByPhone mirrors the SQL predicate: scope-visible, not soft-deleted,
+// exact phone — the same shape as uq_contacts_phone(teacher_id, phone).
+func (f *fakeRepository) FindIDByPhone(_ context.Context, sc authctx.Scope, phone string) (uuid.UUID, bool, error) {
+	for _, c := range f.rows {
+		if visible(c, sc) && c.Phone == phone {
+			return c.ID, true, nil
+		}
+	}
+	return uuid.Nil, false, nil
+}
+
+// FindIDByPhone is the bulk-import lookup: it must normalise the way Create
+// does and stay inside the anchor teacher, or an import would stitch a child
+// onto another teacher's parent record.
+
+func TestFindIDByPhoneNormalisesLikeCreate(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+	sc := memberScope()
+
+	row, err := svc.Create(context.Background(), sc, CreateRequest{FullName: "Phạm Văn Hùng", Phone: "0901234567"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	for _, written := range []string{"0901234567", "+84901234567"} {
+		got, found, err := svc.FindIDByPhone(context.Background(), sc, written)
+		if err != nil || !found || got != row.ID {
+			t.Fatalf("%s must resolve to the stored contact, got id=%v found=%v err=%v", written, got, found, err)
+		}
+	}
+}
+
+func TestFindIDByPhoneStaysWithinTheAnchorTeacher(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+	center := id.New()
+	author := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
+	peer := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
+
+	if _, err := svc.Create(context.Background(), author, CreateRequest{FullName: "Phạm Văn Hùng", Phone: "0901234567"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// uq_contacts_phone is (teacher_id, phone): the same parent under a second
+	// teacher is a second row, so the peer must miss and create their own.
+	if _, found, err := svc.FindIDByPhone(context.Background(), peer, "0901234567"); err != nil || found {
+		t.Fatalf("another teacher's contact must not be found, got found=%v err=%v", found, err)
+	}
+}
+
+func TestFindIDByPhoneIgnoresDeletedContacts(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+	sc := memberScope()
+
+	row, err := svc.Create(context.Background(), sc, CreateRequest{FullName: "Phạm Văn Hùng", Phone: "0901234567"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := svc.Delete(context.Background(), sc, row.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	// uq_contacts_phone is partial on deleted_at IS NULL, so a deleted row
+	// holds no key and a fresh create succeeds — the lookup has to miss it or
+	// the import would attach students to a contact nobody can see.
+	if _, found, err := svc.FindIDByPhone(context.Background(), sc, "0901234567"); err != nil || found {
+		t.Fatalf("a deleted contact must not be found, got found=%v err=%v", found, err)
+	}
+}

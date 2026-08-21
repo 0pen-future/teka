@@ -174,3 +174,19 @@ func translate(err error) error {
 		return err
 	}
 }
+
+// FindByStudentAndClass returns this student's enrollment in this class, open
+// or already ended, so a bulk caller can tell "never enrolled" from "left".
+// uq_enrollments_active only covers open rows, so an ended enrollment is
+// invisible to the database constraint and re-creating one would backdate a
+// departed student onto every session since the class began.
+func (s *Service) FindByStudentAndClass(ctx context.Context, sc authctx.Scope, studentID, classID uuid.UUID) (*Enrollment, bool, error) {
+	e, err := s.repo.FindByStudentAndClass(ctx, sc, studentID, classID)
+	if errors.Is(err, ErrNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return e, true, nil
+}

@@ -360,3 +360,103 @@ func TestPeerScopeCannotSeeAnotherMembersStudent(t *testing.T) {
 		t.Fatalf("peer must not read another member's student, got %v", err)
 	}
 }
+
+// FindIDByName mirrors the SQL predicate, including the NULL-safe note
+// comparison: display_note is NULL when unset, so a plain equality test would
+// miss every student without a distinguishing note.
+func (f *fakeRepository) FindIDByName(_ context.Context, sc authctx.Scope, contactID uuid.UUID, fullName string, note *string) (uuid.UUID, bool, error) {
+	for _, s := range f.rows {
+		if !visible(s, sc) || s.ContactID != contactID || s.FullName != fullName {
+			continue
+		}
+		if sameNote(s.DisplayNote, note) {
+			return s.ID, true, nil
+		}
+	}
+	return uuid.Nil, false, nil
+}
+
+// sameNote is SQL's IS NOT DISTINCT FROM for a nullable text column.
+func sameNote(a, b *string) bool {
+	switch {
+	case a == nil && b == nil:
+		return true
+	case a == nil || b == nil:
+		return false
+	default:
+		return *a == *b
+	}
+}
+
+// FindIDByName is the bulk-import lookup. Its whole difficulty is the note:
+// display_note is NULL when unset, and NULL never equals anything.
+
+func TestFindIDByNameMatchesAStudentWithNoNote(t *testing.T) {
+	svc, repo, _ := newTestService()
+	sc := memberScope()
+	contactID := repo.addContactIn(sc.TeacherID, sc.CenterID)
+
+	row, err := svc.Create(context.Background(), sc, CreateRequest{FullName: "Bé An", ContactID: contactID})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Most students carry no note, so this is the common case a re-import
+	// hits — an equality test on display_note would miss every one of them and
+	// duplicate the whole roster.
+	got, found, err := svc.FindIDByName(context.Background(), sc, contactID, "Bé An", nil)
+	if err != nil || !found || got != row.ID {
+		t.Fatalf("a note-less student must be found with a nil note, got id=%v found=%v err=%v", got, found, err)
+	}
+
+	note := "An lớn"
+	if _, found, err := svc.FindIDByName(context.Background(), sc, contactID, "Bé An", &note); err != nil || found {
+		t.Fatalf("a note-less student must not match a note, got found=%v err=%v", found, err)
+	}
+}
+
+func TestFindIDByNameDistinguishesNamesakesByNote(t *testing.T) {
+	svc, repo, _ := newTestService()
+	sc := memberScope()
+	contactID := repo.addContactIn(sc.TeacherID, sc.CenterID)
+
+	big, err := svc.Create(context.Background(), sc, CreateRequest{
+		FullName: "Bé An", ContactID: contactID, DisplayNote: "An lớn",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	small, err := svc.Create(context.Background(), sc, CreateRequest{
+		FullName: "Bé An", ContactID: contactID, DisplayNote: "An nhỏ",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	for _, tc := range []struct {
+		note string
+		want uuid.UUID
+	}{{"An lớn", big.ID}, {"An nhỏ", small.ID}} {
+		note := tc.note
+		got, found, err := svc.FindIDByName(context.Background(), sc, contactID, "Bé An", &note)
+		if err != nil || !found || got != tc.want {
+			t.Fatalf("%s must resolve to its own student, got id=%v found=%v err=%v", tc.note, got, found, err)
+		}
+	}
+}
+
+func TestFindIDByNameStaysWithinTheAnchorTeacher(t *testing.T) {
+	svc, repo, _ := newTestService()
+	center := id.New()
+	author := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
+	peer := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
+	contactID := repo.addContactIn(author.TeacherID, center)
+
+	if _, err := svc.Create(context.Background(), author, CreateRequest{FullName: "Bé An", ContactID: contactID}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	if _, found, err := svc.FindIDByName(context.Background(), peer, contactID, "Bé An", nil); err != nil || found {
+		t.Fatalf("another teacher's student must not be found, got found=%v err=%v", found, err)
+	}
+}

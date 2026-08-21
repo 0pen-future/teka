@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 
 import { HvBadge, HvButton, HvCard, hvToast } from "@/components/hv";
 import { useSessionsList } from "@/features/attendance";
+import { useCenter } from "@/features/center";
 import { cn, formatDayMonth, formatPhoneLocal } from "@/lib/utils";
 
 import { AnonymizeStudentDialog } from "../components/anonymize-student-dialog";
@@ -39,6 +40,7 @@ const tableCellClassName = "border-t border-line-100 px-[18px] py-[11px]";
  * table rather than routing to per-class pages, matching the prototype.
  */
 export function StudentsPage() {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeClassId = searchParams.get("class_id") ?? "";
   const isUnenrolledTab = activeClassId === UNENROLLED_TAB;
@@ -51,6 +53,11 @@ export function StudentsPage() {
   /** Step 2 of the add-student wizard, or a direct enroll from the unenrolled tab. */
   const [enrolling, setEnrolling] = useState<Student | undefined>(undefined);
   const [enrollFromWizard, setEnrollFromWizard] = useState(false);
+  // `GET /centers/me` is role-shaped and carries no role flag: only the
+  // owner body has `members`. Import is owner-only server-side, so a member
+  // is not offered a link that would only answer 403.
+  const { data: center } = useCenter();
+  const isOwner = center !== undefined && "members" in center;
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -179,6 +186,17 @@ export function StudentsPage() {
           <h1 className="flex-1 font-display text-[26px] font-extrabold text-ink-900">
             Lớp &amp; học sinh
           </h1>
+          {isOwner ? (
+            <HvButton
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                void navigate("/students/import");
+              }}
+            >
+              Nhập từ Excel
+            </HvButton>
+          ) : null}
           <HvButton variant="secondary" size="sm" onClick={() => setClassDialogOpen(true)}>
             + Tạo lớp mới
           </HvButton>

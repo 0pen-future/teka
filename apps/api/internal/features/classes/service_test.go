@@ -461,3 +461,92 @@ func TestPeerScopeCannotSeeAnotherMembersClass(t *testing.T) {
 		t.Fatalf("peer must not read another member's class, got %v", err)
 	}
 }
+
+// FindActiveByName mirrors the SQL predicate: scope-visible, not soft-deleted,
+// exact name, and status active — an archived class must not be found.
+func (f *fakeRepository) FindActiveByName(_ context.Context, sc authctx.Scope, name string) (*Class, error) {
+	for _, c := range f.classes {
+		if visibleClass(c, sc) && c.Name == name && c.Status == StatusActive {
+			out := c.Class
+			return &out, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+// ScheduleExists mirrors the SQL predicate, including effective_from: the same
+// weekday and time may legitimately recur after a timetable change.
+func (f *fakeRepository) ScheduleExists(_ context.Context, sc authctx.Scope, classID uuid.UUID, weekday int16, startTime TimeOfDay, effectiveFrom time.Time) (bool, error) {
+	for _, s := range f.schedules {
+		if visibleSchedule(s, sc) && s.ClassID == classID && s.Weekday == weekday &&
+			s.StartTime == startTime && s.EffectiveFrom.Equal(effectiveFrom) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// The bulk-import lookups below are read paths for another feature, so their
+// scope handling is the thing worth pinning: an import anchored on one teacher
+// must never resolve a name into another teacher's row.
+
+func TestFindActiveByNameStaysWithinTheAnchorTeacher(t *testing.T) {
+	svc, _ := newTestService()
+	center := id.New()
+	author := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
+	peer := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
+
+	if _, err := svc.Create(context.Background(), author, validCreateRequest()); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	if _, found, err := svc.FindActiveByName(context.Background(), author, "Toán 8"); err != nil || !found {
+		t.Fatalf("the author must find their own class, got found=%v err=%v", found, err)
+	}
+	if _, found, err := svc.FindActiveByName(context.Background(), peer, "Toán 8"); err != nil || found {
+		t.Fatalf("a same-name class of another teacher must not be found, got found=%v err=%v", found, err)
+	}
+}
+
+func TestFindActiveByNameIgnoresArchivedClasses(t *testing.T) {
+	svc, _ := newTestService()
+	sc := memberScope()
+	class, err := svc.Create(context.Background(), sc, validCreateRequest())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := svc.Archive(context.Background(), sc, class.ID); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+
+	// An archived class keeps deleted_at NULL, so status is what separates it
+	// from a live one. Reusing it would hang a new term's students off last
+	// term's class.
+	if _, found, err := svc.FindActiveByName(context.Background(), sc, "Toán 8"); err != nil || found {
+		t.Fatalf("an archived class must not be reused, got found=%v err=%v", found, err)
+	}
+}
+
+func TestScheduleExistsKeysOnEffectiveFrom(t *testing.T) {
+	svc, _ := newTestService()
+	sc := memberScope()
+	class, err := svc.Create(context.Background(), sc, validCreateRequest())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	start := time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC)
+
+	exists, err := svc.ScheduleExists(context.Background(), sc, class.ID, 2, "18:00", start)
+	if err != nil || !exists {
+		t.Fatalf("the slot created with the class must be found, got exists=%v err=%v", exists, err)
+	}
+	// The same weekday and time may legitimately recur after a timetable
+	// change, so a different effective_from is a different slot.
+	later := start.AddDate(0, 1, 0)
+	if exists, err := svc.ScheduleExists(context.Background(), sc, class.ID, 2, "18:00", later); err != nil || exists {
+		t.Fatalf("a later effective_from must not match, got exists=%v err=%v", exists, err)
+	}
+	if exists, err := svc.ScheduleExists(context.Background(), sc, class.ID, 3, "18:00", start); err != nil || exists {
+		t.Fatalf("another weekday must not match, got exists=%v err=%v", exists, err)
+	}
+}

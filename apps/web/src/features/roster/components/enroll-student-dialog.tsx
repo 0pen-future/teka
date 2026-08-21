@@ -36,7 +36,6 @@ interface EnrollStudentDialogProps {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-
 /** The known student being enrolled, echoed back so the teacher can't mix children up. */
 function StudentChip({ student }: { student: Student }) {
   return (
