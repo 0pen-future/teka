@@ -9,6 +9,7 @@ import (
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/shared/pagination"
 )
@@ -41,12 +42,19 @@ func NewService(repo Repository, tx database.TxManager) *Service {
 // that contact's outstanding invoices per D8, and recomputes every touched
 // invoice's paid_amount/status — all inside one transaction. A failure at
 // any step leaves zero rows written.
-func (s *Service) Record(ctx context.Context, teacherID uuid.UUID, req RecordPaymentRequest) (*PaymentDetail, error) {
-	exists, err := s.repo.ContactExists(ctx, teacherID, req.ContactID)
+//
+// The payment is anchored on the CONTACT's own owning teacher and center,
+// not necessarily sc: an owner recording a member's payment must not
+// silently reassign it to the owner (the same parent-anchor precedent
+// billing's periodScope and attendance's roster checks apply). For a
+// non-owner sc these are always the same value — ResolveContactScope already
+// refuses a contact outside sc's own tenancy in that case.
+func (s *Service) Record(ctx context.Context, sc authctx.Scope, req RecordPaymentRequest) (*PaymentDetail, error) {
+	ownerScope, ok, err := s.repo.ResolveContactScope(ctx, sc, req.ContactID)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
-	if !exists {
+	if !ok {
 		return nil, apperror.NotFound("contact")
 	}
 
@@ -57,7 +65,8 @@ func (s *Service) Record(ctx context.Context, teacherID uuid.UUID, req RecordPay
 
 	payment := &Payment{
 		ID:            id.New(),
-		TeacherID:     teacherID,
+		TeacherID:     ownerScope.TeacherID,
+		CenterID:      ownerScope.CenterID,
 		ContactID:     req.ContactID,
 		Amount:        req.Amount,
 		Method:        req.Method,
@@ -68,11 +77,11 @@ func (s *Service) Record(ctx context.Context, teacherID uuid.UUID, req RecordPay
 
 	var unallocated int64
 	err = s.tx.WithinTx(ctx, func(txCtx context.Context) error {
-		if err := s.repo.CreatePayment(txCtx, teacherID, payment); err != nil {
+		if err := s.repo.CreatePayment(txCtx, payment); err != nil {
 			return err
 		}
 
-		candidates, err := s.repo.CandidateInvoices(txCtx, teacherID, req.ContactID)
+		candidates, err := s.repo.CandidateInvoices(txCtx, ownerScope, req.ContactID)
 		if err != nil {
 			return err
 		}
@@ -84,19 +93,20 @@ func (s *Service) Record(ctx context.Context, teacherID uuid.UUID, req RecordPay
 		for _, a := range allocs {
 			rows = append(rows, PaymentAllocation{
 				ID:          id.New(),
-				TeacherID:   teacherID,
+				TeacherID:   ownerScope.TeacherID,
+				CenterID:    ownerScope.CenterID,
 				PaymentID:   payment.ID,
 				InvoiceID:   a.InvoiceID,
 				Amount:      a.Amount,
 				AllocatedBy: AllocatedAuto,
 			})
 		}
-		if err := s.repo.InsertAllocations(txCtx, teacherID, rows); err != nil {
+		if err := s.repo.InsertAllocations(txCtx, rows); err != nil {
 			return err
 		}
 
 		for _, a := range allocs {
-			if err := s.repo.RecalcInvoicePaid(txCtx, teacherID, a.InvoiceID); err != nil {
+			if err := s.repo.RecalcInvoicePaid(txCtx, ownerScope, a.InvoiceID); err != nil {
 				return err
 			}
 		}
@@ -106,7 +116,7 @@ func (s *Service) Record(ctx context.Context, teacherID uuid.UUID, req RecordPay
 		return nil, translate(err)
 	}
 
-	allocRows, err := s.repo.ListAllocations(ctx, teacherID, payment.ID)
+	allocRows, err := s.repo.ListAllocations(ctx, ownerScope, payment.ID)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
@@ -114,12 +124,12 @@ func (s *Service) Record(ctx context.Context, teacherID uuid.UUID, req RecordPay
 }
 
 // Get returns one payment with its allocation breakdown.
-func (s *Service) Get(ctx context.Context, teacherID, paymentID uuid.UUID) (*PaymentDetail, error) {
-	p, err := s.repo.GetPayment(ctx, teacherID, paymentID)
+func (s *Service) Get(ctx context.Context, sc authctx.Scope, paymentID uuid.UUID) (*PaymentDetail, error) {
+	p, err := s.repo.GetPayment(ctx, sc, paymentID)
 	if err != nil {
 		return nil, translate(err)
 	}
-	allocRows, err := s.repo.ListAllocations(ctx, teacherID, paymentID)
+	allocRows, err := s.repo.ListAllocations(ctx, sc, paymentID)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
@@ -128,8 +138,8 @@ func (s *Service) Get(ctx context.Context, teacherID, paymentID uuid.UUID) (*Pay
 
 // List returns a page of payments, each with its allocation breakdown
 // fetched in one batched query rather than one round trip per payment.
-func (s *Service) List(ctx context.Context, teacherID uuid.UUID, filter ListFilter, p pagination.Params) ([]PaymentDetail, int64, error) {
-	rows, total, err := s.repo.ListPayments(ctx, teacherID, filter, p)
+func (s *Service) List(ctx context.Context, sc authctx.Scope, filter ListFilter, p pagination.Params) ([]PaymentDetail, int64, error) {
+	rows, total, err := s.repo.ListPayments(ctx, sc, filter, p)
 	if err != nil {
 		return nil, 0, apperror.Internal(err)
 	}
@@ -141,7 +151,7 @@ func (s *Service) List(ctx context.Context, teacherID uuid.UUID, filter ListFilt
 	for i, r := range rows {
 		ids[i] = r.ID
 	}
-	allocRows, err := s.repo.ListAllocationsForPayments(ctx, teacherID, ids)
+	allocRows, err := s.repo.ListAllocationsForPayments(ctx, sc, ids)
 	if err != nil {
 		return nil, 0, apperror.Internal(err)
 	}

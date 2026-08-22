@@ -2,10 +2,12 @@ import { apiClient } from "@/lib/api/client";
 import { parseData } from "@/lib/api/envelope";
 
 import {
+  forgotPasswordResponseSchema,
   sessionSchema,
   teacherSchema,
+  type ForgotPasswordInput,
   type LoginInput,
-  type RegisterInput,
+  type ResetPasswordInput,
   type Session,
   type Teacher,
 } from "../schemas/auth-schemas";
@@ -15,9 +17,14 @@ export async function login(input: LoginInput): Promise<Session> {
   return parseData(sessionSchema, res.data);
 }
 
-export async function register(input: RegisterInput): Promise<Session> {
-  const res = await apiClient.post<unknown>("/auth/register", input);
-  return parseData(sessionSchema, res.data);
+/** Always resolves — the API returns the same generic body for every phone. */
+export async function forgotPassword(input: ForgotPasswordInput): Promise<void> {
+  const res = await apiClient.post<unknown>("/auth/forgot-password", input);
+  parseData(forgotPasswordResponseSchema, res.data);
+}
+
+export async function resetPassword(input: ResetPasswordInput): Promise<void> {
+  await apiClient.post("/auth/reset-password", input);
 }
 
 /**

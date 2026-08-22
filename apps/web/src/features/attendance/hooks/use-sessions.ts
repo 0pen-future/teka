@@ -3,17 +3,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   cancelSession,
   confirmAttendance,
-  createAdHocSession,
   getPeriodForDate,
   getSession,
   getSessionRoster,
   listClassSessions,
 } from "../api/attendance-api";
-import type {
-  CancelSessionInput,
-  ConfirmAttendanceInput,
-  CreateSessionInput,
-} from "../schemas/attendance-schemas";
+import type { CancelSessionInput, ConfirmAttendanceInput } from "../schemas/attendance-schemas";
 
 export const sessionsKeys = {
   all: ["attendance", "sessions"] as const,
@@ -115,16 +110,6 @@ export function useCancelSession(sessionId: string) {
       void queryClient.invalidateQueries({ queryKey: sessionsKeys.roster(sessionId) });
       void queryClient.invalidateQueries({ queryKey: sessionsKeys.lists() });
       void queryClient.invalidateQueries({ queryKey: dashboardPendingSessionsKey });
-    },
-  });
-}
-
-export function useCreateSession(classId: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (input: CreateSessionInput) => createAdHocSession(classId, input),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: sessionsKeys.lists() });
     },
   });
 }

@@ -1,13 +1,14 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { sessionsKeys } from "@/features/attendance";
+
 import {
   addSchedule,
-  archiveClass,
   createClass,
-  deleteClass,
   deleteSchedule,
   getClass,
   listClasses,
+  reassignTeacher,
   updateClass,
   updateSchedule,
   type ListClassesParams,
@@ -55,24 +56,19 @@ export function useUpdateClass(id: string) {
   });
 }
 
-export function useArchiveClass() {
+/**
+ * Owner-only teacher handoff. The reassignment moves the class row, its
+ * schedules and its future planned sessions server-side, so both the class
+ * caches and every session list are stale afterward — invalidate broadly
+ * rather than track which dates moved.
+ */
+export function useReassignTeacher(classId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => archiveClass(id),
-    onSuccess: (_data, id) => {
-      void queryClient.invalidateQueries({ queryKey: classesKeys.lists() });
-      void queryClient.invalidateQueries({ queryKey: classesKeys.detail(id) });
-    },
-  });
-}
-
-export function useDeleteClass() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => deleteClass(id),
-    onSuccess: (_data, id) => {
-      void queryClient.invalidateQueries({ queryKey: classesKeys.lists() });
-      void queryClient.invalidateQueries({ queryKey: classesKeys.detail(id) });
+    mutationFn: (teacherId: string) => reassignTeacher(classId, teacherId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: classesKeys.all });
+      void queryClient.invalidateQueries({ queryKey: sessionsKeys.all });
     },
   });
 }
@@ -92,10 +88,11 @@ export function useAddSchedule(classId: string) {
   });
 }
 
-export function useUpdateSchedule(classId: string, scheduleId: string) {
+export function useUpdateSchedule(classId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: UpdateScheduleInput) => updateSchedule(classId, scheduleId, input),
+    mutationFn: ({ scheduleId, input }: { scheduleId: string; input: UpdateScheduleInput }) =>
+      updateSchedule(classId, scheduleId, input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: classesKeys.detail(classId) });
     },

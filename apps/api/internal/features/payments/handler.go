@@ -30,15 +30,15 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-// teacherID resolves the authenticated tenant — the only sanctioned source of
-// teacher identity; request bodies and paths never carry it.
-func (h *Handler) teacherID(c *gin.Context) (uuid.UUID, bool) {
-	teacherID, ok := authctx.TeacherID(c)
+// scope resolves the authenticated tenant scope — the only sanctioned source
+// of teacher/center identity; request bodies and paths never carry it.
+func (h *Handler) scope(c *gin.Context) (authctx.Scope, bool) {
+	sc, ok := authctx.ScopeFrom(c)
 	if !ok {
 		response.Err(c, apperror.Unauthorized("authentication required"))
-		return uuid.UUID{}, false
+		return authctx.Scope{}, false
 	}
-	return teacherID, true
+	return sc, true
 }
 
 // pathID parses one uuid path parameter, reading a malformed value as the
@@ -100,7 +100,7 @@ func queryDate(c *gin.Context, name string) (*time.Time, bool) {
 //	@Security		BearerAuth
 //	@Router			/payments [post]
 func (h *Handler) record(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -109,7 +109,7 @@ func (h *Handler) record(c *gin.Context) {
 		response.Err(c, validation.BindError(err))
 		return
 	}
-	detail, err := h.svc.Record(c.Request.Context(), teacherID, req)
+	detail, err := h.svc.Record(c.Request.Context(), sc, req)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -135,7 +135,7 @@ func (h *Handler) record(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/payments [get]
 func (h *Handler) list(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -153,7 +153,7 @@ func (h *Handler) list(c *gin.Context) {
 		return
 	}
 	params := pagination.Parse(c, "-received_on", listSorts)
-	details, total, err := h.svc.List(c.Request.Context(), teacherID, filter, params)
+	details, total, err := h.svc.List(c.Request.Context(), sc, filter, params)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -177,7 +177,7 @@ func (h *Handler) list(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/payments/{id} [get]
 func (h *Handler) get(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -185,7 +185,7 @@ func (h *Handler) get(c *gin.Context) {
 	if !ok {
 		return
 	}
-	detail, err := h.svc.Get(c.Request.Context(), teacherID, paymentID)
+	detail, err := h.svc.Get(c.Request.Context(), sc, paymentID)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -210,7 +210,7 @@ func (h *Handler) get(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/payments/{id}/allocations [put]
 func (h *Handler) reallocate(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -223,7 +223,7 @@ func (h *Handler) reallocate(c *gin.Context) {
 		response.Err(c, validation.BindError(err))
 		return
 	}
-	detail, err := h.svc.Reallocate(c.Request.Context(), teacherID, paymentID, req)
+	detail, err := h.svc.Reallocate(c.Request.Context(), sc, paymentID, req)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -246,7 +246,7 @@ func (h *Handler) reallocate(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/payments/{id}/allocations/auto [post]
 func (h *Handler) autoAllocate(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -254,7 +254,7 @@ func (h *Handler) autoAllocate(c *gin.Context) {
 	if !ok {
 		return
 	}
-	detail, err := h.svc.AutoAllocateRemainder(c.Request.Context(), teacherID, paymentID)
+	detail, err := h.svc.AutoAllocateRemainder(c.Request.Context(), sc, paymentID)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -281,7 +281,7 @@ func (h *Handler) autoAllocate(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/payments/{id}/reverse [post]
 func (h *Handler) reverse(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -294,7 +294,7 @@ func (h *Handler) reverse(c *gin.Context) {
 		response.Err(c, validation.BindError(err))
 		return
 	}
-	detail, err := h.svc.Reverse(c.Request.Context(), teacherID, paymentID, req)
+	detail, err := h.svc.Reverse(c.Request.Context(), sc, paymentID, req)
 	if err != nil {
 		response.Err(c, err)
 		return

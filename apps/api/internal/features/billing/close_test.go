@@ -10,6 +10,7 @@ import (
 
 	"teka/apps/api/internal/features/sessions"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 )
 
@@ -27,10 +28,10 @@ func newCloseFakeRepository() *closeFakeRepository {
 	return &closeFakeRepository{previewFakeRepository: newPreviewFakeRepository()}
 }
 
-func (f *closeFakeRepository) IssueDraftInvoices(_ context.Context, teacherID, periodID uuid.UUID) (int64, error) {
+func (f *closeFakeRepository) IssueDraftInvoices(_ context.Context, sc authctx.Scope, periodID uuid.UUID) (int64, error) {
 	var n int64
 	for _, inv := range f.invoices {
-		if inv.TeacherID != teacherID || inv.PeriodID != periodID || inv.Status != InvoiceDraft {
+		if inv.TeacherID != sc.TeacherID || inv.PeriodID != periodID || inv.Status != InvoiceDraft {
 			continue
 		}
 		inv.Status = InvoiceIssued
@@ -39,11 +40,11 @@ func (f *closeFakeRepository) IssueDraftInvoices(_ context.Context, teacherID, p
 	return n, nil
 }
 
-func (f *closeFakeRepository) VoidInvoices(_ context.Context, teacherID, periodID uuid.UUID) (int64, error) {
+func (f *closeFakeRepository) VoidInvoices(_ context.Context, sc authctx.Scope, periodID uuid.UUID) (int64, error) {
 	var n int64
 	now := time.Now()
 	for _, inv := range f.invoices {
-		if inv.TeacherID != teacherID || inv.PeriodID != periodID || inv.Status != InvoiceDraft {
+		if inv.TeacherID != sc.TeacherID || inv.PeriodID != periodID || inv.Status != InvoiceDraft {
 			continue
 		}
 		if inv.CurrentCharge != 0 || inv.OpeningBalance != 0 || inv.AdjustmentTotal != 0 {
@@ -58,27 +59,27 @@ func (f *closeFakeRepository) VoidInvoices(_ context.Context, teacherID, periodI
 	return n, nil
 }
 
-func (f *closeFakeRepository) GetInvoice(_ context.Context, teacherID, invoiceID uuid.UUID) (*Invoice, error) {
+func (f *closeFakeRepository) GetInvoice(_ context.Context, sc authctx.Scope, invoiceID uuid.UUID) (*Invoice, error) {
 	inv, ok := f.invoices[invoiceID]
-	if !ok || inv.TeacherID != teacherID {
+	if !ok || inv.TeacherID != sc.TeacherID {
 		return nil, ErrInvoiceNotFound
 	}
 	cp := *inv
 	return &cp, nil
 }
 
-func (f *closeFakeRepository) LockInvoice(_ context.Context, teacherID, invoiceID uuid.UUID) (*Invoice, error) {
+func (f *closeFakeRepository) LockInvoice(_ context.Context, sc authctx.Scope, invoiceID uuid.UUID) (*Invoice, error) {
 	inv, ok := f.invoices[invoiceID]
-	if !ok || inv.TeacherID != teacherID {
+	if !ok || inv.TeacherID != sc.TeacherID {
 		return nil, ErrInvoiceNotFound
 	}
 	cp := *inv
 	return &cp, nil
 }
 
-func (f *closeFakeRepository) VoidInvoice(_ context.Context, teacherID, invoiceID uuid.UUID, reason string, at time.Time) error {
+func (f *closeFakeRepository) VoidInvoice(_ context.Context, sc authctx.Scope, invoiceID uuid.UUID, reason string, at time.Time) error {
 	inv, ok := f.invoices[invoiceID]
-	if !ok || inv.TeacherID != teacherID {
+	if !ok || inv.TeacherID != sc.TeacherID {
 		return ErrInvoiceNotFound
 	}
 	if inv.Status != InvoiceIssued && inv.Status != InvoicePartiallyPaid {
@@ -105,6 +106,7 @@ func TestCloseVoidsEmptyDraftsAndIssuesChargedOnes(t *testing.T) {
 	repo.setTimezone(teacherID, "UTC")
 	period := openPeriod(repo.previewFakeRepository, teacherID,
 		time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC), PeriodOpen)
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: period.CenterID}
 
 	chargedStudent, chargedEnrollment, chargedClass := id.New(), id.New(), id.New()
 	// emptyStudent is enrolled (has a tally row) but every session this
@@ -126,7 +128,7 @@ func TestCloseVoidsEmptyDraftsAndIssuesChargedOnes(t *testing.T) {
 		},
 	}
 
-	resp, err := svc.Close(ctx, teacherID, period.ID)
+	resp, err := svc.Close(ctx, sc, period.ID)
 	if err != nil {
 		t.Fatalf("close: %v", err)
 	}
@@ -143,7 +145,7 @@ func TestCloseVoidsEmptyDraftsAndIssuesChargedOnes(t *testing.T) {
 		t.Fatalf("period.status = %s, want closed", resp.Period.Status)
 	}
 
-	invoices, err := repo.ListInvoices(ctx, teacherID, period.ID)
+	invoices, err := repo.ListInvoices(ctx, sc, period.ID)
 	if err != nil {
 		t.Fatalf("list invoices: %v", err)
 	}
@@ -188,8 +190,9 @@ func TestCloseBlocksOnUnconfirmedSessionsAndPeriodStaysOpen(t *testing.T) {
 	repo.setTimezone(teacherID, "UTC")
 	period := openPeriod(repo.previewFakeRepository, teacherID,
 		time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC), PeriodOpen)
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: period.CenterID}
 
-	_, err := svc.Close(ctx, teacherID, period.ID)
+	_, err := svc.Close(ctx, sc, period.ID)
 	var blocked *ErrUnconfirmedSessions
 	if !errors.As(err, &blocked) {
 		t.Fatalf("close must be blocked with ErrUnconfirmedSessions, got %v", err)
@@ -201,7 +204,7 @@ func TestCloseBlocksOnUnconfirmedSessionsAndPeriodStaysOpen(t *testing.T) {
 		t.Fatalf("sessions must be ordered by session_date, got %+v", blocked.Sessions)
 	}
 
-	reloaded, err := repo.GetPeriod(ctx, teacherID, period.ID)
+	reloaded, err := repo.GetPeriod(ctx, sc, period.ID)
 	if err != nil {
 		t.Fatalf("get period: %v", err)
 	}
@@ -239,8 +242,9 @@ func TestCloseSucceedsWithFutureUnconfirmedSessionAsWarningOnly(t *testing.T) {
 	repo.setTimezone(teacherID, "UTC")
 	period := openPeriod(repo.previewFakeRepository, teacherID,
 		time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC), PeriodOpen)
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: period.CenterID}
 
-	resp, err := svc.Close(ctx, teacherID, period.ID)
+	resp, err := svc.Close(ctx, sc, period.ID)
 	if err != nil {
 		t.Fatalf("close must succeed despite a future unconfirmed session, got: %v", err)
 	}
@@ -262,8 +266,9 @@ func TestCloseOnClosedPeriodIsConflict(t *testing.T) {
 	repo.setTimezone(teacherID, "UTC")
 	period := openPeriod(repo.previewFakeRepository, teacherID,
 		time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC), PeriodClosed)
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: period.CenterID}
 
-	_, err := svc.Close(ctx, teacherID, period.ID)
+	_, err := svc.Close(ctx, sc, period.ID)
 	if apperror.From(err).Code != apperror.CodeConflict {
 		t.Fatalf("closing an already-closed period must be 409, got %v", err)
 	}
@@ -273,22 +278,23 @@ func TestVoidInvoiceGuards(t *testing.T) {
 	ctx := context.Background()
 	svc, repo := newCloseTestService(&fakePendingSource{}, time.Now())
 	teacherID := id.New()
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: id.New()}
 
 	notIssued := &Invoice{ID: id.New(), TeacherID: teacherID, Status: InvoiceDraft}
 	repo.invoices[notIssued.ID] = notIssued
-	if _, err := svc.VoidInvoice(ctx, teacherID, notIssued.ID, "mistake"); apperror.From(err).Code != apperror.CodeConflict {
+	if _, err := svc.VoidInvoice(ctx, sc, notIssued.ID, "mistake"); apperror.From(err).Code != apperror.CodeConflict {
 		t.Fatalf("voiding a draft invoice must be 409, got %v", err)
 	}
 
 	paidIssued := &Invoice{ID: id.New(), TeacherID: teacherID, Status: InvoiceIssued, PaidAmount: 50_000}
 	repo.invoices[paidIssued.ID] = paidIssued
-	if _, err := svc.VoidInvoice(ctx, teacherID, paidIssued.ID, "mistake"); apperror.From(err).Code != apperror.CodeConflict {
+	if _, err := svc.VoidInvoice(ctx, sc, paidIssued.ID, "mistake"); apperror.From(err).Code != apperror.CodeConflict {
 		t.Fatalf("voiding an invoice with a recorded payment must be 409, got %v", err)
 	}
 
 	voidable := &Invoice{ID: id.New(), TeacherID: teacherID, Status: InvoiceIssued, TotalDue: 100_000}
 	repo.invoices[voidable.ID] = voidable
-	resp, err := svc.VoidInvoice(ctx, teacherID, voidable.ID, "double-billed by mistake")
+	resp, err := svc.VoidInvoice(ctx, sc, voidable.ID, "double-billed by mistake")
 	if err != nil {
 		t.Fatalf("void: %v", err)
 	}
@@ -302,11 +308,11 @@ func TestVoidInvoiceGuards(t *testing.T) {
 		t.Fatal("voided_at must be set")
 	}
 
-	if _, err := svc.VoidInvoice(ctx, teacherID, id.New(), "mistake"); apperror.From(err).Code != apperror.CodeNotFound {
+	if _, err := svc.VoidInvoice(ctx, sc, id.New(), "mistake"); apperror.From(err).Code != apperror.CodeNotFound {
 		t.Fatalf("missing invoice must be 404, got %v", err)
 	}
 
-	stranger := id.New()
+	stranger := authctx.Scope{TeacherID: id.New(), CenterID: id.New()}
 	if _, err := svc.VoidInvoice(ctx, stranger, voidable.ID, "mistake"); apperror.From(err).Code != apperror.CodeNotFound {
 		t.Fatalf("cross-tenant void must be 404, got %v", err)
 	}

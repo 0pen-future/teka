@@ -12,6 +12,7 @@ import (
 	"teka/apps/api/internal/features/attendance"
 	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 )
 
@@ -23,7 +24,7 @@ import (
 // PendingSource use — so a reconciliation never hand-rolls its own
 // started_on/ended_on comparison.
 type EnrollmentSource interface {
-	ActiveOn(ctx context.Context, teacherID, classID uuid.UUID, on time.Time) ([]enrollments.Enrollment, error)
+	ActiveOn(ctx context.Context, sc authctx.Scope, classID uuid.UUID, on time.Time) ([]enrollments.Enrollment, error)
 }
 
 // minAdjustmentReasonLen/maxAdjustmentReasonLen mirror AdjustmentRequest's
@@ -40,7 +41,7 @@ const (
 // invoice is draft, issued, or partially_paid; refused with 409 on void or
 // paid. Recomputes adjustment_total, total_due, and status in the same
 // transaction the adjustment row is created in.
-func (s *Service) AddAdjustment(ctx context.Context, teacherID, invoiceID uuid.UUID, amount int64, reason string) (*AdjustmentResponse, *InvoiceResponse, error) {
+func (s *Service) AddAdjustment(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID, amount int64, reason string) (*AdjustmentResponse, *InvoiceResponse, error) {
 	if amount == 0 {
 		return nil, nil, apperror.Invalid("validation failed", map[string]string{"amount": "must not be zero"})
 	}
@@ -48,7 +49,7 @@ func (s *Service) AddAdjustment(ctx context.Context, teacherID, invoiceID uuid.U
 		return nil, nil, err
 	}
 
-	inv, err := s.repo.GetInvoice(ctx, teacherID, invoiceID)
+	inv, err := s.repo.GetInvoice(ctx, sc, invoiceID)
 	if errors.Is(err, ErrInvoiceNotFound) {
 		return nil, nil, apperror.NotFound("invoice")
 	}
@@ -62,9 +63,13 @@ func (s *Service) AddAdjustment(ctx context.Context, teacherID, invoiceID uuid.U
 		return nil, nil, apperror.Conflict("invoice is fully paid; post the adjustment on the next period instead")
 	}
 
+	// The adjustment inherits the invoice's own anchors, never the acting
+	// caller's — an owner adjusting a member's invoice writes a row owned by
+	// the member, not by the owner.
 	adj := &InvoiceAdjustment{
 		ID:        id.New(),
-		TeacherID: teacherID,
+		TeacherID: inv.TeacherID,
+		CenterID:  inv.CenterID,
 		InvoiceID: invoiceID,
 		Amount:    amount,
 		Reason:    reason,
@@ -73,13 +78,13 @@ func (s *Service) AddAdjustment(ctx context.Context, teacherID, invoiceID uuid.U
 		if err := s.repo.CreateAdjustment(txCtx, adj); err != nil {
 			return err
 		}
-		return s.repo.RecalcInvoiceTotals(txCtx, teacherID, invoiceID)
+		return s.repo.RecalcInvoiceTotals(txCtx, sc, invoiceID)
 	})
 	if err != nil {
 		return nil, nil, apperror.Internal(err)
 	}
 
-	updated, err := s.repo.GetInvoice(ctx, teacherID, invoiceID)
+	updated, err := s.repo.GetInvoice(ctx, sc, invoiceID)
 	if err != nil {
 		return nil, nil, apperror.Internal(err)
 	}
@@ -90,15 +95,15 @@ func (s *Service) AddAdjustment(ctx context.Context, teacherID, invoiceID uuid.U
 
 // ListAdjustments returns invoiceID's adjustment audit trail (R4), 404 for a
 // missing or cross-tenant invoice.
-func (s *Service) ListAdjustments(ctx context.Context, teacherID, invoiceID uuid.UUID) ([]AdjustmentResponse, error) {
-	_, err := s.repo.GetInvoice(ctx, teacherID, invoiceID)
+func (s *Service) ListAdjustments(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID) ([]AdjustmentResponse, error) {
+	_, err := s.repo.GetInvoice(ctx, sc, invoiceID)
 	if errors.Is(err, ErrInvoiceNotFound) {
 		return nil, apperror.NotFound("invoice")
 	}
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
-	rows, err := s.repo.ListAdjustments(ctx, teacherID, invoiceID)
+	rows, err := s.repo.ListAdjustments(ctx, sc, invoiceID)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
@@ -179,8 +184,8 @@ func adjustmentReason(sessionDate time.Time, className string, period *Period) s
 // invoice (PRD R4, D7). Returns an empty Reconciliation (not an error) when
 // the session's date is still inside an open period, has no closed period at
 // all, or has no attendance recorded yet.
-func (s *Service) ReconcileSession(ctx context.Context, teacherID, sessionID uuid.UUID) (attendance.Reconciliation, error) {
-	classID, className, sessionDate, err := s.repo.SessionMeta(ctx, teacherID, sessionID)
+func (s *Service) ReconcileSession(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (attendance.Reconciliation, error) {
+	classID, className, sessionDate, sessionScope, err := s.repo.SessionMeta(ctx, sc, sessionID)
 	if errors.Is(err, ErrSessionNotFound) {
 		return attendance.Reconciliation{}, nil
 	}
@@ -188,7 +193,11 @@ func (s *Service) ReconcileSession(ctx context.Context, teacherID, sessionID uui
 		return attendance.Reconciliation{}, apperror.From(err)
 	}
 
-	period, err := s.repo.PeriodContainingDate(ctx, teacherID, sessionDate)
+	// Everything downstream of this point uses the session's own derived
+	// scope, never the caller's — attendance confirmation triggers this from
+	// a variety of callers, and a date-range/no-id-anchor query under an
+	// owner's raw sc would otherwise widen it to the whole center.
+	period, err := s.repo.PeriodContainingDate(ctx, sessionScope, sessionDate)
 	if err != nil {
 		return attendance.Reconciliation{}, apperror.From(err)
 	}
@@ -196,7 +205,7 @@ func (s *Service) ReconcileSession(ctx context.Context, teacherID, sessionID uui
 		return attendance.Reconciliation{}, nil
 	}
 
-	records, err := s.repo.SessionAttendance(ctx, teacherID, sessionID)
+	records, err := s.repo.SessionAttendance(ctx, sessionScope, sessionID)
 	if err != nil {
 		return attendance.Reconciliation{}, apperror.From(err)
 	}
@@ -225,11 +234,17 @@ func (s *Service) ReconcileSession(ctx context.Context, teacherID, sessionID uui
 		return studentIDs[i].String() < studentIDs[j].String()
 	})
 
+	// period may belong to a different teacher than the session did if the
+	// class moved teachers between the session's date and now — reconciling
+	// through the PERIOD's own anchors keeps every downstream write correct
+	// either way.
+	periodScope := authctx.Scope{TeacherID: period.TeacherID, CenterID: period.CenterID}
+
 	var result attendance.Reconciliation
 	err = s.tx.WithinTx(ctx, func(txCtx context.Context) error {
 		for _, studentID := range studentIDs {
 			a := byStudent[studentID]
-			entry, rcErr := s.reconcileStudent(txCtx, teacherID, period, sessionID, classID, className, sessionDate, studentID, a.enrollmentID)
+			entry, rcErr := s.reconcileStudent(txCtx, periodScope, period, sessionID, classID, className, sessionDate, studentID, a.enrollmentID)
 			if rcErr != nil {
 				return rcErr
 			}
@@ -250,11 +265,11 @@ func (s *Service) ReconcileSession(ctx context.Context, teacherID, sessionID uui
 // and writes nothing when the student has no non-void invoice in the closed
 // period, or the delta comes out exactly zero.
 func (s *Service) reconcileStudent(
-	ctx context.Context, teacherID uuid.UUID, period *Period,
+	ctx context.Context, periodScope authctx.Scope, period *Period,
 	sessionID, sessionClassID uuid.UUID, sessionClassName string, sessionDate time.Time,
 	studentID, sessionEnrollmentID uuid.UUID,
 ) (*attendance.ReconciliationEntry, error) {
-	invoices, err := s.repo.ListInvoices(ctx, teacherID, period.ID)
+	invoices, err := s.repo.ListInvoices(ctx, periodScope, period.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +290,7 @@ func (s *Service) reconcileStudent(
 	// reads an already_adj that already includes the first carry — otherwise
 	// both would read already_adj=0 and post the same delta twice, over-billing
 	// the parent. The lock is held for the rest of the enclosing tx.
-	locked, err := s.repo.LockInvoice(ctx, teacherID, inv.ID)
+	locked, err := s.repo.LockInvoice(ctx, periodScope, inv.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -286,7 +301,7 @@ func (s *Service) reconcileStudent(
 	}
 	inv = locked
 
-	_, lines, err := s.repo.GetInvoiceWithLines(ctx, teacherID, inv.ID)
+	_, lines, err := s.repo.GetInvoiceWithLines(ctx, periodScope, inv.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -303,7 +318,7 @@ func (s *Service) reconcileStudent(
 		enrollmentIDs = append(enrollmentIDs, sessionEnrollmentID)
 	}
 
-	liveCounts, err := s.repo.LiveBillableCounts(ctx, teacherID, enrollmentIDs, period)
+	liveCounts, err := s.repo.LiveBillableCounts(ctx, enrollmentIDs, period)
 	if err != nil {
 		return nil, err
 	}
@@ -318,7 +333,7 @@ func (s *Service) reconcileStudent(
 		// this period happened after close. Roster membership is confirmed
 		// through the sanctioned enrollments.ActiveOn call, never a
 		// hand-written date comparison.
-		roster, rosterErr := s.enrollments.ActiveOn(ctx, teacherID, sessionClassID, sessionDate)
+		roster, rosterErr := s.enrollments.ActiveOn(ctx, periodScope, sessionClassID, sessionDate)
 		if rosterErr != nil {
 			return nil, rosterErr
 		}
@@ -330,7 +345,7 @@ func (s *Service) reconcileStudent(
 		}
 	}
 
-	alreadyAdj, err := s.repo.AdjustmentsBySourcePeriod(ctx, teacherID, studentID, period.ID)
+	alreadyAdj, err := s.repo.AdjustmentsBySourcePeriod(ctx, periodScope, studentID, period.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -340,14 +355,15 @@ func (s *Service) reconcileStudent(
 		return nil, nil
 	}
 
-	targetPeriod, targetInvoiceID, err := s.ensureAdjustmentTarget(ctx, teacherID, period, studentID)
+	targetPeriod, targetInvoiceID, err := s.ensureAdjustmentTarget(ctx, periodScope, period, studentID)
 	if err != nil {
 		return nil, err
 	}
 
 	adj := &InvoiceAdjustment{
 		ID:              id.New(),
-		TeacherID:       teacherID,
+		TeacherID:       periodScope.TeacherID,
+		CenterID:        periodScope.CenterID,
 		InvoiceID:       targetInvoiceID,
 		Amount:          delta,
 		Reason:          adjustmentReason(sessionDate, sessionClassName, period),
@@ -356,7 +372,7 @@ func (s *Service) reconcileStudent(
 	if err := s.repo.CreateAdjustment(ctx, adj); err != nil {
 		return nil, err
 	}
-	if err := s.repo.RecalcInvoiceTotals(ctx, teacherID, targetInvoiceID); err != nil {
+	if err := s.repo.RecalcInvoiceTotals(ctx, periodScope, targetInvoiceID); err != nil {
 		return nil, err
 	}
 
@@ -373,13 +389,13 @@ func (s *Service) reconcileStudent(
 // after the closed period p, or — if none exists yet — the current calendar
 // month (rolling forward past any month that turns out already closed),
 // with a draft invoice for the student ensured on it.
-func (s *Service) ensureAdjustmentTarget(ctx context.Context, teacherID uuid.UUID, p *Period, studentID uuid.UUID) (*Period, uuid.UUID, error) {
-	target, err := s.resolveTargetPeriod(ctx, teacherID, p)
+func (s *Service) ensureAdjustmentTarget(ctx context.Context, periodScope authctx.Scope, p *Period, studentID uuid.UUID) (*Period, uuid.UUID, error) {
+	target, err := s.resolveTargetPeriod(ctx, periodScope, p)
 	if err != nil {
 		return nil, uuid.UUID{}, err
 	}
 
-	existing, err := s.repo.ListInvoices(ctx, teacherID, target.ID)
+	existing, err := s.repo.ListInvoices(ctx, periodScope, target.ID)
 	if err != nil {
 		return nil, uuid.UUID{}, err
 	}
@@ -389,13 +405,16 @@ func (s *Service) ensureAdjustmentTarget(ctx context.Context, teacherID uuid.UUI
 		}
 	}
 
-	contactID, studentName, contactName, err := s.repo.StudentSnapshot(ctx, teacherID, studentID)
+	contactID, studentName, contactName, err := s.repo.StudentSnapshot(ctx, periodScope, studentID)
 	if err != nil {
 		return nil, uuid.UUID{}, err
 	}
+	// The new draft invoice inherits the target period's own anchors, never
+	// the acting caller's — mirrors DraftPeriod's rule.
 	inv := &Invoice{
 		ID:          id.New(),
-		TeacherID:   teacherID,
+		TeacherID:   periodScope.TeacherID,
+		CenterID:    periodScope.CenterID,
 		PeriodID:    target.ID,
 		StudentID:   studentID,
 		ContactID:   contactID,
@@ -409,7 +428,7 @@ func (s *Service) ensureAdjustmentTarget(ctx context.Context, teacherID uuid.UUI
 			// brand-new target period between the existence check above and
 			// this insert; re-resolve the now-existing row instead of
 			// failing the whole reconciliation.
-			refreshed, listErr := s.repo.ListInvoices(ctx, teacherID, target.ID)
+			refreshed, listErr := s.repo.ListInvoices(ctx, periodScope, target.ID)
 			if listErr != nil {
 				return nil, uuid.UUID{}, listErr
 			}
@@ -429,8 +448,8 @@ func (s *Service) ensureAdjustmentTarget(ctx context.Context, teacherID uuid.UUI
 // ensure the current calendar month (in the teacher's timezone) — or, when
 // "now" is not itself after p, the month immediately following p — rolling
 // forward one further month if that candidate turns out already closed.
-func (s *Service) resolveTargetPeriod(ctx context.Context, teacherID uuid.UUID, p *Period) (*Period, error) {
-	target, err := s.repo.NextOpenPeriod(ctx, teacherID, p.PeriodEnd)
+func (s *Service) resolveTargetPeriod(ctx context.Context, periodScope authctx.Scope, p *Period) (*Period, error) {
+	target, err := s.repo.NextOpenPeriod(ctx, periodScope, p.PeriodEnd)
 	if err != nil {
 		return nil, err
 	}
@@ -438,7 +457,7 @@ func (s *Service) resolveTargetPeriod(ctx context.Context, teacherID uuid.UUID, 
 		return target, nil
 	}
 
-	loc, err := s.teacherLocation(ctx, teacherID)
+	loc, err := s.teacherLocation(ctx, periodScope.TeacherID)
 	if err != nil {
 		return nil, err
 	}
@@ -449,13 +468,18 @@ func (s *Service) resolveTargetPeriod(ctx context.Context, teacherID uuid.UUID, 
 		year, month = nextCalendarMonth(int(p.Year), int(p.Month))
 	}
 
-	ensured, err := s.EnsurePeriod(ctx, teacherID, year, month)
+	// A rollover period ensured here belongs to the same teacher/center the
+	// closed period p belonged to — periodScope carries exactly that,
+	// so EnsurePeriod's create-assigns-self stamp lands on the right tenant
+	// even when this call originated from an owner's or a different
+	// teacher's attendance edit.
+	ensured, err := s.EnsurePeriod(ctx, periodScope, year, month)
 	if err != nil {
 		return nil, err
 	}
 	if ensured.Status == PeriodClosed {
 		year, month = nextCalendarMonth(year, month)
-		ensured, err = s.EnsurePeriod(ctx, teacherID, year, month)
+		ensured, err = s.EnsurePeriod(ctx, periodScope, year, month)
 		if err != nil {
 			return nil, err
 		}

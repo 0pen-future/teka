@@ -1,6 +1,7 @@
 package enrollments
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -21,15 +22,25 @@ import (
 
 const handlerTestSecret = "enrollments-test-secret-0123456789ab"
 
-// newEnrollmentsHTTPTest wires the real routes and auth middleware over the
-// in-memory fake repository.
+// fakeScopeResolver resolves every known teacher id to a scope where it owns
+// its own center — matching the fake repository's addClass/addStudent
+// convention that a self-owned teacher's center id equals their own id.
+type fakeScopeResolver struct{}
+
+func (fakeScopeResolver) ResolveScope(_ context.Context, teacherID uuid.UUID) (authctx.Scope, error) {
+	return authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}, nil
+}
+
+// newEnrollmentsHTTPTest wires the real routes, auth, and scope middleware
+// over the in-memory fake repository.
 func newEnrollmentsHTTPTest(t *testing.T) (*gin.Engine, *fakeRepository) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	repo := newFakeRepository()
 	r := gin.New()
 	jwtCfg := config.JWTConfig{Secret: handlerTestSecret, AccessTTL: 15 * time.Minute}
-	RegisterRoutes(r.Group("/api/v1"), NewHandler(NewService(repo)), middleware.RequireAuth(jwtCfg))
+	RegisterRoutes(r.Group("/api/v1"), NewHandler(NewService(repo)),
+		middleware.RequireAuth(jwtCfg), middleware.ResolveScope(fakeScopeResolver{}))
 	return r, repo
 }
 

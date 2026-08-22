@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"teka/apps/api/internal/database"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/pagination"
 )
 
@@ -55,32 +56,37 @@ type InvoiceRow struct {
 // Repository is the persistence contract for payments and their allocations;
 // the service depends on this interface, tests supply a fake.
 type Repository interface {
-	CreatePayment(ctx context.Context, teacherID uuid.UUID, p *Payment) error
-	GetPayment(ctx context.Context, teacherID, paymentID uuid.UUID) (*Payment, error)
-	ListPayments(ctx context.Context, teacherID uuid.UUID, filter ListFilter, p pagination.Params) ([]Payment, int64, error)
+	// CreatePayment writes p as given — not scope-filtered: p already carries
+	// its own TeacherID/CenterID, stamped by the caller before this is
+	// invoked.
+	CreatePayment(ctx context.Context, p *Payment) error
+	GetPayment(ctx context.Context, sc authctx.Scope, paymentID uuid.UUID) (*Payment, error)
+	ListPayments(ctx context.Context, sc authctx.Scope, filter ListFilter, p pagination.Params) ([]Payment, int64, error)
 	// LockPayment loads paymentID FOR UPDATE inside the caller's transaction —
 	// the read every correction path (Reallocate, Reverse,
 	// AutoAllocateRemainder) starts with, so two corrections racing on the
 	// same payment serialise instead of both acting on a stale
 	// reversed_at/reverses_payment_id.
-	LockPayment(ctx context.Context, teacherID, paymentID uuid.UUID) (*Payment, error)
+	LockPayment(ctx context.Context, sc authctx.Scope, paymentID uuid.UUID) (*Payment, error)
 	// CandidateInvoices returns contactID's invoices eligible for payment
 	// (status issued/partially_paid, total_due > paid_amount), locked
 	// FOR UPDATE so two concurrent payments for one contact serialise instead
 	// of both reading the same stale paid_amount.
-	CandidateInvoices(ctx context.Context, teacherID, contactID uuid.UUID) ([]Candidate, error)
+	CandidateInvoices(ctx context.Context, sc authctx.Scope, contactID uuid.UUID) ([]Candidate, error)
 	// InvoicesByIDs loads every invoice in ids, FOR UPDATE, for Reallocate's
 	// validation and write path — the same lock discipline CandidateInvoices
 	// uses so a reallocation can never race a concurrent payment for the same
 	// contact. Missing ids are simply absent from the result; the caller
 	// decides whether that is a validation failure.
-	InvoicesByIDs(ctx context.Context, teacherID uuid.UUID, ids []uuid.UUID) ([]InvoiceRow, error)
+	InvoicesByIDs(ctx context.Context, sc authctx.Scope, ids []uuid.UUID) ([]InvoiceRow, error)
 	// InsertAllocations bulk-inserts payment_allocations rows, merging into
 	// an existing (payment_id, invoice_id) row by adding to its amount rather
 	// than failing uq_payment_allocations — AutoAllocateRemainder relies on
 	// this to top up an invoice this same payment already partially covers.
-	// A no-op for an empty slice (a payment that allocated to nothing).
-	InsertAllocations(ctx context.Context, teacherID uuid.UUID, rows []PaymentAllocation) error
+	// A no-op for an empty slice (a payment that allocated to nothing). Not
+	// scope-filtered: every row already carries its own TeacherID/CenterID,
+	// inherited from its payment.
+	InsertAllocations(ctx context.Context, rows []PaymentAllocation) error
 	// DeleteAllocations removes every payment_allocations row for paymentID —
 	// the only delete anywhere in this package. It is safe because an
 	// allocation is a link between two preserved facts (the payment row and
@@ -88,30 +94,35 @@ type Repository interface {
 	// financial history, the payment amount and the invoice both stay
 	// intact, and RecalcInvoicePaid always re-derives paid_amount from
 	// whatever allocation rows exist at read time.
-	DeleteAllocations(ctx context.Context, teacherID, paymentID uuid.UUID) error
+	DeleteAllocations(ctx context.Context, sc authctx.Scope, paymentID uuid.UUID) error
 	// AllocationsByPayment returns paymentID's raw allocation rows (no
 	// invoice join) — Reallocate uses it to know what a reallocation is
 	// replacing, Reverse uses it to mirror a payment's split onto its
 	// counter-entry, and AutoAllocateRemainder uses it to sum the payment's
 	// already-allocated amount.
-	AllocationsByPayment(ctx context.Context, teacherID, paymentID uuid.UUID) ([]PaymentAllocation, error)
+	AllocationsByPayment(ctx context.Context, sc authctx.Scope, paymentID uuid.UUID) ([]PaymentAllocation, error)
 	// MarkReversed stamps reversed_at on paymentID.
-	MarkReversed(ctx context.Context, teacherID, paymentID uuid.UUID, at time.Time) error
+	MarkReversed(ctx context.Context, sc authctx.Scope, paymentID uuid.UUID, at time.Time) error
 	// RecalcInvoicePaid re-derives invoiceID's paid_amount and status from the
 	// sum of its non-reversed allocations minus its reversed ones — never an
 	// increment, so it can never drift and re-running it is a no-op.
-	RecalcInvoicePaid(ctx context.Context, teacherID, invoiceID uuid.UUID) error
-	// ContactExists reports whether contactID belongs to teacherID,
-	// regardless of soft-delete: a family whose last child left must still be
-	// able to settle a carried debt (D4's soft-deleted-contact exception,
-	// extended here from the collection board to the write path).
-	ContactExists(ctx context.Context, teacherID, contactID uuid.UUID) (bool, error)
+	RecalcInvoicePaid(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID) error
+	// ResolveContactScope reports whether contactID belongs to sc's tenancy
+	// (its own teacher when sc is not an owner, any teacher in sc's center
+	// when it is), regardless of soft-delete: a family whose last child left
+	// must still be able to settle a carried debt (D4's soft-deleted-contact
+	// exception, extended here from the collection board to the write path).
+	// On success it returns the contact's own owning scope (TeacherID from
+	// contacts.teacher_id, CenterID always sc.CenterID) — Record uses this to
+	// anchor a payment on the contact's own teacher, not necessarily the
+	// caller's.
+	ResolveContactScope(ctx context.Context, sc authctx.Scope, contactID uuid.UUID) (authctx.Scope, bool, error)
 	// ListAllocations returns one payment's allocation breakdown, joined with
 	// each target invoice's current money fields.
-	ListAllocations(ctx context.Context, teacherID, paymentID uuid.UUID) ([]AllocationRow, error)
+	ListAllocations(ctx context.Context, sc authctx.Scope, paymentID uuid.UUID) ([]AllocationRow, error)
 	// ListAllocationsForPayments batches ListAllocations over several
 	// payments in one round trip — the list endpoint's N+1 guard.
-	ListAllocationsForPayments(ctx context.Context, teacherID uuid.UUID, paymentIDs []uuid.UUID) ([]AllocationRow, error)
+	ListAllocationsForPayments(ctx context.Context, sc authctx.Scope, paymentIDs []uuid.UUID) ([]AllocationRow, error)
 }
 
 type gormRepository struct {
@@ -123,15 +134,32 @@ func NewRepository(db *gorm.DB) Repository {
 	return &gormRepository{db: db}
 }
 
-func (r *gormRepository) CreatePayment(ctx context.Context, _ uuid.UUID, p *Payment) error {
+// scoped returns a payments query bound to one center, further narrowed to
+// one teacher's own rows unless the caller is the center's owner.
+func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+	q := database.FromContext(ctx, r.db).Where("payments.center_id = ?", sc.CenterID)
+	if !sc.IsOwner {
+		q = q.Where("payments.teacher_id = ?", sc.TeacherID)
+	}
+	return q
+}
+
+// allocationScoped mirrors scoped for the payment_allocations table.
+func (r *gormRepository) allocationScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+	q := database.FromContext(ctx, r.db).Where("payment_allocations.center_id = ?", sc.CenterID)
+	if !sc.IsOwner {
+		q = q.Where("payment_allocations.teacher_id = ?", sc.TeacherID)
+	}
+	return q
+}
+
+func (r *gormRepository) CreatePayment(ctx context.Context, p *Payment) error {
 	return database.FromContext(ctx, r.db).Create(p).Error
 }
 
-func (r *gormRepository) GetPayment(ctx context.Context, teacherID, paymentID uuid.UUID) (*Payment, error) {
+func (r *gormRepository) GetPayment(ctx context.Context, sc authctx.Scope, paymentID uuid.UUID) (*Payment, error) {
 	var p Payment
-	err := database.FromContext(ctx, r.db).
-		Where("teacher_id = ? AND id = ?", teacherID, paymentID).
-		Take(&p).Error
+	err := r.scoped(ctx, sc).Where("payments.id = ?", paymentID).Take(&p).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrPaymentNotFound
 	}
@@ -141,11 +169,11 @@ func (r *gormRepository) GetPayment(ctx context.Context, teacherID, paymentID uu
 	return &p, nil
 }
 
-func (r *gormRepository) LockPayment(ctx context.Context, teacherID, paymentID uuid.UUID) (*Payment, error) {
+func (r *gormRepository) LockPayment(ctx context.Context, sc authctx.Scope, paymentID uuid.UUID) (*Payment, error) {
 	var p Payment
-	err := database.FromContext(ctx, r.db).
+	err := r.scoped(ctx, sc).
 		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("teacher_id = ? AND id = ?", teacherID, paymentID).
+		Where("payments.id = ?", paymentID).
 		Take(&p).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrPaymentNotFound
@@ -156,8 +184,8 @@ func (r *gormRepository) LockPayment(ctx context.Context, teacherID, paymentID u
 	return &p, nil
 }
 
-func (r *gormRepository) ListPayments(ctx context.Context, teacherID uuid.UUID, filter ListFilter, p pagination.Params) ([]Payment, int64, error) {
-	q := database.FromContext(ctx, r.db).Model(&Payment{}).Where("payments.teacher_id = ?", teacherID)
+func (r *gormRepository) ListPayments(ctx context.Context, sc authctx.Scope, filter ListFilter, p pagination.Params) ([]Payment, int64, error) {
+	q := r.scoped(ctx, sc).Model(&Payment{})
 	if filter.ContactID != uuid.Nil {
 		q = q.Where("payments.contact_id = ?", filter.ContactID)
 	}
@@ -165,8 +193,11 @@ func (r *gormRepository) ListPayments(ctx context.Context, teacherID uuid.UUID, 
 		sub := database.FromContext(ctx, r.db).
 			Table("payment_allocations pa").
 			Select("1").
-			Joins("JOIN invoices i ON i.id = pa.invoice_id AND i.teacher_id = pa.teacher_id").
-			Where("pa.payment_id = payments.id AND pa.teacher_id = ? AND i.period_id = ?", teacherID, filter.PeriodID)
+			Joins("JOIN invoices i ON i.id = pa.invoice_id AND i.center_id = pa.center_id").
+			Where("pa.payment_id = payments.id AND pa.center_id = ? AND i.period_id = ?", sc.CenterID, filter.PeriodID)
+		if !sc.IsOwner {
+			sub = sub.Where("pa.teacher_id = ?", sc.TeacherID)
+		}
 		q = q.Where("EXISTS (?)", sub)
 	}
 	if filter.ReceivedFrom != nil {
@@ -195,6 +226,11 @@ func (r *gormRepository) ListPayments(ctx context.Context, teacherID uuid.UUID, 
 // Postgres's "FOR UPDATE cannot be applied to the nullable side of an outer
 // join" restriction, which only concerns columns from the locked relation.
 //
+// The (? OR i.teacher_id = ?) pair lets sc.IsOwner short-circuit the
+// teacher_id check via SQL OR, the same trick RecalcInvoiceTotals uses in
+// billing/repository.go, so the owner-oversight rule holds inside one raw
+// statement rather than a Go conditional building two SQL strings.
+//
 // Rows are ordered by invoice id, not by the D8 sort keys: the caller re-sorts
 // candidates through the D8 comparator before allocating, so this ORDER BY only
 // governs the order locks are acquired. Locking every contact-scoped write path
@@ -209,7 +245,7 @@ const candidateInvoicesQuery = `
 	       i.total_due AS total_due,
 	       i.paid_amount AS paid_amount
 	FROM invoices i
-	JOIN billing_periods bp ON bp.id = i.period_id AND bp.teacher_id = i.teacher_id
+	JOIN billing_periods bp ON bp.id = i.period_id AND bp.center_id = i.center_id
 	LEFT JOIN LATERAL (
 	    SELECT min(cl.start_date) AS earliest_class_start
 	    FROM invoice_lines il
@@ -217,16 +253,18 @@ const candidateInvoicesQuery = `
 	    JOIN classes    cl ON cl.id = e.class_id
 	    WHERE il.invoice_id = i.id
 	) lc ON true
-	WHERE i.teacher_id = ? AND i.contact_id = ?
+	WHERE i.center_id = ? AND (? OR i.teacher_id = ?) AND i.contact_id = ?
 	  AND i.status IN ('issued', 'partially_paid')
 	  AND i.total_due > i.paid_amount
 	ORDER BY i.id
 	FOR UPDATE OF i
 `
 
-func (r *gormRepository) CandidateInvoices(ctx context.Context, teacherID, contactID uuid.UUID) ([]Candidate, error) {
+func (r *gormRepository) CandidateInvoices(ctx context.Context, sc authctx.Scope, contactID uuid.UUID) ([]Candidate, error) {
 	var rows []Candidate
-	err := database.FromContext(ctx, r.db).Raw(candidateInvoicesQuery, teacherID, contactID).Scan(&rows).Error
+	err := database.FromContext(ctx, r.db).
+		Raw(candidateInvoicesQuery, sc.CenterID, sc.IsOwner, sc.TeacherID, contactID).
+		Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}
@@ -246,7 +284,7 @@ var insertAllocationsOnConflict = clause.OnConflict{
 	}),
 }
 
-func (r *gormRepository) InsertAllocations(ctx context.Context, _ uuid.UUID, rows []PaymentAllocation) error {
+func (r *gormRepository) InsertAllocations(ctx context.Context, rows []PaymentAllocation) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -255,18 +293,19 @@ func (r *gormRepository) InsertAllocations(ctx context.Context, _ uuid.UUID, row
 		Create(&rows).Error
 }
 
-func (r *gormRepository) InvoicesByIDs(ctx context.Context, teacherID uuid.UUID, ids []uuid.UUID) ([]InvoiceRow, error) {
+func (r *gormRepository) InvoicesByIDs(ctx context.Context, sc authctx.Scope, ids []uuid.UUID) ([]InvoiceRow, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	var rows []InvoiceRow
-	err := database.FromContext(ctx, r.db).
+	q := database.FromContext(ctx, r.db).
 		Table("invoices").
 		Select("id, contact_id, status, total_due, paid_amount").
-		Where("teacher_id = ? AND id IN ?", teacherID, ids).
-		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Order("id").
-		Find(&rows).Error
+		Where("center_id = ? AND id IN ?", sc.CenterID, ids)
+	if !sc.IsOwner {
+		q = q.Where("teacher_id = ?", sc.TeacherID)
+	}
+	var rows []InvoiceRow
+	err := q.Clauses(clause.Locking{Strength: "UPDATE"}).Order("id").Find(&rows).Error
 	return rows, err
 }
 
@@ -274,25 +313,25 @@ func (r *gormRepository) InvoicesByIDs(ctx context.Context, teacherID uuid.UUID,
 // see the invariant documented on the Repository interface method: an
 // allocation is a link, not a fact, so deleting it here loses no financial
 // history.
-func (r *gormRepository) DeleteAllocations(ctx context.Context, teacherID, paymentID uuid.UUID) error {
-	return database.FromContext(ctx, r.db).
-		Where("teacher_id = ? AND payment_id = ?", teacherID, paymentID).
+func (r *gormRepository) DeleteAllocations(ctx context.Context, sc authctx.Scope, paymentID uuid.UUID) error {
+	return r.allocationScoped(ctx, sc).
+		Where("payment_allocations.payment_id = ?", paymentID).
 		Delete(&PaymentAllocation{}).Error
 }
 
-func (r *gormRepository) AllocationsByPayment(ctx context.Context, teacherID, paymentID uuid.UUID) ([]PaymentAllocation, error) {
+func (r *gormRepository) AllocationsByPayment(ctx context.Context, sc authctx.Scope, paymentID uuid.UUID) ([]PaymentAllocation, error) {
 	var rows []PaymentAllocation
-	err := database.FromContext(ctx, r.db).
-		Where("teacher_id = ? AND payment_id = ?", teacherID, paymentID).
-		Order("invoice_id").
+	err := r.allocationScoped(ctx, sc).
+		Where("payment_allocations.payment_id = ?", paymentID).
+		Order("payment_allocations.invoice_id").
 		Find(&rows).Error
 	return rows, err
 }
 
-func (r *gormRepository) MarkReversed(ctx context.Context, teacherID, paymentID uuid.UUID, at time.Time) error {
-	return database.FromContext(ctx, r.db).
+func (r *gormRepository) MarkReversed(ctx context.Context, sc authctx.Scope, paymentID uuid.UUID, at time.Time) error {
+	return r.scoped(ctx, sc).
 		Model(&Payment{}).
-		Where("teacher_id = ? AND id = ?", teacherID, paymentID).
+		Where("payments.id = ?", paymentID).
 		Update("reversed_at", at).Error
 }
 
@@ -308,6 +347,9 @@ func (r *gormRepository) MarkReversed(ctx context.Context, teacherID, paymentID 
 // correlated subquery in FROM has no join predicate against i, so when it
 // produces zero rows — exactly the all-allocations-deleted case — the UPDATE
 // silently touches nothing and the invoice is left at its stale status.
+//
+// The trailing (? OR i.center_id... i.teacher_id = ?) mirrors
+// candidateInvoicesQuery's owner short-circuit trick.
 const recalcInvoicePaidQuery = `
 	UPDATE invoices i SET
 	  paid_amount = COALESCE(x.paid, 0),
@@ -327,21 +369,34 @@ const recalcInvoicePaidQuery = `
 	  WHERE pa.invoice_id = ?
 	  GROUP BY pa.invoice_id
 	) x ON x.invoice_id = target.invoice_id
-	WHERE i.id = target.invoice_id AND i.teacher_id = ?
+	WHERE i.id = target.invoice_id AND i.center_id = ? AND (? OR i.teacher_id = ?)
 `
 
-func (r *gormRepository) RecalcInvoicePaid(ctx context.Context, teacherID, invoiceID uuid.UUID) error {
-	res := database.FromContext(ctx, r.db).Exec(recalcInvoicePaidQuery, invoiceID, invoiceID, teacherID)
+func (r *gormRepository) RecalcInvoicePaid(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID) error {
+	res := database.FromContext(ctx, r.db).
+		Exec(recalcInvoicePaidQuery, invoiceID, invoiceID, sc.CenterID, sc.IsOwner, sc.TeacherID)
 	return res.Error
 }
 
-func (r *gormRepository) ContactExists(ctx context.Context, teacherID, contactID uuid.UUID) (bool, error) {
-	var n int64
-	err := database.FromContext(ctx, r.db).
+func (r *gormRepository) ResolveContactScope(ctx context.Context, sc authctx.Scope, contactID uuid.UUID) (authctx.Scope, bool, error) {
+	// Scanned into a struct field, never a bare uuid.UUID: GORM's raw-scalar
+	// scan path treats a bare uuid.UUID destination as a 16-element array and
+	// scans byte-by-byte instead of as one column.
+	var rows []struct{ TeacherID uuid.UUID }
+	q := database.FromContext(ctx, r.db).
 		Table("contacts").
-		Where("id = ? AND teacher_id = ?", contactID, teacherID).
-		Count(&n).Error
-	return n > 0, err
+		Select("teacher_id").
+		Where("center_id = ? AND id = ?", sc.CenterID, contactID)
+	if !sc.IsOwner {
+		q = q.Where("teacher_id = ?", sc.TeacherID)
+	}
+	if err := q.Find(&rows).Error; err != nil {
+		return authctx.Scope{}, false, err
+	}
+	if len(rows) == 0 {
+		return authctx.Scope{}, false, nil
+	}
+	return authctx.Scope{TeacherID: rows[0].TeacherID, CenterID: sc.CenterID}, true, nil
 }
 
 // allocationRowSelect is the shared projection ListAllocations and
@@ -356,29 +411,33 @@ const allocationRowSelect = `pa.payment_id AS payment_id,
 	i.total_due AS total_due,
 	i.paid_amount AS paid_amount`
 
-func (r *gormRepository) ListAllocations(ctx context.Context, teacherID, paymentID uuid.UUID) ([]AllocationRow, error) {
-	var rows []AllocationRow
-	err := database.FromContext(ctx, r.db).
+func (r *gormRepository) ListAllocations(ctx context.Context, sc authctx.Scope, paymentID uuid.UUID) ([]AllocationRow, error) {
+	q := database.FromContext(ctx, r.db).
 		Table("payment_allocations pa").
 		Select(allocationRowSelect).
-		Joins("JOIN invoices i ON i.id = pa.invoice_id AND i.teacher_id = pa.teacher_id").
-		Where("pa.teacher_id = ? AND pa.payment_id = ?", teacherID, paymentID).
-		Order("i.student_name, pa.created_at").
-		Find(&rows).Error
+		Joins("JOIN invoices i ON i.id = pa.invoice_id AND i.center_id = pa.center_id").
+		Where("pa.center_id = ? AND pa.payment_id = ?", sc.CenterID, paymentID)
+	if !sc.IsOwner {
+		q = q.Where("pa.teacher_id = ?", sc.TeacherID)
+	}
+	var rows []AllocationRow
+	err := q.Order("i.student_name, pa.created_at").Find(&rows).Error
 	return rows, err
 }
 
-func (r *gormRepository) ListAllocationsForPayments(ctx context.Context, teacherID uuid.UUID, paymentIDs []uuid.UUID) ([]AllocationRow, error) {
+func (r *gormRepository) ListAllocationsForPayments(ctx context.Context, sc authctx.Scope, paymentIDs []uuid.UUID) ([]AllocationRow, error) {
 	if len(paymentIDs) == 0 {
 		return nil, nil
 	}
-	var rows []AllocationRow
-	err := database.FromContext(ctx, r.db).
+	q := database.FromContext(ctx, r.db).
 		Table("payment_allocations pa").
 		Select(allocationRowSelect).
-		Joins("JOIN invoices i ON i.id = pa.invoice_id AND i.teacher_id = pa.teacher_id").
-		Where("pa.teacher_id = ? AND pa.payment_id IN ?", teacherID, paymentIDs).
-		Order("pa.payment_id, i.student_name, pa.created_at").
-		Find(&rows).Error
+		Joins("JOIN invoices i ON i.id = pa.invoice_id AND i.center_id = pa.center_id").
+		Where("pa.center_id = ? AND pa.payment_id IN ?", sc.CenterID, paymentIDs)
+	if !sc.IsOwner {
+		q = q.Where("pa.teacher_id = ?", sc.TeacherID)
+	}
+	var rows []AllocationRow
+	err := q.Order("pa.payment_id, i.student_name, pa.created_at").Find(&rows).Error
 	return rows, err
 }

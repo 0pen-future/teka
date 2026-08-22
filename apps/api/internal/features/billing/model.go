@@ -31,8 +31,11 @@ const (
 type Period struct {
 	ID        uuid.UUID `gorm:"primaryKey"`
 	TeacherID uuid.UUID
-	Year      int16
-	Month     int16
+	// CenterID anchors the row in the center it was created in; it never
+	// changes, even when the creating teacher later moves centers.
+	CenterID uuid.UUID
+	Year     int16
+	Month    int16
 	// PeriodStart/PeriodEnd are Postgres DATE columns: the first and last
 	// calendar day of the month, resolved in the teacher's timezone.
 	PeriodStart time.Time
@@ -58,6 +61,9 @@ func (Period) TableName() string { return "billing_periods" }
 type Invoice struct {
 	ID        uuid.UUID `gorm:"primaryKey"`
 	TeacherID uuid.UUID
+	// CenterID is inherited from the period this invoice belongs to, never
+	// from whichever caller (possibly a center owner) triggered its creation.
+	CenterID  uuid.UUID
 	PeriodID  uuid.UUID
 	StudentID uuid.UUID
 	ContactID uuid.UUID
@@ -89,8 +95,11 @@ func (Invoice) TableName() string { return "invoices" }
 // would make the invoice total no longer explainable by its own detail rows.
 // Corrections use invoice_adjustments instead, which carries a reason.
 type InvoiceLine struct {
-	ID            uuid.UUID `gorm:"primaryKey"`
-	TeacherID     uuid.UUID
+	ID        uuid.UUID `gorm:"primaryKey"`
+	TeacherID uuid.UUID
+	// CenterID is inherited from the invoice this line belongs to, never from
+	// whichever caller (possibly a center owner) triggered its creation.
+	CenterID      uuid.UUID
 	InvoiceID     uuid.UUID
 	EnrollmentID  uuid.UUID
 	ClassName     string
@@ -110,8 +119,11 @@ func (InvoiceLine) TableName() string { return "invoice_lines" }
 // is created instead; deleted_at exists only for a same-session data-entry
 // mistake made before any notification went out.
 type InvoiceAdjustment struct {
-	ID              uuid.UUID `gorm:"primaryKey"`
-	TeacherID       uuid.UUID
+	ID        uuid.UUID `gorm:"primaryKey"`
+	TeacherID uuid.UUID
+	// CenterID is inherited from the invoice this adjustment belongs to,
+	// never from whichever caller (possibly a center owner) recorded it.
+	CenterID        uuid.UUID
 	InvoiceID       uuid.UUID
 	Amount          int64
 	Reason          string

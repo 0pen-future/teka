@@ -1,14 +1,12 @@
 import { Link } from "react-router";
 
-import { HvCheckIcon } from "@/components/hv";
-import { Spinner } from "@/components/shared/spinner";
-import { formatSessionDate } from "@/lib/utils";
+import { cn, formatSessionDate } from "@/lib/utils";
 
 import { usePendingSessions } from "../hooks/use-dashboard";
 
 /**
- * Manually composed to match `HvButton` variant="danger" size="sm" — HvButton
- * itself renders a `<button>`, which can't nest inside this row's `<Link>`
+ * Manually composed to match `HvButton` variant="danger" size="md" — HvButton
+ * itself renders a `<button>`, which can't wrap this banner's navigation
  * without producing invalid nested-interactive-element markup, so the link is
  * styled directly from the same token utilities instead.
  */
@@ -20,72 +18,72 @@ const dangerLinkButtonClassName =
   "active:shadow-none focus-visible:outline-none focus-visible:ring-4";
 
 /**
- * The prototype `home` screen's warning banner (PRD R2 AC 3): a session
- * already held but not yet attended must surface above the fold. Renders
- * nothing while loading rather than a layout-shifting skeleton, since the
- * query is fast and this sits at the very top of the dashboard.
+ * The prototype `home` screen's warning banner (PRD R2 AC 3): sessions
+ * already held but not yet attended must surface above the fold, as one
+ * merged banner whose single action opens the first listed pending session
+ * (the server returns newest first). Renders nothing while loading or when
+ * caught up — the prototype shows the banner only when there is something
+ * to fix.
  */
-export function PendingAttendanceAlert() {
+export function PendingAttendanceAlert({ className }: { className?: string }) {
   const { data: response, isPending, isError } = usePendingSessions();
 
   if (isPending) {
-    return (
-      <div className="flex items-center justify-center rounded-[var(--radius-xl)] bg-coral-100 p-6">
-        <Spinner className="size-5" />
-      </div>
-    );
+    return null;
   }
 
   // The teacher must be able to tell "check failed" apart from "all caught
   // up" — silently rendering nothing here would look identical to the
-  // empty-state below and hide that the safety check never ran (PRD R2 AC 3).
+  // caught-up state and hide that the safety check never ran (PRD R2 AC 3).
   if (isError) {
     return (
-      <p className="text-[14px] font-semibold text-coral-600">
+      <p className={cn("text-[14px] font-semibold text-coral-600", className)}>
         Không tải được danh sách buổi cần điểm danh
       </p>
     );
   }
 
   const { total, items } = response;
+  const first = items[0];
 
-  if (total === 0) {
-    return (
-      <p className="flex items-center gap-2 text-[15px] font-semibold text-mint-600">
-        <HvCheckIcon className="size-5" />
-        Đã điểm danh đủ các buổi đã qua
-      </p>
-    );
+  if (total === 0 || !first) {
+    return null;
   }
 
+  // The headline counts everything (`total` is unbounded); the detail line
+  // stays one readable sentence — a teacher weeks behind must still see the
+  // stats below the fold, not a wall of session labels.
+  const listed = items.slice(0, 3);
+  const extraCount = total - listed.length;
+  const sessionList =
+    listed
+      .map((session) => `${session.class_name} — ${formatSessionDate(session.session_date)}`)
+      .join(" · ") + (extraCount > 0 ? ` … và ${extraCount} buổi khác` : "");
+
   return (
-    <div className="rounded-[var(--radius-xl)] bg-coral-100 p-5">
-      <div className="flex items-center gap-3">
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-white font-display text-lg font-bold text-coral-600">
-          !
-        </span>
-        <p className="font-display text-[16px] font-bold text-coral-600">
-          {total} buổi đã qua chưa điểm danh
+    <div
+      className={cn(
+        "flex flex-wrap items-center gap-[14px] rounded-[var(--radius-lg)] bg-coral-100 px-5 py-4",
+        className,
+      )}
+    >
+      <span
+        aria-hidden
+        className="flex size-10 shrink-0 items-center justify-center rounded-full bg-coral-400 font-display text-[20px] font-black text-white"
+      >
+        !
+      </span>
+      <div className="min-w-[220px] flex-1">
+        <p className="text-[15.5px] font-extrabold text-coral-600">
+          Có {total} buổi đã dạy nhưng chưa điểm danh
+        </p>
+        <p className="text-[14px] text-ink-700">
+          {sessionList}. Chưa điểm danh là chưa tính được tiền.
         </p>
       </div>
-      <ul className="mt-4 flex flex-col gap-3">
-        {items.map((session) => (
-          <li
-            key={session.session_id}
-            className="flex flex-wrap items-center justify-between gap-3"
-          >
-            <span className="text-[14px] text-ink-700">
-              {session.class_name} — {formatSessionDate(session.session_date)}
-            </span>
-            <Link
-              to={`/sessions/${session.session_id}/attendance`}
-              className={dangerLinkButtonClassName}
-            >
-              Điểm danh ngay
-            </Link>
-          </li>
-        ))}
-      </ul>
+      <Link to={`/sessions/${first.session_id}/attendance`} className={dangerLinkButtonClassName}>
+        Điểm danh ngay
+      </Link>
     </div>
   );
 }

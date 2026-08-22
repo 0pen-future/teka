@@ -32,8 +32,11 @@ const (
 // reversed with a counter-entry (reverses_payment_id), never deleted (schema
 // note (i), docs/schema_design.sql:512).
 type Payment struct {
-	ID                uuid.UUID `gorm:"primaryKey"`
-	TeacherID         uuid.UUID
+	ID        uuid.UUID `gorm:"primaryKey"`
+	TeacherID uuid.UUID
+	// CenterID anchors the row in the center it was created in; it never
+	// changes, even when the creating teacher later moves centers.
+	CenterID          uuid.UUID
 	ContactID         uuid.UUID
 	Amount            int64
 	Method            string
@@ -54,8 +57,10 @@ func (Payment) TableName() string { return "payments" }
 // the bridge row realizing Q8's allocation rule. Deliberately has no
 // gorm.DeletedAt: this table has no deleted_at column either.
 type PaymentAllocation struct {
-	ID          uuid.UUID `gorm:"primaryKey"`
-	TeacherID   uuid.UUID
+	ID        uuid.UUID `gorm:"primaryKey"`
+	TeacherID uuid.UUID
+	// CenterID inherits its payment's anchors, never the acting caller's.
+	CenterID    uuid.UUID
 	PaymentID   uuid.UUID
 	InvoiceID   uuid.UUID
 	Amount      int64

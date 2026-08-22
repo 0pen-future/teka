@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"teka/apps/api/internal/features/attendance"
+	"teka/apps/api/internal/features/centers"
 	"teka/apps/api/internal/features/classes"
 	"teka/apps/api/internal/features/contacts"
 	"teka/apps/api/internal/features/enrollments"
@@ -52,9 +53,13 @@ func WithPassword(plaintext string) TeacherOption {
 	return func(_ *teachers.Account, _ *teachers.Teacher, pw *string) { *pw = plaintext }
 }
 
-// Teacher inserts a user_accounts + teachers row pair directly (bypassing the
-// service) and returns both. Passwords hash at bcrypt.MinCost so fixtures stay
-// fast; phones default to a unique random +84 number so tests never collide.
+// Teacher inserts a fixture teacher directly (bypassing the service): their
+// personal centers row, the user_accounts + teachers pair, and the live
+// center_members row — one transaction, because the center's owner FK is
+// deferred until the teachers row exists. The teacher's center is available
+// as the returned Teacher.CenterID. Passwords hash at bcrypt.MinCost so
+// fixtures stay fast; phones default to a unique random +84 number so tests
+// never collide.
 func Teacher(t *testing.T, db *gorm.DB, opts ...TeacherOption) (*teachers.Account, *teachers.Teacher) {
 	t.Helper()
 	accountID := id.New()
@@ -68,6 +73,7 @@ func Teacher(t *testing.T, db *gorm.DB, opts ...TeacherOption) (*teachers.Accoun
 		ID:       accountID,
 		FullName: "Fixture Teacher",
 		Timezone: teachers.DefaultTimezone,
+		CenterID: id.New(),
 	}
 	password := DefaultPassword
 	for _, opt := range opts {
@@ -79,10 +85,25 @@ func Teacher(t *testing.T, db *gorm.DB, opts ...TeacherOption) (*teachers.Accoun
 	}
 	hashStr := string(hash)
 	acct.PasswordHash = &hashStr
-	if err := db.Create(acct).Error; err != nil {
-		t.Fatalf("insert fixture account %s: %v", acct.Phone, err)
-	}
-	if err := db.Create(teacher).Error; err != nil {
+	err = db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&centers.Center{
+			ID:      teacher.CenterID,
+			Name:    teacher.FullName,
+			OwnerID: accountID,
+		}).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(acct).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(teacher).Error; err != nil {
+			return err
+		}
+		return tx.Exec(
+			"INSERT INTO center_members (teacher_id, center_id) VALUES (?, ?)",
+			accountID, teacher.CenterID).Error
+	})
+	if err != nil {
 		t.Fatalf("insert fixture teacher %s: %v", acct.Phone, err)
 	}
 	return acct, teacher
@@ -93,6 +114,77 @@ func Teacher(t *testing.T, db *gorm.DB, opts ...TeacherOption) (*teachers.Accoun
 func randomPhone() string {
 	u := uuid.New()
 	return fmt.Sprintf("+849%08d", binary.BigEndian.Uint32(u[0:4])%100000000)
+}
+
+// centerOf resolves the teacher's current center; business fixtures anchor
+// their rows in it the same way the scoped services do.
+func centerOf(t *testing.T, db *gorm.DB, teacherID uuid.UUID) uuid.UUID {
+	t.Helper()
+	// Scanning straight into a bare uuid.UUID skips its sql.Scanner and hits
+	// GORM's element-wise array path instead; wrap it in a struct field, the
+	// same shape ScopeFor scans into.
+	var row struct{ CenterID uuid.UUID }
+	err := db.Raw("SELECT center_id FROM teachers WHERE id = ?", teacherID).Scan(&row).Error
+	if err != nil {
+		t.Fatalf("resolve fixture teacher %s center: %v", teacherID, err)
+	}
+	if row.CenterID == uuid.Nil {
+		t.Fatalf("fixture teacher %s has no center row", teacherID)
+	}
+	return row.CenterID
+}
+
+// ScopeFor resolves the teacher's live scope straight from the database the
+// way the scope middleware does, so service-level tests call scoped services
+// with the same tenant context a request would carry.
+func ScopeFor(t *testing.T, db *gorm.DB, teacherID uuid.UUID) authctx.Scope {
+	t.Helper()
+	var row struct {
+		CenterID uuid.UUID
+		IsOwner  bool
+	}
+	err := db.Raw(`
+		SELECT t.center_id, (c.owner_id = t.id) AS is_owner
+		FROM teachers t
+		JOIN centers c ON c.id = t.center_id
+		WHERE t.id = ?`, teacherID).Scan(&row).Error
+	if err != nil {
+		t.Fatalf("resolve fixture scope for %s: %v", teacherID, err)
+	}
+	if row.CenterID == uuid.Nil {
+		t.Fatalf("fixture teacher %s has no center row", teacherID)
+	}
+	return authctx.Scope{TeacherID: teacherID, CenterID: row.CenterID, IsOwner: row.IsOwner}
+}
+
+// JoinCenter moves the teacher into the target center directly (bypassing the
+// service): closes their live membership stint, opens one in the target,
+// re-points teachers.center_id, and retires their vacated personal center.
+func JoinCenter(t *testing.T, db *gorm.DB, teacherID, centerID uuid.UUID) {
+	t.Helper()
+	err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(
+			"UPDATE center_members SET left_at = now() WHERE teacher_id = ? AND left_at IS NULL",
+			teacherID).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`
+			INSERT INTO center_members (teacher_id, center_id) VALUES (?, ?)
+			ON CONFLICT (teacher_id, center_id) DO UPDATE SET left_at = NULL, joined_at = now()`,
+			teacherID, centerID).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(
+			"UPDATE teachers SET center_id = ? WHERE id = ?", centerID, teacherID).Error; err != nil {
+			return err
+		}
+		return tx.Exec(
+			"UPDATE centers SET deleted_at = now() WHERE owner_id = ? AND deleted_at IS NULL",
+			teacherID).Error
+	})
+	if err != nil {
+		t.Fatalf("move fixture teacher %s into center %s: %v", teacherID, centerID, err)
+	}
 }
 
 // ContactOption customizes a fixture contact before insertion.
@@ -115,6 +207,7 @@ func Contact(t *testing.T, db *gorm.DB, teacherID uuid.UUID, opts ...ContactOpti
 	c := &contacts.Contact{
 		ID:        id.New(),
 		TeacherID: teacherID,
+		CenterID:  centerOf(t, db, teacherID),
 		FullName:  "Fixture Contact",
 		Phone:     randomPhone(),
 	}
@@ -135,6 +228,7 @@ func Enrollment(t *testing.T, db *gorm.DB, teacherID, studentID, classID uuid.UU
 	e := &enrollments.Enrollment{
 		ID:        id.New(),
 		TeacherID: teacherID,
+		CenterID:  centerOf(t, db, teacherID),
 		StudentID: studentID,
 		ClassID:   classID,
 		StartedOn: startedOn,
@@ -167,6 +261,7 @@ func Student(t *testing.T, db *gorm.DB, teacherID, contactID uuid.UUID, opts ...
 	s := &students.Student{
 		ID:        id.New(),
 		TeacherID: teacherID,
+		CenterID:  centerOf(t, db, teacherID),
 		ContactID: contactID,
 		FullName:  "Fixture Student",
 	}
@@ -209,6 +304,7 @@ func Class(t *testing.T, db *gorm.DB, teacherID uuid.UUID, opts ...ClassOption) 
 	c := &classes.Class{
 		ID:               id.New(),
 		TeacherID:        teacherID,
+		CenterID:         centerOf(t, db, teacherID),
 		Name:             "Fixture Class",
 		StartDate:        time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC),
 		DefaultUnitPrice: 100_000,
@@ -230,6 +326,7 @@ func Schedule(t *testing.T, db *gorm.DB, class *classes.Class, weekday int16, st
 	s := &classes.Schedule{
 		ID:            id.New(),
 		TeacherID:     class.TeacherID,
+		CenterID:      class.CenterID,
 		ClassID:       class.ID,
 		Weekday:       weekday,
 		StartTime:     classes.TimeOfDay(startTime),
@@ -281,6 +378,7 @@ func Session(t *testing.T, db *gorm.DB, teacherID, classID uuid.UUID, date time.
 	s := &sessions.Session{
 		ID:          id.New(),
 		TeacherID:   teacherID,
+		CenterID:    centerOf(t, db, teacherID),
 		ClassID:     classID,
 		SessionDate: date,
 		Status:      sessions.StatusPlanned,
@@ -328,6 +426,7 @@ func AttendanceRecord(t *testing.T, db *gorm.DB, teacherID, sessionID, studentID
 	r := &attendance.Record{
 		ID:           id.New(),
 		TeacherID:    teacherID,
+		CenterID:     centerOf(t, db, teacherID),
 		SessionID:    sessionID,
 		StudentID:    studentID,
 		EnrollmentID: enrollmentID,

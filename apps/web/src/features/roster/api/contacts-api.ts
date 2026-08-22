@@ -1,7 +1,12 @@
 import { apiClient } from "@/lib/api/client";
 import { parseData, parseList, type Paginated } from "@/lib/api/envelope";
 
-import { contactSchema, type Contact, type ContactInput } from "../schemas/roster-schemas";
+import {
+  contactSchema,
+  type Contact,
+  type ContactInput,
+  type ZaloMappingInput,
+} from "../schemas/roster-schemas";
 
 export interface ListContactsParams {
   query?: string;
@@ -35,4 +40,15 @@ export async function updateContact(id: string, input: ContactInput): Promise<Co
 /** Soft delete; the API returns 409 while live students still reference the contact. */
 export async function deleteContact(id: string): Promise<void> {
   await apiClient.delete(`/contacts/${id}`);
+}
+
+/** Binds the contact to a picked Zalo friend; 409 when another contact holds that friend. */
+export async function setContactZaloMapping(id: string, input: ZaloMappingInput): Promise<Contact> {
+  const res = await apiClient.put<unknown>(`/contacts/${id}/zalo-mapping`, input);
+  return parseData(contactSchema, res.data);
+}
+
+/** Detaches the contact from its Zalo friend. Idempotent 204. */
+export async function clearContactZaloMapping(id: string): Promise<void> {
+  await apiClient.delete(`/contacts/${id}/zalo-mapping`);
 }

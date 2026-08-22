@@ -9,6 +9,7 @@ import (
 
 	"teka/apps/api/internal/config"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/shared/pagination"
 )
@@ -36,7 +37,7 @@ type statementKey struct {
 // one row per (contact_id, period_id), a revoked row is never resurrected,
 // and a refresh never touches token_hash.
 type fakeRepository struct {
-	periods map[uuid.UUID]string
+	periods map[uuid.UUID]PeriodInfo
 	targets map[uuid.UUID][]TargetContact
 	totals  map[uuid.UUID]map[uuid.UUID]int64
 
@@ -52,7 +53,7 @@ type fakeRepository struct {
 
 func newFakeRepository() *fakeRepository {
 	return &fakeRepository{
-		periods: map[uuid.UUID]string{},
+		periods: map[uuid.UUID]PeriodInfo{},
 		targets: map[uuid.UUID][]TargetContact{},
 		totals:  map[uuid.UUID]map[uuid.UUID]int64{},
 		byKey:   map[statementKey]*Statement{},
@@ -65,24 +66,35 @@ func newFakeRepository() *fakeRepository {
 	}
 }
 
-func (f *fakeRepository) GetPeriodStatus(_ context.Context, _, periodID uuid.UUID) (string, error) {
-	status, ok := f.periods[periodID]
-	if !ok {
-		return "", ErrPeriodNotFound
-	}
-	return status, nil
+// setPeriod records a billing period's status and owning teacher — the
+// GetPeriodStatus fixture every Generate/Revoke test needs, mirroring the
+// (status, teacher_id) pair the real repository reads off billing_periods.
+func (f *fakeRepository) setPeriod(periodID uuid.UUID, status string, teacherID uuid.UUID) {
+	f.periods[periodID] = PeriodInfo{Status: status, TeacherID: teacherID}
 }
 
-func (f *fakeRepository) TargetContacts(_ context.Context, _, periodID uuid.UUID) ([]TargetContact, error) {
+func (f *fakeRepository) GetPeriodStatus(_ context.Context, sc authctx.Scope, periodID uuid.UUID) (PeriodInfo, error) {
+	info, ok := f.periods[periodID]
+	if !ok {
+		return PeriodInfo{}, ErrPeriodNotFound
+	}
+	if !sc.IsOwner && info.TeacherID != sc.TeacherID {
+		return PeriodInfo{}, ErrPeriodNotFound
+	}
+	return info, nil
+}
+
+func (f *fakeRepository) TargetContacts(_ context.Context, _ authctx.Scope, periodID uuid.UUID) ([]TargetContact, error) {
 	return f.targets[periodID], nil
 }
 
-func (f *fakeRepository) ContactTotals(_ context.Context, _, periodID uuid.UUID) (map[uuid.UUID]int64, error) {
+func (f *fakeRepository) ContactTotals(_ context.Context, _ authctx.Scope, periodID uuid.UUID) (map[uuid.UUID]int64, error) {
 	return f.totals[periodID], nil
 }
 
-func (f *fakeRepository) UpsertStatement(_ context.Context, teacherID uuid.UUID, stmt *Statement) (created, skippedRevoked bool, err error) {
-	stmt.TeacherID = teacherID
+func (f *fakeRepository) UpsertStatement(_ context.Context, sc authctx.Scope, stmt *Statement) (created, skippedRevoked bool, err error) {
+	stmt.TeacherID = sc.TeacherID
+	stmt.CenterID = sc.CenterID
 	key := statementKey{contactID: stmt.ContactID, periodID: stmt.PeriodID}
 
 	existing, ok := f.byKey[key]
@@ -103,19 +115,19 @@ func (f *fakeRepository) UpsertStatement(_ context.Context, teacherID uuid.UUID,
 	return false, false, nil
 }
 
-func (f *fakeRepository) ListByPeriod(_ context.Context, teacherID, periodID uuid.UUID, _ pagination.Params) ([]Row, int64, error) {
+func (f *fakeRepository) ListByPeriod(_ context.Context, sc authctx.Scope, periodID uuid.UUID, _ pagination.Params) ([]Row, int64, error) {
 	var out []Row
 	for _, s := range f.byID {
-		if s.TeacherID == teacherID && s.PeriodID == periodID {
+		if (sc.IsOwner || s.TeacherID == sc.TeacherID) && s.PeriodID == periodID {
 			out = append(out, Row{Statement: *s})
 		}
 	}
 	return out, int64(len(out)), nil
 }
 
-func (f *fakeRepository) GetByID(_ context.Context, teacherID, statementID uuid.UUID) (*Row, error) {
+func (f *fakeRepository) GetByID(_ context.Context, sc authctx.Scope, statementID uuid.UUID) (*Row, error) {
 	s, ok := f.byID[statementID]
-	if !ok || s.TeacherID != teacherID {
+	if !ok || (!sc.IsOwner && s.TeacherID != sc.TeacherID) {
 		return nil, ErrNotFound
 	}
 	return &Row{Statement: *s}, nil
@@ -131,9 +143,9 @@ func (f *fakeRepository) GetByTokenHash(_ context.Context, tokenHash []byte) (*S
 	return nil, ErrNotFound
 }
 
-func (f *fakeRepository) Revoke(_ context.Context, teacherID, statementID uuid.UUID) error {
+func (f *fakeRepository) Revoke(_ context.Context, sc authctx.Scope, statementID uuid.UUID) error {
 	s, ok := f.byID[statementID]
-	if !ok || s.TeacherID != teacherID {
+	if !ok || (!sc.IsOwner && s.TeacherID != sc.TeacherID) {
 		return ErrNotFound
 	}
 	if s.RevokedAt == nil {
@@ -143,26 +155,26 @@ func (f *fakeRepository) Revoke(_ context.Context, teacherID, statementID uuid.U
 	return nil
 }
 
-func (f *fakeRepository) InvoicesWithLines(_ context.Context, _, contactID, periodID uuid.UUID) ([]InvoiceLineRow, error) {
+func (f *fakeRepository) InvoicesWithLines(_ context.Context, _ authctx.Scope, contactID, periodID uuid.UUID) ([]InvoiceLineRow, error) {
 	return f.invoiceLines[statementKey{contactID: contactID, periodID: periodID}], nil
 }
 
-func (f *fakeRepository) PeriodInvoiceLines(_ context.Context, _, periodID uuid.UUID) ([]InvoiceLineRow, error) {
+func (f *fakeRepository) PeriodInvoiceLines(_ context.Context, _ authctx.Scope, periodID uuid.UUID) ([]InvoiceLineRow, error) {
 	return f.periodInvoiceLines[periodID], nil
 }
 
-func (f *fakeRepository) LiveSessions(_ context.Context, _, contactID, periodID uuid.UUID) ([]LiveSessionRow, error) {
+func (f *fakeRepository) LiveSessions(_ context.Context, _ authctx.Scope, contactID, periodID uuid.UUID) ([]LiveSessionRow, error) {
 	return f.liveSessions[statementKey{contactID: contactID, periodID: periodID}], nil
 }
 
-func (f *fakeRepository) Adjustments(_ context.Context, _, contactID, periodID uuid.UUID) ([]AdjustmentRow, error) {
+func (f *fakeRepository) Adjustments(_ context.Context, _ authctx.Scope, contactID, periodID uuid.UUID) ([]AdjustmentRow, error) {
 	return f.adjustments[statementKey{contactID: contactID, periodID: periodID}], nil
 }
 
-func (f *fakeRepository) TouchView(_ context.Context, teacherID, statementID uuid.UUID) error {
+func (f *fakeRepository) TouchView(_ context.Context, sc authctx.Scope, statementID uuid.UUID) error {
 	f.viewTouches++
 	s, ok := f.byID[statementID]
-	if !ok || s.TeacherID != teacherID {
+	if !ok || (!sc.IsOwner && s.TeacherID != sc.TeacherID) {
 		return nil
 	}
 	now := time.Now()
@@ -185,11 +197,12 @@ func testConfig() config.StatementsConfig {
 
 func TestGenerateOpenPeriodIsConflict(t *testing.T) {
 	repo := newFakeRepository()
-	teacherID, periodID := id.New(), id.New()
-	repo.periods[periodID] = "open"
+	teacherID, centerID, periodID := id.New(), id.New(), id.New()
+	repo.setPeriod(periodID, "open", teacherID)
 	svc := NewService(repo, noopTx{}, testConfig(), testBankConfig(), NewQRBuilder())
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: centerID}
 
-	_, err := svc.Generate(context.Background(), teacherID, periodID)
+	_, err := svc.Generate(context.Background(), sc, periodID)
 	if apperror.From(err).Code != apperror.CodeConflict {
 		t.Fatalf("want CONFLICT for an open period, got %v", err)
 	}
@@ -198,8 +211,9 @@ func TestGenerateOpenPeriodIsConflict(t *testing.T) {
 func TestGenerateUnknownPeriodIsNotFound(t *testing.T) {
 	repo := newFakeRepository()
 	svc := NewService(repo, noopTx{}, testConfig(), testBankConfig(), NewQRBuilder())
+	sc := authctx.Scope{TeacherID: id.New(), CenterID: id.New()}
 
-	_, err := svc.Generate(context.Background(), id.New(), id.New())
+	_, err := svc.Generate(context.Background(), sc, id.New())
 	if apperror.From(err).Code != apperror.CodeNotFound {
 		t.Fatalf("want NOT_FOUND for an unknown period, got %v", err)
 	}
@@ -207,17 +221,18 @@ func TestGenerateUnknownPeriodIsNotFound(t *testing.T) {
 
 func TestGenerateCreatesOneStatementPerTargetContact(t *testing.T) {
 	repo := newFakeRepository()
-	teacherID, periodID := id.New(), id.New()
+	teacherID, centerID, periodID := id.New(), id.New(), id.New()
 	contactA, contactB := id.New(), id.New()
-	repo.periods[periodID] = periodStatusClosed
+	repo.setPeriod(periodID, periodStatusClosed, teacherID)
 	repo.targets[periodID] = []TargetContact{
 		{ContactID: contactA, FullName: "Chị Hoa", Phone: "+84912345678"},
 		{ContactID: contactB, FullName: "Anh Tuấn", Phone: "+84912345679"},
 	}
 	repo.totals[periodID] = map[uuid.UUID]int64{contactA: 500_000, contactB: 750_000}
 	svc := NewService(repo, noopTx{}, testConfig(), testBankConfig(), NewQRBuilder())
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: centerID}
 
-	result, err := svc.Generate(context.Background(), teacherID, periodID)
+	result, err := svc.Generate(context.Background(), sc, periodID)
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
@@ -240,22 +255,23 @@ func TestGenerateCreatesOneStatementPerTargetContact(t *testing.T) {
 
 func TestGenerateTwiceRefreshesTotalDueKeepsToken(t *testing.T) {
 	repo := newFakeRepository()
-	teacherID, periodID := id.New(), id.New()
+	teacherID, centerID, periodID := id.New(), id.New(), id.New()
 	contactID := id.New()
-	repo.periods[periodID] = periodStatusClosed
+	repo.setPeriod(periodID, periodStatusClosed, teacherID)
 	repo.targets[periodID] = []TargetContact{{ContactID: contactID, FullName: "Chị Hoa", Phone: "+84912345678"}}
 	repo.totals[periodID] = map[uuid.UUID]int64{contactID: 500_000}
 	svc := NewService(repo, noopTx{}, testConfig(), testBankConfig(), NewQRBuilder())
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: centerID}
 	ctx := context.Background()
 
-	first, err := svc.Generate(ctx, teacherID, periodID)
+	first, err := svc.Generate(ctx, sc, periodID)
 	if err != nil {
 		t.Fatalf("first generate: %v", err)
 	}
 	firstStatement := first.Statements[0]
 
 	repo.totals[periodID] = map[uuid.UUID]int64{contactID: 900_000}
-	second, err := svc.Generate(ctx, teacherID, periodID)
+	second, err := svc.Generate(ctx, sc, periodID)
 	if err != nil {
 		t.Fatalf("second generate: %v", err)
 	}
@@ -277,24 +293,25 @@ func TestGenerateTwiceRefreshesTotalDueKeepsToken(t *testing.T) {
 
 func TestGenerateSkipsRevokedStatementWithoutResurrectingIt(t *testing.T) {
 	repo := newFakeRepository()
-	teacherID, periodID := id.New(), id.New()
+	teacherID, centerID, periodID := id.New(), id.New(), id.New()
 	contactID := id.New()
-	repo.periods[periodID] = periodStatusClosed
+	repo.setPeriod(periodID, periodStatusClosed, teacherID)
 	repo.targets[periodID] = []TargetContact{{ContactID: contactID, FullName: "Chị Hoa", Phone: "+84912345678"}}
 	repo.totals[periodID] = map[uuid.UUID]int64{contactID: 500_000}
 	svc := NewService(repo, noopTx{}, testConfig(), testBankConfig(), NewQRBuilder())
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: centerID}
 	ctx := context.Background()
 
-	first, err := svc.Generate(ctx, teacherID, periodID)
+	first, err := svc.Generate(ctx, sc, periodID)
 	if err != nil {
 		t.Fatalf("first generate: %v", err)
 	}
-	if err := svc.Revoke(ctx, teacherID, first.Statements[0].ID); err != nil {
+	if err := svc.Revoke(ctx, sc, first.Statements[0].ID); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
 
 	repo.totals[periodID] = map[uuid.UUID]int64{contactID: 999_000}
-	second, err := svc.Generate(ctx, teacherID, periodID)
+	second, err := svc.Generate(ctx, sc, periodID)
 	if err != nil {
 		t.Fatalf("second generate: %v", err)
 	}
@@ -305,7 +322,7 @@ func TestGenerateSkipsRevokedStatementWithoutResurrectingIt(t *testing.T) {
 		t.Fatalf("a skipped-revoked statement must not appear in the returned list, got %d", len(second.Statements))
 	}
 
-	stored, err := repo.GetByID(ctx, teacherID, first.Statements[0].ID)
+	stored, err := repo.GetByID(ctx, sc, first.Statements[0].ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -316,8 +333,9 @@ func TestGenerateSkipsRevokedStatementWithoutResurrectingIt(t *testing.T) {
 
 func TestListTranslatesUnknownPeriodAsNotFound(t *testing.T) {
 	svc := NewService(newFakeRepository(), noopTx{}, testConfig(), testBankConfig(), NewQRBuilder())
+	sc := authctx.Scope{TeacherID: id.New(), CenterID: id.New()}
 
-	_, _, err := svc.List(context.Background(), id.New(), id.New(), pagination.Params{})
+	_, _, err := svc.List(context.Background(), sc, id.New(), pagination.Params{})
 	if apperror.From(err).Code != apperror.CodeNotFound {
 		t.Fatalf("want NOT_FOUND, got %v", err)
 	}
@@ -325,42 +343,45 @@ func TestListTranslatesUnknownPeriodAsNotFound(t *testing.T) {
 
 func TestRevokeIsIdempotent(t *testing.T) {
 	repo := newFakeRepository()
-	teacherID, periodID, contactID := id.New(), id.New(), id.New()
-	repo.periods[periodID] = periodStatusClosed
+	teacherID, centerID, periodID, contactID := id.New(), id.New(), id.New(), id.New()
+	repo.setPeriod(periodID, periodStatusClosed, teacherID)
 	repo.targets[periodID] = []TargetContact{{ContactID: contactID, FullName: "Chị Hoa", Phone: "+84912345678"}}
 	repo.totals[periodID] = map[uuid.UUID]int64{contactID: 500_000}
 	svc := NewService(repo, noopTx{}, testConfig(), testBankConfig(), NewQRBuilder())
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: centerID}
 	ctx := context.Background()
 
-	result, err := svc.Generate(ctx, teacherID, periodID)
+	result, err := svc.Generate(ctx, sc, periodID)
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
 	statementID := result.Statements[0].ID
 
-	if err := svc.Revoke(ctx, teacherID, statementID); err != nil {
+	if err := svc.Revoke(ctx, sc, statementID); err != nil {
 		t.Fatalf("first revoke: %v", err)
 	}
-	if err := svc.Revoke(ctx, teacherID, statementID); err != nil {
+	if err := svc.Revoke(ctx, sc, statementID); err != nil {
 		t.Fatalf("second revoke must be a no-op success, got %v", err)
 	}
 }
 
 func TestRevokeOtherTeachersStatementIsNotFound(t *testing.T) {
 	repo := newFakeRepository()
-	teacherID, periodID, contactID := id.New(), id.New(), id.New()
-	repo.periods[periodID] = periodStatusClosed
+	teacherID, centerID, periodID, contactID := id.New(), id.New(), id.New(), id.New()
+	repo.setPeriod(periodID, periodStatusClosed, teacherID)
 	repo.targets[periodID] = []TargetContact{{ContactID: contactID, FullName: "Chị Hoa", Phone: "+84912345678"}}
 	repo.totals[periodID] = map[uuid.UUID]int64{contactID: 500_000}
 	svc := NewService(repo, noopTx{}, testConfig(), testBankConfig(), NewQRBuilder())
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: centerID}
 	ctx := context.Background()
 
-	result, err := svc.Generate(ctx, teacherID, periodID)
+	result, err := svc.Generate(ctx, sc, periodID)
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
 
-	err = svc.Revoke(ctx, id.New(), result.Statements[0].ID)
+	otherSc := authctx.Scope{TeacherID: id.New(), CenterID: centerID}
+	err = svc.Revoke(ctx, otherSc, result.Statements[0].ID)
 	if apperror.From(err).Code != apperror.CodeNotFound {
 		t.Fatalf("cross-tenant revoke must be NOT_FOUND, got %v", err)
 	}
