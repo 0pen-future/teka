@@ -3,13 +3,13 @@ package statements
 import "github.com/gin-gonic/gin"
 
 // RegisterRoutes mounts the statement endpoints under /billing-periods and
-// /statements, all behind authentication.
-func RegisterRoutes(rg *gin.RouterGroup, h *Handler, requireAuth gin.HandlerFunc) {
-	periods := rg.Group("/billing-periods", requireAuth)
+// /statements, all behind authentication and center-scope resolution.
+func RegisterRoutes(rg *gin.RouterGroup, h *Handler, requireAuth, resolveScope gin.HandlerFunc) {
+	periods := rg.Group("/billing-periods", requireAuth, resolveScope)
 	periods.POST("/:id/statements/generate", h.generate)
 	periods.GET("/:id/statements", h.list)
 
-	g := rg.Group("/statements", requireAuth)
+	g := rg.Group("/statements", requireAuth, resolveScope)
 	g.GET("/:id", h.get)
 	g.POST("/:id/revoke", h.revoke)
 }

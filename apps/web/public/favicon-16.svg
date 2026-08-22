@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" role="img" aria-label="favicon-16">
+<title>favicon-16</title>
+<style>
+  .display { font-family: 'Baloo 2', 'Nunito', Arial, sans-serif; font-weight: 800; }
+  .body { font-family: 'Nunito', Arial, sans-serif; font-weight: 700; }
+</style>
+
+<rect width="16" height="16" rx="4" fill="#FFFDF4"/>
+<circle cx="8.0" cy="8.0" r="6.88" fill="#D8FFED"/>
+<circle cx="12.16" cy="3.84" r="1.76" fill="#FFF1B8"/>
+<circle cx="3.84" cy="12.48" r="1.60" fill="#D9F0FF"/>
+
+<g transform="translate(8.0 7.68) scale(0.096875)" stroke-linecap="round" stroke-linejoin="round">
+  <circle cx="0" cy="0" r="46" fill="#EFFFF7" stroke="#17313B" stroke-width="6"/>
+  <rect x="-28" y="-29" width="56" height="36" rx="10" fill="#7CCBFF" stroke="#17313B" stroke-width="5"/>
+  <path d="M-17 -11 L-7 0 L18 -25" stroke="#0D8F61" stroke-width="8" fill="none"/>
+  <path d="M-43 7 C-30 -2 -15 -2 0 10 C15 -2 30 -2 43 7 L43 36 C28 29 14 30 0 42 C-14 30 -28 29 -43 36 Z" fill="#FFF7DF" stroke="#17313B" stroke-width="5"/>
+  <path d="M0 10 V42" stroke="#17313B" stroke-width="4"/>
+  <circle cx="26" cy="24" r="10" fill="#FFC533" stroke="#17313B" stroke-width="4"/>
+  
+</g>
+<path d="M4.80 13.44 H11.20" stroke="#FFC533" stroke-width="2.00" stroke-linecap="round"/>
+
+</svg>

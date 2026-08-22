@@ -1,0 +1,38 @@
+# Homelab-specific routing overlay for the reference production topology.
+# Traefik and the application services share the pre-existing external
+# `homelab` network; the Compose default network remains private to the API
+# and one-shot migration service.
+
+services:
+  api:
+    environment:
+      API_CORS_ORIGINS: https://teka-web.cauchuyenlaptrinh.com
+      API_STATEMENTS_PUBLIC_BASE_URL: https://teka-web.cauchuyenlaptrinh.com
+    networks:
+      - default
+      - homelab
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=homelab
+      - traefik.http.routers.teka-api.rule=Host(`teka-api.cauchuyenlaptrinh.com`)
+      - traefik.http.routers.teka-api.entrypoints=web
+      - traefik.http.routers.teka-api.service=teka-api
+      - traefik.http.services.teka-api.loadbalancer.server.port=8080
+      - traefik.http.services.teka-api.loadbalancer.healthcheck.path=/readyz
+      - traefik.http.services.teka-api.loadbalancer.healthcheck.interval=10s
+      - traefik.http.services.teka-api.loadbalancer.healthcheck.timeout=2s
+
+  web:
+    networks:
+      - homelab
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=homelab
+      - traefik.http.routers.teka-web.rule=Host(`teka-web.cauchuyenlaptrinh.com`)
+      - traefik.http.routers.teka-web.entrypoints=web
+      - traefik.http.routers.teka-web.service=teka-web
+      - traefik.http.services.teka-web.loadbalancer.server.port=8080
+
+networks:
+  homelab:
+    external: true

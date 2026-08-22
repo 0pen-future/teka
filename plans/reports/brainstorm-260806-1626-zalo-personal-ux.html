@@ -1,0 +1,750 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teka × Zalo cá nhân — UX/UI brief</title>
+<style>
+/* ============================================================
+   Tokens lifted verbatim from apps/web/src/styles/tokens/*.css
+   so this brief and the app cannot drift apart.
+   ============================================================ */
+:root{
+  --cream-50:#fbfdfb; --cream-100:#f4f8f3; --cream-200:#eaf1ea; --cream-300:#dfe9df;
+  --ink-900:#1c3a31; --ink-700:#27433b; --ink-500:#5b756c; --ink-400:#86998f; --ink-300:#aab9b1;
+  --white:#fff;
+  --mint-50:#e9f7f1; --mint-100:#d3efe3; --mint-200:#a9e0cb; --mint-300:#7fd2b4;
+  --mint-400:#5cc9a7; --mint-500:#3fa888; --mint-600:#2e8d6e; --mint-700:#1f6b53;
+  --sky-50:#eaf5fb; --sky-100:#d6ecf7; --sky-200:#a9d8ee; --sky-300:#7fc8e8;
+  --sky-400:#4fa9d4; --sky-500:#2d7aa0; --sky-600:#226383;
+  --sun-100:#fff4d6; --sun-200:#ffe6a3; --sun-300:#ffd86b; --sun-400:#ffc83d;
+  --sun-500:#f0a500; --sun-600:#b87d00;
+  --coral-100:#ffe7e1; --coral-300:#ff9b8a; --coral-400:#ff7a66; --coral-500:#e85a44; --coral-600:#b23a28;
+  --line-100:#eef4ee; --line-200:#e2ece2; --line-300:#cfe0d4;
+  --radius-xs:8px; --radius-sm:12px; --radius-md:16px; --radius-lg:20px;
+  --radius-xl:24px; --radius-pill:999px;
+  --shadow-xs:0 1px 2px rgba(28,58,49,.06);
+  --shadow-sm:0 2px 6px rgba(28,58,49,.08);
+  --shadow-md:0 8px 20px -8px rgba(28,58,49,.18);
+  --shadow-lg:0 18px 40px -18px rgba(28,58,49,.28);
+  --press-mint:0 5px 0 var(--mint-500);
+  --press-line:0 4px 0 var(--line-300);
+  /* Baloo 2 is the app's display face; it is a webfont, so this offline brief
+     falls back to the system stack. Shapes/weights are indicative only. */
+  --font-display:"Baloo 2",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-body:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--cream-100);color:var(--ink-700);
+  font-family:var(--font-body);font-size:15px;line-height:1.6;
+  -webkit-font-smoothing:antialiased}
+h1,h2,h3,h4,.disp{font-family:var(--font-display);color:var(--ink-900);font-weight:800;letter-spacing:-.01em}
+h1{font-size:clamp(26px,4vw,38px);line-height:1.15;margin:0 0 8px}
+h2{font-size:clamp(20px,2.6vw,26px);margin:0 0 6px}
+h3{font-size:17px;margin:0 0 4px}
+p{margin:0 0 12px}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;
+  background:var(--cream-200);padding:1px 6px;border-radius:6px;color:var(--ink-900)}
+a{color:var(--mint-600)}
+.wrap{max-width:1180px;margin:0 auto;padding:32px 20px 80px}
+
+/* ---------- page furniture ---------- */
+header.hero{background:var(--white);border:1px solid var(--line-200);
+  border-radius:var(--radius-xl);padding:28px;box-shadow:var(--shadow-sm);margin-bottom:14px}
+.kicker{font-family:var(--font-display);font-weight:800;font-size:12px;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--mint-600);margin-bottom:8px}
+.lede{font-size:17px;color:var(--ink-500);max-width:70ch;margin:0}
+.meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+.tag{font-family:var(--font-display);font-weight:700;font-size:12.5px;
+  background:var(--cream-200);color:var(--ink-500);padding:5px 12px;border-radius:var(--radius-pill)}
+.tag.on{background:var(--mint-50);color:var(--mint-600)}
+
+nav.toc{position:sticky;top:0;z-index:30;background:rgba(244,248,243,.93);
+  backdrop-filter:blur(8px);border-bottom:1px solid var(--line-200);
+  margin:0 -20px 26px;padding:10px 20px;display:flex;gap:6px;overflow-x:auto}
+nav.toc a{font-family:var(--font-display);font-weight:700;font-size:13px;
+  text-decoration:none;color:var(--ink-500);padding:6px 13px;border-radius:var(--radius-pill);white-space:nowrap}
+nav.toc a:hover{background:var(--white);color:var(--ink-900)}
+
+section{margin:0 0 44px;scroll-margin-top:64px}
+.sec-head{border-left:4px solid var(--mint-400);padding-left:14px;margin-bottom:18px}
+.sec-head p{color:var(--ink-500);margin:0;max-width:72ch}
+
+/* ---------- mockup + annotation split ---------- */
+.split{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:22px;align-items:start}
+@media (max-width:900px){.split{grid-template-columns:1fr}}
+.stage{background:var(--cream-100);border:1px solid var(--line-200);
+  border-radius:var(--radius-xl);padding:18px;box-shadow:var(--shadow-xs);overflow-x:auto}
+.stage-label{font-family:var(--font-display);font-weight:800;font-size:11.5px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--ink-400);margin-bottom:12px}
+.notes{display:flex;flex-direction:column;gap:10px}
+.note{background:var(--white);border:1px solid var(--line-200);border-left:3px solid var(--sky-300);
+  border-radius:var(--radius-md);padding:12px 14px;font-size:13.5px;color:var(--ink-500)}
+.note b{color:var(--ink-900);font-family:var(--font-display)}
+.note.warn{border-left-color:var(--coral-400);background:#fffaf8}
+.note.good{border-left-color:var(--mint-400);background:var(--mint-50)}
+.pin{display:inline-flex;align-items:center;justify-content:center;
+  width:20px;height:20px;border-radius:50%;background:var(--sky-500);color:#fff;
+  font-family:var(--font-display);font-weight:800;font-size:11.5px;margin-right:7px;flex:none}
+.pin.c{background:var(--coral-500)} .pin.m{background:var(--mint-500)} .pin.s{background:var(--sun-500);color:var(--ink-900)}
+
+/* ---------- app chrome replicas ---------- */
+.app{background:var(--cream-100);border-radius:var(--radius-lg);min-width:440px}
+.pagetitle{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+.pagetitle h4{font-family:var(--font-display);font-size:20px;font-weight:800;color:var(--ink-900);margin:0}
+.tabs{display:inline-flex;background:var(--white);border:1px solid var(--line-200);
+  border-radius:var(--radius-pill);padding:4px}
+.tabs span{font-family:var(--font-display);font-weight:700;font-size:13px;
+  padding:6px 15px;border-radius:var(--radius-pill);color:var(--ink-500)}
+.tabs span.on{background:var(--mint-400);color:#fff}
+
+.card{background:var(--white);border-radius:var(--radius-lg);padding:14px;box-shadow:var(--shadow-xs);margin-bottom:11px}
+.card.flat{background:var(--white);border:1px solid var(--line-200);box-shadow:none}
+
+/* connection strip */
+.strip{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  border-radius:var(--radius-lg);padding:13px 15px;margin-bottom:11px}
+.strip.idle{background:var(--white);border:1px dashed var(--line-300)}
+.strip.ok{background:var(--white);box-shadow:var(--shadow-xs)}
+.strip.bad{background:var(--coral-100);border:1px solid var(--coral-300)}
+.strip .grow{flex:1;min-width:150px}
+.strip .t1{font-family:var(--font-display);font-weight:800;font-size:14.5px;color:var(--ink-900)}
+.strip .t2{font-size:12.5px;color:var(--ink-500)}
+.strip.bad .t2{color:var(--coral-600)}
+
+.avatar{width:38px;height:38px;border-radius:50%;background:var(--sky-100);
+  display:grid;place-items:center;font-family:var(--font-display);font-weight:800;
+  color:var(--sky-600);font-size:15px;flex:none}
+.avatar.mint{background:var(--mint-100);color:var(--mint-700)}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-display);
+  font-weight:800;font-size:13.5px;border-radius:var(--radius-pill);
+  padding:8px 17px;border:0;cursor:default;white-space:nowrap}
+.btn.pri{background:var(--mint-400);color:#fff;box-shadow:var(--press-mint)}
+.btn.sec{background:var(--white);color:var(--ink-700);border:1px solid var(--line-300);box-shadow:var(--press-line)}
+.btn.ghost{background:transparent;color:var(--ink-500)}
+.btn.danger{background:var(--coral-400);color:#fff;box-shadow:0 5px 0 var(--coral-500)}
+.btn.sm{font-size:12.5px;padding:6px 13px;box-shadow:none}
+.btn.dis{background:var(--cream-200);color:var(--ink-300);box-shadow:none}
+
+/* pills */
+.pill{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-display);
+  font-weight:800;font-size:12px;padding:4px 11px;border-radius:var(--radius-pill)}
+.pill.sent{background:var(--mint-50);color:var(--mint-600)}
+.pill.wait{background:var(--cream-200);color:var(--ink-400)}
+.pill.send{background:var(--sky-50);color:var(--sky-600)}
+.pill.err{background:var(--coral-100);color:var(--coral-600)}
+.pill.nolink{background:var(--sun-100);color:var(--sun-600)}
+
+.dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+.dot.pulse{animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:.35}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.dot.pulse{animation:none;opacity:1}}
+
+/* message card */
+.msg{background:var(--white);border-radius:var(--radius-lg);padding:13px;box-shadow:var(--shadow-xs)}
+.msg .row1{display:flex;align-items:center;gap:10px;margin-bottom:9px}
+.msg .nm{font-family:var(--font-display);font-weight:800;font-size:14px;color:var(--ink-900);line-height:1.25}
+.msg .ph{font-size:12px;color:var(--ink-400)}
+.msg .body{background:var(--sky-50);border-radius:var(--radius-md);padding:10px;
+  font-size:12px;color:var(--ink-700);white-space:pre-wrap;line-height:1.5}
+.msg .acts{display:flex;gap:7px;margin-top:9px;flex-wrap:wrap}
+.msgs{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+@media (max-width:620px){.msgs{grid-template-columns:1fr}}
+
+/* chips */
+.chips{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:11px}
+.chip{font-family:var(--font-display);font-weight:700;font-size:12.5px;
+  background:var(--white);border:1px solid var(--line-200);color:var(--ink-500);
+  padding:5px 13px;border-radius:var(--radius-pill)}
+.chip.on{background:var(--ink-900);color:#fff;border-color:var(--ink-900)}
+.chip .n{opacity:.6;margin-left:3px}
+
+/* progress */
+.track{height:14px;border-radius:var(--radius-pill);background:var(--cream-200);overflow:hidden}
+.fill{height:100%;border-radius:var(--radius-pill);background:var(--mint-400)}
+
+/* modal replica */
+.scrim{background:rgba(28,58,49,.4);border-radius:var(--radius-lg);padding:26px 16px;display:grid;place-items:center}
+.modal{background:var(--white);border-radius:var(--radius-xl);padding:20px;width:100%;max-width:330px;box-shadow:var(--shadow-lg)}
+.modal h5{font-family:var(--font-display);font-weight:800;font-size:16.5px;color:var(--ink-900);margin:0 0 6px}
+.modal p{font-size:13px;color:var(--ink-500);margin:0 0 12px}
+.consent{display:flex;gap:10px;background:var(--sun-100);border-radius:var(--radius-md);padding:11px;margin-bottom:13px}
+.box{width:18px;height:18px;border-radius:5px;border:2px solid var(--sun-500);flex:none;margin-top:2px;
+  display:grid;place-items:center;color:var(--sun-600);font-size:12px;font-weight:800}
+.consent p{font-size:12.5px;color:var(--ink-700);margin:0}
+.qr{width:150px;height:150px;margin:0 auto 12px;border-radius:var(--radius-md);
+  background:
+    repeating-linear-gradient(90deg,var(--ink-900) 0 8px,transparent 8px 16px),
+    repeating-linear-gradient(0deg,var(--ink-900) 0 8px,transparent 8px 16px),
+    var(--white);
+  background-blend-mode:multiply;border:7px solid var(--white);box-shadow:var(--shadow-sm);opacity:.85}
+.steps{display:flex;gap:6px;margin-bottom:14px}
+.steps i{flex:1;height:4px;border-radius:var(--radius-pill);background:var(--cream-200);font-style:normal}
+.steps i.on{background:var(--mint-400)}
+
+/* mapping rows */
+.grp{margin-bottom:14px}
+.grp-h{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap}
+.grp-t{font-family:var(--font-display);font-weight:800;font-size:14px;color:var(--ink-900)}
+.map{display:flex;align-items:center;gap:10px;background:var(--white);
+  border-radius:var(--radius-md);padding:9px 12px;margin-bottom:7px;box-shadow:var(--shadow-xs);flex-wrap:wrap}
+.map .from{font-family:var(--font-display);font-weight:700;font-size:13.5px;color:var(--ink-900);min-width:120px}
+.map .arw{color:var(--ink-300);font-size:13px}
+.map .to{font-size:13px;color:var(--ink-700);flex:1;min-width:130px}
+.sel{display:inline-flex;align-items:center;justify-content:space-between;gap:8px;
+  background:var(--cream-100);border:1px solid var(--line-300);border-radius:var(--radius-sm);
+  padding:6px 11px;font-size:13px;color:var(--ink-700);flex:1;min-width:150px}
+.sel.empty{color:var(--ink-300);border-style:dashed}
+
+/* diagram */
+.flow{background:var(--white);border:1px solid var(--line-200);border-radius:var(--radius-xl);
+  padding:20px;box-shadow:var(--shadow-xs);overflow-x:auto}
+.flow svg{display:block;min-width:840px;width:100%;height:auto}
+
+/* tables */
+table{width:100%;border-collapse:collapse;font-size:13.5px;background:var(--white);
+  border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow-xs)}
+th{text-align:left;font-family:var(--font-display);font-weight:800;font-size:12px;
+  text-transform:uppercase;letter-spacing:.06em;color:var(--ink-400);
+  padding:11px 13px;border-bottom:1px solid var(--line-200);background:var(--cream-50)}
+td{padding:11px 13px;border-bottom:1px solid var(--line-100);vertical-align:top;color:var(--ink-700)}
+tr:last-child td{border-bottom:0}
+.scroller{overflow-x:auto}
+
+/* forks */
+.fork{background:var(--white);border:1px solid var(--line-200);border-radius:var(--radius-lg);
+  padding:16px;margin-bottom:12px;box-shadow:var(--shadow-xs)}
+.fork h4{margin:0 0 8px;font-size:15px}
+.opt{display:flex;gap:10px;padding:9px 0;border-top:1px dashed var(--line-200)}
+.opt:first-of-type{border-top:0}
+.opt .lbl{font-family:var(--font-display);font-weight:800;font-size:13px;min-width:118px;color:var(--ink-900)}
+.opt .txt{font-size:13.5px;color:var(--ink-500)}
+.rec{display:inline-block;font-family:var(--font-display);font-weight:800;font-size:11px;
+  background:var(--mint-50);color:var(--mint-600);padding:2px 9px;border-radius:var(--radius-pill);margin-left:6px}
+footer{border-top:1px solid var(--line-200);padding-top:18px;color:var(--ink-400);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="kicker">Brainstorm · UX/UI</div>
+  <h1>Gửi hoá đơn qua Zalo cá nhân</h1>
+  <p class="lede">Giáo viên liên kết tài khoản Zalo một lần, xác nhận danh sách phụ huynh một lần,
+  sau đó mỗi tháng chỉ bấm một nút. Luồng sao chép thủ công hiện tại vẫn nguyên vẹn ở mọi bước.</p>
+  <div class="meta">
+    <span class="tag on">Design system: components/hv</span>
+    <span class="tag">Tokens: styles/tokens/*.css</span>
+    <span class="tag">Mobile-first (bottom tab bar &lt; md)</span>
+    <span class="tag">06/08/2026</span>
+  </div>
+</header>
+
+<nav class="toc">
+  <a href="#idea">Nguyên tắc</a>
+  <a href="#strip">1 · Điểm vào</a>
+  <a href="#qr">2 · Liên kết QR</a>
+  <a href="#map">3 · Ghép danh bạ</a>
+  <a href="#run">4 · Gửi có nhịp</a>
+  <a href="#states">5 · Trạng thái thẻ</a>
+  <a href="#flow">Luồng triển khai</a>
+  <a href="#forks">Cần quyết định</a>
+</nav>
+
+<!-- ============================================ -->
+<section id="idea">
+  <div class="sec-head">
+    <h2>Ba nguyên tắc quyết định thiết kế</h2>
+    <p>Mọi lựa chọn giao diện bên dưới đều truy về một trong ba điều này.</p>
+  </div>
+  <div class="split">
+    <div class="stage">
+      <div class="stage-label">Vấn đề thật sự</div>
+      <div class="card">
+        <h3>Ghép danh bạ chính là toàn bộ UX</h3>
+        <p style="font-size:13.5px;color:var(--ink-500);margin:0">
+        Bản ghi bạn bè của Zalo chỉ có <code>userId</code> + <code>displayName</code>,
+        <b>không có số điện thoại</b>; Teka lại định danh phụ huynh bằng số điện thoại.
+        Nghĩa là ~40 phụ huynh phải được gắn thủ công với một người bạn Zalo.
+        Nếu việc đó giống nhập liệu 40 dòng, tính năng chết ngay từ đầu.</p>
+      </div>
+      <div class="card" style="background:var(--mint-50)">
+        <h3 style="color:var(--mint-700)">Mục tiêu: giáo viên <em>xác nhận</em>, không <em>gõ</em>.</h3>
+        <p style="font-size:13.5px;color:var(--mint-700);margin:0">Tự động khớp tên → gom nhóm theo độ chắc chắn → một nút "Xác nhận tất cả" xử lý phần lớn.</p>
+      </div>
+    </div>
+    <div class="notes">
+      <div class="note good"><span class="pin m">1</span><b>Zalo là bàn đạp, không phải thay thế.</b>
+        Nút <code>Sao chép</code> còn nguyên trên mọi thẻ, ở mọi trạng thái. Đây là thứ khiến
+        cả tích hợp rủi ro này an toàn để ship: xấu nhất, app lùi về đúng như hôm nay.</div>
+      <div class="note"><span class="pin">2</span><b>Xác nhận, đừng bắt gõ.</b>
+        Khớp tự động theo tên (bỏ dấu, so token) + gom nhóm theo độ tin cậy. Ô tìm kiếm chỉ
+        dành cho phần còn sót.</div>
+      <div class="note warn"><span class="pin c">3</span><b>Chậm thì phải giải thích.</b>
+        40 tin × nhịp 3–8 giây ≈ 4 phút. Không giải thích thì người dùng đọc ra "treo".
+        Nhịp gửi là <em>tính năng an toàn</em>, và giao diện phải nói bằng lời của giáo viên:
+        "gửi chậm để Zalo không khoá tài khoản".</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================ -->
+<section id="strip">
+  <div class="sec-head">
+    <h2>1 · Điểm vào: dải trạng thái trên trang "Gửi thông báo"</h2>
+    <p>App chưa có trang Cài đặt và cũng không có menu tài khoản — chỉ có nút Đăng xuất.
+    Thêm mục điều hướng thứ 7 cho một công tắc là thừa (YAGNI). Đặt ngay nơi công việc diễn ra.</p>
+  </div>
+  <div class="split">
+    <div class="stage">
+      <div class="stage-label">Ba trạng thái của dải</div>
+      <div class="app">
+        <div class="pagetitle">
+          <h4>Gửi thông báo</h4>
+          <div class="tabs"><span class="on">Thông báo học phí</span><span>Nhắc nợ</span></div>
+        </div>
+
+        <div class="strip idle">
+          <div class="avatar" style="background:var(--cream-200);color:var(--ink-400)">Z</div>
+          <div class="grow">
+            <div class="t1">Chưa kết nối Zalo</div>
+            <div class="t2">Kết nối để gửi thẳng cho phụ huynh, khỏi sao chép từng tin.</div>
+          </div>
+          <span class="btn sec">Kết nối Zalo</span>
+        </div>
+
+        <div class="strip ok">
+          <div class="avatar mint">H</div>
+          <div class="grow">
+            <div class="t1">Cô Hương · Zalo đã kết nối</div>
+            <div class="t2"><b style="color:var(--mint-600)">28</b>/40 phụ huynh đã liên kết ·
+              <span style="color:var(--sky-600);text-decoration:underline">ghép nốt 12</span></div>
+          </div>
+          <span class="btn pri">Gửi qua Zalo (28)</span>
+        </div>
+
+        <div class="strip bad">
+          <div class="avatar" style="background:var(--coral-300);color:#fff">!</div>
+          <div class="grow">
+            <div class="t1" style="color:var(--coral-600)">Phiên Zalo đã hết hạn</div>
+            <div class="t2">Quét lại mã QR để tiếp tục gửi tự động. Sao chép thủ công vẫn dùng được.</div>
+          </div>
+          <span class="btn danger">Quét lại mã QR</span>
+        </div>
+
+        <div class="card flat" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+          <div><div class="t2" style="font-size:12px;color:var(--ink-400)">Số phụ huynh</div>
+            <div class="disp" style="font-size:18px">40</div></div>
+          <div style="font-size:13.5px;color:var(--ink-500)"><b style="color:var(--mint-600)">0</b>/40 đã gửi</div>
+          <div style="display:flex;gap:7px">
+            <span class="btn sec sm">Sao chép tất cả chưa gửi</span>
+            <span class="btn ghost sm">Tạo lại</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="notes">
+      <div class="note"><span class="pin">1</span><b>Không thêm mục điều hướng.</b> Dải nằm ngay trên
+        thẻ tổng hợp sẵn có của <code>notifications-page.tsx</code>. Chỉ tách ra trang Cài đặt
+        khi có tích hợp thứ hai.</div>
+      <div class="note"><span class="pin">2</span><b>Trạng thái "chưa kết nối" không chặn gì cả.</b>
+        Thẻ tổng hợp và nút "Sao chép tất cả chưa gửi" vẫn hoạt động y như hiện tại — dải chỉ là
+        lời mời, không phải cổng chặn.</div>
+      <div class="note good"><span class="pin m">3</span><b>"28/40" vừa là số liệu vừa là lối vào.</b>
+        Con số chưa liên kết chính là link sang màn ghép danh bạ — không cần nút riêng.</div>
+      <div class="note warn"><span class="pin c">4</span><b>Hết phiên phải lộ ra <em>trước</em> đợt gửi.</b>
+        Kiểm tra phiên khi mở trang (một lệnh rẻ), không phải phát hiện giữa chừng khi đang thu tiền.
+        Nút gửi tắt, nút sao chép vẫn sống.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================ -->
+<section id="qr">
+  <div class="sec-head">
+    <h2>2 · Đồng ý rủi ro + quét QR</h2>
+    <p><code>HvModal</code> đã là bottom sheet dưới <code>sm</code> và thẻ giữa màn từ <code>sm</code> trở lên — dùng nguyên, không cần primitive mới.</p>
+  </div>
+  <div class="split">
+    <div class="stage">
+      <div class="stage-label">Bước 1 — đồng ý (một lần duy nhất)</div>
+      <div class="scrim" style="margin-bottom:14px">
+        <div class="modal">
+          <div class="steps"><i class="on"></i><i></i></div>
+          <h5>Kết nối Zalo của bạn</h5>
+          <p>Teka sẽ đăng nhập bằng <b>chính tài khoản Zalo của bạn</b> để nhắn cho phụ huynh,
+          giống như bạn tự nhắn.</p>
+          <div class="consent">
+            <div class="box">✓</div>
+            <p>Tôi hiểu Zalo có thể <b>khoá tài khoản</b> nếu phát hiện gửi hàng loạt.
+            Teka gửi chậm để hạn chế, nhưng không đảm bảo. Tôi có thể ngắt kết nối bất cứ lúc nào.</p>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <span class="btn ghost sm">Để sau</span><span class="btn pri sm">Tiếp tục</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="stage-label">Bước 2 — quét mã (máy tính)</div>
+      <div class="scrim">
+        <div class="modal">
+          <div class="steps"><i class="on"></i><i class="on"></i></div>
+          <h5>Quét mã bằng app Zalo</h5>
+          <div class="qr" role="img" aria-label="Mã QR minh hoạ"></div>
+          <p style="text-align:center">Mở Zalo → <b>Thêm</b> → <b>Quét mã QR</b><br>
+            <span style="color:var(--ink-400)">Mã hết hạn sau 01:22</span></p>
+          <div style="display:flex;gap:8px;justify-content:center">
+            <span class="btn sec sm">Lưu ảnh QR</span><span class="btn ghost sm">Tạo mã mới</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="notes">
+      <div class="note warn"><span class="pin c">1</span><b>Bẫy trên điện thoại — quan trọng.</b>
+        Trên mobile, giáo viên <em>đang ở ngay trên</em> thiết bị chứa app Zalo, nên không thể
+        quét mã hiển thị trên chính màn hình đó. Dưới <code>md</code>, modal <b>bắt buộc</b> có
+        <code>Lưu ảnh QR</code> kèm hướng dẫn: mở Zalo → quét mã → chọn ảnh từ thư viện.
+        Thiếu nút này là tính năng vô dụng trên điện thoại — mà thanh tab dưới đáy cho thấy
+        mobile là đối tượng chính.</div>
+      <div class="note"><span class="pin">2</span><b>Đồng ý là bước riêng, không phải checkbox nhỏ.</b>
+        Ngôn ngữ thẳng thắn nhưng không doạ. Nút "Tiếp tục" tắt cho tới khi tích ô.
+        Chỉ hỏi một lần trong đời tài khoản.</div>
+      <div class="note"><span class="pin">3</span><b>Trạng thái phải nói rõ đang chờ gì:</b>
+        <code>đang tạo mã</code> → <code>chờ quét</code> → <code>đã quét, xác nhận trên điện thoại</code>
+        → <code>xong</code>, cộng nhánh <code>hết hạn</code>. Đếm ngược 100 giây khớp thời gian
+        long-poll thật của luồng đăng nhập.</div>
+      <div class="note good"><span class="pin m">4</span><b>Ngay sau khi kết nối</b> chuyển thẳng
+        sang màn ghép danh bạ — đó là lúc động lực cao nhất, đừng bắt tìm lại.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================ -->
+<section id="map">
+  <div class="sec-head">
+    <h2>3 · Ghép phụ huynh với bạn bè Zalo</h2>
+    <p>Khớp <code>contacts.full_name</code> với <code>displayName</code> của Zalo: bỏ dấu, so token, chấm điểm — rồi gom thành ba nhóm.</p>
+  </div>
+  <div class="split">
+    <div class="stage">
+      <div class="stage-label">Một màn, ba nhóm, một nút giải quyết 60%</div>
+      <div class="app">
+        <div class="pagetitle"><h4>Liên kết phụ huynh với Zalo</h4>
+          <span style="font-size:13px;color:var(--ink-500)"><b style="color:var(--mint-600)">24</b>/40 đã ghép</span></div>
+
+        <div class="grp">
+          <div class="grp-h">
+            <div class="grp-t"><span class="pill sent">✓ Khớp chắc chắn</span> 24 phụ huynh</div>
+            <span class="btn pri sm">Xác nhận tất cả</span>
+          </div>
+          <div class="map"><div class="from">Nguyễn Thị Lan</div><div class="arw">→</div>
+            <div class="to">Lan Nguyễn</div><span class="btn ghost sm">đổi</span></div>
+          <div class="map"><div class="from">Trần Văn Minh</div><div class="arw">→</div>
+            <div class="to">Minh Trần</div><span class="btn ghost sm">đổi</span></div>
+        </div>
+
+        <div class="grp">
+          <div class="grp-h"><div class="grp-t"><span class="pill nolink">⚠ Cần kiểm tra</span> 9 phụ huynh</div></div>
+          <div class="map"><div class="from">Mẹ bé Bảo</div><div class="arw">→</div>
+            <div class="sel">Trần Thu Hà <span style="color:var(--ink-300)">▾</span></div>
+            <span class="btn ghost sm">bỏ qua</span></div>
+          <div class="map"><div class="from">Chị Hạnh (bé Na)</div><div class="arw">→</div>
+            <div class="sel">Nguyễn Mỹ Hạnh <span style="color:var(--ink-300)">▾</span></div>
+            <span class="btn ghost sm">bỏ qua</span></div>
+        </div>
+
+        <div class="grp">
+          <div class="grp-h"><div class="grp-t"><span class="pill err">✗ Chưa tìm thấy</span> 7 phụ huynh</div></div>
+          <div class="map"><div class="from">Bố bé Khoai</div><div class="arw">→</div>
+            <div class="sel empty">Tìm bạn Zalo… <span>▾</span></div>
+            <span class="btn sec sm">Gửi thủ công</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="notes">
+      <div class="note good"><span class="pin m">1</span><b>"Xác nhận tất cả" là điểm đòn bẩy.</b>
+        Nhóm khớp chắc chắn thường chiếm ~60% danh sách và biến mất trong một cú chạm.
+        Không có nút này thì màn hình chỉ là bảng nhập liệu 40 dòng.</div>
+      <div class="note"><span class="pin">2</span><b>Nhóm giữa đã điền sẵn ứng viên tốt nhất.</b>
+        Giáo viên đọc và gật, chỉ mở dropdown khi sai. Tên thật hay lệch kiểu
+        "Mẹ bé Bảo" ↔ "Trần Thu Hà" — đó chính là lý do phải có nhóm này thay vì tự động ghép bừa.</div>
+      <div class="note"><span class="pin">3</span><b>"Bỏ qua" là lựa chọn hạng nhất, không phải thất bại.</b>
+        Phụ huynh đó ở lại luồng thủ công vĩnh viễn và thẻ tin nhắn của họ nói rõ điều đó.
+        Không có ô nào bắt buộc phải điền.</div>
+      <div class="note"><span class="pin">4</span><b>Phụ huynh thêm sau này</b> được hỏi ngay trên thẻ
+        tin nhắn của họ (just-in-time), không bắt quay lại màn này.</div>
+      <div class="note warn"><span class="pin c">5</span><b>Khoảng trống bằng chứng:</b> nếu API
+        <code>getfriends</code> của Zalo thực sự trả về số điện thoại (goclaw không giải mã trường đó),
+        việc khớp trở thành chính xác tuyệt đối và hai nhóm dưới gần như biến mất.
+        Chưa kiểm chứng được nếu không có phiên đăng nhập thật.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================ -->
+<section id="run">
+  <div class="sec-head">
+    <h2>4 · Đợt gửi có nhịp</h2>
+    <p>Xác nhận bằng con số thật trước khi chạy, rồi tiến trình sống trong lúc chạy.</p>
+  </div>
+  <div class="split">
+    <div class="stage">
+      <div class="stage-label">Xác nhận → đang chạy</div>
+      <div class="scrim" style="margin-bottom:14px">
+        <div class="modal">
+          <h5>Gửi 28 tin qua Zalo?</h5>
+          <p>Mất khoảng <b>3 phút</b>. Teka gửi chậm, cách nhau vài giây,
+          <b>để Zalo không đánh dấu là spam và khoá tài khoản của bạn</b>.</p>
+          <p style="background:var(--sun-100);border-radius:var(--radius-sm);padding:9px;color:var(--ink-700)">
+            12 phụ huynh chưa liên kết Zalo sẽ <b>không</b> được gửi — bạn vẫn sao chép thủ công như cũ.</p>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <span class="btn ghost sm">Huỷ</span><span class="btn pri sm">Bắt đầu gửi</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="app">
+        <div class="card" style="border:2px solid var(--mint-200)">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;gap:10px;flex-wrap:wrap">
+            <div class="disp" style="font-size:15px">Đang gửi 12/28</div>
+            <div style="font-size:12.5px;color:var(--ink-500)">còn khoảng 2 phút</div>
+          </div>
+          <div class="track"><div class="fill" style="width:43%"></div></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;gap:10px;flex-wrap:wrap">
+            <div style="font-size:12.5px;color:var(--ink-400)">Bạn có thể rời khỏi trang — hệ thống vẫn gửi tiếp.</div>
+            <div style="display:flex;gap:7px"><span class="btn sec sm">Tạm dừng</span><span class="btn ghost sm">Dừng</span></div>
+          </div>
+        </div>
+
+        <div class="chips">
+          <span class="chip on">Tất cả<span class="n">40</span></span>
+          <span class="chip">Chưa gửi<span class="n">16</span></span>
+          <span class="chip">Lỗi<span class="n">1</span></span>
+          <span class="chip">Chưa liên kết<span class="n">12</span></span>
+        </div>
+      </div>
+    </div>
+    <div class="notes">
+      <div class="note good"><span class="pin m">1</span><b>Nói thẳng con số trước khi chạy:</b>
+        bao nhiêu tin, mất bao lâu, ai bị bỏ lại. Không có bất ngờ giữa chừng.</div>
+      <div class="note"><span class="pin">2</span><b>Lý do của sự chậm nằm ngay trong hộp thoại</b>,
+        không giấu trong tooltip. "Để Zalo không khoá tài khoản của bạn" là câu giáo viên hiểu ngay.</div>
+      <div class="note warn"><span class="pin c">3</span><b>Câu "Bạn có thể rời khỏi trang" chỉ đúng
+        nếu đợt gửi chạy ở server.</b> Đây chính là ngã rẽ 3 bên dưới — một câu chữ trong UI
+        quyết định cả kiến trúc backend.</div>
+      <div class="note"><span class="pin">4</span><b>Thứ tự thẻ giữ nguyên khi đang chạy.</b>
+        Sắp xếp lại theo trạng thái làm người dùng mất dấu. Phân loại bằng chip lọc,
+        không bằng cách nhảy vị trí.</div>
+      <div class="note"><span class="pin">5</span><b>Tiến trình lấy bằng polling</b>
+        (<code>refetchInterval</code> của TanStack Query trên sổ thông báo).
+        App chưa có SSE/WebSocket ở bất cứ đâu — đừng thêm chỉ vì thanh tiến trình này.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================ -->
+<section id="states">
+  <div class="sec-head">
+    <h2>5 · Trạng thái thẻ tin nhắn</h2>
+    <p>Mở rộng <code>MessageCard</code> hiện tại (chỉ có đã gửi / chưa gửi). Thân tin nhắn giữ nguyên, không đụng tới.</p>
+  </div>
+  <div class="stage">
+    <div class="stage-label">Năm trạng thái — nút "Sao chép" có mặt ở cả năm</div>
+    <div class="msgs">
+      <div class="msg">
+        <div class="row1"><div class="avatar">L</div>
+          <div style="flex:1;min-width:0"><div class="nm">Nguyễn Thị Lan</div><div class="ph">0901 234 567</div></div>
+          <span class="pill wait"><span class="dot"></span>Chờ gửi</span></div>
+        <div class="body">Chào anh/chị Lan,
+Học phí tháng 8/2026:
+Bé An — 12 buổi · 1.200.000đ …</div>
+        <div class="acts"><span class="btn sec sm">Sao chép</span></div>
+      </div>
+
+      <div class="msg" style="box-shadow:0 0 0 2px var(--sky-200)">
+        <div class="row1"><div class="avatar">M</div>
+          <div style="flex:1;min-width:0"><div class="nm">Trần Văn Minh</div><div class="ph">0912 345 678</div></div>
+          <span class="pill send"><span class="dot pulse"></span>Đang gửi…</span></div>
+        <div class="body">Chào anh/chị Minh,
+Học phí tháng 8/2026: …</div>
+        <div class="acts"><span class="btn ghost sm">Sao chép</span></div>
+      </div>
+
+      <div class="msg">
+        <div class="row1"><div class="avatar mint">H</div>
+          <div style="flex:1;min-width:0"><div class="nm">Nguyễn Mỹ Hạnh</div><div class="ph">0987 654 321</div></div>
+          <span class="pill sent">✓ Đã gửi 14:32</span></div>
+        <div class="body">Chào anh/chị Hạnh,
+Học phí tháng 8/2026: …</div>
+        <div class="acts"><span class="btn ghost sm">Sao chép</span></div>
+      </div>
+
+      <div class="msg" style="box-shadow:0 0 0 2px var(--coral-300)">
+        <div class="row1"><div class="avatar" style="background:var(--coral-100);color:var(--coral-600)">P</div>
+          <div style="flex:1;min-width:0"><div class="nm">Lê Thị Phượng</div><div class="ph">0933 111 222</div></div>
+          <span class="pill err">Lỗi</span></div>
+        <div class="body" style="background:var(--coral-100);color:var(--coral-600)">Zalo từ chối: không còn là bạn bè.</div>
+        <div class="acts"><span class="btn sec sm">Thử lại</span><span class="btn sec sm">Sao chép</span></div>
+      </div>
+
+      <div class="msg">
+        <div class="row1"><div class="avatar" style="background:var(--sun-100);color:var(--sun-600)">K</div>
+          <div style="flex:1;min-width:0"><div class="nm">Bố bé Khoai</div><div class="ph">0944 555 666</div></div>
+          <span class="pill nolink">Chưa liên kết</span></div>
+        <div class="body">Chào anh/chị,
+Học phí tháng 8/2026: …</div>
+        <div class="acts"><span class="btn pri sm">Liên kết Zalo</span><span class="btn sec sm">Sao chép</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="notes" style="margin-top:14px">
+    <div class="note good"><span class="pin m">1</span><b>Bất biến của cả thiết kế:</b> mọi thẻ,
+      mọi trạng thái, luôn còn <code>Sao chép</code>. Không màn hình nào đi vào ngõ cụt.</div>
+    <div class="note"><span class="pin">2</span><b>Lỗi là chuyện của một phụ huynh,</b>
+      không bao giờ làm hỏng cả đợt gửi. Lý do hiển thị bằng tiếng người, kèm "Thử lại".</div>
+    <div class="note"><span class="pin">3</span><b>Chấm nhấp nháy tôn trọng</b>
+      <code>prefers-reduced-motion</code> — đã có sẵn trong <code>hv-animations.css</code>.</div>
+  </div>
+</section>
+
+<!-- ============================================ -->
+<section id="flow">
+  <div class="sec-head">
+    <h2>Luồng triển khai</h2>
+    <p>Thiết lập một lần (trên) và đợt gửi hằng tháng (dưới). Ô nét đứt là phần backend mới.</p>
+  </div>
+  <div class="flow">
+    <svg viewBox="0 0 880 340" role="img" aria-label="Sơ đồ luồng thiết lập một lần và đợt gửi hằng tháng">
+      <defs>
+        <marker id="ar" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+          <path d="M0,0 L9,4.5 L0,9 z" fill="#aab9b1"/>
+        </marker>
+        <style>
+          .bx{fill:#fff;stroke:#e2ece2;stroke-width:1.5;rx:14}
+          .bxn{fill:#e9f7f1;stroke:#a9e0cb;stroke-width:1.5;stroke-dasharray:5 4;rx:14}
+          .bxw{fill:#fff4d6;stroke:#ffd86b;stroke-width:1.5;rx:14}
+          .t{font-family:system-ui,sans-serif;font-size:12.5px;fill:#27433b}
+          .tb{font-family:system-ui,sans-serif;font-size:13px;font-weight:700;fill:#1c3a31}
+          .lb{font-family:system-ui,sans-serif;font-size:11px;fill:#86998f}
+          .ln{stroke:#aab9b1;stroke-width:1.5;fill:none;marker-end:url(#ar)}
+        </style>
+      </defs>
+
+      <text x="8" y="16" class="lb">THIẾT LẬP MỘT LẦN</text>
+      <rect class="bx" x="8" y="28" width="150" height="54"/>
+      <text x="83" y="50" class="tb" text-anchor="middle">Dải "Kết nối"</text>
+      <text x="83" y="68" class="t" text-anchor="middle">trang Gửi thông báo</text>
+
+      <rect class="bxw" x="182" y="28" width="150" height="54"/>
+      <text x="257" y="50" class="tb" text-anchor="middle">Đồng ý rủi ro</text>
+      <text x="257" y="68" class="t" text-anchor="middle">một lần duy nhất</text>
+
+      <rect class="bxn" x="356" y="28" width="150" height="54"/>
+      <text x="431" y="50" class="tb" text-anchor="middle">Đăng nhập QR</text>
+      <text x="431" y="68" class="t" text-anchor="middle">creds mã hoá khi lưu</text>
+
+      <rect class="bxn" x="530" y="28" width="160" height="54"/>
+      <text x="610" y="50" class="tb" text-anchor="middle">Khớp tên tự động</text>
+      <text x="610" y="68" class="t" text-anchor="middle">bỏ dấu · so token</text>
+
+      <rect class="bx" x="714" y="28" width="158" height="54"/>
+      <text x="793" y="50" class="tb" text-anchor="middle">Màn ghép danh bạ</text>
+      <text x="793" y="68" class="t" text-anchor="middle">Xác nhận tất cả</text>
+
+      <path class="ln" d="M158,55 L178,55"/>
+      <path class="ln" d="M332,55 L352,55"/>
+      <path class="ln" d="M506,55 L526,55"/>
+      <path class="ln" d="M690,55 L710,55"/>
+      <path class="ln" d="M793,82 L793,104 L60,104 L60,140"/>
+
+      <text x="8" y="132" class="lb">ĐỢT GỬI HẰNG THÁNG</text>
+      <rect class="bx" x="8" y="140" width="150" height="54"/>
+      <text x="83" y="162" class="tb" text-anchor="middle">Tạo thông báo</text>
+      <text x="83" y="180" class="t" text-anchor="middle">như hiện tại</text>
+
+      <rect class="bx" x="182" y="140" width="150" height="54"/>
+      <text x="257" y="162" class="tb" text-anchor="middle">Xác nhận đợt gửi</text>
+      <text x="257" y="180" class="t" text-anchor="middle">28 tin · ~3 phút</text>
+
+      <rect class="bxn" x="356" y="140" width="150" height="54"/>
+      <text x="431" y="162" class="tb" text-anchor="middle">Đợt gửi ở server</text>
+      <text x="431" y="180" class="t" text-anchor="middle">nhịp 3–8 giây</text>
+
+      <rect class="bx" x="530" y="140" width="160" height="54"/>
+      <text x="610" y="162" class="tb" text-anchor="middle">Sổ thông báo</text>
+      <text x="610" y="180" class="t" text-anchor="middle">queued → sent/failed</text>
+
+      <rect class="bx" x="714" y="140" width="158" height="54"/>
+      <text x="793" y="162" class="tb" text-anchor="middle">Polling tiến trình</text>
+      <text x="793" y="180" class="t" text-anchor="middle">TanStack Query</text>
+
+      <path class="ln" d="M158,167 L178,167"/>
+      <path class="ln" d="M332,167 L352,167"/>
+      <path class="ln" d="M506,167 L526,167"/>
+      <path class="ln" d="M690,167 L710,167"/>
+
+      <rect class="bxw" x="182" y="242" width="324" height="58"/>
+      <text x="344" y="266" class="tb" text-anchor="middle">Luồng thủ công — luôn sẵn sàng</text>
+      <text x="344" y="284" class="t" text-anchor="middle">chưa liên kết · hết phiên · gửi lỗi · bỏ qua</text>
+      <path class="ln" d="M431,194 L431,238"/>
+      <path class="ln" d="M83,194 L83,271 L178,271"/>
+      <text x="530" y="272" class="lb">mọi nhánh hỏng đều rơi về đây</text>
+    </svg>
+  </div>
+</section>
+
+<!-- ============================================ -->
+<section id="forks">
+  <div class="sec-head">
+    <h2>Cần bạn quyết định</h2>
+    <p>Ba ngã rẽ thay đổi thật sự kết quả. Gợi ý đã đánh dấu.</p>
+  </div>
+
+  <div class="fork">
+    <h4>1 · Điểm vào</h4>
+    <div class="opt"><div class="lbl">Dải trên trang<span class="rec">gợi ý</span></div>
+      <div class="txt">Đặt ngay nơi công việc diễn ra. Không thêm mục điều hướng, không thêm trang. YAGNI.</div></div>
+    <div class="opt"><div class="lbl">Trang "Cài đặt"</div>
+      <div class="txt">Sạch sẽ hơn về lâu dài, nhưng dựng cả một khu vực điều hướng mới cho đúng một công tắc.</div></div>
+  </div>
+
+  <div class="fork">
+    <h4>2 · Lúc nào ghép danh bạ</h4>
+    <div class="opt"><div class="lbl">Màn duyệt sau khi liên kết<span class="rec">gợi ý</span></div>
+      <div class="txt">Đòn bẩy nằm ở khớp hàng loạt: một nút "Xác nhận tất cả" xử lý ~60%.</div></div>
+    <div class="opt"><div class="lbl">Chỉ hỏi khi cần (JIT)</div>
+      <div class="txt">Ít việc lúc đầu, nhưng đợt gửi đầu tiên sẽ ngắt lời giáo viên 40 lần.</div></div>
+  </div>
+
+  <div class="fork">
+    <h4>3 · Ai điều nhịp đợt gửi <span style="font-weight:400;color:var(--ink-400);font-size:13px">— ngã rẽ có hệ quả backend thật</span></h4>
+    <div class="opt"><div class="lbl">Goroutine ở server<span class="rec">gợi ý</span></div>
+      <div class="txt">Sống sót qua đóng tab, khoá máy, chuyển app. Sổ thông báo ghi tiến trình;
+        khởi động lại thì phần còn lại vẫn <code>queued</code> và giáo viên bấm "Tiếp tục".
+        Đổi lại: API có thành phần chạy nền đầu tiên — và câu "bạn có thể rời khỏi trang" mới thành thật.</div></div>
+    <div class="opt"><div class="lbl">Vòng lặp ở client</div>
+      <div class="txt">Không cần gì mới ở backend, nhưng khoá màn hình hoặc chuyển app là đợt gửi
+        đứt lặng lẽ. Thanh tab dưới đáy cho thấy phần lớn đợt gửi sẽ diễn ra trên điện thoại —
+        đây nhiều khả năng là tiết kiệm giả.</div></div>
+    <div class="opt"><div class="lbl">Dù chọn gì</div>
+      <div class="txt"><code>BulkSend</code> hiện gọi <code>sender.Send</code> <b>bên trong</b>
+        <code>WithinTx</code>. Đợt gửi có nhịp bắt buộc phải đưa việc gửi ra ngoài transaction —
+        giữ một transaction Postgres vài phút là không chấp nhận được.</div></div>
+  </div>
+</section>
+
+<footer>
+  <p><b>Câu hỏi còn mở:</b> ba ngã rẽ trên · API <code>getfriends</code> có trả về số điện thoại không
+  (chưa kiểm chứng được nếu không có phiên thật) · "Tạm dừng" có đáng làm ở v1 hay chỉ cần "Dừng" + "Tiếp tục" ·
+  ngắt kết nối thì xoá hay giữ lại các liên kết đã ghép.</p>
+  <p>Kèm theo <code>plans/reports/brainstorm-260806-1626-zalo-personal-ux.md</code> ·
+  nối tiếp <code>brainstorm-260806-1611-zalo-personal-invoice-send.md</code>.
+  Font hiển thị Baloo 2 là webfont nên bản offline này lùi về font hệ thống — tỉ lệ chữ chỉ mang tính tham khảo.</p>
+</footer>
+
+</div>
+</body>
+</html>

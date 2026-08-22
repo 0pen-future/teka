@@ -8,6 +8,7 @@ import (
 	"gorm.io/gorm"
 
 	"teka/apps/api/internal/database"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/pagination"
 )
 
@@ -22,13 +23,14 @@ type Filter struct {
 }
 
 // Repository is the read-only data access surface behind the collection
-// board. No method mutates a row: every query here scopes strictly by
-// teacher_id and never opens a transaction.
+// board. No method mutates a row: every query here scopes strictly by center,
+// further narrowed to one teacher's own rows unless the caller owns the
+// center, and never opens a transaction.
 type Repository interface {
-	PeriodExists(ctx context.Context, teacherID, periodID uuid.UUID) (bool, error)
-	ContactBalances(ctx context.Context, teacherID, periodID uuid.UUID, filter Filter, p pagination.Params) ([]ContactBalanceRow, int64, error)
-	ClassCollections(ctx context.Context, teacherID, periodID uuid.UUID, filter Filter, p pagination.Params) ([]ClassCollectionRow, int64, error)
-	PeriodSummary(ctx context.Context, teacherID, periodID uuid.UUID) (*SummaryResponse, error)
+	PeriodExists(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (bool, error)
+	ContactBalances(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, filter Filter, p pagination.Params) ([]ContactBalanceRow, int64, error)
+	ClassCollections(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, filter Filter, p pagination.Params) ([]ClassCollectionRow, int64, error)
+	PeriodSummary(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*SummaryResponse, error)
 }
 
 type gormRepository struct {
@@ -40,15 +42,20 @@ func NewRepository(db *gorm.DB) Repository {
 	return &gormRepository{db: db}
 }
 
-// PeriodExists reports whether periodID belongs to teacherID, the sole
-// tenant check every handler in this package runs before touching any
-// reporting query.
-func (r *gormRepository) PeriodExists(ctx context.Context, teacherID, periodID uuid.UUID) (bool, error) {
+// PeriodExists reports whether periodID belongs to sc's center — and, unless
+// sc is the center's owner, to sc's own teacher — the sole tenant check every
+// handler in this package runs before touching any reporting query. An owner
+// matches any teacher's period in the center, mirroring the oversight rule
+// every other scoped query in this package applies.
+func (r *gormRepository) PeriodExists(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (bool, error) {
 	var count int64
-	err := database.FromContext(ctx, r.db).
+	q := database.FromContext(ctx, r.db).
 		Table("billing_periods").
-		Where("id = ? AND teacher_id = ? AND deleted_at IS NULL", periodID, teacherID).
-		Count(&count).Error
+		Where("id = ? AND center_id = ? AND deleted_at IS NULL", periodID, sc.CenterID)
+	if !sc.IsOwner {
+		q = q.Where("teacher_id = ?", sc.TeacherID)
+	}
+	err := q.Count(&count).Error
 	return count > 0, err
 }
 
@@ -74,16 +81,23 @@ type contactScanRow struct {
 // pass over v_contact_balance: the view already excludes void invoices, so
 // this joins straight to contacts for the display name.
 //
+// vcb.center_id anchors the tenant filter unconditionally; vcb.teacher_id is
+// only added when sc is not the center's owner, so an owner's read resolves
+// every member's rows in one query instead of narrowing to their own.
+//
 // The contacts join deliberately omits "AND c.deleted_at IS NULL" — a
 // contact who still owes money for a period must keep showing up here even
 // after being archived, or a teacher chasing this period's collections would
 // silently lose track of that debt. contact_archived flags the row instead
 // of hiding it. Every other join in this file keeps its deleted_at filter.
-func (r *gormRepository) contactBalanceQuery(ctx context.Context, teacherID, periodID uuid.UUID, filter Filter) *gorm.DB {
+func (r *gormRepository) contactBalanceQuery(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, filter Filter) *gorm.DB {
 	q := database.FromContext(ctx, r.db).
 		Table("v_contact_balance AS vcb").
-		Joins("JOIN contacts c ON c.id = vcb.contact_id AND c.teacher_id = vcb.teacher_id").
-		Where("vcb.teacher_id = ? AND vcb.period_id = ?", teacherID, periodID)
+		Joins("JOIN contacts c ON c.id = vcb.contact_id AND c.center_id = vcb.center_id").
+		Where("vcb.center_id = ? AND vcb.period_id = ?", sc.CenterID, periodID)
+	if !sc.IsOwner {
+		q = q.Where("vcb.teacher_id = ?", sc.TeacherID)
+	}
 	if filter.Status != "" {
 		q = q.Where(paymentStatusExpr("vcb.total_due", "vcb.total_paid")+" = ?", filter.Status)
 	}
@@ -105,15 +119,16 @@ func ContactSortColumns() map[string]string { return contactSortColumns }
 
 // ContactBalances returns one row per contact who has at least one non-void
 // invoice in periodID, merging every one of their children into a single
-// balance — the default view for a teacher chasing money by family.
-func (r *gormRepository) ContactBalances(ctx context.Context, teacherID, periodID uuid.UUID, filter Filter, p pagination.Params) ([]ContactBalanceRow, int64, error) {
+// balance — the default view for a teacher (or the center owner) chasing
+// money by family.
+func (r *gormRepository) ContactBalances(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, filter Filter, p pagination.Params) ([]ContactBalanceRow, int64, error) {
 	var total int64
-	if err := r.contactBalanceQuery(ctx, teacherID, periodID, filter).Count(&total).Error; err != nil {
+	if err := r.contactBalanceQuery(ctx, sc, periodID, filter).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
 	var scanned []contactScanRow
-	err := r.contactBalanceQuery(ctx, teacherID, periodID, filter).
+	err := r.contactBalanceQuery(ctx, sc, periodID, filter).
 		Select(`vcb.contact_id AS contact_id, c.full_name AS full_name, c.phone AS phone,
 			c.deleted_at AS deleted_at, vcb.student_count AS student_count,
 			vcb.total_due AS total_due, vcb.total_paid AS total_paid, vcb.outstanding AS outstanding`).
@@ -127,7 +142,7 @@ func (r *gormRepository) ContactBalances(ctx context.Context, teacherID, periodI
 	for i, sr := range scanned {
 		contactIDs[i] = sr.ContactID
 	}
-	invoicesByContact, err := r.childInvoicesByContact(ctx, teacherID, periodID, contactIDs)
+	invoicesByContact, err := r.childInvoicesByContact(ctx, sc, periodID, contactIDs)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -156,7 +171,7 @@ func (r *gormRepository) ContactBalances(ctx context.Context, teacherID, periodI
 
 // childInvoicesByContact batch-loads every non-void invoice for the given
 // contacts in one query, avoiding an N+1 round trip per page row.
-func (r *gormRepository) childInvoicesByContact(ctx context.Context, teacherID, periodID uuid.UUID, contactIDs []uuid.UUID) (map[uuid.UUID][]ContactChildInvoiceRow, error) {
+func (r *gormRepository) childInvoicesByContact(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, contactIDs []uuid.UUID) (map[uuid.UUID][]ContactChildInvoiceRow, error) {
 	out := make(map[uuid.UUID][]ContactChildInvoiceRow, len(contactIDs))
 	if len(contactIDs) == 0 {
 		return out, nil
@@ -169,13 +184,15 @@ func (r *gormRepository) childInvoicesByContact(ctx context.Context, teacherID, 
 		TotalDue    int64
 		PaidAmount  int64
 	}
-	var rows []scanRow
-	err := database.FromContext(ctx, r.db).
+	q := database.FromContext(ctx, r.db).
 		Table("invoices").
 		Select("contact_id AS contact_id, id AS invoice_id, student_name AS student_name, total_due AS total_due, paid_amount AS paid_amount").
-		Where("teacher_id = ? AND period_id = ? AND contact_id IN ? AND status <> ?", teacherID, periodID, contactIDs, statusVoid).
-		Order("student_name").
-		Find(&rows).Error
+		Where("center_id = ? AND period_id = ? AND contact_id IN ? AND status <> ?", sc.CenterID, periodID, contactIDs, statusVoid)
+	if !sc.IsOwner {
+		q = q.Where("teacher_id = ?", sc.TeacherID)
+	}
+	var rows []scanRow
+	err := q.Order("student_name").Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
@@ -221,12 +238,18 @@ func ClassSortColumns() map[string]string { return classSortColumns }
 // data pass over one class's billing lines for the period. filter.ClassID is
 // required by the caller (Service enforces it); this still guards against a
 // nil pointer for a repository used directly.
-func (r *gormRepository) classCollectionsQuery(ctx context.Context, teacherID, periodID uuid.UUID, filter Filter) *gorm.DB {
+//
+// i.center_id anchors the tenant filter unconditionally; i.teacher_id is
+// only added when sc is not the center's owner, matching contactBalanceQuery.
+func (r *gormRepository) classCollectionsQuery(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, filter Filter) *gorm.DB {
 	q := database.FromContext(ctx, r.db).
 		Table("invoice_lines AS il").
-		Joins("JOIN invoices i ON i.id = il.invoice_id AND i.teacher_id = il.teacher_id").
-		Joins("JOIN enrollments e ON e.id = il.enrollment_id AND e.teacher_id = il.teacher_id AND e.deleted_at IS NULL").
-		Where("i.teacher_id = ? AND i.period_id = ? AND i.status <> ?", teacherID, periodID, statusVoid)
+		Joins("JOIN invoices i ON i.id = il.invoice_id AND i.center_id = il.center_id").
+		Joins("JOIN enrollments e ON e.id = il.enrollment_id AND e.center_id = il.center_id AND e.deleted_at IS NULL").
+		Where("i.center_id = ? AND i.period_id = ? AND i.status <> ?", sc.CenterID, periodID, statusVoid)
+	if !sc.IsOwner {
+		q = q.Where("i.teacher_id = ?", sc.TeacherID)
+	}
 	if filter.ClassID != nil {
 		q = q.Where("e.class_id = ?", *filter.ClassID)
 	}
@@ -241,16 +264,16 @@ func (r *gormRepository) classCollectionsQuery(ctx context.Context, teacherID, p
 }
 
 // ClassCollections returns one row per invoice line for the requested class
-// within periodID — the view a teacher standing in front of one room uses to
-// see which child is short and by how much.
-func (r *gormRepository) ClassCollections(ctx context.Context, teacherID, periodID uuid.UUID, filter Filter, p pagination.Params) ([]ClassCollectionRow, int64, error) {
+// within periodID — the view a teacher (or the center owner) standing in
+// front of one room uses to see which child is short and by how much.
+func (r *gormRepository) ClassCollections(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, filter Filter, p pagination.Params) ([]ClassCollectionRow, int64, error) {
 	var total int64
-	if err := r.classCollectionsQuery(ctx, teacherID, periodID, filter).Count(&total).Error; err != nil {
+	if err := r.classCollectionsQuery(ctx, sc, periodID, filter).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
 	var scanned []classScanRow
-	err := r.classCollectionsQuery(ctx, teacherID, periodID, filter).
+	err := r.classCollectionsQuery(ctx, sc, periodID, filter).
 		Select(`i.id AS invoice_id, i.student_id AS student_id, i.student_name AS student_name,
 			i.contact_id AS contact_id, i.contact_name AS contact_name,
 			il.class_name AS class_name, il.billable_count AS billable_count, il.absent_count AS absent_count,
@@ -288,7 +311,7 @@ func (r *gormRepository) ClassCollections(ctx context.Context, teacherID, period
 // PeriodSummary aggregates periodID's non-void invoices, the paid/unpaid/
 // partial split of its contacts, and the period's contacts' unallocated
 // credit — money already received that no allocation has touched.
-func (r *gormRepository) PeriodSummary(ctx context.Context, teacherID, periodID uuid.UUID) (*SummaryResponse, error) {
+func (r *gormRepository) PeriodSummary(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*SummaryResponse, error) {
 	var totals struct {
 		StudentCount     int64
 		ContactCount     int64
@@ -296,14 +319,16 @@ func (r *gormRepository) PeriodSummary(ctx context.Context, teacherID, periodID 
 		TotalPaid        int64
 		TotalOutstanding int64
 	}
-	err := database.FromContext(ctx, r.db).
+	totalsQ := database.FromContext(ctx, r.db).
 		Table("invoices").
 		Select(`COUNT(DISTINCT student_id) AS student_count, COUNT(DISTINCT contact_id) AS contact_count,
 			COALESCE(SUM(total_due),0) AS total_due, COALESCE(SUM(paid_amount),0) AS total_paid,
 			COALESCE(SUM(total_due - paid_amount),0) AS total_outstanding`).
-		Where("teacher_id = ? AND period_id = ? AND status <> ?", teacherID, periodID, statusVoid).
-		Take(&totals).Error
-	if err != nil {
+		Where("center_id = ? AND period_id = ? AND status <> ?", sc.CenterID, periodID, statusVoid)
+	if !sc.IsOwner {
+		totalsQ = totalsQ.Where("teacher_id = ?", sc.TeacherID)
+	}
+	if err := totalsQ.Take(&totals).Error; err != nil {
 		return nil, err
 	}
 
@@ -312,14 +337,16 @@ func (r *gormRepository) PeriodSummary(ctx context.Context, teacherID, periodID 
 		Unpaid  int64
 		Partial int64
 	}
-	err = database.FromContext(ctx, r.db).
+	statusQ := database.FromContext(ctx, r.db).
 		Table("v_contact_balance").
 		Select(`COUNT(*) FILTER (WHERE outstanding <= 0) AS paid,
 			COUNT(*) FILTER (WHERE outstanding > 0 AND total_paid = 0) AS unpaid,
 			COUNT(*) FILTER (WHERE outstanding > 0 AND total_paid > 0) AS partial`).
-		Where("teacher_id = ? AND period_id = ?", teacherID, periodID).
-		Take(&statusCounts).Error
-	if err != nil {
+		Where("center_id = ? AND period_id = ?", sc.CenterID, periodID)
+	if !sc.IsOwner {
+		statusQ = statusQ.Where("teacher_id = ?", sc.TeacherID)
+	}
+	if err := statusQ.Take(&statusCounts).Error; err != nil {
 		return nil, err
 	}
 
@@ -329,17 +356,29 @@ func (r *gormRepository) PeriodSummary(ctx context.Context, teacherID, periodID 
 	// pair of flags Reverse() uses to keep a corrected payment from counting
 	// twice (repository.go's RecalcInvoicePaid in the payments package nets
 	// a reversal's allocations the same way for the identical reason).
+	//
+	// Every fragment below repeats the (? OR x.teacher_id = ?) pair so
+	// sc.IsOwner short-circuits the teacher_id check via SQL OR — the same
+	// trick payments' candidateInvoicesQuery and billing's
+	// RecalcInvoiceTotals use — because this single statement joins a
+	// subquery and a correlated subquery, each independently tenant-scoped,
+	// and building that out of conditional Go query fragments would mean
+	// three near-duplicate raw strings instead of one.
 	var unallocated int64
 	row := database.FromContext(ctx, r.db).
 		Table("payments AS p").
 		Select("COALESCE(SUM(p.amount - COALESCE(alloc.total, 0)), 0)").
 		Joins(`LEFT JOIN (
 			SELECT payment_id, SUM(amount) AS total FROM payment_allocations
-			WHERE teacher_id = ? GROUP BY payment_id
-		) alloc ON alloc.payment_id = p.id`, teacherID).
-		Where(`p.teacher_id = ? AND p.reversed_at IS NULL AND p.reverses_payment_id IS NULL
-			AND p.contact_id IN (SELECT DISTINCT contact_id FROM v_contact_balance WHERE teacher_id = ? AND period_id = ?)`,
-			teacherID, teacherID, periodID).
+			WHERE center_id = ? AND (? OR teacher_id = ?) GROUP BY payment_id
+		) alloc ON alloc.payment_id = p.id`, sc.CenterID, sc.IsOwner, sc.TeacherID).
+		Where(`p.center_id = ? AND (? OR p.teacher_id = ?) AND p.reversed_at IS NULL AND p.reverses_payment_id IS NULL
+			AND p.contact_id IN (
+				SELECT DISTINCT contact_id FROM v_contact_balance
+				WHERE center_id = ? AND (? OR teacher_id = ?) AND period_id = ?
+			)`,
+			sc.CenterID, sc.IsOwner, sc.TeacherID,
+			sc.CenterID, sc.IsOwner, sc.TeacherID, periodID).
 		Row()
 	if err := row.Scan(&unallocated); err != nil {
 		return nil, err

@@ -21,7 +21,7 @@ removes volumes (destroys local DB data); `make dev-logs` tails api + web.
 |---|---|---|
 | web | <http://localhost:5173> | Vite dev server, HMR; proxies `/api` to the API |
 | api | <http://localhost:8080> | Gin + air hot reload; `/healthz`, `/readyz` |
-| postgres | `localhost:5432` | `postgres:17-alpine`, data in `postgres-data` volume |
+| postgres | `localhost:5432` | `postgres:16-alpine` (same major as production), data in `postgres-data` volume |
 | adminer | <http://localhost:8081> | DB UI; server `postgres`, credentials from `.env` |
 | migrate | — | one-shot `migrate up`, gates the API start |
 
