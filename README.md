@@ -10,7 +10,7 @@ Full-stack application: Go API (Gin + GORM + PostgreSQL) and React web app
 ## Prerequisites
 
 - Git, Make
-- Go 1.22+
+- Go 1.25.14+ (older 1.25 point releases carry patched stdlib CVEs; `GOTOOLCHAIN=auto` downloads it from `go.mod` automatically)
 - Node.js 20+
 - Docker with the Compose plugin
 

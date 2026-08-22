@@ -21,7 +21,7 @@ CI publishes two images to GHCR on every merge to `main` (see
 | Image | Base | Contents |
 |-------|------|----------|
 | `ghcr.io/OWNER/REPO/api` | `gcr.io/distroless/static-debian12:nonroot` | Single static Go binary; serves on 8080 |
-| `ghcr.io/OWNER/REPO/web` | `nginxinc/nginx-unprivileged:1.29-alpine` | Static Vite bundle behind nginx; listens on 8080 |
+| `ghcr.io/OWNER/REPO/web` | `nginxinc/nginx-unprivileged:1.30-alpine` | Static Vite bundle behind nginx; listens on 8080 |
 
 Both run as non-root. Tags: `sha-<commit>` for every main build plus a moving
 `latest`. Deploy by SHA tag — `latest` is for convenience, not for pinning.
