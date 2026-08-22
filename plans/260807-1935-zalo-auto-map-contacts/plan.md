@@ -1,11 +1,12 @@
 ---
 title: "Zalo Auto-Map Contacts"
 description: "Auto-suggest contact→Zalo-friend mapping by phone lookup, plus a Contacts entry in the app nav"
-status: in-progress
+status: done
 priority: P1
 effort: "4d"
 tags: [zalo, contacts, web, protocol]
 created: 2026-08-07
+blocks: [260811-1055-manager-class-oversight]
 ---
 
 # Zalo Auto-Map Contacts

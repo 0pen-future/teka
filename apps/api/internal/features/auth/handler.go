@@ -30,33 +30,6 @@ func NewHandler(svc *Service, cfg *config.Config) *Handler {
 	return &Handler{svc: svc, cfg: cfg}
 }
 
-// register creates a teacher account and opens a session.
-//
-//	@Summary		Register a new teacher
-//	@Description	Creates a teacher account from a Vietnamese phone number (0xxxxxxxxx or +84xxxxxxxxx) and returns an access token; the refresh token is set as an httpOnly cookie.
-//	@Tags			auth
-//	@Accept			json
-//	@Produce		json
-//	@Param			request	body		RegisterRequest	true	"registration payload"
-//	@Success		201		{object}	response.Envelope{data=TokenResponse}
-//	@Failure		409		{object}	response.Envelope{error=response.ErrorBody}	"phone already registered"
-//	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}	"validation failed"
-//	@Router			/auth/register [post]
-func (h *Handler) register(c *gin.Context) {
-	var req RegisterRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Err(c, validation.BindError(err))
-		return
-	}
-	sess, err := h.svc.Register(c.Request.Context(), req)
-	if err != nil {
-		response.Err(c, err)
-		return
-	}
-	h.setRefreshCookie(c, sess.RefreshToken)
-	response.OK(c, http.StatusCreated, h.tokenResponse(sess))
-}
-
 // login verifies credentials and opens a session.
 //
 //	@Summary		Log in
@@ -130,6 +103,58 @@ func (h *Handler) logout(c *gin.Context) {
 	}
 	h.clearRefreshCookie(c)
 	response.OK(c, http.StatusOK, gin.H{"message": "logged out"})
+}
+
+// forgotPassword requests a password-reset link over the center owner's
+// linked Zalo.
+//
+//	@Summary		Request a password reset
+//	@Description	Public, unauthenticated. Always returns the same generic body: whether the phone matched an eligible account (an active, non-owner member) is never revealed. Delivery is best-effort over the center owner's linked Zalo — owners themselves are excluded and recover via operator CLI only.
+//	@Tags			auth
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body		ForgotPasswordRequest	true	"phone"
+//	@Success		200		{object}	response.Envelope{data=ForgotPasswordResponse}
+//	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}	"validation failed"
+//	@Failure		429		{object}	response.Envelope{error=response.ErrorBody}
+//	@Router			/auth/forgot-password [post]
+func (h *Handler) forgotPassword(c *gin.Context) {
+	var req ForgotPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Err(c, validation.BindError(err))
+		return
+	}
+	if err := h.svc.ForgotPassword(c.Request.Context(), req); err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, forgotPasswordResponse)
+}
+
+// resetPassword redeems a password-reset token.
+//
+//	@Summary		Reset password
+//	@Description	Public, unauthenticated. Token travels in the body. Every rejection reason — unknown/used/expired/superseded token, or an account no longer active — answers the same generic 400 body, by design (anti-enumeration). On success, every refresh token the account held is revoked.
+//	@Tags			auth
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body	ResetPasswordRequest	true	"token and new password"
+//	@Success		204
+//	@Failure		400	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		422	{object}	response.Envelope{error=response.ErrorBody}	"validation failed"
+//	@Failure		429	{object}	response.Envelope{error=response.ErrorBody}
+//	@Router			/auth/reset-password [post]
+func (h *Handler) resetPassword(c *gin.Context) {
+	var req ResetPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Err(c, validation.BindError(err))
+		return
+	}
+	if err := h.svc.ResetPassword(c.Request.Context(), req); err != nil {
+		response.Err(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (h *Handler) tokenResponse(sess *Session) TokenResponse {

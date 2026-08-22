@@ -5,11 +5,14 @@ import { ProtectedRoute } from "@/features/auth";
 import { authRoutes } from "@/features/auth/routes";
 import { attendanceRoutes } from "@/features/attendance/routes";
 import { billingRoutes } from "@/features/billing/routes";
+import { centerRoutes } from "@/features/center/routes";
 import { collectionsRoutes } from "@/features/collections/routes";
 import { dashboardRoutes } from "@/features/dashboard/routes";
+import { invitationRoutes } from "@/features/invitation";
 import { profileRoutes } from "@/features/profile/routes";
 import { rosterRoutes } from "@/features/roster/routes";
 import { statementRoutes } from "@/features/statement";
+import { teachingRoutes } from "@/features/teaching/routes";
 import { AuthLayout } from "@/layouts/auth-layout";
 import { DashboardLayout } from "@/layouts/dashboard-layout";
 import { PublicLayout } from "@/layouts/public-layout";
@@ -25,7 +28,7 @@ export const router = createBrowserRouter([
     children: [
       {
         element: <AuthLayout />,
-        children: authRoutes,
+        children: [...authRoutes, ...invitationRoutes],
       },
       {
         element: (
@@ -36,11 +39,13 @@ export const router = createBrowserRouter([
         path: "/",
         children: [
           ...dashboardRoutes,
+          ...teachingRoutes,
           ...rosterRoutes,
           ...attendanceRoutes,
           ...billingRoutes,
           ...collectionsRoutes,
           ...profileRoutes,
+          ...centerRoutes,
         ],
       },
       {

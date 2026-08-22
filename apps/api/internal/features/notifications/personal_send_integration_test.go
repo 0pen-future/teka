@@ -89,9 +89,10 @@ func closedPeriodWithContacts(t *testing.T, d *deps, teacherID uuid.UUID, n int)
 		seedChild(t, d.db, teacherID, contact.ID, "PersonalChild"+string(rune('A'+i)), date("2026-06-01"), 1)
 		contactIDs = append(contactIDs, contact.ID)
 	}
-	period, err := d.billing.EnsurePeriod(ctx, teacherID, 2026, 6)
+	sc := testutil.ScopeFor(t, d.db, teacherID)
+	period, err := d.billing.EnsurePeriod(ctx, sc, 2026, 6)
 	require.NoError(t, err)
-	_, err = d.billing.Close(ctx, teacherID, period.ID)
+	_, err = d.billing.Close(ctx, sc, period.ID)
 	require.NoError(t, err)
 	return period.ID, contactIDs
 }
@@ -102,13 +103,14 @@ func TestBulkSendPersonalSplitsMappedAndUnmappedContacts(t *testing.T) {
 	d := newDepsWithZalo(t, testutil.StartPostgres(t), fake)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, d.db)
+	sc := testutil.ScopeFor(t, d.db, teacher.ID)
 
 	periodID, contacts := closedPeriodWithContacts(t, d, teacher.ID, 3)
 	mapContact(t, d.db, contacts[0], "uid-first")
 	mapContact(t, d.db, contacts[1], "uid-second")
 	// contacts[2] stays unmapped and must fall back to copy-paste.
 
-	resp, err := d.notifications.BulkSend(ctx, teacher.ID, periodID, notifications.BulkSendRequest{
+	resp, err := d.notifications.BulkSend(ctx, sc, periodID, notifications.BulkSendRequest{
 		Purpose: "statement",
 		Channel: notifications.ChannelZaloPersonal,
 	})
@@ -165,10 +167,11 @@ func TestBulkSendPersonalWithNoMappedContactStartsNoRun(t *testing.T) {
 	d := newDepsWithZalo(t, testutil.StartPostgres(t), fake)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, d.db)
+	sc := testutil.ScopeFor(t, d.db, teacher.ID)
 
 	periodID, _ := closedPeriodWithContacts(t, d, teacher.ID, 2)
 
-	resp, err := d.notifications.BulkSend(ctx, teacher.ID, periodID, notifications.BulkSendRequest{
+	resp, err := d.notifications.BulkSend(ctx, sc, periodID, notifications.BulkSendRequest{
 		Purpose: "statement",
 		Channel: notifications.ChannelZaloPersonal,
 	})
@@ -183,6 +186,53 @@ func TestBulkSendPersonalWithNoMappedContactStartsNoRun(t *testing.T) {
 	require.Zero(t, runCount)
 	uids, _ := fake.sent()
 	require.Empty(t, uids)
+}
+
+// A Zalo account is personal: messages go out from the caller's own linked
+// session. An owner opening a member's period under zalo_personal would
+// therefore DM the member's parents from the owner's account — every mapped
+// contact belongs to the member's strict scope, so the whole batch would
+// silently fall back to copy-paste. Refuse the combination outright; the
+// owner's own periods keep working unchanged.
+func TestBulkSendPersonalRefusesAMembersPeriod(t *testing.T) {
+	t.Parallel()
+	fake := &fakeZaloSender{}
+	d := newDepsWithZalo(t, testutil.StartPostgres(t), fake)
+	ctx := context.Background()
+	_, owner := testutil.Teacher(t, d.db)
+	_, member := testutil.Teacher(t, d.db)
+	ownerCenter := testutil.ScopeFor(t, d.db, owner.ID).CenterID
+	testutil.JoinCenter(t, d.db, member.ID, ownerCenter)
+	ownerScope := testutil.ScopeFor(t, d.db, owner.ID)
+
+	memberPeriod, memberContacts := closedPeriodWithContacts(t, d, member.ID, 1)
+	mapContact(t, d.db, memberContacts[0], "uid-member")
+
+	_, err := d.notifications.BulkSend(ctx, ownerScope, memberPeriod, notifications.BulkSendRequest{
+		Purpose: "statement",
+		Channel: notifications.ChannelZaloPersonal,
+	})
+	require.Error(t, err)
+	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
+	require.Zero(t, notificationCount(t, d.db, memberPeriod),
+		"the refused send must write nothing — not even the statement refresh's notifications")
+	var runCount int64
+	require.NoError(t, d.db.Table("notification_runs").Where("teacher_id = ?", owner.ID).Count(&runCount).Error)
+	require.Zero(t, runCount)
+	uids, _ := fake.sent()
+	require.Empty(t, uids)
+
+	// The owner's own period still sends from their own account.
+	ownPeriod, ownContacts := closedPeriodWithContacts(t, d, owner.ID, 1)
+	mapContact(t, d.db, ownContacts[0], "uid-own")
+	resp, err := d.notifications.BulkSend(ctx, ownerScope, ownPeriod, notifications.BulkSendRequest{
+		Purpose: "statement",
+		Channel: notifications.ChannelZaloPersonal,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp.RunID)
+	require.Equal(t, 1, resp.PersonalQueuedCount)
+	require.Equal(t, notifications.RunStatusCompleted, waitForRunOutcome(t, d.db, *resp.RunID))
 }
 
 func TestBulkSendPersonalRejectsAnUnhealthySessionBeforeWritingAnything(t *testing.T) {
@@ -201,10 +251,11 @@ func TestBulkSendPersonalRejectsAnUnhealthySessionBeforeWritingAnything(t *testi
 			d := newDepsWithZalo(t, testutil.StartPostgres(t), &fakeZaloSender{verifyErr: tc.verifyErr})
 			ctx := context.Background()
 			_, teacher := testutil.Teacher(t, d.db)
+			sc := testutil.ScopeFor(t, d.db, teacher.ID)
 			periodID, contacts := closedPeriodWithContacts(t, d, teacher.ID, 1)
 			mapContact(t, d.db, contacts[0], "uid-any")
 
-			_, err := d.notifications.BulkSend(ctx, teacher.ID, periodID, notifications.BulkSendRequest{
+			_, err := d.notifications.BulkSend(ctx, sc, periodID, notifications.BulkSendRequest{
 				Purpose: "statement",
 				Channel: notifications.ChannelZaloPersonal,
 			})
@@ -221,11 +272,12 @@ func TestBulkSendPersonalOverTheRunSizeCapWritesNothing(t *testing.T) {
 	d := newDepsWithZaloAndRunCap(t, testutil.StartPostgres(t), &fakeZaloSender{}, 1)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, d.db)
+	sc := testutil.ScopeFor(t, d.db, teacher.ID)
 	periodID, contacts := closedPeriodWithContacts(t, d, teacher.ID, 2)
 	mapContact(t, d.db, contacts[0], "uid-one")
 	mapContact(t, d.db, contacts[1], "uid-two")
 
-	_, err := d.notifications.BulkSend(ctx, teacher.ID, periodID, notifications.BulkSendRequest{
+	_, err := d.notifications.BulkSend(ctx, sc, periodID, notifications.BulkSendRequest{
 		Purpose: "statement",
 		Channel: notifications.ChannelZaloPersonal,
 	})
@@ -247,11 +299,12 @@ func TestBulkSendPersonalRefusesWhileARunIsStillSending(t *testing.T) {
 	d := newDepsWithZalo(t, testutil.StartPostgres(t), fake)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, d.db)
+	sc := testutil.ScopeFor(t, d.db, teacher.ID)
 
 	periodID, contacts := closedPeriodWithContacts(t, d, teacher.ID, 1)
 	mapContact(t, d.db, contacts[0], "uid-slow")
 
-	first, err := d.notifications.BulkSend(ctx, teacher.ID, periodID, notifications.BulkSendRequest{
+	first, err := d.notifications.BulkSend(ctx, sc, periodID, notifications.BulkSendRequest{
 		Purpose: "statement",
 		Channel: notifications.ChannelZaloPersonal,
 	})
@@ -259,7 +312,7 @@ func TestBulkSendPersonalRefusesWhileARunIsStillSending(t *testing.T) {
 	require.NotNil(t, first.RunID)
 
 	countBefore := notificationCount(t, d.db, periodID)
-	_, err = d.notifications.BulkSend(ctx, teacher.ID, periodID, notifications.BulkSendRequest{
+	_, err = d.notifications.BulkSend(ctx, sc, periodID, notifications.BulkSendRequest{
 		Purpose: "statement",
 		Channel: notifications.ChannelZaloPersonal,
 	})
@@ -272,7 +325,7 @@ func TestBulkSendPersonalRefusesWhileARunIsStillSending(t *testing.T) {
 	require.Equal(t, notifications.RunStatusCompleted, waitForRunOutcome(t, d.db, *first.RunID))
 
 	// Once the run has finished, a new personal send is allowed again.
-	third, err := d.notifications.BulkSend(ctx, teacher.ID, periodID, notifications.BulkSendRequest{
+	third, err := d.notifications.BulkSend(ctx, sc, periodID, notifications.BulkSendRequest{
 		Purpose: "reminder",
 		Channel: notifications.ChannelZaloPersonal,
 	})
@@ -292,13 +345,14 @@ func TestBulkSendPersonalExpiringMidRunFailsTheRemainingRows(t *testing.T) {
 	d := newDepsWithZalo(t, testutil.StartPostgres(t), fake)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, d.db)
+	sc := testutil.ScopeFor(t, d.db, teacher.ID)
 
 	periodID, contacts := closedPeriodWithContacts(t, d, teacher.ID, 3)
 	for i, c := range contacts {
 		mapContact(t, d.db, c, "uid-"+string(rune('a'+i)))
 	}
 
-	resp, err := d.notifications.BulkSend(ctx, teacher.ID, periodID, notifications.BulkSendRequest{
+	resp, err := d.notifications.BulkSend(ctx, sc, periodID, notifications.BulkSendRequest{
 		Purpose: "statement",
 		Channel: notifications.ChannelZaloPersonal,
 	})

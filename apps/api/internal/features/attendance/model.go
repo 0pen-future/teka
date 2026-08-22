@@ -34,8 +34,11 @@ const (
 // it stays correct even if the student later leaves and re-enrolls at a
 // different price.
 type Record struct {
-	ID           uuid.UUID `gorm:"primaryKey"`
-	TeacherID    uuid.UUID
+	ID        uuid.UUID `gorm:"primaryKey"`
+	TeacherID uuid.UUID
+	// CenterID anchors the row in the center it was created in; it never
+	// changes, even when the creating teacher later moves centers.
+	CenterID     uuid.UUID
 	SessionID    uuid.UUID
 	StudentID    uuid.UUID
 	EnrollmentID uuid.UUID

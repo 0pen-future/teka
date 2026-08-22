@@ -168,6 +168,7 @@ const classSlotsField = z
 export const classSchema = z.object({
   id: z.string(),
   name: z.string(),
+  teacher_id: z.string(),
   start_date: z.string(),
   end_date: z.string().nullable(),
   default_unit_price: z.number().int(),
@@ -201,6 +202,18 @@ export const classUpdateInputSchema = z.object({
 });
 
 export type ClassUpdateInput = z.infer<typeof classUpdateInputSchema>;
+
+/**
+ * `handoff.ReassignResponse` (`PUT /classes/:id/teacher`). `teacher_id` is the
+ * class's new owner; `moved_planned_sessions` is 0 on an idempotent no-op.
+ */
+export const reassignTeacherResponseSchema = z.object({
+  class_id: z.string(),
+  teacher_id: z.string(),
+  moved_planned_sessions: z.number().int(),
+});
+
+export type ReassignTeacherResponse = z.infer<typeof reassignTeacherResponseSchema>;
 
 /**
  * Form shape for the "Cài đặt lớp" screen (prototype `classCfg`): one name,

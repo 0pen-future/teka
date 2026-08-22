@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/shared/pagination"
 )
@@ -22,7 +23,8 @@ type fakeContact struct {
 
 // fakeRepository is an in-memory Repository enforcing the same invariants the
 // SQL layer does: per-teacher phone uniqueness among non-deleted rows and
-// tenant-scoped reads.
+// center-scoped reads (owner sees the whole center, a member only their own
+// rows).
 type fakeRepository struct {
 	rows     map[uuid.UUID]*fakeContact
 	students map[uuid.UUID][]string // contactID -> live student names
@@ -30,6 +32,15 @@ type fakeRepository struct {
 
 func newFakeRepository() *fakeRepository {
 	return &fakeRepository{rows: map[uuid.UUID]*fakeContact{}, students: map[uuid.UUID][]string{}}
+}
+
+// visible mirrors the real scoped() predicate: always the center, plus the
+// teacher when the caller is not an owner.
+func visible(c *fakeContact, sc authctx.Scope) bool {
+	if c.deleted || c.CenterID != sc.CenterID {
+		return false
+	}
+	return sc.IsOwner || c.TeacherID == sc.TeacherID
 }
 
 func (f *fakeRepository) Create(_ context.Context, c *Contact) error {
@@ -42,18 +53,18 @@ func (f *fakeRepository) Create(_ context.Context, c *Contact) error {
 	return nil
 }
 
-func (f *fakeRepository) GetByID(_ context.Context, teacherID, contactID uuid.UUID) (*Row, error) {
+func (f *fakeRepository) GetByID(_ context.Context, sc authctx.Scope, contactID uuid.UUID) (*Row, error) {
 	c, ok := f.rows[contactID]
-	if !ok || c.deleted || c.TeacherID != teacherID {
+	if !ok || !visible(c, sc) {
 		return nil, ErrNotFound
 	}
 	return &Row{Contact: c.Contact, StudentCount: int64(len(f.students[contactID]))}, nil
 }
 
-func (f *fakeRepository) List(_ context.Context, teacherID uuid.UUID, filter ListFilter, _ pagination.Params) ([]Row, int64, error) {
+func (f *fakeRepository) List(_ context.Context, sc authctx.Scope, filter ListFilter, _ pagination.Params) ([]Row, int64, error) {
 	var out []Row
 	for _, c := range f.rows {
-		if c.deleted || c.TeacherID != teacherID {
+		if !visible(c, sc) {
 			continue
 		}
 		if q := strings.ToLower(filter.Query); q != "" &&
@@ -76,20 +87,20 @@ func (f *fakeRepository) Update(_ context.Context, c *Contact) error {
 	return nil
 }
 
-func (f *fakeRepository) SoftDelete(_ context.Context, teacherID, contactID uuid.UUID) error {
+func (f *fakeRepository) SoftDelete(_ context.Context, sc authctx.Scope, contactID uuid.UUID) error {
 	c, ok := f.rows[contactID]
-	if !ok || c.deleted || c.TeacherID != teacherID {
+	if !ok || !visible(c, sc) {
 		return ErrNotFound
 	}
 	c.deleted = true
 	return nil
 }
 
-func (f *fakeRepository) CountActiveStudents(_ context.Context, _, contactID uuid.UUID) (int64, error) {
+func (f *fakeRepository) CountActiveStudents(_ context.Context, _ authctx.Scope, contactID uuid.UUID) (int64, error) {
 	return int64(len(f.students[contactID])), nil
 }
 
-func (f *fakeRepository) ListStudentNames(_ context.Context, _, contactID uuid.UUID, limit int) ([]string, error) {
+func (f *fakeRepository) ListStudentNames(_ context.Context, _ authctx.Scope, contactID uuid.UUID, limit int) ([]string, error) {
 	names := append([]string(nil), f.students[contactID]...)
 	sort.Strings(names)
 	if len(names) > limit {
@@ -98,9 +109,9 @@ func (f *fakeRepository) ListStudentNames(_ context.Context, _, contactID uuid.U
 	return names, nil
 }
 
-func (f *fakeRepository) UpdateZaloMapping(_ context.Context, teacherID, contactID uuid.UUID, zaloUserID, zaloName string) error {
+func (f *fakeRepository) UpdateZaloMapping(_ context.Context, sc authctx.Scope, contactID uuid.UUID, zaloUserID, zaloName string) error {
 	c, ok := f.rows[contactID]
-	if !ok || c.deleted || c.TeacherID != teacherID {
+	if !ok || !visible(c, sc) {
 		return ErrNotFound
 	}
 	c.ZaloUserID = &zaloUserID
@@ -108,9 +119,9 @@ func (f *fakeRepository) UpdateZaloMapping(_ context.Context, teacherID, contact
 	return nil
 }
 
-func (f *fakeRepository) ClearZaloMapping(_ context.Context, teacherID, contactID uuid.UUID) error {
+func (f *fakeRepository) ClearZaloMapping(_ context.Context, sc authctx.Scope, contactID uuid.UUID) error {
 	c, ok := f.rows[contactID]
-	if !ok || c.deleted || c.TeacherID != teacherID {
+	if !ok || !visible(c, sc) {
 		return ErrNotFound
 	}
 	c.ZaloUserID = nil
@@ -118,20 +129,33 @@ func (f *fakeRepository) ClearZaloMapping(_ context.Context, teacherID, contactI
 	return nil
 }
 
+// ownerScope returns a scope for a teacher who owns their own center.
+func ownerScope() authctx.Scope {
+	return authctx.Scope{TeacherID: id.New(), CenterID: id.New(), IsOwner: true}
+}
+
+// memberScope returns a scope for a non-owning member of some center.
+func memberScope() authctx.Scope {
+	return authctx.Scope{TeacherID: id.New(), CenterID: id.New(), IsOwner: false}
+}
+
 func TestCreateNormalisesPhone(t *testing.T) {
 	repo := newFakeRepository()
 	svc := NewService(repo)
-	teacherID := id.New()
+	sc := memberScope()
 
-	row, err := svc.Create(context.Background(), teacherID, CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
+	row, err := svc.Create(context.Background(), sc, CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	if row.Phone != "+84912345678" {
 		t.Fatalf("local-form input must be stored as E.164, got %q", row.Phone)
 	}
-	if row.TeacherID != teacherID {
-		t.Fatalf("teacher id must come from the caller, got %s", row.TeacherID)
+	if row.TeacherID != sc.TeacherID {
+		t.Fatalf("teacher id must come from the caller's scope, got %s", row.TeacherID)
+	}
+	if row.CenterID != sc.CenterID {
+		t.Fatalf("center id must come from the caller's scope, got %s", row.CenterID)
 	}
 	if row.StudentCount != 0 {
 		t.Fatalf("fresh contact must report zero students, got %d", row.StudentCount)
@@ -141,14 +165,14 @@ func TestCreateNormalisesPhone(t *testing.T) {
 func TestCreateDuplicatePhoneIsConflict(t *testing.T) {
 	repo := newFakeRepository()
 	svc := NewService(repo)
-	teacherID := id.New()
+	sc := memberScope()
 	ctx := context.Background()
 
-	if _, err := svc.Create(ctx, teacherID, CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"}); err != nil {
+	if _, err := svc.Create(ctx, sc, CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"}); err != nil {
 		t.Fatalf("first create: %v", err)
 	}
 	// The E.164 spelling of the same number must collide with the local form.
-	_, err := svc.Create(ctx, teacherID, CreateRequest{FullName: "Chị Hoa (bis)", Phone: "+84912345678"})
+	_, err := svc.Create(ctx, sc, CreateRequest{FullName: "Chị Hoa (bis)", Phone: "+84912345678"})
 	if apperror.From(err).Code != apperror.CodeConflict {
 		t.Fatalf("want CONFLICT, got %v", err)
 	}
@@ -160,18 +184,18 @@ func TestCreateDuplicatePhoneIsConflict(t *testing.T) {
 func TestUpdateDuplicatePhoneIsConflict(t *testing.T) {
 	repo := newFakeRepository()
 	svc := NewService(repo)
-	teacherID := id.New()
+	sc := memberScope()
 	ctx := context.Background()
 
-	first, err := svc.Create(ctx, teacherID, CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
+	first, err := svc.Create(ctx, sc, CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
 	if err != nil {
 		t.Fatalf("create first: %v", err)
 	}
-	second, err := svc.Create(ctx, teacherID, CreateRequest{FullName: "Anh Tuấn", Phone: "0912345679"})
+	second, err := svc.Create(ctx, sc, CreateRequest{FullName: "Anh Tuấn", Phone: "0912345679"})
 	if err != nil {
 		t.Fatalf("create second: %v", err)
 	}
-	_, err = svc.Update(ctx, teacherID, second.ID, UpdateRequest{FullName: "Anh Tuấn", Phone: first.Phone})
+	_, err = svc.Update(ctx, sc, second.ID, UpdateRequest{FullName: "Anh Tuấn", Phone: first.Phone})
 	if apperror.From(err).Code != apperror.CodeConflict {
 		t.Fatalf("want CONFLICT, got %v", err)
 	}
@@ -180,7 +204,7 @@ func TestUpdateDuplicatePhoneIsConflict(t *testing.T) {
 func TestGetTranslatesNotFound(t *testing.T) {
 	svc := NewService(newFakeRepository())
 
-	_, err := svc.Get(context.Background(), id.New(), id.New())
+	_, err := svc.Get(context.Background(), memberScope(), id.New())
 	if apperror.From(err).Code != apperror.CodeNotFound {
 		t.Fatalf("want NOT_FOUND, got %v", err)
 	}
@@ -189,10 +213,10 @@ func TestGetTranslatesNotFound(t *testing.T) {
 func TestDeleteBlockedByStudentsListsNames(t *testing.T) {
 	repo := newFakeRepository()
 	svc := NewService(repo)
-	teacherID := id.New()
+	sc := memberScope()
 	ctx := context.Background()
 
-	row, err := svc.Create(ctx, teacherID, CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
+	row, err := svc.Create(ctx, sc, CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -200,7 +224,7 @@ func TestDeleteBlockedByStudentsListsNames(t *testing.T) {
 		repo.students[row.ID] = append(repo.students[row.ID], fmt.Sprintf("Bé %d", i))
 	}
 
-	err = svc.Delete(ctx, teacherID, row.ID)
+	err = svc.Delete(ctx, sc, row.ID)
 	appErr := apperror.From(err)
 	if appErr.Code != apperror.CodeConflict {
 		t.Fatalf("want CONFLICT, got %v", err)
@@ -218,7 +242,7 @@ func TestDeleteBlockedByStudentsListsNames(t *testing.T) {
 		t.Fatalf("message must carry total and overflow count: %q", appErr.Message)
 	}
 
-	if _, getErr := svc.Get(ctx, teacherID, row.ID); getErr != nil {
+	if _, getErr := svc.Get(ctx, sc, row.ID); getErr != nil {
 		t.Fatalf("blocked delete must leave the contact live: %v", getErr)
 	}
 }
@@ -226,33 +250,75 @@ func TestDeleteBlockedByStudentsListsNames(t *testing.T) {
 func TestDeleteSoftDeletes(t *testing.T) {
 	repo := newFakeRepository()
 	svc := NewService(repo)
-	teacherID := id.New()
+	sc := memberScope()
 	ctx := context.Background()
 
-	row, err := svc.Create(ctx, teacherID, CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
+	row, err := svc.Create(ctx, sc, CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := svc.Delete(ctx, teacherID, row.ID); err != nil {
+	if err := svc.Delete(ctx, sc, row.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if _, err := svc.Get(ctx, teacherID, row.ID); apperror.From(err).Code != apperror.CodeNotFound {
+	if _, err := svc.Get(ctx, sc, row.ID); apperror.From(err).Code != apperror.CodeNotFound {
 		t.Fatalf("deleted contact must be gone, got %v", err)
 	}
 }
 
-func TestDeleteOtherTeachersContactIsNotFound(t *testing.T) {
+func TestDeleteOtherTenantsContactIsNotFound(t *testing.T) {
 	repo := newFakeRepository()
 	svc := NewService(repo)
 	ctx := context.Background()
 
-	row, err := svc.Create(ctx, id.New(), CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
+	row, err := svc.Create(ctx, memberScope(), CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	err = svc.Delete(ctx, id.New(), row.ID)
+	err = svc.Delete(ctx, memberScope(), row.ID)
 	if apperror.From(err).Code != apperror.CodeNotFound {
 		t.Fatalf("cross-tenant delete must be NOT_FOUND, got %v", err)
+	}
+}
+
+// An owner reads and manages a member's contact — center oversight, not
+// per-teacher isolation.
+func TestOwnerScopeSeesAndDeletesMembersContact(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+	ctx := context.Background()
+	center := id.New()
+	member := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
+	owner := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: true}
+
+	row, err := svc.Create(ctx, member, CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := svc.Get(ctx, owner, row.ID); err != nil {
+		t.Fatalf("owner must read a member's contact, got %v", err)
+	}
+	if err := svc.Delete(ctx, owner, row.ID); err != nil {
+		t.Fatalf("owner must delete a member's contact, got %v", err)
+	}
+}
+
+// A peer in the same center but not the creator, and not the owner, must not
+// see the contact — center scope alone is not enough, isolation still holds
+// between non-owning members.
+func TestPeerScopeCannotSeeAnotherMembersContact(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+	ctx := context.Background()
+	center := id.New()
+	author := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
+	peer := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
+
+	row, err := svc.Create(ctx, author, CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := svc.Get(ctx, peer, row.ID); apperror.From(err).Code != apperror.CodeNotFound {
+		t.Fatalf("peer must not read another member's contact, got %v", err)
 	}
 }
 
@@ -260,14 +326,14 @@ func TestUpdateZaloMappingSetsBothFields(t *testing.T) {
 	repo := newFakeRepository()
 	svc := NewService(repo)
 	ctx := context.Background()
-	teacherID := id.New()
+	sc := memberScope()
 
-	row, err := svc.Create(ctx, teacherID, CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
+	row, err := svc.Create(ctx, sc, CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
-	updated, err := svc.UpdateZaloMapping(ctx, teacherID, row.ID, ZaloMappingRequest{
+	updated, err := svc.UpdateZaloMapping(ctx, sc, row.ID, ZaloMappingRequest{
 		ZaloUserID: "8421000123456789", ZaloName: "Hoa Nguyễn",
 	})
 	if err != nil {
@@ -280,7 +346,7 @@ func TestUpdateZaloMappingSetsBothFields(t *testing.T) {
 		t.Fatalf("zalo_name not stored, got %v", updated.ZaloName)
 	}
 
-	got, err := svc.Get(ctx, teacherID, row.ID)
+	got, err := svc.Get(ctx, sc, row.ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -289,16 +355,16 @@ func TestUpdateZaloMappingSetsBothFields(t *testing.T) {
 	}
 }
 
-func TestUpdateZaloMappingOtherTeachersContactIsNotFound(t *testing.T) {
+func TestUpdateZaloMappingOtherTenantsContactIsNotFound(t *testing.T) {
 	repo := newFakeRepository()
 	svc := NewService(repo)
 	ctx := context.Background()
 
-	row, err := svc.Create(ctx, id.New(), CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
+	row, err := svc.Create(ctx, memberScope(), CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	_, err = svc.UpdateZaloMapping(ctx, id.New(), row.ID, ZaloMappingRequest{
+	_, err = svc.UpdateZaloMapping(ctx, memberScope(), row.ID, ZaloMappingRequest{
 		ZaloUserID: "8421", ZaloName: "Hoa",
 	})
 	if apperror.From(err).Code != apperror.CodeNotFound {
@@ -310,22 +376,22 @@ func TestClearZaloMappingIsIdempotent(t *testing.T) {
 	repo := newFakeRepository()
 	svc := NewService(repo)
 	ctx := context.Background()
-	teacherID := id.New()
+	sc := memberScope()
 
-	row, err := svc.Create(ctx, teacherID, CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
+	row, err := svc.Create(ctx, sc, CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if _, err := svc.UpdateZaloMapping(ctx, teacherID, row.ID, ZaloMappingRequest{
+	if _, err := svc.UpdateZaloMapping(ctx, sc, row.ID, ZaloMappingRequest{
 		ZaloUserID: "8421", ZaloName: "Hoa",
 	}); err != nil {
 		t.Fatalf("update mapping: %v", err)
 	}
 
-	if err := svc.ClearZaloMapping(ctx, teacherID, row.ID); err != nil {
+	if err := svc.ClearZaloMapping(ctx, sc, row.ID); err != nil {
 		t.Fatalf("first clear: %v", err)
 	}
-	got, err := svc.Get(ctx, teacherID, row.ID)
+	got, err := svc.Get(ctx, sc, row.ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -335,7 +401,7 @@ func TestClearZaloMappingIsIdempotent(t *testing.T) {
 
 	// Clearing an already-unmapped contact is a no-op success, mirroring the
 	// unlink endpoint's idempotency.
-	if err := svc.ClearZaloMapping(ctx, teacherID, row.ID); err != nil {
+	if err := svc.ClearZaloMapping(ctx, sc, row.ID); err != nil {
 		t.Fatalf("second clear must succeed, got %v", err)
 	}
 }
@@ -344,16 +410,16 @@ func TestUpdateZaloMappingTrimsAndRejectsWhitespaceOnly(t *testing.T) {
 	repo := newFakeRepository()
 	svc := NewService(repo)
 	ctx := context.Background()
-	teacherID := id.New()
+	sc := memberScope()
 
-	row, err := svc.Create(ctx, teacherID, CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
+	row, err := svc.Create(ctx, sc, CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
 	// Padded values are stored clean — the id is compared byte-for-byte when
 	// the sender resolves a contact to a Zalo user.
-	updated, err := svc.UpdateZaloMapping(ctx, teacherID, row.ID, ZaloMappingRequest{
+	updated, err := svc.UpdateZaloMapping(ctx, sc, row.ID, ZaloMappingRequest{
 		ZaloUserID: "  8421000123456789  ", ZaloName: "  Hoa Nguyễn  ",
 	})
 	if err != nil {
@@ -367,13 +433,13 @@ func TestUpdateZaloMappingTrimsAndRejectsWhitespaceOnly(t *testing.T) {
 	}
 
 	// Whitespace-only slips past the required binding but is still no mapping.
-	_, err = svc.UpdateZaloMapping(ctx, teacherID, row.ID, ZaloMappingRequest{
+	_, err = svc.UpdateZaloMapping(ctx, sc, row.ID, ZaloMappingRequest{
 		ZaloUserID: "   ", ZaloName: "Hoa Nguyễn",
 	})
 	if apperror.From(err).Code != apperror.CodeValidation {
 		t.Fatalf("blank zalo_user_id must be VALIDATION_ERROR, got %v", err)
 	}
-	_, err = svc.UpdateZaloMapping(ctx, teacherID, row.ID, ZaloMappingRequest{
+	_, err = svc.UpdateZaloMapping(ctx, sc, row.ID, ZaloMappingRequest{
 		ZaloUserID: "8421000123456789", ZaloName: "   ",
 	})
 	if apperror.From(err).Code != apperror.CodeValidation {
@@ -385,8 +451,80 @@ func TestClearZaloMappingUnknownContactIsNotFound(t *testing.T) {
 	repo := newFakeRepository()
 	svc := NewService(repo)
 
-	err := svc.ClearZaloMapping(context.Background(), id.New(), id.New())
+	err := svc.ClearZaloMapping(context.Background(), memberScope(), id.New())
 	if apperror.From(err).Code != apperror.CodeNotFound {
 		t.Fatalf("unknown contact must be NOT_FOUND, got %v", err)
+	}
+}
+
+// FindIDByPhone mirrors the SQL predicate: scope-visible, not soft-deleted,
+// exact phone — the same shape as uq_contacts_phone(teacher_id, phone).
+func (f *fakeRepository) FindIDByPhone(_ context.Context, sc authctx.Scope, phone string) (uuid.UUID, bool, error) {
+	for _, c := range f.rows {
+		if visible(c, sc) && c.Phone == phone {
+			return c.ID, true, nil
+		}
+	}
+	return uuid.Nil, false, nil
+}
+
+// FindIDByPhone is the bulk-import lookup: it must normalise the way Create
+// does and stay inside the anchor teacher, or an import would stitch a child
+// onto another teacher's parent record.
+
+func TestFindIDByPhoneNormalisesLikeCreate(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+	sc := memberScope()
+
+	row, err := svc.Create(context.Background(), sc, CreateRequest{FullName: "Phạm Văn Hùng", Phone: "0901234567"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	for _, written := range []string{"0901234567", "+84901234567"} {
+		got, found, err := svc.FindIDByPhone(context.Background(), sc, written)
+		if err != nil || !found || got != row.ID {
+			t.Fatalf("%s must resolve to the stored contact, got id=%v found=%v err=%v", written, got, found, err)
+		}
+	}
+}
+
+func TestFindIDByPhoneStaysWithinTheAnchorTeacher(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+	center := id.New()
+	author := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
+	peer := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
+
+	if _, err := svc.Create(context.Background(), author, CreateRequest{FullName: "Phạm Văn Hùng", Phone: "0901234567"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// uq_contacts_phone is (teacher_id, phone): the same parent under a second
+	// teacher is a second row, so the peer must miss and create their own.
+	if _, found, err := svc.FindIDByPhone(context.Background(), peer, "0901234567"); err != nil || found {
+		t.Fatalf("another teacher's contact must not be found, got found=%v err=%v", found, err)
+	}
+}
+
+func TestFindIDByPhoneIgnoresDeletedContacts(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+	sc := memberScope()
+
+	row, err := svc.Create(context.Background(), sc, CreateRequest{FullName: "Phạm Văn Hùng", Phone: "0901234567"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := svc.Delete(context.Background(), sc, row.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	// uq_contacts_phone is partial on deleted_at IS NULL, so a deleted row
+	// holds no key and a fresh create succeeds — the lookup has to miss it or
+	// the import would attach students to a contact nobody can see.
+	if _, found, err := svc.FindIDByPhone(context.Background(), sc, "0901234567"); err != nil || found {
+		t.Fatalf("a deleted contact must not be found, got found=%v err=%v", found, err)
 	}
 }

@@ -22,15 +22,15 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-// teacherID resolves the authenticated tenant — the only sanctioned source
-// of teacher identity; the path never carries it.
-func (h *Handler) teacherID(c *gin.Context) (uuid.UUID, bool) {
-	teacherID, ok := authctx.TeacherID(c)
+// scope resolves the authenticated tenant scope — the only sanctioned source
+// of teacher/center identity; the path never carries it.
+func (h *Handler) scope(c *gin.Context) (authctx.Scope, bool) {
+	sc, ok := authctx.ScopeFrom(c)
 	if !ok {
 		response.Err(c, apperror.Unauthorized("authentication required"))
-		return uuid.UUID{}, false
+		return authctx.Scope{}, false
 	}
-	return teacherID, true
+	return sc, true
 }
 
 // pathID parses one uuid path parameter, reading a malformed value as the
@@ -87,7 +87,7 @@ func parseFilter(c *gin.Context) (Filter, error) {
 //	@Security		BearerAuth
 //	@Router			/billing-periods/{id}/collections [get]
 func (h *Handler) list(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -109,7 +109,7 @@ func (h *Handler) list(c *gin.Context) {
 		params = pagination.Parse(c, "-outstanding", ContactSortColumns())
 	}
 
-	result, err := h.svc.List(c.Request.Context(), teacherID, periodID, view, filter, params)
+	result, err := h.svc.List(c.Request.Context(), sc, periodID, view, filter, params)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -133,7 +133,7 @@ func (h *Handler) list(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/billing-periods/{id}/collections/summary [get]
 func (h *Handler) summary(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -141,7 +141,7 @@ func (h *Handler) summary(c *gin.Context) {
 	if !ok {
 		return
 	}
-	resp, err := h.svc.Summary(c.Request.Context(), teacherID, periodID)
+	resp, err := h.svc.Summary(c.Request.Context(), sc, periodID)
 	if err != nil {
 		response.Err(c, err)
 		return

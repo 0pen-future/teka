@@ -9,6 +9,7 @@ import (
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/shared/pagination"
 )
@@ -46,8 +47,10 @@ func NewService(repo Repository, tx database.TxManager, pending PendingSource, e
 // day of the month in the teacher's timezone. A concurrent duplicate insert —
 // the unique index, not a pre-check, is what refuses it — resolves to the
 // existing row rather than a 409, so two callers racing to open the same
-// month converge on one period id.
-func (s *Service) EnsurePeriod(ctx context.Context, teacherID uuid.UUID, year, month int) (*Period, error) {
+// month converge on one period id. A new period always self-assigns to the
+// caller: TeacherID/CenterID come from sc, never from a resolved target, so
+// even a center owner creating a period only ever creates their own.
+func (s *Service) EnsurePeriod(ctx context.Context, sc authctx.Scope, year, month int) (*Period, error) {
 	// EnsurePeriodRequest's binding tags (min=2020,max=2100 / min=1,max=12)
 	// already reject out-of-range values at the HTTP boundary; re-check here
 	// so this exported method is safe to call directly (tests, future
@@ -56,7 +59,7 @@ func (s *Service) EnsurePeriod(ctx context.Context, teacherID uuid.UUID, year, m
 		return nil, apperror.Invalid("year must be 2020-2100 and month must be 1-12", nil)
 	}
 
-	loc, err := s.teacherLocation(ctx, teacherID)
+	loc, err := s.teacherLocation(ctx, sc.TeacherID)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +74,8 @@ func (s *Service) EnsurePeriod(ctx context.Context, teacherID uuid.UUID, year, m
 
 	period := &Period{
 		ID:          id.New(),
-		TeacherID:   teacherID,
+		TeacherID:   sc.TeacherID,
+		CenterID:    sc.CenterID,
 		Year:        int16(year),  // #nosec G115 -- bounds-checked above (2020-2100)
 		Month:       int16(month), // #nosec G115 -- bounds-checked above (1-12)
 		PeriodStart: start,
@@ -80,7 +84,7 @@ func (s *Service) EnsurePeriod(ctx context.Context, teacherID uuid.UUID, year, m
 	}
 	err = s.repo.CreatePeriod(ctx, period)
 	if errors.Is(err, ErrDuplicatePeriod) {
-		existing, getErr := s.repo.GetPeriodByYearMonth(ctx, teacherID, int16(year), int16(month)) // #nosec G115 -- bounds-checked above
+		existing, getErr := s.repo.GetPeriodByYearMonth(ctx, sc, int16(year), int16(month)) // #nosec G115 -- bounds-checked above
 		if getErr != nil {
 			return nil, apperror.Internal(getErr)
 		}
@@ -92,14 +96,14 @@ func (s *Service) EnsurePeriod(ctx context.Context, teacherID uuid.UUID, year, m
 	return period, nil
 }
 
-// ListPeriods returns a page of the teacher's billing periods.
-func (s *Service) ListPeriods(ctx context.Context, teacherID uuid.UUID, p pagination.Params) ([]Period, int64, error) {
-	return s.repo.ListPeriods(ctx, teacherID, p)
+// ListPeriods returns a page of the tenant's billing periods.
+func (s *Service) ListPeriods(ctx context.Context, sc authctx.Scope, p pagination.Params) ([]Period, int64, error) {
+	return s.repo.ListPeriods(ctx, sc, p)
 }
 
 // GetPeriod returns one billing period.
-func (s *Service) GetPeriod(ctx context.Context, teacherID, periodID uuid.UUID) (*Period, error) {
-	p, err := s.repo.GetPeriod(ctx, teacherID, periodID)
+func (s *Service) GetPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*Period, error) {
+	p, err := s.repo.GetPeriod(ctx, sc, periodID)
 	if errors.Is(err, ErrPeriodNotFound) {
 		return nil, apperror.NotFound("billing period")
 	}
@@ -111,8 +115,8 @@ func (s *Service) GetPeriod(ctx context.Context, teacherID, periodID uuid.UUID) 
 
 // Preview computes what closing this period would produce right now,
 // without writing anything (R4's chốt sổ review screen).
-func (s *Service) Preview(ctx context.Context, teacherID, periodID uuid.UUID) (*PreviewResponse, error) {
-	compute, err := ComputePeriod(ctx, s.repo, teacherID, periodID)
+func (s *Service) Preview(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*PreviewResponse, error) {
+	compute, err := ComputePeriod(ctx, s.repo, sc, periodID)
 	if errors.Is(err, ErrPeriodNotFound) {
 		return nil, apperror.NotFound("billing period")
 	}
@@ -127,8 +131,8 @@ func (s *Service) Preview(ctx context.Context, teacherID, periodID uuid.UUID) (*
 // Only allowed while the period is open; refuses to touch an invoice that
 // has already moved past draft. Idempotent — running it twice on unchanged
 // attendance produces the same rows, not duplicates.
-func (s *Service) Draft(ctx context.Context, teacherID, periodID uuid.UUID) (*PreviewResponse, error) {
-	period, err := s.repo.GetPeriod(ctx, teacherID, periodID)
+func (s *Service) Draft(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*PreviewResponse, error) {
+	period, err := s.repo.GetPeriod(ctx, sc, periodID)
 	if errors.Is(err, ErrPeriodNotFound) {
 		return nil, apperror.NotFound("billing period")
 	}
@@ -139,15 +143,19 @@ func (s *Service) Draft(ctx context.Context, teacherID, periodID uuid.UUID) (*Pr
 		return nil, apperror.Conflict("period is closed")
 	}
 
-	compute, err := ComputePeriod(ctx, s.repo, teacherID, periodID)
+	compute, err := ComputePeriod(ctx, s.repo, sc, periodID)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
 
+	// Every write below inherits the period's own anchors, never the acting
+	// caller's — an owner drafting a member's period writes rows owned by
+	// the member, not by the owner.
+	periodScope := authctx.Scope{TeacherID: period.TeacherID, CenterID: period.CenterID}
 	var invoiceIDByStudent map[uuid.UUID]uuid.UUID
 	err = s.tx.WithinTx(ctx, func(txCtx context.Context) error {
 		var txErr error
-		invoiceIDByStudent, txErr = DraftPeriod(txCtx, s.repo, teacherID, periodID, compute)
+		invoiceIDByStudent, txErr = DraftPeriod(txCtx, s.repo, periodScope, periodID, compute)
 		return txErr
 	})
 	if errors.Is(err, ErrInvoiceNotDraft) {

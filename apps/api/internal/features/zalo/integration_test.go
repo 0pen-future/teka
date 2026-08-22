@@ -274,6 +274,15 @@ func (s *scriptedQRLogin) login(ctx context.Context, sess *protocol.Session, cb 
 	return &protocol.Credentials{IMEI: "integration-imei", Cookie: &cookies, UserAgent: "ua"}, nil
 }
 
+// fakeScopeResolver resolves every teacher id to a scope where it owns its
+// own center — like the real resolver does for a teacher who never joined
+// anyone else's center. The zalo routes only ever read TeacherID from it.
+type fakeScopeResolver struct{}
+
+func (fakeScopeResolver) ResolveScope(_ context.Context, teacherID uuid.UUID) (authctx.Scope, error) {
+	return authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}, nil
+}
+
 func mintToken(t *testing.T, teacherID uuid.UUID) string {
 	t.Helper()
 	claims := authctx.AccessClaims{
@@ -345,6 +354,7 @@ func TestZaloHTTPLinkLifecycleAgainstARealDatabase(t *testing.T) {
 		r.Group("/api/v1"),
 		zalo.NewHandler(svc),
 		middleware.RequireAuth(config.JWTConfig{Secret: httpTestSecret, AccessTTL: 15 * time.Minute}),
+		middleware.ResolveScope(fakeScopeResolver{}),
 	)
 	ownerToken, otherToken := mintToken(t, owner.ID), mintToken(t, other.ID)
 

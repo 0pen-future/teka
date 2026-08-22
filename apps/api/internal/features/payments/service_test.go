@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/shared/pagination"
 )
@@ -46,24 +47,32 @@ func newFakeRepository() *fakeRepository {
 	}
 }
 
-func (f *fakeRepository) CreatePayment(_ context.Context, _ uuid.UUID, p *Payment) error {
+// scopeFor is this file's stand-in for authctx.ScopeFrom(c): every fake
+// tenancy check below filters on sc.TeacherID alone, the same identity these
+// tests always passed before the center sweep — CenterID/IsOwner semantics
+// are exercised against a real database in integration_test.go instead.
+func scopeFor(teacherID uuid.UUID) authctx.Scope {
+	return authctx.Scope{TeacherID: teacherID, CenterID: id.New()}
+}
+
+func (f *fakeRepository) CreatePayment(_ context.Context, p *Payment) error {
 	f.payments[p.ID] = *p
 	return nil
 }
 
-func (f *fakeRepository) GetPayment(_ context.Context, teacherID, paymentID uuid.UUID) (*Payment, error) {
+func (f *fakeRepository) GetPayment(_ context.Context, sc authctx.Scope, paymentID uuid.UUID) (*Payment, error) {
 	p, ok := f.payments[paymentID]
-	if !ok || p.TeacherID != teacherID {
+	if !ok || p.TeacherID != sc.TeacherID {
 		return nil, ErrPaymentNotFound
 	}
 	cp := p
 	return &cp, nil
 }
 
-func (f *fakeRepository) ListPayments(_ context.Context, teacherID uuid.UUID, filter ListFilter, p pagination.Params) ([]Payment, int64, error) {
+func (f *fakeRepository) ListPayments(_ context.Context, sc authctx.Scope, filter ListFilter, p pagination.Params) ([]Payment, int64, error) {
 	var out []Payment
 	for _, row := range f.payments {
-		if row.TeacherID != teacherID {
+		if row.TeacherID != sc.TeacherID {
 			continue
 		}
 		if filter.ContactID != uuid.Nil && row.ContactID != filter.ContactID {
@@ -79,16 +88,16 @@ func (f *fakeRepository) ListPayments(_ context.Context, teacherID uuid.UUID, fi
 	return out, total, nil
 }
 
-func (f *fakeRepository) CandidateInvoices(_ context.Context, _, contactID uuid.UUID) ([]Candidate, error) {
+func (f *fakeRepository) CandidateInvoices(_ context.Context, _ authctx.Scope, contactID uuid.UUID) ([]Candidate, error) {
 	return f.candidates[contactID], nil
 }
 
-func (f *fakeRepository) InsertAllocations(_ context.Context, _ uuid.UUID, rows []PaymentAllocation) error {
+func (f *fakeRepository) InsertAllocations(_ context.Context, rows []PaymentAllocation) error {
 	f.allocations = append(f.allocations, rows...)
 	return nil
 }
 
-func (f *fakeRepository) RecalcInvoicePaid(_ context.Context, _, invoiceID uuid.UUID) error {
+func (f *fakeRepository) RecalcInvoicePaid(_ context.Context, _ authctx.Scope, invoiceID uuid.UUID) error {
 	f.recalcCalls = append(f.recalcCalls, invoiceID)
 	inv, ok := f.invoices[invoiceID]
 	if !ok {
@@ -109,15 +118,26 @@ func (f *fakeRepository) RecalcInvoicePaid(_ context.Context, _, invoiceID uuid.
 	return nil
 }
 
-func (f *fakeRepository) ContactExists(_ context.Context, teacherID, contactID uuid.UUID) (bool, error) {
+// ResolveContactScope mirrors the real repository's contract: a non-owner sc
+// only resolves its own contact, an owner sc resolves any contact in the
+// fake's namespace — and it always returns the contact's own owning
+// teacherID, never sc's, so Record's anchor-stamping twist can be exercised
+// without a database.
+func (f *fakeRepository) ResolveContactScope(_ context.Context, sc authctx.Scope, contactID uuid.UUID) (authctx.Scope, bool, error) {
 	owner, ok := f.contacts[contactID]
-	return ok && owner == teacherID, nil
+	if !ok {
+		return authctx.Scope{}, false, nil
+	}
+	if !sc.IsOwner && owner != sc.TeacherID {
+		return authctx.Scope{}, false, nil
+	}
+	return authctx.Scope{TeacherID: owner, CenterID: sc.CenterID}, true, nil
 }
 
-func (f *fakeRepository) ListAllocations(_ context.Context, teacherID, paymentID uuid.UUID) ([]AllocationRow, error) {
+func (f *fakeRepository) ListAllocations(_ context.Context, sc authctx.Scope, paymentID uuid.UUID) ([]AllocationRow, error) {
 	var out []AllocationRow
 	for _, a := range f.allocations {
-		if a.TeacherID != teacherID || a.PaymentID != paymentID {
+		if a.TeacherID != sc.TeacherID || a.PaymentID != paymentID {
 			continue
 		}
 		out = append(out, f.rowFor(a))
@@ -125,14 +145,14 @@ func (f *fakeRepository) ListAllocations(_ context.Context, teacherID, paymentID
 	return out, nil
 }
 
-func (f *fakeRepository) ListAllocationsForPayments(_ context.Context, teacherID uuid.UUID, paymentIDs []uuid.UUID) ([]AllocationRow, error) {
+func (f *fakeRepository) ListAllocationsForPayments(_ context.Context, sc authctx.Scope, paymentIDs []uuid.UUID) ([]AllocationRow, error) {
 	want := make(map[uuid.UUID]bool, len(paymentIDs))
 	for _, id := range paymentIDs {
 		want[id] = true
 	}
 	var out []AllocationRow
 	for _, a := range f.allocations {
-		if a.TeacherID != teacherID || !want[a.PaymentID] {
+		if a.TeacherID != sc.TeacherID || !want[a.PaymentID] {
 			continue
 		}
 		out = append(out, f.rowFor(a))
@@ -203,9 +223,9 @@ func mustParseDate(s string) time.Time {
 func TestRecordUnknownContactIsNotFound(t *testing.T) {
 	svc, _ := newTestService()
 	ctx := context.Background()
-	teacherID := id.New()
+	sc := scopeFor(id.New())
 
-	_, err := svc.Record(ctx, teacherID, RecordPaymentRequest{
+	_, err := svc.Record(ctx, sc, RecordPaymentRequest{
 		ContactID:  id.New(),
 		Amount:     100_000,
 		Method:     MethodCash,
@@ -222,7 +242,7 @@ func TestRecordAnotherTeachersContactIsNotFound(t *testing.T) {
 	owner, stranger := id.New(), id.New()
 	contactID := addContact(repo, owner)
 
-	_, err := svc.Record(ctx, stranger, RecordPaymentRequest{
+	_, err := svc.Record(ctx, scopeFor(stranger), RecordPaymentRequest{
 		ContactID:  contactID,
 		Amount:     100_000,
 		Method:     MethodCash,
@@ -245,7 +265,7 @@ func TestRecordAllocatesAndRecalcsEveryTouchedInvoice(t *testing.T) {
 	invA := addCandidate(repo, contactID, fakeInvoice{StudentID: studentA, StudentName: "An", TotalDue: 100_000}, 0)
 	invB := addCandidate(repo, contactID, fakeInvoice{StudentID: studentB, StudentName: "Bình", TotalDue: 150_000}, 0)
 
-	detail, err := svc.Record(ctx, teacherID, RecordPaymentRequest{
+	detail, err := svc.Record(ctx, scopeFor(teacherID), RecordPaymentRequest{
 		ContactID:  contactID,
 		Amount:     250_000,
 		Method:     MethodTransfer,
@@ -286,7 +306,7 @@ func TestRecordWithNoCandidatesLeavesEverythingUnallocated(t *testing.T) {
 	teacherID := id.New()
 	contactID := addContact(repo, teacherID)
 
-	detail, err := svc.Record(ctx, teacherID, RecordPaymentRequest{
+	detail, err := svc.Record(ctx, scopeFor(teacherID), RecordPaymentRequest{
 		ContactID:  contactID,
 		Amount:     50_000,
 		Method:     MethodCash,
@@ -312,7 +332,7 @@ func TestRecordRejectsMalformedReceivedOn(t *testing.T) {
 	teacherID := id.New()
 	contactID := addContact(repo, teacherID)
 
-	_, err := svc.Record(ctx, teacherID, RecordPaymentRequest{
+	_, err := svc.Record(ctx, scopeFor(teacherID), RecordPaymentRequest{
 		ContactID:  contactID,
 		Amount:     10_000,
 		Method:     MethodCash,
@@ -327,7 +347,7 @@ func TestGetPaymentNotFound(t *testing.T) {
 	svc, _ := newTestService()
 	ctx := context.Background()
 
-	_, err := svc.Get(ctx, id.New(), id.New())
+	_, err := svc.Get(ctx, scopeFor(id.New()), id.New())
 	if apperror.From(err).Code != apperror.CodeNotFound {
 		t.Fatalf("missing payment must be 404, got %v", err)
 	}
@@ -339,7 +359,7 @@ func TestGetPaymentCrossTenantIsNotFound(t *testing.T) {
 	owner, stranger := id.New(), id.New()
 	contactID := addContact(repo, owner)
 
-	detail, err := svc.Record(ctx, owner, RecordPaymentRequest{
+	detail, err := svc.Record(ctx, scopeFor(owner), RecordPaymentRequest{
 		ContactID:  contactID,
 		Amount:     10_000,
 		Method:     MethodCash,
@@ -349,7 +369,7 @@ func TestGetPaymentCrossTenantIsNotFound(t *testing.T) {
 		t.Fatalf("record: %v", err)
 	}
 
-	_, err = svc.Get(ctx, stranger, detail.Payment.ID)
+	_, err = svc.Get(ctx, scopeFor(stranger), detail.Payment.ID)
 	if apperror.From(err).Code != apperror.CodeNotFound {
 		t.Fatalf("cross-tenant get must be 404, got %v", err)
 	}
@@ -364,14 +384,14 @@ func TestListPaymentsScopedToTeacherAndBatchesAllocations(t *testing.T) {
 	addCandidate(repo, contactA, fakeInvoice{StudentID: id.New(), StudentName: "An", TotalDue: 50_000}, 0)
 	addCandidate(repo, contactB, fakeInvoice{StudentID: id.New(), StudentName: "Bình", TotalDue: 50_000}, 0)
 
-	if _, err := svc.Record(ctx, teacherA, RecordPaymentRequest{ContactID: contactA, Amount: 50_000, Method: MethodCash, ReceivedOn: "2026-01-10"}); err != nil {
+	if _, err := svc.Record(ctx, scopeFor(teacherA), RecordPaymentRequest{ContactID: contactA, Amount: 50_000, Method: MethodCash, ReceivedOn: "2026-01-10"}); err != nil {
 		t.Fatalf("record A: %v", err)
 	}
-	if _, err := svc.Record(ctx, teacherB, RecordPaymentRequest{ContactID: contactB, Amount: 50_000, Method: MethodCash, ReceivedOn: "2026-01-10"}); err != nil {
+	if _, err := svc.Record(ctx, scopeFor(teacherB), RecordPaymentRequest{ContactID: contactB, Amount: 50_000, Method: MethodCash, ReceivedOn: "2026-01-10"}); err != nil {
 		t.Fatalf("record B: %v", err)
 	}
 
-	details, total, err := svc.List(ctx, teacherA, ListFilter{}, pagination.Params{Page: 1, PerPage: 20})
+	details, total, err := svc.List(ctx, scopeFor(teacherA), ListFilter{}, pagination.Params{Page: 1, PerPage: 20})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}

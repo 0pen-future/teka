@@ -14,6 +14,7 @@ import (
 	"teka/apps/api/internal/features/statements"
 	"teka/apps/api/internal/features/zalo"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 )
 
@@ -27,8 +28,8 @@ import (
 // interface, so notifications depends on statements' public service
 // contract, never a second implementation of its sums.
 type StatementsSource interface {
-	Generate(ctx context.Context, teacherID, periodID uuid.UUID) (*statements.GenerateResult, error)
-	PeriodFigures(ctx context.Context, teacherID, periodID uuid.UUID) (map[uuid.UUID]statements.ContactFigures, error)
+	Generate(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*statements.GenerateResult, error)
+	PeriodFigures(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (map[uuid.UUID]statements.ContactFigures, error)
 	ToResponse(row statements.Row) statements.StatementResponse
 }
 
@@ -90,7 +91,10 @@ func (s *Service) Close() {
 // commit, unmapped contacts fall back to zalo_manual copy-paste rows exactly
 // as if the manual channel had been chosen for them. BulkText then carries
 // only the fallback rows — the auto-sent messages have nothing to copy.
-func (s *Service) BulkSend(ctx context.Context, teacherID, periodID uuid.UUID, req BulkSendRequest) (*BulkSendResponse, error) {
+// zalo_personal also refuses a period owned by another teacher with a 409:
+// the linked account is personal, so only the period's own teacher can DM its
+// parents — an owner reaches a member's period through manual channels only.
+func (s *Service) BulkSend(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, req BulkSendRequest) (*BulkSendResponse, error) {
 	purpose := normalizePurpose(req.Purpose)
 	channel := req.Channel
 	if channel == "" {
@@ -110,17 +114,17 @@ func (s *Service) BulkSend(ctx context.Context, teacherID, periodID uuid.UUID, r
 		// run slot for the same reason: two concurrent personal sends must not
 		// both commit a run, so the loser is turned away while it still has
 		// nothing to lose.
-		if err := s.verifyPersonalSession(ctx, teacherID); err != nil {
+		if err := s.verifyPersonalSession(ctx, sc.TeacherID); err != nil {
 			return nil, err
 		}
-		active, err := s.repo.HasActiveRun(ctx, teacherID)
+		active, err := s.repo.HasActiveRun(ctx, sc)
 		if err != nil {
 			return nil, apperror.From(err)
 		}
 		if active {
 			return nil, apperror.Conflict("a zalo_personal run is already sending; wait for it to finish")
 		}
-		if reservation, err = s.runs.Reserve(teacherID); err != nil {
+		if reservation, err = s.runs.Reserve(sc.TeacherID, sc.CenterID); err != nil {
 			return nil, apperror.Conflict("a zalo_personal run is already sending; wait for it to finish")
 		}
 		defer reservation.Release()
@@ -130,12 +134,23 @@ func (s *Service) BulkSend(ctx context.Context, teacherID, periodID uuid.UUID, r
 	var runItems []RunItem
 	var resp BulkSendResponse
 	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
-		genResult, err := s.statements.Generate(ctx, teacherID, periodID)
+		genResult, err := s.statements.Generate(ctx, sc, periodID)
 		if err != nil {
 			return err
 		}
 
-		figures, err := s.statements.PeriodFigures(ctx, teacherID, periodID)
+		// A Zalo account is personal: DMs go out from the caller's own linked
+		// session, but a member's contacts live in the member's strict scope,
+		// so an owner opening a member's period here would find no mappings
+		// and the whole batch would silently fall back to copy-paste. Refuse
+		// the combination instead — the rollback also undoes the statement
+		// refresh, so nothing is written. Statements are anchored on the
+		// period's own teacher, which is what identifies whose period this is.
+		if personal && len(genResult.Statements) > 0 && genResult.Statements[0].TeacherID != sc.TeacherID {
+			return apperror.Conflict("this period belongs to another teacher; zalo_personal sends only their own periods — ask them to send it, or use zalo_manual")
+		}
+
+		figures, err := s.statements.PeriodFigures(ctx, sc, periodID)
 		if err != nil {
 			return err
 		}
@@ -146,7 +161,7 @@ func (s *Service) BulkSend(ctx context.Context, teacherID, periodID uuid.UUID, r
 			for _, target := range genResult.Statements {
 				contactIDs = append(contactIDs, target.ContactID)
 			}
-			if mappings, err = s.repo.ZaloMappings(ctx, teacherID, contactIDs); err != nil {
+			if mappings, err = s.repo.ZaloMappings(ctx, sc, contactIDs); err != nil {
 				return apperror.From(err)
 			}
 		}
@@ -190,8 +205,13 @@ func (s *Service) BulkSend(ctx context.Context, teacherID, periodID uuid.UUID, r
 			}
 
 			n := &Notification{
-				ID:          id.New(),
-				TeacherID:   teacherID,
+				ID: id.New(),
+				// Stamps the caller as sender, not the statement's own
+				// teacher — an owner sending a member's period (manual
+				// channels only; zalo_personal refuses that combination
+				// above) sends as itself.
+				TeacherID:   sc.TeacherID,
+				CenterID:    sc.CenterID,
 				StatementID: target.ID,
 				Channel:     rowChannel,
 				Purpose:     purpose,
@@ -232,7 +252,8 @@ func (s *Service) BulkSend(ctx context.Context, teacherID, periodID uuid.UUID, r
 		if len(runItems) > 0 {
 			run := &Run{
 				ID:              runID,
-				TeacherID:       teacherID,
+				TeacherID:       sc.TeacherID,
+				CenterID:        sc.CenterID,
 				BillingPeriodID: periodID,
 				Purpose:         purpose,
 				Status:          RunStatusRunning,
@@ -316,9 +337,10 @@ func (s *Service) verifyPersonalSession(ctx context.Context, teacherID uuid.UUID
 }
 
 // List returns one billing period's notification ledger, optionally
-// narrowed by filter.
-func (s *Service) List(ctx context.Context, teacherID, periodID uuid.UUID, filter ListFilter) ([]NotificationResponse, error) {
-	rows, err := s.repo.ListByPeriod(ctx, teacherID, periodID, filter)
+// narrowed by filter. An owner sees every member's rows in the center; a
+// member sees only their own.
+func (s *Service) List(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, filter ListFilter) ([]NotificationResponse, error) {
+	rows, err := s.repo.ListByPeriod(ctx, sc, periodID, filter)
 	if err != nil {
 		return nil, apperror.From(err)
 	}
@@ -329,12 +351,12 @@ func (s *Service) List(ctx context.Context, teacherID, periodID uuid.UUID, filte
 	return out, nil
 }
 
-// MarkSent marks every id in ids sent, for ids that still belong to
-// teacherID and are still queued. Idempotent: an id already sent is silently
-// left alone rather than erroring, so a teacher tapping "mark sent" twice
-// never fails the second time.
-func (s *Service) MarkSent(ctx context.Context, teacherID uuid.UUID, ids []uuid.UUID) error {
-	if err := s.repo.MarkSent(ctx, teacherID, ids); err != nil {
+// MarkSent marks every id in ids sent, for ids visible to sc (center-scoped,
+// and teacher-scoped unless sc is the center's owner) and still queued.
+// Idempotent: an id already sent is silently left alone rather than erroring,
+// so tapping "mark sent" twice never fails the second time.
+func (s *Service) MarkSent(ctx context.Context, sc authctx.Scope, ids []uuid.UUID) error {
+	if err := s.repo.MarkSent(ctx, sc, ids); err != nil {
 		return apperror.From(err)
 	}
 	return nil
@@ -342,16 +364,22 @@ func (s *Service) MarkSent(ctx context.Context, teacherID uuid.UUID, ids []uuid.
 
 // RunSnapshot reports the period's latest run and its row-derived progress.
 // A period that never had a run answers with the zero snapshot rather than an
-// error — "no run" is an ordinary poll result, not a missing resource.
-func (s *Service) RunSnapshot(ctx context.Context, teacherID, periodID uuid.UUID) (*RunSnapshotResponse, error) {
-	run, err := s.repo.LatestRunByPeriod(ctx, teacherID, periodID)
+// error — "no run" is an ordinary poll result, not a missing resource. An
+// owner may read a member's run snapshot as oversight; a member sees only
+// their own.
+func (s *Service) RunSnapshot(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*RunSnapshotResponse, error) {
+	run, err := s.repo.LatestRunByPeriod(ctx, sc, periodID)
 	if errors.Is(err, ErrRunNotFound) {
 		return &RunSnapshotResponse{}, nil
 	}
 	if err != nil {
 		return nil, apperror.From(err)
 	}
-	counts, err := s.repo.RunCounts(ctx, teacherID, run.ID)
+	// runScope anchors on the run's own sender, not necessarily sc's own
+	// teacher — an owner may be viewing a member's run — so the row count
+	// still matches exactly this run regardless of who is asking.
+	runScope := authctx.Scope{TeacherID: run.TeacherID, CenterID: sc.CenterID}
+	counts, err := s.repo.RunCounts(ctx, runScope, run.ID)
 	if err != nil {
 		return nil, apperror.From(err)
 	}
@@ -382,8 +410,15 @@ const (
 // original send — and rows that can no longer be auto-sent (mapping removed,
 // statement gone, or a reminder's balance since paid) are failed with a
 // reason instead of silently dropped.
-func (s *Service) ResumeRun(ctx context.Context, teacherID, periodID uuid.UUID) (*RunSnapshotResponse, error) {
-	run, err := s.repo.LatestRunByPeriod(ctx, teacherID, periodID)
+func (s *Service) ResumeRun(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*RunSnapshotResponse, error) {
+	// A resume re-occupies the acting teacher's own Zalo session and run
+	// slot, never a member's, regardless of oversight rights — IsOwner is
+	// deliberately stripped here so LatestRunByPeriod's owner-bypass template
+	// degrades to a strict own-row match. An owner resuming a member's
+	// interrupted run must not be possible: it would send through the
+	// owner's own Zalo account under the member's run record.
+	ownScope := authctx.Scope{TeacherID: sc.TeacherID, CenterID: sc.CenterID}
+	run, err := s.repo.LatestRunByPeriod(ctx, ownScope, periodID)
 	if errors.Is(err, ErrRunNotFound) {
 		return nil, apperror.NotFound("notification run")
 	}
@@ -393,10 +428,10 @@ func (s *Service) ResumeRun(ctx context.Context, teacherID, periodID uuid.UUID) 
 	if run.Status != RunStatusInterrupted {
 		return nil, apperror.Conflict("only an interrupted run can be resumed")
 	}
-	if err := s.verifyPersonalSession(ctx, teacherID); err != nil {
+	if err := s.verifyPersonalSession(ctx, sc.TeacherID); err != nil {
 		return nil, err
 	}
-	active, err := s.repo.HasActiveRun(ctx, teacherID)
+	active, err := s.repo.HasActiveRun(ctx, sc)
 	if err != nil {
 		return nil, apperror.From(err)
 	}
@@ -407,7 +442,7 @@ func (s *Service) ResumeRun(ctx context.Context, teacherID, periodID uuid.UUID) 
 	// bulk send) loses here, before this call touches the shared run record —
 	// a loser that got as far as writing would flip a run the winner is
 	// actively sending back to interrupted.
-	reservation, err := s.runs.Reserve(teacherID)
+	reservation, err := s.runs.Reserve(sc.TeacherID, sc.CenterID)
 	if err != nil {
 		return nil, apperror.Conflict("a zalo_personal run is already sending; wait for it to finish")
 	}
@@ -415,15 +450,15 @@ func (s *Service) ResumeRun(ctx context.Context, teacherID, periodID uuid.UUID) 
 
 	var items []RunItem
 	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
-		genResult, err := s.statements.Generate(ctx, teacherID, periodID)
+		genResult, err := s.statements.Generate(ctx, sc, periodID)
 		if err != nil {
 			return err
 		}
-		figures, err := s.statements.PeriodFigures(ctx, teacherID, periodID)
+		figures, err := s.statements.PeriodFigures(ctx, sc, periodID)
 		if err != nil {
 			return err
 		}
-		queued, err := s.repo.QueuedRunRows(ctx, teacherID, run.ID)
+		queued, err := s.repo.QueuedRunRows(ctx, sc, run.ID)
 		if err != nil {
 			return apperror.From(err)
 		}
@@ -432,7 +467,7 @@ func (s *Service) ResumeRun(ctx context.Context, teacherID, periodID uuid.UUID) 
 		for _, row := range queued {
 			contactIDs = append(contactIDs, row.ContactID)
 		}
-		mappings, err := s.repo.ZaloMappings(ctx, teacherID, contactIDs)
+		mappings, err := s.repo.ZaloMappings(ctx, sc, contactIDs)
 		if err != nil {
 			return apperror.From(err)
 		}
@@ -443,7 +478,7 @@ func (s *Service) ResumeRun(ctx context.Context, teacherID, periodID uuid.UUID) 
 
 		for _, row := range queued {
 			fail := func(reason string) error {
-				return s.repo.MarkOutcome(ctx, teacherID, row.NotificationID, StatusFailed, nil, ptr(reason))
+				return s.repo.MarkOutcome(ctx, sc, row.NotificationID, StatusFailed, nil, ptr(reason))
 			}
 			uid, mapped := mappings[row.ContactID]
 			if !mapped {
@@ -476,7 +511,7 @@ func (s *Service) ResumeRun(ctx context.Context, teacherID, periodID uuid.UUID) 
 		if len(items) == 0 {
 			status = RunStatusCompleted
 		}
-		if err := s.repo.UpdateRunStatus(ctx, teacherID, run.ID, status); err != nil {
+		if err := s.repo.UpdateRunStatus(ctx, sc, run.ID, status); err != nil {
 			if errors.Is(err, ErrRunActive) {
 				return apperror.Conflict("a zalo_personal run is already sending; wait for it to finish")
 			}
@@ -491,14 +526,18 @@ func (s *Service) ResumeRun(ctx context.Context, teacherID, periodID uuid.UUID) 
 	if len(items) > 0 {
 		reservation.Start(run.ID, items)
 	}
-	return s.RunSnapshot(ctx, teacherID, periodID)
+	return s.RunSnapshot(ctx, sc, periodID)
 }
 
 // ReconcileInterrupted marks every run a previous process left in
 // RunStatusRunning as interrupted. Called once at boot, before requests are
 // served: a run can only be "running" while a goroutine in this process is
 // sending it, so any running row found at startup belongs to a process that
-// died mid-run.
+// died mid-run. Deliberately unscoped by tenant: there is no requesting
+// teacher or center at boot, and a process crash is a system-wide event that
+// can equally strand a run in any center — every affected row keeps its own
+// existing teacher_id/center_id anchor, this sweep only ever touches status
+// and finished_at.
 func (s *Service) ReconcileInterrupted(ctx context.Context) error {
 	count, err := s.repo.MarkInterrupted(ctx)
 	if err != nil {

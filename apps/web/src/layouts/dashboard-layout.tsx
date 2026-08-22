@@ -1,5 +1,15 @@
-import { BookUserIcon, EllipsisIcon, LogOutIcon, type LucideProps } from "lucide-react";
-import { useState, type ComponentType } from "react";
+import {
+  BookOpenIcon,
+  BookUserIcon,
+  Building2Icon,
+  ClipboardCheckIcon,
+  EllipsisIcon,
+  FileSpreadsheetIcon,
+  IdCardIcon,
+  LogOutIcon,
+  type LucideProps,
+} from "lucide-react";
+import { createContext, useContext, useState, type ComponentType } from "react";
 import { NavLink, Outlet, Link, useLocation } from "react-router";
 
 import {
@@ -14,6 +24,7 @@ import {
 import { useAuthStore, useLogout } from "@/features/auth";
 import { useCurrentPeriod } from "@/features/billing";
 import { usePendingSessions } from "@/features/dashboard/hooks/use-dashboard";
+import { useCenterContext, usePendingPlanCount } from "@/features/teaching";
 import { cn, nameInitial } from "@/lib/utils";
 
 interface NavEntry {
@@ -24,53 +35,149 @@ interface NavEntry {
   pending?: boolean;
 }
 
+interface NavGroup {
+  /** Null for the ungrouped leading entries (Tổng quan). */
+  header: string | null;
+  entries: NavEntry[];
+}
+
 /**
- * The nav destinations from the prototype `home` screen plus Phụ huynh. The
+ * The prototype sidebar's grouped nav: Tổng quan ungrouped, then Dạy học /
+ * Học phí / Trung tâm sections. Every group shows for every role — billing is
+ * teacher-scoped server-side, so members keep their own Học phí entries. The
  * three period-scoped routes (Chốt sổ, Gửi thông báo, Thu tiền) build their
  * link once `useCurrentPeriod` resolves rather than routing through a
  * redirect page, since phase 1 owns no `/billing/current`-style route.
  */
-function useNavEntries(): NavEntry[] {
+function useNavGroups(): NavGroup[] {
   const { data: period } = useCurrentPeriod();
   const { data: pendingSessionsResponse } = usePendingSessions();
+  const { isOwner, isResolved } = useCenterContext();
+  const pendingPlanCount = usePendingPlanCount();
   const periodId = period?.id ?? null;
   const hasPending = (pendingSessionsResponse?.total ?? 0) > 0;
 
   return [
-    { label: "Tổng quan", to: "/", Icon: HvHomeIcon },
-    { label: "Điểm danh", to: "/sessions", Icon: HvCheckIcon, pending: hasPending },
-    { label: "Lớp & học sinh", to: "/students", Icon: HvUsersIcon },
-    { label: "Phụ huynh", to: "/contacts", Icon: BookUserIcon },
-    { label: "Chốt sổ", to: periodId ? `/billing/${periodId}` : null, Icon: HvFileIcon },
+    { header: null, entries: [{ label: "Tổng quan", to: "/", Icon: HvHomeIcon }] },
     {
-      label: "Gửi thông báo",
-      to: periodId ? `/notifications/${periodId}` : null,
-      Icon: HvSendIcon,
+      header: "Dạy học",
+      entries: [
+        { label: "Điểm danh", to: "/sessions", Icon: HvCheckIcon, pending: hasPending },
+        { label: "Quản lý lớp học", to: "/classbook", Icon: BookOpenIcon },
+        { label: "Hồ sơ học sinh", to: "/records", Icon: IdCardIcon },
+        { label: "Lớp & học sinh", to: "/students", Icon: HvUsersIcon },
+        { label: "Phụ huynh", to: "/contacts", Icon: BookUserIcon },
+      ],
     },
-    { label: "Thu tiền", to: periodId ? `/collections/${periodId}` : null, Icon: HvWalletIcon },
+    {
+      header: "Học phí",
+      entries: [
+        { label: "Chốt sổ", to: periodId ? `/billing/${periodId}` : null, Icon: HvFileIcon },
+        {
+          label: "Gửi thông báo",
+          to: periodId ? `/notifications/${periodId}` : null,
+          Icon: HvSendIcon,
+        },
+        { label: "Thu tiền", to: periodId ? `/collections/${periodId}` : null, Icon: HvWalletIcon },
+      ],
+    },
+    {
+      header: "Trung tâm",
+      entries: [
+        // Owner-gated, and only after /centers/me resolves — rendering it
+        // optimistically would flash the entry for members on load.
+        ...(isResolved && isOwner
+          ? [
+              {
+                label: "Duyệt giáo án",
+                to: "/lesson-plans",
+                Icon: ClipboardCheckIcon,
+                pending: pendingPlanCount > 0,
+              },
+              { label: "Nhập từ Excel", to: "/students/import", Icon: FileSpreadsheetIcon },
+            ]
+          : []),
+        { label: "Cài đặt trung tâm", to: "/center", Icon: Building2Icon },
+      ],
+    },
   ];
 }
 
 /**
- * Bottom-bar split (<md only; sidebar and rail stay flat): daily actions keep
- * a direct tab, while billing-cycle entries (Chốt sổ, Gửi thông báo) and the
- * setup-time Phụ huynh entry live behind the Thêm sheet so the bar holds five
- * slots at 360px.
+ * Bottom-bar split (<md only; the sidebar and rail render every entry, in
+ * groups): daily actions keep a direct tab, while the billing-cycle entries
+ * (Chốt sổ, Gửi thông báo) and the setup-time Phụ huynh and Cài đặt trung tâm
+ * entries live behind the Thêm sheet so the bar holds five slots at 360px.
  */
-const OVERFLOW_LABELS = new Set(["Chốt sổ", "Gửi thông báo", "Phụ huynh"]);
+const OVERFLOW_LABELS = new Set([
+  "Quản lý lớp học",
+  "Hồ sơ học sinh",
+  "Chốt sổ",
+  "Gửi thông báo",
+  "Phụ huynh",
+  "Duyệt giáo án",
+  "Nhập từ Excel",
+  "Cài đặt trung tâm",
+]);
 
 /**
  * Route families reachable only through the Thêm sheet. Static prefixes, not
  * the entries' `to` values, because the period-scoped links are `null` until
  * the current period resolves — the tab must still light up on their routes.
  */
-const OVERFLOW_PATH_PREFIXES = ["/billing", "/notifications", "/contacts"];
+const OVERFLOW_PATH_PREFIXES = [
+  "/classbook",
+  "/records",
+  "/billing",
+  "/notifications",
+  "/contacts",
+  "/lesson-plans",
+  "/students/import",
+  "/center",
+];
+
+/**
+ * Every concrete (non-null) nav destination, so a parent entry can tell when
+ * the current path belongs to a deeper sibling entry instead. Defaults to empty
+ * so an item rendered outside the layout still resolves active by exact match.
+ */
+const NavPathsContext = createContext<readonly string[]>([]);
+
+/**
+ * Active-state for a nav entry with "most specific wins": a parent entry
+ * (/students) covers its whole subtree, but a deeper sibling destination
+ * (/students/import) owns that branch and claims the highlight there — which
+ * `NavLink`'s prefix matching cannot express without also dropping the parent
+ * on genuine children like /students/:id.
+ */
+function useNavActive(to: string | null): boolean {
+  const { pathname } = useLocation();
+  const paths = useContext(NavPathsContext);
+  if (!to) {
+    return false;
+  }
+  if (to === "/") {
+    return pathname === "/";
+  }
+  const covers = (base: string) => pathname === base || pathname.startsWith(`${base}/`);
+  if (!covers(to)) {
+    return false;
+  }
+  return !paths.some((other) => other.length > to.length && covers(other));
+}
 
 function PendingDot() {
   return <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-coral-400" />;
 }
 
-function SidebarNavItem({ to, label, Icon, pending, onNavigate }: NavEntry & { onNavigate?: () => void }) {
+function SidebarNavItem({
+  to,
+  label,
+  Icon,
+  pending,
+  onNavigate,
+}: NavEntry & { onNavigate?: () => void }) {
+  const active = useNavActive(to);
   if (!to) {
     return (
       <span
@@ -83,27 +190,26 @@ function SidebarNavItem({ to, label, Icon, pending, onNavigate }: NavEntry & { o
     );
   }
   return (
-    <NavLink
+    <Link
       to={to}
-      end={to === "/"}
       onClick={onNavigate}
-      className={({ isActive }) =>
-        cn(
-          "relative flex items-center gap-3 rounded-[14px] px-3 py-[10px] text-[14px] transition-colors",
-          isActive ? "bg-mint-50 text-mint-600" : "text-ink-500 hover:bg-cream-100",
-        )
-      }
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "relative flex items-center gap-3 rounded-[14px] px-3 py-[10px] text-[14px] transition-colors",
+        active ? "bg-mint-50 text-mint-600" : "text-ink-500 hover:bg-cream-100",
+      )}
     >
       <span className="relative">
         <Icon className="size-5" />
         {pending ? <PendingDot /> : null}
       </span>
       <span className="font-display font-bold">{label}</span>
-    </NavLink>
+    </Link>
   );
 }
 
 function RailNavItem({ to, label, Icon, pending }: NavEntry) {
+  const active = useNavActive(to);
   if (!to) {
     return (
       <span
@@ -116,25 +222,24 @@ function RailNavItem({ to, label, Icon, pending }: NavEntry) {
     );
   }
   return (
-    <NavLink
+    <Link
       to={to}
-      end={to === "/"}
       title={label}
       aria-label={label}
-      className={({ isActive }) =>
-        cn(
-          "relative flex size-12 items-center justify-center rounded-[14px] transition-colors",
-          isActive ? "bg-mint-50 text-mint-600" : "text-ink-500 hover:bg-cream-100",
-        )
-      }
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "relative flex size-12 items-center justify-center rounded-[14px] transition-colors",
+        active ? "bg-mint-50 text-mint-600" : "text-ink-500 hover:bg-cream-100",
+      )}
     >
       <Icon className="size-5" />
       {pending ? <PendingDot /> : null}
-    </NavLink>
+    </Link>
   );
 }
 
 function BottomTabItem({ to, label, Icon, pending }: NavEntry) {
+  const active = useNavActive(to);
   if (!to) {
     return (
       <span
@@ -147,22 +252,20 @@ function BottomTabItem({ to, label, Icon, pending }: NavEntry) {
     );
   }
   return (
-    <NavLink
+    <Link
       to={to}
-      end={to === "/"}
-      className={({ isActive }) =>
-        cn(
-          "flex min-h-[56px] flex-1 flex-col items-center justify-center gap-1 px-1 text-center text-[11px] font-semibold",
-          isActive ? "text-mint-600" : "text-ink-500",
-        )
-      }
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "flex min-h-[56px] flex-1 flex-col items-center justify-center gap-1 px-1 text-center text-[11px] font-semibold",
+        active ? "text-mint-600" : "text-ink-500",
+      )}
     >
       <span className="relative">
         <Icon className="size-5" />
         {pending ? <PendingDot /> : null}
       </span>
       <span className="w-full truncate">{label}</span>
-    </NavLink>
+    </Link>
   );
 }
 
@@ -200,6 +303,49 @@ function MoreTab({ entries }: { entries: NavEntry[] }) {
         </div>
       </HvModal>
     </>
+  );
+}
+
+/**
+ * The prototype strips the generic "Trung tâm" prefix before taking the
+ * disc letter, so "Trung tâm Ánh Sao" reads "Á" — the distinctive part of
+ * the name, not the boilerplate.
+ */
+function centerInitial(name: string) {
+  return (
+    name
+      .replace(/^trung tâm\s+/i, "")
+      .trim()
+      .charAt(0) || name.trim().charAt(0)
+  );
+}
+
+/**
+ * Prototype tenant card under the logo: center initial disc, center name,
+ * and the caller's role — derived through `useCenterContext`, the one owner
+ * of the role-shaped `/centers/me` narrowing. While the query resolves (or
+ * after it fails) the card keeps its box with placeholder text so the nav
+ * below never shifts.
+ */
+function CenterCard() {
+  const { centerName: name, isOwner } = useCenterContext();
+  return (
+    <div className="mx-4 mb-2 flex items-center gap-2.5 rounded-2xl border-[1.5px] border-line-200 bg-cream-100 px-2.5 py-2">
+      <span
+        aria-hidden
+        className="flex size-[34px] shrink-0 items-center justify-center rounded-[10px] bg-mint-400 font-display text-[15px] font-extrabold text-white"
+      >
+        {name ? centerInitial(name) : ""}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[13.5px] font-extrabold text-ink-900">
+          {name ?? "Đang tải…"}
+        </span>
+        <span className="block text-[11.5px] text-ink-400">
+          {name ? (isOwner ? "Chủ trung tâm" : "Giáo viên") : " "}
+        </span>
+      </span>
+    </div>
   );
 }
 
@@ -324,73 +470,109 @@ function ProfileDisc() {
 
 /** Authenticated app shell: full sidebar at lg+, icon rail at md–lg, bottom tab bar under md. */
 export function DashboardLayout() {
-  const entries = useNavEntries();
+  const groups = useNavGroups();
+  const entries = groups.flatMap((group) => group.entries);
   const primaryTabs = entries.filter((entry) => !OVERFLOW_LABELS.has(entry.label));
   const overflowEntries = entries.filter((entry) => OVERFLOW_LABELS.has(entry.label));
+  const navPaths = entries.map((entry) => entry.to).filter((to): to is string => to !== null);
 
   return (
-    <div className="flex min-h-svh bg-cream-100">
-      <aside className="hidden lg:flex lg:w-[236px] lg:shrink-0 lg:flex-col lg:border-r lg:border-line-200 lg:bg-white">
-        <div className="flex items-center gap-3 p-6">
-          <img src="/favicon.svg" alt="" aria-hidden="true" className="h-10 w-10 shrink-0" />
-          <div>
-            <p className="font-display text-[22px] font-extrabold text-ink-900">Teka</p>
-            <p className="text-[12px] text-ink-400">Quản lý lớp học</p>
+    <NavPathsContext.Provider value={navPaths}>
+      <div className="flex min-h-svh bg-cream-100">
+        <aside className="hidden lg:flex lg:w-[236px] lg:shrink-0 lg:flex-col lg:border-r lg:border-line-200 lg:bg-white">
+          <div className="flex items-center gap-3 p-6 pb-4">
+            <img src="/favicon.svg" alt="" aria-hidden="true" className="h-10 w-10 shrink-0" />
+            <div>
+              <p className="font-display text-[22px] font-extrabold text-ink-900">Teka</p>
+              <p className="text-[12px] text-ink-400">Quản lý lớp học</p>
+            </div>
           </div>
-        </div>
-        <nav aria-label="Main" className="flex flex-1 flex-col gap-1 px-4">
-          {entries.map((entry) => (
-            <SidebarNavItem key={entry.label} {...entry} />
-          ))}
-        </nav>
-        <CurrentPeriodCard />
-        <SidebarFooter />
-      </aside>
+          <CenterCard />
+          {/* min-h-0 + overflow so short viewports scroll the nav instead of
+            clipping the period card and footer below it. */}
+          <nav aria-label="Main" className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4">
+            {groups.map((group) => (
+              <div
+                key={group.header ?? "top"}
+                role={group.header ? "group" : undefined}
+                aria-label={group.header ?? undefined}
+                className="flex flex-col gap-1"
+              >
+                {group.header ? (
+                  <p
+                    aria-hidden
+                    className="px-3 pb-1 pt-3.5 text-[11px] font-extrabold uppercase tracking-[0.8px] text-ink-300"
+                  >
+                    {group.header}
+                  </p>
+                ) : null}
+                {group.entries.map((entry) => (
+                  <SidebarNavItem key={entry.label} {...entry} />
+                ))}
+              </div>
+            ))}
+          </nav>
+          <CurrentPeriodCard />
+          <SidebarFooter />
+        </aside>
 
-      <aside className="hidden md:flex md:w-[72px] md:shrink-0 md:flex-col md:items-center md:border-r md:border-line-200 md:bg-white lg:hidden">
-        <img src="/favicon.svg" alt="Teka" className="mt-6 h-9 w-9 shrink-0" />
-        <nav aria-label="Main" className="flex flex-1 flex-col items-center gap-2 pb-6 pt-4">
-          {entries.map((entry) => (
-            <RailNavItem key={entry.label} {...entry} />
-          ))}
-        </nav>
-        <ProfileDisc />
-        <CurrentPeriodDisc />
-      </aside>
+        <aside className="hidden md:flex md:w-[72px] md:shrink-0 md:flex-col md:items-center md:border-r md:border-line-200 md:bg-white lg:hidden">
+          <img src="/favicon.svg" alt="Teka" className="mt-6 h-9 w-9 shrink-0" />
+          <nav
+            aria-label="Main"
+            className="flex min-h-0 flex-1 flex-col items-center gap-4 overflow-y-auto pb-6 pt-4"
+          >
+            {groups.map((group) => (
+              <div
+                key={group.header ?? "top"}
+                role={group.header ? "group" : undefined}
+                aria-label={group.header ?? undefined}
+                className="flex flex-col items-center gap-2"
+              >
+                {group.entries.map((entry) => (
+                  <RailNavItem key={entry.label} {...entry} />
+                ))}
+              </div>
+            ))}
+          </nav>
+          <ProfileDisc />
+          <CurrentPeriodDisc />
+        </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <main
-          id="main-content"
-          className={cn(
-            "flex-1 p-4 pb-24",
-            "md:mx-auto md:w-full md:max-w-[var(--w-content)] md:p-6 md:pb-6",
-            "lg:max-w-[var(--w-page)] lg:px-8 lg:py-7",
-          )}
-        >
-          {/* At lg+ the sidebar footer owns profile + logout; below that the
+        <div className="flex min-w-0 flex-1 flex-col">
+          <main
+            id="main-content"
+            className={cn(
+              "flex-1 p-4 pb-24",
+              "md:mx-auto md:w-full md:max-w-[var(--w-content)] md:p-6 md:pb-6",
+              "lg:max-w-[var(--w-page)] lg:px-8 lg:py-7",
+            )}
+          >
+            {/* At lg+ the sidebar footer owns profile + logout; below that the
               header row keeps both reachable for the rail and bottom tabs. */}
-          <div className="mb-2 flex items-center justify-end gap-1 lg:hidden">
-            <Link
-              to="/profile"
-              className="inline-flex items-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-[13px] font-semibold text-ink-500 transition-colors hover:bg-cream-100 hover:text-mint-600"
-            >
-              Hồ sơ giáo viên
-            </Link>
-            <LogoutButton />
-          </div>
-          <Outlet />
-        </main>
-      </div>
+            <div className="mb-2 flex items-center justify-end gap-1 lg:hidden">
+              <Link
+                to="/profile"
+                className="inline-flex items-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-[13px] font-semibold text-ink-500 transition-colors hover:bg-cream-100 hover:text-mint-600"
+              >
+                Hồ sơ giáo viên
+              </Link>
+              <LogoutButton />
+            </div>
+            <Outlet />
+          </main>
+        </div>
 
-      <nav
-        aria-label="Main"
-        className="fixed inset-x-0 bottom-0 z-40 flex border-t border-line-200 bg-white md:hidden"
-      >
-        {primaryTabs.map((entry) => (
-          <BottomTabItem key={entry.label} {...entry} />
-        ))}
-        <MoreTab entries={overflowEntries} />
-      </nav>
-    </div>
+        <nav
+          aria-label="Main"
+          className="fixed inset-x-0 bottom-0 z-40 flex border-t border-line-200 bg-white md:hidden"
+        >
+          {primaryTabs.map((entry) => (
+            <BottomTabItem key={entry.label} {...entry} />
+          ))}
+          <MoreTab entries={overflowEntries} />
+        </nav>
+      </div>
+    </NavPathsContext.Provider>
   );
 }

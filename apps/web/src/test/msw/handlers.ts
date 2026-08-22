@@ -19,11 +19,25 @@ export function ok<T>(data: T, meta?: Meta) {
   return meta === undefined ? { success: true, data } : { success: true, data, meta };
 }
 
-export function fail(code: string, message: string, fields?: Record<string, string>) {
-  return {
-    success: false,
-    error: fields === undefined ? { code, message } : { code, message, fields },
-  };
+/**
+ * `details` mirrors `response.ErrWithDetails` — structured context the flat
+ * `fields` map cannot carry (the roster import's per-row error list). Both
+ * are omitted when unset, exactly as the Go envelope's `omitempty` does.
+ */
+export function fail(
+  code: string,
+  message: string,
+  fields?: Record<string, string>,
+  details?: unknown,
+) {
+  const error: Record<string, unknown> = { code, message };
+  if (fields !== undefined) {
+    error.fields = fields;
+  }
+  if (details !== undefined) {
+    error.details = details;
+  }
+  return { success: false, error };
 }
 
 export function listMeta(total: number, page = 1, perPage = 20): Meta {
@@ -100,6 +114,7 @@ export function makeClass(overrides: Record<string, unknown> = {}) {
   return {
     id,
     name: `Toán 9A${classCounter}`,
+    teacher_id: `22000000-0000-4000-8000-${String(classCounter).padStart(12, "0")}`,
     start_date: "2026-08-01",
     end_date: null,
     default_unit_price: 60000,
@@ -405,17 +420,27 @@ const publicStatementFixturesByToken: Record<string, unknown> = {
 
 export const handlers = [
   http.post(`${API_URL}/auth/login`, () => HttpResponse.json(ok(makeSession(primaryTeacher)))),
-  http.post(`${API_URL}/auth/register`, async ({ request }) => {
-    const body = (await request.json()) as { full_name: string; phone: string };
-    const teacher = makeTeacher({ full_name: body.full_name, phone: body.phone });
-    return HttpResponse.json(ok(makeSession(teacher)), { status: 201 });
-  }),
   // No refresh cookie in tests by default: a fresh visitor has no session.
   http.post(`${API_URL}/auth/refresh`, () =>
     HttpResponse.json(fail("UNAUTHORIZED", "invalid refresh token"), { status: 401 }),
   ),
   http.post(`${API_URL}/auth/logout`, () => HttpResponse.json(ok({ message: "logged out" }))),
   http.get(`${API_URL}/me`, () => HttpResponse.json(ok(primaryTeacher))),
+  // `GET /centers/me` is role-shaped; the default is the owner body, since
+  // any page that role-gates renders its owner branch by default. Tests that
+  // need the member body (`{center_name}`) override this with server.use.
+  http.get(`${API_URL}/centers/me`, () =>
+    HttpResponse.json(
+      ok({
+        center: {
+          id: "30000000-0000-4000-8000-000000000001",
+          name: "Trung Tâm Bình Minh",
+          is_owner: true,
+        },
+        members: [],
+      }),
+    ),
+  ),
   // A test teacher has no linked Zalo account unless the test says otherwise.
   http.get(`${API_URL}/me/zalo`, () => HttpResponse.json(ok({ linked: false }))),
   http.get(`${API_URL}/sessions/pending`, () =>
@@ -427,11 +452,66 @@ export const handlers = [
   // Dashboard aggregation defaults: an empty roster with nothing billed.
   http.get(`${API_URL}/classes`, () => HttpResponse.json(ok([], listMeta(0)))),
   http.get(`${API_URL}/classes/:id/sessions`, () => HttpResponse.json(ok([]))),
+  // Teaching defaults: nothing saved yet. Stateful round-trip handlers live in
+  // `@/features/teaching/__tests__/teaching-handlers.ts`; tests that write
+  // register those with server.use().
+  http.get(`${API_URL}/classes/:id/curriculum`, () =>
+    HttpResponse.json(ok({ lessons: [], current_index: 0 })),
+  ),
+  http.get(`${API_URL}/classes/:id/lesson-plans`, () => HttpResponse.json(ok([]))),
+  http.get(`${API_URL}/classes/:id/marks`, () =>
+    HttpResponse.json(ok({ session_notes: [], marks: [] })),
+  ),
+  http.get(`${API_URL}/teaching/review-queue`, () => HttpResponse.json(ok([]))),
   http.get(`${API_URL}/students`, () => HttpResponse.json(ok([], listMeta(0)))),
   http.get(`${API_URL}/billing-periods/:id/preview`, () => HttpResponse.json(ok(makePreview()))),
   http.get(`${API_URL}/billing-periods/:id/collections/summary`, () =>
     HttpResponse.json(ok(makeCollectionsSummary())),
   ),
+  // Always the same generic body — the real endpoint never reveals whether
+  // the phone matched an eligible account (anti-enumeration).
+  http.post(`${API_URL}/auth/forgot-password`, () =>
+    HttpResponse.json(ok({ message: "if this phone is registered, a reset link has been sent" })),
+  ),
+  http.post(`${API_URL}/auth/reset-password`, () => new HttpResponse(null, { status: 204 })),
+  // Owner-shaped by default — the signed-in teacher owns their center, so the
+  // layout's center card resolves everywhere; member-shaped tests override.
+  http.get(`${API_URL}/centers/me`, () =>
+    HttpResponse.json(
+      ok({
+        center: {
+          id: "30000000-0000-4000-8000-000000000001",
+          name: "Trung Tâm Bình Minh",
+          is_owner: true,
+        },
+        members: [],
+      }),
+    ),
+  ),
+  http.post(`${API_URL}/centers/me/invitations`, () =>
+    HttpResponse.json(
+      ok({
+        id: "40000000-0000-4000-8000-000000000001",
+        phone: "+84901234567",
+        expires_at: "2026-08-19T10:00:00Z",
+        link: "https://app.teka.dev/invite/test-invite-token",
+        dm_status: "sent",
+      }),
+      { status: 201 },
+    ),
+  ),
+  http.get(`${API_URL}/centers/me/invitations`, () => HttpResponse.json(ok([]))),
+  http.delete(
+    `${API_URL}/centers/me/invitations/:id`,
+    () => new HttpResponse(null, { status: 204 }),
+  ),
+  // Anti-enumeration: every rejection reason (unknown/expired/revoked/used
+  // token) collapses to the same generic 404 on the real API; tests override
+  // this default with a fixture keyed to a specific token.
+  http.post(`${API_URL}/invitations/preview`, () =>
+    HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh", phone_masked: "+84******567" })),
+  ),
+  http.post(`${API_URL}/invitations/accept`, () => new HttpResponse(null, { status: 204 })),
   // Every failure mode (unknown, malformed, revoked, expired, already-paid,
   // soft-deleted) collapses to a plain 404 — the real API has no other error
   // code for this endpoint.

@@ -14,6 +14,7 @@ import (
 	"teka/apps/api/internal/features/notifications"
 	"teka/apps/api/internal/features/zalo"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/testutil"
 )
 
@@ -49,6 +50,7 @@ type interruptedRunFixture struct {
 	d         *deps
 	sender    *fakeZaloSender
 	teacherID uuid.UUID
+	scope     authctx.Scope
 	periodID  uuid.UUID
 	runID     uuid.UUID
 	contacts  []uuid.UUID
@@ -62,13 +64,14 @@ func newInterruptedRun(t *testing.T, sender *fakeZaloSender) interruptedRunFixtu
 	d1 := newDepsWithZalo(t, db, blocking)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 
 	periodID, contacts := closedPeriodWithContacts(t, d1, teacher.ID, 3)
 	mapContact(t, db, contacts[0], "uid-delivered")
 	mapContact(t, db, contacts[1], "uid-stranded")
 	mapContact(t, db, contacts[2], "uid-unreached")
 
-	resp, err := d1.notifications.BulkSend(ctx, teacher.ID, periodID, notifications.BulkSendRequest{
+	resp, err := d1.notifications.BulkSend(ctx, sc, periodID, notifications.BulkSendRequest{
 		Purpose: "statement",
 		Channel: notifications.ChannelZaloPersonal,
 	})
@@ -93,6 +96,7 @@ func newInterruptedRun(t *testing.T, sender *fakeZaloSender) interruptedRunFixtu
 		d:         newDepsWithZalo(t, db, sender),
 		sender:    sender,
 		teacherID: teacher.ID,
+		scope:     sc,
 		periodID:  periodID,
 		runID:     *resp.RunID,
 		contacts:  contacts,
@@ -106,23 +110,24 @@ func TestRunSnapshotReportsTheLatestRunOrNoneAtAll(t *testing.T) {
 	d := newDepsWithZalo(t, testutil.StartPostgres(t), fake)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, d.db)
+	sc := testutil.ScopeFor(t, d.db, teacher.ID)
 	periodID, contacts := closedPeriodWithContacts(t, d, teacher.ID, 2)
 
-	snap, err := d.notifications.RunSnapshot(ctx, teacher.ID, periodID)
+	snap, err := d.notifications.RunSnapshot(ctx, sc, periodID)
 	require.NoError(t, err)
 	require.False(t, snap.Active)
 	require.Nil(t, snap.RunID, "a period that never ran reports nothing, not a 404")
 
 	mapContact(t, d.db, contacts[0], "uid-one")
 	mapContact(t, d.db, contacts[1], "uid-two")
-	resp, err := d.notifications.BulkSend(ctx, teacher.ID, periodID, notifications.BulkSendRequest{
+	resp, err := d.notifications.BulkSend(ctx, sc, periodID, notifications.BulkSendRequest{
 		Purpose: "statement",
 		Channel: notifications.ChannelZaloPersonal,
 	})
 	require.NoError(t, err)
 	require.Equal(t, notifications.RunStatusCompleted, waitForRunOutcome(t, d.db, *resp.RunID))
 
-	snap, err = d.notifications.RunSnapshot(ctx, teacher.ID, periodID)
+	snap, err = d.notifications.RunSnapshot(ctx, sc, periodID)
 	require.NoError(t, err)
 	require.False(t, snap.Active, "a finished run is history, not activity")
 	require.NotNil(t, snap.RunID)
@@ -146,14 +151,14 @@ func TestReconcileThenResumeSendsOnlyTheStrandedRows(t *testing.T) {
 		`UPDATE contacts SET zalo_user_id = NULL, zalo_name = NULL WHERE id = ?`, f.contacts[2]).Error)
 
 	require.NoError(t, f.d.notifications.ReconcileInterrupted(ctx))
-	snap, err := f.d.notifications.RunSnapshot(ctx, f.teacherID, f.periodID)
+	snap, err := f.d.notifications.RunSnapshot(ctx, f.scope, f.periodID)
 	require.NoError(t, err)
 	require.Equal(t, notifications.RunStatusInterrupted, snap.Status)
 	require.Equal(t, 3, snap.Total)
 	require.Equal(t, 1, snap.Sent)
 	require.Zero(t, snap.Failed)
 
-	resumed, err := f.d.notifications.ResumeRun(ctx, f.teacherID, f.periodID)
+	resumed, err := f.d.notifications.ResumeRun(ctx, f.scope, f.periodID)
 	require.NoError(t, err)
 	require.NotNil(t, resumed.RunID)
 	require.Equal(t, f.runID, *resumed.RunID, "a resume continues the same run, never a new one")
@@ -187,7 +192,7 @@ func TestReconcileThenResumeSendsOnlyTheStrandedRows(t *testing.T) {
 		"an unmapped row cannot be auto-sent")
 
 	// The finished run cannot be resumed again.
-	_, err = f.d.notifications.ResumeRun(ctx, f.teacherID, f.periodID)
+	_, err = f.d.notifications.ResumeRun(ctx, f.scope, f.periodID)
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
 }
@@ -197,9 +202,10 @@ func TestResumeRefusesWhenThereIsNothingToResume(t *testing.T) {
 	d := newDepsWithZalo(t, testutil.StartPostgres(t), &fakeZaloSender{})
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, d.db)
+	sc := testutil.ScopeFor(t, d.db, teacher.ID)
 	periodID, _ := closedPeriodWithContacts(t, d, teacher.ID, 1)
 
-	_, err := d.notifications.ResumeRun(ctx, teacher.ID, periodID)
+	_, err := d.notifications.ResumeRun(ctx, sc, periodID)
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code, "no run ever existed for this period")
 }
@@ -211,7 +217,7 @@ func TestResumeRefusesWhenTheSessionIsDead(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, f.d.notifications.ReconcileInterrupted(ctx))
 
-	_, err := f.d.notifications.ResumeRun(ctx, f.teacherID, f.periodID)
+	_, err := f.d.notifications.ResumeRun(ctx, f.scope, f.periodID)
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
 	require.Equal(t, notifications.RunStatusInterrupted, runStatusOf(t, f.d.db, f.runID),

@@ -154,7 +154,56 @@ Provision these outside this repository before deploying:
   `http://traefik:80`. TLS terminates at Cloudflare; the Traefik routers use
   the internal `web` entrypoint.
 - An external PostgreSQL instance reachable from the API host through
-  `API_DATABASE_URL`.
+  `API_DATABASE_URL` — for this homelab, the operator-run instance described
+  in the next section.
+
+### Operator-run PostgreSQL
+
+The homelab database is provisioned by
+[`infrastructure/postgres/docker-compose.yml`](../infrastructure/postgres/docker-compose.yml).
+It is deliberately a **separate Compose stack** from `docker-compose.prod.yml`:
+production data lives in its own named volume (`teka-pgdata`) with its own
+lifecycle, so no `docker compose down -v` on the application stack can ever
+touch it.
+
+```bash
+cd infrastructure/postgres
+echo "POSTGRES_PASSWORD=$(openssl rand -base64 24)" > .env   # untracked
+docker compose --env-file .env up -d
+```
+
+How the API reaches it:
+
+- The database publishes **no host port**. It joins the application stack's
+  default network, declared as the external network `teka_default`, and is
+  addressable there by its container name `teka-db`:
+
+  ```text
+  API_DATABASE_URL=postgres://teka:<password>@teka-db:5432/teka?sslmode=disable
+  ```
+
+- **Network name contract:** `teka_default` is what Compose names the app
+  stack's default network when the project name is `teka` (derived from the
+  repository directory name). Running the app stack with `-p`, a
+  `COMPOSE_PROJECT_NAME` override, or from a differently named clone directory
+  changes that name and silently breaks this external reference — keep the
+  project name `teka`.
+- **First-boot order:** the network is created by the application stack. On a
+  fresh host, bring the app stack up once first (the `migrate` job exits
+  nonzero while the database is still missing — expected), start the database
+  stack, then repeat the app stack's `up -d`.
+
+Operational notes:
+
+- Keep the image major version in sync with the dev stack's `postgres` service
+  in the root [`docker-compose.yml`](../docker-compose.yml) (both currently
+  `postgres:16-alpine`), so migrations are always exercised against the
+  production major before they reach it.
+- No initdb scripts are mounted here; migrations create the extensions they
+  need (`pgcrypto`) idempotently.
+- `POSTGRES_PASSWORD` lives in the untracked `infrastructure/postgres/.env`
+  and must match the credential inside `API_DATABASE_URL` in
+  `.env.production`.
 
 ### Prepare images and environment
 

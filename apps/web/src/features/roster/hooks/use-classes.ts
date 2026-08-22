@@ -1,11 +1,14 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { sessionsKeys } from "@/features/attendance";
+
 import {
   addSchedule,
   createClass,
   deleteSchedule,
   getClass,
   listClasses,
+  reassignTeacher,
   updateClass,
   updateSchedule,
   type ListClassesParams,
@@ -49,6 +52,23 @@ export function useUpdateClass(id: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: classesKeys.lists() });
       void queryClient.invalidateQueries({ queryKey: classesKeys.detail(id) });
+    },
+  });
+}
+
+/**
+ * Owner-only teacher handoff. The reassignment moves the class row, its
+ * schedules and its future planned sessions server-side, so both the class
+ * caches and every session list are stale afterward — invalidate broadly
+ * rather than track which dates moved.
+ */
+export function useReassignTeacher(classId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (teacherId: string) => reassignTeacher(classId, teacherId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: classesKeys.all });
+      void queryClient.invalidateQueries({ queryKey: sessionsKeys.all });
     },
   });
 }

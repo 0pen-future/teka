@@ -81,7 +81,7 @@ export function ScheduleSlotsEditor({
               onChange={(days) => updateSlot(index, { days })}
             />
           </div>
-          {slotErrors?.[index]?.time ?? slotErrors?.[index]?.days ? (
+          {(slotErrors?.[index]?.time ?? slotErrors?.[index]?.days) ? (
             <p role="alert" className="mt-1.5 text-sm text-destructive">
               {slotErrors?.[index]?.time ?? slotErrors?.[index]?.days}
             </p>

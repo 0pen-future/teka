@@ -34,6 +34,15 @@ const (
 	canarySecretKey = "canary-zpw-enk-secret-key"
 )
 
+// fakeScopeResolver resolves every teacher id to a scope where it owns its
+// own center — like the real resolver does for a teacher who never joined
+// anyone else's center. The zalo routes only ever read TeacherID from it.
+type fakeScopeResolver struct{}
+
+func (fakeScopeResolver) ResolveScope(_ context.Context, teacherID uuid.UUID) (authctx.Scope, error) {
+	return authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}, nil
+}
+
 func newZaloHTTPTest(t *testing.T, opts ServiceOptions) (*gin.Engine, *fakeRepo, *Service) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -43,7 +52,8 @@ func newZaloHTTPTest(t *testing.T, opts ServiceOptions) (*gin.Engine, *fakeRepo,
 
 	r := gin.New()
 	jwtCfg := config.JWTConfig{Secret: handlerTestSecret, AccessTTL: 15 * time.Minute}
-	RegisterRoutes(r.Group("/api/v1"), NewHandler(svc), middleware.RequireAuth(jwtCfg))
+	RegisterRoutes(r.Group("/api/v1"), NewHandler(svc),
+		middleware.RequireAuth(jwtCfg), middleware.ResolveScope(fakeScopeResolver{}))
 	return r, repo, svc
 }
 

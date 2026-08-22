@@ -8,6 +8,88 @@
     },
     "basePath": "/api/v1",
     "paths": {
+        "/auth/forgot-password": {
+            "post": {
+                "description": "Public, unauthenticated. Always returns the same generic body: whether the phone matched an eligible account (an active, non-owner member) is never revealed. Delivery is best-effort over the center owner's linked Zalo — owners themselves are excluded and recover via operator CLI only.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Request a password reset",
+                "parameters": [
+                    {
+                        "description": "phone",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/auth.ForgotPasswordRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/auth.ForgotPasswordResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "validation failed",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/auth/login": {
             "post": {
                 "description": "Verifies phone and password; returns an access token and sets the refresh cookie (new token family).",
@@ -160,9 +242,9 @@
                 }
             }
         },
-        "/auth/register": {
+        "/auth/reset-password": {
             "post": {
-                "description": "Creates a teacher account from a Vietnamese phone number (0xxxxxxxxx or +84xxxxxxxxx) and returns an access token; the refresh token is set as an httpOnly cookie.",
+                "description": "Public, unauthenticated. Token travels in the body. Every rejection reason — unknown/used/expired/superseded token, or an account no longer active — answers the same generic 400 body, by design (anti-enumeration). On success, every refresh token the account held is revoked.",
                 "consumes": [
                     "application/json"
                 ],
@@ -172,39 +254,24 @@
                 "tags": [
                     "auth"
                 ],
-                "summary": "Register a new teacher",
+                "summary": "Reset password",
                 "parameters": [
                     {
-                        "description": "registration payload",
+                        "description": "token and new password",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/auth.RegisterRequest"
+                            "$ref": "#/definitions/auth.ResetPasswordRequest"
                         }
                     }
                 ],
                 "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "data": {
-                                            "$ref": "#/definitions/auth.TokenResponse"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
+                    "204": {
+                        "description": "No Content"
                     },
-                    "409": {
-                        "description": "phone already registered",
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "allOf": [
                                 {
@@ -223,6 +290,24 @@
                     },
                     "422": {
                         "description": "validation failed",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
                         "schema": {
                             "allOf": [
                                 {
@@ -1612,6 +1697,1043 @@
                 }
             }
         },
+        "/centers/dashboard/overview": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "centers"
+                ],
+                "summary": "Dashboard: monthly per-class KPIs grouped by teacher",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "month as YYYY-MM, default current month",
+                        "name": "month",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/centers.OverviewTeacherResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "not the owner",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "invalid month",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/centers/dashboard/sessions/{sessionId}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "centers"
+                ],
+                "summary": "Dashboard: get one session with its attendance sheet",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "session id",
+                        "name": "sessionId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/centers.SessionDetailResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "not the owner, or session outside this center",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/centers/dashboard/teachers": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "centers"
+                ],
+                "summary": "Dashboard: list teachers with activity counts",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/centers.TeacherStatsResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "not the owner",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/centers/dashboard/teachers/{teacherId}/classes": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "centers"
+                ],
+                "summary": "Dashboard: list a teacher's classes",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "teacher id",
+                        "name": "teacherId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "active (default), archived, or all",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "page number, default 1",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "page size, default 20",
+                        "name": "per_page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "sort key: name, start_date, created_at",
+                        "name": "sort",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/classes.ClassResponse"
+                                            }
+                                        },
+                                        "meta": {
+                                            "$ref": "#/definitions/response.Meta"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "not the owner, or teacher not in this center",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "invalid status",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/centers/dashboard/teachers/{teacherId}/classes/{classId}/sessions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "centers"
+                ],
+                "summary": "Dashboard: list a class's sessions with attendance stats",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "teacher id",
+                        "name": "teacherId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "class id",
+                        "name": "classId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "range start, YYYY-MM-DD",
+                        "name": "from",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "range end, YYYY-MM-DD",
+                        "name": "to",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/centers.SessionRowResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "not the owner, or ids outside this center",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "invalid range",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/centers/me": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Owner gets the full member roster; a non-owner member gets only the center's name.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "centers"
+                ],
+                "summary": "Get my center",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/centers.MeResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "centers"
+                ],
+                "summary": "Rename my center",
+                "parameters": [
+                    {
+                        "description": "new name",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/centers.RenameRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/centers.MeResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "not the owner",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "validation failed",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/centers/me/invitations": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Owner-only. status is \"pending\", \"accepted\", \"revoked\", or the derived \"expired\" (pending past its deadline).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "invitations"
+                ],
+                "summary": "List invitations",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/invitations.InvitationResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "not the center owner",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Owner-only. Supersedes any pending invite already outstanding for the phone. Always returns a copy-link; dm_status (\"skipped\"/\"failed\"/\"sent\") reports a best-effort Zalo DM attempt that never blocks or fails the create.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "invitations"
+                ],
+                "summary": "Create an invitation",
+                "parameters": [
+                    {
+                        "description": "invitee phone",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/invitations.CreateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/invitations.CreateResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "not the center owner",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "validation failed",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/centers/me/invitations/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Owner-only. Idempotent: revoking an already-revoked invite still succeeds. An id belonging to another center answers 404, the same as one that never existed.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "invitations"
+                ],
+                "summary": "Revoke an invitation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "invitation id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "not the center owner",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/centers/me/members/{teacherId}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "centers"
+                ],
+                "summary": "Remove a member (owner-only)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "teacher id",
+                        "name": "teacherId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "not the owner",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "not a member of this center",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "owner cannot remove themselves",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/classes": {
             "get": {
                 "security": [
@@ -2139,6 +3261,1105 @@
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/classes/{id}/curriculum": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the class's giáo trình: ordered lesson titles and the progress pointer. A class that never saved one returns the empty default (lessons: [], current_index: 0), not a 404.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "teaching"
+                ],
+                "summary": "Get class curriculum",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "class id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/teaching.CurriculumResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Whole-list replace of the giáo trình (the editor always saves the entire list). current_index is clamped into the new list's range server-side. Class-teacher only — the owner reads but never edits another teacher's content.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "teaching"
+                ],
+                "summary": "Replace class curriculum",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "class id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "lessons and progress pointer",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/teaching.PutCurriculumRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/teaching.CurriculumResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "caller is not the class teacher",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/classes/{id}/lesson-plans": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Every saved giáo án of the class, ordered by lesson index, submitter names resolved. Lessons never saved have no entry — the client maps a missing index to its virtual \"none\" status.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "teaching"
+                ],
+                "summary": "List class lesson plans",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "class id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/teaching.PlanResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/classes/{id}/lesson-plans/{index}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Full content replace (goal, activities, homework, file metadata); status moves per the review state machine — first save creates the row as draft, saving under redo keeps redo, a plan under or after review has no legal save (409).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "teaching"
+                ],
+                "summary": "Save a lesson plan",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "class id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "lesson index",
+                        "name": "index",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "plan content",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/teaching.SavePlanRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/teaching.PlanResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "caller is not the class teacher",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "409": {
+                        "description": "no legal save from the current status",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "lesson index outside the curriculum",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/classes/{id}/lesson-plans/{index}/approve": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "pending → approved. The optional comment whole-replaces owner_comment (empty clears it). Owner only; owners approve their own plans too — no higher tier exists.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "teaching"
+                ],
+                "summary": "Approve a lesson plan",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "class id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "lesson index",
+                        "name": "index",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "optional comment",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/teaching.ReviewRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/teaching.PlanResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "caller is not the center owner",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "409": {
+                        "description": "plan is not pending",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/classes/{id}/lesson-plans/{index}/reopen": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "approved/redo → pending: re-examine an approved plan, or withdraw the owner's own redo request. Clears both owner notes — the review starts fresh.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "teaching"
+                ],
+                "summary": "Reopen a lesson plan",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "class id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "lesson index",
+                        "name": "index",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/teaching.PlanResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "caller is not the center owner",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "409": {
+                        "description": "plan is neither approved nor redo",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/classes/{id}/lesson-plans/{index}/request-redo": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "pending → redo. The comment is required (422 otherwise) and becomes the redo note the teacher sees; the plan stays submittable and the note stays visible until resubmission.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "teaching"
+                ],
+                "summary": "Request lesson plan redo",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "class id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "lesson index",
+                        "name": "index",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "required comment",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/teaching.ReviewRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/teaching.PlanResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "caller is not the center owner",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "409": {
+                        "description": "plan is not pending",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "comment is required",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/classes/{id}/lesson-plans/{index}/submit": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "draft/redo → pending: hands the giáo án to the owner, consumes the redo note, and stamps who submitted and when.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "teaching"
+                ],
+                "summary": "Submit a lesson plan",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "class id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "lesson index",
+                        "name": "index",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/teaching.PlanResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "caller is not the class teacher",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "409": {
+                        "description": "no legal submit from the current status",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "lesson index outside the curriculum",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/classes/{id}/marks": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Every session note (nhận xét buổi) and per-student mark (điểm + ghi chú riêng) of the class's sessions in the requested month, in one response. No session-status filter — the client already holds the month's session list and correlates by session_id.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "teaching"
+                ],
+                "summary": "Month batch read of session notes and marks",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "class id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "month, YYYY-MM",
+                        "name": "month",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/teaching.MonthMarksResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "month is not YYYY-MM",
                         "schema": {
                             "allOf": [
                                 {
@@ -2686,6 +4907,136 @@
                     },
                     "422": {
                         "description": "Unprocessable Entity",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/classes/{id}/teacher": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Chuyển lớp, lịch học và các buổi đã lên lịch từ hôm nay trở đi sang giáo viên mới. Buổi đã dạy, buổi đã huỷ, điểm danh và học phí giữ nguyên. Chỉ chủ trung tâm được gọi; giáo viên nhận phải thuộc trung tâm.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "classes"
+                ],
+                "summary": "Bàn giao lớp cho giáo viên khác",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "class id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "giáo viên nhận lớp",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handoff.ReassignRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/handoff.ReassignResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "chỉ chủ trung tâm",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "giáo viên không thuộc trung tâm",
                         "schema": {
                             "allOf": [
                                 {
@@ -3852,6 +6203,313 @@
                     },
                     "422": {
                         "description": "ended_on before started_on",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/imports/roster": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Đọc file .xlsx và tạo lớp, lịch học, phụ huynh, học sinh, ghi danh. dry_run=true chỉ kiểm tra, không ghi. Chỉ chủ trung tâm được gọi.",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "imports"
+                ],
+                "summary": "Import lớp và học sinh từ file Excel",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "File .xlsx theo mẫu",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "true = chỉ kiểm tra, không ghi dữ liệu",
+                        "name": "dry_run",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/imports.Report"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Envelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.Envelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/response.Envelope"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/response.Envelope"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/imports/roster/template": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Trả về file .xlsx gồm 2 sheet (Lop, HocSinh) với dòng tiêu đề và một dòng ví dụ.",
+                "produces": [
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                ],
+                "tags": [
+                    "imports"
+                ],
+                "summary": "Tải file Excel mẫu để import lớp và học sinh",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.Envelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/invitations/accept": {
+            "post": {
+                "description": "Public, unauthenticated. Token travels in the body. Every rejection reason — unknown/used/expired/revoked token, an already-active account, or a disabled account that was never a member of this center — answers the same generic 400 body, by design (anti-enumeration).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "invitations"
+                ],
+                "summary": "Accept an invitation",
+                "parameters": [
+                    {
+                        "description": "token, full name, and new password",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/invitations.AcceptRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "validation failed",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/invitations/preview": {
+            "post": {
+                "description": "Public, unauthenticated. Token travels in the body, never the path, so it never appears in an access log. Any invalid/used/expired/revoked token answers the same generic 404.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "invitations"
+                ],
+                "summary": "Preview an invitation",
+                "parameters": [
+                    {
+                        "description": "invite token",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/invitations.PreviewRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/invitations.PreviewResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "validation failed",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
                         "schema": {
                             "allOf": [
                                 {
@@ -6435,6 +9093,254 @@
                 }
             }
         },
+        "/sessions/{id}/marks": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Batch merge of per-student marks. Per entry, score and personal_note are tri-state: omitted leaves the stored value, null clears it, a value sets it; a row whose resulting fields are both NULL is deleted. A new row requires the student to have been on the session's roster; a student's existing row stays editable and clearable after their enrollment ends. Returns the session's full mark set after the write. Session-teacher only.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "teaching"
+                ],
+                "summary": "Save session marks",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "session id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "mark entries",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/teaching.MarkEntryRequest"
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/teaching.MarkResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "caller is not the session's teacher",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "duplicate student, score outside 0–10, or student not on the roster",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/sessions/{id}/note": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Upserts the session's whole-class nhận xét; an empty (or whitespace-only) body deletes the note instead of storing an empty string. Session-teacher only.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "teaching"
+                ],
+                "summary": "Save a session note",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "session id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "note body; empty deletes",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/teaching.PutNoteRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/teaching.NoteResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "caller is not the session's teacher",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/sessions/{id}/uncancel": {
             "post": {
                 "security": [
@@ -7126,6 +10032,82 @@
                     }
                 }
             }
+        },
+        "/teaching/review-queue": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Every pending giáo án in the center with class name, submitter, lesson title (null-safe against a shrunken curriculum), oldest submission first. Its length is the nav-dot count.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "teaching"
+                ],
+                "summary": "Owner review queue",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/teaching.QueueItemResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "caller is not the center owner",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -7197,6 +10179,25 @@
                 }
             }
         },
+        "auth.ForgotPasswordRequest": {
+            "type": "object",
+            "required": [
+                "phone"
+            ],
+            "properties": {
+                "phone": {
+                    "type": "string"
+                }
+            }
+        },
+        "auth.ForgotPasswordResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
         "auth.LoginRequest": {
             "type": "object",
             "required": [
@@ -7212,25 +10213,19 @@
                 }
             }
         },
-        "auth.RegisterRequest": {
+        "auth.ResetPasswordRequest": {
             "type": "object",
             "required": [
-                "full_name",
                 "password",
-                "phone"
+                "token"
             ],
             "properties": {
-                "full_name": {
-                    "type": "string",
-                    "maxLength": 100,
-                    "minLength": 1
-                },
                 "password": {
                     "type": "string",
                     "maxLength": 72,
                     "minLength": 8
                 },
-                "phone": {
+                "token": {
                     "type": "string"
                 }
             }
@@ -7551,6 +10546,224 @@
                 }
             }
         },
+        "centers.CenterResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "is_owner": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "centers.MeResponse": {
+            "type": "object",
+            "properties": {
+                "center": {
+                    "$ref": "#/definitions/centers.CenterResponse"
+                },
+                "members": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/centers.MemberResponse"
+                    }
+                }
+            }
+        },
+        "centers.MemberResponse": {
+            "type": "object",
+            "properties": {
+                "full_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_owner": {
+                    "type": "boolean"
+                },
+                "phone": {
+                    "type": "string"
+                }
+            }
+        },
+        "centers.OverviewClassResponse": {
+            "type": "object",
+            "properties": {
+                "avg_attendance": {
+                    "description": "AvgAttendance is attendance records per held session.",
+                    "type": "number"
+                },
+                "class_id": {
+                    "type": "string"
+                },
+                "class_name": {
+                    "type": "string"
+                },
+                "estimated_revenue": {
+                    "description": "EstimatedRevenue sums unit prices of billable records on confirmed\nheld sessions — the number that moves as attendance is taken.",
+                    "type": "integer"
+                },
+                "invoiced_revenue": {
+                    "description": "InvoicedRevenue is the closed-books number: non-void invoice lines\nplus session-attributed adjustments of the month's closed period.\nNull until the teacher's period for the month is closed. Adjustments\nwithout a source session belong to no class and are excluded here.",
+                    "type": "integer"
+                },
+                "present_rate": {
+                    "description": "PresentRate is the share of attendance records marked present.",
+                    "type": "number"
+                },
+                "retention_rate": {
+                    "description": "RetentionRate is the share of enrollments active on the month's first\nday still active on its last day.",
+                    "type": "number"
+                },
+                "sessions_held": {
+                    "type": "integer"
+                }
+            }
+        },
+        "centers.OverviewTeacherResponse": {
+            "type": "object",
+            "properties": {
+                "classes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/centers.OverviewClassResponse"
+                    }
+                },
+                "teacher_id": {
+                    "type": "string"
+                },
+                "teacher_name": {
+                    "type": "string"
+                }
+            }
+        },
+        "centers.RenameRequest": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "minLength": 1
+                }
+            }
+        },
+        "centers.SessionAttendanceRow": {
+            "type": "object",
+            "properties": {
+                "billable": {
+                    "type": "boolean"
+                },
+                "display_note": {
+                    "type": "string"
+                },
+                "note": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "student_id": {
+                    "type": "string"
+                },
+                "student_name": {
+                    "type": "string"
+                }
+            }
+        },
+        "centers.SessionDetailResponse": {
+            "type": "object",
+            "properties": {
+                "attendance": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/centers.SessionAttendanceRow"
+                    }
+                },
+                "estimated_revenue": {
+                    "type": "integer"
+                },
+                "invoiced_revenue": {
+                    "description": "InvoicedRevenue is null while no closed billing period covers the\nsession's date.",
+                    "type": "integer"
+                },
+                "session": {
+                    "$ref": "#/definitions/centers.SessionSummaryResponse"
+                }
+            }
+        },
+        "centers.SessionRowResponse": {
+            "type": "object",
+            "properties": {
+                "attendance_total": {
+                    "type": "integer"
+                },
+                "estimated_revenue": {
+                    "type": "integer"
+                },
+                "present_count": {
+                    "type": "integer"
+                },
+                "session_date": {
+                    "type": "string"
+                },
+                "session_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "centers.SessionSummaryResponse": {
+            "type": "object",
+            "properties": {
+                "attendance_confirmed_at": {
+                    "type": "string"
+                },
+                "class_id": {
+                    "type": "string"
+                },
+                "class_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "session_date": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "teacher_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "centers.TeacherStatsResponse": {
+            "type": "object",
+            "properties": {
+                "active_classes": {
+                    "description": "ActiveClasses counts their live classes with status active.",
+                    "type": "integer"
+                },
+                "active_students": {
+                    "description": "ActiveStudents counts distinct students with an enrollment of theirs\nactive today.",
+                    "type": "integer"
+                },
+                "teacher": {
+                    "$ref": "#/definitions/centers.MemberResponse"
+                }
+            }
+        },
         "classes.ClassResponse": {
             "type": "object",
             "properties": {
@@ -7579,6 +10792,9 @@
                     "type": "string"
                 },
                 "status": {
+                    "type": "string"
+                },
+                "teacher_id": {
                     "type": "string"
                 }
             }
@@ -7994,6 +11210,161 @@
                 },
                 "unit_price": {
                     "type": "integer"
+                }
+            }
+        },
+        "handoff.ReassignRequest": {
+            "type": "object",
+            "required": [
+                "teacher_id"
+            ],
+            "properties": {
+                "teacher_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handoff.ReassignResponse": {
+            "type": "object",
+            "properties": {
+                "class_id": {
+                    "type": "string"
+                },
+                "moved_planned_sessions": {
+                    "type": "integer"
+                },
+                "teacher_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "imports.Report": {
+            "type": "object",
+            "properties": {
+                "classes": {
+                    "$ref": "#/definitions/imports.ReportEntity"
+                },
+                "committed": {
+                    "type": "boolean"
+                },
+                "contacts": {
+                    "$ref": "#/definitions/imports.ReportEntity"
+                },
+                "enrollments": {
+                    "$ref": "#/definitions/imports.ReportEntity"
+                },
+                "schedules": {
+                    "$ref": "#/definitions/imports.ReportEntity"
+                },
+                "students": {
+                    "$ref": "#/definitions/imports.ReportEntity"
+                }
+            }
+        },
+        "imports.ReportEntity": {
+            "type": "object",
+            "properties": {
+                "created": {
+                    "type": "integer"
+                },
+                "reused": {
+                    "type": "integer"
+                }
+            }
+        },
+        "invitations.AcceptRequest": {
+            "type": "object",
+            "required": [
+                "full_name",
+                "password",
+                "token"
+            ],
+            "properties": {
+                "full_name": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "minLength": 1
+                },
+                "password": {
+                    "type": "string",
+                    "maxLength": 72,
+                    "minLength": 8
+                },
+                "token": {
+                    "type": "string"
+                }
+            }
+        },
+        "invitations.CreateRequest": {
+            "type": "object",
+            "required": [
+                "phone"
+            ],
+            "properties": {
+                "phone": {
+                    "type": "string"
+                }
+            }
+        },
+        "invitations.CreateResponse": {
+            "type": "object",
+            "properties": {
+                "dm_status": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "link": {
+                    "type": "string"
+                },
+                "phone": {
+                    "type": "string"
+                }
+            }
+        },
+        "invitations.InvitationResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "phone": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "invitations.PreviewRequest": {
+            "type": "object",
+            "required": [
+                "token"
+            ],
+            "properties": {
+                "token": {
+                    "type": "string"
+                }
+            }
+        },
+        "invitations.PreviewResponse": {
+            "type": "object",
+            "properties": {
+                "center_name": {
+                    "type": "string"
+                },
+                "phone_masked": {
+                    "type": "string"
                 }
             }
         },
@@ -8841,6 +12212,210 @@
                 "timezone": {
                     "type": "string",
                     "maxLength": 64
+                }
+            }
+        },
+        "teaching.CurriculumResponse": {
+            "type": "object",
+            "properties": {
+                "current_index": {
+                    "type": "integer"
+                },
+                "lessons": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "teaching.MarkEntryRequest": {
+            "type": "object",
+            "required": [
+                "student_id"
+            ],
+            "properties": {
+                "personal_note": {
+                    "type": "string"
+                },
+                "score": {
+                    "type": "number"
+                },
+                "student_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "teaching.MarkResponse": {
+            "type": "object",
+            "properties": {
+                "personal_note": {
+                    "type": "string"
+                },
+                "score": {
+                    "type": "number"
+                },
+                "session_id": {
+                    "type": "string"
+                },
+                "student_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "teaching.MonthMarksResponse": {
+            "type": "object",
+            "properties": {
+                "marks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/teaching.MarkResponse"
+                    }
+                },
+                "session_notes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/teaching.NoteResponse"
+                    }
+                }
+            }
+        },
+        "teaching.NoteResponse": {
+            "type": "object",
+            "properties": {
+                "body": {
+                    "type": "string"
+                },
+                "session_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "teaching.PlanResponse": {
+            "type": "object",
+            "properties": {
+                "activities": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "class_id": {
+                    "type": "string"
+                },
+                "file_name": {
+                    "type": "string"
+                },
+                "goal": {
+                    "type": "string"
+                },
+                "homework": {
+                    "type": "string"
+                },
+                "lesson_index": {
+                    "type": "integer"
+                },
+                "owner_comment": {
+                    "type": "string"
+                },
+                "redo_note": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "submitted_at": {
+                    "type": "string"
+                },
+                "submitted_by": {
+                    "type": "string"
+                },
+                "submitted_by_name": {
+                    "type": "string"
+                }
+            }
+        },
+        "teaching.PutCurriculumRequest": {
+            "type": "object",
+            "properties": {
+                "current_index": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "lessons": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "teaching.PutNoteRequest": {
+            "type": "object",
+            "properties": {
+                "body": {
+                    "type": "string",
+                    "maxLength": 2000
+                }
+            }
+        },
+        "teaching.QueueItemResponse": {
+            "type": "object",
+            "properties": {
+                "class_id": {
+                    "type": "string"
+                },
+                "class_name": {
+                    "type": "string"
+                },
+                "lesson_index": {
+                    "type": "integer"
+                },
+                "lesson_title": {
+                    "type": "string"
+                },
+                "plan_id": {
+                    "type": "string"
+                },
+                "submitted_at": {
+                    "type": "string"
+                },
+                "teacher_name": {
+                    "type": "string"
+                }
+            }
+        },
+        "teaching.ReviewRequest": {
+            "type": "object",
+            "properties": {
+                "comment": {
+                    "type": "string",
+                    "maxLength": 1000
+                }
+            }
+        },
+        "teaching.SavePlanRequest": {
+            "type": "object",
+            "properties": {
+                "activities": {
+                    "type": "array",
+                    "maxItems": 50,
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "file_name": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "goal": {
+                    "type": "string",
+                    "maxLength": 2000
+                },
+                "homework": {
+                    "type": "string",
+                    "maxLength": 2000
                 }
             }
         },

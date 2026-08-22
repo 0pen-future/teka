@@ -20,6 +20,9 @@ type Enrollment struct {
 	// ID is a UUIDv7 generated in Go via id.New(); the column has no default.
 	ID        uuid.UUID `gorm:"primaryKey"`
 	TeacherID uuid.UUID
+	// CenterID anchors the row in the center it was created in; it never
+	// changes, even when the creating teacher later moves centers.
+	CenterID  uuid.UUID
 	StudentID uuid.UUID
 	ClassID   uuid.UUID
 	// StartedOn/EndedOn are Postgres DATE columns; only the date part is

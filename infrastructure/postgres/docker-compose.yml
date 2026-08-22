@@ -8,6 +8,8 @@
 #   docker compose --env-file .env -f docker-compose.yml up -d
 services:
   db:
+    # Keep the major version in sync with the dev stack's postgres service in
+    # the root docker-compose.yml so migrations are tested on this major.
     image: postgres:16-alpine
     container_name: teka-db
     environment:

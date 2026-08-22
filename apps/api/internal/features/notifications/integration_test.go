@@ -190,15 +190,16 @@ func TestBulkSendStatementsTargetsUnpaidPaidAndOldDebtButSkipsVoided(t *testing.
 	d := newDeps(t)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, d.db)
+	sc := testutil.ScopeFor(t, d.db, teacher.ID)
 
 	// Contact D's old debt: one child in an earlier, already-closed period,
 	// left unpaid so its outstanding balance carries forward as the target
 	// period's opening_balance.
 	contactD := testutil.Contact(t, d.db, teacher.ID, testutil.WithContactFullName("Debt Parent"))
 	seedChild(t, d.db, teacher.ID, contactD.ID, "OldDebtChild", date("2026-01-05"), 1)
-	periodJan, err := d.billing.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	periodJan, err := d.billing.EnsurePeriod(ctx, testutil.ScopeFor(t, d.db, teacher.ID), 2026, 1)
 	require.NoError(t, err)
-	_, err = d.billing.Close(ctx, teacher.ID, periodJan.ID)
+	_, err = d.billing.Close(ctx, testutil.ScopeFor(t, d.db, teacher.ID), periodJan.ID)
 	require.NoError(t, err)
 
 	contactA := testutil.Contact(t, d.db, teacher.ID, testutil.WithContactFullName("Alpha Parent"))
@@ -211,9 +212,9 @@ func TestBulkSendStatementsTargetsUnpaidPaidAndOldDebtButSkipsVoided(t *testing.
 	contactC := testutil.Contact(t, d.db, teacher.ID, testutil.WithContactFullName("Charlie Parent"))
 	seedChild(t, d.db, teacher.ID, contactC.ID, "CharlieChild", date("2026-02-02"), 1)
 
-	periodFeb, err := d.billing.EnsurePeriod(ctx, teacher.ID, 2026, 2)
+	periodFeb, err := d.billing.EnsurePeriod(ctx, testutil.ScopeFor(t, d.db, teacher.ID), 2026, 2)
 	require.NoError(t, err)
-	_, err = d.billing.Close(ctx, teacher.ID, periodFeb.ID)
+	_, err = d.billing.Close(ctx, testutil.ScopeFor(t, d.db, teacher.ID), periodFeb.ID)
 	require.NoError(t, err)
 
 	// Beta pays in full.
@@ -224,7 +225,7 @@ func TestBulkSendStatementsTargetsUnpaidPaidAndOldDebtButSkipsVoided(t *testing.
 	require.NoError(t, d.db.Table("invoices").Select("id, total_due").
 		Where("teacher_id = ? AND contact_id = ? AND period_id = ?", teacher.ID, contactB.ID, periodFeb.ID).
 		Take(&betaInvoice).Error)
-	_, err = d.payments.Record(ctx, teacher.ID, payments.RecordPaymentRequest{
+	_, err = d.payments.Record(ctx, testutil.ScopeFor(t, d.db, teacher.ID), payments.RecordPaymentRequest{
 		ContactID:  contactB.ID,
 		Amount:     betaInvoice.TotalDue,
 		Method:     "cash",
@@ -237,11 +238,11 @@ func TestBulkSendStatementsTargetsUnpaidPaidAndOldDebtButSkipsVoided(t *testing.
 	require.NoError(t, d.db.Table("invoices").Select("id").
 		Where("teacher_id = ? AND contact_id = ? AND period_id = ?", teacher.ID, contactC.ID, periodFeb.ID).
 		Take(&charlieInvoice).Error)
-	_, err = d.billing.VoidInvoice(ctx, teacher.ID, charlieInvoice.ID, "test fixture void")
+	_, err = d.billing.VoidInvoice(ctx, testutil.ScopeFor(t, d.db, teacher.ID), charlieInvoice.ID, "test fixture void")
 	require.NoError(t, err)
 
 	// purpose=statement: A, B, D only — never C.
-	stmtResp, err := d.notifications.BulkSend(ctx, teacher.ID, periodFeb.ID, notifications.BulkSendRequest{Purpose: "statement"})
+	stmtResp, err := d.notifications.BulkSend(ctx, sc, periodFeb.ID, notifications.BulkSendRequest{Purpose: "statement"})
 	require.NoError(t, err)
 	require.Equal(t, 3, stmtResp.QueuedCount, "expected exactly one row each for A, B, D")
 	require.Len(t, stmtResp.Rows, 3)
@@ -294,7 +295,7 @@ func TestBulkSendStatementsTargetsUnpaidPaidAndOldDebtButSkipsVoided(t *testing.
 	// purpose=reminder: A and D only (outstanding > 0) — never B, which is
 	// fully paid. A family with two children both in debt still gets exactly
 	// one reminder row.
-	reminderResp, err := d.notifications.BulkSend(ctx, teacher.ID, periodFeb.ID, notifications.BulkSendRequest{Purpose: "reminder"})
+	reminderResp, err := d.notifications.BulkSend(ctx, sc, periodFeb.ID, notifications.BulkSendRequest{Purpose: "reminder"})
 	require.NoError(t, err)
 	require.Equal(t, 2, reminderResp.QueuedCount)
 	require.Equal(t, 1, reminderResp.SkippedPaidCount, "the fully-paid contact must be counted as skipped, not queued")
@@ -310,11 +311,11 @@ func TestBulkSendStatementsTargetsUnpaidPaidAndOldDebtButSkipsVoided(t *testing.
 
 	// Mark-sent is idempotent: a second call on an already-sent id changes
 	// nothing.
-	require.NoError(t, d.notifications.MarkSent(ctx, teacher.ID, []uuid.UUID{rowA.NotificationID}))
+	require.NoError(t, d.notifications.MarkSent(ctx, sc, []uuid.UUID{rowA.NotificationID}))
 	firstSentAt := sentAtOf(t, d.db, rowA.NotificationID)
 	require.NotNil(t, firstSentAt)
 
-	require.NoError(t, d.notifications.MarkSent(ctx, teacher.ID, []uuid.UUID{rowA.NotificationID}))
+	require.NoError(t, d.notifications.MarkSent(ctx, sc, []uuid.UUID{rowA.NotificationID}))
 	secondSentAt := sentAtOf(t, d.db, rowA.NotificationID)
 	require.NotNil(t, secondSentAt)
 	require.True(t, firstSentAt.Equal(*secondSentAt), "marking sent twice must not change sent_at")
@@ -328,14 +329,15 @@ func TestBulkSendOnOpenPeriodFailsWithoutWritingAnything(t *testing.T) {
 	d := newDeps(t)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, d.db)
+	sc := testutil.ScopeFor(t, d.db, teacher.ID)
 
 	contact := testutil.Contact(t, d.db, teacher.ID)
 	seedChild(t, d.db, teacher.ID, contact.ID, "OpenPeriodChild", date("2026-03-01"), 1)
 
-	period, err := d.billing.EnsurePeriod(ctx, teacher.ID, 2026, 3)
+	period, err := d.billing.EnsurePeriod(ctx, testutil.ScopeFor(t, d.db, teacher.ID), 2026, 3)
 	require.NoError(t, err)
 
-	_, err = d.notifications.BulkSend(ctx, teacher.ID, period.ID, notifications.BulkSendRequest{Purpose: "statement"})
+	_, err = d.notifications.BulkSend(ctx, sc, period.ID, notifications.BulkSendRequest{Purpose: "statement"})
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
 
@@ -355,16 +357,17 @@ func TestBulkSendWithUnconfiguredChannelFailsWithoutWritingAnything(t *testing.T
 	d := newDeps(t)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, d.db)
+	sc := testutil.ScopeFor(t, d.db, teacher.ID)
 
 	contact := testutil.Contact(t, d.db, teacher.ID)
 	seedChild(t, d.db, teacher.ID, contact.ID, "ZnsChild", date("2026-04-01"), 1)
 
-	period, err := d.billing.EnsurePeriod(ctx, teacher.ID, 2026, 4)
+	period, err := d.billing.EnsurePeriod(ctx, testutil.ScopeFor(t, d.db, teacher.ID), 2026, 4)
 	require.NoError(t, err)
-	_, err = d.billing.Close(ctx, teacher.ID, period.ID)
+	_, err = d.billing.Close(ctx, testutil.ScopeFor(t, d.db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
-	_, err = d.notifications.BulkSend(ctx, teacher.ID, period.ID, notifications.BulkSendRequest{
+	_, err = d.notifications.BulkSend(ctx, sc, period.ID, notifications.BulkSendRequest{
 		Purpose: "statement",
 		Channel: notifications.ChannelZaloZNS,
 	})
@@ -418,6 +421,7 @@ func TestBulkSendScalesToFiftyContactsUnderThreeSeconds(t *testing.T) {
 	d := newDepsOnDB(t, db)
 	ctx := context.Background()
 	_, teacher := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 
 	const contactCount = 50
 	const twoChildContacts = 30
@@ -434,9 +438,9 @@ func TestBulkSendScalesToFiftyContactsUnderThreeSeconds(t *testing.T) {
 	require.NoError(t, db.Table("students").Where("teacher_id = ?", teacher.ID).Count(&studentCount).Error)
 	require.EqualValues(t, contactCount+twoChildContacts, studentCount, "fixture must produce 80 students across 50 contacts")
 
-	period, err := d.billing.EnsurePeriod(ctx, teacher.ID, 2026, 5)
+	period, err := d.billing.EnsurePeriod(ctx, testutil.ScopeFor(t, d.db, teacher.ID), 2026, 5)
 	require.NoError(t, err)
-	_, err = d.billing.Close(ctx, teacher.ID, period.ID)
+	_, err = d.billing.Close(ctx, testutil.ScopeFor(t, d.db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
 	counter := &queryCounter{}
@@ -444,7 +448,7 @@ func TestBulkSendScalesToFiftyContactsUnderThreeSeconds(t *testing.T) {
 	counter.reset()
 
 	start := time.Now()
-	resp, err := d.notifications.BulkSend(ctx, teacher.ID, period.ID, notifications.BulkSendRequest{Purpose: "statement"})
+	resp, err := d.notifications.BulkSend(ctx, sc, period.ID, notifications.BulkSendRequest{Purpose: "statement"})
 	elapsed := time.Since(start)
 	require.NoError(t, err)
 	require.Equal(t, contactCount, resp.QueuedCount)

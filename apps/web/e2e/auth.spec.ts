@@ -29,18 +29,6 @@ test("rejected credentials show the server message on the form", async ({ page }
   await expect(page).toHaveURL(/\/login$/);
 });
 
-test("registers a new account and lands on the dashboard", async ({ page }) => {
-  await page.goto("/register");
-  await page.getByLabel("Họ và tên").fill("E2E Register");
-  // Deterministic-enough 10-digit local number derived from the current
-  // timestamp so parallel test runs don't collide on a duplicate phone.
-  const phone = `09${String(Date.now()).slice(-8)}`;
-  await page.getByLabel("Số điện thoại").fill(phone);
-  await page.getByLabel("Mật khẩu").fill("e2e-password-123");
-  await page.getByRole("button", { name: "Tạo tài khoản" }).click();
-  await expect(page.getByText(/Chào buổi (sáng|trưa|chiều|tối), E2E Register!/)).toBeVisible();
-});
-
 test("logs in, keeps the session across a reload, and logs out", async ({ page }) => {
   await page.goto("/login");
   await page.getByLabel("Số điện thoại").fill(TEACHER_PHONE);

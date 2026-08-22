@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 
 import { HvBadge, HvButton, HvCard, hvToast } from "@/components/hv";
-import { cn, formatPhoneLocal } from "@/lib/utils";
+import { useSessionsList } from "@/features/attendance";
+import { cn, formatDayMonth, formatPhoneLocal } from "@/lib/utils";
 
 import { AnonymizeStudentDialog } from "../components/anonymize-student-dialog";
 import { ClassDialog } from "../components/class-dialog";
@@ -11,8 +12,10 @@ import { EnrollStudentDialog } from "../components/enroll-student-dialog";
 import { StudentDialog } from "../components/student-dialog";
 import { useClassesList } from "../hooks/use-classes";
 import { useClassSearch } from "../hooks/use-class-search";
+import { useEnrollmentsList } from "../hooks/use-enrollments";
 import { useStudentsList } from "../hooks/use-students";
-import type { Student } from "../schemas/roster-schemas";
+import { currentMonth } from "../lib/current-month";
+import type { Enrollment, Student } from "../schemas/roster-schemas";
 
 /**
  * The "Chưa ghi danh" tab's sentinel in the `class_id` search param — no
@@ -36,7 +39,6 @@ const tableCellClassName = "border-t border-line-100 px-[18px] py-[11px]";
  * table rather than routing to per-class pages, matching the prototype.
  */
 export function StudentsPage() {
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeClassId = searchParams.get("class_id") ?? "";
   const isUnenrolledTab = activeClassId === UNENROLLED_TAB;
@@ -91,6 +93,67 @@ export function StudentsPage() {
   });
   const students = studentsPage?.items ?? [];
 
+  // A stale or mistyped class_id in the URL (or the unenrolled tab) matches
+  // no class: no settings link, no per-class queries.
+  const selectedClassId = classes.some((klass) => klass.id === effectiveClassId)
+    ? effectiveClassId
+    : undefined;
+
+  // BUỔI T{m} counts the selected class's scheduled (non-cancelled) sessions
+  // month-to-date — the roster screen's workload view; attendance detail
+  // lives on the classbook screen. currentMonth() caps `to` at today and is
+  // the same helper class-settings uses, so the query key is identical and
+  // React Query dedupes the fetch.
+  const month = currentMonth();
+  const monthNumber = Number(month.label);
+  const { data: monthSessions } = useSessionsList(selectedClassId, {
+    from: month.from,
+    to: month.to,
+  });
+  const { data: classEnrollmentsPage } = useEnrollmentsList(
+    { class_id: selectedClassId, active: true, per_page: 100 },
+    { enabled: Boolean(selectedClassId) },
+  );
+
+  const enrollmentByStudent = new Map<string, Enrollment>();
+  // Gate on the driving id: `keepPreviousData` keeps the previous class's
+  // page in `data` while this query is disabled or refetching, and an
+  // ungated map would show that class's dates against these students.
+  if (selectedClassId) {
+    for (const enrollment of classEnrollmentsPage?.items ?? []) {
+      const existing = enrollmentByStudent.get(enrollment.student_id);
+      // A re-enrolled student has several rows; the latest window is the live one.
+      if (!existing || enrollment.started_on > existing.started_on) {
+        enrollmentByStudent.set(enrollment.student_id, enrollment);
+      }
+    }
+  }
+  const countableSessionDates = (monthSessions ?? [])
+    .filter((session) => session.status !== "cancelled")
+    .map((session) => session.session_date);
+
+  function monthSessionCount(studentId: string): string {
+    const enrollment = enrollmentByStudent.get(studentId);
+    // "—" until the sessions query resolves — a transient "0" would read as
+    // "no sessions this month" while the data is simply not here yet.
+    if (!enrollment || !monthSessions) {
+      return "—";
+    }
+    // ISO dates compare correctly as strings; count only the sessions inside
+    // the student's enrollment window.
+    return String(
+      countableSessionDates.filter(
+        (date) =>
+          date >= enrollment.started_on && (!enrollment.ended_on || date <= enrollment.ended_on),
+      ).length,
+    );
+  }
+
+  function enrollmentStartLabel(studentId: string): string {
+    const enrollment = enrollmentByStudent.get(studentId);
+    return enrollment ? formatDayMonth(enrollment.started_on) : "—";
+  }
+
   function selectClass(classId: string) {
     // Functional updater for the same reason as the search debounce above:
     // this also runs from dialog callbacks whose render (and captured
@@ -116,18 +179,13 @@ export function StudentsPage() {
           <h1 className="flex-1 font-display text-[26px] font-extrabold text-ink-900">
             Lớp &amp; học sinh
           </h1>
-          {/* Only while a real class is active — a stale or mistyped class_id
-              in the URL matches no class and gets no settings button. */}
-          {classes.some((klass) => klass.id === effectiveClassId) ? (
-            <HvButton
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                void navigate(`/classes/${effectiveClassId}/settings`);
-              }}
+          {selectedClassId ? (
+            <Link
+              to={`/classes/${selectedClassId}/settings`}
+              className="inline-flex min-h-11 items-center rounded-full border-[1.5px] border-line-300 px-4 py-2 text-[13px] font-extrabold text-ink-500 transition-colors hover:border-mint-400 hover:text-mint-600"
             >
               ⚙ Cài đặt lớp
-            </HvButton>
+            </Link>
           ) : null}
           <HvButton variant="secondary" size="sm" onClick={() => setClassDialogOpen(true)}>
             + Tạo lớp mới
@@ -143,8 +201,7 @@ export function StudentsPage() {
           </HvButton>
         </div>
         <p className="mt-1 text-[13.5px] text-ink-500">
-          Chỉ lưu thông tin cần thiết để tính học phí: họ tên, ghi chú phân biệt và người liên hệ.
-          Không lưu tuổi, ngày sinh, địa chỉ, trường học hay ảnh của học sinh.
+          Chỉ lưu: họ tên · ngày nhập học · lớp · người liên hệ. Không thu thập gì thêm.
         </p>
       </div>
 
@@ -264,13 +321,25 @@ export function StudentsPage() {
       <div className="hidden flex-col overflow-hidden rounded-[20px] bg-white shadow-soft-md sm:flex">
         <div className="max-h-[62vh] overflow-auto">
           <table className="w-full min-w-[640px] border-collapse text-left text-[14px]">
+            {/* Prototype grid 2fr 2fr 1.1fr 1fr 1.6fr as column ratios. */}
+            <colgroup>
+              <col className="w-[26%]" />
+              <col className="w-[26%]" />
+              <col className="w-[14%]" />
+              <col className="w-[13%]" />
+              <col className="w-[21%]" />
+            </colgroup>
             <thead>
               <tr>
                 <th className={tableHeadCellClassName}>Học sinh</th>
-                <th className={tableHeadCellClassName}>Ghi chú</th>
                 <th className={tableHeadCellClassName}>Người liên hệ</th>
+                <th className={tableHeadCellClassName}>Nhập học</th>
+                <th className={tableHeadCellClassName}>Buổi T{monthNumber}</th>
                 <th className={tableHeadCellClassName}>
-                  <span className="sr-only">Hành động</span>
+                  {/* Visually empty per the prototype, but the cells hold the
+                      display-note badge too, so the accessible name must
+                      cover both. */}
+                  <span className="sr-only">Ghi chú và hành động</span>
                 </th>
               </tr>
             </thead>
@@ -278,26 +347,12 @@ export function StudentsPage() {
               {students.map((student) => (
                 <tr key={student.id}>
                   <td className={tableCellClassName}>
-                    <div className="flex items-center gap-2">
-                      <Link
-                        to={`/students/${student.id}`}
-                        className="font-extrabold text-ink-900 hover:text-mint-600"
-                      >
-                        {student.full_name}
-                      </Link>
-                      {isUnenrolledTab ? (
-                        <HvBadge variant="warning" size="sm">
-                          Chưa vào lớp nào
-                        </HvBadge>
-                      ) : null}
-                    </div>
-                  </td>
-                  <td className={tableCellClassName}>
-                    {student.display_note ? (
-                      <HvBadge variant="info">{student.display_note}</HvBadge>
-                    ) : (
-                      <span className="text-ink-300">—</span>
-                    )}
+                    <Link
+                      to={`/students/${student.id}`}
+                      className="font-extrabold text-ink-900 hover:text-mint-600"
+                    >
+                      {student.full_name}
+                    </Link>
                   </td>
                   <td className={tableCellClassName}>
                     <Link
@@ -313,8 +368,22 @@ export function StudentsPage() {
                       {formatPhoneLocal(student.contact_phone)}
                     </a>
                   </td>
+                  <td className={cn(tableCellClassName, "text-ink-500")}>
+                    {enrollmentStartLabel(student.id)}
+                  </td>
+                  <td className={cn(tableCellClassName, "font-bold")}>
+                    {monthSessionCount(student.id)}
+                  </td>
                   <td className={tableCellClassName}>
                     <div className="flex flex-wrap items-center justify-end gap-2">
+                      {student.display_note ? (
+                        <HvBadge variant="info">{student.display_note}</HvBadge>
+                      ) : null}
+                      {isUnenrolledTab ? (
+                        <HvBadge variant="warning" size="sm">
+                          Chưa vào lớp nào
+                        </HvBadge>
+                      ) : null}
                       {isUnenrolledTab ? (
                         <HvButton
                           size="sm"

@@ -11,6 +11,7 @@ import (
 	"teka/apps/api/internal/config"
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/shared/pagination"
 )
@@ -69,22 +70,29 @@ type GenerateResult struct {
 // token, and therefore their link, never changes underneath a parent who
 // already received it. An existing, revoked statement is left alone rather
 // than resurrected: revoking a link is meant to kill it for good.
-func (s *Service) Generate(ctx context.Context, teacherID, periodID uuid.UUID) (*GenerateResult, error) {
+//
+// sc authorizes the call (owner may act on any teacher's period in the
+// center; a member only on their own), but every write is anchored on
+// periodScope — the period's own owning teacher, not necessarily sc's —
+// so an owner generating a member's statements never reassigns them to
+// itself.
+func (s *Service) Generate(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*GenerateResult, error) {
 	var result GenerateResult
 	err := s.tx.WithinTx(ctx, func(ctx context.Context) error {
-		status, err := s.repo.GetPeriodStatus(ctx, teacherID, periodID)
+		info, err := s.repo.GetPeriodStatus(ctx, sc, periodID)
 		if err != nil {
 			return s.translate(err)
 		}
-		if status != periodStatusClosed {
+		if info.Status != periodStatusClosed {
 			return apperror.Conflict("period is not closed")
 		}
+		periodScope := authctx.Scope{TeacherID: info.TeacherID, CenterID: sc.CenterID}
 
-		targets, err := s.repo.TargetContacts(ctx, teacherID, periodID)
+		targets, err := s.repo.TargetContacts(ctx, periodScope, periodID)
 		if err != nil {
 			return apperror.From(err)
 		}
-		totals, err := s.repo.ContactTotals(ctx, teacherID, periodID)
+		totals, err := s.repo.ContactTotals(ctx, periodScope, periodID)
 		if err != nil {
 			return apperror.From(err)
 		}
@@ -95,7 +103,6 @@ func (s *Service) Generate(ctx context.Context, teacherID, periodID uuid.UUID) (
 			statementID := id.New()
 			candidate := &Statement{
 				ID:        statementID,
-				TeacherID: teacherID,
 				ContactID: target.ContactID,
 				PeriodID:  periodID,
 				TokenHash: hashToken(deriveToken(s.cfg.TokenKey, statementID)),
@@ -103,7 +110,7 @@ func (s *Service) Generate(ctx context.Context, teacherID, periodID uuid.UUID) (
 				TotalDue:  totals[target.ContactID],
 			}
 
-			created, skippedRevoked, err := s.repo.UpsertStatement(ctx, teacherID, candidate)
+			created, skippedRevoked, err := s.repo.UpsertStatement(ctx, periodScope, candidate)
 			if err != nil {
 				return apperror.From(err)
 			}
@@ -131,34 +138,35 @@ func (s *Service) Generate(ctx context.Context, teacherID, periodID uuid.UUID) (
 	return &result, nil
 }
 
-// List returns a page of one period's statements. periodID must belong to
-// teacherID; an unknown or cross-tenant id is reported as if the period does
-// not exist.
-func (s *Service) List(ctx context.Context, teacherID, periodID uuid.UUID, p pagination.Params) ([]Row, int64, error) {
-	if _, err := s.repo.GetPeriodStatus(ctx, teacherID, periodID); err != nil {
+// List returns a page of one period's statements, center-scoped by sc with
+// owner oversight. periodID must be visible to sc; an unknown or
+// out-of-tenancy id is reported as if the period does not exist.
+func (s *Service) List(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, p pagination.Params) ([]Row, int64, error) {
+	if _, err := s.repo.GetPeriodStatus(ctx, sc, periodID); err != nil {
 		return nil, 0, s.translate(err)
 	}
-	rows, total, err := s.repo.ListByPeriod(ctx, teacherID, periodID, p)
+	rows, total, err := s.repo.ListByPeriod(ctx, sc, periodID, p)
 	if err != nil {
 		return nil, 0, apperror.From(err)
 	}
 	return rows, total, nil
 }
 
-// Get returns one statement. A statement belonging to another teacher is
-// reported identically to a missing one.
-func (s *Service) Get(ctx context.Context, teacherID, statementID uuid.UUID) (*Row, error) {
-	row, err := s.repo.GetByID(ctx, teacherID, statementID)
+// Get returns one statement, center-scoped by sc with owner oversight. A
+// statement outside sc's tenancy is reported identically to a missing one.
+func (s *Service) Get(ctx context.Context, sc authctx.Scope, statementID uuid.UUID) (*Row, error) {
+	row, err := s.repo.GetByID(ctx, sc, statementID)
 	if err != nil {
 		return nil, s.translate(err)
 	}
 	return row, nil
 }
 
-// Revoke kills one statement's link. Idempotent: revoking an already-revoked
-// statement is a no-op success, not a conflict.
-func (s *Service) Revoke(ctx context.Context, teacherID, statementID uuid.UUID) error {
-	if err := s.repo.Revoke(ctx, teacherID, statementID); err != nil {
+// Revoke kills one statement's link, center-scoped by sc with owner
+// oversight. Idempotent: revoking an already-revoked statement is a no-op
+// success, not a conflict.
+func (s *Service) Revoke(ctx context.Context, sc authctx.Scope, statementID uuid.UUID) error {
+	if err := s.repo.Revoke(ctx, sc, statementID); err != nil {
 		return s.translate(err)
 	}
 	return nil
@@ -209,17 +217,20 @@ func (s *Service) LookupPublic(ctx context.Context, token string) (*Statement, e
 }
 
 // RenderPublic assembles a resolved statement's parent-facing payload. Every
-// read is scoped by the statement's own teacher_id/contact_id/period_id —
-// never anything the HTTP caller supplies directly — so a forged or guessed
-// path can never pull another family's data. Returns ErrNotFound (the same
-// neutral 404 LookupPublic's failures produce) when the family has no
-// non-void invoice left for the period, or when it has already finished
-// paying: a statement expires the moment its outstanding balance reaches
-// zero, independent of ExpiresAt. The second return value is the raw VietQR
-// payload string for the qr.png route to render; it is empty exactly when
-// PublicStatement.QR is nil.
+// read is scoped by a scope derived straight from stmt's own
+// TeacherID/CenterID/ContactID/PeriodID — never anything the HTTP caller
+// supplies directly — so a forged or guessed path can never pull another
+// family's data, and there is no owner bypass on this path. Returns
+// ErrNotFound (the same neutral 404 LookupPublic's failures produce) when the
+// family has no non-void invoice left for the period, or when it has already
+// finished paying: a statement expires the moment its outstanding balance
+// reaches zero, independent of ExpiresAt. The second return value is the raw
+// VietQR payload string for the qr.png route to render; it is empty exactly
+// when PublicStatement.QR is nil.
 func (s *Service) RenderPublic(ctx context.Context, stmt *Statement) (*PublicStatement, string, error) {
-	invoiceRows, err := s.repo.InvoicesWithLines(ctx, stmt.TeacherID, stmt.ContactID, stmt.PeriodID)
+	scope := authctx.Scope{TeacherID: stmt.TeacherID, CenterID: stmt.CenterID}
+
+	invoiceRows, err := s.repo.InvoicesWithLines(ctx, scope, stmt.ContactID, stmt.PeriodID)
 	if err != nil {
 		return nil, "", apperror.Internal(err)
 	}
@@ -227,11 +238,11 @@ func (s *Service) RenderPublic(ctx context.Context, stmt *Statement) (*PublicSta
 		return nil, "", ErrNotFound
 	}
 
-	sessionRows, err := s.repo.LiveSessions(ctx, stmt.TeacherID, stmt.ContactID, stmt.PeriodID)
+	sessionRows, err := s.repo.LiveSessions(ctx, scope, stmt.ContactID, stmt.PeriodID)
 	if err != nil {
 		return nil, "", apperror.Internal(err)
 	}
-	adjustmentRows, err := s.repo.Adjustments(ctx, stmt.TeacherID, stmt.ContactID, stmt.PeriodID)
+	adjustmentRows, err := s.repo.Adjustments(ctx, scope, stmt.ContactID, stmt.PeriodID)
 	if err != nil {
 		return nil, "", apperror.Internal(err)
 	}
@@ -255,9 +266,11 @@ func (s *Service) RenderQR(payload string) ([]byte, error) {
 // TouchView records one open of a statement's public link. Called after the
 // response has already been written; the caller is expected to log a
 // failure rather than let a view counter's own error affect what a parent
-// sees.
-func (s *Service) TouchView(ctx context.Context, teacherID, statementID uuid.UUID) error {
-	return s.repo.TouchView(ctx, teacherID, statementID)
+// sees. sc must be derived from the resolved statement row, never the
+// (absent) caller's — this is reached only from the unauthenticated public
+// path.
+func (s *Service) TouchView(ctx context.Context, sc authctx.Scope, statementID uuid.UUID) error {
+	return s.repo.TouchView(ctx, sc, statementID)
 }
 
 // ChildFigures is one child's session/amount summary for one period — the
@@ -297,8 +310,20 @@ type ContactFigures struct {
 // buildPublicStatement uses, off the same invoices/invoice_lines snapshot, so
 // a bulk-sent message's total can never disagree with the number a parent
 // sees at their own statement link.
-func (s *Service) PeriodFigures(ctx context.Context, teacherID, periodID uuid.UUID) (map[uuid.UUID]ContactFigures, error) {
-	rows, err := s.repo.PeriodInvoiceLines(ctx, teacherID, periodID)
+//
+// sc authorizes the call like Generate (owner may act on any teacher's
+// period in the center; a member only on their own), then the read is
+// derived from periodScope — the period's own owning teacher — so an
+// owner's bulk send over a member's period reads exactly that member's
+// figures.
+func (s *Service) PeriodFigures(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (map[uuid.UUID]ContactFigures, error) {
+	info, err := s.repo.GetPeriodStatus(ctx, sc, periodID)
+	if err != nil {
+		return nil, s.translate(err)
+	}
+	periodScope := authctx.Scope{TeacherID: info.TeacherID, CenterID: sc.CenterID}
+
+	rows, err := s.repo.PeriodInvoiceLines(ctx, periodScope, periodID)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}

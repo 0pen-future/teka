@@ -19,6 +19,10 @@ type Contact struct {
 	// ID is a UUIDv7 generated in Go via id.New(); the column has no default.
 	ID        uuid.UUID `gorm:"primaryKey"`
 	TeacherID uuid.UUID
+	// CenterID anchors the row in the center it was created in. It never
+	// moves the row when the creating teacher later changes centers — a
+	// contact stays with the center that owned it at creation time.
+	CenterID uuid.UUID
 	// UserID stays NULL for all of V1 — parents do not log in, they open a
 	// token link. Modelled but never written.
 	UserID   *uuid.UUID

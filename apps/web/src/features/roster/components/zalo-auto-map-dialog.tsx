@@ -56,7 +56,9 @@ type RequestState = "pending" | "sent";
 
 function Avatar({ row }: { row: ZaloFriendMatch }) {
   if (row.avatar) {
-    return <img src={row.avatar} alt="" loading="lazy" className="h-8 w-8 rounded-full object-cover" />;
+    return (
+      <img src={row.avatar} alt="" loading="lazy" className="h-8 w-8 rounded-full object-cover" />
+    );
   }
   const name = row.display_name ?? row.zalo_name ?? "?";
   return (
@@ -176,9 +178,7 @@ export function ZaloAutoMapDialog({ open, onOpenChange }: ZaloAutoMapDialogProps
     return { matched, notFriend, notFound };
   }, [contactsData, match.data]);
 
-  const acceptedRows = (groups?.matched ?? []).filter(
-    ({ contact }) => !unchecked.has(contact.id),
-  );
+  const acceptedRows = (groups?.matched ?? []).filter(({ contact }) => !unchecked.has(contact.id));
 
   function toggleRow(contactId: string) {
     setUnchecked((prev) => {
@@ -318,7 +318,10 @@ export function ZaloAutoMapDialog({ open, onOpenChange }: ZaloAutoMapDialogProps
             <GroupHeading>Bạn bè Zalo — {groups.matched.length}</GroupHeading>
             <ul className="flex flex-col">
               {groups.matched.map(({ contact, row }) => (
-                <li key={contact.id} className="flex items-center gap-3 border-b border-line-200 py-2 last:border-b-0">
+                <li
+                  key={contact.id}
+                  className="flex items-center gap-3 border-b border-line-200 py-2 last:border-b-0"
+                >
                   <input
                     type="checkbox"
                     aria-label={`Ghép ${contact.full_name}`}
@@ -347,7 +350,10 @@ export function ZaloAutoMapDialog({ open, onOpenChange }: ZaloAutoMapDialogProps
               {groups.notFriend.map(({ contact, row }) => {
                 const state = row.user_id ? requests[row.user_id] : undefined;
                 return (
-                  <li key={contact.id} className="flex items-center gap-3 border-b border-line-200 py-2 last:border-b-0">
+                  <li
+                    key={contact.id}
+                    className="flex items-center gap-3 border-b border-line-200 py-2 last:border-b-0"
+                  >
                     <ContactIdentity contact={contact} />
                     <HvBadge variant="warning" size="sm">
                       Chưa kết bạn
@@ -372,7 +378,10 @@ export function ZaloAutoMapDialog({ open, onOpenChange }: ZaloAutoMapDialogProps
             <GroupHeading>Không tìm thấy trên Zalo — {groups.notFound.length}</GroupHeading>
             <ul className="flex flex-col">
               {groups.notFound.map((contact) => (
-                <li key={contact.id} className="flex items-center gap-3 border-b border-line-200 py-2 last:border-b-0">
+                <li
+                  key={contact.id}
+                  className="flex items-center gap-3 border-b border-line-200 py-2 last:border-b-0"
+                >
                   <ContactIdentity contact={contact} />
                   <span className="text-[12.5px] text-ink-400">Không tìm thấy</span>
                 </li>
