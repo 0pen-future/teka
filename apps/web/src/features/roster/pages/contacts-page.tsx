@@ -23,10 +23,15 @@ export function ContactsPage() {
   const zaloReady = zaloStatus?.linked === true && zaloStatus.status === "linked";
 
   useEffect(() => {
+    // Arm the timer only while the input and the URL actually disagree —
+    // `setSearchParams` gets a new identity on every URL change, and a timer
+    // armed across someone else's URL write can revert it: react-router's
+    // functional updater receives the params memoized at the setter's
+    // render, not the live URL.
+    if (query === urlQuery) {
+      return;
+    }
     const timer = setTimeout(() => {
-      // Functional updater: the timer fires up to 300ms after this render,
-      // and building from a captured `searchParams` would overwrite any
-      // param another interaction wrote in the meantime.
       setSearchParams(
         (prev) => {
           const next = new URLSearchParams(prev);
@@ -41,7 +46,7 @@ export function ContactsPage() {
       );
     }, 300);
     return () => clearTimeout(timer);
-  }, [query, setSearchParams]);
+  }, [query, urlQuery, setSearchParams]);
 
   const { data, isPending } = useContactsList({ query: urlQuery, per_page: 50 });
   const contacts = data?.items ?? [];
