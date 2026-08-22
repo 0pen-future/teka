@@ -338,6 +338,14 @@ func (s *Service) ForgotPassword(ctx context.Context, req ForgotPasswordRequest)
 		return s.repo.CreateResetToken(ctx, rt)
 	})
 	if txErr != nil {
+		// A concurrent forgot-password request won the race for the single
+		// live-token slot and already committed one; this transaction rolled
+		// back. The account already has a reset in flight, so the request is
+		// satisfied — fall through to success without a duplicate token or a DM
+		// for the plaintext that never committed.
+		if errors.Is(txErr, ErrActiveResetTokenExists) {
+			return nil
+		}
 		return apperror.Internal(txErr)
 	}
 
