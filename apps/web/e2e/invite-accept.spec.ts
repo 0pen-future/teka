@@ -29,7 +29,7 @@ test("owner invites a teacher, who accepts the link and logs in", async ({ page,
   await expect(page.getByRole("heading", { name: "Đã tạo lời mời" })).toBeVisible();
   const link = await page.getByLabel("Liên kết mời").inputValue();
   expect(link).toContain("/invite/");
-  await page.getByRole("button", { name: "Đóng" }).click();
+  await page.getByRole("button", { name: "Đóng", exact: true }).click();
 
   // The invite creation invalidates the pending-invite list, so the new
   // invitee shows up there right away.
