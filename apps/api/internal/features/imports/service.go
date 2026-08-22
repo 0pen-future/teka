@@ -144,6 +144,15 @@ func (s *Service) Import(ctx context.Context, scope authctx.Scope, file []byte, 
 		return nil, rowErrorsErr(rowErrs)
 	}
 
+	// A workbook that parses cleanly but carries no class and no student is a
+	// whole-file mistake, not a row defect — most often data typed on the
+	// example row (skipped by position) or an untouched template. Reject before
+	// opening the transaction so neither the check nor the commit takes the
+	// center lock for nothing.
+	if len(plan.classes) == 0 && len(plan.students) == 0 {
+		return nil, emptyFileErr()
+	}
+
 	rep := &Report{}
 	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
 		// Three of the five natural keys have no unique index behind them, so

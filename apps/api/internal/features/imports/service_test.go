@@ -240,6 +240,38 @@ func TestImportRequiresOwner(t *testing.T) {
 	require.Empty(t, f.locker.centers, "the gate runs before any work")
 }
 
+// emptyWorkbook has both sheets with their header and example rows but no data
+// rows below them — the shape of an untouched template, or of data mistakenly
+// typed onto the example row (row 2), which the parser skips by position.
+func emptyWorkbook(t *testing.T) []byte {
+	t.Helper()
+	return buildWorkbook(t, map[string][][]string{
+		SheetClasses:  {classHeaders, exampleClassRow},
+		SheetStudents: {studentHeaders, exampleStudentRow},
+	})
+}
+
+func TestImportRejectsEmptyWorkbook(t *testing.T) {
+	t.Parallel()
+
+	// Same rejection on both passes: the guard runs before the transaction, so
+	// neither the dry-run check nor the commit takes the center lock or writes.
+	for _, dryRun := range []bool{true, false} {
+		f := newImportFixture()
+
+		rep, err := f.importFile(emptyWorkbook(t), dryRun)
+		require.Nil(t, rep)
+		require.Equal(t, http.StatusUnprocessableEntity, apperror.From(err).Status)
+		require.Equal(t, CodeEmptyFile, apperror.From(err).Code)
+
+		var rowErrs *RowErrorsError
+		require.False(t, errors.As(err, &rowErrs),
+			"an empty file is a whole-file error, not a row-defect list")
+		require.Empty(t, f.store.calls, "nothing is written")
+		require.Empty(t, f.locker.centers, "the lock is never taken")
+	}
+}
+
 // workbookWithClassPrice is validWorkbook with a different Đơn giá/buổi on
 // both Toán 9A rows.
 func workbookWithClassPrice(t *testing.T, price string) []byte {
