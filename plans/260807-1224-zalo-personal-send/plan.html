@@ -1,0 +1,1016 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zalo Personal Send · Kế hoạch triển khai</title>
+<style>
+  :root{
+    --paper:#faf7f2; --panel:#f0ebe1; --ink:#0a0a0a; --muted:#6b6258;
+    --accent:#b8232c; --hair:#d8d0c2; --hair-dk:#b9ad99;
+    --serif:"Iowan Old Style","Palatino Linotype","Book Antiqua",Georgia,serif;
+    --mono:ui-monospace,"JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
+    --sans:"Segoe UI","Helvetica Neue",Arial,sans-serif;
+    /* App DS tokens (Học Vui Mỗi Ngày) — dùng riêng cho mockup */
+    --hv-cream:#f4f8f3; --hv-card:#ffffff; --hv-ink9:#1c3a31; --hv-ink7:#27433b;
+    --hv-ink5:#5b756c; --hv-ink4:#86998f; --hv-mint4:#5cc9a7; --hv-mint6:#2e8d6e;
+    --hv-mint1:#d3efe3; --hv-mint0:#e9f7f1; --hv-sky3:#7fc8e8; --hv-sun1:#fff4d6;
+    --hv-coral1:#ffe7e1; --hv-coral4:#ff7a66; --hv-coral6:#b23a28;
+    --hv-line:#e2ece2; --hv-line3:#cfe0d4;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto} *{transition:none!important;animation:none!important}}
+  body{
+    margin:0;background:var(--paper);color:var(--ink);
+    font:16px/1.65 var(--sans);
+    background-image:radial-gradient(rgba(107,98,88,.055) 1px,transparent 1px);
+    background-size:5px 5px;
+  }
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+  section{padding:72px 0;border-top:1px solid var(--hair)}
+  section:first-of-type{border-top:0}
+  .tag{font:600 11px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+  .tag .no{color:var(--accent)}
+  h1,h2,h3{font-family:var(--serif);line-height:1.15;text-wrap:balance;margin:0}
+  h1{font-size:clamp(2.75rem,6vw + 1rem,4.5rem);font-weight:600}
+  h2{font-size:clamp(1.6rem,3vw,2.2rem);font-weight:600;margin:10px 0 28px}
+  h3{font-size:1.15rem;font-weight:700}
+  p{margin:.4em 0}
+  a{color:var(--accent);text-underline-offset:3px}
+  .lede{font-family:var(--serif);font-size:1.25rem;max-width:62ch;color:#2a2620}
+  .accent-i{font-family:var(--serif);font-style:italic;color:var(--accent)}
+  .rule-l{border-left:2px solid var(--accent);padding-left:16px}
+  .hairline{border:0;border-top:1px solid var(--hair);margin:32px 0}
+  .grid{display:grid;gap:24px}
+  @media(min-width:840px){
+    .g-5-7{grid-template-columns:5fr 7fr}
+    .g-7-5{grid-template-columns:7fr 5fr}
+    .g-2{grid-template-columns:1fr 1fr}
+  }
+  .panel{background:var(--panel);padding:24px;border:1px solid var(--hair)}
+  ul{margin:.5em 0;padding-left:1.2em}
+  li{margin:.35em 0}
+  .meta-band{display:flex;flex-wrap:wrap;gap:0;border:1px solid var(--hair-dk);margin-top:40px}
+  .meta-band>div{padding:14px 22px;border-right:1px solid var(--hair-dk);flex:1 1 140px}
+  .meta-band>div:last-child{border-right:0}
+  .meta-band b{display:block;font:600 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+  .meta-band span{font-family:var(--serif);font-size:1.05rem}
+  .pull{font-family:var(--serif);font-style:italic;font-size:1.35rem;line-height:1.4;max-width:30ch;color:var(--ink);border-top:2px solid var(--ink);padding-top:14px}
+  .pull small{display:block;font:600 10px/1.6 var(--mono);font-style:normal;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-top:10px}
+  /* phase cards */
+  .phase{border:1px solid var(--hair-dk);background:var(--paper);margin-top:28px}
+  .phase-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:12px 18px;padding:18px 22px;border-bottom:1px solid var(--hair)}
+  .phase-no{font-family:var(--serif);font-size:2rem;color:var(--accent);line-height:1}
+  .phase-head h3{flex:1 1 240px}
+  .pill{font:600 10px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;padding:5px 9px;border:1px solid var(--hair-dk);color:var(--muted);white-space:nowrap}
+  .pill.status{color:var(--accent);border-color:var(--accent)}
+  .phase-body{padding:18px 22px;display:grid;gap:18px}
+  @media(min-width:840px){.phase-body{grid-template-columns:7fr 5fr}}
+  .phase-body h4{font:600 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
+  .files{font:12.5px/1.7 var(--mono);word-break:break-all}
+  .phase-foot{padding:14px 22px;border-top:1px solid var(--hair);display:flex;flex-wrap:wrap;gap:14px;align-items:center;justify-content:space-between}
+  .gate{font:12px/1.5 var(--mono);color:var(--muted)}
+  button.open-modal{
+    font:600 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;
+    background:var(--ink);color:var(--paper);border:1px solid var(--ink);
+    padding:12px 18px;cursor:pointer;min-height:44px;
+    transition:transform .15s cubic-bezier(.25,1,.5,1),background .2s;
+  }
+  button.open-modal:hover{background:var(--accent);border-color:var(--accent);transform:translateY(-2px)}
+  button.open-modal:active{transform:translateY(1px)}
+  button.open-modal:focus-visible,button.close:focus-visible,a:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+  /* dialogs */
+  dialog{
+    width:min(860px,calc(100vw - 32px));max-height:85dvh;
+    border:1px solid var(--hair-dk);background:var(--paper);color:var(--ink);
+    padding:0;margin:auto;
+  }
+  dialog::backdrop{background:rgba(10,10,10,.55)}
+  .dlg-head{position:sticky;top:0;background:var(--paper);border-bottom:1px solid var(--hair);padding:16px 24px;display:flex;gap:16px;align-items:center;justify-content:space-between}
+  .dlg-body{padding:24px;overflow-wrap:break-word}
+  .dlg-body h3{margin:26px 0 8px;border-top:1px solid var(--hair);padding-top:18px}
+  .dlg-body h3:first-child{margin-top:0;border-top:0;padding-top:0}
+  .dlg-body code,.mono{font:.85em var(--mono);background:var(--panel);padding:1px 5px}
+  .dlg-body .fm{width:100%;border-collapse:collapse;font:13px/1.6 var(--mono);margin:0 0 8px}
+  .dlg-body .fm td{border:1px solid var(--hair);padding:6px 10px}
+  .todo{list-style:none;padding-left:0}
+  .todo li{padding-left:1.7em;position:relative}
+  .todo li::before{content:"";position:absolute;left:0;top:.45em;width:.75em;height:.75em;border:1.5px solid var(--muted)}
+  button.close{background:none;border:1px solid var(--hair-dk);font:600 11px var(--mono);letter-spacing:.1em;padding:10px 14px;cursor:pointer;min-height:44px;color:var(--ink)}
+  button.close:hover{border-color:var(--accent);color:var(--accent)}
+  /* diagrams */
+  .diagram{overflow-x:auto;border:1px solid var(--hair);background:var(--paper);padding:12px}
+  .diagram svg{display:block;min-width:720px;width:100%;height:auto}
+  .cap{font:12px/1.6 var(--mono);color:var(--muted);margin-top:10px}
+  /* flow steps */
+  .steps{display:grid;gap:0;border:1px solid var(--hair-dk);counter-reset:step}
+  @media(min-width:840px){.steps{grid-template-columns:repeat(5,1fr)}}
+  .steps>div{padding:18px;border-bottom:1px solid var(--hair);counter-increment:step}
+  @media(min-width:840px){.steps>div{border-bottom:0;border-right:1px solid var(--hair)}
+    .steps>div:last-child{border-right:0}}
+  .steps b{font-family:var(--serif);font-size:1.02rem;display:block;margin-bottom:4px}
+  .steps>div::before{content:counter(step,decimal-leading-zero);font:600 11px var(--mono);color:var(--accent);display:block;margin-bottom:8px}
+  .steps p{font-size:.85rem;color:var(--muted);margin:0}
+  /* mockups */
+  .mock-stage{display:grid;gap:24px}
+  @media(min-width:900px){.mock-stage{grid-template-columns:minmax(320px,420px) 1fr;align-items:start}}
+  .mock{background:var(--hv-cream);border:1px solid var(--hv-line3);border-radius:18px;padding:16px;font-family:var(--sans);color:var(--hv-ink7);box-shadow:0 1px 2px rgba(28,58,49,.06),0 6px 18px rgba(28,58,49,.07)}
+  .mock *{border-radius:12px}
+  .mock h5{font:800 17px/1.2 "Baloo 2",var(--sans);color:var(--hv-ink9);margin:0 0 2px;border-radius:0}
+  .mock .sub{font-size:12.5px;color:var(--hv-ink5);margin:0 0 12px;border-radius:0}
+  .mock .seg{display:flex;background:#eaf1ea;padding:4px;gap:4px}
+  .mock .seg span{flex:1;text-align:center;font:700 12.5px/1 var(--sans);padding:9px 6px;color:var(--hv-ink5)}
+  .mock .seg .on{background:var(--hv-card);color:var(--hv-mint6);box-shadow:0 1px 2px rgba(28,58,49,.12)}
+  .mock .banner{background:var(--hv-mint0);border:1px solid var(--hv-mint1);padding:12px;margin-top:12px}
+  .mock .banner b{color:var(--hv-ink9);font-size:13.5px}
+  .mock .bar{height:8px;background:var(--hv-mint1);margin:8px 0 6px;overflow:hidden}
+  .mock .bar i{display:block;height:100%;width:44%;background:var(--hv-mint4)}
+  .mock .banner small{font-size:11.5px;color:var(--hv-ink5)}
+  .mock .row{background:var(--hv-card);border:1px solid var(--hv-line);padding:10px 12px;margin-top:8px;display:flex;align-items:center;gap:10px}
+  .mock .row b{font-size:13px;color:var(--hv-ink9);flex:1}
+  .mock .chip{font:700 10.5px/1 var(--sans);padding:5px 8px;border-radius:999px}
+  .chip.sent{background:var(--hv-mint1);color:var(--hv-mint6)}
+  .chip.run{background:var(--hv-sun1);color:#b87d00}
+  .chip.fail{background:var(--hv-coral1);color:var(--hv-coral6)}
+  .chip.man{background:#eaf5fb;color:#2d7aa0}
+  .mock .err{font-size:11px;color:var(--hv-coral6);margin:4px 0 0;border-radius:0}
+  .mock .search{background:var(--hv-card);border:1.5px solid var(--hv-line3);padding:10px 12px;font-size:13px;color:var(--hv-ink4)}
+  .mock .friend{display:flex;gap:10px;align-items:center;background:var(--hv-card);border:1px solid var(--hv-line);padding:10px;margin-top:8px}
+  .mock .ava{width:34px;height:34px;border-radius:999px;background:var(--hv-mint1);flex:none;display:grid;place-items:center;font:800 13px "Baloo 2",var(--sans);color:var(--hv-mint6)}
+  .mock .friend div{flex:1}
+  .mock .friend b{display:block;font-size:13px;color:var(--hv-ink9)}
+  .mock .friend small{font-size:11px;color:var(--hv-ink4)}
+  .mock .btn-p{background:var(--hv-mint4);color:#fff;font:800 12.5px "Baloo 2",var(--sans);padding:10px 16px;box-shadow:0 3px 0 #3fa888;display:inline-block}
+  .mock .btn-ghost{border:1.5px solid var(--hv-line3);color:var(--hv-ink5);font:700 12px var(--sans);padding:9px 14px;display:inline-block}
+  .callouts{counter-reset:co}
+  .callouts li{counter-increment:co;list-style:none;position:relative;padding-left:34px;margin:14px 0}
+  .callouts li::before{content:counter(co);position:absolute;left:0;top:1px;width:22px;height:22px;border:1.5px solid var(--accent);color:var(--accent);font:700 12px/22px var(--mono);text-align:center}
+  .callouts b{font-family:var(--serif)}
+  .callouts small{display:block;font:11.5px/1.6 var(--mono);color:var(--muted)}
+  .co-dot{position:absolute;width:22px;height:22px;border:1.5px solid var(--accent);background:var(--paper);color:var(--accent);font:700 12px/22px var(--mono);text-align:center;border-radius:0;z-index:2}
+  .mock-wrap{position:relative}
+  /* risks */
+  details{border:1px solid var(--hair);margin-top:10px;background:var(--paper)}
+  summary{cursor:pointer;padding:14px 18px;font-family:var(--serif);font-size:1.02rem;list-style:none;display:flex;gap:12px;align-items:baseline}
+  summary::before{content:"+";font:600 14px var(--mono);color:var(--accent)}
+  details[open] summary::before{content:"−"}
+  details>div{padding:0 18px 16px 40px;color:#3a352d;font-size:.93rem}
+  summary:focus-visible{outline:3px solid var(--accent);outline-offset:-3px}
+  /* nav dots */
+  .dots{position:fixed;right:14px;top:50%;transform:translateY(-50%);display:none;flex-direction:column;gap:12px;z-index:5}
+  @media(min-width:1220px){.dots{display:flex}}
+  .dots a{width:9px;height:9px;border:1.5px solid var(--muted);display:block;border-radius:0}
+  .dots a.on{background:var(--accent);border-color:var(--accent)}
+  .src{font:13px/1.8 var(--mono)}
+  .src li{margin:.6em 0}
+  footer{border-top:1px solid var(--hair-dk);padding:28px 0 48px;font:11px/1.8 var(--mono);color:var(--muted)}
+  table.simple{border-collapse:collapse;width:100%;font-size:.92rem}
+  table.simple th,table.simple td{border:1px solid var(--hair);padding:8px 12px;text-align:left;vertical-align:top}
+  table.simple th{font:600 10.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+</style>
+</head>
+<body>
+
+<nav class="dots" aria-label="Điều hướng trang">
+  <a href="#cover" aria-label="Mở đầu"></a>
+  <a href="#contract" aria-label="Contract"></a>
+  <a href="#arch" aria-label="Kiến trúc"></a>
+  <a href="#phases" aria-label="Các phase"></a>
+  <a href="#mock" aria-label="Mockup"></a>
+  <a href="#flow" aria-label="User flow"></a>
+  <a href="#risk" aria-label="Rủi ro"></a>
+  <a href="#src" aria-label="Nguồn"></a>
+</nav>
+
+<!-- ============ COVER ============ -->
+<section id="cover">
+  <div class="wrap">
+    <p class="tag"><span class="no">TEKA</span> · KẾ HOẠCH 260807-1224 · NHÁNH MASTER</p>
+    <h1>Zalo Personal Send</h1>
+    <p class="lede" style="margin-top:20px">
+      Trang thông báo gửi tin học phí như <span class="accent-i">tin nhắn Zalo cá nhân</span>
+      của giáo viên: port giao thức gửi, liên kết contact với bạn Zalo,
+      chạy nền có nhịp 3–8 giây, theo dõi tiến độ trực tiếp trên web.
+    </p>
+    <div class="meta-band">
+      <div><b>Trạng thái</b><span>Completed</span></div>
+      <div><b>Ưu tiên</b><span>P1</span></div>
+      <div><b>Ước lượng</b><span>6–7 ngày</span></div>
+      <div><b>Phase</b><span>5, tuần tự + 1 song song</span></div>
+      <div><b>Nền móng</b><span>zalo-personal-auth <em>(đã ship)</em></span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CONTRACT ============ -->
+<section id="contract">
+  <div class="wrap">
+    <p class="tag">01 · CONTRACT ĐÃ CHỐT</p>
+    <h2>Bốn trường của brainstorm</h2>
+    <div class="grid g-7-5">
+      <div>
+        <div class="rule-l">
+          <h3>Outcome</h3>
+          <p>Giáo viên chọn kênh <span class="mono">zalo_personal</span> ở trang thông báo.
+          Hệ thống gửi 1 tin/contact/kỳ (text sẵn có từ <span class="mono">statements.Build</span>)
+          như DM từ chính tài khoản Zalo của giáo viên tới các contact đã liên kết.
+          Ledger chuyển <span class="mono">queued → sent/failed</span> kèm msgId hoặc lý do lỗi.
+          Contact chưa liên kết rơi về copy thủ công, không bao giờ lỗi.</p>
+        </div>
+        <hr class="hairline">
+        <h3>Constraints</h3>
+        <ul>
+          <li>Tái dùng nền đã ship: session cache, health probe, creds mã hóa, <span class="mono">Sender</span> registry, <span class="mono">statements.Build</span>. Không refactor lại.</li>
+          <li>Gửi nằm <b>ngoài</b> DB transaction; nhịp tuần tự, gap ngẫu nhiên 3–8s, có trần mỗi run.</li>
+          <li>Một replica homelab; run persist trong bảng <span class="mono">notification_runs</span> — restart giữa run → run <span class="mono">interrupted</span>, teacher bấm «Gửi tiếp» để resume (không auto-resume). <em>(Validate S1)</em></li>
+          <li>Trước khi gửi kênh personal: confirm dialog «X tự động · Y thủ công». <em>(Validate S1)</em></li>
+          <li>Credentials không bao giờ vào log, response, git.</li>
+          <li>Web: TanStack Query + poll, không SSE.</li>
+        </ul>
+        <h3 style="margin-top:24px">Non-goals</h3>
+        <p style="color:var(--muted)">ZNS/OA/Bot API · SMS · tin per-invoice · auto-match theo số điện thoại ·
+        chat chiều về, media, nhóm · scale đa replica.</p>
+      </div>
+      <div>
+        <div class="pull">
+          «Nguồn gốc không có throttling. 30 tin trong 2 giây chính là chữ ký anti-spam.
+          Nhịp gửi là tiêu chí nghiệm thu, không phải tuỳ chọn.»
+          <small>Guardrail kế thừa từ brainstorm 260806-1611</small>
+        </div>
+        <hr class="hairline">
+        <h3>Acceptance criteria</h3>
+        <ul class="todo" style="font-size:.92rem">
+          <li>Port send-only: <span class="mono">SendMessage</span> + <span class="mono">FetchFriends</span>, quarantine.</li>
+          <li>Map/unmap contact ↔ bạn Zalo qua picker, persist trên contacts.</li>
+          <li>Queue trong tx, run nền cập nhật từng row sent/failed.</li>
+          <li>Poll tiến độ x/y; đóng tab không dừng run.</li>
+          <li>Chưa map/hết phiên → fallback rõ ràng, không tự retry.</li>
+          <li>Test Go + race + web lint/build xanh.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ ARCHITECTURE ============ -->
+<section id="arch">
+  <div class="wrap">
+    <p class="tag">02 · KIẾN TRÚC</p>
+    <h2>Đường đi của một lượt gửi</h2>
+    <div class="diagram" role="img" aria-label="Sơ đồ pipeline: web gửi bulk, API queue trong transaction, RunManager gửi tuần tự qua zalo service tới Zalo, web poll tiến độ">
+      <svg viewBox="0 0 980 420" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace,Menlo,monospace">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0L10 5L0 10z" fill="#0a0a0a"/>
+          </marker>
+          <marker id="arrR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0L10 5L0 10z" fill="#b8232c"/>
+          </marker>
+        </defs>
+        <!-- lane labels -->
+        <text x="16" y="40" font-size="10" fill="#6b6258" letter-spacing="2">WEB</text>
+        <text x="16" y="175" font-size="10" fill="#6b6258" letter-spacing="2">API</text>
+        <text x="16" y="345" font-size="10" fill="#6b6258" letter-spacing="2">ZALO</text>
+        <line x1="10" y1="90" x2="970" y2="90" stroke="#d8d0c2" stroke-dasharray="3 5"/>
+        <line x1="10" y1="290" x2="970" y2="290" stroke="#d8d0c2" stroke-dasharray="3 5"/>
+        <!-- web boxes -->
+        <rect x="60" y="22" width="180" height="52" fill="#f0ebe1" stroke="#0a0a0a"/>
+        <text x="150" y="44" font-size="11" text-anchor="middle" fill="#0a0a0a">notifications-page</text>
+        <text x="150" y="60" font-size="10" text-anchor="middle" fill="#6b6258">chọn kênh · bulk send</text>
+        <rect x="740" y="22" width="200" height="52" fill="#f0ebe1" stroke="#0a0a0a"/>
+        <text x="840" y="44" font-size="11" text-anchor="middle" fill="#0a0a0a">run-progress-banner</text>
+        <text x="840" y="60" font-size="10" text-anchor="middle" fill="#6b6258">poll ~2s · x/y · failed</text>
+        <!-- api boxes -->
+        <rect x="60" y="120" width="240" height="110" fill="#faf7f2" stroke="#0a0a0a"/>
+        <text x="180" y="141" font-size="11" text-anchor="middle" fill="#0a0a0a">BulkSend (trong tx)</text>
+        <text x="180" y="160" font-size="9.5" text-anchor="middle" fill="#6b6258">1. pre-check phiên Zalo</text>
+        <text x="180" y="176" font-size="9.5" text-anchor="middle" fill="#6b6258">2. load mapping contacts</text>
+        <text x="180" y="192" font-size="9.5" text-anchor="middle" fill="#6b6258">3. mapped→personal · unmapped→manual</text>
+        <text x="180" y="208" font-size="9.5" text-anchor="middle" fill="#6b6258">4. InsertBatch rows=queued</text>
+        <rect x="400" y="120" width="220" height="110" fill="#faf7f2" stroke="#b8232c" stroke-width="1.5"/>
+        <text x="510" y="141" font-size="11" text-anchor="middle" fill="#b8232c">RunManager (goroutine)</text>
+        <text x="510" y="160" font-size="9.5" text-anchor="middle" fill="#6b6258">tuần tự từng row</text>
+        <text x="510" y="176" font-size="9.5" text-anchor="middle" fill="#6b6258">ngủ rand(3..8)s giữa 2 tin</text>
+        <text x="510" y="192" font-size="9.5" text-anchor="middle" fill="#6b6258">sent+msgId / failed+lý do</text>
+        <text x="510" y="208" font-size="9.5" text-anchor="middle" fill="#6b6258">expired → fail phần còn lại</text>
+        <rect x="700" y="132" width="150" height="60" fill="#faf7f2" stroke="#0a0a0a"/>
+        <text x="775" y="155" font-size="11" text-anchor="middle" fill="#0a0a0a">zalo.Service</text>
+        <text x="775" y="172" font-size="9.5" text-anchor="middle" fill="#6b6258">SendDM · sessionFor</text>
+        <rect x="400" y="248" width="220" height="34" fill="#f0ebe1" stroke="#0a0a0a"/>
+        <text x="510" y="269" font-size="10" text-anchor="middle" fill="#0a0a0a">notifications + notification_runs (PG)</text>
+        <!-- zalo lane -->
+        <rect x="700" y="318" width="150" height="52" fill="#faf7f2" stroke="#0a0a0a"/>
+        <text x="775" y="340" font-size="11" text-anchor="middle" fill="#0a0a0a">zalo/protocol</text>
+        <text x="775" y="357" font-size="9.5" text-anchor="middle" fill="#6b6258">POST message/sms</text>
+        <!-- edges -->
+        <line x1="150" y1="74" x2="150" y2="118" stroke="#0a0a0a" marker-end="url(#arr)"/>
+        <text x="158" y="102" font-size="9.5" fill="#6b6258">POST /notifications/bulk</text>
+        <line x1="300" y1="175" x2="398" y2="175" stroke="#b8232c" stroke-width="1.5" marker-end="url(#arrR)"/>
+        <text x="308" y="166" font-size="9.5" fill="#b8232c">sau commit</text>
+        <line x1="620" y1="162" x2="698" y2="162" stroke="#0a0a0a" marker-end="url(#arr)"/>
+        <line x1="775" y1="192" x2="775" y2="316" stroke="#0a0a0a" marker-end="url(#arr)"/>
+        <line x1="510" y1="230" x2="510" y2="246" stroke="#0a0a0a" marker-end="url(#arr)"/>
+        <text x="518" y="242" font-size="9.5" fill="#6b6258">MarkOutcome mỗi row</text>
+        <line x1="840" y1="74" x2="840" y2="118" stroke="#0a0a0a" stroke-dasharray="4 4" marker-end="url(#arr)"/>
+        <text x="848" y="102" font-size="9.5" fill="#6b6258">GET …/notifications/run</text>
+        <path d="M700 145 H648 Q636 145 636 133 V96 Q636 84 648 84 H738" fill="none" stroke="#0a0a0a" stroke-dasharray="4 4"/>
+        <text x="640" y="78" font-size="9.5" fill="#6b6258">snapshot {total, sent, failed}</text>
+      </svg>
+    </div>
+    <p class="cap">Ranh giới quan trọng: mọi thứ trong khung BulkSend chạy trong transaction như hiện tại;
+    RunManager (viền đỏ) chỉ khởi động sau commit, giữ nguyên bất biến «kênh hỏng không để lại state dở dang».</p>
+
+    <div class="grid g-2" style="margin-top:40px">
+      <div class="panel">
+        <h3>Phụ thuộc giữa các phase</h3>
+        <div class="diagram" style="border:0;padding:0;background:none">
+        <svg viewBox="0 0 720 150" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace,Menlo,monospace" style="min-width:560px">
+          <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#0a0a0a"/></marker></defs>
+          <g font-size="10.5">
+            <rect x="8"  y="55" width="118" height="40" fill="#faf7f2" stroke="#0a0a0a"/><text x="67" y="72" text-anchor="middle">P1 · protocol</text><text x="67" y="86" text-anchor="middle" fill="#6b6258">send port</text>
+            <rect x="176" y="55" width="118" height="40" fill="#faf7f2" stroke="#0a0a0a"/><text x="235" y="72" text-anchor="middle">P2 · migration</text><text x="235" y="86" text-anchor="middle" fill="#6b6258">+ mapping API</text>
+            <rect x="344" y="12" width="130" height="40" fill="#faf7f2" stroke="#b8232c"/><text x="409" y="29" text-anchor="middle" fill="#b8232c">P3 · paced run</text><text x="409" y="43" text-anchor="middle" fill="#6b6258">kênh personal</text>
+            <rect x="344" y="98" width="130" height="40" fill="#faf7f2" stroke="#0a0a0a"/><text x="409" y="115" text-anchor="middle">P4 · web picker</text><text x="409" y="129" text-anchor="middle" fill="#6b6258">song song P3</text>
+            <rect x="546" y="55" width="150" height="40" fill="#faf7f2" stroke="#0a0a0a"/><text x="621" y="72" text-anchor="middle">P5 · web channel</text><text x="621" y="86" text-anchor="middle" fill="#6b6258">+ run progress</text>
+          </g>
+          <line x1="126" y1="75" x2="174" y2="75" stroke="#0a0a0a" marker-end="url(#a2)"/>
+          <line x1="294" y1="66" x2="342" y2="38" stroke="#0a0a0a" marker-end="url(#a2)"/>
+          <line x1="294" y1="84" x2="342" y2="112" stroke="#0a0a0a" marker-end="url(#a2)"/>
+          <line x1="474" y1="38" x2="544" y2="66" stroke="#0a0a0a" marker-end="url(#a2)"/>
+          <line x1="474" y1="112" x2="544" y2="84" stroke="#0a0a0a" marker-end="url(#a2)"/>
+        </svg>
+        </div>
+        <p class="cap">P3 và P4 chạy song song sau P2. P5 khép mạch.</p>
+      </div>
+      <div class="panel">
+        <h3>Ba quyết định đã khoá</h3>
+        <table class="simple" style="margin-top:10px">
+          <tr><th>Mapping</th><td>Picker thủ công. FriendInfo không có SĐT; lưu <span class="mono">zalo_user_id</span> + <span class="mono">zalo_name</span> trên contacts.</td></tr>
+          <tr><th>Thực thi</th><td>Run nền + poll, theo mẫu LinkManager. Client-driven bị loại: đóng tab là chết run.</td></tr>
+          <tr><th>Đơn vị tin</th><td>1 tin/contact/kỳ, tái dùng nguyên message. Diverge PRD R5 có chủ đích.</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ PHASES ============ -->
+<section id="phases">
+  <div class="wrap">
+    <p class="tag">03 · LỘ TRÌNH</p>
+    <h2>Năm phase</h2>
+
+    <!-- Phase 1 -->
+    <article class="phase">
+      <div class="phase-head">
+        <span class="phase-no">1</span>
+        <h3>Protocol send port</h3>
+        <span class="pill status">Completed</span><span class="pill">P1 · 1d</span><span class="pill">Không phụ thuộc</span>
+      </div>
+      <div class="phase-body">
+        <div>
+          <h4>Mục tiêu</h4>
+          <p>Port send-only subset từ goclaw vào <span class="mono">zalo/protocol</span> (quarantine),
+          expose <span class="mono">SendDM</span> và <span class="mono">ListFriends</span> trên <span class="mono">zalo.Service</span>.</p>
+          <h4 style="margin-top:14px">Điểm chính</h4>
+          <ul>
+            <li><span class="mono">SendMessage</span>: DM only, payload mã hoá AES-CBC, trả msgId.</li>
+            <li><span class="mono">FetchFriends</span>: bỏ toàn bộ group/media/listener.</li>
+            <li>Đi qua <span class="mono">sessionFor</span> sẵn có: tự re-login, expired → <span class="mono">ErrLinkExpired</span>.</li>
+            <li>Test port kèm fake HTTP server như auth port đã làm.</li>
+          </ul>
+        </div>
+        <div>
+          <h4>File</h4>
+          <p class="files">+ protocol/send.go · + protocol/contacts.go<br>~ protocol/{client,crypto,models}.go<br>~ zalo/{service,errors}.go</p>
+          <h4 style="margin-top:14px">Nghiệm thu nổi bật</h4>
+          <ul style="font-size:.9rem">
+            <li>Transport error không chứa IMEI/cookie (mở rộng test đã có).</li>
+            <li>Không package nào ngoài <span class="mono">zalo</span> import protocol.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="phase-foot">
+        <span class="gate">GATE · go test ./internal/features/zalo/... -race</span>
+        <button class="open-modal" data-dlg="dlg-p1">Chi tiết phase</button>
+      </div>
+    </article>
+
+    <!-- Phase 2 -->
+    <article class="phase">
+      <div class="phase-head">
+        <span class="phase-no">2</span>
+        <h3>Migration + mapping backend</h3>
+        <span class="pill status">Completed</span><span class="pill">P1 · 1d</span><span class="pill">Sau P1</span>
+      </div>
+      <div class="phase-body">
+        <div>
+          <h4>Mục tiêu</h4>
+          <p>Migration 000005 mở đường dữ liệu; API xem danh sách bạn Zalo và map/unmap từng contact.</p>
+          <h4 style="margin-top:14px">Điểm chính</h4>
+          <ul>
+            <li><span class="mono">contacts.zalo_user_id</span> + <span class="mono">zalo_name</span> (nullable).</li>
+            <li>Bảng <span class="mono">notification_runs</span> + cột <span class="mono">notifications.run_id</span> — run persistence, counters derive bằng COUNT theo run_id.</li>
+            <li>CHECK <span class="mono">notifications.channel</span> thêm <span class="mono">zalo_personal</span>; down migration luôn chạy được.</li>
+            <li><span class="mono">GET /me/zalo/friends</span> · <span class="mono">PUT/DELETE /contacts/:id/zalo-mapping</span> (idempotent).</li>
+            <li>Không validate UID với live friends khi sửa contact: từ chối có chủ đích.</li>
+          </ul>
+        </div>
+        <div>
+          <h4>File</h4>
+          <p class="files">+ migrations/000005_zalo_personal_mapping.*<br>~ contacts/* · ~ zalo/{handler,dto,routes}.go<br>~ docs/schema_design.sql · swagger</p>
+          <h4 style="margin-top:14px">Nghiệm thu nổi bật</h4>
+          <ul style="font-size:.9rem">
+            <li>Up/down cycle pass trong migrations_test.</li>
+            <li>Unmap idempotent 204 theo chuẩn Unlink.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="phase-foot">
+        <span class="gate">GATE · go test ./... && go test -tags=integration ./...</span>
+        <button class="open-modal" data-dlg="dlg-p2">Chi tiết phase</button>
+      </div>
+    </article>
+
+    <!-- Phase 3 -->
+    <article class="phase">
+      <div class="phase-head">
+        <span class="phase-no">3</span>
+        <h3>Paced run engine + kênh zalo_personal</h3>
+        <span class="pill status">Completed</span><span class="pill">P1 · 2.5d</span><span class="pill">Sau P1, P2</span>
+      </div>
+      <div class="phase-body">
+        <div>
+          <h4>Mục tiêu</h4>
+          <p>Phase lõi: queue trong tx, RunManager gửi tuần tự ngoài tx với gap 3–8s, run persist DB, endpoint poll + resume.</p>
+          <h4 style="margin-top:14px">Điểm chính</h4>
+          <ul>
+            <li>Consumer-defined <span class="mono">ZaloSender</span> interface (mẫu StatementsSource), không import cycle.</li>
+            <li>Mapped → row personal; unmapped → row manual fallback, đếm riêng. Không lỗi vì unmapped.</li>
+            <li>1 run/giáo viên; đang chạy mà bulk tiếp → 409. Cap <span class="mono">MaxRunSize</span>.</li>
+            <li>Run record trong <span class="mono">notification_runs</span>; snapshot DB-backed sống sót restart; boot reconcile <span class="mono">running→interrupted</span>; resume thủ công (re-render text). <em>(Validate S1)</em></li>
+            <li>Expired giữa run → fail phần còn lại, run <span class="mono">expired</span>, không tự retry. Shutdown sạch qua <span class="mono">Close()</span>.</li>
+            <li>Config env: PaceMin 3s · PaceMax 8s · MaxRunSize 50 (đổi được, vì ngưỡng thật không có tài liệu).</li>
+          </ul>
+        </div>
+        <div>
+          <h4>File</h4>
+          <p class="files">+ notifications/run_manager.go<br>~ notifications/* · ~ config/config.go<br>~ app/{container,app}.go · ~ .env.example</p>
+          <h4 style="margin-top:14px">Nghiệm thu nổi bật</h4>
+          <ul style="font-size:.9rem">
+            <li>Hành vi kênh manual/zns cũ không đổi, test cũ xanh nguyên trạng.</li>
+            <li>Race test cho goroutine; sleep hook để test không ngủ thật.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="phase-foot">
+        <span class="gate">GATE · go test -race ./internal/features/notifications/...</span>
+        <button class="open-modal" data-dlg="dlg-p3">Chi tiết phase</button>
+      </div>
+    </article>
+
+    <!-- Phase 4 -->
+    <article class="phase">
+      <div class="phase-head">
+        <span class="phase-no">4</span>
+        <h3>Web friend picker</h3>
+        <span class="pill status">Completed</span><span class="pill">P1 · 1d</span><span class="pill">Sau P2 · song song P3</span>
+      </div>
+      <div class="phase-body">
+        <div>
+          <h4>Mục tiêu</h4>
+          <p>Card Zalo ở trang chi tiết contact: picker chọn bạn Zalo (search theo tên), unmap có confirm, badge trạng thái ở danh sách.</p>
+          <h4 style="margin-top:14px">Điểm chính</h4>
+          <ul>
+            <li>Friends API nằm ở profile feature (đang own zalo-api); mutation mapping thuộc roster.</li>
+            <li>Chưa link Zalo → card dẫn về profile, không gọi friends API.</li>
+            <li>Query friends chỉ chạy khi mở modal; error state có retry.</li>
+          </ul>
+        </div>
+        <div>
+          <h4>File</h4>
+          <p class="files">+ roster/components/zalo-friend-picker.tsx<br>~ roster/{pages,api,hooks,schemas}<br>~ profile/{api,schemas,hooks}</p>
+          <h4 style="margin-top:14px">Nghiệm thu nổi bật</h4>
+          <ul style="font-size:.9rem">
+            <li>Map/unmap cập nhật card + badge không cần reload.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="phase-foot">
+        <span class="gate">GATE · npm test · eslint · tsc · build</span>
+        <button class="open-modal" data-dlg="dlg-p4">Chi tiết phase</button>
+      </div>
+    </article>
+
+    <!-- Phase 5 -->
+    <article class="phase">
+      <div class="phase-head">
+        <span class="phase-no">5</span>
+        <h3>Web channel + run progress</h3>
+        <span class="pill status">Completed</span><span class="pill">P1 · 1d</span><span class="pill">Sau P3, P4</span>
+      </div>
+      <div class="phase-body">
+        <div>
+          <h4>Mục tiêu</h4>
+          <p>Chọn kênh gửi tại trang thông báo, confirm trước khi gửi, banner tiến độ poll run, resume run gián đoạn, hiển thị fallback và failed trung thực. Flow copy thủ công giữ nguyên.</p>
+          <h4 style="margin-top:14px">Điểm chính</h4>
+          <ul>
+            <li>Option «Gửi qua Zalo» chỉ enable khi profile status = linked.</li>
+            <li>Confirm dialog «X tự động · Y thủ công — tiếp tục?» trước khi gọi bulk-send (counts client-side từ mapping). <em>(Validate S1)</em></li>
+            <li>Poll 2s khi running, dừng hẳn khi terminal; done → invalidate ledger.</li>
+            <li>409 khi run đang chạy → thông báo đợi; expired → link về profile.</li>
+            <li>Run <span class="mono">interrupted</span> → banner «bị gián đoạn» + nút «Gửi tiếp» (resume). Reload giữa run → khôi phục từ snapshot DB.</li>
+          </ul>
+        </div>
+        <div>
+          <h4>File</h4>
+          <p class="files">+ collections/components/run-progress-banner.tsx<br>~ collections/{pages,api,hooks,schemas}<br>~ e2e/statement.spec.ts (nếu DOM đổi)</p>
+          <h4 style="margin-top:14px">Nghiệm thu nổi bật</h4>
+          <ul style="font-size:.9rem">
+            <li>Không run → không refetch (chống poll mồ côi, có test).</li>
+          </ul>
+        </div>
+      </div>
+      <div class="phase-foot">
+        <span class="gate">GATE · npm test · eslint · tsc · build · e2e touched</span>
+        <button class="open-modal" data-dlg="dlg-p5">Chi tiết phase</button>
+      </div>
+    </article>
+  </div>
+</section>
+
+<!-- ============ MOCKUPS ============ -->
+<section id="mock">
+  <div class="wrap">
+    <p class="tag">04 · MOCKUP GIAO DIỆN <span class="no">· THEO DESIGN SYSTEM "HỌC VUI MỖI NGÀY"</span></p>
+    <h2>Xem trước ba màn chạm UI</h2>
+    <p style="max-width:64ch;color:var(--muted)">Mockup dùng đúng token của app
+    (nền cream <span class="mono">#f4f8f3</span>, primary mint <span class="mono">#5cc9a7</span>,
+    heading Baloo 2, lỗi coral). Số chú thích đối chiếu cột phải.</p>
+
+    <!-- Mock A -->
+    <div class="mock-stage" style="margin-top:36px">
+      <div class="mock-wrap">
+        <span class="co-dot" style="top:74px;left:-11px">1</span>
+        <span class="co-dot" style="top:150px;left:-11px">2</span>
+        <span class="co-dot" style="top:284px;left:-11px">3</span>
+        <div class="mock" role="img" aria-label="Mockup trang thông báo với chọn kênh, banner tiến độ và danh sách trạng thái">
+          <h5>Gửi thông báo học phí</h5>
+          <p class="sub">Kỳ 07/2026 · 27 phụ huynh</p>
+          <div class="seg" aria-hidden="true">
+            <span>Copy thủ công</span><span class="on">Gửi qua Zalo</span>
+          </div>
+          <div class="banner">
+            <b>Đang gửi 12/27…</b>
+            <div class="bar"><i></i></div>
+            <small>Đã gửi 11 · Lỗi 1 · 4 phụ huynh chưa liên kết Zalo sẽ dùng copy thủ công</small>
+          </div>
+          <div class="row"><b>Chị Hoa (mẹ Bảo An)</b><span class="chip sent">Đã gửi</span></div>
+          <div class="row"><b>Anh Tuấn (bố Minh)</b><span class="chip run">Đang gửi</span></div>
+          <div class="row" style="display:block">
+            <div style="display:flex;gap:10px;align-items:center"><b style="flex:1">Cô Lan (dì Khôi)</b><span class="chip fail">Lỗi</span></div>
+            <p class="err">Zalo từ chối tin nhắn. Thử lại ở lượt gửi sau.</p>
+          </div>
+          <div class="row"><b>Chú Nam (bố Thảo)</b><span class="chip man">Copy thủ công</span></div>
+        </div>
+      </div>
+      <ol class="callouts">
+        <li><b>Chọn kênh dạng segmented</b>, mặc định giữ «Copy thủ công» như hiện tại; «Gửi qua Zalo» chỉ bật khi tài khoản đã liên kết.
+          <small>token: surface-sunken cream-200 · active = card trắng + mint-600 · thoả AC gating của Phase 5</small></li>
+        <li><b>Banner tiến độ</b> poll snapshot 2 giây một lần, progress mint, đếm fallback ngay trên banner.
+          <small>token: mint-50 nền, mint-100 viền, mint-400 bar · AC «poll x/y, đóng tab không dừng run»</small></li>
+        <li><b>Ledger trung thực</b>: mỗi trạng thái một chip (mint = sent, sun = đang gửi, coral = lỗi kèm lý do, sky = thủ công).
+          <small>token: state soft-surfaces của DS · AC «row failed hiển thị lý do»</small></li>
+      </ol>
+    </div>
+
+    <hr class="hairline">
+
+    <!-- Mock B + C -->
+    <div class="mock-stage">
+      <div class="mock-wrap">
+        <span class="co-dot" style="top:64px;left:-11px">1</span>
+        <span class="co-dot" style="top:150px;left:-11px">2</span>
+        <div class="mock" role="img" aria-label="Mockup modal chọn bạn Zalo với ô tìm kiếm và danh sách bạn bè">
+          <h5>Chọn bạn Zalo cho «Chị Hoa»</h5>
+          <p class="sub">Tin nhắn sẽ gửi tới đúng người này</p>
+          <div class="search" aria-hidden="true">Tìm theo tên…</div>
+          <div class="friend"><span class="ava">H</span><div><b>Hoa Nguyễn</b><small>Bạn bè trên Zalo</small></div><span class="btn-p" style="box-shadow:none;padding:8px 14px">Chọn</span></div>
+          <div class="friend"><span class="ava" style="background:#d6ecf7;color:#2d7aa0">MH</span><div><b>Mẹ Hoa Bảo An</b><small>Bạn bè trên Zalo</small></div><span class="btn-ghost">Chọn</span></div>
+          <div class="friend"><span class="ava" style="background:#fff4d6;color:#b87d00">HT</span><div><b>Hoa Trần</b><small>Bạn bè trên Zalo</small></div><span class="btn-ghost">Chọn</span></div>
+        </div>
+      </div>
+      <div>
+        <ol class="callouts">
+          <li><b>Search lọc client-side</b> trên danh sách bạn từ <span class="mono">GET /me/zalo/friends</span>; avatar + tên đầy đủ để phân biệt trùng tên.
+            <small>HvModal sẵn có (focus trap, Esc) · AC mapping Phase 4</small></li>
+          <li><b>Chọn một chạm</b> gọi <span class="mono">PUT /contacts/:id/zalo-mapping</span>, lưu cả tên để card hiển thị không cần refetch.
+            <small>btn primary mint-400 + press-shadow mint-500 theo DS</small></li>
+        </ol>
+        <div class="mock-wrap" style="margin-top:20px">
+          <span class="co-dot" style="top:26px;left:-11px">3</span>
+          <div class="mock" role="img" aria-label="Mockup card Zalo trong trang chi tiết contact ở trạng thái đã liên kết">
+            <div class="row" style="margin-top:0"><b>Zalo · <span style="color:var(--hv-mint6)">Hoa Nguyễn</span></b><span class="btn-ghost">Bỏ liên kết</span></div>
+          </div>
+        </div>
+        <ol class="callouts" start="3" style="counter-reset:co 2">
+          <li><b>Card trạng thái trong chi tiết contact</b>: đã map hiện tên bạn Zalo, unmap có confirm; chưa link tài khoản thì dẫn về trang cá nhân.
+            <small>AC «unmap được» + «chưa link → không gọi friends API»</small></li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ USER FLOW ============ -->
+<section id="flow">
+  <div class="wrap">
+    <p class="tag">05 · USER FLOW</p>
+    <h2>Hành trình của giáo viên</h2>
+    <div class="steps">
+      <div><b>Liên kết Zalo</b><p>Quét QR ở trang cá nhân. Đã ship ở plan trước, kèm consent và mã hoá.</p></div>
+      <div><b>Liên kết phụ huynh</b><p>Mỗi contact chọn một bạn Zalo, làm một lần, sửa được.</p></div>
+      <div><b>Gửi hàng loạt</b><p>Chọn kênh Zalo, bấm gửi. Hệ thống queue rồi tự gửi lần lượt.</p></div>
+      <div><b>Theo dõi</b><p>Banner x/y cập nhật; lỗi hiện lý do ngay trên ledger.</p></div>
+      <div><b>Vét thủ công</b><p>Phụ huynh chưa liên kết vẫn nhận đủ nhờ copy-paste như cũ.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ RISKS ============ -->
+<section id="risk">
+  <div class="wrap">
+    <p class="tag">06 · RỦI RO & GUARDRAIL</p>
+    <h2>Những thứ có thể gãy</h2>
+    <details open>
+      <summary>Ban tài khoản Zalo của giáo viên <span class="pill" style="margin-left:auto">CAO · KHÔNG THU HỒI ĐƯỢC</span></summary>
+      <div>Giao thức reverse-engineered, vi phạm ToS; bulk DM là chữ ký anti-spam. Đối sách: nhịp 3–8s bắt buộc,
+      trần mỗi run, chỉ gửi cho bạn bè, consent đã ký khi link. Rủi ro đã được chấp nhận rõ ràng ở brainstorm 260806-1611.</div>
+    </details>
+    <details>
+      <summary>Giao thức trôi, không có SLA <span class="pill" style="margin-left:auto">TRUNG BÌNH</span></summary>
+      <div>Zalo đổi web client bất kỳ lúc nào. Port giữ mỏng và quarantine; lỗi runtime đổ về row failed có lý do,
+      kênh copy thủ công luôn là đường lui đầy đủ.</div>
+    </details>
+    <details>
+      <summary>Regression ranh giới transaction <span class="pill" style="margin-left:auto">TRUNG BÌNH</span></summary>
+      <div>Kênh manual/zns giữ nguyên đường cũ trong tx; nhánh personal là branch mới, có test chốt hành vi cũ không đổi.</div>
+    </details>
+    <details>
+      <summary>Goroutine leak / double-run <span class="pill" style="margin-left:auto">THẤP</span></summary>
+      <div>RunManager một run mỗi giáo viên, mutex + Close() lúc shutdown, kiểm bằng go test -race -count=3 theo chuẩn plan auth.</div>
+    </details>
+    <details>
+      <summary>Restart giữa run <span class="pill" style="margin-left:auto">ĐÃ XỬ LÝ · VALIDATE S1</span></summary>
+      <div>Run persist trong bảng notification_runs: boot reconcile đánh dấu run dở thành interrupted, rows giữ queued;
+      teacher bấm «Gửi tiếp» để resume (re-render text, chỉ gửi rows queued). Không auto-resume lúc boot — tránh double-send
+      tin đang bay dở lúc crash. Rủi ro còn lại: tối đa 1 tin trùng nếu crash rơi đúng giữa send và MarkOutcome (chấp nhận, ghi doc comment).</div>
+    </details>
+  </div>
+</section>
+
+<!-- ============ SOURCES ============ -->
+<section id="src">
+  <div class="wrap">
+    <p class="tag">07 · NGUỒN & CÂU HỎI MỞ</p>
+    <h2>Trích dẫn</h2>
+    <ul class="src">
+      <li>Contract: plans/reports/brainstorm-260807-1215-zalo-personal-send.md</li>
+      <li>Kỹ thuật + rủi ro: plans/reports/brainstorm-260806-1611-zalo-personal-invoice-send.md</li>
+      <li>Nền auth đã ship: plans/260806-2112-zalo-personal-auth/plan.md</li>
+      <li>Source port: <a href="https://github.com/nextlevelbuilder/goclaw/tree/dev/internal/channels/zalo">github.com/nextlevelbuilder/goclaw@dev → internal/channels/zalo</a></li>
+      <li>Schema đóng băng: docs/schema_design.sql (notifications, contacts)</li>
+    </ul>
+    <hr class="hairline">
+    <h3>Câu hỏi mở</h3>
+    <p>Không còn câu hỏi cần quyết định. Hai khoảng trống bằng chứng đã ghi nhận, không chặn thực thi:</p>
+    <ul>
+      <li>Ngưỡng rate thật của Zalo không có tài liệu công khai. Giá trị 3–8s là phỏng đoán có chủ đích, đã làm configurable.</li>
+      <li><span class="mono">getfriends</span> có trả số điện thoại hay không chỉ xác minh được với credentials thật; nếu có sẽ mở follow-up auto-match.</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    TEKA · PLANS/260807-1224-ZALO-PERSONAL-SEND · TẠO 07-08-2026 · PLAN.HTML LÀ ARTIFACT CHÍNH, PHASE-*.MD LÀ NGUỒN THỰC THI CHO /AK:COOK
+  </div>
+</footer>
+
+<!-- ============ PHASE DETAIL DIALOGS ============ -->
+<dialog id="dlg-p1" aria-labelledby="dlg-p1-t">
+  <div class="dlg-head"><h3 id="dlg-p1-t" style="border:0;padding:0;margin:0">Phase 1 · Protocol send port</h3><button class="close">Đóng · Esc</button></div>
+  <div class="dlg-body">
+    <table class="fm"><tr><td>phase: 1</td><td>status: completed</td><td>priority: P1</td><td>effort: 1d</td><td>dependencies: []</td></tr></table>
+    <h3>Overview</h3>
+    <p>Port send-only subset của Zalo personal protocol từ goclaw vào <code>internal/features/zalo/protocol</code>
+    (quarantine như phần auth đã port), rồi expose 2 method mới trên <code>zalo.Service</code>: gửi DM và liệt kê bạn bè.
+    Không đụng notifications ở phase này.</p>
+    <h3>Requirements</h3>
+    <ul>
+      <li><b>Functional:</b>
+        <ul>
+          <li><code>protocol.SendMessage(ctx, sess, toUID, text) (msgID string, err error)</code>: DM path only
+          (<code>POST {chat_service}/api/message/sms</code>, payload <code>{message, toid, imei, clientId, ttl}</code>, AES-CBC encrypted <code>params=</code>).</li>
+          <li><code>protocol.FetchFriends(ctx, sess) ([]FriendInfo, error)</code>: decode tối thiểu <code>userId</code>, <code>displayName</code>, <code>avatar</code> (bỏ mọi hàm group).</li>
+          <li><code>zalo.Service.SendDM(ctx, teacherID, toUID, text)</code> và <code>zalo.Service.ListFriends(ctx, teacherID)</code> dùng <code>sessionFor</code>
+          (tự re-login, trả <code>ErrNotLinked</code>/<code>ErrLinkExpired</code> như hiện có).</li>
+        </ul></li>
+      <li><b>Non-functional:</b> credentials (IMEI, cookies, secret key) không bao giờ vào log/error string, tái dùng chuẩn <code>doRequest</code>
+      (đã strip query string, review C-1 plan auth). Port trung thực từ source, giữ quarantine: không import protocol ra ngoài package <code>zalo</code>.</li>
+    </ul>
+    <h3>Architecture</h3>
+    <ul>
+      <li>Source port: <code>github.com/nextlevelbuilder/goclaw@dev</code> → <code>internal/channels/zalo/protocol/send.go</code>, <code>send_helpers.go</code>, <code>contacts.go</code> (DM only; drop group/typing/media/listener).</li>
+      <li><code>client.go</code> hiện có <code>ServiceURL</code>, <code>getEncryptParam</code>, <code>encryptParams</code>, <code>buildFormBody</code>, <code>doRequest</code>; send port dùng lại, chỉ thêm helper còn thiếu (vd. decrypt data field của response) vào <code>client.go</code>/<code>crypto.go</code> theo ghi chú kiến trúc plan auth.</li>
+      <li><code>Session</code> đã giữ UID, secret key, service map sau login; <code>SendMessage</code> chỉ nhận <code>*Session</code>, không đọc DB.</li>
+    </ul>
+    <h3>Related Code Files</h3>
+    <ul class="files" style="list-style:none;padding:0">
+      <li>Create: apps/api/internal/features/zalo/protocol/send.go (+ send_test.go)</li>
+      <li>Create: apps/api/internal/features/zalo/protocol/contacts.go (+ contacts_test.go)</li>
+      <li>Modify: protocol/{client,crypto,models}.go (chỉ khi thiếu helper; FriendInfo + envelope)</li>
+      <li>Modify: zalo/{service,errors}.go + service_test.go</li>
+    </ul>
+    <h3>Implementation Steps</h3>
+    <ol>
+      <li>Đọc source goclaw send/contacts, xác định phần DM-only + helper thiếu.</li>
+      <li>Port send + helpers (fold vào client.go nếu nhỏ), port test tương ứng (fake HTTP server như client_test/auth_test hiện có).</li>
+      <li>Port FetchFriends (bỏ group), thêm FriendInfo vào models.go.</li>
+      <li>Thêm SendDM/ListFriends vào zalo.Service qua sessionFor; Zalo reject session → expire + ErrLinkExpired (cùng semantics VerifyAccount).</li>
+      <li>Unit test service với fake login/relogin như service_test.go hiện có.</li>
+    </ol>
+    <h3>Success Criteria</h3>
+    <ul class="todo">
+      <li>go test ./internal/features/zalo/... pass, kể cả -race.</li>
+      <li>Test chứng minh transport error không chứa IMEI/cookie (mở rộng TestFetchers_TransportErrorOmitsCredentials cho send path).</li>
+      <li>SendDM với session chết → account expired + ErrLinkExpired, không panic.</li>
+      <li>Không file nào ngoài package zalo import zalo/protocol.</li>
+    </ul>
+    <h3>Risk Assessment</h3>
+    <ul>
+      <li><b>Protocol drift:</b> endpoint Zalo đổi bất kỳ lúc nào, không SLA. Giữ port mỏng, test bằng fake server; lỗi runtime map về failed row (phase 3), không crash.</li>
+      <li><b>Payload lệch source:</b> so từng field với goclaw trước khi viết; không "cải tiến".</li>
+    </ul>
+  </div>
+</dialog>
+
+<dialog id="dlg-p2" aria-labelledby="dlg-p2-t">
+  <div class="dlg-head"><h3 id="dlg-p2-t" style="border:0;padding:0;margin:0">Phase 2 · Migration + mapping backend</h3><button class="close">Đóng · Esc</button></div>
+  <div class="dlg-body">
+    <table class="fm"><tr><td>phase: 2</td><td>status: completed</td><td>priority: P1</td><td>effort: 1d</td><td>dependencies: [1]</td></tr></table>
+    <h3>Overview</h3>
+    <p>Migration <code>000005</code>: thêm mapping Zalo trên <code>contacts</code>, mở CHECK constraint
+    <code>notifications.channel</code> cho <code>zalo_personal</code>, và tạo bảng <code>notification_runs</code>
+    (+ cột <code>notifications.run_id</code>) cho run persistence <em>(Validate S1)</em>. API: giáo viên xem danh sách bạn Zalo, map/unmap từng contact.</p>
+    <h3>Requirements</h3>
+    <ul>
+      <li><code>contacts.zalo_user_id VARCHAR(32) NULL</code> + <code>contacts.zalo_name VARCHAR(100) NULL</code> (tên bạn Zalo tại thời điểm map, để UI hiển thị không cần refetch friends).</li>
+      <li><code>notifications.channel</code> CHECK thêm <code>'zalo_personal'</code>.</li>
+      <li>Bảng <code>notification_runs</code>: id, teacher_id, billing_period_id, purpose, status
+      (<code>running/completed/interrupted/expired</code>), created_at, finished_at; cột <code>notifications.run_id UUID NULL</code> FK.
+      Counters derive bằng COUNT trên rows theo run_id — không lưu counter trùng trong bảng runs.</li>
+      <li><code>GET /me/zalo/friends</code> (feature zalo): trả <code>[{user_id, display_name, avatar}]</code> từ <code>Service.ListFriends</code>; chưa link → apperror <code>ErrNotLinked</code> như các endpoint /me/zalo hiện có; expired → lỗi rõ để UI đưa về profile re-scan.</li>
+      <li><code>PUT /contacts/:id/zalo-mapping</code> body <code>{zalo_user_id, zalo_name}</code>: validate non-empty, teacher-scoped; <code>DELETE /contacts/:id/zalo-mapping</code> → NULL cả 2 cột, idempotent (theo chuẩn Unlink 204).</li>
+      <li>Contact DTO responses (list/get) trả thêm <code>zalo_user_id</code>, <code>zalo_name</code>.</li>
+      <li>Non-functional: docs <code>docs/schema_design.sql</code> + swagger regen; migration up/down qua <code>migrations_test.go</code> cycle.</li>
+    </ul>
+    <h3>Architecture</h3>
+    <ul>
+      <li>Mapping sống trên <code>contacts</code> (per-teacher tenant sẵn có): không bảng mới, không FK sang zalo_accounts; mapping vẫn giá trị sau khi unlink/relink cùng account.</li>
+      <li>Endpoint friends thuộc feature <code>zalo</code> (cần session); endpoint mapping thuộc feature <code>contacts</code> (chỉ ghi cột, không gọi Zalo). Không validate <code>zalo_user_id</code> với live friends list ở backend: picker UI là nguồn; validate live nghĩa là phụ thuộc Zalo up mỗi lần sửa contact, từ chối có chủ đích.</li>
+      <li>Down migration: <code>UPDATE notifications SET channel='zalo_manual' WHERE channel='zalo_personal'</code> trước khi restore CHECK cũ; drop <code>run_id</code>, drop bảng <code>notification_runs</code>, drop 2 cột contacts; down luôn chạy được.</li>
+    </ul>
+    <h3>Related Code Files</h3>
+    <ul class="files" style="list-style:none;padding:0">
+      <li>Create: apps/api/migrations/000005_zalo_personal_mapping.up.sql / .down.sql</li>
+      <li>Modify: contacts/{model,dto,handler,repository,service,routes}.go + tests</li>
+      <li>Modify: zalo/{handler,dto,routes}.go + tests (endpoint friends)</li>
+      <li>Modify: docs/schema_design.sql · apps/api/docs/* (swagger regen)</li>
+    </ul>
+    <h3>Implementation Steps</h3>
+    <ol>
+      <li>Viết migration 000005 (up/down như Architecture); chạy migrations_test.go.</li>
+      <li>Contacts: field model + DTO, UpdateZaloMapping/ClearZaloMapping repo+service+handler, routes PUT/DELETE.</li>
+      <li>Zalo: handler GET /me/zalo/friends → ListFriends; DTO hand-built (chuẩn reflection test chống lộ credentials đã có trong handler_test.go).</li>
+      <li>Integration tests (-tags=integration) cho mapping CRUD + constraint mới.</li>
+      <li>Regen swagger, cập nhật docs/schema_design.sql.</li>
+    </ol>
+    <h3>Success Criteria</h3>
+    <ul class="todo">
+      <li>Migration up/down cycle pass trong migrations_test.go.</li>
+      <li>Map → contact trả zalo_user_id/zalo_name; unmap idempotent 204.</li>
+      <li>GET /me/zalo/friends trả list khi linked; 4xx rõ ràng khi chưa link/expired.</li>
+      <li>go test ./... + -tags=integration pass; swagger + schema doc khớp code.</li>
+    </ul>
+    <h3>Risk Assessment</h3>
+    <ul>
+      <li><b>CHECK constraint name:</b> baseline dùng inline CHECK (auto-name notifications_channel_check). Xác nhận tên thật từ pg_constraint khi viết migration trước khi merge.</li>
+      <li><b>Friends list lớn:</b> trả nguyên list một lần (bạn bè cá nhân cỡ vài trăm, đủ nhỏ); không phân trang, ghi nhận YAGNI.</li>
+    </ul>
+  </div>
+</dialog>
+
+<dialog id="dlg-p3" aria-labelledby="dlg-p3-t">
+  <div class="dlg-head"><h3 id="dlg-p3-t" style="border:0;padding:0;margin:0">Phase 3 · Paced run engine + kênh zalo_personal</h3><button class="close">Đóng · Esc</button></div>
+  <div class="dlg-body">
+    <table class="fm"><tr><td>phase: 3</td><td>status: completed</td><td>priority: P1</td><td>effort: 2.5d</td><td>dependencies: [1, 2]</td></tr></table>
+    <h3>Overview</h3>
+    <p>Phase lõi: kênh <code>zalo_personal</code> trong notifications. BulkSend queue rows trong tx như cũ;
+    sau commit, một background run gửi tuần tự qua <code>zalo.Service.SendDM</code> với gap ngẫu nhiên 3–8s,
+    cập nhật từng row sent/failed. Run persist trong bảng <code>notification_runs</code> nên sống sót restart
+    <em>(Validate S1)</em>; endpoint poll + endpoint resume thủ công cho run bị gián đoạn.</p>
+    <h3>Requirements</h3>
+    <ul>
+      <li>Constant <code>ChannelZaloPersonal = "zalo_personal"</code> + entry registry.</li>
+      <li>BulkSend với channel=zalo_personal:
+        <ol>
+          <li>Pre-check: zalo.Service có session lành (linked, chưa expired); expired/chưa link → 400/409 message rõ, không ghi gì (giữ semantics «bad channel choice never leaves partial state»).</li>
+          <li>Load mapping zalo_user_id cho các contact target (1 query).</li>
+          <li>Contact đã map → row channel=zalo_personal, status=queued, kèm run item (notification_id, to_uid, text). Contact chưa map → row channel=zalo_manual fallback (vẫn vào BulkText copy-paste), đếm fallback_manual_count. Không bao giờ lỗi vì unmapped.</li>
+          <li>Insert batch trong tx (như hiện tại); sau commit start run.</li>
+        </ol></li>
+      <li>RunManager (in-process pacing theo mẫu LinkManager, state persist qua repo): run record tạo cùng tx với InsertBatch (status <code>running</code>, rows gắn run_id); 1 run active/teacher (bulk tiếp khi đang chạy → 409); goroutine gửi tuần tự (SendDM → sent + provider_msg_id, lỗi → failed + error_message; giữa 2 send ngủ rand(PaceMin..PaceMax)); xong → <code>completed</code>; ErrLinkExpired giữa run → mark mọi row còn lại failed («phiên Zalo hết hạn»), run <code>expired</code>, không tự retry; cap MaxRunSize (quá cap → 400, gợi ý gửi theo đợt); Close() dừng goroutine khi shutdown; startup reconcile: run <code>running</code> mồ côi → <code>interrupted</code> (rows giữ queued).</li>
+      <li>Snapshot DB-backed: run record + COUNT rows theo run_id → {run_id, period_id, purpose, status, total, sent, failed} — sống sót restart.</li>
+      <li>Resume thủ công <em>(Validate S1)</em>: <code>POST /billing-periods/:id/notifications/run/resume</code> cho run <code>interrupted</code> — re-render text các row queued còn lại qua statements.Build, tiếp tục pacing trên cùng run_id. KHÔNG auto-resume lúc boot (guardrail «teacher chủ động bấm» + tránh double-send tin bay dở).</li>
+      <li><code>GET /billing-periods/:id/notifications/run</code> → snapshot run mới nhất của period (DB-backed); không có run → {active: false}. Ledger chi tiết vẫn qua GET …/notifications hiện có.</li>
+      <li>Response BulkSend thêm: run_id, personal_queued_count, fallback_manual_count (schema cũ giữ nguyên cho kênh manual).</li>
+      <li>Config NotificationsConfig: PaceMinSeconds (3), PaceMaxSeconds (8), MaxRunSize (50); env API_NOTIFICATIONS_*, .env.example + compose cập nhật. Send ngoài tx và ngoài request goroutine; race-clean.</li>
+    </ul>
+    <h3>Architecture</h3>
+    <ul>
+      <li><b>Consumer-defined interface</b> (mẫu StatementsSource): notifications khai báo <code>ZaloSender { SendDM(...); Verify(...) }</code>; *zalo.Service satisfy; container wire vào NewService. Không import cycle.</li>
+      <li><b>Sender registry vs run:</b> Sender.Send hiện chạy trong tx nên kênh personal KHÔNG giao việc gửi cho registry; zaloPersonalSender.Send chỉ là validation no-op (như manual), orchestration nằm trong Service.BulkSend (branch theo channel) + RunManager. Doc comment giải thích ranh giới.</li>
+      <li><b>Repo mới:</b> MarkOutcome(ctx, teacherID, id, status, providerMsgID, errMsg) (1 UPDATE/row khi đến lượt) + FailQueuedInRun(ctx, ids, reason) cho nhánh expired giữa run.</li>
+      <li>Run item giữ text đã render trong memory (DB không lưu message text, giữ thiết kế «never persisted»); resume re-render text từ statements.Build cho đúng các contact còn queued — không cần persist text.</li>
+      <li>Repo mở rộng: CRUD notification_runs (create/update status, snapshot COUNT theo run_id, reconcile running→interrupted).</li>
+      <li>Lifecycle: RunManager thuộc notifications.Service; container gọi Close() lúc shutdown (cùng chỗ c.Zalo.Close() trong internal/app).</li>
+    </ul>
+    <h3>Related Code Files</h3>
+    <ul class="files" style="list-style:none;padding:0">
+      <li>Create: notifications/run_manager.go (+ run_manager_test.go)</li>
+      <li>Modify: notifications/{model,sender,service,repository,handler,dto,routes}.go + tests</li>
+      <li>Modify: config/config.go (+ test) · .env.example · docker-compose*.yml (env passthrough nếu khai báo từng biến)</li>
+      <li>Modify: app/{container,app}.go · apps/api/docs/* (swagger regen)</li>
+    </ul>
+    <h3>Implementation Steps</h3>
+    <ol>
+      <li>Config: 3 field + validate (min ≤ max, cap > 0), env mapping, defaults.</li>
+      <li>Repo: MarkOutcome, FailQueuedInRun + integration tests.</li>
+      <li>RunManager: struct + goroutine + snapshot + Close; unit test với fake ZaloSender, sleep hook inject được (test không ngủ thật 3–8s).</li>
+      <li>BulkSend branch zalo_personal (pre-check, mapping load, fallback split, post-commit start); giữ nguyên đường zalo_manual/zalo_zns.</li>
+      <li>Handler/DTO/route cho run snapshot + response mới; swagger regen.</li>
+      <li>Wire container + shutdown; go test ./... && go test -race ./internal/features/notifications/...</li>
+    </ol>
+    <h3>Success Criteria</h3>
+    <ul class="todo">
+      <li>Kênh manual/zns hành vi cũ không đổi (test hiện có xanh, không sửa test).</li>
+      <li>Run 3 contact (2 map, 1 không): 2 row personal sent với msgId, 1 row manual fallback; counts đúng; gap ∈ [PaceMin, PaceMax] (test qua sleep hook).</li>
+      <li>Expired giữa run: row còn lại failed đúng lý do; run kết thúc; account expired (profile card đúng).</li>
+      <li>Bulk send lần 2 khi run đang chạy → 409; sau khi run xong → cho phép.</li>
+      <li>Shutdown giữa run: goroutine dừng sạch (race + Close test), rows còn lại vẫn queued.</li>
+      <li>Poll endpoint trả snapshot đúng qua vòng đời run.</li>
+    </ul>
+    <h3>Risk Assessment</h3>
+    <ul>
+      <li><b>Tx boundary regression:</b> nhánh manual giữ nguyên sender.Send trong tx; chỉ thêm branch mới, có test chốt hành vi cũ.</li>
+      <li><b>Goroutine leak / double-run:</b> RunManager mutex + test -race -count=3 (chuẩn plan auth).</li>
+      <li><b>Ban risk:</b> pacing + cap + friends-only là guardrail bắt buộc; 3–8s là guess có chủ đích → configurable.</li>
+      <li><b>Restart giữa run:</b> run interrupted + resume thủ công (Validate S1); không auto-resume lúc boot. Rủi ro còn lại: tối đa 1 tin trùng nếu crash rơi giữa send và MarkOutcome — chấp nhận, ghi doc comment.</li>
+    </ul>
+  </div>
+</dialog>
+
+<dialog id="dlg-p4" aria-labelledby="dlg-p4-t">
+  <div class="dlg-head"><h3 id="dlg-p4-t" style="border:0;padding:0;margin:0">Phase 4 · Web friend picker</h3><button class="close">Đóng · Esc</button></div>
+  <div class="dlg-body">
+    <table class="fm"><tr><td>phase: 4</td><td>status: completed</td><td>priority: P1</td><td>effort: 1d</td><td>dependencies: [2]</td></tr></table>
+    <h3>Overview</h3>
+    <p>UI map contact ↔ bạn Zalo: card «Zalo» trong trang chi tiết contact, modal picker chọn từ danh sách bạn bè
+    (search theo tên), unmap được. Chạy song song được với Phase 3 (chỉ phụ thuộc Phase 2).</p>
+    <h3>Requirements</h3>
+    <ul>
+      <li>contact-detail-page thêm card Zalo: chưa map → nút «Chọn bạn Zalo» mở picker; đã map → hiển thị zalo_name + nút «Bỏ liên kết» (confirm-dialog sẵn có).</li>
+      <li>Picker modal (HvModal): fetch GET /me/zalo/friends, search client-side theo display_name, chọn → PUT /contacts/:id/zalo-mapping.</li>
+      <li>Teacher chưa link Zalo → card hiển thị trạng thái + link tới profile («Kết nối Zalo trước»); expired → tương tự với copy re-scan.</li>
+      <li>contacts-page list: badge nhỏ đã-map (dot/icon + zalo_name), không đổi layout chính.</li>
+      <li>Non-functional: copy tiếng Việt; TanStack Query cho mọi server state; MSW handlers + tests theo chuẩn feature; a11y qua HvModal (focus trap sẵn).</li>
+    </ul>
+    <h3>Architecture</h3>
+    <ul>
+      <li>API slice: mở rộng features/profile/api/zalo-api.ts thêm getZaloFriends (schema mới trong profile/schemas/zalo-schemas.ts); mapping mutation đặt ở features/roster/api (contacts là domain roster); picker import qua public index của profile feature.</li>
+      <li>Hooks: useZaloFriends() (staleTime ngắn, chỉ fetch khi modal mở), useUpdateContactZaloMapping(contactId), useClearContactZaloMapping(contactId) → invalidate contact detail + contacts list.</li>
+      <li>Component mới: roster/components/zalo-friend-picker.tsx (modal, search, danh sách avatar + tên, chọn 1); tái dùng pattern contact-picker.tsx sẵn có.</li>
+    </ul>
+    <h3>Related Code Files</h3>
+    <ul class="files" style="list-style:none;padding:0">
+      <li>Create: apps/web/src/features/roster/components/zalo-friend-picker.tsx (+ test)</li>
+      <li>Modify: roster/pages/{contact-detail-page,contacts-page}.tsx · roster api/hooks/schemas + __tests__ + MSW handlers</li>
+      <li>Modify: profile/{api/zalo-api.ts, schemas/zalo-schemas.ts, hooks/use-zalo.ts} + index exports</li>
+    </ul>
+    <h3>Implementation Steps</h3>
+    <ol>
+      <li>Schemas + API: friends response, mapping request; MSW handlers.</li>
+      <li>Hooks với invalidation đúng key.</li>
+      <li>zalo-friend-picker.tsx (search + select + loading/error/empty states).</li>
+      <li>Gắn vào contact-detail card + badge contacts-page.</li>
+      <li>Tests: picker chọn/map/unmap, trạng thái chưa-link/expired, search filter.</li>
+    </ol>
+    <h3>Success Criteria</h3>
+    <ul class="todo">
+      <li>Map một contact từ picker → card hiển thị tên bạn Zalo; unmap → về trạng thái chưa map; list badge cập nhật không cần reload.</li>
+      <li>Chưa link Zalo → card dẫn về profile, không gọi friends API.</li>
+      <li>npm test, eslint, tsc -b --noEmit, prettier --check, build xanh.</li>
+    </ul>
+    <h3>Risk Assessment</h3>
+    <ul>
+      <li><b>Trùng tên bạn bè</b> («Mẹ Bảo» x2): hiển thị avatar + tên; chấp nhận teacher tự phân biệt, không xây disambiguation thêm (KISS).</li>
+      <li><b>Friends API chậm/Zalo down:</b> query chỉ chạy khi mở modal, có error state retry; không block trang contact.</li>
+    </ul>
+  </div>
+</dialog>
+
+<dialog id="dlg-p5" aria-labelledby="dlg-p5-t">
+  <div class="dlg-head"><h3 id="dlg-p5-t" style="border:0;padding:0;margin:0">Phase 5 · Web channel + run progress</h3><button class="close">Đóng · Esc</button></div>
+  <div class="dlg-body">
+    <table class="fm"><tr><td>phase: 5</td><td>status: completed</td><td>priority: P1</td><td>effort: 1d</td><td>dependencies: [3, 4]</td></tr></table>
+    <h3>Overview</h3>
+    <p>Trang notifications: chọn kênh zalo_personal khi đã link, confirm trước khi gửi, theo dõi run bằng poll, resume run
+    bị gián đoạn, hiển thị fallback/failed trung thực. Giữ nguyên flow copy-paste manual. <em>(Cập nhật Validate S1)</em></p>
+    <h3>Requirements</h3>
+    <ul>
+      <li>Chọn kênh ở action bulk-send: mặc định zalo_manual như hiện tại; option «Gửi qua Zalo (tự động)» chỉ enable khi profile status = linked (query GET /me/zalo sẵn có); tooltip/ghi chú khi disabled.</li>
+      <li><b>Confirm trước khi gửi</b> <em>(Validate S1)</em>: dialog «X phụ huynh gửi tự động · Y dùng copy thủ công — tiếp tục?» — counts tính client-side từ zalo_user_id trên contact data đã fetch, không cần endpoint preview; xác nhận xong mới gọi bulk-send.</li>
+      <li>Sau bulk-send kênh personal: banner «Đang gửi x/y…» poll GET /billing-periods/:id/notifications/run (refetchInterval ~2s khi running, dừng khi terminal); đồng thời invalidate ledger list.</li>
+      <li>Run <b>interrupted</b> (restart giữa run): banner «Lượt gửi bị gián đoạn — còn N chưa gửi» + nút «Gửi tiếp» → POST …/notifications/run/resume, rồi poll tiếp như run thường.</li>
+      <li>Hiển thị: fallback_manual_count («N contact chưa liên kết, dùng copy-paste bên dưới», các row manual vẫn vào flow copy/mark-sent hiện tại); row failed → lý do (error_message từ ledger); run xong → summary «Đã gửi x · Lỗi y».</li>
+      <li>Bulk-send khi run đang chạy → API 409 → toast «Đang có lượt gửi chạy, đợi xong đã».</li>
+      <li>Session expired (4xx pre-check) → message + link tới profile re-scan.</li>
+      <li>Non-functional: poll dừng hẳn khi done/không có run; copy tiếng Việt; tests MSW mô phỏng run tiến triển.</li>
+    </ul>
+    <h3>Architecture</h3>
+    <ul>
+      <li>Schemas (collections-schemas.ts): mở rộng bulk-send response (run_id, personal_queued_count, fallback_manual_count), schema run snapshot; notifications-api.ts thêm getNotificationRun(periodId).</li>
+      <li>Hook mới useNotificationRun(periodId, {enabled}): refetchInterval trả 2000 khi status running, false khi terminal (completed/expired/interrupted); done → invalidate listNotifications. Mutation useResumeNotificationRun(periodId) cho nút «Gửi tiếp».</li>
+      <li>UI: channel select (radio/segmented trong khu action notifications-page.tsx), confirm dialog trước khi gửi (pattern confirm-dialog sẵn có, counts từ contact mapping), component run-progress-banner.tsx (progress + counts + trạng thái interrupted/nút resume + failed link xuống ledger). message-card.tsx giữ nguyên cho manual rows.</li>
+    </ul>
+    <h3>Related Code Files</h3>
+    <ul class="files" style="list-style:none;padding:0">
+      <li>Create: apps/web/src/features/collections/components/run-progress-banner.tsx (+ test)</li>
+      <li>Modify: collections/{pages/notifications-page.tsx, api/notifications-api.ts, hooks/use-notifications.ts, schemas/collections-schemas.ts, __tests__/collections-handlers.ts} + tests</li>
+      <li>Modify: src/test/msw/handlers.ts (nếu handlers dùng chung) · e2e/statement.spec.ts (nếu copy/DOM đổi)</li>
+    </ul>
+    <h3>Implementation Steps</h3>
+    <ol>
+      <li>Schemas + API + MSW (run snapshot có kịch bản tiến triển theo số lần gọi).</li>
+      <li>useNotificationRun với refetchInterval động + invalidation.</li>
+      <li>Channel select gating theo GET /me/zalo status + confirm dialog trước khi gửi (counts client-side).</li>
+      <li>run-progress-banner.tsx + tích hợp page; handle 409/expired/interrupted + nút «Gửi tiếp» (resume mutation).</li>
+      <li>Tests: linked/unlinked gating, confirm dialog counts, poll tiến triển → done, fallback count, failed row hiển thị lý do, 409 khi run đang chạy, interrupted → resume.</li>
+      <li>E2E hiện có (khu notifications) cập nhật nếu copy/DOM đổi.</li>
+    </ol>
+    <h3>Success Criteria</h3>
+    <ul class="todo">
+      <li>Chưa link → option personal disabled kèm giải thích; linked → confirm dialog hiển thị đúng «X tự động · Y thủ công» rồi mới gửi.</li>
+      <li>Poll hiển thị x/y tăng dần, dừng khi terminal, ledger rows đổi trạng thái không cần reload; run interrupted → banner + «Gửi tiếp» hoạt động.</li>
+      <li>Fallback count + manual flow không thay đổi hành vi cũ (tests cũ xanh).</li>
+      <li>npm test, eslint, tsc, prettier, npm run build xanh.</li>
+    </ul>
+    <h3>Risk Assessment</h3>
+    <ul>
+      <li><b>Poll mồ côi</b> (bật interval khi không có run): enabled gate theo response active; test chốt «không run → không refetch».</li>
+      <li><b>Đóng tab giữa run:</b> by design run vẫn chạy server-side; mở lại trang → banner khôi phục từ snapshot endpoint (test case reload-mid-run).</li>
+    </ul>
+  </div>
+</dialog>
+
+<script>
+  // Modal wiring: native <dialog> gives Esc + focus containment.
+  document.querySelectorAll("button.open-modal").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const dlg = document.getElementById(btn.dataset.dlg);
+      if (dlg) dlg.showModal();
+    });
+  });
+  document.querySelectorAll("dialog").forEach(dlg => {
+    dlg.querySelector("button.close").addEventListener("click", () => dlg.close());
+    dlg.addEventListener("click", e => { if (e.target === dlg) dlg.close(); });
+  });
+  // Nav dot highlighting.
+  const dots = [...document.querySelectorAll(".dots a")];
+  const secs = [...document.querySelectorAll("section[id]")];
+  if ("IntersectionObserver" in window) {
+    const io = new IntersectionObserver(entries => {
+      entries.forEach(en => {
+        if (en.isIntersecting) {
+          const i = secs.indexOf(en.target);
+          dots.forEach((d, j) => d.classList.toggle("on", i === j));
+        }
+      });
+    }, { rootMargin: "-40% 0px -55% 0px" });
+    secs.forEach(s => io.observe(s));
+  }
+</script>
+</body>
+</html>

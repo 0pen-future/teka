@@ -5,8 +5,8 @@ export const NETWORK_ERROR = "NETWORK_ERROR";
 
 /**
  * The one error shape components ever see. Normalized from the backend's
- * {success, error: {code, message, fields}} envelope; raw axios errors never
- * escape the API layer.
+ * {success, error: {code, message, fields, details}} envelope; raw axios
+ * errors never escape the API layer.
  */
 export class ApiError extends Error {
   readonly code: string;
@@ -14,18 +14,27 @@ export class ApiError extends Error {
   readonly status: number | null;
   /** Per-field validation messages (VALIDATION_ERROR responses). */
   readonly fields?: Record<string, string>;
+  /**
+   * Structured context a flat field map cannot express — the roster import's
+   * per-row error list, billing's unconfirmed sessions. Deliberately
+   * `unknown`: it is endpoint-specific, so the owning feature validates it
+   * with its own schema rather than trusting a shared type.
+   */
+  readonly details?: unknown;
 
   constructor(
     code: string,
     message: string,
     status: number | null,
     fields?: Record<string, string>,
+    details?: unknown,
   ) {
     super(message);
     this.name = "ApiError";
     this.code = code;
     this.status = status;
     this.fields = fields;
+    this.details = details;
   }
 }
 
@@ -33,6 +42,7 @@ interface ErrorBody {
   code?: string;
   message?: string;
   fields?: Record<string, string>;
+  details?: unknown;
 }
 
 /**
@@ -63,6 +73,7 @@ export function toApiError(err: unknown): ApiError {
         body?.message ?? "Something went wrong",
         err.response.status,
         body?.fields,
+        body?.details,
       );
     }
     return new ApiError(NETWORK_ERROR, "Cannot reach the server", null);

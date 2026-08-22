@@ -30,15 +30,15 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-// teacherID resolves the authenticated tenant — the only sanctioned source of
-// teacher identity; request bodies and paths never carry it.
-func (h *Handler) teacherID(c *gin.Context) (uuid.UUID, bool) {
-	teacherID, ok := authctx.TeacherID(c)
+// scope resolves the authenticated tenant's center scope — the only
+// sanctioned source of tenancy; request bodies and paths never carry it.
+func (h *Handler) scope(c *gin.Context) (authctx.Scope, bool) {
+	sc, ok := authctx.ScopeFrom(c)
 	if !ok {
 		response.Err(c, apperror.Unauthorized("authentication required"))
-		return uuid.UUID{}, false
+		return authctx.Scope{}, false
 	}
-	return teacherID, true
+	return sc, true
 }
 
 // pathID parses one uuid path parameter, reading a malformed value as the
@@ -66,7 +66,7 @@ func pathID(c *gin.Context, param, resource string) (uuid.UUID, bool) {
 //	@Security		BearerAuth
 //	@Router			/billing-periods [post]
 func (h *Handler) ensurePeriod(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -75,7 +75,7 @@ func (h *Handler) ensurePeriod(c *gin.Context) {
 		response.Err(c, validation.BindError(err))
 		return
 	}
-	period, err := h.svc.EnsurePeriod(c.Request.Context(), teacherID, req.Year, req.Month)
+	period, err := h.svc.EnsurePeriod(c.Request.Context(), sc, req.Year, req.Month)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -96,12 +96,12 @@ func (h *Handler) ensurePeriod(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/billing-periods [get]
 func (h *Handler) list(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
 	params := pagination.Parse(c, "-period_start", listSorts)
-	rows, total, err := h.svc.ListPeriods(c.Request.Context(), teacherID, params)
+	rows, total, err := h.svc.ListPeriods(c.Request.Context(), sc, params)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -121,7 +121,7 @@ func (h *Handler) list(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/billing-periods/{id} [get]
 func (h *Handler) get(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -129,7 +129,7 @@ func (h *Handler) get(c *gin.Context) {
 	if !ok {
 		return
 	}
-	period, err := h.svc.GetPeriod(c.Request.Context(), teacherID, periodID)
+	period, err := h.svc.GetPeriod(c.Request.Context(), sc, periodID)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -152,7 +152,7 @@ func (h *Handler) get(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/billing-periods/{id}/preview [get]
 func (h *Handler) preview(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -160,7 +160,7 @@ func (h *Handler) preview(c *gin.Context) {
 	if !ok {
 		return
 	}
-	resp, err := h.svc.Preview(c.Request.Context(), teacherID, periodID)
+	resp, err := h.svc.Preview(c.Request.Context(), sc, periodID)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -185,7 +185,7 @@ func (h *Handler) preview(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/billing-periods/{id}/draft [post]
 func (h *Handler) draft(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -193,7 +193,7 @@ func (h *Handler) draft(c *gin.Context) {
 	if !ok {
 		return
 	}
-	resp, err := h.svc.Draft(c.Request.Context(), teacherID, periodID)
+	resp, err := h.svc.Draft(c.Request.Context(), sc, periodID)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -219,7 +219,7 @@ func (h *Handler) draft(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/billing-periods/{id}/close [post]
 func (h *Handler) close(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -227,7 +227,7 @@ func (h *Handler) close(c *gin.Context) {
 	if !ok {
 		return
 	}
-	resp, err := h.svc.Close(c.Request.Context(), teacherID, periodID)
+	resp, err := h.svc.Close(c.Request.Context(), sc, periodID)
 	if err != nil {
 		var blocked *ErrUnconfirmedSessions
 		if errors.As(err, &blocked) {
@@ -259,7 +259,7 @@ func (h *Handler) close(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/invoices/{id}/void [post]
 func (h *Handler) voidInvoice(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -272,7 +272,7 @@ func (h *Handler) voidInvoice(c *gin.Context) {
 		response.Err(c, validation.BindError(err))
 		return
 	}
-	resp, err := h.svc.VoidInvoice(c.Request.Context(), teacherID, invoiceID, req.Reason)
+	resp, err := h.svc.VoidInvoice(c.Request.Context(), sc, invoiceID, req.Reason)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -299,7 +299,7 @@ func (h *Handler) voidInvoice(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/invoices/{id}/adjustments [post]
 func (h *Handler) addAdjustment(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -312,7 +312,7 @@ func (h *Handler) addAdjustment(c *gin.Context) {
 		response.Err(c, validation.BindError(err))
 		return
 	}
-	adjResp, _, err := h.svc.AddAdjustment(c.Request.Context(), teacherID, invoiceID, req.Amount, req.Reason)
+	adjResp, _, err := h.svc.AddAdjustment(c.Request.Context(), sc, invoiceID, req.Amount, req.Reason)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -333,7 +333,7 @@ func (h *Handler) addAdjustment(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/invoices/{id}/adjustments [get]
 func (h *Handler) listAdjustments(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -341,7 +341,7 @@ func (h *Handler) listAdjustments(c *gin.Context) {
 	if !ok {
 		return
 	}
-	rows, err := h.svc.ListAdjustments(c.Request.Context(), teacherID, invoiceID)
+	rows, err := h.svc.ListAdjustments(c.Request.Context(), sc, invoiceID)
 	if err != nil {
 		response.Err(c, err)
 		return

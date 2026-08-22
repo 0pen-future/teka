@@ -2,6 +2,7 @@ package teachers
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -69,6 +70,58 @@ func (r *fakeRepository) TouchLastLogin(_ context.Context, id uuid.UUID, at time
 	return nil
 }
 
+func (r *fakeRepository) SetStatus(_ context.Context, id uuid.UUID, status string) error {
+	p, ok := r.profiles[id]
+	if !ok {
+		return ErrNotFound
+	}
+	p.Account.Status = status
+	return nil
+}
+
+func (r *fakeRepository) SetPasswordHash(_ context.Context, id uuid.UUID, passwordHash string, _ time.Time) error {
+	p, ok := r.profiles[id]
+	if !ok || p.Account.Status != StatusActive {
+		return ErrNotFound
+	}
+	p.Account.PasswordHash = &passwordHash
+	return nil
+}
+
+func (r *fakeRepository) SetPasswordHashForRecovery(_ context.Context, id uuid.UUID, passwordHash string, _ time.Time) error {
+	p, ok := r.profiles[id]
+	if !ok {
+		return ErrNotFound
+	}
+	p.Account.PasswordHash = &passwordHash
+	return nil
+}
+
+func (r *fakeRepository) ReactivateAccount(_ context.Context, id uuid.UUID, passwordHash string, _ time.Time) error {
+	p, ok := r.profiles[id]
+	if !ok || p.Account.Status != StatusDisabled {
+		return ErrNotFound
+	}
+	p.Account.PasswordHash = &passwordHash
+	p.Account.Status = StatusActive
+	return nil
+}
+
+// fakeTokenRevoker implements TokenRevoker in memory, recording every account
+// id Reactivate asked it to revoke.
+type fakeTokenRevoker struct {
+	revoked []uuid.UUID
+	err     error
+}
+
+func (r *fakeTokenRevoker) RevokeAllForUser(_ context.Context, userID uuid.UUID) error {
+	if r.err != nil {
+		return r.err
+	}
+	r.revoked = append(r.revoked, userID)
+	return nil
+}
+
 func seedProfile(repo *fakeRepository, phone string) *Profile {
 	accountID := uuid.New()
 	p := &Profile{
@@ -87,16 +140,16 @@ func wantFieldError(t *testing.T, err error, field string) {
 	}
 }
 
-func TestCreateTeacherNormalizesAndPairsRows(t *testing.T) {
+func TestCreateInCenterNormalizesAndPairsRows(t *testing.T) {
 	repo := newFakeRepository()
 	svc := NewService(repo)
+	centerID := uuid.New()
 
-	p, err := svc.CreateTeacher(context.Background(), CreateRequest{
-		Phone: "0901234567", Password: "password-123", FullName: "Cô Lan",
-	})
+	accountID, err := svc.CreateInCenter(context.Background(), "0901234567", "Cô Lan", "password-123", centerID)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
+	p := repo.profiles[accountID]
 	if p.Account.Phone != "+84901234567" {
 		t.Fatalf("phone must normalize to E.164, got %q", p.Account.Phone)
 	}
@@ -106,24 +159,145 @@ func TestCreateTeacherNormalizesAndPairsRows(t *testing.T) {
 	if p.Account.PasswordHash == nil || *p.Account.PasswordHash == "password-123" {
 		t.Fatal("password must be stored hashed")
 	}
+	if p.Teacher.CenterID != centerID {
+		t.Fatalf("teacher must land in the given center, got %s", p.Teacher.CenterID)
+	}
+	if p.Account.Status != StatusActive {
+		t.Fatalf("new account must be active, got %q", p.Account.Status)
+	}
 
-	_, err = svc.CreateTeacher(context.Background(), CreateRequest{
-		Phone: "+84901234567", Password: "password-123", FullName: "Trùng",
-	})
+	_, err = svc.CreateInCenter(context.Background(), "+84901234567", "Trùng", "password-123", centerID)
 	if apperror.From(err).Code != apperror.CodeConflict {
 		t.Fatalf("duplicate phone must conflict, got %v", err)
 	}
 }
 
-func TestCreateTeacherRejectsOver72BytePassword(t *testing.T) {
+func TestCreateInCenterRejectsOver72BytePassword(t *testing.T) {
 	svc := NewService(newFakeRepository())
 
 	// 25 three-byte runes = 25 characters (passes binding max=72 runes) but 75
 	// bytes (exceeds bcrypt's input limit).
-	_, err := svc.CreateTeacher(context.Background(), CreateRequest{
-		Phone: "0901234567", Password: strings.Repeat("ầ", 25), FullName: "X",
-	})
+	_, err := svc.CreateInCenter(context.Background(), "0901234567", "X", strings.Repeat("ầ", 25), uuid.New())
 	wantFieldError(t, err, "password")
+}
+
+func TestFindByPhoneReturnsAccountOrRawNotFound(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+	p := seedProfile(repo, "+84901234567")
+
+	acct, err := svc.FindByPhone(context.Background(), "0901234567")
+	if err != nil {
+		t.Fatalf("find: %v", err)
+	}
+	if acct.ID != p.Account.ID {
+		t.Fatalf("want account %s, got %s", p.Account.ID, acct.ID)
+	}
+
+	_, err = svc.FindByPhone(context.Background(), "0909999999")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown phone must return the raw ErrNotFound sentinel, got %v", err)
+	}
+}
+
+func TestReactivateFlipsStatusSetsPasswordAndRevokesTokens(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+	revoker := &fakeTokenRevoker{}
+	svc.SetTokenRevoker(revoker)
+	p := seedProfile(repo, "+84901234567")
+	p.Account.Status = StatusDisabled
+
+	if err := svc.Reactivate(context.Background(), p.Account.ID, "New Name", "new-password"); err != nil {
+		t.Fatalf("reactivate: %v", err)
+	}
+	stored := repo.profiles[p.Account.ID]
+	if stored.Account.Status != StatusActive {
+		t.Fatalf("account must be active again, got %q", stored.Account.Status)
+	}
+	if stored.Account.PasswordHash == nil || *stored.Account.PasswordHash == "new-password" {
+		t.Fatal("password must be stored hashed")
+	}
+	if stored.Teacher.FullName != "New Name" {
+		t.Fatalf("full name must update, got %q", stored.Teacher.FullName)
+	}
+	if len(revoker.revoked) != 1 || revoker.revoked[0] != p.Account.ID {
+		t.Fatalf("reactivate must revoke every token for the account, got %v", revoker.revoked)
+	}
+}
+
+func TestReactivateRejectsAlreadyActiveAccount(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+	p := seedProfile(repo, "+84901234567") // StatusActive by default
+
+	err := svc.Reactivate(context.Background(), p.Account.ID, "New Name", "new-password")
+	if !errors.Is(err, ErrNotDisabled) {
+		t.Fatalf("want ErrNotDisabled, got %v", err)
+	}
+}
+
+func TestDisableFlipsStatusToDisabled(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+	p := seedProfile(repo, "+84901234567")
+
+	if err := svc.Disable(context.Background(), p.Account.ID); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	if repo.profiles[p.Account.ID].Account.Status != StatusDisabled {
+		t.Fatalf("account must be disabled, got %q", repo.profiles[p.Account.ID].Account.Status)
+	}
+}
+
+func TestSetPasswordForRecoveryUpdatesDisabledAccountWithoutReactivating(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+	p := seedProfile(repo, "+84901234567")
+	p.Account.Status = StatusDisabled
+
+	if err := svc.SetPasswordForRecovery(context.Background(), p.Account.ID, "new-password"); err != nil {
+		t.Fatalf("set password for recovery: %v", err)
+	}
+	stored := repo.profiles[p.Account.ID]
+	if stored.Account.Status != StatusDisabled {
+		t.Fatalf("status must stay disabled, got %q", stored.Account.Status)
+	}
+	if stored.Account.PasswordHash == nil || *stored.Account.PasswordHash == "new-password" {
+		t.Fatal("password must be stored hashed")
+	}
+}
+
+func TestSetPasswordForRecoveryUpdatesActiveAccount(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+	p := seedProfile(repo, "+84901234567") // StatusActive by default
+
+	if err := svc.SetPasswordForRecovery(context.Background(), p.Account.ID, "new-password"); err != nil {
+		t.Fatalf("set password for recovery: %v", err)
+	}
+	stored := repo.profiles[p.Account.ID]
+	if stored.Account.PasswordHash == nil || *stored.Account.PasswordHash == "new-password" {
+		t.Fatal("password must be stored hashed")
+	}
+}
+
+func TestSetPasswordForRecoveryRejectsOver72BytePassword(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewService(repo)
+	p := seedProfile(repo, "+84901234567")
+
+	err := svc.SetPasswordForRecovery(context.Background(), p.Account.ID, strings.Repeat("ầ", 25))
+	wantFieldError(t, err, "password")
+}
+
+func TestSetPasswordForRecoveryUnknownAccount(t *testing.T) {
+	svc := NewService(newFakeRepository())
+
+	err := svc.SetPasswordForRecovery(context.Background(), uuid.New(), "new-password")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("want ErrNotFound, got %v", err)
+	}
 }
 
 func TestUpdateProfileChangesOnlyNameAndTimezone(t *testing.T) {

@@ -1,8 +1,5 @@
 import { z } from "zod";
 
-const dateField = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ngày phải theo định dạng YYYY-MM-DD");
-const hhmmPattern = /^([01]\d|2[0-3]):[0-5]\d$/;
-
 /**
  * `sessions.SessionResponse` (`apps/api/internal/features/sessions/dto.go`).
  * `status` is `'planned' | 'held' | 'cancelled'`
@@ -79,18 +76,3 @@ export const cancelSessionInputSchema = z.object({
 });
 
 export type CancelSessionInput = z.infer<typeof cancelSessionInputSchema>;
-
-/**
- * `sessions.CreateSessionRequest` — an ad-hoc make-up session outside any
- * schedule. `start_time` binds `omitempty,hhmm` server-side, so an empty
- * string must not be sent; the api layer strips it before the request.
- */
-export const createSessionInputSchema = z.object({
-  session_date: dateField,
-  start_time: z.union([
-    z.string().regex(hhmmPattern, "Giờ phải theo định dạng HH:MM"),
-    z.literal(""),
-  ]),
-});
-
-export type CreateSessionInput = z.infer<typeof createSessionInputSchema>;

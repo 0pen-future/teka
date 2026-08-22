@@ -29,15 +29,16 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-// teacherID resolves the authenticated tenant — the only sanctioned source of
-// teacher identity; request bodies and paths never carry it.
-func (h *Handler) teacherID(c *gin.Context) (uuid.UUID, bool) {
-	teacherID, ok := authctx.TeacherID(c)
+// scope resolves the authenticated caller's center scope — the only
+// sanctioned source of tenant identity; request bodies and paths never carry
+// it.
+func (h *Handler) scope(c *gin.Context) (authctx.Scope, bool) {
+	sc, ok := authctx.ScopeFrom(c)
 	if !ok {
 		response.Err(c, apperror.Unauthorized("authentication required"))
-		return uuid.UUID{}, false
+		return authctx.Scope{}, false
 	}
-	return teacherID, true
+	return sc, true
 }
 
 // contactID parses the :id path parameter.
@@ -64,7 +65,7 @@ func contactID(c *gin.Context) (uuid.UUID, bool) {
 //	@Security		BearerAuth
 //	@Router			/contacts [post]
 func (h *Handler) create(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -73,7 +74,7 @@ func (h *Handler) create(c *gin.Context) {
 		response.Err(c, validation.BindError(err))
 		return
 	}
-	row, err := h.svc.Create(c.Request.Context(), teacherID, req)
+	row, err := h.svc.Create(c.Request.Context(), sc, req)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -96,12 +97,12 @@ func (h *Handler) create(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/contacts [get]
 func (h *Handler) list(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
 	params := pagination.Parse(c, "full_name", listSorts)
-	rows, total, err := h.svc.List(c.Request.Context(), teacherID, ListFilter{Query: c.Query("query")}, params)
+	rows, total, err := h.svc.List(c.Request.Context(), sc, ListFilter{Query: c.Query("query")}, params)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -125,7 +126,7 @@ func (h *Handler) list(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/contacts/{id} [get]
 func (h *Handler) get(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -133,7 +134,7 @@ func (h *Handler) get(c *gin.Context) {
 	if !ok {
 		return
 	}
-	row, err := h.svc.Get(c.Request.Context(), teacherID, cid)
+	row, err := h.svc.Get(c.Request.Context(), sc, cid)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -157,7 +158,7 @@ func (h *Handler) get(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/contacts/{id} [put]
 func (h *Handler) update(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -170,7 +171,7 @@ func (h *Handler) update(c *gin.Context) {
 		response.Err(c, validation.BindError(err))
 		return
 	}
-	row, err := h.svc.Update(c.Request.Context(), teacherID, cid, req)
+	row, err := h.svc.Update(c.Request.Context(), sc, cid, req)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -192,7 +193,7 @@ func (h *Handler) update(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/contacts/{id} [delete]
 func (h *Handler) remove(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -200,7 +201,73 @@ func (h *Handler) remove(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.svc.Delete(c.Request.Context(), teacherID, cid); err != nil {
+	if err := h.svc.Delete(c.Request.Context(), sc, cid); err != nil {
+		response.Err(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// setZaloMapping binds the contact to a Zalo friend chosen in the picker.
+//
+//	@Summary		Map contact to a Zalo friend
+//	@Description	Stores the picked friend's id and display name on the contact. Values come from GET /me/zalo/friends; the backend does not re-check them against the live friend list.
+//	@Tags			contacts
+//	@Accept			json
+//	@Produce		json
+//	@Param			id		path		string				true	"contact id"
+//	@Param			request	body		ZaloMappingRequest	true	"picked Zalo friend"
+//	@Success		200		{object}	response.Envelope{data=ContactResponse}
+//	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		409		{object}	response.Envelope{error=response.ErrorBody}	"friend already mapped to another contact"
+//	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}	"validation failed"
+//	@Security		BearerAuth
+//	@Router			/contacts/{id}/zalo-mapping [put]
+func (h *Handler) setZaloMapping(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	cid, ok := contactID(c)
+	if !ok {
+		return
+	}
+	var req ZaloMappingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Err(c, validation.BindError(err))
+		return
+	}
+	row, err := h.svc.UpdateZaloMapping(c.Request.Context(), sc, cid, req)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, FromModel(row))
+}
+
+// clearZaloMapping detaches the contact from its Zalo friend.
+//
+//	@Summary		Unmap contact from its Zalo friend
+//	@Description	Nulls both mapping fields. Idempotent: unmapping an unmapped contact is still 204.
+//	@Tags			contacts
+//	@Produce		json
+//	@Param			id	path	string	true	"contact id"
+//	@Success		204
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/contacts/{id}/zalo-mapping [delete]
+func (h *Handler) clearZaloMapping(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	cid, ok := contactID(c)
+	if !ok {
+		return
+	}
+	if err := h.svc.ClearZaloMapping(c.Request.Context(), sc, cid); err != nil {
 		response.Err(c, err)
 		return
 	}

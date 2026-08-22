@@ -30,7 +30,7 @@ func normalizePurpose(raw string) string {
 // cfg.Notifications.DefaultChannel.
 type BulkSendRequest struct {
 	Purpose string `json:"purpose" binding:"required,oneof=statement statements reminder"`
-	Channel string `json:"channel" binding:"omitempty,oneof=zalo_manual zalo_zns sms"`
+	Channel string `json:"channel" binding:"omitempty,oneof=zalo_manual zalo_zns sms zalo_personal"`
 }
 
 // BulkSendRow is one contact's queued notification, with everything a
@@ -54,11 +54,37 @@ type BulkSendResponse struct {
 	QueuedCount      int `json:"queued_count"`
 	SkippedPaidCount int `json:"skipped_paid_count"`
 	CollapsedCount   int `json:"collapsed_count"`
-	// BulkText joins every row's message, separated by a blank line, so a
-	// teacher can copy once when pasting into a broadcast tool instead of
-	// copying each contact's message individually.
+	// RunID names the background run auto-sending this call's zalo_personal
+	// rows; poll GET .../notifications/run for its progress. Null when
+	// nothing is being auto-sent — the copy-paste channels, or a personal
+	// send whose every contact was unmapped.
+	RunID *uuid.UUID `json:"run_id"`
+	// PersonalQueuedCount and FallbackManualCount split a zalo_personal
+	// send's rows: mapped contacts the run delivers itself vs unmapped
+	// contacts left in BulkText for the teacher to copy-paste. Both zero for
+	// other channels.
+	PersonalQueuedCount int `json:"personal_queued_count"`
+	FallbackManualCount int `json:"fallback_manual_count"`
+	// BulkText joins every copy-paste row's message, separated by a blank
+	// line, so a teacher can copy once when pasting into a broadcast tool
+	// instead of copying each contact's message individually. Rows a
+	// zalo_personal run delivers itself are excluded.
 	BulkText string        `json:"bulk_text"`
 	Rows     []BulkSendRow `json:"rows"`
+}
+
+// RunSnapshotResponse is the GET .../notifications/run body: the period's
+// latest zalo_personal run with its progress derived by counting the run's
+// rows. The zero value — Active false, RunID nil — means the period has never
+// had a run, which is an ordinary answer here, not a 404.
+type RunSnapshotResponse struct {
+	Active  bool       `json:"active"`
+	RunID   *uuid.UUID `json:"run_id"`
+	Status  string     `json:"status,omitempty"`
+	Purpose string     `json:"purpose,omitempty"`
+	Total   int        `json:"total"`
+	Sent    int        `json:"sent"`
+	Failed  int        `json:"failed"`
 }
 
 // MarkSentRequest is the POST /notifications/mark-sent body.
@@ -71,28 +97,36 @@ type MarkSentRequest struct {
 // persisted (see model.go), so a past send's text cannot be replayed here —
 // only its delivery bookkeeping can.
 type NotificationResponse struct {
-	ID          uuid.UUID  `json:"id"`
-	ContactID   uuid.UUID  `json:"contact_id"`
-	ContactName string     `json:"contact_name"`
-	Phone       string     `json:"phone"`
-	Channel     string     `json:"channel"`
-	Purpose     string     `json:"purpose"`
-	Status      string     `json:"status"`
-	SentAt      *time.Time `json:"sent_at"`
-	CreatedAt   time.Time  `json:"created_at"`
+	ID          uuid.UUID `json:"id"`
+	ContactID   uuid.UUID `json:"contact_id"`
+	ContactName string    `json:"contact_name"`
+	Phone       string    `json:"phone"`
+	Channel     string    `json:"channel"`
+	Purpose     string    `json:"purpose"`
+	Status      string    `json:"status"`
+	// ErrorMessage is a failed row's teacher-facing reason — the ledger is
+	// the only place a teacher can learn why a row was not delivered.
+	ErrorMessage *string `json:"error_message,omitempty"`
+	// RunID pins the row to the paced run that sent it, letting a client
+	// show a run's failures without adopting older runs' rows.
+	RunID     *uuid.UUID `json:"run_id,omitempty"`
+	SentAt    *time.Time `json:"sent_at"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 // fromListRow maps a ledger row onto its wire DTO.
 func fromListRow(r ListRow) NotificationResponse {
 	return NotificationResponse{
-		ID:          r.ID,
-		ContactID:   r.ContactID,
-		ContactName: r.ContactName,
-		Phone:       r.Phone,
-		Channel:     r.Channel,
-		Purpose:     r.Purpose,
-		Status:      r.Status,
-		SentAt:      r.SentAt,
-		CreatedAt:   r.CreatedAt,
+		ID:           r.ID,
+		ContactID:    r.ContactID,
+		ContactName:  r.ContactName,
+		Phone:        r.Phone,
+		Channel:      r.Channel,
+		Purpose:      r.Purpose,
+		Status:       r.Status,
+		ErrorMessage: r.ErrorMessage,
+		RunID:        r.RunID,
+		SentAt:       r.SentAt,
+		CreatedAt:    r.CreatedAt,
 	}
 }

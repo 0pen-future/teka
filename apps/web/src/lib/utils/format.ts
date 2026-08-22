@@ -11,10 +11,10 @@ const moneyFormatter = new Intl.NumberFormat("vi-VN", {
   maximumFractionDigits: 0,
 });
 
-const weekdayFormatter = new Intl.DateTimeFormat("vi-VN", {
-  weekday: "short",
-  timeZone: "UTC",
-});
+// Fixed labels instead of Intl.DateTimeFormat: the vi-VN short-weekday form
+// differs across ICU/CLDR versions ("Th 4" vs "Thứ 4"), so Intl output would
+// vary by Node/browser build. Indexed by Date#getUTCDay (0 = Sunday).
+const weekdayLabels = ["CN", "Th 2", "Th 3", "Th 4", "Th 5", "Th 6", "Th 7"];
 
 /** Renders whole đồng with no fraction digits, e.g. `formatMoney(1500000)` → `"1.500.000 ₫"`. */
 export function formatMoney(amountDong: number): string {
@@ -33,13 +33,34 @@ export function formatSessionDate(sessionDate: string): string {
   if (Number.isNaN(date.getTime())) {
     return sessionDate;
   }
-  const weekday = weekdayFormatter.format(date);
+  const weekday = weekdayLabels[date.getUTCDay()];
   const day = String(date.getUTCDate()).padStart(2, "0");
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
   return `${weekday}, ${day}/${month}`;
 }
 
+/**
+ * Renders a `YYYY-MM-DD` date as bare `dd/MM` (e.g. `"05/01"`) for dense
+ * table cells that carry no weekday. Malformed input passes through
+ * unchanged, same degradation contract as `formatSessionDate`.
+ */
+export function formatDayMonth(isoDate: string): string {
+  const [, month, day] = isoDate.split("-");
+  if (!month || !day) {
+    return isoDate;
+  }
+  return `${day}/${month}`;
+}
+
 /** Converts a stored E.164 Vietnamese number back to the local `0…` display form. */
 export function formatPhoneLocal(phone: string): string {
   return phone.startsWith("+84") ? `0${phone.slice(3)}` : phone;
+}
+
+/**
+ * Last given name's first letter for avatar discs — Vietnamese names put the
+ * given name last, so "Nguyễn Thị Lan" → "L". Empty input yields "".
+ */
+export function nameInitial(fullName: string): string {
+  return fullName.trim().split(/\s+/).at(-1)?.charAt(0) ?? "";
 }

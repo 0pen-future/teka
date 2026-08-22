@@ -15,7 +15,7 @@ async function login(page: import("@playwright/test").Page) {
   await page.getByLabel("Số điện thoại").fill(TEACHER_PHONE);
   await page.getByLabel("Mật khẩu").fill(TEACHER_PASSWORD);
   await page.getByRole("button", { name: "Đăng nhập" }).click();
-  await expect(page.getByText(/Chào Cô Lan/)).toBeVisible();
+  await expect(page.getByText(/Chào buổi (sáng|trưa|chiều|tối), Cô Lan!/)).toBeVisible();
 }
 
 /** The contact's card: the name paragraph's row-level ancestor (name -> name/phone wrapper -> button -> header -> card). */

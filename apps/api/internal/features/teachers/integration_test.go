@@ -12,14 +12,28 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"teka/apps/api/internal/config"
+	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/auth"
+	"teka/apps/api/internal/features/centers"
 	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/middleware"
 	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/testutil"
 )
+
+// mountProfileRoutes wires the real middleware chain — auth then scope
+// resolution — exactly as the production router does.
+func mountProfileRoutes(db *gorm.DB, jwtCfg config.JWTConfig) *gin.Engine {
+	r := gin.New()
+	svc := teachers.NewService(teachers.NewRepository(db))
+	centersSvc := centers.NewService(centers.NewRepository(db), database.NewTxManager(db))
+	teachers.RegisterRoutes(r.Group("/api/v1"), teachers.NewHandler(svc),
+		middleware.RequireAuth(jwtCfg), middleware.ResolveScope(centersSvc))
+	return r
+}
 
 func TestMeIsolationAndDeadAccounts(t *testing.T) {
 	t.Parallel()
@@ -28,9 +42,7 @@ func TestMeIsolationAndDeadAccounts(t *testing.T) {
 	jwtCfg := config.JWTConfig{Secret: testutil.JWTSecret, AccessTTL: 15 * time.Minute}
 	issuer := auth.NewTokenIssuer(jwtCfg)
 
-	r := gin.New()
-	svc := teachers.NewService(teachers.NewRepository(db))
-	teachers.RegisterRoutes(r.Group("/api/v1"), teachers.NewHandler(svc), middleware.RequireAuth(jwtCfg))
+	r := mountProfileRoutes(db, jwtCfg)
 
 	get := func(token string) (*httptest.ResponseRecorder, string) {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
@@ -79,9 +91,7 @@ func TestUpdateMePersistsAgainstRealSQL(t *testing.T) {
 	jwtCfg := config.JWTConfig{Secret: testutil.JWTSecret, AccessTTL: 15 * time.Minute}
 	issuer := auth.NewTokenIssuer(jwtCfg)
 
-	r := gin.New()
-	svc := teachers.NewService(teachers.NewRepository(db))
-	teachers.RegisterRoutes(r.Group("/api/v1"), teachers.NewHandler(svc), middleware.RequireAuth(jwtCfg))
+	r := mountProfileRoutes(db, jwtCfg)
 
 	acct, _ := testutil.Teacher(t, db)
 	token, err := issuer.IssueAccess(acct.ID, authctx.RoleTeacher)

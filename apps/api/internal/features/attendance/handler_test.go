@@ -1,6 +1,7 @@
 package attendance
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +22,15 @@ import (
 
 const handlerTestSecret = "attendance-test-secret-0123456789abcdef"
 
+// fakeScopeResolver resolves every teacher as the sole owner of their own
+// center — enough to exercise handler routing without a real centers
+// service.
+type fakeScopeResolver struct{}
+
+func (fakeScopeResolver) ResolveScope(_ context.Context, teacherID uuid.UUID) (authctx.Scope, error) {
+	return authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}, nil
+}
+
 // newAttendanceHTTPTest wires the real routes and auth middleware over the
 // in-memory fakes.
 func newAttendanceHTTPTest(t *testing.T) (*gin.Engine, *testDeps) {
@@ -29,7 +39,7 @@ func newAttendanceHTTPTest(t *testing.T) (*gin.Engine, *testDeps) {
 	svc, deps := newTestService()
 	r := gin.New()
 	jwtCfg := config.JWTConfig{Secret: handlerTestSecret, AccessTTL: 15 * time.Minute}
-	RegisterRoutes(r.Group("/api/v1"), NewHandler(svc), middleware.RequireAuth(jwtCfg))
+	RegisterRoutes(r.Group("/api/v1"), NewHandler(svc), middleware.RequireAuth(jwtCfg), middleware.ResolveScope(fakeScopeResolver{}))
 	return r, deps
 }
 

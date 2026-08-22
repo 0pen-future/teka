@@ -19,8 +19,11 @@ const AnonymizedName = "Đã xoá"
 // have no accounts by design. DisplayNote is the attendance-screen
 // disambiguator ("An lớp 9A"), the only free-text field the closed list allows.
 type Student struct {
-	ID           uuid.UUID `gorm:"primaryKey"`
-	TeacherID    uuid.UUID
+	ID        uuid.UUID `gorm:"primaryKey"`
+	TeacherID uuid.UUID
+	// CenterID anchors the row in the center it was created in; it never
+	// changes, even when the creating teacher later moves centers.
+	CenterID     uuid.UUID
 	ContactID    uuid.UUID
 	UserID       *uuid.UUID
 	FullName     string

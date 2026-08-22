@@ -23,15 +23,15 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-// teacherID resolves the authenticated tenant — the only sanctioned source
-// of teacher identity; the path never carries it.
-func (h *Handler) teacherID(c *gin.Context) (uuid.UUID, bool) {
-	teacherID, ok := authctx.TeacherID(c)
+// scope resolves the authenticated caller's teacher/center/owner scope — the
+// only sanctioned source of tenant identity; the path never carries it.
+func (h *Handler) scope(c *gin.Context) (authctx.Scope, bool) {
+	sc, ok := authctx.ScopeFrom(c)
 	if !ok {
 		response.Err(c, apperror.Unauthorized("authentication required"))
-		return uuid.UUID{}, false
+		return authctx.Scope{}, false
 	}
-	return teacherID, true
+	return sc, true
 }
 
 // pathID parses one uuid path parameter, reading a malformed value as the
@@ -62,7 +62,7 @@ func pathID(c *gin.Context, param, resource string) (uuid.UUID, bool) {
 //	@Security		BearerAuth
 //	@Router			/billing-periods/{id}/notifications/bulk [post]
 func (h *Handler) bulkSend(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -75,12 +75,72 @@ func (h *Handler) bulkSend(c *gin.Context) {
 		response.Err(c, validation.BindError(err))
 		return
 	}
-	result, err := h.svc.BulkSend(c.Request.Context(), teacherID, periodID, req)
+	result, err := h.svc.BulkSend(c.Request.Context(), sc, periodID, req)
 	if err != nil {
 		response.Err(c, err)
 		return
 	}
 	response.OK(c, http.StatusOK, result)
+}
+
+// runSnapshot reports the period's latest zalo_personal run and its progress.
+//
+//	@Summary		Poll a period's zalo_personal run
+//	@Description	Returns the period's latest background send run with progress counters derived from its rows. A period that never had a run answers active=false with a null run_id, not a 404 — poll this after a zalo_personal bulk send until active turns false.
+//	@Tags			notifications
+//	@Produce		json
+//	@Param			id	path		string	true	"billing period id"
+//	@Success		200	{object}	response.Envelope{data=RunSnapshotResponse}
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/billing-periods/{id}/notifications/run [get]
+func (h *Handler) runSnapshot(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	periodID, ok := pathID(c, "id", "billing period")
+	if !ok {
+		return
+	}
+	snapshot, err := h.svc.RunSnapshot(c.Request.Context(), sc, periodID)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, snapshot)
+}
+
+// resumeRun restarts the period's interrupted zalo_personal run.
+//
+//	@Summary		Resume an interrupted zalo_personal run
+//	@Description	Re-renders and re-sends only the run's still-queued rows; rows already sent keep their verdict. Only a run in the interrupted state qualifies. Rows that can no longer be auto-sent (mapping removed, balance since paid) are failed with a reason.
+//	@Tags			notifications
+//	@Produce		json
+//	@Param			id	path		string	true	"billing period id"
+//	@Success		200	{object}	response.Envelope{data=RunSnapshotResponse}
+//	@Failure		400	{object}	response.Envelope{error=response.ErrorBody}	"no linked Zalo account"
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}	"period has no run"
+//	@Failure		409	{object}	response.Envelope{error=response.ErrorBody}	"run is not interrupted, another run is sending, or the Zalo session expired"
+//	@Security		BearerAuth
+//	@Router			/billing-periods/{id}/notifications/run/resume [post]
+func (h *Handler) resumeRun(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	periodID, ok := pathID(c, "id", "billing period")
+	if !ok {
+		return
+	}
+	snapshot, err := h.svc.ResumeRun(c.Request.Context(), sc, periodID)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, snapshot)
 }
 
 // markSent marks the given notification ids as sent.
@@ -97,7 +157,7 @@ func (h *Handler) bulkSend(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/notifications/mark-sent [post]
 func (h *Handler) markSent(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -106,7 +166,7 @@ func (h *Handler) markSent(c *gin.Context) {
 		response.Err(c, validation.BindError(err))
 		return
 	}
-	if err := h.svc.MarkSent(c.Request.Context(), teacherID, req.IDs); err != nil {
+	if err := h.svc.MarkSent(c.Request.Context(), sc, req.IDs); err != nil {
 		response.Err(c, err)
 		return
 	}
@@ -126,7 +186,7 @@ func (h *Handler) markSent(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/billing-periods/{id}/notifications [get]
 func (h *Handler) list(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -138,7 +198,7 @@ func (h *Handler) list(c *gin.Context) {
 		Purpose: c.Query("purpose"),
 		Status:  c.Query("status"),
 	}
-	rows, err := h.svc.List(c.Request.Context(), teacherID, periodID, filter)
+	rows, err := h.svc.List(c.Request.Context(), sc, periodID, filter)
 	if err != nil {
 		response.Err(c, err)
 		return

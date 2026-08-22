@@ -9,7 +9,7 @@ async function login(page: import("@playwright/test").Page) {
   await page.getByLabel("Số điện thoại").fill(TEACHER_PHONE);
   await page.getByLabel("Mật khẩu").fill(TEACHER_PASSWORD);
   await page.getByRole("button", { name: "Đăng nhập" }).click();
-  await expect(page.getByText(/Chào Cô Lan/)).toBeVisible();
+  await expect(page.getByText(/Chào buổi (sáng|trưa|chiều|tối), Cô Lan!/)).toBeVisible();
 }
 
 test("marks absentees and confirms a pending session in one touch each, clearing the dashboard alert", async ({
@@ -21,7 +21,7 @@ test("marks absentees and confirms a pending session in one touch each, clearing
   // (`apps/api/seeds/seed.go`, `pendingAttendanceCount`) — jump straight into
   // one from the dashboard's pending-attendance alert rather than hand-rolling
   // a session first.
-  await expect(page.getByText("buổi đã qua chưa điểm danh")).toBeVisible();
+  await expect(page.getByText("buổi đã dạy nhưng chưa điểm danh")).toBeVisible();
   await page.getByRole("link", { name: "Điểm danh ngay" }).first().click();
   await expect(page).toHaveURL(/\/sessions\/.+\/attendance$/);
 
@@ -54,9 +54,9 @@ test("marks absentees and confirms a pending session in one touch each, clearing
 
   // The dashboard's pending count reflects the just-confirmed session.
   await page.goto("/");
-  const pendingBanner = page.getByText(/buổi đã qua chưa điểm danh/);
+  const pendingBanner = page.getByText(/buổi đã dạy nhưng chưa điểm danh/);
   if (await pendingBanner.isVisible().catch(() => false)) {
-    await expect(pendingBanner).toContainText("1 buổi đã qua chưa điểm danh");
+    await expect(pendingBanner).toContainText("1 buổi đã dạy nhưng chưa điểm danh");
   } else {
     await expect(pendingBanner).not.toBeVisible();
   }

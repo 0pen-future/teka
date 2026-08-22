@@ -1,13 +1,15 @@
 import { apiClient } from "@/lib/api/client";
-import { parseData, parseList, type Paginated } from "@/lib/api/envelope";
+import { parseArray, parseData } from "@/lib/api/envelope";
 
 import {
   bulkSendResponseSchema,
   notificationRowSchema,
+  runSnapshotSchema,
   type BulkSendInput,
   type BulkSendResponse,
   type MarkSentInput,
   type NotificationRow,
+  type RunSnapshot,
 } from "../schemas/collections-schemas";
 
 /**
@@ -36,8 +38,6 @@ export async function bulkSendNotifications(
 export interface ListNotificationsParams {
   purpose?: "statements" | "reminder";
   status?: "queued" | "sent" | "delivered" | "failed";
-  page?: number;
-  per_page?: number;
 }
 
 /**
@@ -45,19 +45,43 @@ export interface ListNotificationsParams {
  * `message_text`/`url`: the backend never persists rendered text (see
  * `notificationRowSchema`'s doc comment). Used to read back sent/queued
  * status after reload; the message body itself only ever comes from a fresh
- * `bulkSendNotifications` call.
+ * `bulkSendNotifications` call. Unlike the other list endpoints this one is
+ * unpaginated — the handler answers a bare array with no `meta` block, so it
+ * only accepts filters, never `page`/`per_page`.
  */
 export async function listNotifications(
   periodId: string,
   params: ListNotificationsParams = {},
-): Promise<Paginated<NotificationRow>> {
+): Promise<NotificationRow[]> {
   const res = await apiClient.get<unknown>(`/billing-periods/${periodId}/notifications`, {
     params,
   });
-  return parseList(notificationRowSchema, res.data);
+  return parseArray(notificationRowSchema, res.data);
 }
 
 /** `POST /notifications/mark-sent` — idempotent; unknown/foreign/already-sent ids are silently skipped. */
 export async function markNotificationsSent(input: MarkSentInput): Promise<void> {
   await apiClient.post("/notifications/mark-sent", input);
+}
+
+/**
+ * `GET /billing-periods/:id/notifications/run` — the period's latest
+ * `zalo_personal` run with progress counters. A period without any run
+ * answers `active: false`, not a 404.
+ */
+export async function getNotificationRun(periodId: string): Promise<RunSnapshot> {
+  const res = await apiClient.get<unknown>(`/billing-periods/${periodId}/notifications/run`);
+  return parseData(runSnapshotSchema, res.data);
+}
+
+/**
+ * `POST /billing-periods/:id/notifications/run/resume` — restarts the
+ * period's interrupted run over its still-queued rows only. 409 when the run
+ * is not interrupted, another run is sending, or the Zalo session expired.
+ */
+export async function resumeNotificationRun(periodId: string): Promise<RunSnapshot> {
+  const res = await apiClient.post<unknown>(
+    `/billing-periods/${periodId}/notifications/run/resume`,
+  );
+  return parseData(runSnapshotSchema, res.data);
 }

@@ -22,15 +22,15 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-// teacherID resolves the authenticated tenant — the only sanctioned source of
-// teacher identity; request bodies and paths never carry it.
-func (h *Handler) teacherID(c *gin.Context) (uuid.UUID, bool) {
-	teacherID, ok := authctx.TeacherID(c)
+// scope resolves the authenticated tenant's center scope — the only
+// sanctioned source of tenancy; request bodies and paths never carry it.
+func (h *Handler) scope(c *gin.Context) (authctx.Scope, bool) {
+	sc, ok := authctx.ScopeFrom(c)
 	if !ok {
 		response.Err(c, apperror.Unauthorized("authentication required"))
-		return uuid.UUID{}, false
+		return authctx.Scope{}, false
 	}
-	return teacherID, true
+	return sc, true
 }
 
 // pathID parses one uuid path parameter, reading a malformed value as the
@@ -57,7 +57,7 @@ func pathID(c *gin.Context, param, resource string) (uuid.UUID, bool) {
 //	@Security		BearerAuth
 //	@Router			/sessions/{id}/attendance [get]
 func (h *Handler) get(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -65,7 +65,7 @@ func (h *Handler) get(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := h.svc.Get(c.Request.Context(), teacherID, sessionID)
+	out, err := h.svc.Get(c.Request.Context(), sc, sessionID)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -91,7 +91,7 @@ func (h *Handler) get(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/sessions/{id}/attendance [post]
 func (h *Handler) confirm(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -104,7 +104,7 @@ func (h *Handler) confirm(c *gin.Context) {
 		response.Err(c, validation.BindError(err))
 		return
 	}
-	out, err := h.svc.Confirm(c.Request.Context(), teacherID, sessionID, req)
+	out, err := h.svc.Confirm(c.Request.Context(), sc, sessionID, req)
 	if err != nil {
 		response.Err(c, err)
 		return

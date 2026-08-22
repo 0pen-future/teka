@@ -6,6 +6,8 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+
+	"teka/apps/api/internal/shared/authctx"
 )
 
 // defaultPendingLimit is what an unset (or non-positive) `limit` falls back
@@ -70,19 +72,20 @@ func fromPendingRow(row *PendingRow, today time.Time) PendingSessionResponse {
 	}
 }
 
-// ListPending implements the pending-attendance predicate: teacher-scoped,
-// session_date < before, attendance_confirmed_at IS NULL, status IN
-// ('held','planned'), deleted_at IS NULL. from/to (both inclusive) narrow the
-// range when set — the same predicate plan 04's period-closing gate reuses.
+// ListPending implements the pending-attendance predicate: center-scoped
+// (narrowed to the caller's own rows when not an owner), session_date <
+// before, attendance_confirmed_at IS NULL, status IN ('held','planned'),
+// deleted_at IS NULL. from/to (both inclusive) narrow the range when set —
+// the same predicate plan 04's period-closing gate reuses.
 //
 // total is counted with a plain scan over class_sessions (no joins, so it
 // stays on the widened partial index); the limited rows carry the expected
 // student count from one grouped LEFT JOIN over enrollments, keeping the
 // whole feed at two statements regardless of result size — never a per-row
 // roster lookup.
-func (r *gormRepository) ListPending(ctx context.Context, teacherID uuid.UUID, before time.Time, from, to *time.Time, limit int) ([]PendingRow, int64, error) {
+func (r *gormRepository) ListPending(ctx context.Context, sc authctx.Scope, before time.Time, from, to *time.Time, limit int) ([]PendingRow, int64, error) {
 	base := func() *gorm.DB {
-		q := r.scoped(ctx, teacherID).Model(&Session{}).
+		q := r.scoped(ctx, sc).Model(&Session{}).
 			Where("class_sessions.session_date < ?", before).
 			Where("class_sessions.attendance_confirmed_at IS NULL").
 			Where("class_sessions.status IN ?", []string{StatusHeld, StatusPlanned})
@@ -102,9 +105,9 @@ func (r *gormRepository) ListPending(ctx context.Context, teacherID uuid.UUID, b
 
 	var rows []PendingRow
 	err := base().
-		Joins("JOIN classes ON classes.id = class_sessions.class_id AND classes.teacher_id = class_sessions.teacher_id").
+		Joins("JOIN classes ON classes.id = class_sessions.class_id AND classes.center_id = class_sessions.center_id").
 		Joins(`LEFT JOIN enrollments ON enrollments.class_id = class_sessions.class_id
-			AND enrollments.teacher_id = class_sessions.teacher_id
+			AND enrollments.center_id = class_sessions.center_id
 			AND enrollments.started_on <= class_sessions.session_date
 			AND (enrollments.ended_on IS NULL OR enrollments.ended_on >= class_sessions.session_date)
 			AND enrollments.deleted_at IS NULL`).
