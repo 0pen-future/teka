@@ -14,7 +14,7 @@ on:
       - "docker-compose.yml"
       - ".env.example"
   push:
-    branches: [main]
+    branches: [master]
     paths:
       - "apps/web/**"
       - ".github/workflows/web-ci.yml"
@@ -86,14 +86,14 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/metadata-action@v5
+      - uses: docker/metadata-action@v6
         id: meta
         with:
           images: ghcr.io/${{ github.repository }}/web
           tags: |
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: apps/web
           # Deployment-specific: override with a repository variable when the
@@ -116,6 +116,11 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
+      # npm ci must run before the stack starts: compose bind-mounts
+      # ./apps/web with an anonymous node_modules volume, and if the host
+      # directory doesn't exist yet Docker creates the mountpoint root-owned,
+      # which makes a later npm ci fail with EACCES.
+      - run: npm ci
       # Compose interpolates the repo-root .env; the example values are the
       # dev-stack defaults and contain no real secrets.
       - name: Create .env from example
@@ -143,7 +148,6 @@ jobs:
       - name: Seed test users
         working-directory: .
         run: docker compose run --rm migrate go run ./cmd/api seed
-      - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run e2e
       - uses: actions/upload-artifact@v4

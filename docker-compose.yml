@@ -5,7 +5,10 @@
 # "address already in use", stop the stale owner (lsof -i :PORT), never remap.
 services:
   postgres:
-    image: postgres:17-alpine
+    # Same major as the operator-run production instance
+    # (infrastructure/postgres/docker-compose.yml) so migrations and SQL are
+    # exercised against the version they will actually run on.
+    image: postgres:16-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-teka}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-teka_dev_password}
@@ -65,12 +68,18 @@ services:
       # fingerprint, never the key itself) — fine locally, never for prod.
       API_STATEMENTS_TOKEN_KEY: ${API_STATEMENTS_TOKEN_KEY:-}
       API_STATEMENTS_PUBLIC_BASE_URL: ${API_STATEMENTS_PUBLIC_BASE_URL:-http://localhost:5173}
+      # Same dev fallback. Unset means each restart generates a new key, so
+      # any Zalo account linked in a previous run stops decrypting.
+      API_ZALO_CRED_KEY: ${API_ZALO_CRED_KEY:-}
       # Optional VietQR transfer target; blank omits the QR from statements.
       API_BANK_CODE: ${API_BANK_CODE:-}
       API_BANK_ACCOUNT_NUMBER: ${API_BANK_ACCOUNT_NUMBER:-}
       API_BANK_ACCOUNT_NAME: ${API_BANK_ACCOUNT_NAME:-}
       API_NOTIFICATIONS_DEFAULT_CHANNEL: ${API_NOTIFICATIONS_DEFAULT_CHANNEL:-zalo_manual}
       API_NOTIFICATIONS_MAX_MESSAGE_LEN: ${API_NOTIFICATIONS_MAX_MESSAGE_LEN:-1000}
+      API_NOTIFICATIONS_PACE_MIN_SECONDS: ${API_NOTIFICATIONS_PACE_MIN_SECONDS:-3}
+      API_NOTIFICATIONS_PACE_MAX_SECONDS: ${API_NOTIFICATIONS_PACE_MAX_SECONDS:-8}
+      API_NOTIFICATIONS_MAX_RUN_SIZE: ${API_NOTIFICATIONS_MAX_RUN_SIZE:-50}
     volumes:
       - ./apps/api:/app
       - go-mod-cache:/go/pkg/mod

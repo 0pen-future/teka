@@ -10,6 +10,7 @@ import (
 
 	"teka/apps/api/internal/features/classes"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 )
 
@@ -24,15 +25,15 @@ type fakePendingRepo struct {
 	total int64
 	err   error
 
-	gotTeacherID uuid.UUID
-	gotBefore    time.Time
-	gotFrom      *time.Time
-	gotTo        *time.Time
-	gotLimit     int
+	gotScope  authctx.Scope
+	gotBefore time.Time
+	gotFrom   *time.Time
+	gotTo     *time.Time
+	gotLimit  int
 }
 
-func (f *fakePendingRepo) ListPending(_ context.Context, teacherID uuid.UUID, before time.Time, from, to *time.Time, limit int) ([]PendingRow, int64, error) {
-	f.gotTeacherID = teacherID
+func (f *fakePendingRepo) ListPending(_ context.Context, sc authctx.Scope, before time.Time, from, to *time.Time, limit int) ([]PendingRow, int64, error) {
+	f.gotScope = sc
 	f.gotBefore = before
 	f.gotFrom = from
 	f.gotTo = to
@@ -46,17 +47,20 @@ func (f *fakePendingRepo) ListPending(_ context.Context, teacherID uuid.UUID, be
 // The remaining Repository methods are unused by ListPending tests.
 func (f *fakePendingRepo) BulkInsertIgnoreConflicts(context.Context, []Session) error { return nil }
 func (f *fakePendingRepo) Create(context.Context, *Session) error                     { return nil }
-func (f *fakePendingRepo) ListByClassAndRange(context.Context, uuid.UUID, uuid.UUID, time.Time, time.Time) ([]Row, error) {
+func (f *fakePendingRepo) ListByClassAndRange(context.Context, authctx.Scope, uuid.UUID, time.Time, time.Time) ([]Row, error) {
 	return nil, nil
 }
-func (f *fakePendingRepo) GetByID(context.Context, uuid.UUID, uuid.UUID) (*Row, error) {
+func (f *fakePendingRepo) GetByID(context.Context, authctx.Scope, uuid.UUID) (*Row, error) {
 	return nil, ErrNotFound
 }
-func (f *fakePendingRepo) UpdateStatus(context.Context, uuid.UUID, uuid.UUID, string, *string) error {
+func (f *fakePendingRepo) UpdateStatus(context.Context, authctx.Scope, uuid.UUID, string, *string) error {
 	return nil
 }
-func (f *fakePendingRepo) SoftDelete(context.Context, uuid.UUID, uuid.UUID) error { return nil }
-func (f *fakePendingRepo) MarkHeldAndConfirmed(context.Context, uuid.UUID, uuid.UUID, time.Time) error {
+func (f *fakePendingRepo) SoftDelete(context.Context, authctx.Scope, uuid.UUID) error { return nil }
+func (f *fakePendingRepo) ReassignPlanned(context.Context, authctx.Scope, uuid.UUID, uuid.UUID, time.Time) (int64, error) {
+	return 0, nil
+}
+func (f *fakePendingRepo) MarkHeldAndConfirmed(context.Context, authctx.Scope, uuid.UUID, time.Time) error {
 	return nil
 }
 
@@ -65,10 +69,10 @@ func (f *fakePendingRepo) MarkHeldAndConfirmed(context.Context, uuid.UUID, uuid.
 // in this package that build a Service through newTestService; ListPending's
 // own behaviour is covered against fakePendingRepo above and against real
 // Postgres in integration_test.go.
-func (f *fakeRepository) ListPending(_ context.Context, teacherID uuid.UUID, before time.Time, from, to *time.Time, limit int) ([]PendingRow, int64, error) {
+func (f *fakeRepository) ListPending(_ context.Context, sc authctx.Scope, before time.Time, from, to *time.Time, limit int) ([]PendingRow, int64, error) {
 	var out []PendingRow
 	for _, r := range f.rows {
-		if r.deleted || r.TeacherID != teacherID {
+		if r.deleted || !visible(sc, r) {
 			continue
 		}
 		if !r.SessionDate.Before(before) {
@@ -113,8 +117,9 @@ func TestListPendingCutoffUsesTeacherTimezone(t *testing.T) {
 	fixedNow := time.Date(2026, 3, 10, 2, 0, 0, 0, time.UTC)
 	repo := &fakePendingRepo{}
 	svc := newPendingTestService(repo, teacherID, "America/Los_Angeles", fixedNow)
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}
 
-	if _, err := svc.ListPending(context.Background(), teacherID, nil, nil, 0); err != nil {
+	if _, err := svc.ListPending(context.Background(), sc, nil, nil, 0); err != nil {
 		t.Fatalf("ListPending: %v", err)
 	}
 	want := time.Date(2026, 3, 9, 0, 0, 0, 0, time.UTC)
@@ -129,16 +134,17 @@ func TestListPendingCutoffShiftsWithNonDefaultTimezone(t *testing.T) {
 	// teacher's calendar day a full day ahead of the default
 	// Asia/Ho_Chi_Minh (UTC+7) zone for the same instant.
 	fixedNow := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}
 
 	repoDefault := &fakePendingRepo{}
 	svcDefault := newPendingTestService(repoDefault, teacherID, "Asia/Ho_Chi_Minh", fixedNow)
-	if _, err := svcDefault.ListPending(context.Background(), teacherID, nil, nil, 0); err != nil {
+	if _, err := svcDefault.ListPending(context.Background(), sc, nil, nil, 0); err != nil {
 		t.Fatalf("ListPending (default tz): %v", err)
 	}
 
 	repoFar := &fakePendingRepo{}
 	svcFar := newPendingTestService(repoFar, teacherID, "Pacific/Kiritimati", fixedNow)
-	if _, err := svcFar.ListPending(context.Background(), teacherID, nil, nil, 0); err != nil {
+	if _, err := svcFar.ListPending(context.Background(), sc, nil, nil, 0); err != nil {
 		t.Fatalf("ListPending (far tz): %v", err)
 	}
 
@@ -159,6 +165,7 @@ func TestListPendingCutoffShiftsWithNonDefaultTimezone(t *testing.T) {
 func TestListPendingDefaultsAndCapsLimit(t *testing.T) {
 	teacherID := id.New()
 	fixedNow := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}
 
 	cases := []struct {
 		name  string
@@ -174,7 +181,7 @@ func TestListPendingDefaultsAndCapsLimit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &fakePendingRepo{}
 			svc := newPendingTestService(repo, teacherID, "Asia/Ho_Chi_Minh", fixedNow)
-			if _, err := svc.ListPending(context.Background(), teacherID, nil, nil, tc.limit); err != nil {
+			if _, err := svc.ListPending(context.Background(), sc, nil, nil, tc.limit); err != nil {
 				t.Fatalf("ListPending: %v", err)
 			}
 			if repo.gotLimit != tc.want {
@@ -189,10 +196,11 @@ func TestListPendingPassesFromToThrough(t *testing.T) {
 	fixedNow := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
 	repo := &fakePendingRepo{}
 	svc := newPendingTestService(repo, teacherID, "Asia/Ho_Chi_Minh", fixedNow)
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}
 
 	from := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC)
-	if _, err := svc.ListPending(context.Background(), teacherID, &from, &to, 0); err != nil {
+	if _, err := svc.ListPending(context.Background(), sc, &from, &to, 0); err != nil {
 		t.Fatalf("ListPending: %v", err)
 	}
 	if repo.gotFrom == nil || !repo.gotFrom.Equal(from) {
@@ -227,8 +235,9 @@ func TestListPendingMapsTotalAndDaysOverdue(t *testing.T) {
 		total: 7, // more than len(rows): total must reflect the unlimited count
 	}
 	svc := newPendingTestService(repo, teacherID, "Asia/Ho_Chi_Minh", fixedNow)
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}
 
-	out, err := svc.ListPending(context.Background(), teacherID, nil, nil, 2)
+	out, err := svc.ListPending(context.Background(), sc, nil, nil, 2)
 	if err != nil {
 		t.Fatalf("ListPending: %v", err)
 	}
@@ -263,8 +272,9 @@ func TestListPendingInvalidTimezoneFallsBackToUTC(t *testing.T) {
 	fixedNow := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
 	repo := &fakePendingRepo{}
 	svc := newPendingTestService(repo, teacherID, "not-a-real-zone", fixedNow)
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}
 
-	if _, err := svc.ListPending(context.Background(), teacherID, nil, nil, 0); err != nil {
+	if _, err := svc.ListPending(context.Background(), sc, nil, nil, 0); err != nil {
 		t.Fatalf("an invalid stored timezone must not fail the request, got %v", err)
 	}
 	want := time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC)
@@ -280,8 +290,9 @@ func TestListPendingMissingTeacherPropagatesNotFound(t *testing.T) {
 	// No addTeacher call: the fake teacher source has nothing for teacherID.
 	teachersSrc := newFakeTeacherSource()
 	svc := &Service{repo: repo, teachers: teachersSrc, now: func() time.Time { return fixedNow }}
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}
 
-	_, err := svc.ListPending(context.Background(), teacherID, nil, nil, 0)
+	_, err := svc.ListPending(context.Background(), sc, nil, nil, 0)
 	if apperror.From(err).Code != apperror.CodeNotFound {
 		t.Fatalf("missing teacher must surface as 404, got %v", err)
 	}
@@ -292,8 +303,9 @@ func TestListPendingRepositoryErrorIsInternal(t *testing.T) {
 	fixedNow := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
 	repo := &fakePendingRepo{err: errors.New("boom")}
 	svc := newPendingTestService(repo, teacherID, "Asia/Ho_Chi_Minh", fixedNow)
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}
 
-	_, err := svc.ListPending(context.Background(), teacherID, nil, nil, 0)
+	_, err := svc.ListPending(context.Background(), sc, nil, nil, 0)
 	if apperror.From(err).Code != apperror.CodeInternal {
 		t.Fatalf("repository error must surface as internal, got %v", err)
 	}

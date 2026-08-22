@@ -12,7 +12,15 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"teka/apps/api/internal/config"
+	"teka/apps/api/internal/database"
+	"teka/apps/api/internal/features/auth"
+	"teka/apps/api/internal/features/centers"
+	"teka/apps/api/internal/features/notifications"
+	"teka/apps/api/internal/features/statements"
+	"teka/apps/api/internal/features/teachers"
+	"teka/apps/api/internal/features/zalo"
 	"teka/apps/api/internal/middleware"
+	"teka/apps/api/internal/shared/secrets"
 )
 
 // newTestRouter builds the full middleware stack without a database; tests
@@ -31,7 +39,39 @@ func newTestRouterEnv(t *testing.T, env string) http.Handler {
 		Database:    config.DatabaseConfig{ConnMaxLifetime: time.Minute},
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return NewRouter(cfg, log, nil)
+	zaloSvc := newTestZaloService(t)
+	statementsSvc := statements.NewService(statements.NewRepository(nil), database.NewTxManager(nil),
+		cfg.Statements, statements.BankConfig{}, statements.NewQRBuilder())
+	notificationsSvc := notifications.NewService(notifications.NewRepository(nil), database.NewTxManager(nil),
+		statementsSvc, zaloSvc, log, cfg.Notifications)
+	t.Cleanup(notificationsSvc.Close)
+
+	// Mirrors app.Container's identity wiring (NewRouter no longer builds
+	// these itself) with a nil db — no test in this package issues a query
+	// through them.
+	txMgr := database.NewTxManager(nil)
+	teachersSvc := teachers.NewService(teachers.NewRepository(nil))
+	centersSvc := centers.NewService(centers.NewRepository(nil), txMgr)
+	authSvc := auth.NewService(teachersSvc, auth.NewRepository(nil), auth.NewTokenIssuer(cfg.JWT), txMgr,
+		centersSvc, zaloSvc, cfg.Onboarding, cfg.Statements.PublicBaseURL)
+	centersSvc.SetAccountDisabler(authSvc)
+	teachersSvc.SetTokenRevoker(authSvc)
+
+	return NewRouter(cfg, log, nil, zaloSvc, statementsSvc, notificationsSvc, teachersSvc, centersSvc, authSvc)
+}
+
+// newTestZaloService builds the one feature service NewRouter does not build
+// itself. Its key protects nothing here — no test in this package links an
+// account — but the cipher has to exist for the routes to mount.
+func newTestZaloService(t *testing.T) *zalo.Service {
+	t.Helper()
+	cipher, err := secrets.New([]byte("router-test-zalo-credential-key-32"))
+	if err != nil {
+		t.Fatalf("build test cipher: %v", err)
+	}
+	svc := zalo.NewService(zalo.NewRepository(nil), cipher, zalo.ServiceOptions{})
+	t.Cleanup(svc.Close)
+	return svc
 }
 
 func TestHealthzAlwaysOK(t *testing.T) {

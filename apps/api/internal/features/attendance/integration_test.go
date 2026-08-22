@@ -48,11 +48,117 @@ func date(s string) time.Time {
 	return t
 }
 
+// An owner reads and confirms a member's session attendance sheet; the
+// created records are stamped with the MEMBER's own teacher and center, never
+// the owner's — the same precedent sessions' generated/ad-hoc rows follow.
+func TestOwnerConfirmsMembersSessionAttendanceRecordsInheritMembersAnchors(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, db)
+	member, _ := testutil.Teacher(t, db)
+	ownerCenter := testutil.ScopeFor(t, db, owner.ID).CenterID
+
+	testutil.JoinCenter(t, db, member.ID, ownerCenter)
+	ownerScope := testutil.ScopeFor(t, db, owner.ID)
+	memberScope := testutil.ScopeFor(t, db, member.ID)
+	require.Equal(t, ownerScope.CenterID, memberScope.CenterID, "member must have joined the owner's center")
+
+	contact := testutil.Contact(t, db, member.ID)
+	class := testutil.Class(t, db, member.ID, testutil.WithClassStartDate(date("2026-01-01")))
+	session := testutil.Session(t, db, member.ID, class.ID, date("2026-01-06"))
+	student := testutil.Student(t, db, member.ID, contact.ID)
+	testutil.Enrollment(t, db, member.ID, student.ID, class.ID, date("2026-01-01"))
+
+	got, err := svc.Get(ctx, ownerScope, session.ID)
+	require.NoError(t, err, "owner must read a member's attendance sheet")
+	require.Len(t, got.Rows, 1)
+
+	out, err := svc.Confirm(ctx, ownerScope, session.ID, attendance.ConfirmRequest{})
+	require.NoError(t, err, "owner must confirm a member's session attendance")
+	require.Equal(t, sessions.StatusHeld, out.Status)
+	// The sheet the owner reads back must surface the member's recorded rows,
+	// not come back blank because the read path filtered them to the owner's
+	// own teacher id.
+	require.Len(t, out.Rows, 1)
+	require.NotNil(t, out.Rows[0].Status, "owner's read-back must include the recorded status")
+	require.Equal(t, attendance.StatusPresent, *out.Rows[0].Status)
+	require.NotEmpty(t, out.Rows[0].StudentName, "owner's read-back must resolve the member's student name")
+
+	var rows []struct {
+		TeacherID uuid.UUID
+		CenterID  uuid.UUID
+	}
+	require.NoError(t, db.Table("attendance_records").
+		Where("session_id = ? AND deleted_at IS NULL", session.ID).Find(&rows).Error)
+	require.Len(t, rows, 1)
+	require.Equal(t, member.ID, rows[0].TeacherID,
+		"records must be stamped with the member's own teacher id, not the confirming owner's")
+	require.Equal(t, ownerCenter, rows[0].CenterID)
+}
+
+// Two non-owning teachers in the same center are still isolated from each
+// other's session attendance — center scope grants the owner oversight, not
+// peer-to-peer access.
+func TestPeersInSameCenterCannotSeeEachOthersAttendance(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, db)
+	memberB, _ := testutil.Teacher(t, db)
+	memberC, _ := testutil.Teacher(t, db)
+	ownerCenter := testutil.ScopeFor(t, db, owner.ID).CenterID
+
+	testutil.JoinCenter(t, db, memberB.ID, ownerCenter)
+	testutil.JoinCenter(t, db, memberC.ID, ownerCenter)
+	scopeC := testutil.ScopeFor(t, db, memberC.ID)
+
+	contact := testutil.Contact(t, db, memberB.ID)
+	class := testutil.Class(t, db, memberB.ID, testutil.WithClassStartDate(date("2026-01-01")))
+	session := testutil.Session(t, db, memberB.ID, class.ID, date("2026-01-06"))
+	student := testutil.Student(t, db, memberB.ID, contact.ID)
+	testutil.Enrollment(t, db, memberB.ID, student.ID, class.ID, date("2026-01-01"))
+
+	_, err := svc.Get(ctx, scopeC, session.ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code, "a peer must not read another member's attendance sheet")
+
+	_, err = svc.Confirm(ctx, scopeC, session.ID, attendance.ConfirmRequest{})
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code, "a peer must not confirm another member's session attendance")
+}
+
+// A teacher from a different center is refused with 404, never 403 — a 403
+// would confirm the session exists in another center.
+func TestCrossCenterSessionAttendanceIsNotFound(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	teacherA, _ := testutil.Teacher(t, db)
+	teacherB, _ := testutil.Teacher(t, db)
+	scopeA := testutil.ScopeFor(t, db, teacherA.ID)
+	scopeB := testutil.ScopeFor(t, db, teacherB.ID)
+
+	contact := testutil.Contact(t, db, teacherA.ID)
+	class := testutil.Class(t, db, teacherA.ID, testutil.WithClassStartDate(date("2026-01-01")))
+	session := testutil.Session(t, db, teacherA.ID, class.ID, date("2026-01-06"))
+	student := testutil.Student(t, db, teacherA.ID, contact.ID)
+	testutil.Enrollment(t, db, teacherA.ID, student.ID, class.ID, date("2026-01-01"))
+
+	_, err := svc.Get(ctx, scopeA, session.ID)
+	require.NoError(t, err, "teacher A must read their own attendance sheet")
+
+	_, err = svc.Get(ctx, scopeB, session.ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+
+	_, err = svc.Confirm(ctx, scopeB, session.ID, attendance.ConfirmRequest{})
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+}
+
 func TestConfirmWritesOneRecordPerRosterStudentInOneCall(t *testing.T) {
 	t.Parallel()
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	contact := testutil.Contact(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-01-01")))
 	session := testutil.Session(t, db, teacher.ID, class.ID, date("2026-01-06"))
@@ -66,7 +172,7 @@ func TestConfirmWritesOneRecordPerRosterStudentInOneCall(t *testing.T) {
 	}
 	absent := []uuid.UUID{studentIDs[0], studentIDs[1]}
 
-	out, err := svc.Confirm(ctx, teacher.ID, session.ID, attendance.ConfirmRequest{AbsentStudentIDs: absent})
+	out, err := svc.Confirm(ctx, sc, session.ID, attendance.ConfirmRequest{AbsentStudentIDs: absent})
 	require.NoError(t, err)
 	require.Len(t, out.Rows, total, "one HTTP call must write every roster student's row")
 
@@ -90,6 +196,7 @@ func TestReConfirmIsIdempotentAndPreservesRecordedAt(t *testing.T) {
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	contact := testutil.Contact(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-01-01")))
 	session := testutil.Session(t, db, teacher.ID, class.ID, date("2026-01-06"))
@@ -98,7 +205,7 @@ func TestReConfirmIsIdempotentAndPreservesRecordedAt(t *testing.T) {
 	testutil.Enrollment(t, db, teacher.ID, s1.ID, class.ID, date("2026-01-01"))
 	testutil.Enrollment(t, db, teacher.ID, s2.ID, class.ID, date("2026-01-01"))
 
-	_, err := svc.Confirm(ctx, teacher.ID, session.ID, attendance.ConfirmRequest{AbsentStudentIDs: []uuid.UUID{s1.ID}})
+	_, err := svc.Confirm(ctx, sc, session.ID, attendance.ConfirmRequest{AbsentStudentIDs: []uuid.UUID{s1.ID}})
 	require.NoError(t, err)
 
 	type recordRow struct {
@@ -115,7 +222,7 @@ func TestReConfirmIsIdempotentAndPreservesRecordedAt(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond) // ensure a measurable updated_at delta
 
-	second, err := svc.Confirm(ctx, teacher.ID, session.ID, attendance.ConfirmRequest{AbsentStudentIDs: []uuid.UUID{s2.ID}})
+	second, err := svc.Confirm(ctx, sc, session.ID, attendance.ConfirmRequest{AbsentStudentIDs: []uuid.UUID{s2.ID}})
 	require.NoError(t, err)
 	require.Len(t, second.Rows, 2)
 
@@ -143,6 +250,7 @@ func TestConfirmOnlyIncludesRosterActiveOnSessionDate(t *testing.T) {
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	contact := testutil.Contact(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-01-01")))
 	session := testutil.Session(t, db, teacher.ID, class.ID, date("2026-03-14"))
@@ -157,7 +265,7 @@ func TestConfirmOnlyIncludesRosterActiveOnSessionDate(t *testing.T) {
 	leftEnrollment := testutil.Enrollment(t, db, teacher.ID, leavesBefore.ID, class.ID, date("2026-01-01"))
 	require.NoError(t, db.Model(leftEnrollment).Update("ended_on", date("2026-03-13")).Error)
 
-	out, err := svc.Confirm(ctx, teacher.ID, session.ID, attendance.ConfirmRequest{})
+	out, err := svc.Confirm(ctx, sc, session.ID, attendance.ConfirmRequest{})
 	require.NoError(t, err)
 	require.Len(t, out.Rows, 1, "only the student active on the session date belongs on the sheet")
 	require.Equal(t, startsOnDate.ID, out.Rows[0].StudentID)
@@ -173,6 +281,7 @@ func TestConcurrentConfirmsProduceExactlyOneRecordPerStudent(t *testing.T) {
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	contact := testutil.Contact(t, db, teacher.ID)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-01-01")))
 	session := testutil.Session(t, db, teacher.ID, class.ID, date("2026-01-06"))
@@ -190,7 +299,7 @@ func TestConcurrentConfirmsProduceExactlyOneRecordPerStudent(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, err := svc.Confirm(ctx, teacher.ID, session.ID, attendance.ConfirmRequest{})
+			_, err := svc.Confirm(ctx, sc, session.ID, attendance.ConfirmRequest{})
 			errs[i] = err
 		}(i)
 	}
@@ -214,19 +323,20 @@ func TestRemovedFromRosterStudentIsSoftDeletedAbsentStudentNeverIs(t *testing.T)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-01-01")))
 	session := testutil.Session(t, db, teacher.ID, class.ID, date("2026-01-06"))
 
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	stays := testutil.Student(t, db, teacher.ID, contact.ID, testutil.WithStudentFullName("Stays Absent"))
 	leaves := testutil.Student(t, db, teacher.ID, contact.ID, testutil.WithStudentFullName("Leaves Roster"))
 	testutil.Enrollment(t, db, teacher.ID, stays.ID, class.ID, date("2026-01-01"))
 	leaveEnrollment := testutil.Enrollment(t, db, teacher.ID, leaves.ID, class.ID, date("2026-01-01"))
 
-	_, err := svc.Confirm(ctx, teacher.ID, session.ID, attendance.ConfirmRequest{AbsentStudentIDs: []uuid.UUID{stays.ID}})
+	_, err := svc.Confirm(ctx, sc, session.ID, attendance.ConfirmRequest{AbsentStudentIDs: []uuid.UUID{stays.ID}})
 	require.NoError(t, err)
 
 	// The student leaves the roster before the session date, so the next
 	// confirm no longer sees them active.
 	require.NoError(t, db.Model(leaveEnrollment).Update("ended_on", date("2026-01-05")).Error)
 
-	_, err = svc.Confirm(ctx, teacher.ID, session.ID, attendance.ConfirmRequest{AbsentStudentIDs: []uuid.UUID{stays.ID}})
+	_, err = svc.Confirm(ctx, sc, session.ID, attendance.ConfirmRequest{AbsentStudentIDs: []uuid.UUID{stays.ID}})
 	require.NoError(t, err)
 
 	type recordRow struct {
@@ -255,7 +365,8 @@ func TestConfirmSetsSessionHeldAndConfirmedAt(t *testing.T) {
 	student := testutil.Student(t, db, teacher.ID, contact.ID)
 	testutil.Enrollment(t, db, teacher.ID, student.ID, class.ID, date("2026-01-01"))
 
-	out, err := svc.Confirm(ctx, teacher.ID, session.ID, attendance.ConfirmRequest{})
+	sc := testutil.ScopeFor(t, db, teacher.ID)
+	out, err := svc.Confirm(ctx, sc, session.ID, attendance.ConfirmRequest{})
 	require.NoError(t, err)
 	require.Equal(t, sessions.StatusHeld, out.Status)
 	require.NotNil(t, out.AttendanceConfirmedAt)
@@ -282,7 +393,8 @@ func TestConfirmCancelledSessionIs409(t *testing.T) {
 	student := testutil.Student(t, db, teacher.ID, contact.ID)
 	testutil.Enrollment(t, db, teacher.ID, student.ID, class.ID, date("2026-01-01"))
 
-	_, err := svc.Confirm(ctx, teacher.ID, session.ID, attendance.ConfirmRequest{})
+	sc := testutil.ScopeFor(t, db, teacher.ID)
+	_, err := svc.Confirm(ctx, sc, session.ID, attendance.ConfirmRequest{})
 	require.ErrorIs(t, err, attendance.ErrSessionCancelled)
 	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
 }
@@ -298,14 +410,15 @@ func TestConfirmRejectsAbsentIDOutsideRosterAndEmptyMeansPresent(t *testing.T) {
 	student := testutil.Student(t, db, teacher.ID, contact.ID)
 	testutil.Enrollment(t, db, teacher.ID, student.ID, class.ID, date("2026-01-01"))
 
-	_, err := svc.Confirm(ctx, teacher.ID, session.ID,
+	sc := testutil.ScopeFor(t, db, teacher.ID)
+	_, err := svc.Confirm(ctx, sc, session.ID,
 		attendance.ConfirmRequest{AbsentStudentIDs: []uuid.UUID{uuid.New()}})
 	require.ErrorIs(t, err, attendance.ErrStudentNotEnrolled)
 	appErr := apperror.From(err)
 	require.Equal(t, apperror.CodeValidation, appErr.Code)
 	require.NotEmpty(t, appErr.Fields["absent_student_ids"])
 
-	out, err := svc.Confirm(ctx, teacher.ID, session.ID, attendance.ConfirmRequest{})
+	out, err := svc.Confirm(ctx, sc, session.ID, attendance.ConfirmRequest{})
 	require.NoError(t, err)
 	require.Len(t, out.Rows, 1)
 	require.NotNil(t, out.Rows[0].Status)
@@ -324,10 +437,11 @@ func TestCrossTenantAttendanceIsNotFound(t *testing.T) {
 	student := testutil.Student(t, db, teacherA.ID, contact.ID)
 	testutil.Enrollment(t, db, teacherA.ID, student.ID, class.ID, date("2026-01-01"))
 
-	_, err := svc.Get(ctx, teacherB.ID, session.ID)
+	scopeB := testutil.ScopeFor(t, db, teacherB.ID)
+	_, err := svc.Get(ctx, scopeB, session.ID)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
 
-	_, err = svc.Confirm(ctx, teacherB.ID, session.ID, attendance.ConfirmRequest{})
+	_, err = svc.Confirm(ctx, scopeB, session.ID, attendance.ConfirmRequest{})
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
 }
 
@@ -347,7 +461,8 @@ func TestAnonymisedStudentNameStaysReadableOnHistoricalSheet(t *testing.T) {
 	student := testutil.Student(t, db, teacher.ID, contact.ID, testutil.WithStudentFullName("Bé An"))
 	testutil.Enrollment(t, db, teacher.ID, student.ID, class.ID, date("2026-01-01"))
 
-	_, err := svc.Confirm(ctx, teacher.ID, session.ID, attendance.ConfirmRequest{})
+	sc := testutil.ScopeFor(t, db, teacher.ID)
+	_, err := svc.Confirm(ctx, sc, session.ID, attendance.ConfirmRequest{})
 	require.NoError(t, err)
 
 	// Mirror students.AnonymizeAndDelete's exact effect directly (this package
@@ -358,7 +473,7 @@ func TestAnonymisedStudentNameStaysReadableOnHistoricalSheet(t *testing.T) {
 		`UPDATE students SET full_name = ?, display_note = NULL, anonymized_at = now(), deleted_at = now() WHERE id = ?`,
 		anonymizedName, student.ID).Error)
 
-	names, err := attendance.NewRepository(db).StudentNames(ctx, teacher.ID, []uuid.UUID{student.ID})
+	names, err := attendance.NewRepository(db).StudentNames(ctx, sc, []uuid.UUID{student.ID})
 	require.NoError(t, err)
 	require.Equal(t, anonymizedName, names[student.ID].FullName,
 		"an anonymised student's name must still resolve on a historical attendance sheet, not vanish")
@@ -408,10 +523,12 @@ func TestUpsertManyTargetsPartialUniqueIndex(t *testing.T) {
 	capture := &sqlCapture{}
 	repo := attendance.NewRepository(db.Session(&gorm.Session{Logger: capture}))
 
+	sc := testutil.ScopeFor(t, db, teacher.ID)
 	now := time.Now()
 	err := repo.UpsertMany(ctx, []attendance.Record{{
 		ID:           id.New(),
 		TeacherID:    teacher.ID,
+		CenterID:     sc.CenterID,
 		SessionID:    session.ID,
 		StudentID:    student.ID,
 		EnrollmentID: enrollment.ID,

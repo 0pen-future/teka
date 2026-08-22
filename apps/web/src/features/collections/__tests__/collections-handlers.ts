@@ -27,6 +27,7 @@ export const fixturePeriod: Period = {
 export const classMath: Class = {
   id: "c1000000-0000-4000-8000-000000000001",
   name: "Toán 6A",
+  teacher_id: "c2000000-0000-4000-8000-000000000001",
   start_date: "2026-01-05",
   end_date: null,
   default_unit_price: 150000,
@@ -38,6 +39,7 @@ export const classMath: Class = {
 export const classEnglish: Class = {
   id: "c1000000-0000-4000-8000-000000000002",
   name: "Anh Văn 7B",
+  teacher_id: "c2000000-0000-4000-8000-000000000002",
   start_date: "2026-01-05",
   end_date: null,
   default_unit_price: 150000,
@@ -50,6 +52,7 @@ export const classEnglish: Class = {
 export const classEmpty: Class = {
   id: "c1000000-0000-4000-8000-000000000003",
   name: "Vẽ 5A",
+  teacher_id: "c2000000-0000-4000-8000-000000000003",
   start_date: "2026-01-05",
   end_date: null,
   default_unit_price: 150000,
@@ -226,20 +229,44 @@ interface StoredNotification {
   contact_id: string;
   contact_name: string;
   phone: string;
-  channel: "zalo_manual" | "zalo_zns" | "sms";
+  channel: "zalo_manual" | "zalo_zns" | "sms" | "zalo_personal";
   purpose: "statements" | "reminder";
   status: "queued" | "sent" | "delivered" | "failed";
+  error_message: string | null;
+  run_id: string | null;
   sent_at: string | null;
   created_at: string;
   message_text: string;
   url: string;
 }
 
+interface StoredRun {
+  id: string;
+  status: "running" | "completed" | "interrupted" | "expired";
+  purpose: "statements" | "reminder";
+  notification_ids: string[];
+}
+
+/**
+ * Contacts the teacher has bound to a Zalo friend. Lan and Mai are mapped;
+ * Hùng and Bình are not — so a statements send splits 2 auto / 2 manual and a
+ * reminder send (Hùng fully paid) splits 2 auto / 1 manual.
+ */
+export const zaloMappedContacts: Record<string, { zalo_user_id: string; zalo_name: string }> = {
+  [contactSingleChildOwing.id]: { zalo_user_id: "zalo-uid-lan", zalo_name: "Lan Nguyễn" },
+  [contactTwoChildrenOwing.id]: { zalo_user_id: "zalo-uid-mai", zalo_name: "Mai Lê" },
+};
+
 interface Store {
   classes: Class[];
   invoices: Invoice[];
   payments: Map<string, StoredPayment>;
   notifications: StoredNotification[];
+  run: StoredRun | null;
+  /** Contact ids whose run row must fail (with this reason) instead of delivering. */
+  runFailures: Map<string, string>;
+  /** When true, snapshot reads stop advancing the run — it stays running. */
+  runHeld: boolean;
 }
 
 function seedCollectionsStore(): Store {
@@ -248,6 +275,9 @@ function seedCollectionsStore(): Store {
     invoices: buildInvoices(),
     payments: new Map(),
     notifications: [],
+    run: null,
+    runFailures: new Map(),
+    runHeld: false,
   };
 }
 
@@ -255,6 +285,91 @@ let store = seedCollectionsStore();
 
 export function resetCollectionsStore() {
   store = seedCollectionsStore();
+}
+
+/** Makes the run row for this contact fail with `reason` instead of delivering. */
+export function failRunRowFor(contactId: string, reason: string) {
+  store.runFailures.set(contactId, reason);
+}
+
+/** Freezes run progression so a test can act while the run is still running. */
+export function holdRunProgress() {
+  store.runHeld = true;
+}
+
+/** Simulates a server restart mid-run: the run stops advancing until resumed. */
+export function interruptRun() {
+  if (store.run) {
+    store.run.status = "interrupted";
+  }
+}
+
+/**
+ * Seeds a run already half-way through delivering — what a teacher who closed
+ * the tab mid-run finds when they reopen the page: one row delivered, one
+ * still queued, nothing generated in this session.
+ */
+export function seedRunMidFlight() {
+  const runId = nextId("run-");
+  const delivered: StoredNotification = {
+    id: nextId("notification-"),
+    contact_id: contactSingleChildOwing.id,
+    contact_name: contactSingleChildOwing.full_name,
+    phone: contactSingleChildOwing.phone,
+    channel: "zalo_personal",
+    purpose: "statements",
+    status: "delivered",
+    error_message: null,
+    run_id: runId,
+    sent_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+    message_text: messageTextFor(contactSingleChildOwing.id, "statements"),
+    url: `/statements/${contactSingleChildOwing.id}?period=${fixturePeriod.id}`,
+  };
+  const queued: StoredNotification = {
+    id: nextId("notification-"),
+    contact_id: contactTwoChildrenOwing.id,
+    contact_name: contactTwoChildrenOwing.full_name,
+    phone: contactTwoChildrenOwing.phone,
+    channel: "zalo_personal",
+    purpose: "statements",
+    status: "queued",
+    error_message: null,
+    run_id: runId,
+    sent_at: null,
+    created_at: new Date().toISOString(),
+    message_text: messageTextFor(contactTwoChildrenOwing.id, "statements"),
+    url: `/statements/${contactTwoChildrenOwing.id}?period=${fixturePeriod.id}`,
+  };
+  store.notifications.push(delivered, queued);
+  store.run = {
+    id: runId,
+    status: "running",
+    purpose: "statements",
+    notification_ids: [delivered.id, queued.id],
+  };
+}
+
+/**
+ * A failed personal row left behind by an earlier, finished run. Its reason
+ * belongs to that old run only — a newer run's banner must not adopt it.
+ */
+export function seedOldRunFailure(reason: string) {
+  store.notifications.push({
+    id: nextId("notification-"),
+    contact_id: contactUnderpaid.id,
+    contact_name: contactUnderpaid.full_name,
+    phone: contactUnderpaid.phone,
+    channel: "zalo_personal",
+    purpose: "statements",
+    status: "failed",
+    error_message: reason,
+    run_id: nextId("run-"),
+    sent_at: null,
+    created_at: new Date().toISOString(),
+    message_text: messageTextFor(contactUnderpaid.id, "statements"),
+    url: `/statements/${contactUnderpaid.id}?period=${fixturePeriod.id}`,
+  });
 }
 
 let idCounter = 0;
@@ -512,26 +627,45 @@ export const collectionsHandlers = [
   http.post(`${API_URL}/billing-periods/:id/notifications/bulk`, async ({ request }) => {
     const body = (await request.json()) as {
       purpose: "statements" | "reminder";
-      channel?: "zalo_manual" | "zalo_zns" | "sms";
+      channel?: "zalo_manual" | "zalo_zns" | "sms" | "zalo_personal";
     };
+    const personal = body.channel === "zalo_personal";
+    if (personal && store.run?.status === "running") {
+      return HttpResponse.json(
+        fail("CONFLICT", "a zalo_personal run is already sending; wait for it to finish"),
+        { status: 409 },
+      );
+    }
     const rows = buildContactRows().filter((row) =>
       body.purpose === "reminder" ? row.outstanding > 0 : true,
     );
+    const runNotificationIds: string[] = [];
     const generated: BulkSendRow[] = rows.map((row) => {
+      const mapped = personal && row.contact_id in zaloMappedContacts;
+      const channel = mapped
+        ? "zalo_personal"
+        : personal
+          ? "zalo_manual"
+          : (body.channel ?? "zalo_manual");
       const record: StoredNotification = {
         id: nextId("notification-"),
         contact_id: row.contact_id,
         contact_name: row.full_name,
         phone: row.phone,
-        channel: body.channel ?? "zalo_manual",
+        channel,
         purpose: body.purpose,
         status: "queued",
+        error_message: null,
+        run_id: null,
         sent_at: null,
         created_at: new Date().toISOString(),
         message_text: messageTextFor(row.contact_id, body.purpose),
         url: `/statements/${row.contact_id}?period=${fixturePeriod.id}`,
       };
       store.notifications.push(record);
+      if (mapped) {
+        runNotificationIds.push(record.id);
+      }
       return {
         notification_id: record.id,
         contact_id: record.contact_id,
@@ -545,15 +679,118 @@ export const collectionsHandlers = [
         collapsed: false,
       };
     });
+    let runId: string | null = null;
+    if (runNotificationIds.length > 0) {
+      runId = nextId("run-");
+      store.run = {
+        id: runId,
+        status: "running",
+        purpose: body.purpose,
+        notification_ids: runNotificationIds,
+      };
+      for (const notification of store.notifications) {
+        if (runNotificationIds.includes(notification.id)) {
+          notification.run_id = runId;
+        }
+      }
+    }
+    // BulkText is the copy-paste bundle — auto-sent personal rows stay out.
+    const manualRows = generated.filter((row) => row.channel !== "zalo_personal");
     return HttpResponse.json(
       ok({
         queued_count: generated.length,
         skipped_paid_count: buildContactRows().length - rows.length,
         collapsed_count: 0,
-        bulk_text: generated.map((row) => row.message_text).join("\n\n"),
+        run_id: runId,
+        personal_queued_count: runNotificationIds.length,
+        fallback_manual_count: personal ? manualRows.length : 0,
+        bulk_text: manualRows.map((row) => row.message_text).join("\n\n"),
         rows: generated,
       }),
     );
+  }),
+
+  http.get(`${API_URL}/billing-periods/:id/notifications/run`, () => {
+    const run = store.run;
+    if (!run) {
+      return HttpResponse.json(ok({ active: false, run_id: null, total: 0, sent: 0, failed: 0 }));
+    }
+    // Each poll delivers (or fails) one more queued row — the background
+    // sender's pacing compressed to "one row per snapshot read" so tests can
+    // watch x/y advance without real waiting.
+    if (run.status === "running" && !store.runHeld) {
+      const next = store.notifications.find(
+        (item) => run.notification_ids.includes(item.id) && item.status === "queued",
+      );
+      if (next) {
+        const reason = store.runFailures.get(next.contact_id);
+        if (reason) {
+          next.status = "failed";
+          next.error_message = reason;
+        } else {
+          next.status = "delivered";
+          next.sent_at = new Date().toISOString();
+        }
+      }
+      const queuedLeft = store.notifications.some(
+        (item) => run.notification_ids.includes(item.id) && item.status === "queued",
+      );
+      if (!queuedLeft) {
+        run.status = "completed";
+      }
+    }
+    const rows = store.notifications.filter((item) => run.notification_ids.includes(item.id));
+    return HttpResponse.json(
+      ok({
+        active: run.status === "running",
+        run_id: run.id,
+        status: run.status,
+        purpose: run.purpose,
+        total: rows.length,
+        sent: rows.filter((item) => item.status === "delivered").length,
+        failed: rows.filter((item) => item.status === "failed").length,
+      }),
+    );
+  }),
+
+  http.post(`${API_URL}/billing-periods/:id/notifications/run/resume`, () => {
+    const run = store.run;
+    if (!run) {
+      return HttpResponse.json(fail("NOT_FOUND", "notification run not found"), { status: 404 });
+    }
+    if (run.status !== "interrupted") {
+      return HttpResponse.json(fail("CONFLICT", "only an interrupted run can be resumed"), {
+        status: 409,
+      });
+    }
+    run.status = "running";
+    const rows = store.notifications.filter((item) => run.notification_ids.includes(item.id));
+    return HttpResponse.json(
+      ok({
+        active: true,
+        run_id: run.id,
+        status: run.status,
+        purpose: run.purpose,
+        total: rows.length,
+        sent: rows.filter((item) => item.status === "delivered").length,
+        failed: rows.filter((item) => item.status === "failed").length,
+      }),
+    );
+  }),
+
+  // The roster feature owns the real `/contacts` handler; the notifications
+  // page only needs id + zalo mapping to split auto vs manual counts, so this
+  // suite serves its own contacts consistent with the collections fixtures.
+  http.get(`${API_URL}/contacts`, () => {
+    const contacts = buildContactRows().map((row) => ({
+      id: row.contact_id,
+      full_name: row.full_name,
+      phone: row.phone,
+      student_count: row.student_count,
+      created_at: "2026-01-01T08:00:00Z",
+      ...(zaloMappedContacts[row.contact_id] ?? {}),
+    }));
+    return HttpResponse.json(ok(contacts, listMeta(contacts.length)));
   }),
 
   http.get(`${API_URL}/billing-periods/:id/notifications`, ({ request }) => {
@@ -568,6 +805,8 @@ export const collectionsHandlers = [
       channel: notification.channel,
       purpose: notification.purpose,
       status: notification.status,
+      error_message: notification.error_message ?? undefined,
+      run_id: notification.run_id ?? undefined,
       sent_at: notification.sent_at,
       created_at: notification.created_at,
     }));
@@ -577,7 +816,9 @@ export const collectionsHandlers = [
     if (status) {
       items = items.filter((item) => item.status === status);
     }
-    return HttpResponse.json(ok(items, listMeta(items.length)));
+    // The real handler answers a bare array with no meta block — the mock
+    // must match the wire, or a paginated-envelope regression hides here.
+    return HttpResponse.json(ok(items));
   }),
 
   http.post(`${API_URL}/notifications/mark-sent`, async ({ request }) => {

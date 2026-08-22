@@ -1,6 +1,7 @@
 package teachers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -20,15 +21,30 @@ import (
 
 const handlerTestSecret = "teachers-test-secret-0123456789abcdef"
 
-// newTeachersHTTPTest wires the real routes and auth middleware over the
-// in-memory fake repository.
+// fakeScopeResolver resolves scopes off the in-memory repository the way the
+// centers service does off the database: only a live, active account gets one.
+type fakeScopeResolver struct {
+	repo *fakeRepository
+}
+
+func (f *fakeScopeResolver) ResolveScope(_ context.Context, teacherID uuid.UUID) (authctx.Scope, error) {
+	p, ok := f.repo.profiles[teacherID]
+	if !ok || p.Account.Status != StatusActive {
+		return authctx.Scope{}, apperror.Unauthorized("account is not active")
+	}
+	return authctx.Scope{TeacherID: teacherID, CenterID: p.Teacher.CenterID, IsOwner: true}, nil
+}
+
+// newTeachersHTTPTest wires the real routes, auth, and scope middleware over
+// the in-memory fake repository.
 func newTeachersHTTPTest(t *testing.T) (*gin.Engine, *fakeRepository) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	repo := newFakeRepository()
 	r := gin.New()
 	jwtCfg := config.JWTConfig{Secret: handlerTestSecret, AccessTTL: 15 * time.Minute}
-	RegisterRoutes(r.Group("/api/v1"), NewHandler(NewService(repo)), middleware.RequireAuth(jwtCfg))
+	RegisterRoutes(r.Group("/api/v1"), NewHandler(NewService(repo)),
+		middleware.RequireAuth(jwtCfg), middleware.ResolveScope(&fakeScopeResolver{repo: repo}))
 	return r, repo
 }
 

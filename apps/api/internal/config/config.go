@@ -29,6 +29,11 @@ const (
 	// statement links are signed with. 32 bytes (256 bits) matches
 	// deriveToken's HMAC-SHA256.
 	minStatementTokenKeyLen = 32
+
+	// minZaloCredKeyLen is the minimum decoded key length, in bytes, Zalo
+	// session credentials are encrypted at rest with. 32 bytes (256 bits)
+	// matches the AES-256-GCM envelope in internal/shared/secrets.
+	minZaloCredKeyLen = 32
 )
 
 // HTTPConfig configures the HTTP listener.
@@ -96,6 +101,51 @@ type NotificationsConfig struct {
 	// under before it collapses its per-child detail (statements.Build's
 	// maxLen).
 	MaxMessageLen int `env:"NOTIFICATIONS_MAX_MESSAGE_LEN" envDefault:"1000"`
+	// PaceMinSeconds and PaceMaxSeconds bound the random gap between two
+	// consecutive zalo_personal sends in one run. The pacing exists to keep a
+	// teacher's personal account from looking like a spam bot to Zalo; 3–8s is
+	// a deliberate guess (Zalo publishes no limits), which is why it is
+	// configurable at all.
+	PaceMinSeconds int `env:"NOTIFICATIONS_PACE_MIN_SECONDS" envDefault:"3"`
+	PaceMaxSeconds int `env:"NOTIFICATIONS_PACE_MAX_SECONDS" envDefault:"8"`
+	// MaxRunSize caps how many zalo_personal messages one bulk send may queue
+	// for automatic delivery — the other half of the same anti-ban guardrail.
+	// A larger period simply has to be sent in batches.
+	MaxRunSize int `env:"NOTIFICATIONS_MAX_RUN_SIZE" envDefault:"50"`
+}
+
+// ZaloConfig configures the encryption of linked Zalo session credentials.
+// Those credentials are full account-takeover material, so they are only ever
+// stored sealed under this key.
+type ZaloConfig struct {
+	// CredKeyRaw is the configured secret exactly as read from the
+	// environment — hex or base64, either is accepted (see decodeTokenKey).
+	// Never logged; use CredKey for the decoded bytes.
+	CredKeyRaw string `env:"ZALO_CRED_KEY"`
+
+	// CredKey is the decoded secret, resolved by validateZalo. Not an
+	// environment field itself (env:"-"): production requires CredKeyRaw to
+	// decode to at least minZaloCredKeyLen bytes, because a changed key makes
+	// every already-linked account undecryptable. Every other environment
+	// falls back to a random per-process key when it does not.
+	CredKey []byte `env:"-"`
+}
+
+// OnboardingConfig configures the invite-only onboarding lifecycle: how long
+// an owner-created invitation and a password-reset link stay valid, and the
+// minimum gap between two reset requests for one account. The public link base
+// is deliberately absent — invite/reset links reuse Statements.PublicBaseURL,
+// which is already set in every deployed env; a second base-URL key would
+// silently emit localhost links in prod if forgotten.
+type OnboardingConfig struct {
+	// InviteTTL is how long an owner-created invitation stays acceptable
+	// before it derives to 'expired'.
+	InviteTTL time.Duration `env:"INVITE_TTL" envDefault:"72h"`
+	// ResetTTL is how long a password-reset link stays valid.
+	ResetTTL time.Duration `env:"RESET_TTL" envDefault:"48h"`
+	// ResetCooldown is the minimum gap between two reset requests for one
+	// account; a request inside the window is refused rather than superseding.
+	ResetCooldown time.Duration `env:"RESET_COOLDOWN" envDefault:"15m"`
 }
 
 // Config is the full application configuration, populated from API_-prefixed
@@ -111,6 +161,8 @@ type Config struct {
 	Statements    StatementsConfig
 	Bank          BankConfig
 	Notifications NotificationsConfig
+	Zalo          ZaloConfig
+	Onboarding    OnboardingConfig
 }
 
 // Load reads configuration from the environment (prefix API_). In development
@@ -161,7 +213,51 @@ func (c *Config) validate() error {
 			return fmt.Errorf("API_CORS_ORIGINS entry %q must start with http:// or https://", origin)
 		}
 	}
-	return c.validateStatements()
+	if err := c.validateNotifications(); err != nil {
+		return err
+	}
+	if err := c.validateStatements(); err != nil {
+		return err
+	}
+	if err := c.validateOnboarding(); err != nil {
+		return err
+	}
+	return c.validateZalo()
+}
+
+// validateOnboarding rejects non-positive lifetimes: a zero or negative invite
+// or reset TTL would mint links that are already dead, and a negative cooldown
+// is meaningless. (Unparseable durations already fail earlier in env.Parse.)
+func (c *Config) validateOnboarding() error {
+	o := c.Onboarding
+	if o.InviteTTL <= 0 {
+		return fmt.Errorf("API_INVITE_TTL must be positive, got %v", o.InviteTTL)
+	}
+	if o.ResetTTL <= 0 {
+		return fmt.Errorf("API_RESET_TTL must be positive, got %v", o.ResetTTL)
+	}
+	if o.ResetCooldown < 0 {
+		return fmt.Errorf("API_RESET_COOLDOWN must not be negative, got %v", o.ResetCooldown)
+	}
+	return nil
+}
+
+// validateNotifications guards the zalo_personal pacing guardrail: a zero or
+// negative gap, an inverted range, or a boundless run would defeat the whole
+// point of pacing, so a config that asks for one is a startup error rather
+// than a silently "fast" run.
+func (c *Config) validateNotifications() error {
+	n := c.Notifications
+	if n.PaceMinSeconds < 1 {
+		return fmt.Errorf("API_NOTIFICATIONS_PACE_MIN_SECONDS must be at least 1, got %d", n.PaceMinSeconds)
+	}
+	if n.PaceMaxSeconds < n.PaceMinSeconds {
+		return fmt.Errorf("API_NOTIFICATIONS_PACE_MAX_SECONDS must be >= the minimum pace (%d), got %d", n.PaceMinSeconds, n.PaceMaxSeconds)
+	}
+	if n.MaxRunSize < 1 {
+		return fmt.Errorf("API_NOTIFICATIONS_MAX_RUN_SIZE must be at least 1, got %d", n.MaxRunSize)
+	}
+	return nil
 }
 
 // decodeTokenKey resolves a configured secret into raw key bytes. It tries
@@ -211,6 +307,35 @@ func (c *Config) validateStatements() error {
 	c.Statements.TokenKey = fallback
 	fingerprint := sha256.Sum256(fallback)
 	slog.Warn("insecure development statement token key generated",
+		"fingerprint", hex.EncodeToString(fingerprint[:])[:8])
+	return nil
+}
+
+// validateZalo resolves Zalo.CredKey from CredKeyRaw. In production a missing
+// or short key is fatal: it is the only key that can decrypt already-stored
+// session credentials, so starting under a substitute would silently orphan
+// every teacher's linked account and force them all to re-scan a QR code.
+// Outside production, a missing or short key falls back to a random 32-byte
+// key generated once for this process — links made in a previous run stop
+// working, which is the accepted development trade-off. Only a fingerprint
+// (never the key) is logged.
+func (c *Config) validateZalo() error {
+	key := decodeTokenKey(c.Zalo.CredKeyRaw)
+	if len(key) >= minZaloCredKeyLen {
+		c.Zalo.CredKey = key
+		return nil
+	}
+	if c.IsProduction() {
+		return fmt.Errorf("API_ZALO_CRED_KEY must be at least %d bytes", minZaloCredKeyLen)
+	}
+
+	fallback := make([]byte, minZaloCredKeyLen)
+	if _, err := rand.Read(fallback); err != nil {
+		return fmt.Errorf("generate development zalo credential key: %w", err)
+	}
+	c.Zalo.CredKey = fallback
+	fingerprint := sha256.Sum256(fallback)
+	slog.Warn("insecure development zalo credential key generated; previously linked accounts will not decrypt",
 		"fingerprint", hex.EncodeToString(fingerprint[:])[:8])
 	return nil
 }

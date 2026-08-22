@@ -1,9 +1,8 @@
 # Teka
 
-<!-- Badges activate once the repo has a GitHub remote: replace OWNER/REPO. -->
-[![API CI](https://github.com/OWNER/REPO/actions/workflows/api-ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/api-ci.yml)
-[![Web CI](https://github.com/OWNER/REPO/actions/workflows/web-ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/web-ci.yml)
-[![Security](https://github.com/OWNER/REPO/actions/workflows/security.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/security.yml)
+[![API CI](https://github.com/0pen-future/teka/actions/workflows/api-ci.yml/badge.svg)](https://github.com/0pen-future/teka/actions/workflows/api-ci.yml)
+[![Web CI](https://github.com/0pen-future/teka/actions/workflows/web-ci.yml/badge.svg)](https://github.com/0pen-future/teka/actions/workflows/web-ci.yml)
+[![Security](https://github.com/0pen-future/teka/actions/workflows/security.yml/badge.svg)](https://github.com/0pen-future/teka/actions/workflows/security.yml)
 
 Full-stack application: Go API (Gin + GORM + PostgreSQL) and React web app
 (TypeScript + Vite + Tailwind + shadcn/ui) in a single monorepo.

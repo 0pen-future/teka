@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/logger"
 	"teka/apps/api/internal/shared/response"
 )
@@ -128,7 +129,8 @@ func (h *PublicHandler) qrImage(c *gin.Context) {
 // counter must never cost a parent their page, so a failure here is logged
 // and nothing else.
 func (h *PublicHandler) touchView(c *gin.Context, stmt *Statement) {
-	if err := h.svc.TouchView(c.Request.Context(), stmt.TeacherID, stmt.ID); err != nil {
+	scope := authctx.Scope{TeacherID: stmt.TeacherID, CenterID: stmt.CenterID}
+	if err := h.svc.TouchView(c.Request.Context(), scope, stmt.ID); err != nil {
 		logger.FromContext(c.Request.Context()).Error("statement view tracking failed",
 			"statement_id", stmt.ID, "error", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/pagination"
 )
 
@@ -31,17 +32,17 @@ type ListResult struct {
 	Total       int64
 }
 
-// List validates periodID belongs to teacherID and that view is a known
+// List validates periodID belongs to sc's tenancy and that view is a known
 // value, then dispatches to the matching repository query. view == ViewClass
 // additionally requires filter.ClassID.
-func (s *Service) List(ctx context.Context, teacherID, periodID uuid.UUID, view string, filter Filter, p pagination.Params) (*ListResult, error) {
-	if err := s.ensurePeriod(ctx, teacherID, periodID); err != nil {
+func (s *Service) List(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, view string, filter Filter, p pagination.Params) (*ListResult, error) {
+	if err := s.ensurePeriod(ctx, sc, periodID); err != nil {
 		return nil, err
 	}
 
 	switch view {
 	case ViewContact:
-		rows, total, err := s.repo.ContactBalances(ctx, teacherID, periodID, filter, p)
+		rows, total, err := s.repo.ContactBalances(ctx, sc, periodID, filter, p)
 		if err != nil {
 			return nil, err
 		}
@@ -50,7 +51,7 @@ func (s *Service) List(ctx context.Context, teacherID, periodID uuid.UUID, view 
 		if filter.ClassID == nil {
 			return nil, apperror.Invalid("validation failed", map[string]string{"class_id": "required when view is class"})
 		}
-		rows, total, err := s.repo.ClassCollections(ctx, teacherID, periodID, filter, p)
+		rows, total, err := s.repo.ClassCollections(ctx, sc, periodID, filter, p)
 		if err != nil {
 			return nil, err
 		}
@@ -60,17 +61,17 @@ func (s *Service) List(ctx context.Context, teacherID, periodID uuid.UUID, view 
 	}
 }
 
-// Summary validates periodID belongs to teacherID, then returns the whole
+// Summary validates periodID belongs to sc's tenancy, then returns the whole
 // period's aggregate.
-func (s *Service) Summary(ctx context.Context, teacherID, periodID uuid.UUID) (*SummaryResponse, error) {
-	if err := s.ensurePeriod(ctx, teacherID, periodID); err != nil {
+func (s *Service) Summary(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*SummaryResponse, error) {
+	if err := s.ensurePeriod(ctx, sc, periodID); err != nil {
 		return nil, err
 	}
-	return s.repo.PeriodSummary(ctx, teacherID, periodID)
+	return s.repo.PeriodSummary(ctx, sc, periodID)
 }
 
-func (s *Service) ensurePeriod(ctx context.Context, teacherID, periodID uuid.UUID) error {
-	exists, err := s.repo.PeriodExists(ctx, teacherID, periodID)
+func (s *Service) ensurePeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) error {
+	exists, err := s.repo.PeriodExists(ctx, sc, periodID)
 	if err != nil {
 		return err
 	}

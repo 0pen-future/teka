@@ -22,6 +22,16 @@ function renderLogin(route = "/login") {
 }
 
 describe("LoginPage", () => {
+  it("links to forgot-password, not register", () => {
+    renderLogin();
+
+    expect(screen.getByRole("link", { name: "Quên mật khẩu?" })).toHaveAttribute(
+      "href",
+      "/forgot-password",
+    );
+    expect(screen.queryByRole("link", { name: "Đăng ký" })).not.toBeInTheDocument();
+  });
+
   it("shows required-field errors when submitted empty", async () => {
     const user = userEvent.setup();
     renderLogin();

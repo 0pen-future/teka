@@ -63,23 +63,39 @@ transaction. Services own transaction boundaries.
 
 ## Tenancy
 
-Every domain table carries a `teacher_id`; the composite foreign keys in the
-schema stop cross-teacher **writes**, but nothing except a `WHERE` clause stops
-cross-teacher **reads**. Two rules, applied without exception:
+The tenant is the **center** (migration 000007). Every domain table carries a
+`center_id`; `teacher_id` remains as attribution within the center. Composite
+foreign keys `(id, center_id)` stop cross-center **writes**, but nothing except
+a `WHERE` clause stops cross-center **reads** — and teacher-vs-teacher
+isolation inside one center exists *only* at the query layer. Rules, applied
+without exception:
 
-- Handlers learn the tenant only from `authctx.TeacherID(c)` — never from a
-  request body, query string, or path segment. A client-supplied `teacher_id`
-  is an authorization bypass, and it looks completely ordinary in a diff.
-- Every repository over a `teacher_id` table funnels reads through a `scoped`
-  helper (reference implementation:
-  `apps/api/internal/features/teachers/repository.go`):
+- Handlers learn the tenant only from `authctx.ScopeFrom(c)` — never from a
+  request body, query string, or path segment. A client-supplied `center_id`
+  or `teacher_id` is an authorization bypass, and it looks completely ordinary
+  in a diff.
+- `Scope{TeacherID, CenterID, IsOwner}` is resolved fresh from the database on
+  every request by `middleware.ResolveScope` and never cached in the JWT, so a
+  membership change (kick, leave, join) takes effect on the very next request.
+- Every repository over a tenant table funnels reads through a `scoped`
+  helper: always filter by center; non-owners additionally filter by their own
+  `teacher_id` (reference implementation:
+  `apps/api/internal/features/students/repository.go`):
 
 ```go
-// Every read is scoped to one teacher and skips soft-deleted rows.
-func (r *gormRepository) scoped(ctx context.Context, teacherID uuid.UUID) *gorm.DB {
-    return database.FromContext(ctx, r.db).Where("teacher_id = ?", teacherID)
+// scoped returns a query bound to one center. An owner sees every student in
+// their center; a member sees only the rows they created themselves.
+func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+    q := database.FromContext(ctx, r.db).Where("students.center_id = ?", sc.CenterID)
+    if !sc.IsOwner {
+        q = q.Where("students.teacher_id = ?", sc.TeacherID)
+    }
+    return q
 }
 ```
+
+- Writes keep the invariant `teacher_id = $self` for the teacher role; owners
+  may write on behalf of any teacher in their center.
 
 `deleted_at IS NULL` comes free from `gorm.DeletedAt` on model-based queries;
 raw SQL and `Table()` queries must add it by hand. Postgres row-level security
@@ -148,9 +164,22 @@ per-field messages, anything else (malformed JSON) becomes a 400.
   immediately. Introduce a token denylist only if the product ever needs
   instant revocation.
 
-**Extension points (deliberately out of scope):** password reset, phone (OTP)
-verification, and parent/student portal auth are not implemented. They slot in
-as new endpoints on the `auth` feature without changing the token model;
+**Invitation and reset-token discipline**: teacher onboarding
+(`POST /centers/me/invitations`) and self-service password reset
+(`POST /auth/forgot-password`) both mint an opaque 256-bit token
+(`internal/shared/token`) — plaintext handed to the client once, only its
+sha256 digest stored at rest. Invitations stay acceptable for `API_INVITE_TTL`
+(default 72h); reset links expire after `API_RESET_TTL` (default 48h) and are
+rate-limited by `API_RESET_COOLDOWN` (default 15m, one live token per
+account). Both tokens are single-use and travel in the request body, never a
+path segment, so they never land in an access log. Owners are excluded from
+`forgot-password` by design — their phone gets the same generic response as
+any other request, no token minted, no DM sent; their only recovery path is
+the operator CLI's `reset-password`.
+
+**Extension points (deliberately out of scope):** phone (OTP) verification and
+parent/student portal auth are not implemented. They slot in as new endpoints
+on the `auth` feature without changing the token model;
 `user_accounts.password_hash` is already nullable for future OTP-only
 accounts.
 
@@ -158,8 +187,13 @@ accounts.
 
 `api seed` inserts the development dataset idempotently (keyed by phone,
 existing rows never modified) and refuses `API_ENV=production` without
-`--force`. There is no separate admin bootstrap — every account is a teacher
-created via `/auth/register` or the seeder.
+`--force`. There is no public self-registration: teacher accounts come to
+exist only via invitation accept (`POST /invitations/accept`), and the first
+center/owner pair on a fresh database is bootstrapped by the operator CLI
+(`api create-center`, atomic — center + owner land together or neither does).
+`api reset-password` rewrites any account's password (including an owner's)
+and revokes its refresh tokens; both are Cobra subcommands on the `cmd/api`
+binary (`internal/cli`), alongside `serve`/`migrate`/`seed`.
 
 ## Testing
 

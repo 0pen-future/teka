@@ -69,27 +69,24 @@ func (h *Handler) updateMe(c *gin.Context) {
 	response.OK(c, http.StatusOK, FromModel(&updated.Account, &updated.Teacher))
 }
 
-// currentProfile resolves the authenticated teacher and enforces that the
-// account is still live: an access token issued before a soft-delete or
-// disable is cryptographically valid but must stop working here.
+// currentProfile loads the authenticated teacher's profile. Account liveness
+// is already enforced by the scope-resolution middleware (dead accounts,
+// teachers, and centers all fail to resolve a scope), so a missing profile
+// here is the same 401, not a 404.
 func (h *Handler) currentProfile(c *gin.Context) (*Profile, bool) {
 	unauthorized := apperror.Unauthorized("authentication required")
-	teacherID, ok := authctx.TeacherID(c)
+	scope, ok := authctx.ScopeFrom(c)
 	if !ok {
 		response.Err(c, unauthorized)
 		return nil, false
 	}
-	p, err := h.svc.GetByID(c.Request.Context(), teacherID)
+	p, err := h.svc.GetByID(c.Request.Context(), scope.TeacherID)
 	if err != nil {
 		if apperror.From(err).Code == apperror.CodeNotFound {
 			response.Err(c, unauthorized)
 		} else {
 			response.Err(c, err)
 		}
-		return nil, false
-	}
-	if p.Account.Status != StatusActive {
-		response.Err(c, unauthorized)
 		return nil, false
 	}
 	return p, true

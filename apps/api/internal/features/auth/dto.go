@@ -4,15 +4,6 @@ import (
 	"teka/apps/api/internal/features/teachers"
 )
 
-// RegisterRequest is the payload for POST /auth/register. Phone accepts
-// local (0xxxxxxxxx) or E.164 (+84xxxxxxxxx) form; it is normalized to E.164
-// before storage.
-type RegisterRequest struct {
-	Phone    string `json:"phone" binding:"required,vnphone"`
-	Password string `json:"password" binding:"required,min=8,max=72"`
-	FullName string `json:"full_name" binding:"required,min=1,max=100"`
-}
-
 // LoginRequest is the payload for POST /auth/login.
 type LoginRequest struct {
 	Phone    string `json:"phone" binding:"required,vnphone"`
@@ -36,4 +27,30 @@ func NewTokenResponse(sess *Session, accessTTLSeconds int64) TokenResponse {
 		ExpiresIn:   accessTTLSeconds,
 		Teacher:     teachers.FromModel(&sess.Teacher.Account, &sess.Teacher.Teacher),
 	}
+}
+
+// ForgotPasswordRequest is the payload for POST /auth/forgot-password.
+type ForgotPasswordRequest struct {
+	Phone string `json:"phone" binding:"required,vnphone"`
+}
+
+// ForgotPasswordResponse is the byte-identical generic body every call
+// returns, regardless of whether the phone matched an eligible account — the
+// caller must never be able to distinguish "member, reset sent" from
+// "unknown phone" or "owner" by diffing responses.
+type ForgotPasswordResponse struct {
+	Message string `json:"message"`
+}
+
+// forgotPasswordResponse is the single package-level value the handler
+// always returns, so its identity (not just its contents) is stable across
+// every call — tests assert on it with require.Same.
+var forgotPasswordResponse = ForgotPasswordResponse{
+	Message: "if this phone is registered, a reset link has been sent",
+}
+
+// ResetPasswordRequest is the payload for POST /auth/reset-password.
+type ResetPasswordRequest struct {
+	Token    string `json:"token" binding:"required"`
+	Password string `json:"password" binding:"required,min=8,max=72"`
 }

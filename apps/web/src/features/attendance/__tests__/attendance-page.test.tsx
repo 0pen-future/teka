@@ -90,6 +90,53 @@ describe("AttendancePage", () => {
     expect(previouslyPresentRow).toHaveAttribute("aria-pressed", "false");
   });
 
+  it("shows the confirmed state on the button and only saves again after an edit", async () => {
+    const user = userEvent.setup();
+    renderAttendancePage(sessionConfirmed.id);
+
+    const attendanceWrites = () =>
+      capturedRequests.filter(
+        (r) => r.method === "POST" && /\/sessions\/.+\/attendance$/.test(r.url),
+      );
+
+    // No local edits yet — the button reports state; a tap only explains
+    // itself in a toast, it writes nothing.
+    const stateButton = await screen.findByRole("button", { name: /ĐÃ XÁC NHẬN/ });
+    await user.click(stateButton);
+    expect(await screen.findByText("Buổi này đã xác nhận rồi")).toBeInTheDocument();
+    expect(attendanceWrites()).toHaveLength(0);
+
+    // Toggling any row reopens the save action with the live absent count.
+    const editedRow = await screen.findByRole("button", { name: /Học sinh 3$/ });
+    await user.click(editedRow);
+    const saveButton = screen.getByRole("button", { name: /XÁC NHẬN BUỔI HỌC/ });
+    // Two pre-existing absentees plus the fresh toggle.
+    expect(saveButton).toHaveTextContent("3 vắng");
+    await user.click(saveButton);
+    await waitFor(() => {
+      expect(attendanceWrites()).toHaveLength(1);
+    });
+  });
+
+  it("still saves an unconfirmed session with zero absentees (no edits needed)", async () => {
+    const user = userEvent.setup();
+    renderAttendancePage(sessionUnconfirmedPast.id);
+
+    const attendanceWrites = () =>
+      capturedRequests.filter(
+        (r) => r.method === "POST" && /\/sessions\/.+\/attendance$/.test(r.url),
+      );
+
+    // The main flow: everyone present, nothing toggled — the untouched
+    // (non-dirty) state must not be mistaken for an already-settled session.
+    const confirmButton = await screen.findByRole("button", { name: /XÁC NHẬN BUỔI HỌC/ });
+    expect(confirmButton).toHaveTextContent("0 vắng");
+    await user.click(confirmButton);
+    await waitFor(() => {
+      expect(attendanceWrites()).toHaveLength(1);
+    });
+  });
+
   it("shows the closed-period warning and the adjustment button copy", async () => {
     renderAttendancePage(sessionInClosedPeriod.id);
 

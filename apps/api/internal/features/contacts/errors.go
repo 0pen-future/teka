@@ -9,6 +9,9 @@ var (
 	// ErrDuplicatePhone surfaces the uq_contacts_phone partial unique index:
 	// one phone per teacher among non-deleted contacts.
 	ErrDuplicatePhone = errors.New("phone already used by another contact")
+	// ErrDuplicateZaloMapping surfaces the uq_contacts_zalo_user partial
+	// unique index: one Zalo friend per teacher among non-deleted contacts.
+	ErrDuplicateZaloMapping = errors.New("zalo friend already mapped to another contact")
 	// ErrHasStudents blocks soft-deleting a contact that still has live
 	// students referencing it.
 	ErrHasStudents = errors.New("contact still has students")

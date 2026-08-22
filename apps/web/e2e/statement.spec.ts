@@ -17,7 +17,7 @@ async function login(page: Page) {
   await page.getByLabel("Số điện thoại").fill(TEACHER_PHONE);
   await page.getByLabel("Mật khẩu").fill(TEACHER_PASSWORD);
   await page.getByRole("button", { name: "Đăng nhập" }).click();
-  await expect(page.getByText(/Chào Cô Lan/)).toBeVisible();
+  await expect(page.getByText(/Chào buổi (sáng|trưa|chiều|tối), Cô Lan!/)).toBeVisible();
 }
 
 /**
@@ -85,7 +85,12 @@ test("a valid token renders the family total, and an invalid token renders the n
 
   await parentPage.goto("/s/not-a-real-token");
   await expect(parentPage.getByText("Không mở được liên kết này.")).toBeVisible();
-  await expect(parentPage.getByText(/[0-9]{3}/)).toHaveCount(0);
+  // The neutral error must not leak statement data (amounts, counts, HTTP
+  // statuses). The digit sweep excludes the public footer, whose support
+  // hotline and copyright year are static chrome, not statement data.
+  await expect(
+    parentPage.locator("#main-content > *:not(footer)").getByText(/[0-9]{3}/),
+  ).toHaveCount(0);
 
   await parentPage.close();
 });

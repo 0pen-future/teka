@@ -1,5 +1,7 @@
 import { Outlet } from "react-router";
 
+import { AppFooter } from "@/components/shared/app-footer";
+
 /**
  * Shell for the public, unauthenticated parent-statement route (`/s/:token`).
  * A centered column with no header, nav, or theme toggle — a parent lands
@@ -12,8 +14,9 @@ import { Outlet } from "react-router";
  */
 export function PublicLayout() {
   return (
-    <div id="main-content" className="mx-auto min-h-svh max-w-md px-4 py-6">
+    <div id="main-content" className="mx-auto flex min-h-svh max-w-md flex-col px-4 py-6">
       <Outlet />
+      <AppFooter />
     </div>
   );
 }

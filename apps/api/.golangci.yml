@@ -26,6 +26,18 @@ linters:
       - path: internal/config/
         linters:
           - forbidigo
+      # The Zalo protocol package is a port of a reverse-engineered wire format.
+      # md5 there is dictated by Zalo (IMEI, request signing, key derivation), so
+      # it cannot be substituted, and the wire structs stay comment-free so that
+      # re-porting upstream changes remains a diff rather than a rewrite.
+      - path: internal/features/zalo/protocol/
+        linters:
+          - gosec
+        text: "(G401|G501)"
+      - path: internal/features/zalo/protocol/
+        linters:
+          - revive
+        text: "exported:"
 
 formatters:
   enable:

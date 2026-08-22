@@ -9,28 +9,35 @@ export interface ReviewTableProps {
   onAdjust: (row: ReviewRow) => void;
 }
 
+/**
+ * Prototype header band: cream-200, sticky against the card's own scroll
+ * container so it stays pinned while rows scroll beneath it. The band's
+ * background stands in for the border a `border-collapse` table would lose
+ * under `position: sticky`.
+ */
 const headerClassName =
-  "px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-ink-400";
+  "sticky top-0 z-10 bg-cream-200 px-3 py-2 text-left text-[11.5px] font-extrabold uppercase tracking-[0.4px] text-ink-500";
 const cellClassName = "px-3 py-3 text-[15px] text-ink-700";
 const numericCellClassName = `${cellClassName} text-right font-display font-bold`;
 
 /**
- * `sm+` review table: sticky first column, horizontal scroll confined to the
- * wrapper (`overflow-x-auto`), never the page. R1 AC 2 requires one row per
- * student even when they attend two classes — implemented as one `<tr>` per
- * class line with `rowSpan` on the student-level columns (name, nợ cũ,
- * điều chỉnh, tổng, action), so the invoice stays visually and semantically
- * one row while each class line is still legible on its own line. The
- * class-name cell keeps the `--mint-50` tint the Design Spec's group-header
- * rows call for.
+ * `sm+` review table: both scroll axes confined to the wrapper (capped at
+ * 64vh), never the page — the document scroll stays free for the rest of
+ * the screen. First column sticks left, header row sticks top. R1 AC 2
+ * requires one row per student even when they attend two classes —
+ * implemented as one `<tr>` per class line with `rowSpan` on the
+ * student-level columns (name, nợ cũ, điều chỉnh, tổng, action), so the
+ * invoice stays visually and semantically one row while each class line is
+ * still legible on its own line. The class-name cell keeps the `--mint-50`
+ * tint the Design Spec's group-header rows call for.
  */
 export function ReviewTable({ rows, closed, onAdjust }: ReviewTableProps) {
   return (
-    <HvCard variant="flat" padding="sm" className="overflow-x-auto p-0">
+    <HvCard variant="flat" padding="sm" className="max-h-[64vh] overflow-auto p-0">
       <table className="w-full min-w-[720px] border-collapse">
         <thead>
-          <tr className="border-b border-line-100">
-            <th className={`${headerClassName} sticky left-0 bg-white`}>Học sinh</th>
+          <tr>
+            <th className={`${headerClassName} left-0 z-20`}>Học sinh</th>
             <th className={headerClassName}>Lớp &amp; số buổi</th>
             <th className={headerClassName}>Vắng</th>
             <th className={headerClassName}>Đơn giá</th>
