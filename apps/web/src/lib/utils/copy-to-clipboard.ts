@@ -28,13 +28,11 @@ export async function copyToClipboard(text: string): Promise<boolean> {
   textarea.select();
   textarea.setSelectionRange(0, textarea.value.length);
 
-  let succeeded = false;
   try {
-    succeeded = document.execCommand("copy");
+    return document.execCommand("copy");
   } catch {
-    succeeded = false;
+    return false;
   } finally {
     document.body.removeChild(textarea);
   }
-  return succeeded;
 }
