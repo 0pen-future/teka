@@ -114,6 +114,7 @@ export function makeClass(overrides: Record<string, unknown> = {}) {
   return {
     id,
     name: `Toán 9A${classCounter}`,
+    teacher_id: `22000000-0000-4000-8000-${String(classCounter).padStart(12, "0")}`,
     start_date: "2026-08-01",
     end_date: null,
     default_unit_price: 60000,
