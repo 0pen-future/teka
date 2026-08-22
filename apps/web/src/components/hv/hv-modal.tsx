@@ -71,7 +71,7 @@ function HvModalContent({
             )}
           >
             <X className="h-5 w-5" strokeWidth={2} />
-            <span className="sr-only">Đóng</span>
+            <span className="sr-only">Đóng hộp thoại</span>
           </DialogPrimitive.Close>
         ) : null}
       </DialogPrimitive.Content>
