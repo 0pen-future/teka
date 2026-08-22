@@ -51,6 +51,16 @@ type Repository interface {
 	// student count comes from one grouped join over enrollments, never a
 	// per-row lookup — see pending.go.
 	ListPending(ctx context.Context, sc authctx.Scope, before time.Time, from, to *time.Time, limit int) ([]PendingRow, int64, error)
+	// ReassignPlanned moves this class's future planned sessions to newTeacherID
+	// on the context's transaction and returns how many moved. Only
+	// status='planned' rows dated on or after notBefore move; held and cancelled
+	// sessions and past planned sessions keep the old teacher, so attendance and
+	// billing history never change. notBefore is "today" already resolved in the
+	// teacher's timezone by the caller (see Service.ReassignPlanned) — the query
+	// must not derive today from the DB clock, whose zone differs from the
+	// teacher's. class_sessions is owned by sessions, so the class-handoff
+	// feature moves them only through here.
+	ReassignPlanned(ctx context.Context, sc authctx.Scope, classID, newTeacherID uuid.UUID, notBefore time.Time) (int64, error)
 }
 
 type gormRepository struct {
@@ -156,6 +166,29 @@ func (r *gormRepository) SoftDelete(ctx context.Context, sc authctx.Scope, id uu
 		return ErrNotFound
 	}
 	return nil
+}
+
+// ReassignPlanned moves the class's future planned sessions to newTeacherID and
+// returns the count moved. The date predicate is inclusive of today
+// (session_date >= notBefore): a late-day handoff carries today's still-planned
+// session; the owner records attendance first if it already ran, and a held
+// session never matches this filter. notBefore is today resolved in the
+// teacher's timezone by the caller — never CURRENT_DATE, whose DB-session zone
+// (UTC in deployment) would count a session dated yesterday-VN as "today" in the
+// early-morning window and wrongly sweep a past planned session. Past planned,
+// held, and cancelled sessions are left untouched so history and closed books
+// stay with the old teacher. Runs on the context's transaction for atomicity
+// with the class move.
+func (r *gormRepository) ReassignPlanned(ctx context.Context, sc authctx.Scope, classID, newTeacherID uuid.UUID, notBefore time.Time) (int64, error) {
+	res := r.scoped(ctx, sc).
+		Model(&Session{}).
+		Where("class_sessions.class_id = ? AND class_sessions.status = ?", classID, StatusPlanned).
+		Where("class_sessions.session_date >= ?", notBefore).
+		Update("teacher_id", newTeacherID)
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	return res.RowsAffected, nil
 }
 
 func (r *gormRepository) MarkHeldAndConfirmed(ctx context.Context, sc authctx.Scope, id uuid.UUID, at time.Time) error {

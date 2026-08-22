@@ -167,7 +167,9 @@ export function ClassbookPage() {
           row.lessonIndex === null
             ? ""
             : `Bài ${row.lessonIndex + 1}${
-                curriculum?.lessons[row.lessonIndex] ? ` - ${curriculum.lessons[row.lessonIndex]}` : ""
+                curriculum?.lessons[row.lessonIndex]
+                  ? ` - ${curriculum.lessons[row.lessonIndex]}`
+                  : ""
               }`;
         return [
           formatSessionDate(session.session_date),
@@ -193,12 +195,10 @@ export function ClassbookPage() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-start gap-3">
         <div className="min-w-[260px] flex-1">
-          <h1 className="font-display text-[26px] font-extrabold text-ink-900">
-            Quản lý lớp học
-          </h1>
+          <h1 className="font-display text-[26px] font-extrabold text-ink-900">Quản lý lớp học</h1>
           <p className="mt-1 text-[14px] text-ink-500">
-            Sĩ số, điểm trung bình, doanh thu và giáo án từng buổi — số liệu cho họp tuần nằm hết
-            ở đây.
+            Sĩ số, điểm trung bình, doanh thu và giáo án từng buổi — số liệu cho họp tuần nằm hết ở
+            đây.
           </p>
         </div>
         <button
@@ -238,7 +238,11 @@ export function ClassbookPage() {
 
       <ClassStatCards stats={stats} />
 
-      <div className="flex gap-[22px] border-b-[1.5px] border-line-200" role="tablist" aria-label="Chế độ xem">
+      <div
+        className="flex gap-[22px] border-b-[1.5px] border-line-200"
+        role="tablist"
+        aria-label="Chế độ xem"
+      >
         {viewTabs.map((tab) => (
           <button
             key={tab.id}
@@ -248,9 +252,7 @@ export function ClassbookPage() {
             onClick={() => setView(tab.id)}
             className={cn(
               "border-b-[3px] px-0.5 py-2.5 text-[14.5px] font-extrabold focus-visible:ring-4 focus-visible:outline-none",
-              view === tab.id
-                ? "border-mint-400 text-ink-900"
-                : "border-transparent text-ink-400",
+              view === tab.id ? "border-mint-400 text-ink-900" : "border-transparent text-ink-400",
             )}
           >
             {tab.label}

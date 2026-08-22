@@ -245,15 +245,7 @@ func (s *Service) ReviewQueue(ctx context.Context, sc authctx.Scope) ([]QueueIte
 	}
 	out := make([]QueueItemResponse, len(rows))
 	for i, row := range rows {
-		out[i] = QueueItemResponse{
-			PlanID:      row.PlanID,
-			ClassID:     row.ClassID,
-			ClassName:   row.ClassName,
-			LessonIndex: row.LessonIndex,
-			LessonTitle: row.LessonTitle,
-			TeacherName: row.TeacherName,
-			SubmittedAt: row.SubmittedAt,
-		}
+		out[i] = QueueItemResponse(row)
 	}
 	return out, nil
 }

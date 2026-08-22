@@ -54,7 +54,13 @@ export function getTeachingApiStore(): Store {
 }
 
 export function resetTeachingApiStore(): void {
-  store = { curricula: new Map(), plans: new Map(), notes: new Map(), marks: new Map(), sessions: new Map() };
+  store = {
+    curricula: new Map(),
+    plans: new Map(),
+    notes: new Map(),
+    marks: new Map(),
+    sessions: new Map(),
+  };
 }
 
 // --- Seed helpers ---
@@ -156,10 +162,9 @@ export const teachingHandlers = [
     const current = store.plans.get(key);
     const next = transitionLessonPlanStatus(current?.status ?? "none", "save");
     if (next === null) {
-      return HttpResponse.json(
-        fail("CONFLICT", "plan status does not allow saving"),
-        { status: 409 },
-      );
+      return HttpResponse.json(fail("CONFLICT", "plan status does not allow saving"), {
+        status: 409,
+      });
     }
     const input = (await request.json()) as SavePlanInput;
     const plan: PlanResponse = {
@@ -189,10 +194,9 @@ export const teachingHandlers = [
     const current = store.plans.get(key);
     const next = transitionLessonPlanStatus(current?.status ?? "none", action);
     if (!current || next === null) {
-      return HttpResponse.json(
-        fail("CONFLICT", "plan status does not allow this action"),
-        { status: 409 },
-      );
+      return HttpResponse.json(fail("CONFLICT", "plan status does not allow this action"), {
+        status: 409,
+      });
     }
     const body = (await request.json().catch(() => ({}))) as { comment?: string };
     const comment = (body.comment ?? "").trim();
@@ -261,8 +265,7 @@ export const teachingHandlers = [
         class_id: plan.class_id,
         class_name: "",
         lesson_index: plan.lesson_index,
-        lesson_title:
-          store.curricula.get(plan.class_id)?.lessons[plan.lesson_index] ?? null,
+        lesson_title: store.curricula.get(plan.class_id)?.lessons[plan.lesson_index] ?? null,
         teacher_name: plan.submitted_by_name,
         submitted_at: plan.submitted_at,
       }));

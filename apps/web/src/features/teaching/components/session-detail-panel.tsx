@@ -293,7 +293,7 @@ export function SessionDetailPanel({
                           max={10}
                           step={0.5}
                           aria-label={`Điểm ${row.student_name}`}
-                          value={scoreDraft[row.student_id] ?? (stored?.toString() ?? "")}
+                          value={scoreDraft[row.student_id] ?? stored?.toString() ?? ""}
                           onChange={(event) =>
                             setScoreDraft((draft) => ({
                               ...draft,

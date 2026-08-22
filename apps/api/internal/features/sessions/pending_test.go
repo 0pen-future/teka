@@ -57,6 +57,9 @@ func (f *fakePendingRepo) UpdateStatus(context.Context, authctx.Scope, uuid.UUID
 	return nil
 }
 func (f *fakePendingRepo) SoftDelete(context.Context, authctx.Scope, uuid.UUID) error { return nil }
+func (f *fakePendingRepo) ReassignPlanned(context.Context, authctx.Scope, uuid.UUID, uuid.UUID, time.Time) (int64, error) {
+	return 0, nil
+}
 func (f *fakePendingRepo) MarkHeldAndConfirmed(context.Context, authctx.Scope, uuid.UUID, time.Time) error {
 	return nil
 }

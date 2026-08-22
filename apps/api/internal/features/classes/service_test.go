@@ -157,6 +157,15 @@ func (f *fakeRepository) SoftDelete(_ context.Context, sc authctx.Scope, classID
 	return nil
 }
 
+func (f *fakeRepository) ReassignTeacher(_ context.Context, sc authctx.Scope, classID, newTeacherID uuid.UUID) error {
+	c, ok := f.classes[classID]
+	if !ok || !visibleClass(c, sc) {
+		return ErrNotFound
+	}
+	c.TeacherID = newTeacherID
+	return nil
+}
+
 func (f *fakeRepository) CountOpenEnrollments(_ context.Context, _ authctx.Scope, classID uuid.UUID) (int64, error) {
 	return f.openEnrollments[classID], nil
 }

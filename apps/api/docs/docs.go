@@ -4933,6 +4933,136 @@ const docTemplate = `{
                 }
             }
         },
+        "/classes/{id}/teacher": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Chuyển lớp, lịch học và các buổi đã lên lịch từ hôm nay trở đi sang giáo viên mới. Buổi đã dạy, buổi đã huỷ, điểm danh và học phí giữ nguyên. Chỉ chủ trung tâm được gọi; giáo viên nhận phải thuộc trung tâm.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "classes"
+                ],
+                "summary": "Bàn giao lớp cho giáo viên khác",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "class id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "giáo viên nhận lớp",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handoff.ReassignRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/handoff.ReassignResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "chỉ chủ trung tâm",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "giáo viên không thuộc trung tâm",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/contacts": {
             "get": {
                 "security": [
@@ -10670,6 +10800,9 @@ const docTemplate = `{
                 },
                 "status": {
                     "type": "string"
+                },
+                "teacher_id": {
+                    "type": "string"
                 }
             }
         },
@@ -11084,6 +11217,31 @@ const docTemplate = `{
                 },
                 "unit_price": {
                     "type": "integer"
+                }
+            }
+        },
+        "handoff.ReassignRequest": {
+            "type": "object",
+            "required": [
+                "teacher_id"
+            ],
+            "properties": {
+                "teacher_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handoff.ReassignResponse": {
+            "type": "object",
+            "properties": {
+                "class_id": {
+                    "type": "string"
+                },
+                "moved_planned_sessions": {
+                    "type": "integer"
+                },
+                "teacher_id": {
+                    "type": "string"
                 }
             }
         },

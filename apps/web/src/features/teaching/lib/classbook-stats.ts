@@ -208,8 +208,7 @@ export function retentionStat(
   return {
     previous: previousStudents.size,
     continuing,
-    pct:
-      previousStudents.size === 0 ? 100 : Math.round((continuing / previousStudents.size) * 100),
+    pct: previousStudents.size === 0 ? 100 : Math.round((continuing / previousStudents.size) * 100),
   };
 }
 

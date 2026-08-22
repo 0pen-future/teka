@@ -27,6 +27,7 @@ export const fixturePeriod: Period = {
 export const classMath: Class = {
   id: "c1000000-0000-4000-8000-000000000001",
   name: "Toán 6A",
+  teacher_id: "c2000000-0000-4000-8000-000000000001",
   start_date: "2026-01-05",
   end_date: null,
   default_unit_price: 150000,
@@ -38,6 +39,7 @@ export const classMath: Class = {
 export const classEnglish: Class = {
   id: "c1000000-0000-4000-8000-000000000002",
   name: "Anh Văn 7B",
+  teacher_id: "c2000000-0000-4000-8000-000000000002",
   start_date: "2026-01-05",
   end_date: null,
   default_unit_price: 150000,
@@ -50,6 +52,7 @@ export const classEnglish: Class = {
 export const classEmpty: Class = {
   id: "c1000000-0000-4000-8000-000000000003",
   name: "Vẽ 5A",
+  teacher_id: "c2000000-0000-4000-8000-000000000003",
   start_date: "2026-01-05",
   end_date: null,
   default_unit_price: 150000,

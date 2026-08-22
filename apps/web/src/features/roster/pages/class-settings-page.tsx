@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { Link, useNavigate, useParams } from "react-router";
 
@@ -7,6 +7,8 @@ import { HvButton, HvCard, hvToast } from "@/components/hv";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useSessionsList } from "@/features/attendance";
+import { useCenter, type CenterMember } from "@/features/center";
+import { ApiError } from "@/lib/api/errors";
 import { formatMoney } from "@/lib/utils";
 import { useApiFormErrors } from "@/lib/forms/use-api-form-errors";
 
@@ -16,6 +18,7 @@ import {
   useAddSchedule,
   useClass,
   useDeleteSchedule,
+  useReassignTeacher,
   useUpdateClass,
   useUpdateSchedule,
 } from "../hooks/use-classes";
@@ -58,6 +61,7 @@ export function ClassSettingsPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data: klass, isPending } = useClass(id);
+  const { data: center } = useCenter();
   const { data: enrollmentsPage } = useEnrollmentsList({ class_id: id, per_page: 100 });
   const month = currentMonth();
   const { data: sessions } = useSessionsList(id, { from: month.from, to: month.to });
@@ -252,6 +256,128 @@ export function ClassSettingsPage() {
           </div>
         </form>
       </HvCard>
+
+      {/* Owner-only: `GET /centers/me` carries `members` only in the owner body,
+          so the narrowing doubles as the role gate. The API's own owner check
+          is the real authorization. */}
+      {center && "members" in center ? (
+        <TeacherHandoffCard klass={klass} members={center.members} />
+      ) : null}
     </div>
+  );
+}
+
+/**
+ * "Giáo viên phụ trách" — hands the class to another center member via
+ * `PUT /classes/:id/teacher`. Handing a class to the owner themselves is legal,
+ * so the target list excludes only the class's current teacher, never the
+ * owner. The confirm is a two-click reveal (no `window.confirm`, matching the
+ * rest of the app): the primary button arms, a second explicit button commits.
+ */
+function TeacherHandoffCard({ klass, members }: { klass: Class; members: CenterMember[] }) {
+  const [targetId, setTargetId] = useState("");
+  const [arming, setArming] = useState(false);
+  const reassign = useReassignTeacher(klass.id);
+
+  const currentTeacher = members.find((member) => member.id === klass.teacher_id);
+  const targets = members.filter((member) => member.id !== klass.teacher_id);
+  const errorMessage =
+    reassign.error instanceof ApiError
+      ? reassign.error.message
+      : reassign.error
+        ? "Không bàn giao được lớp. Thử lại sau."
+        : null;
+
+  function confirm() {
+    if (!targetId) {
+      return;
+    }
+    reassign.mutate(targetId, {
+      onSuccess: (result) => {
+        const name = members.find((member) => member.id === result.teacher_id)?.full_name;
+        hvToast(name ? `Đã bàn giao lớp cho ${name}` : "Đã bàn giao lớp");
+        setArming(false);
+        setTargetId("");
+      },
+    });
+  }
+
+  return (
+    <HvCard className="max-w-[640px]">
+      <p className="font-display text-[16px] font-bold text-ink-900">Giáo viên phụ trách</p>
+      <p className="mt-0.5 text-[13px] text-ink-400">
+        Giáo viên hiện tại:{" "}
+        <span className="font-bold text-ink-700">
+          {currentTeacher ? currentTeacher.full_name : "Không rõ"}
+        </span>
+        . Bàn giao sẽ chuyển lớp, lịch học và các buổi <em>đã lên lịch</em> từ hôm nay trở đi sang
+        giáo viên mới. Buổi đã dạy, đã hủy và học phí đã chốt vẫn giữ nguyên.
+      </p>
+
+      {targets.length === 0 ? (
+        <p className="mt-3 text-[13px] text-ink-400">
+          Chưa có giáo viên khác trong trung tâm để bàn giao.
+        </p>
+      ) : (
+        <div className="mt-3 flex flex-col gap-3">
+          <Field className="max-w-[320px]">
+            <FieldLabel htmlFor="handoff-teacher">Bàn giao cho</FieldLabel>
+            <select
+              id="handoff-teacher"
+              value={targetId}
+              onChange={(event) => {
+                setTargetId(event.target.value);
+                // Changing the target un-arms so a confirm always reflects the
+                // teacher currently shown in the select.
+                setArming(false);
+              }}
+              disabled={reassign.isPending}
+              className="min-h-11 rounded-[var(--radius-md)] border border-line-200 bg-white px-3 text-[14px] text-ink-900"
+            >
+              <option value="">— Chọn giáo viên —</option>
+              {targets.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.full_name}
+                  {member.is_owner ? " (chủ trung tâm)" : ""}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          {errorMessage ? <p className="text-[13px] text-coral-600">{errorMessage}</p> : null}
+
+          {arming ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[13px] font-bold text-ink-700">
+                Bàn giao lớp cho{" "}
+                {targets.find((member) => member.id === targetId)?.full_name ?? "giáo viên này"}?
+              </span>
+              <HvButton size="sm" onClick={confirm} disabled={reassign.isPending}>
+                {reassign.isPending ? "Đang bàn giao…" : "Xác nhận bàn giao"}
+              </HvButton>
+              <HvButton
+                size="sm"
+                variant="ghost"
+                onClick={() => setArming(false)}
+                disabled={reassign.isPending}
+              >
+                Hủy
+              </HvButton>
+            </div>
+          ) : (
+            <div>
+              <HvButton
+                variant="secondary"
+                size="sm"
+                onClick={() => setArming(true)}
+                disabled={!targetId || reassign.isPending}
+              >
+                Bàn giao lớp
+              </HvButton>
+            </div>
+          )}
+        </div>
+      )}
+    </HvCard>
   );
 }

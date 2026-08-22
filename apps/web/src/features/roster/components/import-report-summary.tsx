@@ -26,12 +26,32 @@ function EntityRow({ label, entity }: { label: string; entity: ImportReportEntit
 }
 
 /**
+ * A report touches nothing when every entity is neither created nor reused —
+ * the "successfully imported nothing" shape of an empty workbook. The server
+ * now rejects that with a 422 before it ever becomes a report, so this can
+ * only reach the UI from an old client or API drift; the check keeps the
+ * success header from ever vouching for an empty file.
+ */
+function isEmptyReport(report: ImportReport): boolean {
+  return ENTITY_LABELS.every(({ key }) => report[key].created === 0 && report[key].reused === 0);
+}
+
+/**
  * The created/reused split for one run. A re-import of an unchanged file
  * reports every entity as "đã có sẵn" with nothing created — that is the
  * operator's only evidence the second upload was a no-op rather than a
  * silent duplication, so the split is always shown, even when zero.
  */
 export function ImportReportSummary({ report }: { report: ImportReport }) {
+  if (isEmptyReport(report)) {
+    return (
+      <HvCard variant="flat" className="text-[13.5px] text-coral-600">
+        File không có dòng dữ liệu nào — nhập từ dòng 3 trở đi (dòng 2 là dòng ví dụ, hệ thống bỏ
+        qua).
+      </HvCard>
+    );
+  }
+
   return (
     <HvCard>
       <p className="font-display text-[16px] font-bold text-ink-900">
