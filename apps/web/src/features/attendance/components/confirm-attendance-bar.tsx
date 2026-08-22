@@ -5,6 +5,12 @@ export interface ConfirmAttendanceBarProps {
   pending: boolean;
   /** The session's billing period is already closed — the save becomes an adjustment. */
   closedPeriod: boolean;
+  /**
+   * Confirmed server-side with no local edits — the button reports state
+   * instead of offering a save. Derived once in `AttendancePage` so the label
+   * and the confirm handler can never disagree.
+   */
+  settled: boolean;
   onConfirm: () => void;
 }
 
@@ -19,20 +25,23 @@ export function ConfirmAttendanceBar({
   absentCount,
   pending,
   closedPeriod,
+  settled,
   onConfirm,
 }: ConfirmAttendanceBarProps) {
-  const label = closedPeriod ? "LƯU VÀ TẠO ĐIỀU CHỈNH" : "XÁC NHẬN BUỔI HỌC";
+  const label = settled
+    ? "ĐÃ XÁC NHẬN ✓"
+    : `${closedPeriod ? "LƯU VÀ TẠO ĐIỀU CHỈNH" : "XÁC NHẬN BUỔI HỌC"} · ${absentCount} vắng`;
   return (
-    <div className="sticky bottom-14 z-10 border-t border-line-200 bg-white p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:bottom-0">
+    <div className="sticky bottom-14 z-10 rounded-b-[28px] border-t border-line-100 bg-white px-4 py-[14px] pb-[max(14px,env(safe-area-inset-bottom))] md:bottom-0">
       <HvButton
         type="button"
-        variant={closedPeriod ? "reward" : "primary"}
+        variant={closedPeriod && !settled ? "reward" : "primary"}
         size="lg"
         block
         disabled={pending}
         onClick={onConfirm}
       >
-        {pending ? "Đang lưu…" : `${label} · ${absentCount} vắng`}
+        {pending ? "Đang lưu…" : label}
       </HvButton>
     </div>
   );

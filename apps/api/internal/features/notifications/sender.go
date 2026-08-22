@@ -44,14 +44,27 @@ func (znsSender) Channel() string { return ChannelZaloZNS }
 
 func (znsSender) Send(_ context.Context, _ *Notification) error { return ErrNotConfigured }
 
+// zaloPersonalSender backs ChannelZaloPersonal in the registry, but only as
+// channel validation: Sender.Send runs inside BulkSend's transaction, and an
+// actual Zalo send must never hold a transaction open (nor roll back rows a
+// half-sent run already delivered). The real delivery is orchestrated by
+// Service.BulkSend's personal branch and RunManager, entirely after commit —
+// so Send here is a no-op, exactly like the manual channel it falls back to.
+type zaloPersonalSender struct{}
+
+func (zaloPersonalSender) Channel() string { return ChannelZaloPersonal }
+
+func (zaloPersonalSender) Send(_ context.Context, _ *Notification) error { return nil }
+
 // senderRegistry resolves a channel string to its Sender. sms appears in the
 // schema's CHECK constraint (docs/schema_design.sql:438-439) with no
 // implementation — it is deliberately absent from this map, so resolving it
 // falls through to the "unknown channel" branch below.
 func senderRegistry() map[string]Sender {
 	return map[string]Sender{
-		ChannelZaloManual: manualSender{},
-		ChannelZaloZNS:    znsSender{},
+		ChannelZaloManual:   manualSender{},
+		ChannelZaloZNS:      znsSender{},
+		ChannelZaloPersonal: zaloPersonalSender{},
 	}
 }
 

@@ -101,12 +101,7 @@ export function StudentDetailPage() {
         student={student}
         onSuccess={() => void navigate("/students", { replace: true })}
       />
-      <EnrollStudentDialog
-        open={enrollOpen}
-        onOpenChange={setEnrollOpen}
-        mode="student"
-        studentId={student.id}
-      />
+      <EnrollStudentDialog open={enrollOpen} onOpenChange={setEnrollOpen} studentId={student.id} />
       {ending ? (
         <EndEnrollmentDialog
           open={Boolean(ending)}

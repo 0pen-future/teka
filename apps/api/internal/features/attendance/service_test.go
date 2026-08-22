@@ -11,6 +11,7 @@ import (
 	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/features/sessions"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 )
 
@@ -34,7 +35,7 @@ func (f *fakeRosterSource) addEnrollment(classID, studentID uuid.UUID) enrollmen
 	return e
 }
 
-func (f *fakeRosterSource) ActiveOn(_ context.Context, _, classID uuid.UUID, _ time.Time) ([]enrollments.Enrollment, error) {
+func (f *fakeRosterSource) ActiveOn(_ context.Context, _ authctx.Scope, classID uuid.UUID, _ time.Time) ([]enrollments.Enrollment, error) {
 	return f.rosters[classID], nil
 }
 
@@ -52,26 +53,40 @@ func newFakeSessionStore() *fakeSessionStore {
 	return &fakeSessionStore{rows: map[uuid.UUID]*fakeSession{}}
 }
 
+// addSession stamps CenterID the same as teacherID: these unit tests exercise
+// a single teacher acting as the sole owner of their own center, so the two
+// ids coincide by construction (see the sc := authctx.Scope{...} literals
+// below). Multi-tenant center semantics are covered by the real-DB tests in
+// integration_test.go.
 func (f *fakeSessionStore) addSession(teacherID, classID uuid.UUID, on time.Time, status string) uuid.UUID {
 	sessionID := id.New()
 	f.rows[sessionID] = &fakeSession{Session: sessions.Session{
-		ID: sessionID, TeacherID: teacherID, ClassID: classID, SessionDate: on, Status: status,
+		ID: sessionID, TeacherID: teacherID, CenterID: teacherID, ClassID: classID, SessionDate: on, Status: status,
 	}}
 	return sessionID
 }
 
-func (f *fakeSessionStore) GetByID(_ context.Context, teacherID, sessionID uuid.UUID) (*sessions.Session, error) {
+// visibleSession mirrors gormRepository.scoped: an owner sees every row in
+// their center, a member sees only the ones they teach themselves.
+func visibleSession(sc authctx.Scope, r *fakeSession) bool {
+	if r.CenterID != sc.CenterID {
+		return false
+	}
+	return sc.IsOwner || r.TeacherID == sc.TeacherID
+}
+
+func (f *fakeSessionStore) GetByID(_ context.Context, sc authctx.Scope, sessionID uuid.UUID) (*sessions.Session, error) {
 	r, ok := f.rows[sessionID]
-	if !ok || r.TeacherID != teacherID {
+	if !ok || !visibleSession(sc, r) {
 		return nil, sessions.ErrNotFound
 	}
 	cp := r.Session
 	return &cp, nil
 }
 
-func (f *fakeSessionStore) MarkHeldAndConfirmed(_ context.Context, teacherID, sessionID uuid.UUID, at time.Time) error {
+func (f *fakeSessionStore) MarkHeldAndConfirmed(_ context.Context, sc authctx.Scope, sessionID uuid.UUID, at time.Time) error {
 	r, ok := f.rows[sessionID]
-	if !ok || r.TeacherID != teacherID {
+	if !ok || !visibleSession(sc, r) {
 		return sessions.ErrNotFound
 	}
 	r.Status = sessions.StatusHeld
@@ -118,10 +133,19 @@ func (f *fakeRepository) UpsertMany(_ context.Context, records []Record) error {
 	return nil
 }
 
-func (f *fakeRepository) ListBySession(_ context.Context, teacherID, sessionID uuid.UUID) ([]Record, error) {
+// visibleRecord mirrors gormRepository.scoped: an owner sees every row in
+// their center, a member sees only the ones they teach themselves.
+func visibleRecord(sc authctx.Scope, r *fakeRecordRow) bool {
+	if r.CenterID != sc.CenterID {
+		return false
+	}
+	return sc.IsOwner || r.TeacherID == sc.TeacherID
+}
+
+func (f *fakeRepository) ListBySession(_ context.Context, sc authctx.Scope, sessionID uuid.UUID) ([]Record, error) {
 	var out []Record
 	for _, r := range f.rows {
-		if r.deleted || r.TeacherID != teacherID || r.SessionID != sessionID {
+		if r.deleted || !visibleRecord(sc, r) || r.SessionID != sessionID {
 			continue
 		}
 		out = append(out, r.Record)
@@ -129,13 +153,13 @@ func (f *fakeRepository) ListBySession(_ context.Context, teacherID, sessionID u
 	return out, nil
 }
 
-func (f *fakeRepository) SoftDeleteMissing(_ context.Context, teacherID, sessionID uuid.UUID, keepStudentIDs []uuid.UUID) error {
+func (f *fakeRepository) SoftDeleteMissing(_ context.Context, sc authctx.Scope, sessionID uuid.UUID, keepStudentIDs []uuid.UUID) error {
 	keep := make(map[uuid.UUID]bool, len(keepStudentIDs))
 	for _, sid := range keepStudentIDs {
 		keep[sid] = true
 	}
 	for _, r := range f.rows {
-		if r.deleted || r.TeacherID != teacherID || r.SessionID != sessionID {
+		if r.deleted || !visibleRecord(sc, r) || r.SessionID != sessionID {
 			continue
 		}
 		if !keep[r.StudentID] {
@@ -145,7 +169,7 @@ func (f *fakeRepository) SoftDeleteMissing(_ context.Context, teacherID, session
 	return nil
 }
 
-func (f *fakeRepository) StudentNames(_ context.Context, _ uuid.UUID, studentIDs []uuid.UUID) (map[uuid.UUID]StudentName, error) {
+func (f *fakeRepository) StudentNames(_ context.Context, _ authctx.Scope, studentIDs []uuid.UUID) (map[uuid.UUID]StudentName, error) {
 	out := make(map[uuid.UUID]StudentName, len(studentIDs))
 	for _, sid := range studentIDs {
 		out[sid] = f.names[sid]
@@ -153,10 +177,10 @@ func (f *fakeRepository) StudentNames(_ context.Context, _ uuid.UUID, studentIDs
 	return out, nil
 }
 
-func (f *fakeRepository) TallyByEnrollment(_ context.Context, teacherID uuid.UUID, _, _ time.Time) ([]EnrollmentTally, error) {
+func (f *fakeRepository) TallyByEnrollment(_ context.Context, sc authctx.Scope, _, _ time.Time) ([]EnrollmentTally, error) {
 	byEnrollment := map[uuid.UUID]*EnrollmentTally{}
 	for _, r := range f.rows {
-		if r.deleted || r.TeacherID != teacherID {
+		if r.deleted || !visibleRecord(sc, r) {
 			continue
 		}
 		t, ok := byEnrollment[r.EnrollmentID]
@@ -206,11 +230,12 @@ func TestConfirmEmptyAbsentListMarksEveryonePresent(t *testing.T) {
 	svc, deps := newTestService()
 	ctx := context.Background()
 	teacherID, classID := id.New(), id.New()
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}
 	a := deps.roster.addEnrollment(classID, id.New())
 	b := deps.roster.addEnrollment(classID, id.New())
 	sessionID := deps.sessions.addSession(teacherID, classID, time.Now(), sessions.StatusPlanned)
 
-	out, err := svc.Confirm(ctx, teacherID, sessionID, ConfirmRequest{})
+	out, err := svc.Confirm(ctx, sc, sessionID, ConfirmRequest{})
 	if err != nil {
 		t.Fatalf("confirm: %v", err)
 	}
@@ -230,11 +255,12 @@ func TestConfirmDedupsAbsentIDs(t *testing.T) {
 	svc, deps := newTestService()
 	ctx := context.Background()
 	teacherID, classID := id.New(), id.New()
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}
 	studentID := id.New()
 	deps.roster.addEnrollment(classID, studentID)
 	sessionID := deps.sessions.addSession(teacherID, classID, time.Now(), sessions.StatusPlanned)
 
-	out, err := svc.Confirm(ctx, teacherID, sessionID,
+	out, err := svc.Confirm(ctx, sc, sessionID,
 		ConfirmRequest{AbsentStudentIDs: []uuid.UUID{studentID, studentID}})
 	if err != nil {
 		t.Fatalf("confirm: %v", err)
@@ -251,11 +277,12 @@ func TestConfirmRejectsAbsentIDOutsideRoster(t *testing.T) {
 	svc, deps := newTestService()
 	ctx := context.Background()
 	teacherID, classID := id.New(), id.New()
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}
 	deps.roster.addEnrollment(classID, id.New())
 	sessionID := deps.sessions.addSession(teacherID, classID, time.Now(), sessions.StatusPlanned)
 
 	stranger := id.New()
-	_, err := svc.Confirm(ctx, teacherID, sessionID, ConfirmRequest{AbsentStudentIDs: []uuid.UUID{stranger}})
+	_, err := svc.Confirm(ctx, sc, sessionID, ConfirmRequest{AbsentStudentIDs: []uuid.UUID{stranger}})
 	var appErr *apperror.AppError
 	if !errors.As(err, &appErr) || appErr.Code != apperror.CodeValidation {
 		t.Fatalf("absent id outside roster must be 422, got %v", err)
@@ -272,10 +299,11 @@ func TestConfirmCancelledSessionIs409(t *testing.T) {
 	svc, deps := newTestService()
 	ctx := context.Background()
 	teacherID, classID := id.New(), id.New()
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}
 	deps.roster.addEnrollment(classID, id.New())
 	sessionID := deps.sessions.addSession(teacherID, classID, time.Now(), sessions.StatusCancelled)
 
-	_, err := svc.Confirm(ctx, teacherID, sessionID, ConfirmRequest{})
+	_, err := svc.Confirm(ctx, sc, sessionID, ConfirmRequest{})
 	var appErr *apperror.AppError
 	if !errors.As(err, &appErr) || appErr.Code != apperror.CodeConflict {
 		t.Fatalf("confirming a cancelled session must be 409, got %v", err)
@@ -289,9 +317,10 @@ func TestConfirmMissingSessionIs404(t *testing.T) {
 	svc, deps := newTestService()
 	ctx := context.Background()
 	teacherID := id.New()
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}
 	_ = deps
 
-	_, err := svc.Confirm(ctx, teacherID, id.New(), ConfirmRequest{})
+	_, err := svc.Confirm(ctx, sc, id.New(), ConfirmRequest{})
 	if apperror.From(err).Code != apperror.CodeNotFound {
 		t.Fatalf("missing session must be 404, got %v", err)
 	}
@@ -301,10 +330,11 @@ func TestConfirmTransitionsSessionToHeld(t *testing.T) {
 	svc, deps := newTestService()
 	ctx := context.Background()
 	teacherID, classID := id.New(), id.New()
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}
 	deps.roster.addEnrollment(classID, id.New())
 	sessionID := deps.sessions.addSession(teacherID, classID, time.Now(), sessions.StatusPlanned)
 
-	out, err := svc.Confirm(ctx, teacherID, sessionID, ConfirmRequest{})
+	out, err := svc.Confirm(ctx, sc, sessionID, ConfirmRequest{})
 	if err != nil {
 		t.Fatalf("confirm: %v", err)
 	}
@@ -320,10 +350,11 @@ func TestGetReturnsNullStatusBeforeFirstConfirm(t *testing.T) {
 	svc, deps := newTestService()
 	ctx := context.Background()
 	teacherID, classID := id.New(), id.New()
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}
 	deps.roster.addEnrollment(classID, id.New())
 	sessionID := deps.sessions.addSession(teacherID, classID, time.Now(), sessions.StatusPlanned)
 
-	out, err := svc.Get(ctx, teacherID, sessionID)
+	out, err := svc.Get(ctx, sc, sessionID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -336,13 +367,14 @@ func TestConfirmCrossTenantIs404(t *testing.T) {
 	svc, deps := newTestService()
 	ctx := context.Background()
 	owner, stranger, classID := id.New(), id.New(), id.New()
+	strangerScope := authctx.Scope{TeacherID: stranger, CenterID: stranger, IsOwner: true}
 	deps.roster.addEnrollment(classID, id.New())
 	sessionID := deps.sessions.addSession(owner, classID, time.Now(), sessions.StatusPlanned)
 
-	if _, err := svc.Get(ctx, stranger, sessionID); apperror.From(err).Code != apperror.CodeNotFound {
+	if _, err := svc.Get(ctx, strangerScope, sessionID); apperror.From(err).Code != apperror.CodeNotFound {
 		t.Fatalf("cross-tenant get must be 404, got %v", err)
 	}
-	if _, err := svc.Confirm(ctx, stranger, sessionID, ConfirmRequest{}); apperror.From(err).Code != apperror.CodeNotFound {
+	if _, err := svc.Confirm(ctx, strangerScope, sessionID, ConfirmRequest{}); apperror.From(err).Code != apperror.CodeNotFound {
 		t.Fatalf("cross-tenant confirm must be 404, got %v", err)
 	}
 }

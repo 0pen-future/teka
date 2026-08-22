@@ -71,6 +71,7 @@ type ScheduleResponse struct {
 type ClassResponse struct {
 	ID               uuid.UUID          `json:"id"`
 	Name             string             `json:"name"`
+	TeacherID        uuid.UUID          `json:"teacher_id"`
 	StartDate        string             `json:"start_date"`
 	EndDate          *string            `json:"end_date"`
 	DefaultUnitPrice int64              `json:"default_unit_price"`
@@ -101,6 +102,7 @@ func FromModel(class *Class) ClassResponse {
 	return ClassResponse{
 		ID:               class.ID,
 		Name:             class.Name,
+		TeacherID:        class.TeacherID,
 		StartDate:        class.StartDate.Format(dateLayout),
 		EndDate:          formatDatePtr(class.EndDate),
 		DefaultUnitPrice: class.DefaultUnitPrice,

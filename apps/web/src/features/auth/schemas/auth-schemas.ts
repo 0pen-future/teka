@@ -25,12 +25,45 @@ export const loginSchema = z.object({
   password: z.string().min(1, "Vui lòng nhập mật khẩu"),
 });
 
-/** Mirrors the API's RegisterRequest binding rules. */
-export const registerSchema = z.object({
-  full_name: z.string().min(1, "Vui lòng nhập họ tên").max(100, "Họ tên tối đa 100 ký tự"),
+/** `auth.ForgotPasswordRequest` — the phone to send a reset link for. */
+export const forgotPasswordInputSchema = z.object({
   phone: phoneSchema,
-  password: z.string().min(8, "Mật khẩu tối thiểu 8 ký tự").max(72, "Mật khẩu tối đa 72 ký tự"),
 });
+
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordInputSchema>;
+
+/**
+ * `auth.ForgotPasswordResponse` — a byte-identical generic body regardless of
+ * whether the phone matched an eligible account (anti-enumeration); the
+ * message text itself is never shown verbatim, only its success is used to
+ * drive the always-generic confirmation screen.
+ */
+export const forgotPasswordResponseSchema = z.object({
+  message: z.string(),
+});
+
+/**
+ * Client-only form shape for the reset page: `confirm_password` never
+ * leaves the browser. `password` mirrors the API's `ResetPasswordRequest`
+ * bound exactly so a client-side rejection never differs from the server's.
+ */
+export const resetPasswordFormSchema = z
+  .object({
+    password: z.string().min(8, "Mật khẩu tối thiểu 8 ký tự").max(72, "Mật khẩu tối đa 72 ký tự"),
+    confirm_password: z.string(),
+  })
+  .refine((values) => values.password === values.confirm_password, {
+    message: "Mật khẩu xác nhận không khớp",
+    path: ["confirm_password"],
+  });
+
+export type ResetPasswordFormInput = z.infer<typeof resetPasswordFormSchema>;
+
+/** `auth.ResetPasswordRequest` — the wire shape sent to the API. */
+export interface ResetPasswordInput {
+  token: string;
+  password: string;
+}
 
 /** `teachers.TeacherResponse` — the authenticated teacher's profile. */
 export const teacherSchema = z.object({
@@ -56,6 +89,5 @@ export const sessionSchema = z.object({
 });
 
 export type LoginInput = z.infer<typeof loginSchema>;
-export type RegisterInput = z.infer<typeof registerSchema>;
 export type Teacher = z.infer<typeof teacherSchema>;
 export type Session = z.infer<typeof sessionSchema>;

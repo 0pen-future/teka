@@ -41,11 +41,14 @@ type Account struct {
 func (Account) TableName() string { return "user_accounts" }
 
 // Teacher mirrors the teachers business profile; Teacher.ID references
-// user_accounts(id) and carries the same value.
+// user_accounts(id) and carries the same value. CenterID is the teacher's
+// current (live) membership — always exactly one, backed by the deferrable
+// fk_teachers_membership into center_members.
 type Teacher struct {
 	ID        uuid.UUID `gorm:"type:uuid;primaryKey"`
 	FullName  string
 	Timezone  string
+	CenterID  uuid.UUID `gorm:"type:uuid"`
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	DeletedAt gorm.DeletedAt

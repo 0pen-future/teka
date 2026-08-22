@@ -1,10 +1,6 @@
 package auth
 
 import (
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -13,6 +9,7 @@ import (
 
 	"teka/apps/api/internal/config"
 	"teka/apps/api/internal/shared/authctx"
+	"teka/apps/api/internal/shared/token"
 )
 
 // TokenIssuer mints access JWTs and opaque refresh tokens.
@@ -55,16 +52,10 @@ func (i *TokenIssuer) RefreshTTL() time.Duration { return i.cfg.RefreshTTL }
 // NewRefreshToken mints a 256-bit opaque token, returning the plaintext
 // (sent to the client once) and its sha256 hex hash (stored at rest).
 func (i *TokenIssuer) NewRefreshToken() (plaintext, hash string, err error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return "", "", fmt.Errorf("generate refresh token: %w", err)
-	}
-	plaintext = base64.RawURLEncoding.EncodeToString(buf)
-	return plaintext, HashToken(plaintext), nil
+	return token.New()
 }
 
 // HashToken returns the sha256 hex digest used to look up stored tokens.
 func HashToken(plaintext string) string {
-	sum := sha256.Sum256([]byte(plaintext))
-	return hex.EncodeToString(sum[:])
+	return token.Hash(plaintext)
 }

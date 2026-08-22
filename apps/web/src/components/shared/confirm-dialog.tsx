@@ -28,7 +28,7 @@ export function ConfirmDialog({
   onOpenChange,
   title,
   description,
-  confirmLabel = "Confirm",
+  confirmLabel = "Xác nhận",
   destructive = false,
   pending = false,
   onConfirm,
@@ -43,7 +43,7 @@ export function ConfirmDialog({
         <DialogFooter>
           <DialogClose asChild>
             <Button variant="outline" disabled={pending}>
-              Cancel
+              Huỷ
             </Button>
           </DialogClose>
           <Button
@@ -51,7 +51,7 @@ export function ConfirmDialog({
             disabled={pending}
             onClick={onConfirm}
           >
-            {pending ? "Working…" : confirmLabel}
+            {pending ? "Đang xử lý…" : confirmLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

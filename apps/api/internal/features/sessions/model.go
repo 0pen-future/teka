@@ -25,8 +25,11 @@ const (
 // schedules or added ad-hoc. StartTime reuses classes.TimeOfDay rather than a
 // parallel "HH:MM" type since both wrap the same Postgres TIME column shape.
 type Session struct {
-	ID                    uuid.UUID `gorm:"primaryKey"`
-	TeacherID             uuid.UUID
+	ID        uuid.UUID `gorm:"primaryKey"`
+	TeacherID uuid.UUID
+	// CenterID anchors the row in the center it was created in; it never
+	// changes, even when the creating teacher later moves centers.
+	CenterID              uuid.UUID
 	ClassID               uuid.UUID
 	SessionDate           time.Time
 	StartTime             *classes.TimeOfDay

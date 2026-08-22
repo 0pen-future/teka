@@ -9,7 +9,6 @@ import {
   type AttendanceResponse,
   type CancelSessionInput,
   type ConfirmAttendanceInput,
-  type CreateSessionInput,
   type Session,
 } from "../schemas/attendance-schemas";
 
@@ -63,25 +62,6 @@ export async function cancelSession(
   input: CancelSessionInput,
 ): Promise<Session> {
   const res = await apiClient.post<unknown>(`/sessions/${sessionId}/cancel`, input);
-  return parseData(sessionSchema, res.data);
-}
-
-/**
- * `POST /classes/:id/sessions` (`sessions.createAdHoc`) — a make-up session
- * outside any schedule. `start_time` binds `omitempty`; an empty string must
- * not be sent as the field, so it is dropped rather than forwarded blank.
- */
-export async function createAdHocSession(
-  classId: string,
-  input: CreateSessionInput,
-): Promise<Session> {
-  const body: { session_date: string; start_time?: string } = {
-    session_date: input.session_date,
-  };
-  if (input.start_time) {
-    body.start_time = input.start_time;
-  }
-  const res = await apiClient.post<unknown>(`/classes/${classId}/sessions`, body);
   return parseData(sessionSchema, res.data);
 }
 
