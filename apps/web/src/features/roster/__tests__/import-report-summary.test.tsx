@@ -20,7 +20,11 @@ function report(overrides: Partial<ImportReport> = {}): ImportReport {
 
 describe("ImportReportSummary", () => {
   it("shows the success header once a commit created rows", () => {
-    render(<ImportReportSummary report={report({ committed: true, classes: { created: 2, reused: 0 } })} />);
+    render(
+      <ImportReportSummary
+        report={report({ committed: true, classes: { created: 2, reused: 0 } })}
+      />,
+    );
     expect(screen.getByText("Đã nhập xong")).toBeInTheDocument();
   });
 

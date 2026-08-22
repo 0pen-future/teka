@@ -111,12 +111,8 @@ describe("StudentsPage v2 layout", () => {
     const addStudent = screen.getByRole("button", { name: "+ Thêm học sinh" });
     // All three sit in the same header row, in prototype order — settings
     // before create, create before add.
-    expect(settings.compareDocumentPosition(createClass)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-    expect(createClass.compareDocumentPosition(addStudent)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
+    expect(settings.compareDocumentPosition(createClass)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(createClass.compareDocumentPosition(addStudent)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it("shows enrollment start and this month's non-cancelled session count", async () => {

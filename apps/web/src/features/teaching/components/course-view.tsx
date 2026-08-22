@@ -113,10 +113,7 @@ export function CourseView({
     }
     // Clamp so removing lessons can never leave the pointer past the end;
     // the server clamps identically.
-    const currentIndex = Math.max(
-      0,
-      Math.min(curriculum?.currentIndex ?? 0, lessons.length - 1),
-    );
+    const currentIndex = Math.max(0, Math.min(curriculum?.currentIndex ?? 0, lessons.length - 1));
     saveCurriculumMutation.mutate({ lessons, current_index: currentIndex });
     setOpenModal(null);
     hvToast(`Đã lưu chương trình ${classTitle} — khóa ${lessons.length} buổi`);

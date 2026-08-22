@@ -147,9 +147,9 @@ function ImportFlow() {
         <p className="font-display text-[16px] font-bold text-ink-900">1. Tải file mẫu</p>
         <p className="mt-0.5 mb-3 text-[13px] text-ink-400">
           File mẫu có 2 sheet: <strong>Lop</strong> và <strong>HocSinh</strong>, kèm dòng ví dụ. Giữ
-          nguyên tên sheet và dòng tiêu đề. Dòng 2 là dòng ví dụ — hệ thống bỏ qua; nhập dữ liệu thật
-          từ <strong>dòng 3</strong> trở đi. Cột <strong>SĐT giáo viên</strong> có thể để trống, khi
-          đó lớp thuộc về chủ trung tâm.
+          nguyên tên sheet và dòng tiêu đề. Dòng 2 là dòng ví dụ — hệ thống bỏ qua; nhập dữ liệu
+          thật từ <strong>dòng 3</strong> trở đi. Cột <strong>SĐT giáo viên</strong> có thể để
+          trống, khi đó lớp thuộc về chủ trung tâm.
         </p>
         <HvButton
           variant="secondary"

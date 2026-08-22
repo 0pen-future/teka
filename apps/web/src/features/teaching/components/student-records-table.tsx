@@ -56,7 +56,10 @@ export function StudentRecordsTable({ rows, onOpen }: StudentRecordsTableProps) 
         {rows.map((row) => (
           <div
             key={row.studentId}
-            className={cn(gridClassName, "border-b border-line-100 px-5 py-[9px] hover:bg-cream-100")}
+            className={cn(
+              gridClassName,
+              "border-b border-line-100 px-5 py-[9px] hover:bg-cream-100",
+            )}
           >
             <div className="text-[14px] font-extrabold text-ink-900">{row.name}</div>
             <div className="text-[13px] text-ink-500">—</div>

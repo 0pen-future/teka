@@ -33,9 +33,7 @@ function EntityRow({ label, entity }: { label: string; entity: ImportReportEntit
  * success header from ever vouching for an empty file.
  */
 function isEmptyReport(report: ImportReport): boolean {
-  return ENTITY_LABELS.every(
-    ({ key }) => report[key].created === 0 && report[key].reused === 0,
-  );
+  return ENTITY_LABELS.every(({ key }) => report[key].created === 0 && report[key].reused === 0);
 }
 
 /**

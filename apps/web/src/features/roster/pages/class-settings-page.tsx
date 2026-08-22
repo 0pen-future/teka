@@ -344,9 +344,7 @@ function TeacherHandoffCard({ klass, members }: { klass: Class; members: CenterM
             </select>
           </Field>
 
-          {errorMessage ? (
-            <p className="text-[13px] text-coral-600">{errorMessage}</p>
-          ) : null}
+          {errorMessage ? <p className="text-[13px] text-coral-600">{errorMessage}</p> : null}
 
           {arming ? (
             <div className="flex flex-wrap items-center gap-2">

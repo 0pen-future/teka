@@ -24,7 +24,11 @@ const TARGET_TEACHER = "73000000-0000-4000-8000-000000000002";
 const ownerCenterHandler = http.get(`${API_URL}/centers/me`, () =>
   HttpResponse.json(
     ok({
-      center: { id: "30000000-0000-4000-8000-000000000001", name: "Trung Tâm Bình Minh", is_owner: true },
+      center: {
+        id: "30000000-0000-4000-8000-000000000001",
+        name: "Trung Tâm Bình Minh",
+        is_owner: true,
+      },
       members: [
         { id: CURRENT_TEACHER, full_name: "Cô Lan", phone: "+84901000001", is_owner: true },
         { id: TARGET_TEACHER, full_name: "Thầy Nam", phone: "+84901000002", is_owner: false },

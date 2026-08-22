@@ -111,9 +111,7 @@ describe("RecordsPage", () => {
     expect(text).toContain('"Nguyễn Văn An";"—";"Toán 6A";"2026-01-05";"8.8"');
 
     await user.click(screen.getByRole("button", { name: "Xem hồ sơ" }));
-    expect(
-      await screen.findByRole("heading", { name: "Nguyễn Văn An" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Nguyễn Văn An" })).toBeInTheDocument();
     expect(screen.getByText("← Hồ sơ học sinh")).toBeInTheDocument();
   });
 });
