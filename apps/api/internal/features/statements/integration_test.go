@@ -114,10 +114,10 @@ func TestGenerateOpenPeriodFailsWithoutWritingAnything(t *testing.T) {
 	contact := testutil.Contact(t, db, teacher.ID)
 	seedChild(t, db, teacher.ID, contact.ID, "Open", date("2026-02-01"), 1)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 2)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 2)
 	require.NoError(t, err)
 
-	_, err = statementsSvc.Generate(ctx, teacher.ID, period.ID)
+	_, err = statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
 
@@ -140,12 +140,12 @@ func TestGenerateClosedPeriodWritesOneRowPerContactWithDistinctTokens(t *testing
 	contactB := testutil.Contact(t, db, teacher.ID, testutil.WithContactFullName("Contact B"))
 	seedChild(t, db, teacher.ID, contactB.ID, "B1", date("2026-03-01"), 1)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 3)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 3)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
-	result, err := statementsSvc.Generate(ctx, teacher.ID, period.ID)
+	result, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 	require.Equal(t, 2, result.Created)
 	require.Zero(t, result.Refreshed)
@@ -179,9 +179,9 @@ func TestGenerateSkipsContactWithOnlyAVoidedInvoice(t *testing.T) {
 	contact := testutil.Contact(t, db, teacher.ID)
 	seedChild(t, db, teacher.ID, contact.ID, "Voided", date("2026-04-01"), 1)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 4)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 4)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
 	require.NoError(t, db.Table("invoices").
@@ -190,7 +190,7 @@ func TestGenerateSkipsContactWithOnlyAVoidedInvoice(t *testing.T) {
 			"status": billing.InvoiceVoid, "void_reason": "test fixture void", "voided_at": time.Now(),
 		}).Error)
 
-	result, err := statementsSvc.Generate(ctx, teacher.ID, period.ID)
+	result, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 	require.Zero(t, result.Created)
 	require.Empty(t, result.Statements)
@@ -212,12 +212,12 @@ func TestGenerateSumsTwoChildrenUnderOneStatement(t *testing.T) {
 	seedChild(t, db, teacher.ID, contact.ID, "Child1", date("2026-05-01"), 1)
 	seedChild(t, db, teacher.ID, contact.ID, "Child2", date("2026-05-02"), 2)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 5)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 5)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
-	result, err := statementsSvc.Generate(ctx, teacher.ID, period.ID)
+	result, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 	require.Equal(t, 1, result.Created)
 	require.Len(t, result.Statements, 1)
@@ -240,12 +240,12 @@ func TestGenerateTwiceKeepsSameIDAndTokenRefreshesTotalDue(t *testing.T) {
 	contact := testutil.Contact(t, db, teacher.ID)
 	seedChild(t, db, teacher.ID, contact.ID, "Refresh", date("2026-06-01"), 1)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 6)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 6)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
-	first, err := statementsSvc.Generate(ctx, teacher.ID, period.ID)
+	first, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 	require.Len(t, first.Statements, 1)
 
@@ -263,7 +263,7 @@ func TestGenerateTwiceKeepsSameIDAndTokenRefreshesTotalDue(t *testing.T) {
 		invoiceRow.ID,
 	).Error)
 
-	second, err := statementsSvc.Generate(ctx, teacher.ID, period.ID)
+	second, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 	require.Zero(t, second.Created)
 	require.Equal(t, 1, second.Refreshed)
@@ -288,18 +288,18 @@ func TestRevokeThenGenerateLeavesTheStatementRevoked(t *testing.T) {
 	contact := testutil.Contact(t, db, teacher.ID)
 	seedChild(t, db, teacher.ID, contact.ID, "Revoke", date("2026-07-01"), 1)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 7)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 7)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
-	first, err := statementsSvc.Generate(ctx, teacher.ID, period.ID)
+	first, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 	statementID := first.Statements[0].ID
 
-	require.NoError(t, statementsSvc.Revoke(ctx, teacher.ID, statementID))
+	require.NoError(t, statementsSvc.Revoke(ctx, testutil.ScopeFor(t, db, teacher.ID), statementID))
 
-	second, err := statementsSvc.Generate(ctx, teacher.ID, period.ID)
+	second, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 	require.Zero(t, second.Created)
 	require.Zero(t, second.Refreshed)
@@ -322,18 +322,18 @@ func TestTokenHashIsGloballyUnique(t *testing.T) {
 	contact := testutil.Contact(t, db, teacher.ID)
 	seedChild(t, db, teacher.ID, contact.ID, "Unique", date("2026-08-01"), 1)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 8)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 8)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
-	_, err = statementsSvc.Generate(ctx, teacher.ID, period.ID)
+	_, err = statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 	existing := loadStatement(t, db, teacher.ID, contact.ID, period.ID)
 	require.NotEmpty(t, existing.TokenHash)
 
 	otherContact := testutil.Contact(t, db, teacher.ID)
-	otherPeriod, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 9)
+	otherPeriod, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 9)
 	require.NoError(t, err)
 
 	err = db.Exec(
@@ -358,22 +358,22 @@ func TestNoTeacherEndpointLeaksAnotherTeachersStatement(t *testing.T) {
 	contact := testutil.Contact(t, db, teacherA.ID)
 	seedChild(t, db, teacherA.ID, contact.ID, "Cross", date("2026-10-01"), 1)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacherA.ID, 2026, 10)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacherA.ID), 2026, 10)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacherA.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacherA.ID), period.ID)
 	require.NoError(t, err)
 
-	result, err := statementsSvc.Generate(ctx, teacherA.ID, period.ID)
+	result, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacherA.ID), period.ID)
 	require.NoError(t, err)
 	statementID := result.Statements[0].ID
 
-	_, err = statementsSvc.Get(ctx, teacherB.ID, statementID)
+	_, err = statementsSvc.Get(ctx, testutil.ScopeFor(t, db, teacherB.ID), statementID)
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
 
-	_, _, err = statementsSvc.List(ctx, teacherB.ID, period.ID, pagination.Params{})
+	_, _, err = statementsSvc.List(ctx, testutil.ScopeFor(t, db, teacherB.ID), period.ID, pagination.Params{})
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
 
-	require.Error(t, statementsSvc.Revoke(ctx, teacherB.ID, statementID))
+	require.Error(t, statementsSvc.Revoke(ctx, testutil.ScopeFor(t, db, teacherB.ID), statementID))
 }

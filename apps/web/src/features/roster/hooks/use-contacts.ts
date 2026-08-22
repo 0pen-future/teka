@@ -1,14 +1,16 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+  clearContactZaloMapping,
   createContact,
   deleteContact,
   getContact,
   listContacts,
+  setContactZaloMapping,
   updateContact,
   type ListContactsParams,
 } from "../api/contacts-api";
-import type { ContactInput } from "../schemas/roster-schemas";
+import type { ContactInput, ZaloMappingInput } from "../schemas/roster-schemas";
 import { contactsKeys, studentsKeys } from "./roster-keys";
 
 export { contactsKeys };
@@ -55,6 +57,28 @@ export function useUpdateContact(id: string) {
       void queryClient.invalidateQueries({ queryKey: contactsKeys.detail(id) });
       // The contact's name/phone are denormalized onto every student row.
       void queryClient.invalidateQueries({ queryKey: studentsKeys.lists() });
+    },
+  });
+}
+
+export function useSetContactZaloMapping(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ZaloMappingInput) => setContactZaloMapping(id, input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: contactsKeys.lists() });
+      void queryClient.invalidateQueries({ queryKey: contactsKeys.detail(id) });
+    },
+  });
+}
+
+export function useClearContactZaloMapping(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => clearContactZaloMapping(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: contactsKeys.lists() });
+      void queryClient.invalidateQueries({ queryKey: contactsKeys.detail(id) });
     },
   });
 }

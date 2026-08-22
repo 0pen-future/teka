@@ -28,7 +28,10 @@ type Class struct {
 	// ID is a UUIDv7 generated in Go via id.New(); the column has no default.
 	ID        uuid.UUID `gorm:"primaryKey"`
 	TeacherID uuid.UUID
-	Name      string
+	// CenterID anchors the row in the center it was created in; it never
+	// changes, even when the creating teacher later moves centers.
+	CenterID uuid.UUID
+	Name     string
 	// StartDate/EndDate are Postgres DATE columns; only the date part is
 	// meaningful.
 	StartDate        time.Time
@@ -51,7 +54,10 @@ func (Class) TableName() string { return "classes" }
 type Schedule struct {
 	ID        uuid.UUID `gorm:"primaryKey"`
 	TeacherID uuid.UUID
-	ClassID   uuid.UUID
+	// CenterID mirrors the parent class's center; schedules live and die
+	// with their class and never cross centers.
+	CenterID uuid.UUID
+	ClassID  uuid.UUID
 	// Weekday uses 0 = Chủ nhật (Sunday), deliberately matching Go's
 	// time.Weekday where int(time.Sunday) == 0 — convert with a direct cast,
 	// never an offset.

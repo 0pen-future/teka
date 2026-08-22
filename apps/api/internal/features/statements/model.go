@@ -1,8 +1,9 @@
 // Package statements generates per-contact billing statements for a closed
-// period and the tokenised links parents use to view them. Generation is
-// teacher-initiated and every read here is teacher-scoped; the public,
-// unauthenticated view a parent opens with the plaintext token is a later
-// phase.
+// period and the tokenised links parents use to view them. Generation and
+// every authenticated read here are center-scoped, with owner oversight over
+// every teacher's own statements in the center; the public, unauthenticated
+// view a parent opens with the plaintext token derives its own scope from the
+// resolved statement row instead.
 package statements
 
 import (
@@ -19,6 +20,12 @@ import (
 type Statement struct {
 	ID        uuid.UUID `gorm:"primaryKey"`
 	TeacherID uuid.UUID
+	// CenterID is inherited from the statement's billing period at creation
+	// (see Service.Generate's periodScope anchor), never the acting caller's
+	// — the public, unauthenticated view derives its own read scope straight
+	// from this row's TeacherID/CenterID, so a forged or guessed token can
+	// never reach past its own family's own tenancy.
+	CenterID  uuid.UUID
 	ContactID uuid.UUID
 	PeriodID  uuid.UUID
 	TokenHash []byte

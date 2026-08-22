@@ -9,6 +9,8 @@ interface AuthState {
   accessToken: string | null;
   user: Teacher | null;
   setSession: (user: Teacher, accessToken: string) => void;
+  /** Replaces the cached profile after PUT /me without touching the token. */
+  setUser: (user: Teacher) => void;
   setAccessToken: (accessToken: string) => void;
   clearSession: () => void;
 }
@@ -21,6 +23,7 @@ export const useAuthStore = create<AuthState>()((set) => ({
     markRefreshAlive();
     set({ user, accessToken });
   },
+  setUser: (user) => set({ user }),
   setAccessToken: (accessToken) => set({ accessToken }),
   clearSession: () => set({ user: null, accessToken: null }),
 }));

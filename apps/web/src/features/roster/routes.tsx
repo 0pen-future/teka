@@ -21,19 +21,23 @@ export const rosterRoutes: RouteObject[] = [
     lazy: async () => ({ Component: (await import("./pages/students-page")).StudentsPage }),
   },
   {
+    // Also matched by "students/:id" below; react-router ranks the static
+    // segment higher, so /students/import never resolves "import" as an id.
+    path: "students/import",
+    lazy: async () => ({
+      Component: (await import("./pages/roster-import-page")).RosterImportPage,
+    }),
+  },
+  {
     path: "students/:id",
     lazy: async () => ({
       Component: (await import("./pages/student-detail-page")).StudentDetailPage,
     }),
   },
   {
-    path: "classes",
-    lazy: async () => ({ Component: (await import("./pages/classes-page")).ClassesPage }),
-  },
-  {
-    path: "classes/:id",
+    path: "classes/:id/settings",
     lazy: async () => ({
-      Component: (await import("./pages/class-detail-page")).ClassDetailPage,
+      Component: (await import("./pages/class-settings-page")).ClassSettingsPage,
     }),
   },
 ];

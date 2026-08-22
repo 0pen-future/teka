@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 )
 
@@ -27,14 +28,18 @@ type PeriodCompute struct {
 // ComputePeriod runs the R3 formula for one billing period: attendance tally
 // + carried debt + adjustments in, one ComputedInvoice per student out. It is
 // read-only — no repository method it calls writes anything — so Preview
-// calls it directly and Draft calls it before opening its transaction.
-func ComputePeriod(ctx context.Context, repo Repository, teacherID, periodID uuid.UUID) (*PeriodCompute, error) {
-	period, err := repo.GetPeriod(ctx, teacherID, periodID)
+// calls it directly and Draft calls it before opening its transaction. sc
+// authorizes the initial GetPeriod; every subsequent repository call uses
+// the period's own derived scope, so an owner computing a member's period
+// never aggregates across the whole center.
+func ComputePeriod(ctx context.Context, repo Repository, sc authctx.Scope, periodID uuid.UUID) (*PeriodCompute, error) {
+	period, err := repo.GetPeriod(ctx, sc, periodID)
 	if err != nil {
 		return nil, err
 	}
+	periodScope := authctx.Scope{TeacherID: period.TeacherID, CenterID: period.CenterID}
 
-	tallies, err := repo.TallyAttendance(ctx, teacherID, periodID)
+	tallies, err := repo.TallyAttendance(ctx, periodScope, periodID)
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +48,7 @@ func ComputePeriod(ctx context.Context, repo Repository, teacherID, periodID uui
 		talliesByEnrollment[t.EnrollmentID] = t
 	}
 
-	prevPeriod, err := repo.PreviousClosedPeriod(ctx, teacherID, period.PeriodStart)
+	prevPeriod, err := repo.PreviousClosedPeriod(ctx, periodScope, period.PeriodStart)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +56,7 @@ func ComputePeriod(ctx context.Context, repo Repository, teacherID, periodID uui
 	var carriedDebt []CarriedDebtStudent
 	openingBalances := map[uuid.UUID]int64{}
 	if prevPeriod != nil {
-		carriedDebt, err = repo.CarriedDebtStudents(ctx, teacherID, prevPeriod.ID)
+		carriedDebt, err = repo.CarriedDebtStudents(ctx, periodScope, prevPeriod.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -72,13 +77,13 @@ func ComputePeriod(ctx context.Context, repo Repository, teacherID, periodID uui
 			studentIDs = append(studentIDs, sid)
 		}
 
-		openingBalances, err = repo.OpeningBalances(ctx, teacherID, prevPeriod.ID, studentIDs)
+		openingBalances, err = repo.OpeningBalances(ctx, periodScope, prevPeriod.ID, studentIDs)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	existingInvoices, err := repo.ListInvoices(ctx, teacherID, periodID)
+	existingInvoices, err := repo.ListInvoices(ctx, periodScope, periodID)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +98,7 @@ func ComputePeriod(ctx context.Context, repo Repository, teacherID, periodID uui
 	// data is keyed by invoice_id. Remap through this period's own invoices
 	// (empty on a first-ever preview/draft, so adjustmentsByStudent is empty
 	// too — adjustment_total stays 0 until phase 4 attaches one).
-	adjustmentsByInvoice, err := repo.AdjustmentTotals(ctx, teacherID, periodID)
+	adjustmentsByInvoice, err := repo.AdjustmentTotals(ctx, periodScope, periodID)
 	if err != nil {
 		return nil, err
 	}
@@ -177,8 +182,13 @@ func ComputePeriod(ctx context.Context, repo Repository, teacherID, periodID uui
 // ErrInvoiceNotDraft (unwrapped by the caller into a 409) the moment any
 // targeted invoice turns out not to be a draft — nothing after that point
 // has been written, and the transaction rolls back everything before it too.
-func DraftPeriod(ctx context.Context, repo Repository, teacherID, periodID uuid.UUID, compute *PeriodCompute) (map[uuid.UUID]uuid.UUID, error) {
-	existingInvoices, err := repo.ListInvoices(ctx, teacherID, periodID)
+//
+// periodScope must already be the period's own derived owner scope (never
+// the acting caller's) — every invoice and invoice_line this writes inherits
+// it, so an owner drafting a member's period writes rows owned by the
+// member, not by the owner.
+func DraftPeriod(ctx context.Context, repo Repository, periodScope authctx.Scope, periodID uuid.UUID, compute *PeriodCompute) (map[uuid.UUID]uuid.UUID, error) {
+	existingInvoices, err := repo.ListInvoices(ctx, periodScope, periodID)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +203,7 @@ func DraftPeriod(ctx context.Context, repo Repository, teacherID, periodID uuid.
 		}
 	}
 
-	adjustmentsByInvoice, err := repo.AdjustmentTotals(ctx, teacherID, periodID)
+	adjustmentsByInvoice, err := repo.AdjustmentTotals(ctx, periodScope, periodID)
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +221,8 @@ func DraftPeriod(ctx context.Context, repo Repository, teacherID, periodID uuid.
 
 		inv := &Invoice{
 			ID:              invoiceID,
-			TeacherID:       teacherID,
+			TeacherID:       periodScope.TeacherID,
+			CenterID:        periodScope.CenterID,
 			PeriodID:        periodID,
 			StudentID:       ci.StudentID,
 			ContactID:       ci.ContactID,
@@ -233,7 +244,8 @@ func DraftPeriod(ctx context.Context, repo Repository, teacherID, periodID uuid.
 			keepEnrollmentIDs = append(keepEnrollmentIDs, line.EnrollmentID)
 			invLine := &InvoiceLine{
 				ID:            id.New(),
-				TeacherID:     teacherID,
+				TeacherID:     periodScope.TeacherID,
+				CenterID:      periodScope.CenterID,
 				InvoiceID:     inv.ID,
 				EnrollmentID:  line.EnrollmentID,
 				ClassName:     line.ClassName,
@@ -246,7 +258,7 @@ func DraftPeriod(ctx context.Context, repo Repository, teacherID, periodID uuid.
 				return nil, err
 			}
 		}
-		if err := repo.ZeroUnmatchedLines(ctx, teacherID, inv.ID, keepEnrollmentIDs); err != nil {
+		if err := repo.ZeroUnmatchedLines(ctx, periodScope, inv.ID, keepEnrollmentIDs); err != nil {
 			return nil, err
 		}
 	}
