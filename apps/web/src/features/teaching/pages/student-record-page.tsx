@@ -57,9 +57,7 @@ export function StudentRecordPage() {
 
   const notes: Record<string, string> = {};
   for (const row of rows) {
-    const note = studentId
-      ? personalNotes[personalNoteKey(row.session.id, studentId)]
-      : undefined;
+    const note = studentId ? personalNotes[personalNoteKey(row.session.id, studentId)] : undefined;
     if (note !== undefined) {
       notes[row.session.id] = note;
     }

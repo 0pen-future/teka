@@ -48,6 +48,11 @@ type Repository interface {
 	// ScheduleExists reports whether the class already carries this exact
 	// weekly slot, including its effective_from.
 	ScheduleExists(ctx context.Context, sc authctx.Scope, classID uuid.UUID, weekday int16, startTime TimeOfDay, effectiveFrom time.Time) (bool, error)
+	// ReassignTeacher moves the class and every one of its schedule rows to
+	// newTeacherID within the scope, on the context's transaction. Both tables
+	// are owned by classes, so the class-handoff feature moves them only
+	// through here. ErrNotFound when the class is not visible in the scope.
+	ReassignTeacher(ctx context.Context, sc authctx.Scope, classID, newTeacherID uuid.UUID) error
 }
 
 type gormRepository struct {
@@ -233,6 +238,29 @@ func (r *gormRepository) FindActiveByName(ctx context.Context, sc authctx.Scope,
 		return nil, err
 	}
 	return &class, nil
+}
+
+// ReassignTeacher stamps newTeacherID onto the class and all its live schedule
+// rows. Both statements run on the context's transaction so a class-handoff
+// coordinator can move them atomically with the class's future sessions. The
+// class update must touch a row (else the class is not in scope → ErrNotFound);
+// the schedule update may touch none — a class can carry no live slot — so its
+// RowsAffected is not asserted.
+func (r *gormRepository) ReassignTeacher(ctx context.Context, sc authctx.Scope, classID, newTeacherID uuid.UUID) error {
+	res := r.scoped(ctx, sc).
+		Model(&Class{}).
+		Where("classes.id = ?", classID).
+		Update("teacher_id", newTeacherID)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return r.scopedSchedules(ctx, sc).
+		Model(&Schedule{}).
+		Where("class_schedules.class_id = ?", classID).
+		Update("teacher_id", newTeacherID).Error
 }
 
 // ScheduleExists reports whether an identical live slot is already on the

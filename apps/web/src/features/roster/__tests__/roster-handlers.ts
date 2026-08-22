@@ -67,6 +67,7 @@ export const classSchedule: Schedule = {
 export const classWithSchedule: Class = {
   id: "70000000-0000-4000-8000-000000000001",
   name: "Toán 6A",
+  teacher_id: "73000000-0000-4000-8000-000000000001",
   start_date: "2026-01-05",
   end_date: null,
   default_unit_price: 150000,
@@ -346,6 +347,9 @@ export const rosterHandlers = [
     const klass: Class = {
       id: nextId("class-"),
       name: body.name,
+      // The API assigns a new class to the creating teacher; the fixture
+      // roster runs under one owner, so a single stable id stands in.
+      teacher_id: "73000000-0000-4000-8000-000000000001",
       start_date: body.start_date,
       end_date: orNull(body.end_date),
       default_unit_price: body.default_unit_price,
@@ -376,6 +380,30 @@ export const rosterHandlers = [
     klass.end_date = orNull(body.end_date);
     klass.default_unit_price = body.default_unit_price;
     return HttpResponse.json(ok(klass));
+  }),
+  http.put(`${API_URL}/classes/:id/teacher`, async ({ params, request }) => {
+    const klass = store.classes.find((item) => item.id === params.id);
+    if (!klass) {
+      return HttpResponse.json(fail("NOT_FOUND", "class not found"), { status: 404 });
+    }
+    const body = (await request.json()) as { teacher_id: string };
+    // Mirror the server's future-planned-only move so the returned count is
+    // realistic; held/cancelled/past sessions keep their teacher.
+    const todayIso = new Date().toISOString().slice(0, 10);
+    let moved = 0;
+    for (const session of store.sessions) {
+      if (
+        session.class_id === klass.id &&
+        session.status === "planned" &&
+        session.session_date >= todayIso
+      ) {
+        moved += 1;
+      }
+    }
+    klass.teacher_id = body.teacher_id;
+    return HttpResponse.json(
+      ok({ class_id: klass.id, teacher_id: body.teacher_id, moved_planned_sessions: moved }),
+    );
   }),
   http.post(`${API_URL}/classes/:classId/schedules`, async ({ params, request }) => {
     const klass = store.classes.find((item) => item.id === params.classId);

@@ -73,7 +73,7 @@ describe("grouped sidebar", () => {
     const expected: Record<string, string[]> = {
       "Dạy học": ["Điểm danh", "Quản lý lớp học", "Hồ sơ học sinh", "Lớp & học sinh", "Phụ huynh"],
       "Học phí": ["Chốt sổ", "Gửi thông báo", "Thu tiền"],
-      "Trung tâm": ["Duyệt giáo án", "Cài đặt trung tâm"],
+      "Trung tâm": ["Duyệt giáo án", "Nhập từ Excel", "Cài đặt trung tâm"],
     };
     for (const [header, labels] of Object.entries(expected)) {
       const group = within(sidebarNav).getByRole("group", { name: header });
@@ -140,6 +140,26 @@ describe("bottom tab bar", () => {
     await user.click(contacts);
     await waitFor(() => expect(router.state.location.pathname).toBe("/contacts"));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("keeps only Nhập từ Excel active on /students/import, not its parent entry", async () => {
+    renderLayout("/students/import");
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+
+    const importLink = await within(sidebarNav).findByRole("link", { name: "Nhập từ Excel" });
+    const studentsLink = within(sidebarNav).getByRole("link", { name: "Lớp & học sinh" });
+    // /students/import is a subpath of /students; only the deeper entry lights up.
+    expect(importLink).toHaveAttribute("aria-current", "page");
+    expect(studentsLink).not.toHaveAttribute("aria-current");
+  });
+
+  it("keeps the parent entry active on a student detail route", async () => {
+    renderLayout("/students/42");
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+
+    const studentsLink = await within(sidebarNav).findByRole("link", { name: "Lớp & học sinh" });
+    // A genuine child (/students/:id) still highlights its parent nav entry.
+    expect(studentsLink).toHaveAttribute("aria-current", "page");
   });
 
   it("marks Thêm active while on an overflow route", async () => {
@@ -234,7 +254,29 @@ describe("teaching v2 nav", () => {
     const labels = within(group)
       .getAllByRole("link")
       .map((l) => l.textContent);
-    expect(labels).toEqual(["Duyệt giáo án", "Cài đặt trung tâm"]);
+    expect(labels).toEqual(["Duyệt giáo án", "Nhập từ Excel", "Cài đặt trung tâm"]);
+  });
+
+  it("shows Nhập từ Excel to owners and hides it from members", async () => {
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+    // Default /centers/me is owner-shaped: the import entry links into the group.
+    expect(await within(sidebarNav).findByRole("link", { name: "Nhập từ Excel" })).toHaveAttribute(
+      "href",
+      "/students/import",
+    );
+  });
+
+  it("hides Nhập từ Excel from non-owner members", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh" })),
+      ),
+    );
+    renderLayout();
+    // Member role label proves /centers/me resolved member-shaped.
+    await screen.findByText("Giáo viên");
+    expect(screen.queryByRole("link", { name: "Nhập từ Excel" })).not.toBeInTheDocument();
   });
 
   it("hides Duyệt giáo án from non-owner members and never fetches their queue", async () => {

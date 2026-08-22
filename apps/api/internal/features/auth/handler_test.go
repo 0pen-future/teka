@@ -126,11 +126,9 @@ func TestLoginSetsCookieAndEnvelope(t *testing.T) {
 	c := refreshCookie(t, w)
 	if c == nil {
 		t.Fatal("login must set the refresh cookie")
-	}
-	if !c.HttpOnly || c.Path != refreshCookiePath || c.Value == "" {
+	} else if !c.HttpOnly || c.Path != refreshCookiePath || c.Value == "" {
 		t.Fatalf("unexpected cookie attributes: %+v", c)
-	}
-	if c.Secure {
+	} else if c.Secure {
 		t.Fatal("cookie must not be Secure outside production")
 	}
 }

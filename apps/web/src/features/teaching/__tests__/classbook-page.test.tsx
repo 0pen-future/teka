@@ -14,11 +14,7 @@ import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
 
 import { ClassbookPage } from "../pages/classbook-page";
-import {
-  resetTeachingApiStore,
-  seedTeachingSession,
-  teachingHandlers,
-} from "./teaching-handlers";
+import { resetTeachingApiStore, seedTeachingSession, teachingHandlers } from "./teaching-handlers";
 
 function renderClassbookPage(route = "/classbook") {
   signInAs(testPrimaryTeacher);

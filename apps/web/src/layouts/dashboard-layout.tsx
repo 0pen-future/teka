@@ -4,11 +4,12 @@ import {
   Building2Icon,
   ClipboardCheckIcon,
   EllipsisIcon,
+  FileSpreadsheetIcon,
   IdCardIcon,
   LogOutIcon,
   type LucideProps,
 } from "lucide-react";
-import { useState, type ComponentType } from "react";
+import { createContext, useContext, useState, type ComponentType } from "react";
 import { NavLink, Outlet, Link, useLocation } from "react-router";
 
 import {
@@ -93,6 +94,7 @@ function useNavGroups(): NavGroup[] {
                 Icon: ClipboardCheckIcon,
                 pending: pendingPlanCount > 0,
               },
+              { label: "Nhập từ Excel", to: "/students/import", Icon: FileSpreadsheetIcon },
             ]
           : []),
         { label: "Cài đặt trung tâm", to: "/center", Icon: Building2Icon },
@@ -114,6 +116,7 @@ const OVERFLOW_LABELS = new Set([
   "Gửi thông báo",
   "Phụ huynh",
   "Duyệt giáo án",
+  "Nhập từ Excel",
   "Cài đặt trung tâm",
 ]);
 
@@ -129,8 +132,39 @@ const OVERFLOW_PATH_PREFIXES = [
   "/notifications",
   "/contacts",
   "/lesson-plans",
+  "/students/import",
   "/center",
 ];
+
+/**
+ * Every concrete (non-null) nav destination, so a parent entry can tell when
+ * the current path belongs to a deeper sibling entry instead. Defaults to empty
+ * so an item rendered outside the layout still resolves active by exact match.
+ */
+const NavPathsContext = createContext<readonly string[]>([]);
+
+/**
+ * Active-state for a nav entry with "most specific wins": a parent entry
+ * (/students) covers its whole subtree, but a deeper sibling destination
+ * (/students/import) owns that branch and claims the highlight there — which
+ * `NavLink`'s prefix matching cannot express without also dropping the parent
+ * on genuine children like /students/:id.
+ */
+function useNavActive(to: string | null): boolean {
+  const { pathname } = useLocation();
+  const paths = useContext(NavPathsContext);
+  if (!to) {
+    return false;
+  }
+  if (to === "/") {
+    return pathname === "/";
+  }
+  const covers = (base: string) => pathname === base || pathname.startsWith(`${base}/`);
+  if (!covers(to)) {
+    return false;
+  }
+  return !paths.some((other) => other.length > to.length && covers(other));
+}
 
 function PendingDot() {
   return <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-coral-400" />;
@@ -143,6 +177,7 @@ function SidebarNavItem({
   pending,
   onNavigate,
 }: NavEntry & { onNavigate?: () => void }) {
+  const active = useNavActive(to);
   if (!to) {
     return (
       <span
@@ -155,27 +190,26 @@ function SidebarNavItem({
     );
   }
   return (
-    <NavLink
+    <Link
       to={to}
-      end={to === "/"}
       onClick={onNavigate}
-      className={({ isActive }) =>
-        cn(
-          "relative flex items-center gap-3 rounded-[14px] px-3 py-[10px] text-[14px] transition-colors",
-          isActive ? "bg-mint-50 text-mint-600" : "text-ink-500 hover:bg-cream-100",
-        )
-      }
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "relative flex items-center gap-3 rounded-[14px] px-3 py-[10px] text-[14px] transition-colors",
+        active ? "bg-mint-50 text-mint-600" : "text-ink-500 hover:bg-cream-100",
+      )}
     >
       <span className="relative">
         <Icon className="size-5" />
         {pending ? <PendingDot /> : null}
       </span>
       <span className="font-display font-bold">{label}</span>
-    </NavLink>
+    </Link>
   );
 }
 
 function RailNavItem({ to, label, Icon, pending }: NavEntry) {
+  const active = useNavActive(to);
   if (!to) {
     return (
       <span
@@ -188,25 +222,24 @@ function RailNavItem({ to, label, Icon, pending }: NavEntry) {
     );
   }
   return (
-    <NavLink
+    <Link
       to={to}
-      end={to === "/"}
       title={label}
       aria-label={label}
-      className={({ isActive }) =>
-        cn(
-          "relative flex size-12 items-center justify-center rounded-[14px] transition-colors",
-          isActive ? "bg-mint-50 text-mint-600" : "text-ink-500 hover:bg-cream-100",
-        )
-      }
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "relative flex size-12 items-center justify-center rounded-[14px] transition-colors",
+        active ? "bg-mint-50 text-mint-600" : "text-ink-500 hover:bg-cream-100",
+      )}
     >
       <Icon className="size-5" />
       {pending ? <PendingDot /> : null}
-    </NavLink>
+    </Link>
   );
 }
 
 function BottomTabItem({ to, label, Icon, pending }: NavEntry) {
+  const active = useNavActive(to);
   if (!to) {
     return (
       <span
@@ -219,22 +252,20 @@ function BottomTabItem({ to, label, Icon, pending }: NavEntry) {
     );
   }
   return (
-    <NavLink
+    <Link
       to={to}
-      end={to === "/"}
-      className={({ isActive }) =>
-        cn(
-          "flex min-h-[56px] flex-1 flex-col items-center justify-center gap-1 px-1 text-center text-[11px] font-semibold",
-          isActive ? "text-mint-600" : "text-ink-500",
-        )
-      }
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "flex min-h-[56px] flex-1 flex-col items-center justify-center gap-1 px-1 text-center text-[11px] font-semibold",
+        active ? "text-mint-600" : "text-ink-500",
+      )}
     >
       <span className="relative">
         <Icon className="size-5" />
         {pending ? <PendingDot /> : null}
       </span>
       <span className="w-full truncate">{label}</span>
-    </NavLink>
+    </Link>
   );
 }
 
@@ -281,7 +312,12 @@ function MoreTab({ entries }: { entries: NavEntry[] }) {
  * the name, not the boilerplate.
  */
 function centerInitial(name: string) {
-  return name.replace(/^trung tâm\s+/i, "").trim().charAt(0) || name.trim().charAt(0);
+  return (
+    name
+      .replace(/^trung tâm\s+/i, "")
+      .trim()
+      .charAt(0) || name.trim().charAt(0)
+  );
 }
 
 /**
@@ -438,102 +474,105 @@ export function DashboardLayout() {
   const entries = groups.flatMap((group) => group.entries);
   const primaryTabs = entries.filter((entry) => !OVERFLOW_LABELS.has(entry.label));
   const overflowEntries = entries.filter((entry) => OVERFLOW_LABELS.has(entry.label));
+  const navPaths = entries.map((entry) => entry.to).filter((to): to is string => to !== null);
 
   return (
-    <div className="flex min-h-svh bg-cream-100">
-      <aside className="hidden lg:flex lg:w-[236px] lg:shrink-0 lg:flex-col lg:border-r lg:border-line-200 lg:bg-white">
-        <div className="flex items-center gap-3 p-6 pb-4">
-          <img src="/favicon.svg" alt="" aria-hidden="true" className="h-10 w-10 shrink-0" />
-          <div>
-            <p className="font-display text-[22px] font-extrabold text-ink-900">Teka</p>
-            <p className="text-[12px] text-ink-400">Quản lý lớp học</p>
-          </div>
-        </div>
-        <CenterCard />
-        {/* min-h-0 + overflow so short viewports scroll the nav instead of
-            clipping the period card and footer below it. */}
-        <nav aria-label="Main" className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4">
-          {groups.map((group) => (
-            <div
-              key={group.header ?? "top"}
-              role={group.header ? "group" : undefined}
-              aria-label={group.header ?? undefined}
-              className="flex flex-col gap-1"
-            >
-              {group.header ? (
-                <p
-                  aria-hidden
-                  className="px-3 pb-1 pt-3.5 text-[11px] font-extrabold uppercase tracking-[0.8px] text-ink-300"
-                >
-                  {group.header}
-                </p>
-              ) : null}
-              {group.entries.map((entry) => (
-                <SidebarNavItem key={entry.label} {...entry} />
-              ))}
+    <NavPathsContext.Provider value={navPaths}>
+      <div className="flex min-h-svh bg-cream-100">
+        <aside className="hidden lg:flex lg:w-[236px] lg:shrink-0 lg:flex-col lg:border-r lg:border-line-200 lg:bg-white">
+          <div className="flex items-center gap-3 p-6 pb-4">
+            <img src="/favicon.svg" alt="" aria-hidden="true" className="h-10 w-10 shrink-0" />
+            <div>
+              <p className="font-display text-[22px] font-extrabold text-ink-900">Teka</p>
+              <p className="text-[12px] text-ink-400">Quản lý lớp học</p>
             </div>
-          ))}
-        </nav>
-        <CurrentPeriodCard />
-        <SidebarFooter />
-      </aside>
+          </div>
+          <CenterCard />
+          {/* min-h-0 + overflow so short viewports scroll the nav instead of
+            clipping the period card and footer below it. */}
+          <nav aria-label="Main" className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4">
+            {groups.map((group) => (
+              <div
+                key={group.header ?? "top"}
+                role={group.header ? "group" : undefined}
+                aria-label={group.header ?? undefined}
+                className="flex flex-col gap-1"
+              >
+                {group.header ? (
+                  <p
+                    aria-hidden
+                    className="px-3 pb-1 pt-3.5 text-[11px] font-extrabold uppercase tracking-[0.8px] text-ink-300"
+                  >
+                    {group.header}
+                  </p>
+                ) : null}
+                {group.entries.map((entry) => (
+                  <SidebarNavItem key={entry.label} {...entry} />
+                ))}
+              </div>
+            ))}
+          </nav>
+          <CurrentPeriodCard />
+          <SidebarFooter />
+        </aside>
 
-      <aside className="hidden md:flex md:w-[72px] md:shrink-0 md:flex-col md:items-center md:border-r md:border-line-200 md:bg-white lg:hidden">
-        <img src="/favicon.svg" alt="Teka" className="mt-6 h-9 w-9 shrink-0" />
+        <aside className="hidden md:flex md:w-[72px] md:shrink-0 md:flex-col md:items-center md:border-r md:border-line-200 md:bg-white lg:hidden">
+          <img src="/favicon.svg" alt="Teka" className="mt-6 h-9 w-9 shrink-0" />
+          <nav
+            aria-label="Main"
+            className="flex min-h-0 flex-1 flex-col items-center gap-4 overflow-y-auto pb-6 pt-4"
+          >
+            {groups.map((group) => (
+              <div
+                key={group.header ?? "top"}
+                role={group.header ? "group" : undefined}
+                aria-label={group.header ?? undefined}
+                className="flex flex-col items-center gap-2"
+              >
+                {group.entries.map((entry) => (
+                  <RailNavItem key={entry.label} {...entry} />
+                ))}
+              </div>
+            ))}
+          </nav>
+          <ProfileDisc />
+          <CurrentPeriodDisc />
+        </aside>
+
+        <div className="flex min-w-0 flex-1 flex-col">
+          <main
+            id="main-content"
+            className={cn(
+              "flex-1 p-4 pb-24",
+              "md:mx-auto md:w-full md:max-w-[var(--w-content)] md:p-6 md:pb-6",
+              "lg:max-w-[var(--w-page)] lg:px-8 lg:py-7",
+            )}
+          >
+            {/* At lg+ the sidebar footer owns profile + logout; below that the
+              header row keeps both reachable for the rail and bottom tabs. */}
+            <div className="mb-2 flex items-center justify-end gap-1 lg:hidden">
+              <Link
+                to="/profile"
+                className="inline-flex items-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-[13px] font-semibold text-ink-500 transition-colors hover:bg-cream-100 hover:text-mint-600"
+              >
+                Hồ sơ giáo viên
+              </Link>
+              <LogoutButton />
+            </div>
+            <Outlet />
+          </main>
+        </div>
+
         <nav
           aria-label="Main"
-          className="flex min-h-0 flex-1 flex-col items-center gap-4 overflow-y-auto pb-6 pt-4"
+          className="fixed inset-x-0 bottom-0 z-40 flex border-t border-line-200 bg-white md:hidden"
         >
-          {groups.map((group) => (
-            <div
-              key={group.header ?? "top"}
-              role={group.header ? "group" : undefined}
-              aria-label={group.header ?? undefined}
-              className="flex flex-col items-center gap-2"
-            >
-              {group.entries.map((entry) => (
-                <RailNavItem key={entry.label} {...entry} />
-              ))}
-            </div>
+          {primaryTabs.map((entry) => (
+            <BottomTabItem key={entry.label} {...entry} />
           ))}
+          <MoreTab entries={overflowEntries} />
         </nav>
-        <ProfileDisc />
-        <CurrentPeriodDisc />
-      </aside>
-
-      <div className="flex min-w-0 flex-1 flex-col">
-        <main
-          id="main-content"
-          className={cn(
-            "flex-1 p-4 pb-24",
-            "md:mx-auto md:w-full md:max-w-[var(--w-content)] md:p-6 md:pb-6",
-            "lg:max-w-[var(--w-page)] lg:px-8 lg:py-7",
-          )}
-        >
-          {/* At lg+ the sidebar footer owns profile + logout; below that the
-              header row keeps both reachable for the rail and bottom tabs. */}
-          <div className="mb-2 flex items-center justify-end gap-1 lg:hidden">
-            <Link
-              to="/profile"
-              className="inline-flex items-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-[13px] font-semibold text-ink-500 transition-colors hover:bg-cream-100 hover:text-mint-600"
-            >
-              Hồ sơ giáo viên
-            </Link>
-            <LogoutButton />
-          </div>
-          <Outlet />
-        </main>
       </div>
-
-      <nav
-        aria-label="Main"
-        className="fixed inset-x-0 bottom-0 z-40 flex border-t border-line-200 bg-white md:hidden"
-      >
-        {primaryTabs.map((entry) => (
-          <BottomTabItem key={entry.label} {...entry} />
-        ))}
-        <MoreTab entries={overflowEntries} />
-      </nav>
-    </div>
+    </NavPathsContext.Provider>
   );
 }

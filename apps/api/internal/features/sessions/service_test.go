@@ -140,6 +140,9 @@ type fakeSessionRow struct {
 type fakeRepository struct {
 	rows    map[uuid.UUID]*fakeSessionRow
 	classes *fakeClassSource // resolves ClassName, mirroring the repository's SQL join
+	// gotNotBefore records the boundary the service resolved and passed to
+	// ReassignPlanned, so a test can assert it is teacher-local today.
+	gotNotBefore time.Time
 }
 
 func newFakeRepository(classes *fakeClassSource) *fakeRepository {
@@ -238,6 +241,21 @@ func (f *fakeRepository) SoftDelete(_ context.Context, sc authctx.Scope, id uuid
 	}
 	r.deleted = true
 	return nil
+}
+
+func (f *fakeRepository) ReassignPlanned(_ context.Context, sc authctx.Scope, classID, newTeacherID uuid.UUID, notBefore time.Time) (int64, error) {
+	f.gotNotBefore = notBefore
+	var moved int64
+	for _, r := range f.rows {
+		if r.deleted || !visible(sc, r) {
+			continue
+		}
+		if r.ClassID == classID && r.Status == StatusPlanned && !r.SessionDate.Before(notBefore) {
+			r.TeacherID = newTeacherID
+			moved++
+		}
+	}
+	return moved, nil
 }
 
 func (f *fakeRepository) MarkHeldAndConfirmed(_ context.Context, sc authctx.Scope, id uuid.UUID, at time.Time) error {
@@ -741,5 +759,62 @@ func TestCrossTenantReadsAreNotFound(t *testing.T) {
 	}
 	if _, err := svc.ListRange(ctx, strangerScope, classID, d("2026-01-01"), d("2026-01-31")); apperror.From(err).Code != apperror.CodeNotFound {
 		t.Fatalf("cross-tenant list must be 404 (foreign class), got %v", err)
+	}
+}
+
+// TestReassignPlannedBoundaryUsesTeacherTimezone pins the future-session cutoff
+// to the old teacher's calendar day, not the DB/UTC clock: a handoff run in the
+// small hours (UTC) must not sweep a session dated "yesterday-UTC / today-local"
+// — and, symmetrically here, must resolve the boundary in the teacher's zone.
+func TestReassignPlannedBoundaryUsesTeacherTimezone(t *testing.T) {
+	oldTeacher := id.New()
+	newTeacher := id.New()
+	classID := id.New()
+	sc := authctx.Scope{TeacherID: oldTeacher, CenterID: oldTeacher, IsOwner: true}
+
+	// 2026-03-10 02:00 UTC is still 2026-03-09 in America/Los_Angeles (UTC-8):
+	// the boundary must be the teacher's calendar day, not UTC's 03-10.
+	fixedNow := time.Date(2026, 3, 10, 2, 0, 0, 0, time.UTC)
+	classSrc := newFakeClassSource()
+	repo := newFakeRepository(classSrc)
+	teachersSrc := newFakeTeacherSource()
+	teachersSrc.addTeacher(oldTeacher, "America/Los_Angeles")
+	svc := &Service{
+		repo:     repo,
+		classes:  classSrc,
+		teachers: teachersSrc,
+		now:      func() time.Time { return fixedNow },
+	}
+
+	// Two planned sessions straddling the teacher-local boundary (03-09):
+	// the one on the boundary moves (inclusive), the one before stays.
+	onBoundary := &Session{
+		ID: id.New(), TeacherID: oldTeacher, CenterID: sc.CenterID, ClassID: classID,
+		SessionDate: d("2026-03-09"), Status: StatusPlanned,
+	}
+	before := &Session{
+		ID: id.New(), TeacherID: oldTeacher, CenterID: sc.CenterID, ClassID: classID,
+		SessionDate: d("2026-03-08"), Status: StatusPlanned,
+	}
+	repo.rows[onBoundary.ID] = &fakeSessionRow{Session: *onBoundary}
+	repo.rows[before.ID] = &fakeSessionRow{Session: *before}
+
+	moved, err := svc.ReassignPlanned(context.Background(), sc, classID, oldTeacher, newTeacher)
+	if err != nil {
+		t.Fatalf("ReassignPlanned: %v", err)
+	}
+
+	want := time.Date(2026, 3, 9, 0, 0, 0, 0, time.UTC)
+	if !repo.gotNotBefore.Equal(want) {
+		t.Fatalf("boundary must be today in the teacher's timezone, got %v want %v", repo.gotNotBefore, want)
+	}
+	if moved != 1 {
+		t.Fatalf("only the on-boundary session moves, got %d", moved)
+	}
+	if repo.rows[onBoundary.ID].TeacherID != newTeacher {
+		t.Fatal("the session dated on the local boundary must move to the new teacher")
+	}
+	if repo.rows[before.ID].TeacherID != oldTeacher {
+		t.Fatal("the session dated before the local boundary must keep the old teacher")
 	}
 }

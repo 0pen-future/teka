@@ -50,7 +50,10 @@ export async function savePlan(
   lessonIndex: number,
   input: SavePlanInput,
 ): Promise<PlanResponse> {
-  const res = await apiClient.put<unknown>(`/classes/${classId}/lesson-plans/${lessonIndex}`, input);
+  const res = await apiClient.put<unknown>(
+    `/classes/${classId}/lesson-plans/${lessonIndex}`,
+    input,
+  );
   return parseData(planResponseSchema, res.data);
 }
 

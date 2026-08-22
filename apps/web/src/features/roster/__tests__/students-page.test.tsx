@@ -103,6 +103,18 @@ describe("StudentsPage v2 layout", () => {
     );
   });
 
+  it("orders the header actions: ⚙ Cài đặt lớp, + Tạo lớp mới, + Thêm học sinh", async () => {
+    renderStudentsPage();
+
+    const settings = await screen.findByRole("link", { name: "⚙ Cài đặt lớp" });
+    const createClass = screen.getByRole("button", { name: "+ Tạo lớp mới" });
+    const addStudent = screen.getByRole("button", { name: "+ Thêm học sinh" });
+    // All three sit in the same header row, in prototype order — settings
+    // before create, create before add.
+    expect(settings.compareDocumentPosition(createClass)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(createClass.compareDocumentPosition(addStudent)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
   it("shows enrollment start and this month's non-cancelled session count", async () => {
     renderStudentsPage();
 

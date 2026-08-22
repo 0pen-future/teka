@@ -23,6 +23,13 @@ var ErrTokenAlreadyRevoked = errors.New("refresh token already revoked")
 // hash.
 var ErrResetTokenNotFound = errors.New("password reset token not found")
 
+// ErrActiveResetTokenExists is returned by CreateResetToken when the insert
+// loses a race to a concurrent request that already holds the one live token
+// the partial unique index uq_password_reset_active permits per user. It lets
+// the caller treat a benign forgot-password race as a no-op rather than an
+// internal error, driver-agnostically.
+var ErrActiveResetTokenExists = errors.New("an active password reset token already exists")
+
 // Repository is the persistence contract for refresh tokens.
 type Repository interface {
 	Create(ctx context.Context, t *RefreshToken) error
@@ -40,7 +47,9 @@ type Repository interface {
 	// CreateResetToken inserts a new password-reset token row on the ambient
 	// transaction. The caller must have superseded any existing live token for
 	// the same user in the same transaction first, or the partial unique index
-	// uq_password_reset_active rejects the insert.
+	// uq_password_reset_active rejects the insert. A concurrent request that
+	// wins the race to that single live slot yields ErrActiveResetTokenExists,
+	// which the caller can treat as a benign no-op.
 	CreateResetToken(ctx context.Context, t *PasswordResetToken) error
 	// LatestResetToken returns the most recently created reset token for a
 	// user, live or not — ForgotPassword's cooldown check needs the newest
@@ -117,7 +126,11 @@ func (r *gormRepository) RevokeAllForUser(ctx context.Context, userID uuid.UUID,
 }
 
 func (r *gormRepository) CreateResetToken(ctx context.Context, t *PasswordResetToken) error {
-	return database.FromContext(ctx, r.db).Create(t).Error
+	err := database.FromContext(ctx, r.db).Create(t).Error
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return ErrActiveResetTokenExists
+	}
+	return err
 }
 
 func (r *gormRepository) LatestResetToken(ctx context.Context, userID uuid.UUID) (*PasswordResetToken, error) {

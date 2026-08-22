@@ -78,9 +78,7 @@ describe("LessonPlansPage queue", () => {
     expect(within(row).getByText("Chờ duyệt")).toBeInTheDocument();
 
     // Detail panel mirrors the submitted plan.
-    expect(
-      screen.getByRole("heading", { name: "Toán 6A — Cô Lan" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Toán 6A — Cô Lan" })).toBeInTheDocument();
     expect(screen.getByText("Hiểu số thập phân")).toBeInTheDocument();
     expect(screen.getByText("Luyện tập 30'")).toBeInTheDocument();
     expect(screen.getByText("Phiếu 12")).toBeInTheDocument();
@@ -125,14 +123,9 @@ describe("LessonPlansPage review actions", () => {
 
     const redoButton = await screen.findByRole("button", { name: "Yêu cầu sửa" });
     expect(redoButton).toBeDisabled();
-    expect(
-      screen.getByText("Ghi rõ cần sửa gì để giáo viên biết đường sửa."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Ghi rõ cần sửa gì để giáo viên biết đường sửa.")).toBeInTheDocument();
 
-    await user.type(
-      screen.getByLabelText("NHẬN XÉT CỦA CHỦ TRUNG TÂM"),
-      "Thiếu phần luyện tập",
-    );
+    await user.type(screen.getByLabelText("NHẬN XÉT CỦA CHỦ TRUNG TÂM"), "Thiếu phần luyện tập");
     expect(redoButton).toBeEnabled();
     await user.click(redoButton);
 
