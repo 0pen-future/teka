@@ -369,6 +369,32 @@ func (s *Service) Delete(ctx context.Context, sc authctx.Scope, sessionID uuid.U
 	return translate(s.repo.SoftDelete(ctx, sc, sessionID))
 }
 
+// ReassignPlanned moves the class's future planned sessions to newTeacherID and
+// returns the count moved. It is the sessions-owned half of the owner-only
+// class handoff (see the handoff feature): changing a class's teacher must
+// carry its upcoming un-run sessions so the new teacher owns the work, while
+// held/cancelled and past planned sessions keep the old teacher and leave
+// attendance and billing history untouched.
+//
+// The "future" boundary is today in oldTeacherID's timezone — the calendar the
+// class's sessions were dated in — not the DB clock, matching ListPending's
+// cutoff discipline. oldTeacherID is the class's current teacher, resolved by
+// the caller before the class row is reassigned.
+func (s *Service) ReassignPlanned(ctx context.Context, sc authctx.Scope, classID, oldTeacherID, newTeacherID uuid.UUID) (int64, error) {
+	loc, err := s.teacherLocation(ctx, oldTeacherID)
+	if err != nil {
+		return 0, err
+	}
+	// now().In(loc) picks the teacher's calendar day; dateOnly re-expresses it
+	// at UTC midnight, matching how session_date is stored.
+	today := dateOnly(s.now().In(loc), time.UTC)
+	n, err := s.repo.ReassignPlanned(ctx, sc, classID, newTeacherID, today)
+	if err != nil {
+		return 0, apperror.Internal(err)
+	}
+	return n, nil
+}
+
 // toDetail enriches a joined row with the roster size active on its date.
 func (s *Service) toDetail(ctx context.Context, sc authctx.Scope, row *Row) (*Detail, error) {
 	active, err := s.enrollments.ActiveOn(ctx, sc, row.ClassID, row.SessionDate)

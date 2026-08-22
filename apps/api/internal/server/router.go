@@ -22,6 +22,7 @@ import (
 	"teka/apps/api/internal/features/collections"
 	"teka/apps/api/internal/features/contacts"
 	"teka/apps/api/internal/features/enrollments"
+	"teka/apps/api/internal/features/handoff"
 	"teka/apps/api/internal/features/imports"
 	"teka/apps/api/internal/features/invitations"
 	"teka/apps/api/internal/features/notifications"
@@ -139,8 +140,13 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	// The upload is the most expensive endpoint in the product and the
 	// connection pool is shared across every tenant, so it carries its own
 	// per-teacher rate limit rather than relying on the caller to behave.
+	// centerLocker is the single advisory-lock instance imports and handoff
+	// share: both take pg_try_advisory_xact_lock on the same center key, so a
+	// class handoff and an in-flight import exclude each other rather than
+	// interleaving mid-transaction. One instance keeps that key in one place.
+	centerLocker := imports.NewLocker(db)
 	importsSvc := imports.NewService(centersSvc, classesSvc, contactsSvc, studentsSvc, enrollmentsSvc,
-		imports.NewLocker(db), txMgr)
+		centerLocker, txMgr)
 	imports.RegisterRoutes(v1, imports.NewHandler(importsSvc), requireAuth, resolveScope,
 		middleware.RateLimit(middleware.TeacherKey(), 10, time.Minute))
 
@@ -149,6 +155,15 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	// their repository types, so all three services must exist first.
 	sessionsSvc := sessions.NewService(sessions.NewRepository(db), classesSvc, teachersSvc, enrollmentsSvc)
 	sessions.RegisterRoutes(v1, sessions.NewHandler(sessionsSvc), requireAuth, resolveScope)
+
+	// handoff reassigns a class to another teacher. It coordinates classes and
+	// sessions through consumer interfaces and validates the target through
+	// centersSvc, so it mounts after all three exist. It shares centerLocker
+	// with imports so the two center-wide writers exclude each other. It owns no
+	// tables: the class and its schedules move through classesSvc, the future
+	// planned sessions through sessionsSvc, in one transaction.
+	handoffSvc := handoff.NewService(classesSvc, sessionsSvc, centersSvc, centerLocker, txMgr)
+	handoff.RegisterRoutes(v1, handoff.NewHandler(handoffSvc), requireAuth, resolveScope)
 
 	// attendance consumes enrollments and sessions through consumer
 	// interfaces (RosterSource, SessionStore) rather than their repository

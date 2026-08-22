@@ -148,6 +148,25 @@ func (s *Service) MemberIDsByPhone(ctx context.Context, scope authctx.Scope) (ma
 	return out, nil
 }
 
+// IsActiveMember reports whether teacherID is a live, active member of the
+// caller's own center. It is the target check the class-handoff feature
+// consumes: as with MemberIDsByPhone the scope is the authorization boundary
+// itself — there is no way to ask about another center, so a caller cannot
+// probe membership outside its own tenant, and callers must not distinguish
+// "not a member here" from "no such account". A removed (disabled) or
+// soft-deleted teacher is not a member, matching the live-roster rule
+// ListMembers/GetTeacherInCenter apply.
+func (s *Service) IsActiveMember(ctx context.Context, scope authctx.Scope, teacherID uuid.UUID) (bool, error) {
+	_, err := s.repo.GetTeacherInCenter(ctx, scope.CenterID, teacherID)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, apperror.Internal(err)
+	}
+	return true, nil
+}
+
 // Me returns the caller's center read model: the owner sees the full member
 // roster, a member sees only the center's name — the roster is owner-only
 // data.

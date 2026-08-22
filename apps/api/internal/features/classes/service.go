@@ -266,6 +266,15 @@ func (s *Service) FindActiveByName(ctx context.Context, sc authctx.Scope, name s
 	return class, true, nil
 }
 
+// ReassignTeacher moves the class and its schedule rows to newTeacherID within
+// the scope. It is the classes-owned half of the owner-only class handoff: the
+// coordinating handoff feature calls it inside a transaction that also moves
+// the class's future planned sessions (owned by the sessions feature), so this
+// touches only tables classes owns. ErrNotFound surfaces as a 404.
+func (s *Service) ReassignTeacher(ctx context.Context, sc authctx.Scope, classID, newTeacherID uuid.UUID) error {
+	return translate(s.repo.ReassignTeacher(ctx, sc, classID, newTeacherID))
+}
+
 // ScheduleExists reports whether the class already carries this exact weekly
 // slot. Callers must pass the same effective_from they intend to write:
 // AddSchedule defaults a blank one to the stored class's start_date, so a
