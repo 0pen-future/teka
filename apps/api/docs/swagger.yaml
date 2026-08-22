@@ -478,6 +478,8 @@ definitions:
         type: string
       status:
         type: string
+      teacher_id:
+        type: string
     type: object
   classes.CreateClassRequest:
     properties:
@@ -763,6 +765,22 @@ definitions:
         type: string
       unit_price:
         type: integer
+    type: object
+  handoff.ReassignRequest:
+    properties:
+      teacher_id:
+        type: string
+    required:
+    - teacher_id
+    type: object
+  handoff.ReassignResponse:
+    properties:
+      class_id:
+        type: string
+      moved_planned_sessions:
+        type: integer
+      teacher_id:
+        type: string
     type: object
   imports.Report:
     properties:
@@ -4387,6 +4405,78 @@ paths:
       summary: Add an ad-hoc session
       tags:
       - sessions
+  /classes/{id}/teacher:
+    put:
+      consumes:
+      - application/json
+      description: Chuyển lớp, lịch học và các buổi đã lên lịch từ hôm nay trở đi
+        sang giáo viên mới. Buổi đã dạy, buổi đã huỷ, điểm danh và học phí giữ nguyên.
+        Chỉ chủ trung tâm được gọi; giáo viên nhận phải thuộc trung tâm.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: giáo viên nhận lớp
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handoff.ReassignRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/handoff.ReassignResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: chỉ chủ trung tâm
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: giáo viên không thuộc trung tâm
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Bàn giao lớp cho giáo viên khác
+      tags:
+      - classes
   /contacts:
     get:
       description: Paginated; query matches full_name or phone case-insensitively.
