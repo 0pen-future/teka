@@ -25,7 +25,7 @@ type reassignCall struct {
 	teacherID uuid.UUID
 }
 
-func (f *fakeClasses) Get(_ context.Context, _ authctx.Scope, classID uuid.UUID) (*classes.Class, error) {
+func (f *fakeClasses) Get(_ context.Context, _ authctx.Scope, _ uuid.UUID) (*classes.Class, error) {
 	if f.getErr != nil {
 		return nil, f.getErr
 	}

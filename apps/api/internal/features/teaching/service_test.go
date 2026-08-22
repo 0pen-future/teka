@@ -345,7 +345,9 @@ func seedPlan(deps *fakeRepository, sc authctx.Scope, classID uuid.UUID, index i
 	return plan
 }
 
-func wantAppError(t *testing.T, err error, status int) *apperror.AppError {
+// requireAppError asserts err is an *apperror.AppError carrying the given HTTP
+// status and returns it so callers can make further assertions on its fields.
+func requireAppError(t *testing.T, err error, status int) *apperror.AppError {
 	t.Helper()
 	var appErr *apperror.AppError
 	if !errors.As(err, &appErr) {
@@ -355,6 +357,13 @@ func wantAppError(t *testing.T, err error, status int) *apperror.AppError {
 		t.Fatalf("want HTTP %d, got %d (%v)", status, appErr.Status, appErr)
 	}
 	return appErr
+}
+
+// wantAppError asserts err is an *apperror.AppError with the given HTTP status
+// when the caller does not need the error itself.
+func wantAppError(t *testing.T, err error, status int) {
+	t.Helper()
+	_ = requireAppError(t, err, status)
 }
 
 // TestPlanTransitionMatrix exercises every status × action combination
@@ -490,7 +499,7 @@ func TestRequestRedoRequiresComment(t *testing.T) {
 	seedPlan(deps.repo, sc, classID, 0, StatusPending)
 
 	_, err := svc.RequestRedo(ctx, sc, classID, 0, ReviewRequest{Comment: "   "})
-	appErr := wantAppError(t, err, http.StatusUnprocessableEntity)
+	appErr := requireAppError(t, err, http.StatusUnprocessableEntity)
 	if _, ok := appErr.Fields["comment"]; !ok {
 		t.Fatalf("want a comment field error, got %+v", appErr.Fields)
 	}
@@ -591,7 +600,7 @@ func TestLessonIndexValidation(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := svc.SavePlan(ctx, sc, classID, 1, SavePlanRequest{Goal: "g"})
-	appErr := wantAppError(t, err, http.StatusUnprocessableEntity)
+	appErr := requireAppError(t, err, http.StatusUnprocessableEntity)
 	if _, ok := appErr.Fields["lesson_index"]; !ok {
 		t.Fatalf("want a lesson_index field error, got %+v", appErr.Fields)
 	}
@@ -727,7 +736,7 @@ func TestMarksBatchValidation(t *testing.T) {
 
 	stranger := uuid.New()
 	_, err := svc.PutMarks(ctx, sc, session.ID, []MarkEntryRequest{{StudentID: stranger, Score: setTo(7.0)}})
-	appErr := wantAppError(t, err, http.StatusUnprocessableEntity)
+	appErr := requireAppError(t, err, http.StatusUnprocessableEntity)
 	if _, ok := appErr.Fields["marks"]; !ok {
 		t.Fatalf("want a marks field error, got %+v", appErr.Fields)
 	}
@@ -855,7 +864,7 @@ func TestGetMonthMarksWindowAndValidation(t *testing.T) {
 
 	for _, bad := range []string{"", "2026", "2026-13", "08-2026", "abc"} {
 		_, err := svc.GetMonthMarks(ctx, sc, classID, bad)
-		appErr := wantAppError(t, err, http.StatusUnprocessableEntity)
+		appErr := requireAppError(t, err, http.StatusUnprocessableEntity)
 		if _, ok := appErr.Fields["month"]; !ok {
 			t.Fatalf("month %q: want a month field error, got %+v", bad, appErr.Fields)
 		}
