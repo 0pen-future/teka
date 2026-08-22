@@ -42,7 +42,10 @@ test("owner invites a teacher, who accepts the link and logs in", async ({ page,
   const inviteePage = await context.browser()!.newPage();
   await inviteePage.goto(invitePath);
 
-  await expect(inviteePage.getByText("Trung Tâm Bình Minh")).toBeVisible();
+  // The preview header shows the inviter's center name. Seeded centers are
+  // named after their owner (a personal center, mirroring registration), so
+  // the expected name here is the owner's, not a standalone center name.
+  await expect(inviteePage.getByText("Cô Lan", { exact: true })).toBeVisible();
   await inviteePage.getByLabel("Họ và tên").fill(inviteeName);
   await inviteePage.getByLabel("Mật khẩu", { exact: true }).fill(inviteePassword);
   await inviteePage.getByLabel("Xác nhận mật khẩu").fill(inviteePassword);
