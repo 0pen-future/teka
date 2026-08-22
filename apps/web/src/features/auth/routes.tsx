@@ -10,7 +10,15 @@ export const authRoutes: RouteObject[] = [
     lazy: async () => ({ Component: (await import("./pages/login-page")).LoginPage }),
   },
   {
-    path: "/register",
-    lazy: async () => ({ Component: (await import("./pages/register-page")).RegisterPage }),
+    path: "/forgot-password",
+    lazy: async () => ({
+      Component: (await import("./pages/forgot-password-page")).ForgotPasswordPage,
+    }),
+  },
+  {
+    path: "/reset-password/:token",
+    lazy: async () => ({
+      Component: (await import("./pages/reset-password-page")).ResetPasswordPage,
+    }),
   },
 ];

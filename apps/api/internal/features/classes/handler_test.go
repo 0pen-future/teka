@@ -1,6 +1,7 @@
 package classes
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -20,15 +21,25 @@ import (
 
 const handlerTestSecret = "classes-test-secret-0123456789abcdef"
 
-// newClassesHTTPTest wires the real routes and auth middleware over the
-// in-memory fake repository.
+// fakeScopeResolver resolves every known teacher id to a scope where it owns
+// its own center — exactly like the real resolver does for a fixture teacher
+// who never joined anyone else's center.
+type fakeScopeResolver struct{}
+
+func (fakeScopeResolver) ResolveScope(_ context.Context, teacherID uuid.UUID) (authctx.Scope, error) {
+	return authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}, nil
+}
+
+// newClassesHTTPTest wires the real routes, auth, and scope middleware over
+// the in-memory fake repository.
 func newClassesHTTPTest(t *testing.T) (*gin.Engine, *fakeRepository) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	repo := newFakeRepository()
 	r := gin.New()
 	jwtCfg := config.JWTConfig{Secret: handlerTestSecret, AccessTTL: 15 * time.Minute}
-	RegisterRoutes(r.Group("/api/v1"), NewHandler(NewService(repo, noopTx{})), middleware.RequireAuth(jwtCfg))
+	RegisterRoutes(r.Group("/api/v1"), NewHandler(NewService(repo, noopTx{})),
+		middleware.RequireAuth(jwtCfg), middleware.ResolveScope(fakeScopeResolver{}))
 	return r, repo
 }
 

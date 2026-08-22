@@ -29,15 +29,16 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-// teacherID resolves the authenticated tenant — the only sanctioned source of
-// teacher identity; request bodies and paths never carry it.
-func (h *Handler) teacherID(c *gin.Context) (uuid.UUID, bool) {
-	teacherID, ok := authctx.TeacherID(c)
+// scope resolves the authenticated caller's center scope — the only
+// sanctioned source of tenant identity; request bodies and paths never carry
+// it.
+func (h *Handler) scope(c *gin.Context) (authctx.Scope, bool) {
+	sc, ok := authctx.ScopeFrom(c)
 	if !ok {
 		response.Err(c, apperror.Unauthorized("authentication required"))
-		return uuid.UUID{}, false
+		return authctx.Scope{}, false
 	}
-	return teacherID, true
+	return sc, true
 }
 
 // studentID parses the :id path parameter, reading a malformed value as the
@@ -81,7 +82,7 @@ func queryUUID(c *gin.Context, name string) (uuid.UUID, bool) {
 //	@Security		BearerAuth
 //	@Router			/students [post]
 func (h *Handler) create(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -90,7 +91,7 @@ func (h *Handler) create(c *gin.Context) {
 		response.Err(c, validation.BindError(err))
 		return
 	}
-	row, err := h.svc.Create(c.Request.Context(), teacherID, req)
+	row, err := h.svc.Create(c.Request.Context(), sc, req)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -117,7 +118,7 @@ func (h *Handler) create(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/students [get]
 func (h *Handler) list(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -136,7 +137,7 @@ func (h *Handler) list(c *gin.Context) {
 		Unenrolled: c.Query("unenrolled") == "true",
 	}
 	params := pagination.Parse(c, "full_name", listSorts)
-	rows, total, err := h.svc.List(c.Request.Context(), teacherID, filter, params)
+	rows, total, err := h.svc.List(c.Request.Context(), sc, filter, params)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -160,7 +161,7 @@ func (h *Handler) list(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/students/{id} [get]
 func (h *Handler) get(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -168,7 +169,7 @@ func (h *Handler) get(c *gin.Context) {
 	if !ok {
 		return
 	}
-	row, err := h.svc.Get(c.Request.Context(), teacherID, sid)
+	row, err := h.svc.Get(c.Request.Context(), sc, sid)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -191,7 +192,7 @@ func (h *Handler) get(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/students/{id} [put]
 func (h *Handler) update(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -204,7 +205,7 @@ func (h *Handler) update(c *gin.Context) {
 		response.Err(c, validation.BindError(err))
 		return
 	}
-	row, err := h.svc.Update(c.Request.Context(), teacherID, sid, req)
+	row, err := h.svc.Update(c.Request.Context(), sc, sid, req)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -226,7 +227,7 @@ func (h *Handler) update(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Router			/students/{id} [delete]
 func (h *Handler) remove(c *gin.Context) {
-	teacherID, ok := h.teacherID(c)
+	sc, ok := h.scope(c)
 	if !ok {
 		return
 	}
@@ -234,7 +235,7 @@ func (h *Handler) remove(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.svc.Delete(c.Request.Context(), teacherID, sid); err != nil {
+	if err := h.svc.Delete(c.Request.Context(), sc, sid); err != nil {
 		response.Err(c, err)
 		return
 	}

@@ -12,21 +12,22 @@ import (
 	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/features/sessions"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 )
 
 // RosterSource is the slice of the enrollments feature attendance needs: the
 // roster active on a session's date. *enrollments.Service satisfies this.
 type RosterSource interface {
-	ActiveOn(ctx context.Context, teacherID, classID uuid.UUID, on time.Time) ([]enrollments.Enrollment, error)
+	ActiveOn(ctx context.Context, sc authctx.Scope, classID uuid.UUID, on time.Time) ([]enrollments.Enrollment, error)
 }
 
 // SessionStore is the slice of the sessions feature attendance needs:
 // resolving one session, and transitioning it to held+confirmed inside the
 // caller's transaction. *sessions.Service satisfies this.
 type SessionStore interface {
-	GetByID(ctx context.Context, teacherID, sessionID uuid.UUID) (*sessions.Session, error)
-	MarkHeldAndConfirmed(ctx context.Context, teacherID, sessionID uuid.UUID, at time.Time) error
+	GetByID(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*sessions.Session, error)
+	MarkHeldAndConfirmed(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID, at time.Time) error
 }
 
 // ReconciliationEntry is one student's carried adjustment produced by a
@@ -56,7 +57,7 @@ type Reconciliation struct {
 // attendance to import billing to call it, an import cycle. *billing.Service
 // satisfies this; attendance itself never imports billing.
 type BillingReconciler interface {
-	ReconcileSession(ctx context.Context, teacherID, sessionID uuid.UUID) (Reconciliation, error)
+	ReconcileSession(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (Reconciliation, error)
 }
 
 // Service implements one-touch attendance (PRD R2): reading the roster
@@ -89,27 +90,27 @@ func (s *Service) SetReconciler(r BillingReconciler) {
 // TallyByEnrollment passes through the repository's batched attendance tally
 // for a date window. This is the one entry point plan 04's billing package
 // uses to price a period — it never re-aggregates attendance_records itself.
-func (s *Service) TallyByEnrollment(ctx context.Context, teacherID uuid.UUID, from, to time.Time) ([]EnrollmentTally, error) {
-	return s.repo.TallyByEnrollment(ctx, teacherID, from, to)
+func (s *Service) TallyByEnrollment(ctx context.Context, sc authctx.Scope, from, to time.Time) ([]EnrollmentTally, error) {
+	return s.repo.TallyByEnrollment(ctx, sc, from, to)
 }
 
 // SessionAttendance passes through the repository's already-recorded rows
 // for one session. This is plan 04's entry point for discovering which
 // students a post-close reconciliation must consider — it never scans
 // attendance_records by anything but session_id.
-func (s *Service) SessionAttendance(ctx context.Context, teacherID, sessionID uuid.UUID) ([]Record, error) {
-	return s.repo.ListBySession(ctx, teacherID, sessionID)
+func (s *Service) SessionAttendance(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) ([]Record, error) {
+	return s.repo.ListBySession(ctx, sc, sessionID)
 }
 
 // Get returns the attendance sheet for a session: one row per student
 // enrolled as of the session date, with a null status if the session has
 // never been confirmed.
-func (s *Service) Get(ctx context.Context, teacherID, sessionID uuid.UUID) (*Response, error) {
-	session, err := s.resolveSession(ctx, teacherID, sessionID)
+func (s *Service) Get(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*Response, error) {
+	session, err := s.resolveSession(ctx, sc, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	return s.buildResponse(ctx, teacherID, session)
+	return s.buildResponse(ctx, sc, session)
 }
 
 // Confirm writes one attendance record per roster enrollment (present unless
@@ -117,8 +118,8 @@ func (s *Service) Get(ctx context.Context, teacherID, sessionID uuid.UUID) (*Res
 // transitions the session to held+confirmed — all inside one transaction so
 // the write is atomic and re-confirming is idempotent (stable record ids,
 // recorded_at preserved, updated_at advanced).
-func (s *Service) Confirm(ctx context.Context, teacherID, sessionID uuid.UUID, req ConfirmRequest) (*Response, error) {
-	session, err := s.resolveSession(ctx, teacherID, sessionID)
+func (s *Service) Confirm(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID, req ConfirmRequest) (*Response, error) {
+	session, err := s.resolveSession(ctx, sc, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +127,7 @@ func (s *Service) Confirm(ctx context.Context, teacherID, sessionID uuid.UUID, r
 		return nil, cancelledConflict()
 	}
 
-	roster, err := s.roster.ActiveOn(ctx, teacherID, session.ClassID, session.SessionDate)
+	roster, err := s.roster.ActiveOn(ctx, sc, session.ClassID, session.SessionDate)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
@@ -145,8 +146,13 @@ func (s *Service) Confirm(ctx context.Context, teacherID, sessionID uuid.UUID, r
 			status = StatusAbsent
 		}
 		records = append(records, Record{
-			ID:           id.New(),
-			TeacherID:    teacherID,
+			ID: id.New(),
+			// A record belongs to the session's own teacher and center, not
+			// the confirming caller — an owner confirming a member's session
+			// must not silently reassign its attendance rows to the owner,
+			// the same precedent sessions' generated/ad-hoc rows follow.
+			TeacherID:    session.TeacherID,
+			CenterID:     session.CenterID,
 			SessionID:    sessionID,
 			StudentID:    e.StudentID,
 			EnrollmentID: e.ID,
@@ -167,23 +173,23 @@ func (s *Service) Confirm(ctx context.Context, teacherID, sessionID uuid.UUID, r
 		// removed from the roster since the last confirmation. Absent
 		// students stay in keepIDs because they are still enrolled — they
 		// are marked status='absent' above, never soft-deleted.
-		if err := s.repo.SoftDeleteMissing(ctx, teacherID, sessionID, keepIDs); err != nil {
+		if err := s.repo.SoftDeleteMissing(ctx, sc, sessionID, keepIDs); err != nil {
 			return err
 		}
 		// Runs inside this same transaction via database.FromContext, so the
 		// session's held+confirmed transition commits atomically with the
 		// attendance rows above.
-		return s.sessions.MarkHeldAndConfirmed(ctx, teacherID, sessionID, now)
+		return s.sessions.MarkHeldAndConfirmed(ctx, sc, sessionID, now)
 	})
 	if err != nil {
 		return nil, translateTxErr(err)
 	}
 
-	confirmed, err := s.resolveSession(ctx, teacherID, sessionID)
+	confirmed, err := s.resolveSession(ctx, sc, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := s.buildResponse(ctx, teacherID, confirmed)
+	resp, err := s.buildResponse(ctx, sc, confirmed)
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +201,7 @@ func (s *Service) Confirm(ctx context.Context, teacherID, sessionID uuid.UUID, r
 	// entirely when billing has not wired itself in (SetReconciler never
 	// called), which keeps this package usable standalone.
 	if s.reconciler != nil {
-		if _, reconErr := s.reconciler.ReconcileSession(ctx, teacherID, sessionID); reconErr != nil {
+		if _, reconErr := s.reconciler.ReconcileSession(ctx, sc, sessionID); reconErr != nil {
 			warning := "attendance saved, but the automatic billing adjustment for this change could not be applied; review the student's invoice manually"
 			resp.Warning = &warning
 		}
@@ -205,8 +211,8 @@ func (s *Service) Confirm(ctx context.Context, teacherID, sessionID uuid.UUID, r
 
 // buildResponse assembles the roster + attendance-status read model shared
 // by Get and the response of a successful Confirm.
-func (s *Service) buildResponse(ctx context.Context, teacherID uuid.UUID, session *sessions.Session) (*Response, error) {
-	roster, err := s.roster.ActiveOn(ctx, teacherID, session.ClassID, session.SessionDate)
+func (s *Service) buildResponse(ctx context.Context, sc authctx.Scope, session *sessions.Session) (*Response, error) {
+	roster, err := s.roster.ActiveOn(ctx, sc, session.ClassID, session.SessionDate)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
@@ -214,11 +220,11 @@ func (s *Service) buildResponse(ctx context.Context, teacherID uuid.UUID, sessio
 	for i, e := range roster {
 		studentIDs[i] = e.StudentID
 	}
-	names, err := s.repo.StudentNames(ctx, teacherID, studentIDs)
+	names, err := s.repo.StudentNames(ctx, sc, studentIDs)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
-	records, err := s.repo.ListBySession(ctx, teacherID, session.ID)
+	records, err := s.repo.ListBySession(ctx, sc, session.ID)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
@@ -260,8 +266,8 @@ func (s *Service) buildResponse(ctx context.Context, teacherID uuid.UUID, sessio
 // normalises whatever error shape it returns (a pre-translated *AppError
 // from the real sessions.Service, or a raw sessions.ErrNotFound from a test
 // fake) into this package's 404 contract.
-func (s *Service) resolveSession(ctx context.Context, teacherID, sessionID uuid.UUID) (*sessions.Session, error) {
-	session, err := s.sessions.GetByID(ctx, teacherID, sessionID)
+func (s *Service) resolveSession(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*sessions.Session, error) {
+	session, err := s.sessions.GetByID(ctx, sc, sessionID)
 	if err != nil {
 		var appErr *apperror.AppError
 		if errors.As(err, &appErr) {

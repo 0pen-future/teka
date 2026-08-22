@@ -13,11 +13,15 @@ import { classesKeys, enrollmentsKeys, studentsKeys } from "./roster-keys";
 
 export { enrollmentsKeys };
 
-export function useEnrollmentsList(params: ListEnrollmentsParams = {}) {
+export function useEnrollmentsList(
+  params: ListEnrollmentsParams = {},
+  options: { enabled?: boolean } = {},
+) {
   return useQuery({
     queryKey: enrollmentsKeys.list(params),
     queryFn: () => listEnrollments(params),
     placeholderData: keepPreviousData,
+    enabled: options.enabled ?? true,
   });
 }
 
@@ -30,9 +34,12 @@ export function useEnrollment(id: string | undefined) {
 }
 
 /**
- * Create and end both touch the same three surfaces: the class's enrollment
- * list, the enrolled student's detail (its enrollment list refetches), and
- * the class detail — per the Architecture's cache invalidation graph.
+ * Create and end both touch the same surfaces: the class's enrollment
+ * list, the enrolled student's detail (its enrollment list refetches), the
+ * class detail — per the Architecture's cache invalidation graph — and every
+ * students list, whose class/unenrolled filters are derived from enrollments
+ * (the app-wide 30s staleTime would otherwise keep a just-enrolled student
+ * off the class tab it navigates to).
  */
 function invalidateEnrollmentSurfaces(
   queryClient: ReturnType<typeof useQueryClient>,
@@ -40,6 +47,7 @@ function invalidateEnrollmentSurfaces(
   classId: string,
 ) {
   void queryClient.invalidateQueries({ queryKey: enrollmentsKeys.lists() });
+  void queryClient.invalidateQueries({ queryKey: studentsKeys.lists() });
   void queryClient.invalidateQueries({ queryKey: studentsKeys.detail(studentId) });
   void queryClient.invalidateQueries({ queryKey: classesKeys.detail(classId) });
 }

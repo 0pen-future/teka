@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 )
 
@@ -39,11 +40,11 @@ func setInvoiceMeta(f *fakeRepository, invoiceID, contactID uuid.UUID, status st
 	m[invoiceID] = invoiceMeta{ContactID: contactID, Status: status}
 }
 
-func (f *fakeRepository) LockPayment(ctx context.Context, teacherID, paymentID uuid.UUID) (*Payment, error) {
-	return f.GetPayment(ctx, teacherID, paymentID)
+func (f *fakeRepository) LockPayment(ctx context.Context, sc authctx.Scope, paymentID uuid.UUID) (*Payment, error) {
+	return f.GetPayment(ctx, sc, paymentID)
 }
 
-func (f *fakeRepository) InvoicesByIDs(_ context.Context, _ uuid.UUID, ids []uuid.UUID) ([]InvoiceRow, error) {
+func (f *fakeRepository) InvoicesByIDs(_ context.Context, _ authctx.Scope, ids []uuid.UUID) ([]InvoiceRow, error) {
 	meta := invoiceMetaByRepo[f]
 	var rows []InvoiceRow
 	for _, invID := range ids {
@@ -57,10 +58,10 @@ func (f *fakeRepository) InvoicesByIDs(_ context.Context, _ uuid.UUID, ids []uui
 	return rows, nil
 }
 
-func (f *fakeRepository) DeleteAllocations(_ context.Context, teacherID, paymentID uuid.UUID) error {
+func (f *fakeRepository) DeleteAllocations(_ context.Context, sc authctx.Scope, paymentID uuid.UUID) error {
 	out := f.allocations[:0:0]
 	for _, a := range f.allocations {
-		if a.TeacherID == teacherID && a.PaymentID == paymentID {
+		if a.TeacherID == sc.TeacherID && a.PaymentID == paymentID {
 			continue
 		}
 		out = append(out, a)
@@ -69,19 +70,19 @@ func (f *fakeRepository) DeleteAllocations(_ context.Context, teacherID, payment
 	return nil
 }
 
-func (f *fakeRepository) AllocationsByPayment(_ context.Context, teacherID, paymentID uuid.UUID) ([]PaymentAllocation, error) {
+func (f *fakeRepository) AllocationsByPayment(_ context.Context, sc authctx.Scope, paymentID uuid.UUID) ([]PaymentAllocation, error) {
 	var out []PaymentAllocation
 	for _, a := range f.allocations {
-		if a.TeacherID == teacherID && a.PaymentID == paymentID {
+		if a.TeacherID == sc.TeacherID && a.PaymentID == paymentID {
 			out = append(out, a)
 		}
 	}
 	return out, nil
 }
 
-func (f *fakeRepository) MarkReversed(_ context.Context, teacherID, paymentID uuid.UUID, at time.Time) error {
+func (f *fakeRepository) MarkReversed(_ context.Context, sc authctx.Scope, paymentID uuid.UUID, at time.Time) error {
 	p, ok := f.payments[paymentID]
-	if !ok || p.TeacherID != teacherID {
+	if !ok || p.TeacherID != sc.TeacherID {
 		return ErrPaymentNotFound
 	}
 	p.ReversedAt = &at
@@ -124,7 +125,7 @@ func TestReallocateReversedPaymentIsInvalid(t *testing.T) {
 	payment.ReversedAt = &reversedAt
 	repo.payments[payment.ID] = *payment
 
-	_, err := svc.Reallocate(ctx, teacherID, payment.ID, ReallocateRequest{
+	_, err := svc.Reallocate(ctx, scopeFor(teacherID), payment.ID, ReallocateRequest{
 		Allocations: []ReallocationLine{{InvoiceID: invID, Amount: 100_000}},
 	})
 	if apperror.From(err).Code != apperror.CodeValidation {
@@ -145,7 +146,7 @@ func TestReallocateReversalEntryIsInvalid(t *testing.T) {
 	reversal.ReversesPaymentID = &original.ID
 	repo.payments[reversal.ID] = *reversal
 
-	_, err := svc.Reallocate(ctx, teacherID, reversal.ID, ReallocateRequest{
+	_, err := svc.Reallocate(ctx, scopeFor(teacherID), reversal.ID, ReallocateRequest{
 		Allocations: []ReallocationLine{{InvoiceID: invID, Amount: 100_000}},
 	})
 	if apperror.From(err).Code != apperror.CodeValidation {
@@ -160,7 +161,7 @@ func TestReallocateToAnotherContactsInvoiceIsInvalid(t *testing.T) {
 	invID := addInvoice(repo, otherContactID, 100_000, 0, "issued")
 	payment := addPayment(repo, teacherID, contactID, 100_000)
 
-	_, err := svc.Reallocate(ctx, teacherID, payment.ID, ReallocateRequest{
+	_, err := svc.Reallocate(ctx, scopeFor(teacherID), payment.ID, ReallocateRequest{
 		Allocations: []ReallocationLine{{InvoiceID: invID, Amount: 100_000}},
 	})
 	if apperror.From(err).Code != apperror.CodeValidation {
@@ -179,7 +180,7 @@ func TestReallocateSumExceedingPaymentIsInvalid(t *testing.T) {
 	invB := addInvoice(repo, contactID, 200_000, 0, "issued")
 	payment := addPayment(repo, teacherID, contactID, 100_000)
 
-	_, err := svc.Reallocate(ctx, teacherID, payment.ID, ReallocateRequest{
+	_, err := svc.Reallocate(ctx, scopeFor(teacherID), payment.ID, ReallocateRequest{
 		Allocations: []ReallocationLine{
 			{InvoiceID: invA, Amount: 60_000},
 			{InvoiceID: invB, Amount: 60_000},
@@ -197,7 +198,7 @@ func TestReallocateAmountExceedingInvoiceRoomIsInvalid(t *testing.T) {
 	invID := addInvoice(repo, contactID, 100_000, 30_000, "partially_paid")
 	payment := addPayment(repo, teacherID, contactID, 100_000)
 
-	_, err := svc.Reallocate(ctx, teacherID, payment.ID, ReallocateRequest{
+	_, err := svc.Reallocate(ctx, scopeFor(teacherID), payment.ID, ReallocateRequest{
 		// room = total_due(100000) - (paid(30000) - existing-from-this-payment(0)) = 70000
 		Allocations: []ReallocationLine{{InvoiceID: invID, Amount: 80_000}},
 	})
@@ -213,7 +214,7 @@ func TestReallocateToDraftInvoiceIsInvalid(t *testing.T) {
 	invID := addInvoice(repo, contactID, 100_000, 0, "draft")
 	payment := addPayment(repo, teacherID, contactID, 100_000)
 
-	_, err := svc.Reallocate(ctx, teacherID, payment.ID, ReallocateRequest{
+	_, err := svc.Reallocate(ctx, scopeFor(teacherID), payment.ID, ReallocateRequest{
 		Allocations: []ReallocationLine{{InvoiceID: invID, Amount: 100_000}},
 	})
 	if apperror.From(err).Code != apperror.CodeValidation {
@@ -231,7 +232,7 @@ func TestReallocateSuccessRewritesToManualAndRecalcsUnion(t *testing.T) {
 	addAllocation(repo, teacherID, payment.ID, invA, 70_000, AllocatedAuto)
 	addAllocation(repo, teacherID, payment.ID, invB, 30_000, AllocatedAuto)
 
-	detail, err := svc.Reallocate(ctx, teacherID, payment.ID, ReallocateRequest{
+	detail, err := svc.Reallocate(ctx, scopeFor(teacherID), payment.ID, ReallocateRequest{
 		Allocations: []ReallocationLine{{InvoiceID: invA, Amount: 100_000}},
 	})
 	if err != nil {
@@ -262,7 +263,7 @@ func TestReverseTwiceIsConflict(t *testing.T) {
 	payment := addPayment(repo, teacherID, contactID, 100_000)
 	addAllocation(repo, teacherID, payment.ID, invID, 100_000, AllocatedAuto)
 
-	_, err := svc.Reverse(ctx, teacherID, payment.ID, ReverseRequest{Reason: "recorded twice by mistake"})
+	_, err := svc.Reverse(ctx, scopeFor(teacherID), payment.ID, ReverseRequest{Reason: "recorded twice by mistake"})
 	if err != nil {
 		t.Fatalf("first reverse: %v", err)
 	}
@@ -270,7 +271,7 @@ func TestReverseTwiceIsConflict(t *testing.T) {
 		t.Fatalf("want original + one reversal row, got %d payments", len(repo.payments))
 	}
 
-	_, err = svc.Reverse(ctx, teacherID, payment.ID, ReverseRequest{Reason: "trying again"})
+	_, err = svc.Reverse(ctx, scopeFor(teacherID), payment.ID, ReverseRequest{Reason: "trying again"})
 	if apperror.From(err).Code != apperror.CodeConflict {
 		t.Fatalf("second reverse attempt must be 409, got %v", err)
 	}
@@ -283,7 +284,7 @@ func TestReverseUnknownPaymentIsNotFound(t *testing.T) {
 	svc, _ := newTestService()
 	ctx := context.Background()
 
-	_, err := svc.Reverse(ctx, id.New(), id.New(), ReverseRequest{Reason: "does not exist"})
+	_, err := svc.Reverse(ctx, scopeFor(id.New()), id.New(), ReverseRequest{Reason: "does not exist"})
 	if apperror.From(err).Code != apperror.CodeNotFound {
 		t.Fatalf("reversing an unknown payment must be 404, got %v", err)
 	}
@@ -296,8 +297,9 @@ func TestReverseMirrorsAllocationsAndStampsOriginal(t *testing.T) {
 	invID := addInvoice(repo, contactID, 100_000, 100_000, "paid")
 	payment := addPayment(repo, teacherID, contactID, 100_000)
 	addAllocation(repo, teacherID, payment.ID, invID, 100_000, AllocatedAuto)
+	sc := scopeFor(teacherID)
 
-	detail, err := svc.Reverse(ctx, teacherID, payment.ID, ReverseRequest{Reason: "wrong contact"})
+	detail, err := svc.Reverse(ctx, sc, payment.ID, ReverseRequest{Reason: "wrong contact"})
 	if err != nil {
 		t.Fatalf("reverse: %v", err)
 	}
@@ -308,7 +310,7 @@ func TestReverseMirrorsAllocationsAndStampsOriginal(t *testing.T) {
 		t.Fatalf("reversal must mirror the original's allocations exactly, got %+v", detail.Allocations)
 	}
 
-	original, err := repo.GetPayment(ctx, teacherID, payment.ID)
+	original, err := repo.GetPayment(ctx, sc, payment.ID)
 	if err != nil {
 		t.Fatalf("get original: %v", err)
 	}
@@ -327,7 +329,7 @@ func TestAutoAllocateRemainderZeroIsConflict(t *testing.T) {
 	payment := addPayment(repo, teacherID, contactID, 100_000)
 	addAllocation(repo, teacherID, payment.ID, invID, 100_000, AllocatedAuto)
 
-	_, err := svc.AutoAllocateRemainder(ctx, teacherID, payment.ID)
+	_, err := svc.AutoAllocateRemainder(ctx, scopeFor(teacherID), payment.ID)
 	if apperror.From(err).Code != apperror.CodeConflict {
 		t.Fatalf("zero remainder must be 409, got %v", err)
 	}
@@ -342,7 +344,7 @@ func TestAutoAllocateRemainderOnReversedPaymentIsConflict(t *testing.T) {
 	payment.ReversedAt = &reversedAt
 	repo.payments[payment.ID] = *payment
 
-	_, err := svc.AutoAllocateRemainder(ctx, teacherID, payment.ID)
+	_, err := svc.AutoAllocateRemainder(ctx, scopeFor(teacherID), payment.ID)
 	if apperror.From(err).Code != apperror.CodeConflict {
 		t.Fatalf("auto-allocating a reversed payment must be 409, got %v", err)
 	}

@@ -15,16 +15,32 @@ const phoneField = z
   .min(1, "Bắt buộc nhập số điện thoại")
   .regex(vnPhonePattern, "Số điện thoại không hợp lệ");
 
-/** `contacts.ContactResponse` (`apps/api/internal/features/contacts/dto.go`). */
+/**
+ * `contacts.ContactResponse` (`apps/api/internal/features/contacts/dto.go`).
+ * The Zalo fields are `omitempty` server-side: an unmapped contact has no key
+ * at all rather than `null`, hence `.optional()` and not `.nullable()`.
+ */
 export const contactSchema = z.object({
   id: z.string(),
   full_name: z.string(),
   phone: z.string(),
   student_count: z.number().int(),
   created_at: z.string(),
+  zalo_user_id: z.string().optional(),
+  zalo_name: z.string().optional(),
 });
 
 export type Contact = z.infer<typeof contactSchema>;
+
+/**
+ * `contacts.ZaloMappingRequest` — both values come straight from the picked
+ * `GET /me/zalo/friends` row; the name is stored so lists render without
+ * refetching the live friend list.
+ */
+export interface ZaloMappingInput {
+  zalo_user_id: string;
+  zalo_name: string;
+}
 
 /**
  * `contacts.CreateRequest` / `UpdateRequest` — full replace, no partial
@@ -105,10 +121,54 @@ export const scheduleInputSchema = z.object({
 
 export type ScheduleInput = z.infer<typeof scheduleInputSchema>;
 
+/**
+ * One "khung giờ" as the class-timetable forms edit it (prototype
+ * `modalClass.slots` / `classCfg.slots`): a shared start time plus every
+ * weekday it repeats on. The wire shape stays one `ScheduleRequest` row per
+ * (weekday, time) pair — see `toClassCreateInput` and `diffSchedules`
+ * (`../lib/schedule-diff.ts`).
+ */
+export const scheduleSlotInputSchema = z.object({
+  start_time: z.string().regex(hhmmPattern, "Giờ phải theo định dạng HH:MM"),
+  days: z
+    .array(z.number().int().min(0).max(6))
+    .min(1, "Mỗi khung giờ cần ít nhất một ngày trong tuần"),
+});
+
+export type ScheduleSlotInput = z.infer<typeof scheduleSlotInputSchema>;
+
+/**
+ * The khung-giờ list both class forms share. A weekday may appear in only
+ * one slot: the session generator materializes at most one session per class
+ * per calendar date (`uq_class_sessions_per_day`,
+ * `apps/api/migrations/000001_baseline_schema.up.sql`) and matches rows by
+ * weekday alone, so a second row on the same weekday would be written but
+ * silently never generate its session — under-billing with no error.
+ */
+const classSlotsField = z
+  .array(scheduleSlotInputSchema)
+  .min(1, "Thêm ít nhất một khung giờ")
+  .superRefine((slots, ctx) => {
+    const seen = new Set<number>();
+    slots.forEach((slot, index) => {
+      if (slot.days.some((day) => seen.has(day))) {
+        ctx.addIssue({
+          code: "custom",
+          path: [index, "days"],
+          message: "Ngày này đã có ở khung giờ khác — mỗi ngày chỉ một khung giờ",
+        });
+      }
+      for (const day of slot.days) {
+        seen.add(day);
+      }
+    });
+  });
+
 /** `classes.ClassResponse`. `default_unit_price` is integer đồng, never a decimal. */
 export const classSchema = z.object({
   id: z.string(),
   name: z.string(),
+  teacher_id: z.string(),
   start_date: z.string(),
   end_date: z.string().nullable(),
   default_unit_price: z.number().int(),
@@ -144,47 +204,71 @@ export const classUpdateInputSchema = z.object({
 export type ClassUpdateInput = z.infer<typeof classUpdateInputSchema>;
 
 /**
+ * `handoff.ReassignResponse` (`PUT /classes/:id/teacher`). `teacher_id` is the
+ * class's new owner; `moved_planned_sessions` is 0 on an idempotent no-op.
+ */
+export const reassignTeacherResponseSchema = z.object({
+  class_id: z.string(),
+  teacher_id: z.string(),
+  moved_planned_sessions: z.number().int(),
+});
+
+export type ReassignTeacherResponse = z.infer<typeof reassignTeacherResponseSchema>;
+
+/**
  * Form shape for the "Cài đặt lớp" screen (prototype `classCfg`): one name,
- * one set of weekdays, one shared start time, one unit price. The screen
- * fans this out into `PUT /classes/:id` plus schedule add/delete calls —
- * see `diffSchedules` (`../lib/schedule-diff.ts`). Unlike
- * `classUpdateInputSchema`, price must be positive here: the prototype's
- * onSave rejects a zero rate with "Nhập đơn giá mỗi buổi".
+ * a list of khung-giờ slots, one unit price. The screen fans this out into
+ * `PUT /classes/:id` plus schedule add/delete calls — see `diffSchedules`
+ * (`../lib/schedule-diff.ts`). Unlike `classUpdateInputSchema`, price must
+ * be positive here: the prototype's onSave rejects a zero rate with
+ * "Nhập đơn giá mỗi buổi".
  */
 export const classSettingsInputSchema = z.object({
   name: z.string().trim().min(1, "Bắt buộc nhập tên lớp").max(100, "Tối đa 100 ký tự"),
-  days: z.array(z.number().int().min(0).max(6)).min(1, "Chọn ít nhất một ngày trong tuần"),
-  start_time: z.string().regex(hhmmPattern, "Giờ phải theo định dạng HH:MM"),
+  slots: classSlotsField,
   default_unit_price: z.number().int().min(1, "Nhập đơn giá mỗi buổi"),
 });
 
 export type ClassSettingsInput = z.infer<typeof classSettingsInputSchema>;
 
 /**
- * Form shape for `ClassDialog`'s create mode, which flattens the class and
- * its one initial `ScheduleInput` into a single field set, matching the
- * `modalClass` Design Spec (one weekday/time/duration picker alongside the
- * class fields). `toClassCreateInput` reassembles the wire shape that
- * `POST /classes` expects.
+ * Form shape for `ClassDialog`'s create mode: the class fields plus the
+ * khung-giờ slot list from the `modalClass` Design Spec. Duration is one
+ * shared field (the prototype omits it entirely; a per-slot input would only
+ * add noise) applied to every generated row. `toClassCreateInput`
+ * reassembles the wire shape that `POST /classes` expects.
  */
 export const classDialogInputSchema = z.object({
   name: z.string().trim().min(1, "Bắt buộc nhập tên lớp").max(100, "Tối đa 100 ký tự"),
   start_date: dateField,
   end_date: z.union([dateField, z.literal("")]).optional(),
   default_unit_price: z.number().int().min(0, "Học phí không được âm"),
-  weekday: z.number().int().min(0, "Chọn một ngày trong tuần").max(6),
-  start_time: z.string().regex(hhmmPattern, "Giờ phải theo định dạng HH:MM"),
+  slots: classSlotsField,
   duration_min: z.number().int().min(1, "Thời lượng phải lớn hơn 0"),
 });
 
 export type ClassDialogInput = z.infer<typeof classDialogInputSchema>;
 
 export function toClassCreateInput(values: ClassDialogInput): ClassCreateInput {
-  const { weekday, start_time, duration_min, ...rest } = values;
-  return {
-    ...rest,
-    schedules: [{ weekday, start_time, duration_min, effective_from: values.start_date }],
-  };
+  const { slots, duration_min, ...rest } = values;
+  // One wire row per (weekday, time) pair; two slots naming the same pair
+  // would otherwise duplicate a session generator server-side.
+  const seen = new Set<string>();
+  const schedules: ScheduleInput[] = [];
+  for (const slot of slots) {
+    for (const weekday of slot.days) {
+      const key = `${weekday}|${slot.start_time}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      schedules.push({
+        weekday,
+        start_time: slot.start_time,
+        duration_min,
+        effective_from: values.start_date,
+      });
+    }
+  }
+  return { ...rest, schedules };
 }
 
 /** `enrollments.EnrollmentResponse`. `unit_price` is integer đồng. */

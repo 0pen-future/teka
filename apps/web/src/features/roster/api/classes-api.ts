@@ -3,10 +3,12 @@ import { parseData, parseList, type Paginated } from "@/lib/api/envelope";
 
 import {
   classSchema,
+  reassignTeacherResponseSchema,
   scheduleSchema,
   type Class,
   type ClassCreateInput,
   type ClassUpdateInput,
+  type ReassignTeacherResponse,
   type Schedule,
   type ScheduleInput,
 } from "../schemas/roster-schemas";
@@ -66,4 +68,19 @@ export async function updateSchedule(
 
 export async function deleteSchedule(classId: string, scheduleId: string): Promise<void> {
   await apiClient.delete(`/classes/${classId}/schedules/${scheduleId}`);
+}
+
+/**
+ * `PUT /classes/:id/teacher` (`apps/api/internal/features/handoff`) — owner-only
+ * handoff. Moves the class, its schedules and its future planned sessions to
+ * `teacherId`; held/past/cancelled sessions and billing history stay behind.
+ */
+export async function reassignTeacher(
+  classId: string,
+  teacherId: string,
+): Promise<ReassignTeacherResponse> {
+  const res = await apiClient.put<unknown>(`/classes/${classId}/teacher`, {
+    teacher_id: teacherId,
+  });
+  return parseData(reassignTeacherResponseSchema, res.data);
 }

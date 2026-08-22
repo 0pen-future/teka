@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!.env.production.example
 # Localhost-only Vite defaults; VITE_* values are public by design.
 !apps/web/.env.development
 

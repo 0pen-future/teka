@@ -25,6 +25,7 @@ function daysAgo(count: number): string {
 export const fixtureClass: Class = {
   id: "90000000-0000-4000-8000-000000000001",
   name: "Toán 6A",
+  teacher_id: "91000000-0000-4000-8000-000000000001",
   start_date: "2026-01-05",
   end_date: null,
   default_unit_price: 150000,

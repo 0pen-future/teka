@@ -2,17 +2,23 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   bulkSendNotifications,
+  getNotificationRun,
   listNotifications,
   markNotificationsSent,
+  resumeNotificationRun,
   type ListNotificationsParams,
 } from "../api/notifications-api";
-import type { BulkSendInput, MarkSentInput } from "../schemas/collections-schemas";
+import type { BulkSendInput, MarkSentInput, RunSnapshot } from "../schemas/collections-schemas";
+
+/** How often an in-flight zalo_personal run is polled for progress. */
+export const RUN_POLL_INTERVAL_MS = 2000;
 
 export const notificationsKeys = {
   all: ["notifications"] as const,
   lists: () => [...notificationsKeys.all, "list"] as const,
   list: (periodId: string, params: ListNotificationsParams) =>
     [...notificationsKeys.lists(), periodId, params] as const,
+  run: (periodId: string) => [...notificationsKeys.all, "run", periodId] as const,
 };
 
 /**
@@ -45,6 +51,49 @@ export function useBulkSendNotifications(periodId: string) {
     mutationFn: (input: BulkSendInput) => bulkSendNotifications(periodId, input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: notificationsKeys.lists() });
+      // A zalo_personal send starts a background run; refetching the snapshot
+      // here is what kicks the progress poll off.
+      void queryClient.invalidateQueries({ queryKey: notificationsKeys.run(periodId) });
+    },
+  });
+}
+
+/**
+ * The period's latest zalo_personal run. One fetch on mount restores a run
+ * that survived a closed tab; the interval only exists while the snapshot
+ * says the run is still sending, so a runless period is read exactly once
+ * and a finished run never leaves a timer polling the API.
+ */
+export function useNotificationRun(periodId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useQuery({
+    queryKey: notificationsKeys.run(periodId ?? ""),
+    queryFn: async () => {
+      const previous = queryClient.getQueryData<RunSnapshot>(notificationsKeys.run(periodId ?? ""));
+      const snapshot = await getNotificationRun(periodId!);
+      // The run flips ledger rows to delivered/failed server-side; refresh
+      // them while it sends — and once more on the poll that sees it finish —
+      // so statuses update without a reload.
+      const justFinished = previous?.status === "running" && snapshot.status !== "running";
+      if (snapshot.status === "running" || justFinished) {
+        void queryClient.invalidateQueries({ queryKey: notificationsKeys.lists() });
+      }
+      return snapshot;
+    },
+    enabled: Boolean(periodId),
+    refetchInterval: (query) =>
+      query.state.data?.status === "running" ? RUN_POLL_INTERVAL_MS : false,
+  });
+}
+
+/** "Gửi tiếp" on an interrupted run — the run resumes over its still-queued rows. */
+export function useResumeNotificationRun(periodId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => resumeNotificationRun(periodId),
+    onSuccess: (snapshot) => {
+      // Seeding the snapshot (now running again) restarts the poll interval.
+      queryClient.setQueryData(notificationsKeys.run(periodId), snapshot);
     },
   });
 }

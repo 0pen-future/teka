@@ -89,12 +89,11 @@ export function LoginPage() {
             {loginMutation.isPending ? "Đang đăng nhập…" : "Đăng nhập"}
           </HvButton>
           <p className="text-center text-[13px] text-ink-400">
-            Chưa có tài khoản?{" "}
             <Link
-              to="/register"
+              to="/forgot-password"
               className="font-bold text-mint-600 underline-offset-4 hover:underline"
             >
-              Đăng ký
+              Quên mật khẩu?
             </Link>
           </p>
         </div>

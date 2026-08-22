@@ -106,4 +106,47 @@ describe("SessionsPage", () => {
     expect(screen.queryAllByRole("tab")).toHaveLength(0);
     expect(screen.getByText('Không có lớp nào khớp "hoá 12"')).toBeInTheDocument();
   });
+
+  it("selects the class named by ?class_id= (dashboard deep link)", async () => {
+    useSixClasses();
+    signInAs(testPrimaryTeacher);
+    renderWithProviders(<SessionsPage />, {
+      route: "/sessions?class_id=90000000-0000-4000-8000-000000000011",
+      path: "/sessions",
+    });
+
+    expect(await screen.findByRole("tab", { name: "Văn 6A" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("ignores a ?class_id= not in the active list and falls back to the first class", async () => {
+    useSixClasses();
+    signInAs(testPrimaryTeacher);
+    renderWithProviders(<SessionsPage />, {
+      route: "/sessions?class_id=ffffffff-0000-4000-8000-000000000000",
+      path: "/sessions",
+    });
+
+    expect(await screen.findByRole("tab", { name: fixtureClass.name })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("lets an explicit tab click override the ?class_id= link", async () => {
+    useSixClasses();
+    signInAs(testPrimaryTeacher);
+    renderWithProviders(<SessionsPage />, {
+      route: "/sessions?class_id=90000000-0000-4000-8000-000000000011",
+      path: "/sessions",
+    });
+    await screen.findByRole("tab", { name: "Văn 6A" });
+
+    await userEvent.click(screen.getByRole("tab", { name: "Toán 7B" }));
+
+    expect(screen.getByRole("tab", { name: "Toán 7B" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Văn 6A" })).toHaveAttribute("aria-selected", "false");
+  });
 });

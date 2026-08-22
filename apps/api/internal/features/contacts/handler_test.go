@@ -1,6 +1,7 @@
 package contacts
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -20,15 +21,25 @@ import (
 
 const handlerTestSecret = "contacts-test-secret-0123456789abcdef"
 
-// newContactsHTTPTest wires the real routes and auth middleware over the
-// in-memory fake repository.
+// fakeScopeResolver resolves every known teacher id to a scope where it owns
+// its own center — exactly like the real resolver does for a fixture teacher
+// who never joined anyone else's center.
+type fakeScopeResolver struct{}
+
+func (fakeScopeResolver) ResolveScope(_ context.Context, teacherID uuid.UUID) (authctx.Scope, error) {
+	return authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}, nil
+}
+
+// newContactsHTTPTest wires the real routes, auth, and scope middleware over
+// the in-memory fake repository.
 func newContactsHTTPTest(t *testing.T) (*gin.Engine, *fakeRepository) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	repo := newFakeRepository()
 	r := gin.New()
 	jwtCfg := config.JWTConfig{Secret: handlerTestSecret, AccessTTL: 15 * time.Minute}
-	RegisterRoutes(r.Group("/api/v1"), NewHandler(NewService(repo)), middleware.RequireAuth(jwtCfg))
+	RegisterRoutes(r.Group("/api/v1"), NewHandler(NewService(repo)),
+		middleware.RequireAuth(jwtCfg), middleware.ResolveScope(fakeScopeResolver{}))
 	return r, repo
 }
 
@@ -92,6 +103,8 @@ func TestAllRoutesRequireAuth(t *testing.T) {
 		{http.MethodGet, "/api/v1/contacts/" + someID},
 		{http.MethodPut, "/api/v1/contacts/" + someID},
 		{http.MethodDelete, "/api/v1/contacts/" + someID},
+		{http.MethodPut, "/api/v1/contacts/" + someID + "/zalo-mapping"},
+		{http.MethodDelete, "/api/v1/contacts/" + someID + "/zalo-mapping"},
 	}
 	for _, route := range routes {
 		w, env := do(t, r, route.method, route.path, "", "")
@@ -178,5 +191,117 @@ func TestListIsTenantScoped(t *testing.T) {
 	}
 	if len(rows) != 0 {
 		t.Fatalf("another teacher's list must be empty, got %+v", rows)
+	}
+}
+
+func TestZaloMappingRoundTrip(t *testing.T) {
+	r, _ := newContactsHTTPTest(t)
+	token := mintToken(t, uuid.New())
+
+	w, env := do(t, r, http.MethodPost, "/api/v1/contacts",
+		`{"full_name":"Chị Hoa","phone":"0912345678"}`, token)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: got %d %+v", w.Code, env)
+	}
+	var created ContactResponse
+	if err := json.Unmarshal(env.Data, &created); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	base := "/api/v1/contacts/" + created.ID.String()
+
+	w, env = do(t, r, http.MethodPut, base+"/zalo-mapping",
+		`{"zalo_user_id":"8421000123456789","zalo_name":"Hoa Nguyễn"}`, token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("map: want 200, got %d %+v", w.Code, env)
+	}
+	var mapped ContactResponse
+	if err := json.Unmarshal(env.Data, &mapped); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if mapped.ZaloUserID != "8421000123456789" || mapped.ZaloName != "Hoa Nguyễn" {
+		t.Fatalf("mapping missing from response: %+v", mapped)
+	}
+
+	// The regular contact read must carry the mapping too — the list UI shows it.
+	w, env = do(t, r, http.MethodGet, base, "", token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("get: got %d %+v", w.Code, env)
+	}
+	var got ContactResponse
+	if err := json.Unmarshal(env.Data, &got); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if got.ZaloUserID != "8421000123456789" || got.ZaloName != "Hoa Nguyễn" {
+		t.Fatalf("mapping missing from GET: %+v", got)
+	}
+
+	// Unmap is 204 and idempotent, mirroring the unlink endpoint's contract.
+	if w, env = do(t, r, http.MethodDelete, base+"/zalo-mapping", "", token); w.Code != http.StatusNoContent {
+		t.Fatalf("unmap: want 204, got %d %+v", w.Code, env)
+	}
+	if w, env = do(t, r, http.MethodDelete, base+"/zalo-mapping", "", token); w.Code != http.StatusNoContent {
+		t.Fatalf("second unmap: want 204, got %d %+v", w.Code, env)
+	}
+
+	w, env = do(t, r, http.MethodGet, base, "", token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("get after unmap: got %d %+v", w.Code, env)
+	}
+	var cleared ContactResponse
+	if err := json.Unmarshal(env.Data, &cleared); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if cleared.ZaloUserID != "" || cleared.ZaloName != "" {
+		t.Fatalf("mapping must be gone after unmap: %+v", cleared)
+	}
+}
+
+func TestZaloMappingValidation(t *testing.T) {
+	r, _ := newContactsHTTPTest(t)
+	token := mintToken(t, uuid.New())
+
+	w, env := do(t, r, http.MethodPost, "/api/v1/contacts",
+		`{"full_name":"Chị Hoa","phone":"0912345678"}`, token)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: got %d %+v", w.Code, env)
+	}
+	var created ContactResponse
+	if err := json.Unmarshal(env.Data, &created); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	path := "/api/v1/contacts/" + created.ID.String() + "/zalo-mapping"
+
+	cases := map[string]struct {
+		body      string
+		wantField string
+	}{
+		"missing user id":  {`{"zalo_name":"Hoa"}`, "zalo_user_id"},
+		"blank user id":    {`{"zalo_user_id":"","zalo_name":"Hoa"}`, "zalo_user_id"},
+		"user id too long": {`{"zalo_user_id":"` + strings.Repeat("9", 33) + `","zalo_name":"Hoa"}`, "zalo_user_id"},
+		"missing name":     {`{"zalo_user_id":"8421"}`, "zalo_name"},
+		"name too long":    {`{"zalo_user_id":"8421","zalo_name":"` + strings.Repeat("x", 101) + `"}`, "zalo_name"},
+	}
+	for name, tc := range cases {
+		w, env := do(t, r, http.MethodPut, path, tc.body, token)
+		if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Code != apperror.CodeValidation {
+			t.Fatalf("%s: want 422 VALIDATION_ERROR, got %d %+v", name, w.Code, env)
+		}
+		if env.Error.Fields[tc.wantField] == "" {
+			t.Fatalf("%s: want a message for field %q, got %+v", name, tc.wantField, env.Error.Fields)
+		}
+	}
+}
+
+func TestZaloMappingUnknownContactIs404(t *testing.T) {
+	r, _ := newContactsHTTPTest(t)
+	token := mintToken(t, uuid.New())
+	path := "/api/v1/contacts/" + uuid.NewString() + "/zalo-mapping"
+
+	if w, env := do(t, r, http.MethodPut, path,
+		`{"zalo_user_id":"8421","zalo_name":"Hoa"}`, token); w.Code != http.StatusNotFound {
+		t.Fatalf("map unknown: want 404, got %d %+v", w.Code, env)
+	}
+	if w, env := do(t, r, http.MethodDelete, path, "", token); w.Code != http.StatusNotFound {
+		t.Fatalf("unmap unknown: want 404, got %d %+v", w.Code, env)
 	}
 }

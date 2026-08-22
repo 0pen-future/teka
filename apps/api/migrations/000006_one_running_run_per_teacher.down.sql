@@ -1,0 +1,1 @@
+DROP INDEX uq_notification_runs_one_active;

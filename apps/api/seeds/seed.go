@@ -21,6 +21,7 @@ import (
 	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/features/sessions"
 	"teka/apps/api/internal/features/teachers"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 )
 
@@ -36,6 +37,11 @@ type seedTeacher struct {
 }
 
 // Development credentials only — never used outside seeded local databases.
+// The first teacher owns the center; every following teacher joins that same
+// center as a member instead of owning a center of their own — the invite-only
+// onboarding funnel has no self-registration or join-by-phone path anymore, so
+// a stable owner+member pair in one center is what the web and e2e specs need
+// to log in as.
 var seedTeachers = []seedTeacher{
 	{Phone: "+84901000001", Password: "lan-password", FullName: "Cô Lan"},
 	{Phone: "+84901000002", Password: "minh-password", FullName: "Thầy Minh"},
@@ -125,45 +131,148 @@ var seedClasses = []seedClass{
 	},
 }
 
-// Run inserts the seed teachers that do not exist yet, then demo roster data
-// for the first teacher, and reports each outcome.
+// Run inserts the seed teachers that do not exist yet — the first as the
+// center's owner, every following one as a member of that same center — then
+// demo roster data for the owner, and reports each outcome.
 func Run(ctx context.Context, db *gorm.DB, log *slog.Logger) error {
-	teacherIDs := make([]uuid.UUID, 0, len(seedTeachers))
-	for _, s := range seedTeachers {
-		teacherID, err := ensureTeacher(ctx, db, log, s)
-		if err != nil {
+	ownerID, centerID, err := ensureOwner(ctx, db, log, seedTeachers[0])
+	if err != nil {
+		return err
+	}
+	for _, s := range seedTeachers[1:] {
+		if _, err := ensureMember(ctx, db, log, s, centerID); err != nil {
 			return err
 		}
-		teacherIDs = append(teacherIDs, teacherID)
 	}
-	if err := seedRoster(ctx, db, log, teacherIDs[0]); err != nil {
+	sc, err := scopeFor(ctx, db, ownerID)
+	if err != nil {
 		return err
 	}
-	if err := seedStudentList(ctx, db, log, teacherIDs[0]); err != nil {
+	if err := seedRoster(ctx, db, log, sc); err != nil {
 		return err
 	}
-	if err := seedClassList(ctx, db, log, teacherIDs[0]); err != nil {
+	if err := seedStudentList(ctx, db, log, sc); err != nil {
 		return err
 	}
-	if err := seedEnrollmentList(ctx, db, log, teacherIDs[0]); err != nil {
+	if err := seedClassList(ctx, db, log, sc); err != nil {
 		return err
 	}
-	return seedSessionList(ctx, db, log, teacherIDs[0])
+	if err := seedEnrollmentList(ctx, db, log, sc); err != nil {
+		return err
+	}
+	return seedSessionList(ctx, db, log, sc)
 }
 
-// ensureTeacher returns the id of the teacher with s.Phone, creating the
-// user_accounts + teachers row pair in one transaction when absent.
-func ensureTeacher(ctx context.Context, db *gorm.DB, log *slog.Logger, s seedTeacher) (uuid.UUID, error) {
+// scopeFor resolves the seeded teacher's live center scope the same way the
+// scope middleware does, so the service calls below run with the exact tenant
+// context a real request would carry.
+func scopeFor(ctx context.Context, db *gorm.DB, teacherID uuid.UUID) (authctx.Scope, error) {
+	// Scanning straight into a bare uuid.UUID skips its sql.Scanner and hits
+	// GORM's element-wise array path instead; wrap it in a struct field.
+	var row struct {
+		CenterID uuid.UUID
+		IsOwner  bool
+	}
+	err := db.WithContext(ctx).Raw(`
+		SELECT t.center_id, (c.owner_id = t.id) AS is_owner
+		FROM teachers t
+		JOIN centers c ON c.id = t.center_id
+		WHERE t.id = ?`, teacherID).Scan(&row).Error
+	if err != nil {
+		return authctx.Scope{}, fmt.Errorf("seed: resolve scope for %s: %w", teacherID, err)
+	}
+	if row.CenterID == uuid.Nil {
+		return authctx.Scope{}, fmt.Errorf("seed: teacher %s has no center", teacherID)
+	}
+	return authctx.Scope{TeacherID: teacherID, CenterID: row.CenterID, IsOwner: row.IsOwner}, nil
+}
+
+// accountExists looks up an account by phone, so both ensureOwner and
+// ensureMember can share the same idempotency check.
+func accountExists(ctx context.Context, db *gorm.DB, phone string) (uuid.UUID, bool, error) {
 	var existing []uuid.UUID
 	err := db.WithContext(ctx).
-		Raw("SELECT id FROM user_accounts WHERE phone = ? AND deleted_at IS NULL", s.Phone).
+		Raw("SELECT id FROM user_accounts WHERE phone = ? AND deleted_at IS NULL", phone).
 		Scan(&existing).Error
 	if err != nil {
-		return uuid.UUID{}, fmt.Errorf("seed: look up %s: %w", s.Phone, err)
+		return uuid.UUID{}, false, fmt.Errorf("seed: look up %s: %w", phone, err)
 	}
 	if len(existing) > 0 {
+		return existing[0], true, nil
+	}
+	return uuid.UUID{}, false, nil
+}
+
+// ensureOwner returns the id of the teacher with s.Phone and the id of the
+// center they own, creating both the center and the user_accounts + teachers
+// row pair in one transaction when the account is absent.
+func ensureOwner(ctx context.Context, db *gorm.DB, log *slog.Logger, s seedTeacher) (uuid.UUID, uuid.UUID, error) {
+	if existingID, ok, err := accountExists(ctx, db, s.Phone); err != nil {
+		return uuid.UUID{}, uuid.UUID{}, err
+	} else if ok {
 		log.Info("seed: teacher exists, skipping", "phone", s.Phone)
-		return existing[0], nil
+		// Scanning straight into a bare uuid.UUID skips its sql.Scanner and hits
+		// GORM's element-wise array path instead; wrap it in a struct field, same
+		// as scopeFor below.
+		var row struct{ CenterID uuid.UUID }
+		if err := db.WithContext(ctx).
+			Raw("SELECT center_id FROM teachers WHERE id = ?", existingID).
+			Scan(&row).Error; err != nil {
+			return uuid.UUID{}, uuid.UUID{}, fmt.Errorf("seed: resolve center for %s: %w", s.Phone, err)
+		}
+		return existingID, row.CenterID, nil
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(s.Password), bcryptCost)
+	if err != nil {
+		return uuid.UUID{}, uuid.UUID{}, fmt.Errorf("seed: hash password for %s: %w", s.Phone, err)
+	}
+	accountID := id.New()
+	centerID := id.New()
+	// One transaction, mirroring registration: the personal centers row first
+	// (its owner FK is deferred until the teachers row follows), then the
+	// account/teacher pair, then the live membership stint.
+	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(
+			"INSERT INTO centers (id, name, owner_id) VALUES (?, ?, ?)",
+			centerID, s.FullName, accountID,
+		).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(
+			"INSERT INTO user_accounts (id, role, phone, password_hash, status) VALUES (?, 'teachers', ?, ?, 'active')",
+			accountID, s.Phone, string(hash),
+		).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(
+			"INSERT INTO teachers (id, full_name, timezone, center_id) VALUES (?, ?, ?, ?)",
+			accountID, s.FullName, defaultTimezone, centerID,
+		).Error; err != nil {
+			return err
+		}
+		return tx.Exec(
+			"INSERT INTO center_members (teacher_id, center_id) VALUES (?, ?)",
+			accountID, centerID,
+		).Error
+	})
+	if err != nil {
+		return uuid.UUID{}, uuid.UUID{}, fmt.Errorf("seed: create %s: %w", s.Phone, err)
+	}
+	log.Info("seed: owner created", "phone", s.Phone, "full_name", s.FullName)
+	return accountID, centerID, nil
+}
+
+// ensureMember returns the id of the teacher with s.Phone, creating the
+// user_accounts + teachers row pair as a member of centerID (no center of
+// their own) when absent — mirroring what invitation-accept produces, without
+// the token round-trip.
+func ensureMember(ctx context.Context, db *gorm.DB, log *slog.Logger, s seedTeacher, centerID uuid.UUID) (uuid.UUID, error) {
+	if existingID, ok, err := accountExists(ctx, db, s.Phone); err != nil {
+		return uuid.UUID{}, err
+	} else if ok {
+		log.Info("seed: teacher exists, skipping", "phone", s.Phone)
+		return existingID, nil
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(s.Password), bcryptCost)
@@ -178,39 +287,45 @@ func ensureTeacher(ctx context.Context, db *gorm.DB, log *slog.Logger, s seedTea
 		).Error; err != nil {
 			return err
 		}
+		if err := tx.Exec(
+			"INSERT INTO teachers (id, full_name, timezone, center_id) VALUES (?, ?, ?, ?)",
+			accountID, s.FullName, defaultTimezone, centerID,
+		).Error; err != nil {
+			return err
+		}
 		return tx.Exec(
-			"INSERT INTO teachers (id, full_name, timezone) VALUES (?, ?, ?)",
-			accountID, s.FullName, defaultTimezone,
+			"INSERT INTO center_members (teacher_id, center_id) VALUES (?, ?)",
+			accountID, centerID,
 		).Error
 	})
 	if err != nil {
 		return uuid.UUID{}, fmt.Errorf("seed: create %s: %w", s.Phone, err)
 	}
-	log.Info("seed: teacher created", "phone", s.Phone, "full_name", s.FullName)
+	log.Info("seed: member created", "phone", s.Phone, "full_name", s.FullName, "center_id", centerID)
 	return accountID, nil
 }
 
 // seedRoster inserts demo contacts for one teacher. It is all-or-nothing per
 // teacher: any pre-existing contact means the roster was seeded (or the
 // teacher has real data) and the whole block is skipped.
-func seedRoster(ctx context.Context, db *gorm.DB, log *slog.Logger, teacherID uuid.UUID) error {
+func seedRoster(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authctx.Scope) error {
 	var count int64
 	err := db.WithContext(ctx).
-		Raw("SELECT count(*) FROM contacts WHERE teacher_id = ? AND deleted_at IS NULL", teacherID).
+		Raw("SELECT count(*) FROM contacts WHERE teacher_id = ? AND deleted_at IS NULL", sc.TeacherID).
 		Scan(&count).Error
 	if err != nil {
 		return fmt.Errorf("seed: look up contacts: %w", err)
 	}
 	if count > 0 {
-		log.Info("seed: roster exists, skipping", "teacher_id", teacherID)
+		log.Info("seed: roster exists, skipping", "teacher_id", sc.TeacherID)
 		return nil
 	}
 
 	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, c := range seedContacts {
 			if err := tx.Exec(
-				"INSERT INTO contacts (id, teacher_id, full_name, phone) VALUES (?, ?, ?, ?)",
-				id.New(), teacherID, c.FullName, c.Phone,
+				"INSERT INTO contacts (id, teacher_id, center_id, full_name, phone) VALUES (?, ?, ?, ?, ?)",
+				id.New(), sc.TeacherID, sc.CenterID, c.FullName, c.Phone,
 			).Error; err != nil {
 				return err
 			}
@@ -220,23 +335,23 @@ func seedRoster(ctx context.Context, db *gorm.DB, log *slog.Logger, teacherID uu
 	if err != nil {
 		return fmt.Errorf("seed: create roster: %w", err)
 	}
-	log.Info("seed: roster created", "teacher_id", teacherID, "contacts", len(seedContacts))
+	log.Info("seed: roster created", "teacher_id", sc.TeacherID, "contacts", len(seedContacts))
 	return nil
 }
 
 // seedStudentList inserts the demo students against the seeded contacts,
 // skipped wholesale when the teacher already has any student. Contacts are
 // resolved by phone so the block also works against a roster seeded earlier.
-func seedStudentList(ctx context.Context, db *gorm.DB, log *slog.Logger, teacherID uuid.UUID) error {
+func seedStudentList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authctx.Scope) error {
 	var count int64
 	err := db.WithContext(ctx).
-		Raw("SELECT count(*) FROM students WHERE teacher_id = ? AND deleted_at IS NULL", teacherID).
+		Raw("SELECT count(*) FROM students WHERE teacher_id = ? AND deleted_at IS NULL", sc.TeacherID).
 		Scan(&count).Error
 	if err != nil {
 		return fmt.Errorf("seed: look up students: %w", err)
 	}
 	if count > 0 {
-		log.Info("seed: students exist, skipping", "teacher_id", teacherID)
+		log.Info("seed: students exist, skipping", "teacher_id", sc.TeacherID)
 		return nil
 	}
 
@@ -245,7 +360,7 @@ func seedStudentList(ctx context.Context, db *gorm.DB, log *slog.Logger, teacher
 			var contactIDs []uuid.UUID
 			if err := tx.Raw(
 				"SELECT id FROM contacts WHERE teacher_id = ? AND phone = ? AND deleted_at IS NULL",
-				teacherID, s.ContactPhone,
+				sc.TeacherID, s.ContactPhone,
 			).Scan(&contactIDs).Error; err != nil {
 				return err
 			}
@@ -257,8 +372,8 @@ func seedStudentList(ctx context.Context, db *gorm.DB, log *slog.Logger, teacher
 				note = s.DisplayNote
 			}
 			if err := tx.Exec(
-				"INSERT INTO students (id, teacher_id, contact_id, full_name, display_note) VALUES (?, ?, ?, ?, ?)",
-				id.New(), teacherID, contactIDs[0], s.FullName, note,
+				"INSERT INTO students (id, teacher_id, center_id, contact_id, full_name, display_note) VALUES (?, ?, ?, ?, ?, ?)",
+				id.New(), sc.TeacherID, sc.CenterID, contactIDs[0], s.FullName, note,
 			).Error; err != nil {
 				return err
 			}
@@ -268,22 +383,22 @@ func seedStudentList(ctx context.Context, db *gorm.DB, log *slog.Logger, teacher
 	if err != nil {
 		return fmt.Errorf("seed: create students: %w", err)
 	}
-	log.Info("seed: students created", "teacher_id", teacherID, "students", len(seedStudents))
+	log.Info("seed: students created", "teacher_id", sc.TeacherID, "students", len(seedStudents))
 	return nil
 }
 
 // seedClassList inserts the demo classes with their weekly schedules for one
 // teacher, skipped wholesale when the teacher already has any class.
-func seedClassList(ctx context.Context, db *gorm.DB, log *slog.Logger, teacherID uuid.UUID) error {
+func seedClassList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authctx.Scope) error {
 	var count int64
 	err := db.WithContext(ctx).
-		Raw("SELECT count(*) FROM classes WHERE teacher_id = ? AND deleted_at IS NULL", teacherID).
+		Raw("SELECT count(*) FROM classes WHERE teacher_id = ? AND deleted_at IS NULL", sc.TeacherID).
 		Scan(&count).Error
 	if err != nil {
 		return fmt.Errorf("seed: look up classes: %w", err)
 	}
 	if count > 0 {
-		log.Info("seed: classes exist, skipping", "teacher_id", teacherID)
+		log.Info("seed: classes exist, skipping", "teacher_id", sc.TeacherID)
 		return nil
 	}
 
@@ -291,15 +406,15 @@ func seedClassList(ctx context.Context, db *gorm.DB, log *slog.Logger, teacherID
 		for _, c := range seedClasses {
 			classID := id.New()
 			if err := tx.Exec(
-				"INSERT INTO classes (id, teacher_id, name, start_date, default_unit_price, status) VALUES (?, ?, ?, ?::date, ?, 'active')",
-				classID, teacherID, c.Name, c.StartDate, c.UnitPrice,
+				"INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price, status) VALUES (?, ?, ?, ?, ?::date, ?, 'active')",
+				classID, sc.TeacherID, sc.CenterID, c.Name, c.StartDate, c.UnitPrice,
 			).Error; err != nil {
 				return err
 			}
 			for _, s := range c.Schedules {
 				if err := tx.Exec(
-					"INSERT INTO class_schedules (id, teacher_id, class_id, weekday, start_time, duration_min, effective_from) VALUES (?, ?, ?, ?, ?::time, ?, ?::date)",
-					id.New(), teacherID, classID, s.Weekday, s.StartTime, s.DurationMin, c.StartDate,
+					"INSERT INTO class_schedules (id, teacher_id, center_id, class_id, weekday, start_time, duration_min, effective_from) VALUES (?, ?, ?, ?, ?, ?::time, ?, ?::date)",
+					id.New(), sc.TeacherID, sc.CenterID, classID, s.Weekday, s.StartTime, s.DurationMin, c.StartDate,
 				).Error; err != nil {
 					return err
 				}
@@ -310,7 +425,7 @@ func seedClassList(ctx context.Context, db *gorm.DB, log *slog.Logger, teacherID
 	if err != nil {
 		return fmt.Errorf("seed: create classes: %w", err)
 	}
-	log.Info("seed: classes created", "teacher_id", teacherID, "classes", len(seedClasses))
+	log.Info("seed: classes created", "teacher_id", sc.TeacherID, "classes", len(seedClasses))
 	return nil
 }
 
@@ -318,16 +433,16 @@ func seedClassList(ctx context.Context, db *gorm.DB, log *slog.Logger, teacherID
 // skipped wholesale when the teacher already has any enrollment. Students and
 // classes are resolved by name; unit_price is copied from the class's current
 // default, matching what the enrollments service does.
-func seedEnrollmentList(ctx context.Context, db *gorm.DB, log *slog.Logger, teacherID uuid.UUID) error {
+func seedEnrollmentList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authctx.Scope) error {
 	var count int64
 	err := db.WithContext(ctx).
-		Raw("SELECT count(*) FROM enrollments WHERE teacher_id = ? AND deleted_at IS NULL", teacherID).
+		Raw("SELECT count(*) FROM enrollments WHERE teacher_id = ? AND deleted_at IS NULL", sc.TeacherID).
 		Scan(&count).Error
 	if err != nil {
 		return fmt.Errorf("seed: look up enrollments: %w", err)
 	}
 	if count > 0 {
-		log.Info("seed: enrollments exist, skipping", "teacher_id", teacherID)
+		log.Info("seed: enrollments exist, skipping", "teacher_id", sc.TeacherID)
 		return nil
 	}
 
@@ -336,7 +451,7 @@ func seedEnrollmentList(ctx context.Context, db *gorm.DB, log *slog.Logger, teac
 			var studentIDs []uuid.UUID
 			if err := tx.Raw(
 				"SELECT id FROM students WHERE teacher_id = ? AND full_name = ? AND deleted_at IS NULL",
-				teacherID, e.StudentName,
+				sc.TeacherID, e.StudentName,
 			).Scan(&studentIDs).Error; err != nil {
 				return err
 			}
@@ -350,7 +465,7 @@ func seedEnrollmentList(ctx context.Context, db *gorm.DB, log *slog.Logger, teac
 			var classRows []classRow
 			if err := tx.Raw(
 				"SELECT id, default_unit_price FROM classes WHERE teacher_id = ? AND name = ? AND deleted_at IS NULL",
-				teacherID, e.ClassName,
+				sc.TeacherID, e.ClassName,
 			).Scan(&classRows).Error; err != nil {
 				return err
 			}
@@ -362,8 +477,8 @@ func seedEnrollmentList(ctx context.Context, db *gorm.DB, log *slog.Logger, teac
 				endedOn = e.EndedOn
 			}
 			if err := tx.Exec(
-				"INSERT INTO enrollments (id, teacher_id, student_id, class_id, started_on, ended_on, unit_price) VALUES (?, ?, ?, ?, ?::date, ?::date, ?)",
-				id.New(), teacherID, studentIDs[0], classRows[0].ID, e.StartedOn, endedOn, classRows[0].DefaultUnitPrice,
+				"INSERT INTO enrollments (id, teacher_id, center_id, student_id, class_id, started_on, ended_on, unit_price) VALUES (?, ?, ?, ?, ?, ?::date, ?::date, ?)",
+				id.New(), sc.TeacherID, sc.CenterID, studentIDs[0], classRows[0].ID, e.StartedOn, endedOn, classRows[0].DefaultUnitPrice,
 			).Error; err != nil {
 				return err
 			}
@@ -373,7 +488,7 @@ func seedEnrollmentList(ctx context.Context, db *gorm.DB, log *slog.Logger, teac
 	if err != nil {
 		return fmt.Errorf("seed: create enrollments: %w", err)
 	}
-	log.Info("seed: enrollments created", "teacher_id", teacherID, "enrollments", len(seedEnrollments))
+	log.Info("seed: enrollments created", "teacher_id", sc.TeacherID, "enrollments", len(seedEnrollments))
 	return nil
 }
 
@@ -399,27 +514,27 @@ type pastSession struct {
 // real attendance.Service, for every past session except the
 // pendingAttendanceCount most recent — a deterministic scatter of absences
 // gives the seeded data realistic variation without needing true randomness.
-func seedSessionList(ctx context.Context, db *gorm.DB, log *slog.Logger, teacherID uuid.UUID) error {
+func seedSessionList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authctx.Scope) error {
 	var count int64
 	err := db.WithContext(ctx).
-		Raw("SELECT count(*) FROM class_sessions WHERE teacher_id = ? AND deleted_at IS NULL", teacherID).
+		Raw("SELECT count(*) FROM class_sessions WHERE teacher_id = ? AND deleted_at IS NULL", sc.TeacherID).
 		Scan(&count).Error
 	if err != nil {
 		return fmt.Errorf("seed: look up sessions: %w", err)
 	}
 	if count > 0 {
-		log.Info("seed: sessions exist, skipping", "teacher_id", teacherID)
+		log.Info("seed: sessions exist, skipping", "teacher_id", sc.TeacherID)
 		return nil
 	}
 
 	var classIDs []uuid.UUID
 	if err := db.WithContext(ctx).
-		Raw("SELECT id FROM classes WHERE teacher_id = ? AND deleted_at IS NULL", teacherID).
+		Raw("SELECT id FROM classes WHERE teacher_id = ? AND deleted_at IS NULL", sc.TeacherID).
 		Scan(&classIDs).Error; err != nil {
 		return fmt.Errorf("seed: look up classes for sessions: %w", err)
 	}
 	if len(classIDs) == 0 {
-		log.Info("seed: no classes to generate sessions for, skipping", "teacher_id", teacherID)
+		log.Info("seed: no classes to generate sessions for, skipping", "teacher_id", sc.TeacherID)
 		return nil
 	}
 
@@ -449,7 +564,7 @@ func seedSessionList(ctx context.Context, db *gorm.DB, log *slog.Logger, teacher
 	// avoid the unique (class_id, session_date) constraint.
 	classDates := make(map[uuid.UUID]map[string]bool, len(classIDs))
 	for _, classID := range classIDs {
-		rows, err := sessionsSvc.ListRange(ctx, teacherID, classID, from, to)
+		rows, err := sessionsSvc.ListRange(ctx, sc, classID, from, to)
 		if err != nil {
 			return fmt.Errorf("seed: generate sessions for class %s: %w", classID, err)
 		}
@@ -473,7 +588,7 @@ func seedSessionList(ctx context.Context, db *gorm.DB, log *slog.Logger, teacher
 	confirmUpTo := max(len(past)-pendingAttendanceCount, 0)
 	var confirmed int
 	for i, ps := range past[:confirmUpTo] {
-		roster, err := enrollmentsSvc.ActiveOn(ctx, teacherID, ps.ClassID, ps.Date)
+		roster, err := enrollmentsSvc.ActiveOn(ctx, sc, ps.ClassID, ps.Date)
 		if err != nil {
 			return fmt.Errorf("seed: look up roster for session %s: %w", ps.ID, err)
 		}
@@ -487,7 +602,7 @@ func seedSessionList(ctx context.Context, db *gorm.DB, log *slog.Logger, teacher
 			}
 		}
 		req := attendance.ConfirmRequest{AbsentStudentIDs: absentIDs}
-		if _, err := attendanceSvc.Confirm(ctx, teacherID, ps.ID, req); err != nil {
+		if _, err := attendanceSvc.Confirm(ctx, sc, ps.ID, req); err != nil {
 			return fmt.Errorf("seed: confirm attendance for session %s: %w", ps.ID, err)
 		}
 		confirmed++
@@ -534,13 +649,13 @@ func seedSessionList(ctx context.Context, db *gorm.DB, log *slog.Logger, teacher
 			}
 			candidate = todayMid
 		}
-		detail, err := sessionsSvc.CreateAdHoc(ctx, teacherID, classID, sessions.CreateSessionRequest{
+		detail, err := sessionsSvc.CreateAdHoc(ctx, sc, classID, sessions.CreateSessionRequest{
 			SessionDate: candidate.Format("2006-01-02"),
 		})
 		if err != nil {
 			return fmt.Errorf("seed: backfill session for class %s: %w", classID, err)
 		}
-		if _, err := attendanceSvc.Confirm(ctx, teacherID, detail.ID, attendance.ConfirmRequest{}); err != nil {
+		if _, err := attendanceSvc.Confirm(ctx, sc, detail.ID, attendance.ConfirmRequest{}); err != nil {
 			return fmt.Errorf("seed: confirm backfilled session %s: %w", detail.ID, err)
 		}
 		generated++
@@ -548,7 +663,7 @@ func seedSessionList(ctx context.Context, db *gorm.DB, log *slog.Logger, teacher
 		backfilled++
 	}
 
-	log.Info("seed: sessions generated", "teacher_id", teacherID, "sessions", generated,
+	log.Info("seed: sessions generated", "teacher_id", sc.TeacherID, "sessions", generated,
 		"attendance_confirmed", confirmed, "attendance_pending", len(past)-(confirmed-backfilled),
 		"backfilled", backfilled)
 	return nil

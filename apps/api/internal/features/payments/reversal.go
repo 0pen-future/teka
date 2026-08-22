@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 )
 
@@ -16,15 +17,19 @@ import (
 // ascending invoice-id order. The order is not required for correctness once
 // the caller has already locked these rows FOR UPDATE, but keeping every
 // recompute loop on the same total order removes the last source of
-// lock-acquisition divergence between the write paths.
-func (s *Service) recalcTouched(ctx context.Context, teacherID uuid.UUID, set map[uuid.UUID]bool) error {
+// lock-acquisition divergence between the write paths. sc must be the
+// touched payment's own owner scope, derived from the row Reallocate/Reverse/
+// AutoAllocateRemainder just locked — never the raw acting caller's — so an
+// owner's oversight recompute never silently widens to another teacher's
+// invoice.
+func (s *Service) recalcTouched(ctx context.Context, sc authctx.Scope, set map[uuid.UUID]bool) error {
 	ids := make([]uuid.UUID, 0, len(set))
 	for invID := range set {
 		ids = append(ids, invID)
 	}
 	sort.Slice(ids, func(i, j int) bool { return ids[i].String() < ids[j].String() })
 	for _, invID := range ids {
-		if err := s.repo.RecalcInvoicePaid(ctx, teacherID, invID); err != nil {
+		if err := s.repo.RecalcInvoicePaid(ctx, sc, invID); err != nil {
 			return err
 		}
 	}
@@ -42,15 +47,16 @@ var reallocatableStatuses = map[string]bool{
 
 // Reallocate replaces paymentID's split with a teacher-supplied set of
 // amounts (a manual override of D8's automatic choice), validating every
-// line before touching a row: the payment must exist, be teacher-owned, and
-// be neither a reversal nor reversed; every target invoice must belong to
-// the same teacher and the same contact as the payment and sit in a status
-// that can still receive money; every amount must be positive; the sum must
-// not exceed the payment; and no single invoice may be pushed past its
-// total_due. All of that runs under FOR UPDATE inside the same transaction
-// that performs the write, so a concurrent payment or reallocation for the
-// same contact can never race it into an inconsistent split.
-func (s *Service) Reallocate(ctx context.Context, teacherID, paymentID uuid.UUID, req ReallocateRequest) (*PaymentDetail, error) {
+// line before touching a row: the payment must exist, be within sc's
+// tenancy, and be neither a reversal nor reversed; every target invoice must
+// belong to the same teacher and the same contact as the payment and sit in
+// a status that can still receive money; every amount must be positive; the
+// sum must not exceed the payment; and no single invoice may be pushed past
+// its total_due. All of that runs under FOR UPDATE inside the same
+// transaction that performs the write, so a concurrent payment or
+// reallocation for the same contact can never race it into an inconsistent
+// split.
+func (s *Service) Reallocate(ctx context.Context, sc authctx.Scope, paymentID uuid.UUID, req ReallocateRequest) (*PaymentDetail, error) {
 	if len(req.Allocations) == 0 {
 		return nil, apperror.Invalid("validation failed", map[string]string{"allocations": "must include at least one line"})
 	}
@@ -78,10 +84,14 @@ func (s *Service) Reallocate(ctx context.Context, teacherID, paymentID uuid.UUID
 	}
 
 	err := s.tx.WithinTx(ctx, func(txCtx context.Context) error {
-		payment, err := s.repo.LockPayment(txCtx, teacherID, paymentID)
+		payment, err := s.repo.LockPayment(txCtx, sc, paymentID)
 		if err != nil {
 			return err
 		}
+		// paymentScope is the payment's own owner scope — never sc — so an
+		// owner reallocating a member's payment recomputes only that
+		// member's invoices, matching billing's periodScope precedent.
+		paymentScope := authctx.Scope{TeacherID: payment.TeacherID, CenterID: payment.CenterID}
 		if payment.ReversesPaymentID != nil {
 			return apperror.Invalid("validation failed", map[string]string{"payment_id": "a reversal entry cannot be reallocated"})
 		}
@@ -92,7 +102,7 @@ func (s *Service) Reallocate(ctx context.Context, teacherID, paymentID uuid.UUID
 			return apperror.Invalid("validation failed", map[string]string{"allocations": "sum exceeds the payment amount"})
 		}
 
-		existing, err := s.repo.AllocationsByPayment(txCtx, teacherID, paymentID)
+		existing, err := s.repo.AllocationsByPayment(txCtx, paymentScope, paymentID)
 		if err != nil {
 			return err
 		}
@@ -116,7 +126,7 @@ func (s *Service) Reallocate(ctx context.Context, teacherID, paymentID uuid.UUID
 		for invID := range touched {
 			lockIDs = append(lockIDs, invID)
 		}
-		invoices, err := s.repo.InvoicesByIDs(txCtx, teacherID, lockIDs)
+		invoices, err := s.repo.InvoicesByIDs(txCtx, paymentScope, lockIDs)
 		if err != nil {
 			return err
 		}
@@ -150,7 +160,7 @@ func (s *Service) Reallocate(ctx context.Context, teacherID, paymentID uuid.UUID
 			return apperror.Invalid("validation failed", lineFields)
 		}
 
-		if err := s.repo.DeleteAllocations(txCtx, teacherID, paymentID); err != nil {
+		if err := s.repo.DeleteAllocations(txCtx, paymentScope, paymentID); err != nil {
 			return err
 		}
 
@@ -158,24 +168,25 @@ func (s *Service) Reallocate(ctx context.Context, teacherID, paymentID uuid.UUID
 		for _, invID := range invoiceIDs {
 			rows = append(rows, PaymentAllocation{
 				ID:          id.New(),
-				TeacherID:   teacherID,
+				TeacherID:   paymentScope.TeacherID,
+				CenterID:    paymentScope.CenterID,
 				PaymentID:   paymentID,
 				InvoiceID:   invID,
 				Amount:      amounts[invID],
 				AllocatedBy: AllocatedManual,
 			})
 		}
-		if err := s.repo.InsertAllocations(txCtx, teacherID, rows); err != nil {
+		if err := s.repo.InsertAllocations(txCtx, rows); err != nil {
 			return err
 		}
 
-		return s.recalcTouched(txCtx, teacherID, touched)
+		return s.recalcTouched(txCtx, paymentScope, touched)
 	})
 	if err != nil {
 		return nil, translate(err)
 	}
 
-	return s.Get(ctx, teacherID, paymentID)
+	return s.Get(ctx, sc, paymentID)
 }
 
 // Reverse creates a new payments row that cancels paymentID: same contact,
@@ -187,18 +198,23 @@ func (s *Service) Reallocate(ctx context.Context, teacherID, paymentID uuid.UUID
 // payment that is already reversed or is itself a reversal — a reversal
 // cannot be undone by reversing it again; recording a fresh payment is the
 // correct fix for a wrong reversal (YAGNI: no partial reversal in V1).
-func (s *Service) Reverse(ctx context.Context, teacherID, paymentID uuid.UUID, req ReverseRequest) (*PaymentDetail, error) {
+func (s *Service) Reverse(ctx context.Context, sc authctx.Scope, paymentID uuid.UUID, req ReverseRequest) (*PaymentDetail, error) {
 	var reversalID uuid.UUID
 	err := s.tx.WithinTx(ctx, func(txCtx context.Context) error {
-		original, err := s.repo.LockPayment(txCtx, teacherID, paymentID)
+		original, err := s.repo.LockPayment(txCtx, sc, paymentID)
 		if err != nil {
 			return err
 		}
+		// paymentScope anchors the reversal entry and every downstream call on
+		// the ORIGINAL payment's own owner, not sc — an owner reversing a
+		// member's payment must not silently reassign the reversal (and its
+		// allocation mirror) to the owner.
+		paymentScope := authctx.Scope{TeacherID: original.TeacherID, CenterID: original.CenterID}
 		if original.ReversedAt != nil || original.ReversesPaymentID != nil {
 			return apperror.Conflict("payment has already been reversed, or is itself a reversal entry")
 		}
 
-		allocs, err := s.repo.AllocationsByPayment(txCtx, teacherID, paymentID)
+		allocs, err := s.repo.AllocationsByPayment(txCtx, paymentScope, paymentID)
 		if err != nil {
 			return err
 		}
@@ -211,14 +227,15 @@ func (s *Service) Reverse(ctx context.Context, teacherID, paymentID uuid.UUID, r
 		for _, a := range allocs {
 			affected = append(affected, a.InvoiceID)
 		}
-		if _, err := s.repo.InvoicesByIDs(txCtx, teacherID, affected); err != nil {
+		if _, err := s.repo.InvoicesByIDs(txCtx, paymentScope, affected); err != nil {
 			return err
 		}
 
 		reason := req.Reason
 		reversal := &Payment{
 			ID:                id.New(),
-			TeacherID:         teacherID,
+			TeacherID:         paymentScope.TeacherID,
+			CenterID:          paymentScope.CenterID,
 			ContactID:         original.ContactID,
 			Amount:            original.Amount,
 			Method:            original.Method,
@@ -226,7 +243,7 @@ func (s *Service) Reverse(ctx context.Context, teacherID, paymentID uuid.UUID, r
 			ReversesPaymentID: &original.ID,
 			Note:              &reason,
 		}
-		if err := s.repo.CreatePayment(txCtx, teacherID, reversal); err != nil {
+		if err := s.repo.CreatePayment(txCtx, reversal); err != nil {
 			return err
 		}
 		reversalID = reversal.ID
@@ -236,7 +253,8 @@ func (s *Service) Reverse(ctx context.Context, teacherID, paymentID uuid.UUID, r
 		for _, a := range allocs {
 			mirrored = append(mirrored, PaymentAllocation{
 				ID:          id.New(),
-				TeacherID:   teacherID,
+				TeacherID:   paymentScope.TeacherID,
+				CenterID:    paymentScope.CenterID,
 				PaymentID:   reversal.ID,
 				InvoiceID:   a.InvoiceID,
 				Amount:      a.Amount,
@@ -244,21 +262,21 @@ func (s *Service) Reverse(ctx context.Context, teacherID, paymentID uuid.UUID, r
 			})
 			touched[a.InvoiceID] = true
 		}
-		if err := s.repo.InsertAllocations(txCtx, teacherID, mirrored); err != nil {
+		if err := s.repo.InsertAllocations(txCtx, mirrored); err != nil {
 			return err
 		}
 
-		if err := s.repo.MarkReversed(txCtx, teacherID, paymentID, s.now()); err != nil {
+		if err := s.repo.MarkReversed(txCtx, paymentScope, paymentID, s.now()); err != nil {
 			return err
 		}
 
-		return s.recalcTouched(txCtx, teacherID, touched)
+		return s.recalcTouched(txCtx, paymentScope, touched)
 	})
 	if err != nil {
 		return nil, translate(err)
 	}
 
-	return s.Get(ctx, teacherID, reversalID)
+	return s.Get(ctx, sc, reversalID)
 }
 
 // AutoAllocateRemainder re-runs D8's Allocate over paymentID's unallocated
@@ -271,17 +289,21 @@ func (s *Service) Reverse(ctx context.Context, teacherID, paymentID uuid.UUID, r
 // Returns 409 when there is no remainder to place; refuses a payment that is
 // reversed or is itself a reversal, the same guard Reverse and Reallocate
 // enforce.
-func (s *Service) AutoAllocateRemainder(ctx context.Context, teacherID, paymentID uuid.UUID) (*PaymentDetail, error) {
+func (s *Service) AutoAllocateRemainder(ctx context.Context, sc authctx.Scope, paymentID uuid.UUID) (*PaymentDetail, error) {
 	err := s.tx.WithinTx(ctx, func(txCtx context.Context) error {
-		payment, err := s.repo.LockPayment(txCtx, teacherID, paymentID)
+		payment, err := s.repo.LockPayment(txCtx, sc, paymentID)
 		if err != nil {
 			return err
 		}
+		// paymentScope is the payment's own owner scope — never sc — so an
+		// owner auto-allocating a member's payment only ever touches that
+		// member's own candidate invoices.
+		paymentScope := authctx.Scope{TeacherID: payment.TeacherID, CenterID: payment.CenterID}
 		if payment.ReversedAt != nil || payment.ReversesPaymentID != nil {
 			return apperror.Conflict("a reversed payment or a reversal entry cannot be auto-allocated")
 		}
 
-		existing, err := s.repo.AllocationsByPayment(txCtx, teacherID, paymentID)
+		existing, err := s.repo.AllocationsByPayment(txCtx, paymentScope, paymentID)
 		if err != nil {
 			return err
 		}
@@ -294,7 +316,7 @@ func (s *Service) AutoAllocateRemainder(ctx context.Context, teacherID, paymentI
 			return apperror.Conflict("payment has no unallocated remainder")
 		}
 
-		candidates, err := s.repo.CandidateInvoices(txCtx, teacherID, payment.ContactID)
+		candidates, err := s.repo.CandidateInvoices(txCtx, paymentScope, payment.ContactID)
 		if err != nil {
 			return err
 		}
@@ -311,7 +333,8 @@ func (s *Service) AutoAllocateRemainder(ctx context.Context, teacherID, paymentI
 		for _, a := range allocs {
 			rows = append(rows, PaymentAllocation{
 				ID:          id.New(),
-				TeacherID:   teacherID,
+				TeacherID:   paymentScope.TeacherID,
+				CenterID:    paymentScope.CenterID,
 				PaymentID:   paymentID,
 				InvoiceID:   a.InvoiceID,
 				Amount:      a.Amount,
@@ -319,17 +342,17 @@ func (s *Service) AutoAllocateRemainder(ctx context.Context, teacherID, paymentI
 			})
 			touched[a.InvoiceID] = true
 		}
-		if err := s.repo.InsertAllocations(txCtx, teacherID, rows); err != nil {
+		if err := s.repo.InsertAllocations(txCtx, rows); err != nil {
 			return err
 		}
 
-		return s.recalcTouched(txCtx, teacherID, touched)
+		return s.recalcTouched(txCtx, paymentScope, touched)
 	})
 	if err != nil {
 		return nil, translate(err)
 	}
 
-	return s.Get(ctx, teacherID, paymentID)
+	return s.Get(ctx, sc, paymentID)
 }
 
 // today resolves "now" as the calendar day at UTC midnight — V1's

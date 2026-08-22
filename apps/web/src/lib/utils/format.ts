@@ -39,7 +39,28 @@ export function formatSessionDate(sessionDate: string): string {
   return `${weekday}, ${day}/${month}`;
 }
 
+/**
+ * Renders a `YYYY-MM-DD` date as bare `dd/MM` (e.g. `"05/01"`) for dense
+ * table cells that carry no weekday. Malformed input passes through
+ * unchanged, same degradation contract as `formatSessionDate`.
+ */
+export function formatDayMonth(isoDate: string): string {
+  const [, month, day] = isoDate.split("-");
+  if (!month || !day) {
+    return isoDate;
+  }
+  return `${day}/${month}`;
+}
+
 /** Converts a stored E.164 Vietnamese number back to the local `0…` display form. */
 export function formatPhoneLocal(phone: string): string {
   return phone.startsWith("+84") ? `0${phone.slice(3)}` : phone;
+}
+
+/**
+ * Last given name's first letter for avatar discs — Vietnamese names put the
+ * given name last, so "Nguyễn Thị Lan" → "L". Empty input yields "".
+ */
+export function nameInitial(fullName: string): string {
+  return fullName.trim().split(/\s+/).at(-1)?.charAt(0) ?? "";
 }

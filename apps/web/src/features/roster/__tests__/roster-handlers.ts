@@ -1,5 +1,6 @@
 import { http, HttpResponse } from "msw";
 
+import type { Session } from "@/features/attendance";
 import { API_URL, fail, listMeta, ok } from "@/test/msw/handlers";
 
 import type { Class, Contact, Enrollment, Schedule, Student } from "../schemas/roster-schemas";
@@ -66,6 +67,7 @@ export const classSchedule: Schedule = {
 export const classWithSchedule: Class = {
   id: "70000000-0000-4000-8000-000000000001",
   name: "Toán 6A",
+  teacher_id: "73000000-0000-4000-8000-000000000001",
   start_date: "2026-01-05",
   end_date: null,
   default_unit_price: 150000,
@@ -86,6 +88,32 @@ export const enrollmentActive: Enrollment = {
   created_at: "2026-01-05T08:00:00Z",
 };
 
+/**
+ * ISO date for a day of the month the test run executes in — the students
+ * page only queries the current calendar month, so a fixed date would fall
+ * outside its window as real time moves on.
+ */
+export function dayOfCurrentMonth(day: number): string {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${String(day).padStart(2, "0")}`;
+}
+
+function makeSession(day: number, status: Session["status"]): Session {
+  return {
+    id: `session-${String(day).padStart(2, "0")}`,
+    class_id: classWithSchedule.id,
+    class_name: classWithSchedule.name,
+    session_date: dayOfCurrentMonth(day),
+    start_time: "18:00",
+    status,
+    cancel_reason: status === "cancelled" ? "Nghỉ lễ" : null,
+    attendance_confirmed_at: null,
+    student_count: 1,
+    created_at: "2026-01-01T08:00:00Z",
+  };
+}
+
 // --- In-memory store, reset before each test in the suite's beforeEach ---
 
 export function seedRosterStore() {
@@ -96,6 +124,18 @@ export function seedRosterStore() {
     })),
     classes: [{ ...classWithSchedule, schedules: [{ ...classSchedule }] }],
     enrollments: [{ ...enrollmentActive }],
+    // Four countable sessions this month plus one cancelled — the BUỔI T{m}
+    // column must skip the cancelled one.
+    sessions: [
+      makeSession(5, "held"),
+      makeSession(8, "cancelled"),
+      makeSession(12, "held"),
+      makeSession(19, "planned"),
+      makeSession(26, "planned"),
+    ],
+    // sessionId → absent student ids for the attendance-sheet handler; empty
+    // by default (everyone present), tests mutate via `getRosterStore()`.
+    absences: {} as Record<string, string[]>,
   };
 }
 
@@ -169,6 +209,34 @@ export const rosterHandlers = [
     contact.full_name = body.full_name;
     contact.phone = body.phone;
     return HttpResponse.json(ok(contact));
+  }),
+  http.put(`${API_URL}/contacts/:id/zalo-mapping`, async ({ params, request }) => {
+    const contact = store.contacts.find((item) => item.id === params.id);
+    if (!contact) {
+      return HttpResponse.json(fail("NOT_FOUND", "contact not found"), { status: 404 });
+    }
+    const body = (await request.json()) as { zalo_user_id: string; zalo_name: string };
+    // Mirrors the API's unique index: one Zalo friend maps to one contact.
+    const taken = store.contacts.some(
+      (item) => item.id !== contact.id && item.zalo_user_id === body.zalo_user_id,
+    );
+    if (taken) {
+      return HttpResponse.json(fail("CONFLICT", "friend already mapped to another contact"), {
+        status: 409,
+      });
+    }
+    contact.zalo_user_id = body.zalo_user_id;
+    contact.zalo_name = body.zalo_name;
+    return HttpResponse.json(ok(contact));
+  }),
+  http.delete(`${API_URL}/contacts/:id/zalo-mapping`, ({ params }) => {
+    const contact = store.contacts.find((item) => item.id === params.id);
+    if (!contact) {
+      return HttpResponse.json(fail("NOT_FOUND", "contact not found"), { status: 404 });
+    }
+    delete contact.zalo_user_id;
+    delete contact.zalo_name;
+    return new HttpResponse(null, { status: 204 });
   }),
 
   http.get(`${API_URL}/students`, ({ request }) => {
@@ -279,6 +347,9 @@ export const rosterHandlers = [
     const klass: Class = {
       id: nextId("class-"),
       name: body.name,
+      // The API assigns a new class to the creating teacher; the fixture
+      // roster runs under one owner, so a single stable id stands in.
+      teacher_id: "73000000-0000-4000-8000-000000000001",
       start_date: body.start_date,
       end_date: orNull(body.end_date),
       default_unit_price: body.default_unit_price,
@@ -309,6 +380,30 @@ export const rosterHandlers = [
     klass.end_date = orNull(body.end_date);
     klass.default_unit_price = body.default_unit_price;
     return HttpResponse.json(ok(klass));
+  }),
+  http.put(`${API_URL}/classes/:id/teacher`, async ({ params, request }) => {
+    const klass = store.classes.find((item) => item.id === params.id);
+    if (!klass) {
+      return HttpResponse.json(fail("NOT_FOUND", "class not found"), { status: 404 });
+    }
+    const body = (await request.json()) as { teacher_id: string };
+    // Mirror the server's future-planned-only move so the returned count is
+    // realistic; held/cancelled/past sessions keep their teacher.
+    const todayIso = new Date().toISOString().slice(0, 10);
+    let moved = 0;
+    for (const session of store.sessions) {
+      if (
+        session.class_id === klass.id &&
+        session.status === "planned" &&
+        session.session_date >= todayIso
+      ) {
+        moved += 1;
+      }
+    }
+    klass.teacher_id = body.teacher_id;
+    return HttpResponse.json(
+      ok({ class_id: klass.id, teacher_id: body.teacher_id, moved_planned_sessions: moved }),
+    );
   }),
   http.post(`${API_URL}/classes/:classId/schedules`, async ({ params, request }) => {
     const klass = store.classes.find((item) => item.id === params.classId);
@@ -346,13 +441,67 @@ export const rosterHandlers = [
     return new HttpResponse(null, { status: 204 });
   }),
 
+  http.get(`${API_URL}/classes/:classId/sessions`, ({ params, request }) => {
+    const url = new URL(request.url);
+    const from = url.searchParams.get("from");
+    const to = url.searchParams.get("to");
+    const items = store.sessions.filter(
+      (session) =>
+        session.class_id === params.classId &&
+        (!from || session.session_date >= from) &&
+        (!to || session.session_date <= to),
+    );
+    return HttpResponse.json(ok(items));
+  }),
+
+  http.get(`${API_URL}/sessions/:id/attendance`, ({ params }) => {
+    const session = store.sessions.find((item) => item.id === params.id);
+    if (!session) {
+      return HttpResponse.json(fail("NOT_FOUND", "session not found"), { status: 404 });
+    }
+    const absentIds = new Set(store.absences[session.id] ?? []);
+    // One row per student enrolled as of the session date, like the API.
+    const rows = store.enrollments
+      .filter(
+        (enrollment) =>
+          enrollment.class_id === session.class_id &&
+          enrollment.started_on <= session.session_date &&
+          (!enrollment.ended_on || enrollment.ended_on >= session.session_date),
+      )
+      .map((enrollment) => {
+        const student = store.students.find((item) => item.id === enrollment.student_id);
+        const absent = absentIds.has(enrollment.student_id);
+        return {
+          student_id: enrollment.student_id,
+          student_name: student?.full_name ?? enrollment.student_name,
+          display_note: student?.display_note ?? null,
+          enrollment_id: enrollment.id,
+          status: session.status === "held" ? (absent ? "absent" : "present") : null,
+          billable: session.status === "held" && !absent,
+          note: null,
+        };
+      });
+    return HttpResponse.json(
+      ok({
+        session_id: session.id,
+        session_date: session.session_date,
+        status: session.status,
+        attendance_confirmed_at: session.attendance_confirmed_at,
+        rows,
+        warning: null,
+      }),
+    );
+  }),
+
   http.get(`${API_URL}/enrollments`, ({ request }) => {
     const url = new URL(request.url);
     const studentId = url.searchParams.get("student_id");
     const classId = url.searchParams.get("class_id");
+    const active = url.searchParams.get("active");
     const items = store.enrollments.filter((enrollment) => {
       if (studentId && enrollment.student_id !== studentId) return false;
       if (classId && enrollment.class_id !== classId) return false;
+      if (active === "true" && enrollment.ended_on) return false;
       return true;
     });
     return HttpResponse.json(ok(items, listMeta(items.length)));

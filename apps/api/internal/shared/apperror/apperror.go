@@ -18,6 +18,7 @@ const (
 	CodeNotFound     = "NOT_FOUND"
 	CodeConflict     = "CONFLICT"
 	CodeInternal     = "INTERNAL_ERROR"
+	CodeTooManyReqs  = "TOO_MANY_REQUESTS"
 )
 
 // AppError carries an error code, HTTP status, and client-safe message across
@@ -76,6 +77,11 @@ func NotFound(resource string) *AppError {
 // Conflict is a 409 for state conflicts such as duplicates.
 func Conflict(message string) *AppError {
 	return New(CodeConflict, http.StatusConflict, message)
+}
+
+// TooManyRequests is a 429 for a caller that tripped a rate limit.
+func TooManyRequests(message string) *AppError {
+	return New(CodeTooManyReqs, http.StatusTooManyRequests, message)
 }
 
 // Internal is a 500 that keeps the cause for logs and hides it from clients.

@@ -117,12 +117,12 @@ func TestPublicGetValidTokenReturnsBothChildrenAndFamilyTotal(t *testing.T) {
 	seedChild(t, db, teacher.ID, contact.ID, "ConMot", date("2026-08-01"), 1)
 	seedChild(t, db, teacher.ID, contact.ID, "ConHai", date("2026-08-02"), 2)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 8)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 8)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
-	result, err := statementsSvc.Generate(ctx, teacher.ID, period.ID)
+	result, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 	require.Len(t, result.Statements, 1)
 	token := tokenOf(t, statementsSvc, result.Statements[0])
@@ -169,11 +169,11 @@ func TestPublicGet404ForEveryInvalidTokenReasonReturnsByteIdenticalBody(t *testi
 	makeStatement := func(month int, classStart, name string) (uuid.UUID, string) {
 		contact := testutil.Contact(t, db, teacher.ID)
 		seedChild(t, db, teacher.ID, contact.ID, name, date(classStart), 1)
-		period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, month)
+		period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, month)
 		require.NoError(t, err)
-		_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+		_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 		require.NoError(t, err)
-		result, err := statementsSvc.Generate(ctx, teacher.ID, period.ID)
+		result, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 		require.NoError(t, err)
 		for _, row := range result.Statements {
 			if row.ContactID == contact.ID {
@@ -185,7 +185,7 @@ func TestPublicGet404ForEveryInvalidTokenReasonReturnsByteIdenticalBody(t *testi
 	}
 
 	revokedID, revokedToken := makeStatement(1, "2026-01-01", "Revoked")
-	require.NoError(t, statementsSvc.Revoke(ctx, teacher.ID, revokedID))
+	require.NoError(t, statementsSvc.Revoke(ctx, testutil.ScopeFor(t, db, teacher.ID), revokedID))
 
 	expiredID, expiredToken := makeStatement(2, "2026-02-01", "Expired")
 	require.NoError(t, db.Table("statements").Where("id = ?", expiredID).
@@ -196,11 +196,11 @@ func TestPublicGet404ForEveryInvalidTokenReasonReturnsByteIdenticalBody(t *testi
 
 	paidContact := testutil.Contact(t, db, teacher.ID)
 	seedChild(t, db, teacher.ID, paidContact.ID, "Paid", date("2026-04-01"), 1)
-	paidPeriod, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 4)
+	paidPeriod, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 4)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, paidPeriod.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), paidPeriod.ID)
 	require.NoError(t, err)
-	paidResult, err := statementsSvc.Generate(ctx, teacher.ID, paidPeriod.ID)
+	paidResult, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), paidPeriod.ID)
 	require.NoError(t, err)
 	var paidRow statements.Row
 	for _, row := range paidResult.Statements {
@@ -210,7 +210,7 @@ func TestPublicGet404ForEveryInvalidTokenReasonReturnsByteIdenticalBody(t *testi
 	}
 	require.NotEqual(t, uuid.Nil, paidRow.ID, "expected a statement for the paid contact")
 	paidToken := tokenOf(t, statementsSvc, paidRow)
-	_, err = paymentsSvc.Record(ctx, teacher.ID, payments.RecordPaymentRequest{
+	_, err = paymentsSvc.Record(ctx, testutil.ScopeFor(t, db, teacher.ID), payments.RecordPaymentRequest{
 		ContactID: paidContact.ID, Amount: 100_000, Method: payments.MethodCash, ReceivedOn: "2026-04-15",
 	})
 	require.NoError(t, err)
@@ -267,12 +267,12 @@ func TestPublicPostCloseAttendanceCorrectionShowsLiveSessionsAndCarriedAdjustmen
 	record1 := testutil.AttendanceRecord(t, db, teacher.ID, session1.ID, student.ID, enrollment.ID)
 	testutil.AttendanceRecord(t, db, teacher.ID, session2.ID, student.ID, enrollment.ID)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 1)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 1)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
-	result, err := statementsSvc.Generate(ctx, teacher.ID, period.ID)
+	result, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, 200_000, result.Statements[0].TotalDue)
 	token := tokenOf(t, statementsSvc, result.Statements[0])
@@ -290,7 +290,7 @@ func TestPublicPostCloseAttendanceCorrectionShowsLiveSessionsAndCarriedAdjustmen
 
 	require.NoError(t, db.Model(&attendance.Record{}).
 		Where("id = ?", record1.ID).Update("billable", false).Error)
-	_, err = billingSvc.ReconcileSession(ctx, teacher.ID, session1.ID)
+	_, err = billingSvc.ReconcileSession(ctx, testutil.ScopeFor(t, db, teacher.ID), session1.ID)
 	require.NoError(t, err)
 
 	after := getPublic(t, router, token)
@@ -321,12 +321,12 @@ func TestPublicViewTrackingCountsOnlyJSONGetNotQRImage(t *testing.T) {
 	contact := testutil.Contact(t, db, teacher.ID)
 	seedChild(t, db, teacher.ID, contact.ID, "Viewed", date("2026-05-01"), 1)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 5)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 5)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
-	result, err := statementsSvc.Generate(ctx, teacher.ID, period.ID)
+	result, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 	row := result.Statements[0]
 	token := tokenOf(t, statementsSvc, row)
@@ -384,12 +384,12 @@ func TestPublicTwoFamiliesDataIsolation(t *testing.T) {
 	contactB := testutil.Contact(t, db, teacher.ID, testutil.WithContactFullName("Chi Binh"))
 	seedChild(t, db, teacher.ID, contactB.ID, "BinhCon", date("2026-06-01"), 1)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 6)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 6)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
-	result, err := statementsSvc.Generate(ctx, teacher.ID, period.ID)
+	result, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 	require.Len(t, result.Statements, 2)
 
@@ -424,9 +424,9 @@ func TestPublicAdjustmentReasonNeverAppearsInResponseBody(t *testing.T) {
 	contact := testutil.Contact(t, db, teacher.ID)
 	seedChild(t, db, teacher.ID, contact.ID, "Adjusted", date("2026-07-01"), 1)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 7)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 7)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
 	var invoiceRow struct{ ID uuid.UUID }
@@ -435,10 +435,10 @@ func TestPublicAdjustmentReasonNeverAppearsInResponseBody(t *testing.T) {
 		Take(&invoiceRow).Error)
 
 	const secretReason = "REASON_MUST_NEVER_LEAK_TO_PARENT"
-	_, _, err = billingSvc.AddAdjustment(ctx, teacher.ID, invoiceRow.ID, -15_000, secretReason)
+	_, _, err = billingSvc.AddAdjustment(ctx, testutil.ScopeFor(t, db, teacher.ID), invoiceRow.ID, -15_000, secretReason)
 	require.NoError(t, err)
 
-	result, err := statementsSvc.Generate(ctx, teacher.ID, period.ID)
+	result, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 	token := tokenOf(t, statementsSvc, result.Statements[0])
 
@@ -469,18 +469,18 @@ func TestPublicPaymentsByInvoiceMatchesD8UnderpaymentSplit(t *testing.T) {
 	seedChild(t, db, teacher.ID, contact.ID, "Earlier", date("2026-09-01"), 1)
 	seedChild(t, db, teacher.ID, contact.ID, "Later", date("2026-09-10"), 1)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 9)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 9)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
-	result, err := statementsSvc.Generate(ctx, teacher.ID, period.ID)
+	result, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 	require.Len(t, result.Statements, 1)
 	require.EqualValues(t, 200_000, result.Statements[0].TotalDue)
 	token := tokenOf(t, statementsSvc, result.Statements[0])
 
-	_, err = paymentsSvc.Record(ctx, teacher.ID, payments.RecordPaymentRequest{
+	_, err = paymentsSvc.Record(ctx, testutil.ScopeFor(t, db, teacher.ID), payments.RecordPaymentRequest{
 		ContactID: contact.ID, Amount: 150_000, Method: payments.MethodCash, ReceivedOn: "2026-09-15",
 	})
 	require.NoError(t, err)
@@ -514,12 +514,12 @@ func TestPublicQRImageServesWithBankConfigAndReturnsNeutral404WithoutIt(t *testi
 	contact := testutil.Contact(t, db, teacher.ID, testutil.WithContactFullName("Chi QR"))
 	seedChild(t, db, teacher.ID, contact.ID, "QRChild", date("2026-10-01"), 1)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 10)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 10)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
-	result, err := statementsSvc.Generate(ctx, teacher.ID, period.ID)
+	result, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 	token := tokenOf(t, statementsSvc, result.Statements[0])
 
@@ -589,12 +589,12 @@ func TestPublicRenderIssuesTheSameQueryCountRegardlessOfFamilySize(t *testing.T)
 	seedChild(t, db, teacher.ID, contactThree.ID, "Trio2", date("2026-11-02"), 1)
 	seedChild(t, db, teacher.ID, contactThree.ID, "Trio3", date("2026-11-03"), 1)
 
-	period, err := billingSvc.EnsurePeriod(ctx, teacher.ID, 2026, 11)
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 11)
 	require.NoError(t, err)
-	_, err = billingSvc.Close(ctx, teacher.ID, period.ID)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 
-	result, err := statementsSvc.Generate(ctx, teacher.ID, period.ID)
+	result, err := statementsSvc.Generate(ctx, testutil.ScopeFor(t, db, teacher.ID), period.ID)
 	require.NoError(t, err)
 	require.Len(t, result.Statements, 2)
 

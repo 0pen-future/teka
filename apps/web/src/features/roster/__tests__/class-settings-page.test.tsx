@@ -65,7 +65,7 @@ describe("ClassSettingsPage", () => {
     expect(screen.getByText("ĐƠN GIÁ HIỆN TẠI")).toBeInTheDocument();
 
     expect(screen.getByLabelText("Tên lớp")).toHaveValue(classWithSchedule.name);
-    expect(screen.getByLabelText("Giờ học")).toHaveValue("18:00");
+    expect(screen.getByLabelText("Giờ học khung 1")).toHaveValue("18:00");
     // classSchedule.weekday = 2 → the T3 chip starts selected.
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "T3" })).toHaveAttribute("aria-pressed", "true"),
@@ -81,7 +81,9 @@ describe("ClassSettingsPage", () => {
     await user.click(chip);
     await user.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
 
-    expect(await screen.findByText("Chọn ít nhất một ngày trong tuần")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Mỗi khung giờ cần ít nhất một ngày trong tuần"),
+    ).toBeInTheDocument();
   });
 
   it("warns when the unit price differs from the saved one", async () => {
@@ -123,11 +125,66 @@ describe("ClassSettingsPage", () => {
     expect(added?.effective_from).toBe(todayIso());
   });
 
+  it("adds a second khung giờ and saves rows for both times", async () => {
+    const user = userEvent.setup();
+    renderClassSettings();
+
+    await screen.findByLabelText("Tên lớp");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "T3" })).toHaveAttribute("aria-pressed", "true"),
+    );
+    await user.click(screen.getByRole("button", { name: "+ Thêm khung giờ khác" }));
+
+    const secondTime = await screen.findByLabelText("Giờ học khung 2");
+    await user.clear(secondTime);
+    await user.type(secondTime, "20:00");
+    // The new slot meets on T7 — its chips render after the first slot's, so
+    // the last "T7" button on screen belongs to khung giờ 2.
+    const chips = screen.getAllByRole("button", { name: "T7" });
+    expect(chips).toHaveLength(2);
+    await user.click(chips[1]!);
+    await user.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
+
+    expect(await screen.findByText("students-screen-stub")).toBeInTheDocument();
+
+    const saved = getRosterStore().classes.find((klass) => klass.id === classWithSchedule.id);
+    expect(saved?.schedules).toHaveLength(2);
+    const kept = saved?.schedules.find((s) => s.id === classSchedule.id);
+    expect(kept?.effective_to).toBeNull();
+    const added = saved?.schedules.find((s) => s.id !== classSchedule.id);
+    expect(added?.weekday).toBe(6);
+    expect(added?.start_time).toBe("20:00");
+    expect(added?.effective_from).toBe(todayIso());
+  });
+
+  it("rejects a weekday that already belongs to another khung giờ", async () => {
+    const user = userEvent.setup();
+    renderClassSettings();
+
+    await screen.findByLabelText("Tên lớp");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "T3" })).toHaveAttribute("aria-pressed", "true"),
+    );
+    await user.click(screen.getByRole("button", { name: "+ Thêm khung giờ khác" }));
+
+    // Slot 1 already meets on T3 — picking T3 again in slot 2 must not save:
+    // the backend generates at most one session per class per date.
+    const chips = screen.getAllByRole("button", { name: "T3" });
+    expect(chips).toHaveLength(2);
+    await user.click(chips[1]!);
+    await user.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
+
+    expect(
+      await screen.findByText("Ngày này đã có ở khung giờ khác — mỗi ngày chỉ một khung giờ"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("students-screen-stub")).not.toBeInTheDocument();
+  });
+
   it("closes the old row instead of deleting it when the time changes", async () => {
     const user = userEvent.setup();
     renderClassSettings();
 
-    const timeInput = await screen.findByLabelText("Giờ học");
+    const timeInput = await screen.findByLabelText("Giờ học khung 1");
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "T3" })).toHaveAttribute("aria-pressed", "true"),
     );
