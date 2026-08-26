@@ -15,6 +15,7 @@ import (
 	"teka/apps/api/internal/features/zalo"
 	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/shared/authctx"
+	"teka/apps/api/internal/shared/events"
 	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/shared/token"
 	"teka/apps/api/internal/shared/validation"
@@ -90,7 +91,10 @@ type Service struct {
 	tx            database.TxManager
 	inviteTTL     time.Duration
 	publicBaseURL string
-	now           func() time.Time
+	// bus receives MemberJoined events for the audit trail. Nil is a
+	// supported state — publish goes through the nil-safe helper below.
+	bus events.Bus
+	now func() time.Time
 }
 
 // NewService builds the invitations service. cfg supplies the invite TTL;
@@ -100,7 +104,7 @@ type Service struct {
 // router.go builds invitations, teachers.Service and centers.Service already
 // exist (invitations is wired last), so there is no construction cycle to
 // break here, unlike the auth<->teachers/centers seams.
-func NewService(repo Repository, zaloSender ZaloSender, onboarder AccountOnboarder, opener MembershipOpener, tx database.TxManager, cfg config.OnboardingConfig, publicBaseURL string) *Service {
+func NewService(repo Repository, zaloSender ZaloSender, onboarder AccountOnboarder, opener MembershipOpener, tx database.TxManager, cfg config.OnboardingConfig, publicBaseURL string, bus events.Bus) *Service {
 	return &Service{
 		repo:          repo,
 		zalo:          zaloSender,
@@ -109,7 +113,15 @@ func NewService(repo Repository, zaloSender ZaloSender, onboarder AccountOnboard
 		tx:            tx,
 		inviteTTL:     cfg.InviteTTL,
 		publicBaseURL: publicBaseURL,
+		bus:           bus,
 		now:           time.Now,
+	}
+}
+
+// publish emits e when a bus is wired; a nil bus makes every publish a no-op.
+func (s *Service) publish(e events.Event) {
+	if s.bus != nil {
+		s.bus.Publish(e)
 	}
 }
 
@@ -284,9 +296,12 @@ func (s *Service) Preview(ctx context.Context, req PreviewRequest) (*PreviewResp
 // never distinguish "no such token" from "right token, wrong account state".
 // The whole flow runs in one WithinTx with a SELECT ... FOR UPDATE lock on
 // the invitation row, so two concurrent accepts of the same token serialize
-// and only one can flip pending->accepted.
-func (s *Service) Accept(ctx context.Context, req AcceptRequest) error {
-	return s.tx.WithinTx(ctx, func(ctx context.Context) error {
+// and only one can flip pending->accepted. A successful accept publishes
+// MemberJoined strictly after the transaction commits — a rolled-back
+// membership must never reach the audit trail.
+func (s *Service) Accept(ctx context.Context, req AcceptRequest, meta ClientMeta) error {
+	var joined MemberJoined
+	err := s.tx.WithinTx(ctx, func(ctx context.Context) error {
 		inv, err := s.repo.GetByTokenHashForUpdate(ctx, token.Hash(req.Token))
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
@@ -296,6 +311,13 @@ func (s *Service) Accept(ctx context.Context, req AcceptRequest) error {
 		}
 		if inv.Status != StatusPending || inv.Expired(s.now()) {
 			return errAcceptRejected
+		}
+
+		joined = MemberJoined{
+			CenterID:     inv.CenterID,
+			InvitationID: inv.ID,
+			IP:           meta.IP,
+			UserAgent:    meta.UserAgent,
 		}
 
 		acct, err := s.onboarder.FindByPhone(ctx, inv.Phone)
@@ -308,6 +330,7 @@ func (s *Service) Accept(ctx context.Context, req AcceptRequest) error {
 			if oerr := s.opener.OpenMembership(ctx, accountID, inv.CenterID); oerr != nil {
 				return oerr
 			}
+			joined.UserID = accountID
 		case err != nil:
 			return apperror.Internal(err)
 		case acct.Status == teachers.StatusActive:
@@ -336,6 +359,7 @@ func (s *Service) Accept(ctx context.Context, req AcceptRequest) error {
 			if serr := s.opener.SwitchTeacherCenter(ctx, acct.ID, inv.CenterID); serr != nil {
 				return serr
 			}
+			joined.UserID = acct.ID
 		}
 
 		if merr := s.repo.MarkAccepted(ctx, inv.ID, s.now()); merr != nil {
@@ -343,4 +367,10 @@ func (s *Service) Accept(ctx context.Context, req AcceptRequest) error {
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	joined.OccurredAt = s.now()
+	s.publish(joined)
+	return nil
 }

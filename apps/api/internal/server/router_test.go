@@ -20,6 +20,7 @@ import (
 	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/features/zalo"
 	"teka/apps/api/internal/middleware"
+	"teka/apps/api/internal/shared/events"
 	"teka/apps/api/internal/shared/secrets"
 )
 
@@ -53,11 +54,11 @@ func newTestRouterEnv(t *testing.T, env string) http.Handler {
 	teachersSvc := teachers.NewService(teachers.NewRepository(nil))
 	centersSvc := centers.NewService(centers.NewRepository(nil), txMgr)
 	authSvc := auth.NewService(teachersSvc, auth.NewRepository(nil), auth.NewTokenIssuer(cfg.JWT), txMgr,
-		centersSvc, zaloSvc, cfg.Onboarding, cfg.Statements.PublicBaseURL)
+		centersSvc, zaloSvc, cfg.Onboarding, cfg.Statements.PublicBaseURL, nil)
 	centersSvc.SetAccountDisabler(authSvc)
 	teachersSvc.SetTokenRevoker(authSvc)
 
-	return NewRouter(cfg, log, nil, zaloSvc, statementsSvc, notificationsSvc, teachersSvc, centersSvc, authSvc)
+	return NewRouter(cfg, log, nil, zaloSvc, statementsSvc, notificationsSvc, teachersSvc, centersSvc, authSvc, events.NewSync())
 }
 
 // newTestZaloService builds the one feature service NewRouter does not build

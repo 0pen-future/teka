@@ -48,6 +48,10 @@ services:
         condition: service_healthy
 
   api:
+    # Graceful shutdown drains HTTP (10s), the event bus (5s), and the
+    # audit buffer's final flush (5s); Docker's 10s default would SIGKILL
+    # mid-drain and drop the last audit batch.
+    stop_grace_period: 30s
     build:
       context: ./apps/api
       dockerfile: Dockerfile.dev

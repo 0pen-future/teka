@@ -53,7 +53,7 @@ func newCLIEnv(t *testing.T) *cliEnv {
 	jwtCfg := config.JWTConfig{Secret: testutil.JWTSecret, AccessTTL: 15 * time.Minute}
 	onboardingCfg := config.OnboardingConfig{InviteTTL: 72 * time.Hour, ResetTTL: 48 * time.Hour, ResetCooldown: 15 * time.Minute}
 	authSvc := auth.NewService(teachersSvc, auth.NewRepository(db), auth.NewTokenIssuer(jwtCfg), tx,
-		centersSvc, stubZaloSender{}, onboardingCfg, "https://app.example.com")
+		centersSvc, stubZaloSender{}, onboardingCfg, "https://app.example.com", nil)
 	centersSvc.SetAccountDisabler(authSvc)
 	teachersSvc.SetTokenRevoker(authSvc)
 	return &cliEnv{db: db, tx: tx, teachersSvc: teachersSvc, centersSvc: centersSvc, authSvc: authSvc}
@@ -74,7 +74,7 @@ func TestBootstrapCenterFreshDBOwnerCanLogInAndIsOwner(t *testing.T) {
 	require.NotEqual(t, uuid.Nil, centerID)
 	require.NotEqual(t, uuid.Nil, accountID)
 
-	sess, err := e.authSvc.Login(ctx, auth.LoginRequest{Phone: "+84901234567", Password: "owner-password-1"})
+	sess, err := e.authSvc.Login(ctx, auth.LoginRequest{Phone: "+84901234567", Password: "owner-password-1"}, auth.ClientMeta{})
 	require.NoError(t, err, "the owner must be able to log in immediately after bootstrap")
 	require.Equal(t, accountID, sess.Teacher.Account.ID)
 
@@ -124,7 +124,7 @@ func TestResetPasswordRevokesSessionAndAllowsReloginWithNewPassword(t *testing.T
 	ctx := context.Background()
 	owner, _ := testutil.Teacher(t, e.db, testutil.WithPassword("old-password-1"))
 
-	oldSess, err := e.authSvc.Login(ctx, auth.LoginRequest{Phone: owner.Phone, Password: "old-password-1"})
+	oldSess, err := e.authSvc.Login(ctx, auth.LoginRequest{Phone: owner.Phone, Password: "old-password-1"}, auth.ClientMeta{})
 	require.NoError(t, err)
 
 	accountID, err := resetPassword(ctx, e.tx, e.teachersSvc, e.authSvc, owner.Phone, "new-password-1")
@@ -134,10 +134,10 @@ func TestResetPasswordRevokesSessionAndAllowsReloginWithNewPassword(t *testing.T
 	_, err = e.authSvc.Refresh(ctx, oldSess.RefreshToken)
 	require.Error(t, err, "the pre-existing refresh token must be revoked by reset-password")
 
-	_, err = e.authSvc.Login(ctx, auth.LoginRequest{Phone: owner.Phone, Password: "old-password-1"})
+	_, err = e.authSvc.Login(ctx, auth.LoginRequest{Phone: owner.Phone, Password: "old-password-1"}, auth.ClientMeta{})
 	require.Error(t, err, "the old password must no longer work")
 
-	sess, err := e.authSvc.Login(ctx, auth.LoginRequest{Phone: owner.Phone, Password: "new-password-1"})
+	sess, err := e.authSvc.Login(ctx, auth.LoginRequest{Phone: owner.Phone, Password: "new-password-1"}, auth.ClientMeta{})
 	require.NoError(t, err, "the new password must work immediately")
 	require.Equal(t, owner.ID, sess.Teacher.Account.ID)
 }
@@ -161,6 +161,6 @@ func TestResetPasswordWorksOnDisabledAccountWithoutReactivatingIt(t *testing.T) 
 	require.NoError(t, e.db.Raw("SELECT status FROM user_accounts WHERE id = ?", member.ID).Scan(&status).Error)
 	require.Equal(t, teachers.StatusDisabled, status, "status must stay disabled")
 
-	_, err = e.authSvc.Login(ctx, auth.LoginRequest{Phone: member.Phone, Password: "recovered-password-1"})
+	_, err = e.authSvc.Login(ctx, auth.LoginRequest{Phone: member.Phone, Password: "recovered-password-1"}, auth.ClientMeta{})
 	require.Error(t, err, "login must stay blocked for a disabled account even with the right password")
 }

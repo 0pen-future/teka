@@ -53,7 +53,7 @@ func newInvitationsHTTPTest(t *testing.T) (*gin.Engine, *fakeRepository, *fakeSc
 	gin.SetMode(gin.TestMode)
 	repo := newFakeRepository()
 	resolver := &fakeScopeResolver{}
-	svc := NewService(repo, &fakeZaloSender{}, newFakeOnboarder(), &fakeOpener{}, noopTxManager{}, testOnboardingConfig(), "https://app.example.com")
+	svc := NewService(repo, &fakeZaloSender{}, newFakeOnboarder(), &fakeOpener{}, noopTxManager{}, testOnboardingConfig(), "https://app.example.com", nil)
 	r := gin.New()
 	jwtCfg := config.JWTConfig{Secret: handlerTestSecret, AccessTTL: 15 * time.Minute}
 	RegisterRoutes(r.Group("/api/v1"), NewHandler(svc),
@@ -75,7 +75,7 @@ func newInvitationsPublicHTTPTest(t *testing.T) (*gin.Engine, *fakeRepository, *
 	repo := newFakeRepository()
 	onboarder := newFakeOnboarder()
 	opener := &fakeOpener{}
-	svc := NewService(repo, &fakeZaloSender{}, onboarder, opener, noopTxManager{}, testOnboardingConfig(), "https://app.example.com")
+	svc := NewService(repo, &fakeZaloSender{}, onboarder, opener, noopTxManager{}, testOnboardingConfig(), "https://app.example.com", nil)
 	r := gin.New()
 	RegisterPublicRoutes(r.Group("/api/v1"), NewHandler(svc), noLimit, noLimit)
 	return r, repo, onboarder, opener

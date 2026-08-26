@@ -62,6 +62,67 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Onboarding.ResetCooldown != 15*time.Minute {
 		t.Errorf("Onboarding.ResetCooldown = %v, want 15m", cfg.Onboarding.ResetCooldown)
 	}
+	if cfg.Audit.BufferSize != 1024 {
+		t.Errorf("Audit.BufferSize = %d, want 1024", cfg.Audit.BufferSize)
+	}
+	if cfg.Audit.BatchSize != 100 {
+		t.Errorf("Audit.BatchSize = %d, want 100", cfg.Audit.BatchSize)
+	}
+	if cfg.Audit.FlushInterval != time.Second {
+		t.Errorf("Audit.FlushInterval = %v, want 1s", cfg.Audit.FlushInterval)
+	}
+	if cfg.Audit.DrainTimeout != 5*time.Second {
+		t.Errorf("Audit.DrainTimeout = %v, want 5s", cfg.Audit.DrainTimeout)
+	}
+}
+
+func TestAuditConfigErrors(t *testing.T) {
+	cases := []struct {
+		name    string
+		mutate  func(t *testing.T)
+		wantSub string
+	}{
+		{
+			name:    "non-positive buffer",
+			mutate:  func(t *testing.T) { t.Setenv("API_AUDIT_BUFFER_SIZE", "0") },
+			wantSub: "API_AUDIT_BUFFER_SIZE",
+		},
+		{
+			name:    "non-positive batch",
+			mutate:  func(t *testing.T) { t.Setenv("API_AUDIT_BATCH_SIZE", "0") },
+			wantSub: "API_AUDIT_BATCH_SIZE",
+		},
+		{
+			// audit_logs has 13 insert parameters; batches above 4000 rows
+			// would overflow postgres' 65535-parameter statement limit.
+			name:    "batch above postgres param limit",
+			mutate:  func(t *testing.T) { t.Setenv("API_AUDIT_BATCH_SIZE", "5000") },
+			wantSub: "API_AUDIT_BATCH_SIZE",
+		},
+		{
+			name:    "non-positive flush interval",
+			mutate:  func(t *testing.T) { t.Setenv("API_AUDIT_FLUSH_INTERVAL", "0s") },
+			wantSub: "API_AUDIT_FLUSH_INTERVAL",
+		},
+		{
+			name:    "non-positive drain timeout",
+			mutate:  func(t *testing.T) { t.Setenv("API_AUDIT_DRAIN_TIMEOUT", "-1s") },
+			wantSub: "API_AUDIT_DRAIN_TIMEOUT",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setRequired(t)
+			tc.mutate(t)
+			_, err := Load()
+			if err == nil {
+				t.Fatalf("Load() error = nil, want error containing %q", tc.wantSub)
+			}
+			if !strings.Contains(err.Error(), tc.wantSub) {
+				t.Errorf("Load() error = %q, want substring %q", err, tc.wantSub)
+			}
+		})
+	}
 }
 
 // TestOnboardingConfigOverrides proves the three onboarding knobs parse from

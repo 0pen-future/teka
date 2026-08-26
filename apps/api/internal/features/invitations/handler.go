@@ -189,7 +189,8 @@ func (h *Handler) accept(c *gin.Context) {
 		response.Err(c, validation.BindError(err))
 		return
 	}
-	if err := h.svc.Accept(c.Request.Context(), req); err != nil {
+	meta := ClientMeta{IP: c.ClientIP(), UserAgent: c.Request.UserAgent()}
+	if err := h.svc.Accept(c.Request.Context(), req, meta); err != nil {
 		response.Err(c, err)
 		return
 	}

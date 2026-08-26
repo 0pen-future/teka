@@ -33,7 +33,7 @@ func newHandlerHTTPTest(t *testing.T) (*gin.Engine, *fakeAccountService, *fakeOw
 		RefreshTTL: 720 * time.Hour,
 	}
 	svc := NewService(accounts, newFakeTokenRepository(), NewTokenIssuer(jwtCfg), noopTxManager{},
-		owners, dmSender, testResetConfig(), "https://app.example.com")
+		owners, dmSender, testResetConfig(), "https://app.example.com", nil)
 	cfg := &config.Config{Env: config.EnvTest, JWT: jwtCfg}
 
 	r := gin.New()

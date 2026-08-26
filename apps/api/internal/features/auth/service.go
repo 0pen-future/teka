@@ -16,6 +16,7 @@ import (
 	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/features/zalo"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/events"
 	"teka/apps/api/internal/shared/token"
 	"teka/apps/api/internal/shared/validation"
 )
@@ -93,7 +94,11 @@ type Service struct {
 	resetTTL      time.Duration
 	resetCooldown time.Duration
 	publicBaseURL string
-	now           func() time.Time
+	// bus receives login/logout events for the audit trail. Nil is a
+	// supported state (operator CLI builds the service without one) — publish
+	// goes through the nil-safe helper below.
+	bus events.Bus
+	now func() time.Time
 }
 
 // NewService builds the auth service. owners and dmSender are constructor
@@ -103,7 +108,7 @@ type Service struct {
 // AccountDisabler/TokenRevoker seams below. cfg supplies the reset TTL and
 // cooldown; publicBaseURL is cfg.Statements.PublicBaseURL, reused rather than
 // a new onboarding-specific env var (reset and invite links share one base).
-func NewService(accounts AccountService, repo Repository, issuer *TokenIssuer, tx database.TxManager, owners OwnerResolver, dmSender ResetDMSender, cfg config.OnboardingConfig, publicBaseURL string) *Service {
+func NewService(accounts AccountService, repo Repository, issuer *TokenIssuer, tx database.TxManager, owners OwnerResolver, dmSender ResetDMSender, cfg config.OnboardingConfig, publicBaseURL string, bus events.Bus) *Service {
 	return &Service{
 		accounts:      accounts,
 		repo:          repo,
@@ -114,40 +119,70 @@ func NewService(accounts AccountService, repo Repository, issuer *TokenIssuer, t
 		resetTTL:      cfg.ResetTTL,
 		resetCooldown: cfg.ResetCooldown,
 		publicBaseURL: publicBaseURL,
+		bus:           bus,
 		now:           time.Now,
+	}
+}
+
+// publish emits e when a bus is wired; a nil bus (operator CLI builds) makes
+// every publish a no-op.
+func (s *Service) publish(e events.Event) {
+	if s.bus != nil {
+		s.bus.Publish(e)
 	}
 }
 
 // Login verifies credentials and opens a new session (new token family).
 // Unknown phone, disabled account, passwordless account, and wrong password
-// are indistinguishable to the caller — same message, comparable latency.
-func (s *Service) Login(ctx context.Context, req LoginRequest) (*Session, error) {
+// are indistinguishable to the caller — same message, comparable latency — and
+// each publishes LoginFailed for the audit trail (masked phone only; internal
+// errors publish nothing because the credentials were never judged).
+func (s *Service) Login(ctx context.Context, req LoginRequest, meta ClientMeta) (*Session, error) {
 	invalid := apperror.Unauthorized("invalid phone or password")
+	rejected := func() (*Session, error) {
+		s.publish(LoginFailed{
+			OccurredAt:  s.now(),
+			PhoneMasked: maskPhone(req.Phone),
+			IP:          meta.IP,
+			UserAgent:   meta.UserAgent,
+		})
+		return nil, invalid
+	}
 
 	p, err := s.accounts.GetByPhone(ctx, req.Phone)
 	if err != nil {
 		var appErr *apperror.AppError
 		if errors.As(err, &appErr) && appErr.Code == apperror.CodeNotFound {
 			burnPassword(req.Password)
-			return nil, invalid
+			return rejected()
 		}
 		return nil, err
 	}
 	if p.Account.Status != teachers.StatusActive {
 		burnPassword(req.Password)
-		return nil, invalid
+		return rejected()
 	}
 	if p.Account.PasswordHash == nil {
 		burnPassword(req.Password)
-		return nil, invalid
+		return rejected()
 	}
 	if bcrypt.CompareHashAndPassword([]byte(*p.Account.PasswordHash), []byte(req.Password)) != nil {
-		return nil, invalid
+		return rejected()
 	}
 	if err := s.accounts.TouchLastLogin(ctx, p.Account.ID); err != nil {
 		return nil, err
 	}
-	return s.openSession(ctx, p)
+	sess, err := s.openSession(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	s.publish(LoginSucceeded{
+		OccurredAt: s.now(),
+		UserID:     p.Account.ID,
+		IP:         meta.IP,
+		UserAgent:  meta.UserAgent,
+	})
+	return sess, nil
 }
 
 // burnPassword runs a bcrypt comparison against a fixed dummy hash so every
@@ -227,8 +262,9 @@ func (s *Service) Refresh(ctx context.Context, plaintext string) (*Session, erro
 }
 
 // Logout revokes the presented token's whole family. Unknown tokens succeed
-// silently — logout must be idempotent.
-func (s *Service) Logout(ctx context.Context, plaintext string) error {
+// silently — logout must be idempotent, and those no-op calls publish nothing:
+// only a real revocation is a user action worth a LoggedOut event.
+func (s *Service) Logout(ctx context.Context, plaintext string, meta ClientMeta) error {
 	if plaintext == "" {
 		return nil
 	}
@@ -239,8 +275,19 @@ func (s *Service) Logout(ctx context.Context, plaintext string) error {
 	if err != nil {
 		return apperror.Internal(err)
 	}
+	// A token that is already revoked means the family was killed earlier —
+	// this call is the idempotent repeat, not a fresh user action.
+	alreadyRevoked := t.Revoked()
 	if err := s.repo.RevokeFamily(ctx, t.FamilyID, s.now()); err != nil {
 		return apperror.Internal(err)
+	}
+	if !alreadyRevoked {
+		s.publish(LoggedOut{
+			OccurredAt: s.now(),
+			UserID:     t.UserID,
+			IP:         meta.IP,
+			UserAgent:  meta.UserAgent,
+		})
 	}
 	return nil
 }

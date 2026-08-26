@@ -15,6 +15,7 @@ import (
 	"teka/apps/api/internal/config"
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/attendance"
+	"teka/apps/api/internal/features/audit"
 	"teka/apps/api/internal/features/auth"
 	"teka/apps/api/internal/features/billing"
 	"teka/apps/api/internal/features/centers"
@@ -35,6 +36,7 @@ import (
 	"teka/apps/api/internal/features/zalo"
 	"teka/apps/api/internal/middleware"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/events"
 	"teka/apps/api/internal/shared/response"
 )
 
@@ -47,7 +49,7 @@ import (
 // teachers/centers/auth are built once in app.Container so the operator
 // CLI's onboarding commands share the exact same identity wiring instead of
 // duplicating it.
-func NewRouter(cfg *config.Config, log *slog.Logger, db *gorm.DB, zaloSvc *zalo.Service, statementsSvc *statements.Service, notificationsSvc *notifications.Service, teachersSvc *teachers.Service, centersSvc *centers.Service, authSvc *auth.Service) *gin.Engine {
+func NewRouter(cfg *config.Config, log *slog.Logger, db *gorm.DB, zaloSvc *zalo.Service, statementsSvc *statements.Service, notificationsSvc *notifications.Service, teachersSvc *teachers.Service, centersSvc *centers.Service, authSvc *auth.Service, bus events.Bus) *gin.Engine {
 	if cfg.IsProduction() {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -72,7 +74,11 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *gorm.DB, zaloSvc *zalo.
 	}
 
 	v1 := r.Group("/api/v1")
-	registerFeatures(v1, cfg, db, zaloSvc, statementsSvc, notificationsSvc, teachersSvc, centersSvc, authSvc)
+	// After the global stack, before any route registers: RequestEvents does
+	// its work post-c.Next(), so the principal/scope the per-route auth
+	// middleware resolves is already on the context when it publishes.
+	v1.Use(middleware.RequestEvents(bus))
+	registerFeatures(v1, cfg, db, zaloSvc, statementsSvc, notificationsSvc, teachersSvc, centersSvc, authSvc, bus)
 
 	// Deliberately outside v1 and outside requireAuth: the only unauthenticated
 	// route in the product that serves child/money data.
@@ -90,7 +96,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *gorm.DB, zaloSvc *zalo.
 // decoupled from bootstrap; the process-lifetime services (zalo, statements,
 // notifications) arrive already built from the container and are only
 // mounted.
-func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zaloSvc *zalo.Service, statementsSvc *statements.Service, notificationsSvc *notifications.Service, teachersSvc *teachers.Service, centersSvc *centers.Service, authSvc *auth.Service) {
+func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zaloSvc *zalo.Service, statementsSvc *statements.Service, notificationsSvc *notifications.Service, teachersSvc *teachers.Service, centersSvc *centers.Service, authSvc *auth.Service, bus events.Bus) {
 	requireAuth := middleware.RequireAuth(cfg.JWT)
 	txMgr := database.NewTxManager(db)
 
@@ -102,6 +108,9 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	// request (never from JWT claims) so removals bite immediately.
 	resolveScope := middleware.ResolveScope(centersSvc)
 	centers.RegisterRoutes(v1, centers.NewHandler(centersSvc), requireAuth, resolveScope)
+
+	auditSvc := audit.NewService(audit.NewRepository(db))
+	audit.RegisterRoutes(v1, audit.NewHandler(auditSvc), requireAuth, resolveScope)
 
 	authHandler := auth.NewHandler(authSvc, cfg)
 	auth.RegisterRoutes(v1, authHandler)
@@ -227,7 +236,7 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	// parameters, not setters — no construction cycle to break), and reuses
 	// Statements.PublicBaseURL rather than a second base-URL env var.
 	invitationsSvc := invitations.NewService(
-		invitations.NewRepository(db), zaloSvc, teachersSvc, centersSvc, txMgr, cfg.Onboarding, cfg.Statements.PublicBaseURL)
+		invitations.NewRepository(db), zaloSvc, teachersSvc, centersSvc, txMgr, cfg.Onboarding, cfg.Statements.PublicBaseURL, bus)
 	invitationsHandler := invitations.NewHandler(invitationsSvc)
 	invitations.RegisterRoutes(v1, invitationsHandler, requireAuth, resolveScope)
 	// The token is the only credential guarding an accept — these two routes

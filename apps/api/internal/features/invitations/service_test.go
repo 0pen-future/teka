@@ -286,13 +286,13 @@ func memberScopeIn(centerID uuid.UUID) authctx.Scope {
 // tests, which never touch AccountOnboarder/MembershipOpener — fresh no-op
 // fakes are enough to satisfy the constructor.
 func newTestService(repo Repository, sender ZaloSender) *Service {
-	return NewService(repo, sender, newFakeOnboarder(), &fakeOpener{}, noopTxManager{}, testOnboardingConfig(), "https://app.example.com")
+	return NewService(repo, sender, newFakeOnboarder(), &fakeOpener{}, noopTxManager{}, testOnboardingConfig(), "https://app.example.com", nil)
 }
 
 // newAcceptTestService builds a Service for Preview/Accept tests, where the
 // onboarder and opener are the fakes under test.
 func newAcceptTestService(repo Repository, onboarder AccountOnboarder, opener MembershipOpener) *Service {
-	return NewService(repo, &fakeZaloSender{}, onboarder, opener, noopTxManager{}, testOnboardingConfig(), "https://app.example.com")
+	return NewService(repo, &fakeZaloSender{}, onboarder, opener, noopTxManager{}, testOnboardingConfig(), "https://app.example.com", nil)
 }
 
 // mintInvitation inserts a pending (by default) invitation directly into the
@@ -572,7 +572,7 @@ func TestAcceptNewPhoneCreatesAccountOpensMembershipAndMarksAccepted(t *testing.
 	svc := newAcceptTestService(repo, onboarder, opener)
 	plaintext, invID := mintInvitation(t, repo, id.New(), "+84901234567", StatusPending, time.Now().Add(time.Hour))
 
-	err := svc.Accept(context.Background(), AcceptRequest{Token: plaintext, FullName: "Nguyễn Văn A", Password: "matkhau123"})
+	err := svc.Accept(context.Background(), AcceptRequest{Token: plaintext, FullName: "Nguyễn Văn A", Password: "matkhau123"}, ClientMeta{})
 	require.NoError(t, err)
 
 	require.Len(t, onboarder.created, 1, "a new phone must create exactly one account")
@@ -598,7 +598,7 @@ func TestAcceptDisabledEverMemberReactivatesOpensAndSwitches(t *testing.T) {
 	svc := newAcceptTestService(repo, onboarder, opener)
 	plaintext, invID := mintInvitation(t, repo, centerID, phone, StatusPending, time.Now().Add(time.Hour))
 
-	err := svc.Accept(context.Background(), AcceptRequest{Token: plaintext, FullName: "Nguyễn Văn A", Password: "matkhau123"})
+	err := svc.Accept(context.Background(), AcceptRequest{Token: plaintext, FullName: "Nguyễn Văn A", Password: "matkhau123"}, ClientMeta{})
 	require.NoError(t, err)
 
 	require.Equal(t, []uuid.UUID{accountID}, onboarder.reactivated)
@@ -620,7 +620,7 @@ func TestAcceptPropagatesGenuineOnboarderErrorsUnmasked(t *testing.T) {
 	svc := newAcceptTestService(repo, onboarder, &fakeOpener{})
 	plaintext, _ := mintInvitation(t, repo, id.New(), "+84901234567", StatusPending, time.Now().Add(time.Hour))
 
-	err := svc.Accept(context.Background(), AcceptRequest{Token: plaintext, FullName: "X", Password: "password1"})
+	err := svc.Accept(context.Background(), AcceptRequest{Token: plaintext, FullName: "X", Password: "password1"}, ClientMeta{})
 	require.Same(t, sentinel, err, "a genuine onboarder failure must propagate, not be masked as the generic rejection")
 }
 
@@ -649,27 +649,27 @@ func TestAcceptRejectionIsIdenticalAcrossEveryFailureReason(t *testing.T) {
 
 	scenarios := map[string]func(t *testing.T, svc *Service, repo *fakeRepository) error{
 		"unknown token": func(_ *testing.T, svc *Service, _ *fakeRepository) error {
-			return svc.Accept(context.Background(), AcceptRequest{Token: "does-not-exist", FullName: "X", Password: "password1"})
+			return svc.Accept(context.Background(), AcceptRequest{Token: "does-not-exist", FullName: "X", Password: "password1"}, ClientMeta{})
 		},
 		"expired token": func(t *testing.T, svc *Service, repo *fakeRepository) error {
 			pt, _ := mintInvitation(t, repo, centerID, "+84903333333", StatusPending, time.Now().Add(-time.Hour))
-			return svc.Accept(context.Background(), AcceptRequest{Token: pt, FullName: "X", Password: "password1"})
+			return svc.Accept(context.Background(), AcceptRequest{Token: pt, FullName: "X", Password: "password1"}, ClientMeta{})
 		},
 		"already accepted (used) token": func(t *testing.T, svc *Service, repo *fakeRepository) error {
 			pt, _ := mintInvitation(t, repo, centerID, "+84904444444", StatusAccepted, time.Now().Add(time.Hour))
-			return svc.Accept(context.Background(), AcceptRequest{Token: pt, FullName: "X", Password: "password1"})
+			return svc.Accept(context.Background(), AcceptRequest{Token: pt, FullName: "X", Password: "password1"}, ClientMeta{})
 		},
 		"revoked token": func(t *testing.T, svc *Service, repo *fakeRepository) error {
 			pt, _ := mintInvitation(t, repo, centerID, "+84905555555", StatusRevoked, time.Now().Add(time.Hour))
-			return svc.Accept(context.Background(), AcceptRequest{Token: pt, FullName: "X", Password: "password1"})
+			return svc.Accept(context.Background(), AcceptRequest{Token: pt, FullName: "X", Password: "password1"}, ClientMeta{})
 		},
 		"already-active account": func(t *testing.T, svc *Service, repo *fakeRepository) error {
 			pt, _ := mintInvitation(t, repo, centerID, activePhone, StatusPending, time.Now().Add(time.Hour))
-			return svc.Accept(context.Background(), AcceptRequest{Token: pt, FullName: "X", Password: "password1"})
+			return svc.Accept(context.Background(), AcceptRequest{Token: pt, FullName: "X", Password: "password1"}, ClientMeta{})
 		},
 		"disabled account never a member of this center": func(t *testing.T, svc *Service, repo *fakeRepository) error {
 			pt, _ := mintInvitation(t, repo, centerID, neverMemberPhone, StatusPending, time.Now().Add(time.Hour))
-			return svc.Accept(context.Background(), AcceptRequest{Token: pt, FullName: "X", Password: "password1"})
+			return svc.Accept(context.Background(), AcceptRequest{Token: pt, FullName: "X", Password: "password1"}, ClientMeta{})
 		},
 	}
 

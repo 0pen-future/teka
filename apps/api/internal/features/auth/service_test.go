@@ -320,7 +320,7 @@ func newTestAuthService(t *testing.T) (*Service, *fakeAccountService, *fakeToken
 		RefreshTTL: 720 * time.Hour,
 	})
 	svc := NewService(accounts, repo, issuer, noopTxManager{},
-		newFakeOwnerResolver(), &fakeResetDMSender{}, testResetConfig(), "https://app.example.com")
+		newFakeOwnerResolver(), &fakeResetDMSender{}, testResetConfig(), "https://app.example.com", nil)
 	return svc, accounts, repo
 }
 
@@ -337,7 +337,7 @@ func newResetTestService(t *testing.T) (*Service, *fakeAccountService, *fakeToke
 		AccessTTL:  15 * time.Minute,
 		RefreshTTL: 720 * time.Hour,
 	})
-	svc := NewService(accounts, repo, issuer, noopTxManager{}, owners, dmSender, testResetConfig(), "https://app.example.com")
+	svc := NewService(accounts, repo, issuer, noopTxManager{}, owners, dmSender, testResetConfig(), "https://app.example.com", nil)
 	return svc, accounts, repo, owners, dmSender
 }
 
@@ -353,10 +353,10 @@ func TestLoginRejectsBadCredentials(t *testing.T) {
 	svc, accounts, _ := newTestAuthService(t)
 	accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
 
-	_, err := svc.Login(context.Background(), LoginRequest{Phone: "+84901234567", Password: "wrong-password"})
+	_, err := svc.Login(context.Background(), LoginRequest{Phone: "+84901234567", Password: "wrong-password"}, ClientMeta{})
 	wantUnauthorized(t, err)
 
-	_, err = svc.Login(context.Background(), LoginRequest{Phone: "+84909999999", Password: "whatever-123"})
+	_, err = svc.Login(context.Background(), LoginRequest{Phone: "+84909999999", Password: "whatever-123"}, ClientMeta{})
 	wantUnauthorized(t, err)
 }
 
@@ -366,7 +366,7 @@ func TestLoginRejectsDisabledAccount(t *testing.T) {
 
 	// Correct password on a disabled account must look identical to bad
 	// credentials.
-	_, err := svc.Login(context.Background(), LoginRequest{Phone: "+84901234567", Password: "correct-password"})
+	_, err := svc.Login(context.Background(), LoginRequest{Phone: "+84901234567", Password: "correct-password"}, ClientMeta{})
 	wantUnauthorized(t, err)
 }
 
@@ -375,7 +375,7 @@ func TestLoginRejectsPasswordlessAccount(t *testing.T) {
 	p := accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
 	p.Account.PasswordHash = nil
 
-	_, err := svc.Login(context.Background(), LoginRequest{Phone: "+84901234567", Password: "correct-password"})
+	_, err := svc.Login(context.Background(), LoginRequest{Phone: "+84901234567", Password: "correct-password"}, ClientMeta{})
 	wantUnauthorized(t, err)
 }
 
@@ -384,7 +384,7 @@ func TestLoginSucceedsWithEitherPhoneForm(t *testing.T) {
 	p := accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
 
 	for _, phone := range []string{"+84901234567", "0901234567"} {
-		sess, err := svc.Login(context.Background(), LoginRequest{Phone: phone, Password: "correct-password"})
+		sess, err := svc.Login(context.Background(), LoginRequest{Phone: phone, Password: "correct-password"}, ClientMeta{})
 		if err != nil {
 			t.Fatalf("login with %q: %v", phone, err)
 		}
@@ -402,7 +402,7 @@ func TestRefreshRotatesWithinFamily(t *testing.T) {
 	accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
 	ctx := context.Background()
 
-	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"})
+	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"}, ClientMeta{})
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -429,7 +429,7 @@ func TestRefreshRejectsDisabledAccount(t *testing.T) {
 	p := accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
 	ctx := context.Background()
 
-	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"})
+	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"}, ClientMeta{})
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -445,7 +445,7 @@ func TestRefreshReuseRevokesFamily(t *testing.T) {
 	accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
 	ctx := context.Background()
 
-	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"})
+	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"}, ClientMeta{})
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -490,11 +490,11 @@ func TestRefreshConcurrentRotationRevokesFamily(t *testing.T) {
 		RefreshTTL: 720 * time.Hour,
 	})
 	svc := NewService(accounts, &staleReadRepository{repo}, issuer, noopTxManager{},
-		newFakeOwnerResolver(), &fakeResetDMSender{}, testResetConfig(), "https://app.example.com")
+		newFakeOwnerResolver(), &fakeResetDMSender{}, testResetConfig(), "https://app.example.com", nil)
 	accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
 	ctx := context.Background()
 
-	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"})
+	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"}, ClientMeta{})
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -518,7 +518,7 @@ func TestRefreshRejectsExpiredAndUnknown(t *testing.T) {
 	accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
 	ctx := context.Background()
 
-	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"})
+	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"}, ClientMeta{})
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -538,21 +538,21 @@ func TestLogoutRevokesFamilyAndIsIdempotent(t *testing.T) {
 	accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
 	ctx := context.Background()
 
-	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"})
+	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"}, ClientMeta{})
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
-	if err := svc.Logout(ctx, sess.RefreshToken); err != nil {
+	if err := svc.Logout(ctx, sess.RefreshToken, ClientMeta{}); err != nil {
 		t.Fatalf("logout: %v", err)
 	}
 	if repo.byHash[HashToken(sess.RefreshToken)].RevokedAt == nil {
 		t.Fatal("logout must revoke the token family")
 	}
 
-	if err := svc.Logout(ctx, sess.RefreshToken); err != nil {
+	if err := svc.Logout(ctx, sess.RefreshToken, ClientMeta{}); err != nil {
 		t.Fatalf("second logout must be a no-op, got %v", err)
 	}
-	if err := svc.Logout(ctx, ""); err != nil {
+	if err := svc.Logout(ctx, "", ClientMeta{}); err != nil {
 		t.Fatalf("logout without cookie must be a no-op, got %v", err)
 	}
 }
@@ -564,12 +564,12 @@ func TestDisableFlipsStatusAndRevokesEveryFamily(t *testing.T) {
 
 	// Two separate logins open two independent token families — Disable must
 	// revoke both, not just the latest.
-	sessA, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"})
+	sessA, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"}, ClientMeta{})
 	if err != nil {
 		t.Fatalf("login A: %v", err)
 	}
 	p.Account.Status = teachers.StatusActive // Login doesn't change status; keep active for the 2nd login
-	sessB, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"})
+	sessB, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"}, ClientMeta{})
 	if err != nil {
 		t.Fatalf("login B: %v", err)
 	}
@@ -594,11 +594,11 @@ func TestRevokeAllForUserRevokesOnlyThatUsersTokens(t *testing.T) {
 	other := accounts.add(t, "+84909999999", "correct-password", teachers.StatusActive)
 	ctx := context.Background()
 
-	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"})
+	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"}, ClientMeta{})
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
-	otherSess, err := svc.Login(ctx, LoginRequest{Phone: "+84909999999", Password: "correct-password"})
+	otherSess, err := svc.Login(ctx, LoginRequest{Phone: "+84909999999", Password: "correct-password"}, ClientMeta{})
 	if err != nil {
 		t.Fatalf("login other: %v", err)
 	}
@@ -779,7 +779,7 @@ func TestResetPasswordHappyPathSetsPasswordAndRevokesTokens(t *testing.T) {
 	dmSender.lookupUID = "u1"
 	ctx := context.Background()
 
-	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "old-password"})
+	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "old-password"}, ClientMeta{})
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -793,10 +793,10 @@ func TestResetPasswordHappyPathSetsPasswordAndRevokesTokens(t *testing.T) {
 		t.Fatalf("reset password: %v", err)
 	}
 
-	if _, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "old-password"}); err == nil {
+	if _, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "old-password"}, ClientMeta{}); err == nil {
 		t.Fatal("the old password must be rejected after a reset")
 	}
-	if _, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "new-password"}); err != nil {
+	if _, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "new-password"}, ClientMeta{}); err != nil {
 		t.Fatalf("the new password must work after a reset: %v", err)
 	}
 

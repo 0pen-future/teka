@@ -148,6 +148,26 @@ type OnboardingConfig struct {
 	ResetCooldown time.Duration `env:"RESET_COOLDOWN" envDefault:"15m"`
 }
 
+// AuditConfig tunes the audit pipeline: the per-subscriber bus queue, the
+// write batching, and how long shutdown waits for the queue to drain. The
+// defaults suit a single-center deployment; none of these should need touching
+// until write volume grows by orders of magnitude.
+type AuditConfig struct {
+	// BufferSize is the audit subscriber's bus queue length; events beyond a
+	// full queue are dropped (at-most-once delivery).
+	BufferSize int `env:"AUDIT_BUFFER_SIZE" envDefault:"1024"`
+	// BatchSize is how many rows accumulate before a flush. Capped at 4000:
+	// audit_logs inserts carry 13 parameters per row and postgres rejects
+	// statements above 65535 bind parameters.
+	BatchSize int `env:"AUDIT_BATCH_SIZE" envDefault:"100"`
+	// FlushInterval bounds how stale a buffered row can get when traffic is
+	// too light to fill a batch.
+	FlushInterval time.Duration `env:"AUDIT_FLUSH_INTERVAL" envDefault:"1s"`
+	// DrainTimeout bounds how long shutdown waits for the bus to hand its
+	// queued events to the subscriber before giving up and dropping them.
+	DrainTimeout time.Duration `env:"AUDIT_DRAIN_TIMEOUT" envDefault:"5s"`
+}
+
 // Config is the full application configuration, populated from API_-prefixed
 // environment variables.
 type Config struct {
@@ -163,6 +183,7 @@ type Config struct {
 	Notifications NotificationsConfig
 	Zalo          ZaloConfig
 	Onboarding    OnboardingConfig
+	Audit         AuditConfig
 }
 
 // Load reads configuration from the environment (prefix API_). In development
@@ -222,7 +243,31 @@ func (c *Config) validate() error {
 	if err := c.validateOnboarding(); err != nil {
 		return err
 	}
+	if err := c.validateAudit(); err != nil {
+		return err
+	}
 	return c.validateZalo()
+}
+
+// validateAudit rejects tunings the pipeline cannot run with: a non-positive
+// queue or batch does nothing, a batch above 4000 rows overflows postgres'
+// 65535-bind-parameter statement limit (13 parameters per audit row), and a
+// non-positive interval or drain timeout would spin or skip draining entirely.
+func (c *Config) validateAudit() error {
+	a := c.Audit
+	if a.BufferSize < 1 {
+		return fmt.Errorf("API_AUDIT_BUFFER_SIZE must be at least 1, got %d", a.BufferSize)
+	}
+	if a.BatchSize < 1 || a.BatchSize > 4000 {
+		return fmt.Errorf("API_AUDIT_BATCH_SIZE must be between 1 and 4000, got %d", a.BatchSize)
+	}
+	if a.FlushInterval <= 0 {
+		return fmt.Errorf("API_AUDIT_FLUSH_INTERVAL must be positive, got %v", a.FlushInterval)
+	}
+	if a.DrainTimeout <= 0 {
+		return fmt.Errorf("API_AUDIT_DRAIN_TIMEOUT must be positive, got %v", a.DrainTimeout)
+	}
+	return nil
 }
 
 // validateOnboarding rejects non-positive lifetimes: a zero or negative invite

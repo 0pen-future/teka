@@ -32,6 +32,6 @@ func RunServer(ctx context.Context) error {
 		return err
 	}
 
-	router := server.NewRouter(c.Cfg, c.Log, c.DB, c.Zalo, c.Statements, c.Notifications, c.Teachers, c.Centers, c.Auth)
+	router := server.NewRouter(c.Cfg, c.Log, c.DB, c.Zalo, c.Statements, c.Notifications, c.Teachers, c.Centers, c.Auth, c.Bus)
 	return server.Run(ctx, c.Cfg, c.Log, router)
 }

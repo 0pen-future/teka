@@ -71,7 +71,7 @@ func newIntegrationService(t *testing.T) (*auth.Service, *gorm.DB, *centers.Serv
 		RefreshTTL: 720 * time.Hour,
 	})
 	cfg := config.OnboardingConfig{ResetTTL: 48 * time.Hour, ResetCooldown: 15 * time.Minute}
-	svc := auth.NewService(teachersSvc, auth.NewRepository(db), issuer, txMgr, centersSvc, dmSender, cfg, "https://app.example.com")
+	svc := auth.NewService(teachersSvc, auth.NewRepository(db), issuer, txMgr, centersSvc, dmSender, cfg, "https://app.example.com", nil)
 	return svc, db, centersSvc, dmSender
 }
 
@@ -94,7 +94,7 @@ func TestRefreshRotationAndReuseAgainstRealSQL(t *testing.T) {
 	ctx := context.Background()
 
 	acct, _ := testutil.Teacher(t, db, testutil.WithPassword("password-123"))
-	sess, err := svc.Login(ctx, auth.LoginRequest{Phone: acct.Phone, Password: "password-123"})
+	sess, err := svc.Login(ctx, auth.LoginRequest{Phone: acct.Phone, Password: "password-123"}, auth.ClientMeta{})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, liveTokenCount(t, db))
 
@@ -119,7 +119,7 @@ func TestLoginAgainstStoredHash(t *testing.T) {
 
 	acct, _ := testutil.Teacher(t, db, testutil.WithPassword("s3cret-pass!"))
 
-	sess, err := svc.Login(ctx, auth.LoginRequest{Phone: acct.Phone, Password: "s3cret-pass!"})
+	sess, err := svc.Login(ctx, auth.LoginRequest{Phone: acct.Phone, Password: "s3cret-pass!"}, auth.ClientMeta{})
 	require.NoError(t, err)
 	require.Equal(t, acct.ID, sess.Teacher.Account.ID)
 	require.NotEmpty(t, sess.AccessToken)
@@ -128,7 +128,7 @@ func TestLoginAgainstStoredHash(t *testing.T) {
 	require.NoError(t, db.First(&reloaded, "id = ?", acct.ID).Error)
 	require.NotNil(t, reloaded.LastLoginAt, "login must stamp last_login_at")
 
-	_, err = svc.Login(ctx, auth.LoginRequest{Phone: acct.Phone, Password: "wrong-pass"})
+	_, err = svc.Login(ctx, auth.LoginRequest{Phone: acct.Phone, Password: "wrong-pass"}, auth.ClientMeta{})
 	requireUnauthorized(t, err)
 }
 
@@ -139,7 +139,7 @@ func TestLoginRejectsDisabledAccountAgainstRealSQL(t *testing.T) {
 
 	acct, _ := testutil.Teacher(t, db, testutil.WithStatus(teachers.StatusDisabled))
 
-	_, err := svc.Login(ctx, auth.LoginRequest{Phone: acct.Phone, Password: testutil.DefaultPassword})
+	_, err := svc.Login(ctx, auth.LoginRequest{Phone: acct.Phone, Password: testutil.DefaultPassword}, auth.ClientMeta{})
 	requireUnauthorized(t, err)
 }
 
@@ -149,7 +149,7 @@ func TestDisableAgainstRealSQLFlipsStatusAndRevokesTokens(t *testing.T) {
 	ctx := context.Background()
 
 	acct, _ := testutil.Teacher(t, db, testutil.WithPassword("password-123"))
-	sess, err := svc.Login(ctx, auth.LoginRequest{Phone: acct.Phone, Password: "password-123"})
+	sess, err := svc.Login(ctx, auth.LoginRequest{Phone: acct.Phone, Password: "password-123"}, auth.ClientMeta{})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, liveTokenCount(t, db))
 
@@ -176,7 +176,7 @@ func TestForgotPasswordAndResetRoundTripAgainstRealSQL(t *testing.T) {
 	member, _ := testutil.Teacher(t, db, testutil.WithPassword("old-password-1"))
 	testutil.JoinCenter(t, db, member.ID, ownerTeacher.CenterID)
 
-	oldSess, err := svc.Login(ctx, auth.LoginRequest{Phone: member.Phone, Password: "old-password-1"})
+	oldSess, err := svc.Login(ctx, auth.LoginRequest{Phone: member.Phone, Password: "old-password-1"}, auth.ClientMeta{})
 	require.NoError(t, err)
 
 	require.NoError(t, svc.ForgotPassword(ctx, auth.ForgotPasswordRequest{Phone: member.Phone}))
@@ -186,10 +186,10 @@ func TestForgotPasswordAndResetRoundTripAgainstRealSQL(t *testing.T) {
 
 	require.NoError(t, svc.ResetPassword(ctx, auth.ResetPasswordRequest{Token: plaintext, Password: "new-password-1"}))
 
-	_, err = svc.Login(ctx, auth.LoginRequest{Phone: member.Phone, Password: "old-password-1"})
+	_, err = svc.Login(ctx, auth.LoginRequest{Phone: member.Phone, Password: "old-password-1"}, auth.ClientMeta{})
 	require.Error(t, err, "the old password must be rejected after a reset")
 
-	sess, err := svc.Login(ctx, auth.LoginRequest{Phone: member.Phone, Password: "new-password-1"})
+	sess, err := svc.Login(ctx, auth.LoginRequest{Phone: member.Phone, Password: "new-password-1"}, auth.ClientMeta{})
 	require.NoError(t, err, "the new password must work after a reset")
 	require.Equal(t, member.ID, sess.Teacher.Account.ID)
 

@@ -3,18 +3,21 @@
 package app
 
 import (
+	"context"
 	"log/slog"
 
 	"gorm.io/gorm"
 
 	"teka/apps/api/internal/config"
 	"teka/apps/api/internal/database"
+	"teka/apps/api/internal/features/audit"
 	"teka/apps/api/internal/features/auth"
 	"teka/apps/api/internal/features/centers"
 	"teka/apps/api/internal/features/notifications"
 	"teka/apps/api/internal/features/statements"
 	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/features/zalo"
+	"teka/apps/api/internal/shared/events"
 	"teka/apps/api/internal/shared/logger"
 	"teka/apps/api/internal/shared/secrets"
 )
@@ -44,6 +47,13 @@ type Container struct {
 	Centers   *centers.Service
 	Auth      *auth.Service
 	TxManager database.TxManager
+	// Bus is the in-process event bus mutating requests and auth flows
+	// publish into; the audit subscriber below is its first consumer. Both
+	// live here because their lifetime is the process's: Close must drain the
+	// bus into the subscriber, then flush the subscriber, before the database
+	// pool goes away.
+	Bus   events.Bus
+	Audit *audit.Subscriber
 }
 
 // NewContainer builds the dependency graph: logger first, then database.
@@ -69,6 +79,10 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 
 	txMgr := database.NewTxManager(db)
 
+	bus := events.New(log)
+	auditSub := audit.NewSubscriber(audit.NewRepository(db), log, cfg.Audit.BatchSize, cfg.Audit.FlushInterval)
+	bus.Subscribe("audit", cfg.Audit.BufferSize, auditSub.Handle)
+
 	teachersSvc := teachers.NewService(teachers.NewRepository(db))
 	centersSvc := centers.NewService(centers.NewRepository(db), txMgr)
 	// centersSvc is auth's OwnerResolver (owner-exclusion + DM anchor for
@@ -77,7 +91,7 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 	// Reset links reuse Statements.PublicBaseURL rather than a second
 	// base-URL env var.
 	authSvc := auth.NewService(teachersSvc, auth.NewRepository(db), auth.NewTokenIssuer(cfg.JWT), txMgr,
-		centersSvc, zaloSvc, cfg.Onboarding, cfg.Statements.PublicBaseURL)
+		centersSvc, zaloSvc, cfg.Onboarding, cfg.Statements.PublicBaseURL, bus)
 	// authSvc is the AccountDisabler centers consumes to offboard a removed
 	// member (disable + revoke tokens) and the TokenRevoker teachers consumes
 	// to invalidate old sessions on reactivate — setters, not constructor
@@ -106,15 +120,25 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 		Centers:       centersSvc,
 		Auth:          authSvc,
 		TxManager:     txMgr,
+		Bus:           bus,
+		Audit:         auditSub,
 	}, nil
 }
 
 // Close releases held resources: notification runs first (they send through
-// zalo), then zalo's own background work, so nothing is still using the
-// database connection pool when it goes away.
+// zalo), then zalo's own background work; then the event bus drains its
+// queues into the audit subscriber, whose own Close flushes the last batch —
+// strictly in that order, and both before the database connection pool goes
+// away, so nothing is still using it and no audit row is silently dropped.
 func (c *Container) Close() {
 	c.Notifications.Close()
 	c.Zalo.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), c.Cfg.Audit.DrainTimeout)
+	defer cancel()
+	if err := c.Bus.Close(ctx); err != nil {
+		c.Log.Error("draining event bus", "error", err)
+	}
+	c.Audit.Close()
 	if err := database.Close(c.DB); err != nil {
 		c.Log.Error("closing database", "error", err)
 	}

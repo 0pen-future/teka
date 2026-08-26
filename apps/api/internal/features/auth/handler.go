@@ -30,6 +30,12 @@ func NewHandler(svc *Service, cfg *config.Config) *Handler {
 	return &Handler{svc: svc, cfg: cfg}
 }
 
+// clientMeta extracts the request context the service attaches to auth events;
+// the service itself never touches gin.
+func clientMeta(c *gin.Context) ClientMeta {
+	return ClientMeta{IP: c.ClientIP(), UserAgent: c.Request.UserAgent()}
+}
+
 // login verifies credentials and opens a session.
 //
 //	@Summary		Log in
@@ -48,7 +54,7 @@ func (h *Handler) login(c *gin.Context) {
 		response.Err(c, validation.BindError(err))
 		return
 	}
-	sess, err := h.svc.Login(c.Request.Context(), req)
+	sess, err := h.svc.Login(c.Request.Context(), req, clientMeta(c))
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -97,7 +103,7 @@ func (h *Handler) refresh(c *gin.Context) {
 //	@Router			/auth/logout [post]
 func (h *Handler) logout(c *gin.Context) {
 	plaintext, _ := c.Cookie(refreshCookieName)
-	if err := h.svc.Logout(c.Request.Context(), plaintext); err != nil {
+	if err := h.svc.Logout(c.Request.Context(), plaintext, clientMeta(c)); err != nil {
 		response.Err(c, err)
 		return
 	}

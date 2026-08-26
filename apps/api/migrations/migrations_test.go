@@ -19,7 +19,8 @@ import (
 )
 
 // domainTables is every table docs/schema_design.sql creates, plus the
-// refresh_tokens table from 000002 and zalo_accounts from 000004.
+// refresh_tokens table from 000002, zalo_accounts from 000004, and
+// audit_logs from 000010.
 // schema_migrations belongs to golang-migrate itself.
 var domainTables = []string{
 	"user_accounts", "teachers", "contacts", "students", "classes",
@@ -29,6 +30,7 @@ var domainTables = []string{
 	"refresh_tokens", "zalo_accounts", "notification_runs", "centers",
 	"center_members", "invitations", "password_reset_tokens",
 	"class_curricula", "lesson_plans", "session_notes", "session_marks",
+	"audit_logs",
 }
 
 // centerTables is every business table 000007 re-keyed to the center tenant.

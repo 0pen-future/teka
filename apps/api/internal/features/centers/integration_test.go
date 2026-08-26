@@ -63,7 +63,7 @@ func newEnv(t *testing.T) *env {
 	jwtCfg := config.JWTConfig{Secret: testutil.JWTSecret, AccessTTL: 15 * time.Minute}
 	onboardingCfg := config.OnboardingConfig{ResetTTL: 48 * time.Hour, ResetCooldown: 15 * time.Minute}
 	authSvc := auth.NewService(teachersSvc, auth.NewRepository(db), auth.NewTokenIssuer(jwtCfg), txMgr,
-		centersSvc, noopDMSender{}, onboardingCfg, "https://app.example.com")
+		centersSvc, noopDMSender{}, onboardingCfg, "https://app.example.com", nil)
 	// centersSvc consumes authSvc to offboard a removed member (disable +
 	// revoke refresh tokens); teachersSvc consumes it to invalidate old
 	// sessions on reactivate — the same wiring router.go does in production.
@@ -243,7 +243,7 @@ func TestRemoveMemberByOwnerDataStaysBehind(t *testing.T) {
 	e.join(t, member.ID, owner.ID)
 	classID := insertClass(t, e.db, member.ID, ownerTeacher.CenterID)
 
-	sess, err := e.authSvc.Login(ctx, auth.LoginRequest{Phone: member.Phone, Password: testutil.DefaultPassword})
+	sess, err := e.authSvc.Login(ctx, auth.LoginRequest{Phone: member.Phone, Password: testutil.DefaultPassword}, auth.ClientMeta{})
 	require.NoError(t, err)
 
 	require.NoError(t, e.centersSvc.RemoveMember(ctx, e.scope(t, owner.ID), member.ID))

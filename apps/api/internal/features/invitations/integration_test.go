@@ -60,7 +60,7 @@ func newEnv(t *testing.T) *env {
 	// centersSvc is auth's OwnerResolver and stubZaloSender its ResetDMSender —
 	// the same wiring router.go does in production (see the comment above).
 	authSvc := auth.NewService(teachersSvc, auth.NewRepository(db), auth.NewTokenIssuer(jwtCfg), txMgr,
-		centersSvc, stubZaloSender{}, onboardingCfg, "https://app.example.com")
+		centersSvc, stubZaloSender{}, onboardingCfg, "https://app.example.com", nil)
 	// Same wiring router.go does in production: authSvc is the
 	// AccountDisabler centers consumes to offboard a removed member, and the
 	// TokenRevoker teachers consumes to invalidate old sessions on reactivate.
@@ -68,7 +68,7 @@ func newEnv(t *testing.T) *env {
 	teachersSvc.SetTokenRevoker(authSvc)
 	invitationsSvc := invitations.NewService(
 		invitations.NewRepository(db), stubZaloSender{}, teachersSvc, centersSvc, txMgr,
-		onboardingCfg, "https://app.example.com")
+		onboardingCfg, "https://app.example.com", nil)
 	return &env{db: db, teachersSvc: teachersSvc, centersSvc: centersSvc, authSvc: authSvc, invitationsSvc: invitationsSvc}
 }
 
@@ -228,7 +228,7 @@ func TestAcceptNewPhoneRoundTripCreatesAccountThatCanLogIn(t *testing.T) {
 
 	err = e.invitationsSvc.Accept(ctx, invitations.AcceptRequest{
 		Token: plaintext, FullName: "Nguyễn Văn A", Password: "matkhau123",
-	})
+	}, invitations.ClientMeta{})
 	require.NoError(t, err)
 
 	acct, err := e.teachersSvc.FindByPhone(ctx, phone)
@@ -239,7 +239,7 @@ func TestAcceptNewPhoneRoundTripCreatesAccountThatCanLogIn(t *testing.T) {
 	require.Equal(t, sc.CenterID, memberScope.CenterID, "the new account must land in the inviting center")
 	require.False(t, memberScope.IsOwner)
 
-	sess, err := e.authSvc.Login(ctx, auth.LoginRequest{Phone: phone, Password: "matkhau123"})
+	sess, err := e.authSvc.Login(ctx, auth.LoginRequest{Phone: phone, Password: "matkhau123"}, auth.ClientMeta{})
 	require.NoError(t, err, "the chosen password must work immediately after accept")
 	require.Equal(t, acct.ID, sess.Teacher.Account.ID)
 
@@ -263,12 +263,12 @@ func TestAcceptReInviteRoundTripReactivatesRemovedMember(t *testing.T) {
 
 	// The member logs in once, then gets removed — proving their old session
 	// dies with the account, not just future logins.
-	oldSess, err := e.authSvc.Login(ctx, auth.LoginRequest{Phone: member.Phone, Password: "old-password-1"})
+	oldSess, err := e.authSvc.Login(ctx, auth.LoginRequest{Phone: member.Phone, Password: "old-password-1"}, auth.ClientMeta{})
 	require.NoError(t, err)
 
 	require.NoError(t, e.centersSvc.RemoveMember(ctx, ownerScope, member.ID))
 
-	_, err = e.authSvc.Login(ctx, auth.LoginRequest{Phone: member.Phone, Password: "old-password-1"})
+	_, err = e.authSvc.Login(ctx, auth.LoginRequest{Phone: member.Phone, Password: "old-password-1"}, auth.ClientMeta{})
 	require.Error(t, err, "a removed member must not be able to log in")
 	require.Equal(t, apperror.CodeUnauthorized, apperror.From(err).Code)
 
@@ -281,7 +281,7 @@ func TestAcceptReInviteRoundTripReactivatesRemovedMember(t *testing.T) {
 
 	err = e.invitationsSvc.Accept(ctx, invitations.AcceptRequest{
 		Token: plaintext, FullName: "Nguyễn Văn A (Reactivated)", Password: "new-password-1",
-	})
+	}, invitations.ClientMeta{})
 	require.NoError(t, err)
 
 	acct, err := e.teachersSvc.FindByPhone(ctx, member.Phone)
@@ -291,10 +291,10 @@ func TestAcceptReInviteRoundTripReactivatesRemovedMember(t *testing.T) {
 	memberScope := testutil.ScopeFor(t, e.db, member.ID)
 	require.Equal(t, ownerScope.CenterID, memberScope.CenterID, "reactivation must land back in the inviting center")
 
-	_, err = e.authSvc.Login(ctx, auth.LoginRequest{Phone: member.Phone, Password: "old-password-1"})
+	_, err = e.authSvc.Login(ctx, auth.LoginRequest{Phone: member.Phone, Password: "old-password-1"}, auth.ClientMeta{})
 	require.Error(t, err, "the pre-removal password must no longer work")
 
-	sess, err := e.authSvc.Login(ctx, auth.LoginRequest{Phone: member.Phone, Password: "new-password-1"})
+	sess, err := e.authSvc.Login(ctx, auth.LoginRequest{Phone: member.Phone, Password: "new-password-1"}, auth.ClientMeta{})
 	require.NoError(t, err, "the password chosen at accept time must work")
 	require.Equal(t, member.ID, sess.Teacher.Account.ID)
 }
@@ -318,7 +318,7 @@ func TestAcceptRejectsDisabledAccountNeverAMemberOfThisCenter(t *testing.T) {
 	require.NoError(t, err)
 	plaintext := tokenFromLink(t, created.Link)
 
-	err = e.invitationsSvc.Accept(ctx, invitations.AcceptRequest{Token: plaintext, FullName: "X", Password: "password1"})
+	err = e.invitationsSvc.Accept(ctx, invitations.AcceptRequest{Token: plaintext, FullName: "X", Password: "password1"}, invitations.ClientMeta{})
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeBadRequest, apperror.From(err).Code)
 
@@ -350,7 +350,7 @@ func TestAcceptConcurrentDoubleAcceptOfSameTokenOnlyOneWins(t *testing.T) {
 			defer wg.Done()
 			errs[i] = e.invitationsSvc.Accept(ctx, invitations.AcceptRequest{
 				Token: plaintext, FullName: "Nguyễn Văn A", Password: "matkhau123",
-			})
+			}, invitations.ClientMeta{})
 		}(i)
 	}
 	wg.Wait()
