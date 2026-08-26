@@ -111,6 +111,13 @@ interrupted — so overlapping instances (scale-out, rolling deploys with two
 live containers) would flag each other's active runs and invite duplicate
 messages on resume. Deploy the API with stop-then-start, not start-then-stop.
 
+Grant the API a stop grace of **at least 30s** (both compose files set
+`stop_grace_period: 30s`; replicate that in any external manifest). Worst-case
+shutdown takes at least ~20s — HTTP drain, then event-bus drain, then the
+final audit batch flush, with other subsystems closing in between — and a
+shorter grace kills the process before the last audit rows are written. See
+[`docs/event-bus.md`](./event-bus.md).
+
 ## Environment and secrets
 
 The API is configured entirely through `API_*` environment variables:
@@ -125,6 +132,7 @@ The API is configured entirely through `API_*` environment variables:
 | `API_JWT_ACCESS_TTL` / `API_JWT_REFRESH_TTL` | no | Default 15m / 720h |
 | `API_LOG_LEVEL` | no | Use `info` in production |
 | `API_CORS_ORIGINS` | no | Only for split-origin topologies |
+| `API_AUDIT_BUFFER_SIZE` / `API_AUDIT_BATCH_SIZE` / `API_AUDIT_FLUSH_INTERVAL` / `API_AUDIT_DRAIN_TIMEOUT` | no | Audit capture tuning (defaults 1024 / 100 / 1s / 5s); see [`docs/event-bus.md`](./event-bus.md) |
 
 Policy: secrets come from the platform's secret store (or an env file kept out
 of git). Nothing under version control contains a production credential; the

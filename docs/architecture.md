@@ -37,8 +37,17 @@ client → http.Server (timeouts: read-header 5s / read 10s / write 30s / idle 1
        → gin engine (no trusted proxies)
        → request-id → logger → recovery → CORS
        → /healthz | /readyz | /api/v1/<feature routes>
+                                └─ request-events (publishes one bus event per
+                                   mutating request — see docs/event-bus.md)
 ```
 
 Graceful shutdown: SIGINT/SIGTERM cancels the serve context; the server drains
-in-flight requests (10s budget) before the DB pool closes. A second signal
-force-quits.
+in-flight requests (10s budget), then the event bus and audit batcher drain,
+before the DB pool closes. A second signal force-quits.
+
+## In-process events (backend)
+
+Cross-feature side effects (today: the audit trail) ride an in-process event
+bus with non-blocking publish and at-most-once delivery. Contract, event
+catalog, capture pipeline, and extension conventions:
+[`docs/event-bus.md`](./event-bus.md).
