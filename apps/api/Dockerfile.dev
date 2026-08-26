@@ -1,7 +1,7 @@
 # Dev-only image: compose bind-mounts ./apps/api over /app and air rebuilds
 # the API on every Go source change. Not used for production builds.
 # Go 1.26 image builds the go-1.25 module fine; air >= 1.67 needs go 1.26.
-FROM golang:1.26-alpine
+FROM golang:1.27-alpine
 
 RUN go install github.com/air-verse/air@v1.67.4
 
