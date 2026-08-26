@@ -5,6 +5,7 @@ import {
   ClipboardCheckIcon,
   EllipsisIcon,
   FileSpreadsheetIcon,
+  HistoryIcon,
   IdCardIcon,
   LogOutIcon,
   type LucideProps,
@@ -95,6 +96,7 @@ function useNavGroups(): NavGroup[] {
                 pending: pendingPlanCount > 0,
               },
               { label: "Nhập từ Excel", to: "/students/import", Icon: FileSpreadsheetIcon },
+              { label: "Nhật ký hoạt động", to: "/audit", Icon: HistoryIcon },
             ]
           : []),
         { label: "Cài đặt trung tâm", to: "/center", Icon: Building2Icon },
@@ -117,6 +119,7 @@ const OVERFLOW_LABELS = new Set([
   "Phụ huynh",
   "Duyệt giáo án",
   "Nhập từ Excel",
+  "Nhật ký hoạt động",
   "Cài đặt trung tâm",
 ]);
 
@@ -133,6 +136,7 @@ const OVERFLOW_PATH_PREFIXES = [
   "/contacts",
   "/lesson-plans",
   "/students/import",
+  "/audit",
   "/center",
 ];
 

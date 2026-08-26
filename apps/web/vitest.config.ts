@@ -19,6 +19,10 @@ export default defineConfig({
     // a valid URL to pass its boot validation. Nothing listens on this port.
     env: {
       VITE_API_URL: "http://localhost:8080/api/v1",
+      // Local-timezone rendering (formatDateTime, the audit date filters) must
+      // assert literal wall-clock output, so the suite pins the product's home
+      // timezone instead of inheriting the machine's.
+      TZ: "Asia/Ho_Chi_Minh",
     },
   },
 });

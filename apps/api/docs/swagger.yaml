@@ -50,6 +50,50 @@ definitions:
       student_name:
         type: string
     type: object
+  audit.ListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/audit.LogResponse'
+        type: array
+      next_cursor:
+        type: string
+    type: object
+  audit.LogResponse:
+    properties:
+      action:
+        type: string
+      actor_name:
+        type: string
+      actor_role:
+        type: string
+      actor_user_id:
+        type: string
+      entity_id:
+        type: string
+      entity_type:
+        type: string
+      id:
+        type: string
+      ip:
+        type: string
+      metadata:
+        $ref: '#/definitions/audit.Metadata'
+      method:
+        type: string
+      occurred_at:
+        type: string
+      path:
+        type: string
+      status_code:
+        type: integer
+      user_agent:
+        type: string
+    type: object
+  audit.Metadata:
+    additionalProperties:
+      type: string
+    type: object
   auth.ForgotPasswordRequest:
     properties:
       phone:
@@ -1668,6 +1712,80 @@ info:
   title: Teka API
   version: "1.0"
 paths:
+  /audit-logs:
+    get:
+      description: Owner-only. Keyset-paginated, newest first; pass next_cursor back
+        to fetch the following page. A cursor is only valid alongside the same filters
+        that produced it.
+      parameters:
+      - description: filter by actor teacher id (UUID)
+        in: query
+        name: actor_id
+        type: string
+      - description: action prefix, e.g. class. or auth.login
+        in: query
+        name: action
+        type: string
+      - description: RFC3339 lower bound on occurred_at
+        in: query
+        name: from
+        type: string
+      - description: RFC3339 upper bound on occurred_at
+        in: query
+        name: to
+        type: string
+      - description: opaque cursor from a previous page
+        in: query
+        name: cursor
+        type: string
+      - description: page size (default 50, max 100; out-of-range values are clamped)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/audit.ListResponse'
+              type: object
+        "400":
+          description: malformed filter or cursor
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: caller is not the center owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List audit logs
+      tags:
+      - audit-logs
   /auth/forgot-password:
     post:
       consumes:

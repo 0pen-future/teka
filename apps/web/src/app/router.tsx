@@ -4,6 +4,7 @@ import { NotFound } from "@/components/shared/not-found";
 import { ProtectedRoute } from "@/features/auth";
 import { authRoutes } from "@/features/auth/routes";
 import { attendanceRoutes } from "@/features/attendance/routes";
+import { auditRoutes } from "@/features/audit/routes";
 import { billingRoutes } from "@/features/billing/routes";
 import { centerRoutes } from "@/features/center/routes";
 import { collectionsRoutes } from "@/features/collections/routes";
@@ -46,6 +47,7 @@ export const router = createBrowserRouter([
           ...collectionsRoutes,
           ...profileRoutes,
           ...centerRoutes,
+          ...auditRoutes,
         ],
       },
       {

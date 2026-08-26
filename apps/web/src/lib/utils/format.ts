@@ -52,6 +52,23 @@ export function formatDayMonth(isoDate: string): string {
   return `${day}/${month}`;
 }
 
+/**
+ * Renders an RFC3339 instant as `dd/MM/yyyy HH:mm` in the browser's local
+ * timezone — unlike the DATE-column helpers above, an audit timestamp is a
+ * real instant, so the local wall-clock reading is the correct one. Manual
+ * assembly instead of Intl for the same cross-ICU stability reason, and
+ * malformed input passes through unchanged.
+ */
+export function formatDateTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return iso;
+  }
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const day = `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
+  return `${day} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 /** Converts a stored E.164 Vietnamese number back to the local `0…` display form. */
 export function formatPhoneLocal(phone: string): string {
   return phone.startsWith("+84") ? `0${phone.slice(3)}` : phone;

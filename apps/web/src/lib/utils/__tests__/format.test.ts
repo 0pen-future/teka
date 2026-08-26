@@ -1,12 +1,33 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  formatDateTime,
   formatDayMonth,
   formatMoney,
   formatPhoneLocal,
   formatSessionDate,
   nameInitial,
 } from "../format";
+
+// vitest.config.ts pins TZ=Asia/Ho_Chi_Minh (UTC+7, no DST) so these
+// wall-clock literals are deterministic everywhere the suite runs.
+describe("formatDateTime", () => {
+  it("renders an instant as dd/MM/yyyy HH:mm in the local timezone", () => {
+    expect(formatDateTime("2026-08-26T10:30:00Z")).toBe("26/08/2026 17:30");
+  });
+
+  it("rolls into the next local day when the UTC evening crosses midnight", () => {
+    expect(formatDateTime("2026-08-25T18:00:00Z")).toBe("26/08/2026 01:00");
+  });
+
+  it("zero-pads day, month, hour, and minute", () => {
+    expect(formatDateTime("2026-01-02T18:04:00-05:00")).toBe("03/01/2026 06:04");
+  });
+
+  it("passes an invalid instant through unchanged", () => {
+    expect(formatDateTime("not-an-instant")).toBe("not-an-instant");
+  });
+});
 
 describe("formatMoney", () => {
   it("renders zero with the đồng symbol", () => {

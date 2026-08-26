@@ -73,7 +73,7 @@ describe("grouped sidebar", () => {
     const expected: Record<string, string[]> = {
       "Dạy học": ["Điểm danh", "Quản lý lớp học", "Hồ sơ học sinh", "Lớp & học sinh", "Phụ huynh"],
       "Học phí": ["Chốt sổ", "Gửi thông báo", "Thu tiền"],
-      "Trung tâm": ["Duyệt giáo án", "Nhập từ Excel", "Cài đặt trung tâm"],
+      "Trung tâm": ["Duyệt giáo án", "Nhập từ Excel", "Nhật ký hoạt động", "Cài đặt trung tâm"],
     };
     for (const [header, labels] of Object.entries(expected)) {
       const group = within(sidebarNav).getByRole("group", { name: header });
@@ -254,7 +254,32 @@ describe("teaching v2 nav", () => {
     const labels = within(group)
       .getAllByRole("link")
       .map((l) => l.textContent);
-    expect(labels).toEqual(["Duyệt giáo án", "Nhập từ Excel", "Cài đặt trung tâm"]);
+    expect(labels).toEqual([
+      "Duyệt giáo án",
+      "Nhập từ Excel",
+      "Nhật ký hoạt động",
+      "Cài đặt trung tâm",
+    ]);
+  });
+
+  it("shows Nhật ký hoạt động to owners linking /audit", async () => {
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+    expect(
+      await within(sidebarNav).findByRole("link", { name: "Nhật ký hoạt động" }),
+    ).toHaveAttribute("href", "/audit");
+  });
+
+  it("hides Nhật ký hoạt động from non-owner members", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh" })),
+      ),
+    );
+    renderLayout();
+    // Member role label proves /centers/me resolved member-shaped.
+    await screen.findByText("Giáo viên");
+    expect(screen.queryByRole("link", { name: "Nhật ký hoạt động" })).not.toBeInTheDocument();
   });
 
   it("shows Nhập từ Excel to owners and hides it from members", async () => {
