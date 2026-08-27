@@ -13,6 +13,11 @@ import { formatDateTime } from "@/lib/utils";
 
 import type { AuditLog } from "../schemas/audit-schemas";
 
+// Matches the roster/billing header band; keeps the default px-2 so header
+// text stays aligned with the p-2 body cells.
+const headCellClassName =
+  "bg-cream-200 text-[12px] font-extrabold uppercase tracking-[0.4px] text-ink-500";
+
 function statusVariant(code: number): HvBadgeVariant {
   if (code >= 500) {
     return "danger";
@@ -43,13 +48,13 @@ export function AuditTable({ logs }: { logs: AuditLog[] }) {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Thời gian</TableHead>
-            <TableHead>Người thao tác</TableHead>
-            <TableHead>Hành động</TableHead>
-            <TableHead>Đối tượng</TableHead>
-            <TableHead>Trạng thái</TableHead>
-            <TableHead>IP</TableHead>
-            <TableHead className="w-px" />
+            <TableHead className={headCellClassName}>Thời gian</TableHead>
+            <TableHead className={headCellClassName}>Người thao tác</TableHead>
+            <TableHead className={headCellClassName}>Hành động</TableHead>
+            <TableHead className={headCellClassName}>Đối tượng</TableHead>
+            <TableHead className={headCellClassName}>Trạng thái</TableHead>
+            <TableHead className={headCellClassName}>IP</TableHead>
+            <TableHead className={`${headCellClassName} w-px`} />
           </TableRow>
         </TableHeader>
         <TableBody>
