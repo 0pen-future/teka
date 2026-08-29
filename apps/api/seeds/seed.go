@@ -6,6 +6,7 @@ package seeds
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -17,6 +18,7 @@ import (
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/attendance"
+	"teka/apps/api/internal/features/billing"
 	"teka/apps/api/internal/features/classes"
 	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/features/sessions"
@@ -46,6 +48,13 @@ var seedTeachers = []seedTeacher{
 	{Phone: "+84901000001", Password: "lan-password", FullName: "Cô Lan"},
 	{Phone: "+84901000002", Password: "minh-password", FullName: "Thầy Minh"},
 }
+
+// The secretary is a member with no teaching data of her own: delegated
+// sending (can_send_reports) is only observable on someone whose center-wide
+// reach comes entirely from the flag. The seed never sets the flag — the
+// grant happens through the owner's UI, so the database stays neutral for
+// specs that expect a plain member.
+var seedSecretary = seedTeacher{Phone: "+84901000003", Password: "thu-password", FullName: "Cô Thu"}
 
 type seedContact struct {
 	Phone    string
@@ -131,36 +140,111 @@ var seedClasses = []seedClass{
 	},
 }
 
+// teacherDataset groups one teaching member's demo roster so Run can seed
+// several teachers through the same functions.
+type teacherDataset struct {
+	Contacts    []seedContact
+	Students    []seedStudent
+	Classes     []seedClass
+	Enrollments []seedEnrollment
+}
+
+var ownerData = teacherDataset{
+	Contacts:    seedContacts,
+	Students:    seedStudents,
+	Classes:     seedClasses,
+	Enrollments: seedEnrollments,
+}
+
+// Thầy Minh teaches a small class of his own so the center holds
+// cross-teacher data: center-wide oversight and delegated sends are only
+// observable when a billable period belongs to someone other than the owner.
+var minhData = teacherDataset{
+	Contacts: []seedContact{
+		{Phone: "+84913000001", FullName: "Chị Yến"},
+		{Phone: "+84913000002", FullName: "Anh Sơn"},
+	},
+	Students: []seedStudent{
+		{FullName: "Bé Phúc", ContactPhone: "+84913000001"},
+		{FullName: "Bé Quỳnh", ContactPhone: "+84913000002"},
+	},
+	Classes: []seedClass{
+		{
+			Name:      "Lý 7 - Chiều Thứ Năm",
+			StartDate: "2026-02-05",
+			UnitPrice: 180_000,
+			Schedules: []seedSchedule{
+				{Weekday: 4, StartTime: "17:00", DurationMin: 90},
+			},
+		},
+	},
+	Enrollments: []seedEnrollment{
+		{StudentName: "Bé Phúc", ClassName: "Lý 7 - Chiều Thứ Năm", StartedOn: "2026-02-05"},
+		{StudentName: "Bé Quỳnh", ClassName: "Lý 7 - Chiều Thứ Năm", StartedOn: "2026-02-05"},
+	},
+}
+
 // Run inserts the seed teachers that do not exist yet — the first as the
 // center's owner, every following one as a member of that same center — then
-// demo roster data for the owner, and reports each outcome.
+// demo roster data for each teaching member, an open billing period for the
+// member teacher, and reports each outcome.
 func Run(ctx context.Context, db *gorm.DB, log *slog.Logger) error {
 	ownerID, centerID, err := ensureOwner(ctx, db, log, seedTeachers[0])
 	if err != nil {
 		return err
 	}
-	for _, s := range seedTeachers[1:] {
-		if _, err := ensureMember(ctx, db, log, s, centerID); err != nil {
-			return err
-		}
-	}
-	sc, err := scopeFor(ctx, db, ownerID)
+	minhID, err := ensureMember(ctx, db, log, seedTeachers[1], centerID)
 	if err != nil {
 		return err
 	}
-	if err := seedRoster(ctx, db, log, sc); err != nil {
+	if _, err := ensureMember(ctx, db, log, seedSecretary, centerID); err != nil {
 		return err
 	}
-	if err := seedStudentList(ctx, db, log, sc); err != nil {
+
+	ownerSc, err := scopeFor(ctx, db, ownerID)
+	if err != nil {
 		return err
 	}
-	if err := seedClassList(ctx, db, log, sc); err != nil {
+	minhSc, err := scopeFor(ctx, db, minhID)
+	if err != nil {
 		return err
 	}
-	if err := seedEnrollmentList(ctx, db, log, sc); err != nil {
-		return err
+
+	for _, t := range []struct {
+		sc      authctx.Scope
+		data    teacherDataset
+		pending int
+	}{
+		// The owner keeps pending sessions so the dashboard's attendance
+		// warning has material; the member's sessions are all confirmed so his
+		// current period can close below — statements (and therefore report
+		// sends) only exist for a closed period.
+		{ownerSc, ownerData, pendingAttendanceCount},
+		{minhSc, minhData, 0},
+	} {
+		if err := seedRoster(ctx, db, log, t.sc, t.data.Contacts); err != nil {
+			return err
+		}
+		if err := seedStudentList(ctx, db, log, t.sc, t.data.Students); err != nil {
+			return err
+		}
+		if err := seedClassList(ctx, db, log, t.sc, t.data.Classes); err != nil {
+			return err
+		}
+		if err := seedEnrollmentList(ctx, db, log, t.sc, t.data.Enrollments); err != nil {
+			return err
+		}
+		if err := seedSessionList(ctx, db, log, t.sc, t.pending); err != nil {
+			return err
+		}
 	}
-	return seedSessionList(ctx, db, log, sc)
+
+	// Only the member teacher gets a pre-closed period: a delegated sender can
+	// read and send another teacher's period but never create or close it
+	// (EnsurePeriod self-assigns to the caller, close is a write), and sends
+	// only work on a closed period. The owner keeps opening and closing her
+	// own period through the UI.
+	return seedClosedPeriod(ctx, db, log, minhSc)
 }
 
 // scopeFor resolves the seeded teacher's live center scope the same way the
@@ -170,13 +254,17 @@ func scopeFor(ctx context.Context, db *gorm.DB, teacherID uuid.UUID) (authctx.Sc
 	// Scanning straight into a bare uuid.UUID skips its sql.Scanner and hits
 	// GORM's element-wise array path instead; wrap it in a struct field.
 	var row struct {
-		CenterID uuid.UUID
-		IsOwner  bool
+		CenterID       uuid.UUID
+		IsOwner        bool
+		CanSendReports bool
 	}
 	err := db.WithContext(ctx).Raw(`
-		SELECT t.center_id, (c.owner_id = t.id) AS is_owner
+		SELECT t.center_id, (c.owner_id = t.id) AS is_owner,
+			COALESCE(cm.can_send_reports, FALSE) AS can_send_reports
 		FROM teachers t
 		JOIN centers c ON c.id = t.center_id
+		LEFT JOIN center_members cm ON cm.teacher_id = t.id
+			AND cm.center_id = t.center_id AND cm.left_at IS NULL
 		WHERE t.id = ?`, teacherID).Scan(&row).Error
 	if err != nil {
 		return authctx.Scope{}, fmt.Errorf("seed: resolve scope for %s: %w", teacherID, err)
@@ -184,7 +272,12 @@ func scopeFor(ctx context.Context, db *gorm.DB, teacherID uuid.UUID) (authctx.Sc
 	if row.CenterID == uuid.Nil {
 		return authctx.Scope{}, fmt.Errorf("seed: teacher %s has no center", teacherID)
 	}
-	return authctx.Scope{TeacherID: teacherID, CenterID: row.CenterID, IsOwner: row.IsOwner}, nil
+	return authctx.Scope{
+		TeacherID:      teacherID,
+		CenterID:       row.CenterID,
+		IsOwner:        row.IsOwner,
+		CanSendReports: row.CanSendReports,
+	}, nil
 }
 
 // accountExists looks up an account by phone, so both ensureOwner and
@@ -308,7 +401,7 @@ func ensureMember(ctx context.Context, db *gorm.DB, log *slog.Logger, s seedTeac
 // seedRoster inserts demo contacts for one teacher. It is all-or-nothing per
 // teacher: any pre-existing contact means the roster was seeded (or the
 // teacher has real data) and the whole block is skipped.
-func seedRoster(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authctx.Scope) error {
+func seedRoster(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authctx.Scope, contacts []seedContact) error {
 	var count int64
 	err := db.WithContext(ctx).
 		Raw("SELECT count(*) FROM contacts WHERE teacher_id = ? AND deleted_at IS NULL", sc.TeacherID).
@@ -322,7 +415,7 @@ func seedRoster(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authctx.S
 	}
 
 	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for _, c := range seedContacts {
+		for _, c := range contacts {
 			if err := tx.Exec(
 				"INSERT INTO contacts (id, teacher_id, center_id, full_name, phone) VALUES (?, ?, ?, ?, ?)",
 				id.New(), sc.TeacherID, sc.CenterID, c.FullName, c.Phone,
@@ -335,14 +428,14 @@ func seedRoster(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authctx.S
 	if err != nil {
 		return fmt.Errorf("seed: create roster: %w", err)
 	}
-	log.Info("seed: roster created", "teacher_id", sc.TeacherID, "contacts", len(seedContacts))
+	log.Info("seed: roster created", "teacher_id", sc.TeacherID, "contacts", len(contacts))
 	return nil
 }
 
 // seedStudentList inserts the demo students against the seeded contacts,
 // skipped wholesale when the teacher already has any student. Contacts are
 // resolved by phone so the block also works against a roster seeded earlier.
-func seedStudentList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authctx.Scope) error {
+func seedStudentList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authctx.Scope, students []seedStudent) error {
 	var count int64
 	err := db.WithContext(ctx).
 		Raw("SELECT count(*) FROM students WHERE teacher_id = ? AND deleted_at IS NULL", sc.TeacherID).
@@ -356,7 +449,7 @@ func seedStudentList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc auth
 	}
 
 	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for _, s := range seedStudents {
+		for _, s := range students {
 			var contactIDs []uuid.UUID
 			if err := tx.Raw(
 				"SELECT id FROM contacts WHERE teacher_id = ? AND phone = ? AND deleted_at IS NULL",
@@ -383,13 +476,13 @@ func seedStudentList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc auth
 	if err != nil {
 		return fmt.Errorf("seed: create students: %w", err)
 	}
-	log.Info("seed: students created", "teacher_id", sc.TeacherID, "students", len(seedStudents))
+	log.Info("seed: students created", "teacher_id", sc.TeacherID, "students", len(students))
 	return nil
 }
 
 // seedClassList inserts the demo classes with their weekly schedules for one
 // teacher, skipped wholesale when the teacher already has any class.
-func seedClassList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authctx.Scope) error {
+func seedClassList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authctx.Scope, classList []seedClass) error {
 	var count int64
 	err := db.WithContext(ctx).
 		Raw("SELECT count(*) FROM classes WHERE teacher_id = ? AND deleted_at IS NULL", sc.TeacherID).
@@ -403,7 +496,7 @@ func seedClassList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authct
 	}
 
 	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for _, c := range seedClasses {
+		for _, c := range classList {
 			classID := id.New()
 			if err := tx.Exec(
 				"INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price, status) VALUES (?, ?, ?, ?, ?::date, ?, 'active')",
@@ -425,7 +518,7 @@ func seedClassList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authct
 	if err != nil {
 		return fmt.Errorf("seed: create classes: %w", err)
 	}
-	log.Info("seed: classes created", "teacher_id", sc.TeacherID, "classes", len(seedClasses))
+	log.Info("seed: classes created", "teacher_id", sc.TeacherID, "classes", len(classList))
 	return nil
 }
 
@@ -433,7 +526,7 @@ func seedClassList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authct
 // skipped wholesale when the teacher already has any enrollment. Students and
 // classes are resolved by name; unit_price is copied from the class's current
 // default, matching what the enrollments service does.
-func seedEnrollmentList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authctx.Scope) error {
+func seedEnrollmentList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authctx.Scope, enrollmentList []seedEnrollment) error {
 	var count int64
 	err := db.WithContext(ctx).
 		Raw("SELECT count(*) FROM enrollments WHERE teacher_id = ? AND deleted_at IS NULL", sc.TeacherID).
@@ -447,7 +540,7 @@ func seedEnrollmentList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc a
 	}
 
 	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for _, e := range seedEnrollments {
+		for _, e := range enrollmentList {
 			var studentIDs []uuid.UUID
 			if err := tx.Raw(
 				"SELECT id FROM students WHERE teacher_id = ? AND full_name = ? AND deleted_at IS NULL",
@@ -488,7 +581,75 @@ func seedEnrollmentList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc a
 	if err != nil {
 		return fmt.Errorf("seed: create enrollments: %w", err)
 	}
-	log.Info("seed: enrollments created", "teacher_id", sc.TeacherID, "enrollments", len(seedEnrollments))
+	log.Info("seed: enrollments created", "teacher_id", sc.TeacherID, "enrollments", len(enrollmentList))
+	return nil
+}
+
+// seedServices wires the real feature services the seed drives, mirroring
+// router.go's construction so seeded data flows through production code paths.
+type seedServices struct {
+	enrollments *enrollments.Service
+	sessions    *sessions.Service
+	attendance  *attendance.Service
+	billing     *billing.Service
+}
+
+func newSeedServices(db *gorm.DB) seedServices {
+	txMgr := database.NewTxManager(db)
+	classesSvc := classes.NewService(classes.NewRepository(db), txMgr)
+	teachersSvc := teachers.NewService(teachers.NewRepository(db))
+	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db))
+	sessionsSvc := sessions.NewService(sessions.NewRepository(db), classesSvc, teachersSvc, enrollmentsSvc)
+	attendanceSvc := attendance.NewService(attendance.NewRepository(db), enrollmentsSvc, sessionsSvc, txMgr)
+	billingSvc := billing.NewService(billing.NewRepository(db, attendanceSvc), txMgr, sessionsSvc, enrollmentsSvc)
+	return seedServices{
+		enrollments: enrollmentsSvc,
+		sessions:    sessionsSvc,
+		attendance:  attendanceSvc,
+		billing:     billingSvc,
+	}
+}
+
+// seedClosedPeriod opens the current calendar month's billing period for one
+// teacher through the real billing service, then closes it — statements, and
+// with them report sends, only exist for a closed period. EnsurePeriod
+// converges on the existing (teacher, year, month) row and an already-closed
+// period skips the close, so reseeding a reused database changes nothing.
+// Close refuses unconfirmed past sessions, so this teacher's seed must
+// confirm every past session (pending count 0).
+func seedClosedPeriod(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authctx.Scope) error {
+	loc, err := time.LoadLocation(defaultTimezone)
+	if err != nil {
+		loc = time.UTC
+	}
+	now := time.Now().In(loc)
+	svcs := newSeedServices(db)
+	period, err := svcs.billing.EnsurePeriod(ctx, sc, now.Year(), int(now.Month()))
+	if err != nil {
+		return fmt.Errorf("seed: ensure period for %s: %w", sc.TeacherID, err)
+	}
+	if period.Status != billing.PeriodOpen {
+		log.Info("seed: billing period already closed, skipping close",
+			"teacher_id", sc.TeacherID, "period_id", period.ID)
+		return nil
+	}
+	closed, err := svcs.billing.Close(ctx, sc, period.ID)
+	var unconfirmed *billing.ErrUnconfirmedSessions
+	if errors.As(err, &unconfirmed) {
+		// A reused database can hold sessions this run did not create (an
+		// older seed shape, or manual dev work on the demo teacher). Closing
+		// is irreversible, so leave the period open rather than failing the
+		// whole seed; sends just stay unavailable until it is closed by hand.
+		log.Warn("seed: period has unconfirmed sessions, leaving it open",
+			"teacher_id", sc.TeacherID, "period_id", period.ID,
+			"unconfirmed", len(unconfirmed.Sessions))
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("seed: close period %s: %w", period.ID, err)
+	}
+	log.Info("seed: billing period closed", "teacher_id", sc.TeacherID,
+		"period_id", period.ID, "invoices_issued", closed.IssuedCount)
 	return nil
 }
 
@@ -511,10 +672,11 @@ type pastSession struct {
 // exercising the same generation path the API uses rather than hand-rolled
 // inserts. Skipped wholesale when the teacher already has any session, so
 // reseeding never duplicates rows. Attendance is then confirmed, through the
-// real attendance.Service, for every past session except the
-// pendingAttendanceCount most recent — a deterministic scatter of absences
-// gives the seeded data realistic variation without needing true randomness.
-func seedSessionList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authctx.Scope) error {
+// real attendance.Service, for every past session except the pendingCount
+// most recent — a deterministic scatter of absences gives the seeded data
+// realistic variation without needing true randomness. pendingCount 0 leaves
+// nothing unconfirmed, which is what lets a teacher's period close.
+func seedSessionList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authctx.Scope, pendingCount int) error {
 	var count int64
 	err := db.WithContext(ctx).
 		Raw("SELECT count(*) FROM class_sessions WHERE teacher_id = ? AND deleted_at IS NULL", sc.TeacherID).
@@ -538,12 +700,8 @@ func seedSessionList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc auth
 		return nil
 	}
 
-	txMgr := database.NewTxManager(db)
-	classesSvc := classes.NewService(classes.NewRepository(db), txMgr)
-	teachersSvc := teachers.NewService(teachers.NewRepository(db))
-	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db))
-	sessionsSvc := sessions.NewService(sessions.NewRepository(db), classesSvc, teachersSvc, enrollmentsSvc)
-	attendanceSvc := attendance.NewService(attendance.NewRepository(db), enrollmentsSvc, sessionsSvc, txMgr)
+	svcs := newSeedServices(db)
+	enrollmentsSvc, sessionsSvc, attendanceSvc := svcs.enrollments, svcs.sessions, svcs.attendance
 
 	// "Today" is the teacher's calendar day, matching how the app decides
 	// which sessions count as already held. Session dates are stored as
@@ -585,7 +743,7 @@ func seedSessionList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc auth
 	}
 	sort.Slice(past, func(i, j int) bool { return past[i].Date.Before(past[j].Date) })
 
-	confirmUpTo := max(len(past)-pendingAttendanceCount, 0)
+	confirmUpTo := max(len(past)-pendingCount, 0)
 	var confirmed int
 	for i, ps := range past[:confirmUpTo] {
 		roster, err := enrollmentsSvc.ActiveOn(ctx, sc, ps.ClassID, ps.Date)
