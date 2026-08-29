@@ -1,0 +1,1569 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Secretary Report Sender — Plan Dossier</title>
+<style>
+  :root{
+    --paper:#faf7f2; --panel:#f0ebe1; --ink:#0a0a0a; --muted:#6b6258;
+    --accent:#b8232c; --hair:#ddd5c6; --hair-dark:#c9c0ae;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+    --mono:ui-monospace,"SF Mono","Cascadia Mono",Consolas,"Liberation Mono",monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px; --s8:64px; --s9:96px;
+    --ease:cubic-bezier(0.22,1,0.36,1);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion:reduce){
+    html{scroll-behavior:auto}
+    *,*::before,*::after{animation:none!important;transition:none!important}
+  }
+  body{
+    background:var(--paper); color:var(--ink);
+    font-family:var(--sans); font-size:16px; line-height:1.6;
+    overflow-x:hidden;
+  }
+  /* paper grain */
+  body::before{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:0; opacity:.35;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.42 0 0 0 0 0.38 0 0 0 0 0.33 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  main{position:relative; z-index:1; max-width:1080px; margin:0 auto; padding:0 var(--s5)}
+  section{padding:var(--s8) 0; border-top:1px solid var(--hair)}
+  section:first-of-type{border-top:none}
+
+  .folio{
+    font-family:var(--mono); font-size:11px; letter-spacing:.09em; text-transform:uppercase;
+    color:var(--muted); display:flex; justify-content:space-between; gap:var(--s4);
+    padding:var(--s3) 0;
+  }
+  .folio b{color:var(--accent); font-weight:600}
+
+  h1{
+    font-family:var(--serif); font-weight:500;
+    font-size:clamp(2.75rem,6vw + 1rem,4.5rem);
+    line-height:1.08; letter-spacing:-0.01em; text-wrap:balance;
+    max-width:16ch;
+  }
+  h1 em{font-style:italic; color:var(--accent)}
+  h2{
+    font-family:var(--serif); font-weight:500; font-size:clamp(1.6rem,3vw,2.1rem);
+    line-height:1.15; letter-spacing:-0.005em; text-wrap:balance; margin-bottom:var(--s5);
+  }
+  h3{font-family:var(--serif); font-weight:600; font-size:1.15rem; line-height:1.25}
+  p{max-width:68ch; text-wrap:pretty}
+  a{color:var(--ink); text-decoration-color:var(--accent); text-underline-offset:3px}
+  a:hover{color:var(--accent)}
+  a:focus-visible,button:focus-visible{outline:2px solid var(--accent); outline-offset:3px}
+  code{font-family:var(--mono); font-size:.85em; background:var(--panel); padding:1px 5px}
+
+  .kicker{
+    font-family:var(--mono); font-size:11px; letter-spacing:.09em; text-transform:uppercase;
+    color:var(--accent); display:block; margin-bottom:var(--s3);
+  }
+  .rule-num{
+    font-family:var(--mono); font-size:12px; color:var(--muted);
+    border-top:2px solid var(--ink); padding-top:var(--s2); display:inline-block; min-width:64px;
+  }
+
+  /* cover */
+  .cover{padding:var(--s7) 0 var(--s8)}
+  .cover-grid{display:grid; grid-template-columns:2fr 1fr; gap:var(--s7); align-items:end; margin-top:var(--s6)}
+  .meta-band{border-left:1px solid var(--hair-dark); padding-left:var(--s5)}
+  .meta-band dl{display:grid; grid-template-columns:auto 1fr; gap:var(--s2) var(--s4); font-size:13px}
+  .meta-band dt{font-family:var(--mono); font-size:11px; letter-spacing:.07em; text-transform:uppercase; color:var(--muted); padding-top:2px}
+  .meta-band dd{font-variant-numeric:tabular-nums}
+  .lede{font-family:var(--serif); font-size:1.2rem; line-height:1.55; margin-top:var(--s5); max-width:58ch}
+  .lede strong{font-weight:600}
+  .contract-cite{font-family:var(--mono); font-size:12px; color:var(--muted); margin-top:var(--s5)}
+
+  /* stat band */
+  .stat-band{
+    display:grid; grid-template-columns:repeat(4,1fr); border:1px solid var(--hair-dark);
+    margin-top:var(--s6); background:var(--panel);
+  }
+  .stat-band>div{padding:var(--s4) var(--s5); border-left:1px solid var(--hair-dark)}
+  .stat-band>div:first-child{border-left:none}
+  .stat-band .n{font-family:var(--serif); font-size:2rem; line-height:1.1; font-variant-numeric:tabular-nums}
+  .stat-band .l{font-family:var(--mono); font-size:11px; letter-spacing:.07em; text-transform:uppercase; color:var(--muted)}
+  .stat-band .n em{font-style:normal;color:var(--accent)}
+
+  /* decisions */
+  .decisions{display:grid; grid-template-columns:1fr 1fr; gap:0 var(--s7)}
+  .decision{padding:var(--s5) 0; border-top:1px solid var(--hair)}
+  .decision:nth-child(-n+2){border-top:none}
+  .decision .tag{font-family:var(--mono); font-size:11px; color:var(--accent); letter-spacing:.07em}
+  .decision h3{margin:var(--s2) 0 var(--s2)}
+  .decision p{font-size:14.5px; color:#3d3830}
+
+  /* diagram */
+  .diagram-wrap{margin-top:var(--s6); overflow-x:auto}
+  .diagram-wrap svg{display:block; min-width:640px; width:100%; height:auto}
+  .diagram-caption{font-family:var(--mono); font-size:12px; color:var(--muted); margin-top:var(--s3)}
+
+  /* guard chain */
+  .guard-chain{margin-top:var(--s7); display:grid; grid-template-columns:220px 1fr; gap:var(--s5)}
+  .guard-chain aside{font-family:var(--serif); font-size:1.05rem; line-height:1.45; font-style:italic; color:var(--muted)}
+  .guard-chain aside b{color:var(--accent); font-style:normal}
+  .chain{list-style:none; counter-reset:g}
+  .chain li{
+    counter-increment:g; display:grid; grid-template-columns:44px 1fr; gap:var(--s4);
+    padding:var(--s3) 0; border-top:1px solid var(--hair); align-items:baseline;
+  }
+  .chain li:first-child{border-top:none}
+  .chain li::before{
+    content:counter(g,decimal-leading-zero); font-family:var(--mono); font-size:12px; color:var(--muted);
+  }
+  .chain .g-name{font-family:var(--mono); font-size:13px}
+  .chain .g-desc{font-size:13.5px; color:#3d3830; max-width:60ch}
+  .chain .new{color:var(--accent); font-weight:600}
+
+  /* phases */
+  .phase-grid{display:grid; grid-template-columns:1fr; gap:0; border:1px solid var(--hair-dark)}
+  .phase-card{
+    display:grid; grid-template-columns:120px 1fr 200px; gap:var(--s5);
+    padding:var(--s5); border-top:1px solid var(--hair-dark); background:var(--paper);
+    text-align:left; width:100%; font:inherit; color:inherit; cursor:pointer;
+    border-left:none; border-right:none; border-bottom:none;
+    transition:background .2s var(--ease);
+  }
+  .phase-card:first-child{border-top:none}
+  .phase-card:hover,.phase-card:focus-visible{background:var(--panel)}
+  .phase-card:active{transform:translateY(1px)}
+  .phase-no{font-family:var(--serif); font-size:2.2rem; line-height:1; color:var(--ink)}
+  .phase-no small{display:block; font-family:var(--mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-top:var(--s2)}
+  .phase-main h3{margin-bottom:var(--s2)}
+  .phase-main .obj{font-size:14px; color:#3d3830; max-width:60ch}
+  .phase-main ul{margin:var(--s3) 0 0 0; list-style:none; font-size:13.5px}
+  .phase-main ul li{padding-left:14px; position:relative; margin-top:3px; color:#3d3830}
+  .phase-main ul li::before{content:""; position:absolute; left:0; top:.62em; width:6px; height:1px; background:var(--accent)}
+  .phase-side{font-family:var(--mono); font-size:11.5px; color:var(--muted); line-height:1.7}
+  .phase-side b{color:var(--ink); font-weight:600}
+  .phase-side .open-hint{color:var(--accent); margin-top:var(--s3); display:inline-block; border-bottom:1px solid var(--accent)}
+  .pill{display:inline-block; border:1px solid var(--hair-dark); padding:1px 7px; font-family:var(--mono); font-size:10.5px; letter-spacing:.05em; text-transform:uppercase; margin-right:4px}
+  .pill.p1{border-color:var(--accent); color:var(--accent)}
+
+  /* mockups */
+  .mock-sec{display:grid; grid-template-columns:1fr; gap:var(--s8)}
+  .mockup{display:grid; grid-template-columns:minmax(0,1.5fr) 1fr; gap:var(--s6); align-items:start}
+  .mock-frame{border:1px solid var(--hair-dark); background:#fefdfb}
+  .mock-title{font-family:var(--mono); font-size:11px; letter-spacing:.07em; text-transform:uppercase; color:var(--muted); border-bottom:1px solid var(--hair); padding:var(--s2) var(--s4); display:flex; justify-content:space-between}
+  .mock-body{padding:var(--s4); font-size:13px}
+  .callouts{list-style:none; font-size:13.5px}
+  .callouts li{display:grid; grid-template-columns:26px 1fr; gap:var(--s3); padding:var(--s3) 0; border-top:1px solid var(--hair)}
+  .callouts li:first-child{border-top:none}
+  .co-n{font-family:var(--mono); font-size:11px; color:#fff; background:var(--accent); width:20px; height:20px; display:inline-flex; align-items:center; justify-content:center}
+  .callouts .crit{font-family:var(--mono); font-size:11px; color:var(--muted)}
+  .co-mark{font-family:var(--mono); font-size:10px; color:#fff; background:var(--accent); padding:0 5px; vertical-align:2px; margin-left:6px}
+  /* mock ui atoms */
+  .m-row{display:flex; align-items:center; gap:var(--s3); padding:var(--s3) var(--s2); border-top:1px solid var(--hair)}
+  .m-row:first-child{border-top:none}
+  .m-ava{width:28px;height:28px;border:1px solid var(--hair-dark);background:var(--panel);display:inline-flex;align-items:center;justify-content:center;font-family:var(--serif);font-size:13px;flex:none}
+  .m-name{font-weight:600; font-size:13px}
+  .m-sub{font-size:11.5px; color:var(--muted)}
+  .m-badge{font-family:var(--mono); font-size:10px; letter-spacing:.04em; border:1px solid var(--accent); color:var(--accent); padding:1px 6px; text-transform:uppercase}
+  .m-badge.gray{border-color:var(--hair-dark); color:var(--muted)}
+  .m-toggle{margin-left:auto; flex:none; font-family:var(--mono); font-size:10.5px; border:1px solid var(--ink); padding:3px 9px; background:var(--ink); color:var(--paper)}
+  .m-toggle.off{background:transparent; color:var(--muted); border-color:var(--hair-dark)}
+  .m-modal{border:1px solid var(--ink); margin:var(--s4); background:var(--paper)}
+  .m-modal .hd{font-family:var(--serif); font-size:15px; font-weight:600; padding:var(--s3) var(--s4); border-bottom:1px solid var(--hair)}
+  .m-modal .bd{padding:var(--s3) var(--s4); font-size:12.5px; color:#3d3830; max-width:52ch}
+  .m-modal .ft{padding:var(--s3) var(--s4); border-top:1px solid var(--hair); display:flex; gap:var(--s3); justify-content:flex-end}
+  .m-btn{font-family:var(--mono); font-size:11px; padding:5px 12px; border:1px solid var(--ink); background:var(--ink); color:var(--paper)}
+  .m-btn.ghost{background:transparent; color:var(--ink)}
+  .m-btn.danger{background:var(--accent); border-color:var(--accent)}
+  .m-nav{border-right:1px solid var(--hair); padding:var(--s3); font-size:12.5px; min-width:132px}
+  .m-nav div{padding:5px 8px; color:var(--muted)}
+  .m-nav .on{color:var(--accent); border-left:2px solid var(--accent); background:var(--panel)}
+  .m-split{display:flex}
+  .m-group-h{font-family:var(--mono); font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); padding:var(--s3) var(--s2) var(--s1); border-bottom:1px solid var(--hair)}
+  .m-count{margin-left:auto; font-family:var(--mono); font-size:11px; font-variant-numeric:tabular-nums}
+  .bucket{display:grid; grid-template-columns:56px 1fr; gap:var(--s3); padding:var(--s2) 0; align-items:baseline; border-top:1px solid var(--hair)}
+  .bucket:first-of-type{border-top:none}
+  .bucket .bn{font-family:var(--serif); font-size:1.5rem; text-align:right; font-variant-numeric:tabular-nums}
+  .bucket .warn{color:var(--accent)}
+  .bucket .bl{font-size:12px; color:#3d3830}
+
+  /* red team */
+  .rt-grid{display:grid; grid-template-columns:1fr 1fr; gap:var(--s6)}
+  .rt-list{list-style:none; font-size:13.5px; counter-reset:f}
+  .rt-list li{counter-increment:f; display:grid; grid-template-columns:30px 1fr; gap:var(--s3); padding:var(--s2) 0 var(--s2); border-top:1px solid var(--hair)}
+  .rt-list li::before{content:"F" counter(f); font-family:var(--mono); font-size:11px; color:var(--muted); padding-top:2px}
+  .rt-list li:first-child{border-top:none}
+  .sev{font-family:var(--mono); font-size:10px; letter-spacing:.05em; text-transform:uppercase; margin-right:6px}
+  .sev.c{color:var(--accent)} .sev.h{color:#8a6d1a} .sev.m{color:var(--muted)}
+  blockquote.pull{
+    font-family:var(--serif); font-style:italic; font-size:1.35rem; line-height:1.4;
+    border-left:2px solid var(--accent); padding-left:var(--s5); margin:var(--s6) 0; max-width:44ch;
+  }
+  blockquote.pull cite{display:block; font-family:var(--mono); font-style:normal; font-size:11px; color:var(--muted); margin-top:var(--s3)}
+
+  /* checklists / tables */
+  .plain-list{list-style:none; font-size:14px}
+  .plain-list li{padding:var(--s2) 0 var(--s2) 26px; position:relative; border-top:1px solid var(--hair)}
+  .plain-list li:first-child{border-top:none}
+  .plain-list li::before{content:"☐"; position:absolute; left:2px; color:var(--accent); font-size:14px}
+  table.hairline{border-collapse:collapse; width:100%; font-size:13.5px}
+  table.hairline th{font-family:var(--mono); font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); text-align:left; font-weight:500; padding:var(--s2) var(--s3); border-bottom:2px solid var(--ink)}
+  table.hairline td{padding:var(--s2) var(--s3); border-bottom:1px solid var(--hair); vertical-align:top}
+
+  /* citations */
+  .cite-cols{columns:2; column-gap:var(--s7); font-family:var(--mono); font-size:11.5px; line-height:2; color:var(--muted)}
+  .cite-cols span{display:block; break-inside:avoid}
+  .cite-cols b{color:var(--ink); font-weight:500}
+
+  footer{padding:var(--s6) 0 var(--s8); font-family:var(--mono); font-size:11px; color:var(--muted); display:flex; justify-content:space-between; gap:var(--s4); border-top:2px solid var(--ink)}
+
+  /* nav dots */
+  .dots{position:fixed; right:14px; top:50%; transform:translateY(-50%); z-index:5; display:flex; flex-direction:column; gap:10px}
+  .dots a{width:8px; height:8px; border:1px solid var(--muted); border-radius:50%; display:block}
+  .dots a:hover,.dots a.on{background:var(--accent); border-color:var(--accent)}
+  .dots a:focus-visible{outline-offset:2px}
+
+  /* modal */
+  dialog.phase-modal{
+    border:1px solid var(--ink); background:var(--paper); color:var(--ink);
+    width:min(760px,92vw); max-height:86vh; padding:0; margin:auto;
+  }
+  dialog.phase-modal::backdrop{background:rgba(10,10,10,.45)}
+  .pm-head{display:flex; justify-content:space-between; align-items:center; gap:var(--s4); padding:var(--s3) var(--s5); border-bottom:1px solid var(--hair-dark); position:sticky; top:0; background:var(--paper)}
+  .pm-head .t{font-family:var(--mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted)}
+  .pm-close{font:inherit; font-family:var(--mono); font-size:12px; background:none; border:1px solid var(--hair-dark); padding:4px 10px; cursor:pointer}
+  .pm-close:hover{border-color:var(--accent); color:var(--accent)}
+  .pm-body{padding:var(--s5) var(--s5) var(--s7); overflow-y:auto}
+  .pm-fm{font-family:var(--mono); font-size:11.5px; color:var(--muted); border:1px solid var(--hair); background:var(--panel); padding:var(--s3) var(--s4); margin-bottom:var(--s5); display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:var(--s2)}
+  .pm-fm b{color:var(--ink); display:block; font-weight:500}
+  .md h1,.md h2,.md h3{font-family:var(--serif); margin:var(--s5) 0 var(--s3); line-height:1.2}
+  .md h1{font-size:1.6rem} .md h2{font-size:1.25rem; border-bottom:1px solid var(--hair); padding-bottom:var(--s2)} .md h3{font-size:1.05rem}
+  .md p{margin:var(--s3) 0; font-size:14px}
+  .md ul,.md ol{margin:var(--s3) 0 var(--s3) 22px; font-size:14px}
+  .md li{margin:4px 0}
+  .md li.task{list-style:none; margin-left:-18px}
+  .md li.task::before{content:"☐ "; color:var(--accent)}
+  .md li.task.done::before{content:"☑ "}
+  .md code{font-size:.82em}
+  .md pre{background:var(--ink); color:var(--paper); font-family:var(--mono); font-size:12.5px; line-height:1.55; padding:var(--s4); overflow-x:auto; margin:var(--s4) 0}
+  .md pre code{background:none; padding:0; color:inherit}
+  .md blockquote{border-left:2px solid var(--accent); padding-left:var(--s4); color:var(--muted); font-style:italic; margin:var(--s4) 0}
+  .md table{border-collapse:collapse; margin:var(--s4) 0; font-size:13px; width:100%}
+  .md th{border-bottom:2px solid var(--ink); text-align:left; padding:4px 8px; font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em}
+  .md td{border-bottom:1px solid var(--hair); padding:4px 8px}
+  .md hr{border:none; border-top:1px solid var(--hair-dark); margin:var(--s5) 0}
+  .md a{word-break:break-all}
+
+  @media (max-width:820px){
+    .cover-grid,.decisions,.rt-grid,.mockup,.guard-chain{grid-template-columns:1fr}
+    .guard-chain aside{max-width:60ch}
+    .stat-band{grid-template-columns:1fr 1fr}
+    .stat-band>div:nth-child(3){border-left:none}
+    .stat-band>div{border-top:1px solid var(--hair-dark)}
+    .stat-band>div:nth-child(-n+2){border-top:none}
+    .phase-card{grid-template-columns:64px 1fr}
+    .phase-side{grid-column:2}
+    .cite-cols{columns:1}
+    .dots{display:none}
+    .meta-band{border-left:none; padding-left:0; border-top:1px solid var(--hair-dark); padding-top:var(--s4)}
+  }
+</style>
+</head>
+<body>
+<nav class="dots" aria-label="Điều hướng nhanh">
+  <a href="#cover" title="Cover" aria-label="Cover"></a>
+  <a href="#decisions" title="Decisions" aria-label="Decisions"></a>
+  <a href="#workflow" title="Workflow" aria-label="Workflow"></a>
+  <a href="#phases" title="Phases" aria-label="Phases"></a>
+  <a href="#mockups" title="Mockups" aria-label="Mockups"></a>
+  <a href="#redteam" title="Red team" aria-label="Red team"></a>
+  <a href="#criteria" title="Criteria" aria-label="Criteria"></a>
+</nav>
+<main>
+
+<!-- ============ COVER ============ -->
+<section class="cover" id="cover">
+  <div class="folio"><span>TEKA · HỒ SƠ KẾ HOẠCH · <b>260829-1020</b></span><span>29·08·2026</span></div>
+  <h1>Thư ký là người <em>gửi báo cáo</em> được ủy quyền</h1>
+  <div class="cover-grid">
+    <div>
+      <p class="lede">Chủ trung tâm mời thư ký làm thành viên bình thường, cấp một quyền duy nhất
+      <strong><code>can_send_reports</code></strong>: đọc bảng kê và công nợ toàn trung tâm, chạy các đợt gửi
+      báo cáo/nhắc nợ theo nhịp <strong>từ Zalo của chính cô</strong> cho period của bất kỳ giáo viên nào.
+      Mọi bản ghi notification, run và audit ghi nhận cô là người gửi. Không có bất kỳ quyền ghi nào lên
+      điểm danh, lớp học, cấu hình thu học phí, danh bạ hay thành viên.
+      <strong>Đổi hướng 29·08 (D8):</strong> gửi báo cáo là trách nhiệm của thư ký — giáo viên thường chỉ nhập
+      <em>điểm danh</em> và <em>nhận xét</em> sau buổi học, và bị chặn tạo đợt gửi trên mọi kênh, kể cả period
+      của chính mình; owner là người gửi dự phòng. Nội dung báo cáo không đổi (bảng kê/nhắc nợ — nhận xét
+      không đi vào tin nhắn).</p>
+      <p class="contract-cite">Nguồn contract: <a href="../reports/brainstorm-260828-0849-secretary-report-sender.md">brainstorm-260828-0849-secretary-report-sender.md</a> (chấp nhận 28·08·2026, phương án A). Chi tiết thực thi: <a href="./plan.md">plan.md</a> + <code>phase-01…05</code>.</p>
+    </div>
+    <div class="meta-band">
+      <dl>
+        <dt>Trạng thái</dt><dd>Pending</dd>
+        <dt>Ưu tiên</dt><dd>P1</dd>
+        <dt>Ước lượng</dt><dd>7.5 ngày</dd>
+        <dt>Phạm vi</dt><dd>api · web · zalo · notifications · authorization</dd>
+        <dt>Red team</dt><dd>3 reviewer · 15 finding · đã áp dụng · delta D8 chưa re-red-team</dd>
+      </dl>
+    </div>
+  </div>
+  <div class="stat-band" role="group" aria-label="Số liệu kế hoạch">
+    <div><div class="n">5</div><div class="l">phase</div></div>
+    <div><div class="n">2</div><div class="l">migration (000011·000012)</div></div>
+    <div><div class="n"><em>15</em></div><div class="l">finding red-team đã áp dụng</div></div>
+    <div><div class="n">0</div><div class="l">câu hỏi còn mở</div></div>
+  </div>
+</section>
+
+<!-- ============ DECISIONS ============ -->
+<section id="decisions">
+  <span class="rule-num">01</span>
+  <h2>Tám quyết định chốt</h2>
+  <div class="decisions">
+    <div class="decision"><span class="tag">D1</span><h3>Cờ, không phải role</h3>
+      <p>Boolean <code>center_members.can_send_reports</code>, mặc định false. Không role enum, không đổi JWT, không framework RBAC (non-goal của brainstorm, YAGNI). Scope resolution đọc cờ theo từng request.</p></div>
+    <div class="decision"><span class="tag">D2</span><h3>Hành vi owner đóng băng; cờ chỉ dành cho member</h3>
+      <p>Gate mới chỉ mở <code>zalo_personal</code> cross-teacher khi caller mang cờ, và cờ chỉ cấp được cho member đang hoạt động không phải owner (quyết định của người dùng, 29·08). 409 của owner được giữ vô điều kiện. Owner giữ nguyên khả năng gửi hôm nay như người gửi dự phòng; breaking change của D8 chỉ áp cho member thường.</p></div>
+    <div class="decision"><span class="tag">D3</span><h3>Cụm đọc qua helper read-only riêng</h3>
+      <p><code>ReportsOversight() = IsOwner || CanSendReports</code> đi qua helper <code>scopedRead</code> mới, không bao giờ nới <code>scoped()</code> dùng chung vốn gánh cả write (finding F1–F3). Ledger của period chuyển sang scope theo period để giáo viên luôn thấy các lần gửi thay mặt mình.</p></div>
+    <div class="decision"><span class="tag">D4</span><h3>Không có quyền generate độc lập</h3>
+      <p>Thư ký chỉ chạm statement refresh qua đường BulkSend với nhánh Generate ủy quyền nội bộ; endpoint generate độc lập và revoke giữ nguyên guard, có denial test.</p></div>
+    <div class="decision"><span class="tag">D5</span><h3>Từ chối theo convention neutral not-found</h3>
+      <p>Mọi từ chối theo convention tenancy hiện có (không lộ sự tồn tại tài nguyên) thay vì 403 trần; "403 paths tested" của brainstorm ánh xạ thành "denial paths tested per convention".</p></div>
+    <div class="decision"><span class="tag">D6</span><h3>Một run gửi cá nhân mỗi period</h3>
+      <p>Gỡ 409 làm mất lá chắn gián tiếp "một period một người gửi". Index unique một phần mới trên <code>notification_runs(billing_period_id) WHERE status='running'</code> + pre-check biến bất biến này thành tường minh: không phụ huynh nào nhận DM trùng.</p></div>
+    <div class="decision"><span class="tag">D7</span><h3>Audit qua action registry, tách đôi route</h3>
+      <p>Grant/revoke là <code>POST</code>/<code>DELETE …/members/:teacherId/send-reports</code> với hai entry trong <code>audit/action.go</code>. Middleware không lưu body, nên tách route là thứ khiến grant và revoke phân biệt được trong audit trail. Không publish bus event thủ công (double-log).</p></div>
+    <div class="decision"><span class="tag">D8</span><h3>Độc quyền gửi: chỉ thư ký &amp; owner</h3>
+      <p>Tạo đợt gửi đòi <code>ReportsOversight()</code> — helper của D3 tái dùng làm gate (DRY, không thêm khái niệm mới) — ở đầu BulkSend và ResumeRun cho MỌI kênh. Member thường nhận 403 tường minh: lệch có chủ đích khỏi D5 vì period là của chính họ, giả vờ not-found là nói dối. <code>markSent</code> và ledger giữ nguyên; web ẩn entry point gửi, server là nơi cưỡng chế. Đổi hướng 29·08 sau red-team — delta này chưa re-red-team.</p></div>
+  </div>
+</section>
+
+<!-- ============ WORKFLOW DIAGRAM ============ -->
+<section id="workflow">
+  <span class="rule-num">02</span>
+  <h2>Luồng triển khai &amp; chuỗi guard</h2>
+  <div class="diagram-wrap">
+    <svg viewBox="0 0 960 300" role="img" aria-label="Sơ đồ phụ thuộc 5 phase: Phase 1 mở đường cho Phase 2 và 3 chạy song song, cả hai đổ vào Phase 4, Phase 5 chốt sau 3 và 4">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#0a0a0a"/>
+        </marker>
+        <marker id="arrR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#b8232c"/>
+        </marker>
+      </defs>
+      <style>
+        .box{fill:#faf7f2; stroke:#0a0a0a; stroke-width:1.25}
+        .boxCrit{fill:#f0ebe1; stroke:#b8232c; stroke-width:1.5}
+        .bt{font:600 14px Georgia,serif; fill:#0a0a0a}
+        .bs{font:10.5px ui-monospace,Consolas,monospace; fill:#6b6258}
+        .be{font:10.5px ui-monospace,Consolas,monospace; fill:#b8232c}
+        .edge{stroke:#0a0a0a; stroke-width:1.1; fill:none}
+        .edgeR{stroke:#b8232c; stroke-width:1.4; fill:none}
+        .lbl{font:10px ui-monospace,Consolas,monospace; fill:#6b6258}
+      </style>
+      <!-- Phase 1 -->
+      <rect class="boxCrit" x="20" y="110" width="180" height="80"/>
+      <text class="bt" x="34" y="138">Phase 1</text>
+      <text class="bs" x="34" y="156">Permission model</text>
+      <text class="bs" x="34" y="170">&amp; scope resolution</text>
+      <text class="be" x="34" y="184">1.5d · mig 000011</text>
+      <!-- Phase 2 -->
+      <rect class="boxCrit" x="300" y="30" width="200" height="80"/>
+      <text class="bt" x="314" y="58">Phase 2</text>
+      <text class="bs" x="314" y="76">API read oversight</text>
+      <text class="bs" x="314" y="90">&amp; delegated send</text>
+      <text class="be" x="314" y="104">3d · mig 000012</text>
+      <!-- Phase 3 -->
+      <rect class="box" x="300" y="190" width="200" height="80"/>
+      <text class="bt" x="314" y="218">Phase 3</text>
+      <text class="bs" x="314" y="236">Web: owner</text>
+      <text class="bs" x="314" y="250">grant/revoke UI</text>
+      <text class="bs" x="314" y="264">0.5d</text>
+      <!-- Phase 4 -->
+      <rect class="boxCrit" x="590" y="110" width="200" height="80"/>
+      <text class="bt" x="604" y="138">Phase 4</text>
+      <text class="bs" x="604" y="156">Web: secretary</text>
+      <text class="bs" x="604" y="170">send experience</text>
+      <text class="be" x="604" y="184">1.5d</text>
+      <!-- Phase 5 -->
+      <rect class="box" x="840" y="110" width="105" height="80"/>
+      <text class="bt" x="852" y="138">Phase 5</text>
+      <text class="bs" x="852" y="156">E2E, docs</text>
+      <text class="bs" x="852" y="170">regression</text>
+      <text class="bs" x="852" y="184">1d</text>
+      <!-- edges -->
+      <path class="edgeR" d="M200,135 C250,120 260,85 298,72" marker-end="url(#arrR)"/>
+      <path class="edge" d="M200,165 C250,180 260,215 298,228" marker-end="url(#arr)"/>
+      <path class="edgeR" d="M500,72 C545,85 555,120 588,135" marker-end="url(#arrR)"/>
+      <path class="edge" d="M500,228 C545,215 555,180 588,165" marker-end="url(#arr)"/>
+      <path class="edge" d="M790,150 L838,150" marker-end="url(#arr)"/>
+      <path class="edge" d="M500,255 C700,255 810,220 858,192" marker-end="url(#arr)"/>
+      <text class="lbl" x="222" y="88">song song sau P1</text>
+      <text class="lbl" x="620" y="235">P5 cần cả P3 + P4</text>
+      <text class="lbl" x="512" y="122">đường găng (đỏ)</text>
+    </svg>
+  </div>
+  <p class="diagram-caption">Đường găng 1 → 2 → 4 → 5 (7d tuần tự; P3 nằm lọt trong khoảng chạy song song).</p>
+
+  <div class="guard-chain">
+    <aside>Điểm đáng nhớ của thiết kế: đường gửi ủy quyền không phải một quyền mới, mà là <b>một chuỗi tám guard</b> — mỗi mắt xích đều có test riêng: bốn mắt sinh ra từ red team, một mắt từ đổi hướng D8.</aside>
+    <ol class="chain">
+      <li><span class="g-name">resolveScope</span><span class="g-desc">LEFT JOIN <code>center_members</code>, COALESCE cờ về false; member đã rời luôn resolve false; rejoin bị reset cờ (F-resurrection).</span></li>
+      <li><span class="g-name new">ReportsOversight() gate ← mới (D8)</span><span class="g-desc"><code>IsOwner || CanSendReports</code> ở đầu BulkSend/ResumeRun, mọi kênh. Member thường nhận 403 tường minh — giáo viên chỉ nhập điểm danh &amp; nhận xét, không tạo đợt gửi.</span></li>
+      <li><span class="g-name">verifyPersonalSession(caller)</span><span class="g-desc">Session Zalo là của CHÍNH thư ký — giữ bất biến 1-Zalo-mỗi-người (PK <code>zalo_accounts.teacher_id</code>).</span></li>
+      <li><span class="g-name new">HasActiveRunForPeriod ← mới</span><span class="g-desc">Cùng index unique 000012: hai người bấm gửi cùng period → đúng một run, người sau nhận 409 sạch (D6).</span></li>
+      <li><span class="g-name new">gate 409 có điều kiện ← đổi</span><span class="g-desc"><code>personal &amp;&amp; crossTeacher &amp;&amp; !sc.CanSendReports → 409</code>. Owner không bao giờ mang cờ nên 409 của owner bất biến (D2).</span></li>
+      <li><span class="g-name new">Generate (nhánh ủy quyền nội bộ)</span><span class="g-desc">Chỉ BulkSend đi được nhánh này; endpoint generate độc lập và revoke giữ guard cũ + denial test (D4).</span></li>
+      <li><span class="g-name">ZaloMappings — chỉ đọc</span><span class="g-desc">Mapping là chứng cứ đồng thuận của giáo viên chủ period; đường ủy quyền đọc, không bao giờ ghi lại.</span></li>
+      <li><span class="g-name new">re-check theo từng item ← mới</span><span class="g-desc">Run cross-teacher đọc lại cờ trước mỗi DM; thu hồi quyền dừng run trong vài giây (theo pace), phần còn lại fail với lý do tường minh.</span></li>
+    </ol>
+  </div>
+</section>
+
+<!-- ============ PHASES ============ -->
+<section id="phases">
+  <span class="rule-num">03</span>
+  <h2>Năm phase — bấm để mở toàn văn</h2>
+  <div class="phase-grid" role="list">
+    <button class="phase-card" data-phase="1" role="listitem">
+      <div class="phase-no">1<small>1.5 ngày</small></div>
+      <div class="phase-main">
+        <h3>Permission model &amp; scope resolution</h3>
+        <p class="obj">Cột <code>can_send_reports</code>, Scope + <code>ReportsOversight()</code>, hai route grant/revoke của owner, audit phân biệt được.</p>
+        <ul>
+          <li>Migration 000011; reset cờ trong <code>OpenMembership</code>/<code>CloseMembership</code> (chống hồi sinh quyền)</li>
+          <li><code>POST</code>/<code>DELETE /centers/me/members/:teacherId/send-reports</code> — không body, không bẫy <code>*bool</code></li>
+          <li>Hai entry <code>audit/action.go</code>: grant ≠ revoke trong audit trail</li>
+          <li>Đồng bộ 3 bản sao SQL resolve scope (repo, testutil, seeds)</li>
+        </ul>
+      </div>
+      <div class="phase-side"><span class="pill p1">P1</span><span class="pill">todo</span><br>phụ thuộc: <b>—</b><br>gate: <b>make test-api-unit + centers integration</b><br><span class="open-hint">Mở chi tiết ↗</span></div>
+    </button>
+    <button class="phase-card" data-phase="2" role="listitem">
+      <div class="phase-no">2<small>3 ngày</small></div>
+      <div class="phase-main">
+        <h3>API read oversight &amp; delegated send path</h3>
+        <p class="obj">Cụm đọc center-wide qua <code>scopedRead</code>, gate độc quyền gửi D8, mở gate gửi ủy quyền, khoá run theo period, preview bucket server-side.</p>
+        <ul>
+          <li>Gate D8 đầu BulkSend/ResumeRun: <code>ReportsOversight()</code> mọi kênh — member thường nhận 403 tường minh; test self-send cũ đổi thành expect-denial (chủ đích, không weaken)</li>
+          <li><code>scopedRead</code> cho statements/billing/collections/contacts/mappings — <code>scoped()</code> dùng chung bất khả xâm phạm</li>
+          <li>Migration 000012: một run <code>running</code> mỗi period; test hai caller đồng thời</li>
+          <li>Ledger đọc theo period: giáo viên thấy lần gửi thay mặt mình (chống gửi trùng)</li>
+          <li>Re-check quyền theo item; ResumeRun re-check; fail-out run mồ côi</li>
+          <li><code>GET …/notifications/preview</code>: 3 bucket + max_run_size</li>
+          <li><code>PeriodResponse</code> thêm <code>teacher_id/teacher_name</code> (Phase 4 cần)</li>
+        </ul>
+      </div>
+      <div class="phase-side"><span class="pill p1">P1</span><span class="pill">todo</span><br>phụ thuộc: <b>1</b><br>gate: <b>make test-api (ma trận authorization)</b><br><span class="open-hint">Mở chi tiết ↗</span></div>
+    </button>
+    <button class="phase-card" data-phase="3" role="listitem">
+      <div class="phase-no">3<small>0.5 ngày</small></div>
+      <div class="phase-main">
+        <h3>Web: owner grant/revoke UI</h3>
+        <p class="obj">Toggle theo member trên <code>/center</code> với modal xác nhận và badge "Thư ký gửi báo cáo".</p>
+        <ul>
+          <li>Zod schema thêm cờ với <code>.default(false)</code> (an toàn rollout, API deploy trước)</li>
+          <li>Mutation POST/DELETE, invalidate <code>/centers/me</code></li>
+          <li>Toggle từ HvButton (repo không có switch component — không thêm mới)</li>
+        </ul>
+      </div>
+      <div class="phase-side"><span class="pill">P2</span><span class="pill">todo</span><br>phụ thuộc: <b>1</b><br>gate: <b>vitest + MSW; check tay trên dev stack</b><br><span class="open-hint">Mở chi tiết ↗</span></div>
+    </button>
+    <button class="phase-card" data-phase="4" role="listitem">
+      <div class="phase-no">4<small>1.5 ngày</small></div>
+      <div class="phase-main">
+        <h3>Web: secretary send experience</h3>
+        <p class="obj">Nav "Gửi báo cáo", trang period toàn trung tâm gộp theo giáo viên, dialog 3 bucket từ preview server; ẩn affordance gửi của member thường (D8).</p>
+        <ul>
+          <li>Nav hiện với <code>!isOwner &amp;&amp; canSendReports</code>; feature folder <code>features/reports/</code> mới</li>
+          <li><code>canRunSends = isOwner || canSendReports</code> gate 3 entry point gửi (nút "Nhắc nợ", link billing review, control trang gửi); ledger vẫn đọc được</li>
+          <li>Tái dùng trang gửi hiện có — server là nơi authorize, không thêm role check client</li>
+          <li>Bucket từ server (hết lỗi đếm sai do cap 100/trang); chặn confirm khi vượt max_run_size</li>
+          <li>Banner chưa liên kết Zalo trỏ về <code>/profile</code>; CTA "Kết bạn trước"</li>
+        </ul>
+      </div>
+      <div class="phase-side"><span class="pill p1">P1</span><span class="pill">todo</span><br>phụ thuộc: <b>2 · 3</b><br>gate: <b>vitest/MSW + hành trình trên dev stack</b><br><span class="open-hint">Mở chi tiết ↗</span></div>
+    </button>
+    <button class="phase-card" data-phase="5" role="listitem">
+      <div class="phase-no">5<small>1 ngày</small></div>
+      <div class="phase-main">
+        <h3>E2E, regression &amp; docs</h3>
+        <p class="obj">Hành trình đầy-cuối trên stack cô lập, khoá regression owner/member, cập nhật docs sở hữu tenancy.</p>
+        <ul>
+          <li>Seed thêm thư ký + giáo viên thứ hai với lớp/danh bạ/period mở riêng</li>
+          <li><code>secretary-send.spec.ts</code>: grant qua UI (assert-then-set) → gửi manual → audit ghi thư ký; <code>afterEach</code> revoke (idempotent trên DB tái dùng)</li>
+          <li>Negative path D8: giáo viên thứ hai (member thường) không thấy entry gửi nào, ledger period của mình vẫn đọc được; docs + release note cho behavior removal</li>
+          <li>Thang verify đầy đủ: unit → integration → vitest → e2e (seed mới)</li>
+        </ul>
+      </div>
+      <div class="phase-side"><span class="pill">P2</span><span class="pill">todo</span><br>phụ thuộc: <b>3 · 4</b><br>gate: <b>toàn bộ suite e2e trên stack teka-e2e</b><br><span class="open-hint">Mở chi tiết ↗</span></div>
+    </button>
+  </div>
+</section>
+
+<!-- ============ MOCKUPS ============ -->
+<section id="mockups">
+  <span class="rule-num">04</span>
+  <h2>Mockup có chú giải</h2>
+  <div class="mock-sec">
+
+    <!-- Mockup A: grant/revoke -->
+    <div class="mockup">
+      <div>
+        <div class="mock-frame" role="img" aria-label="Mockup danh sách thành viên với toggle cấp quyền và modal xác nhận">
+          <div class="mock-title"><span>/center · danh sách thành viên (view của owner)</span><span>Phase 3</span></div>
+          <div class="mock-body">
+            <div class="m-row">
+              <span class="m-ava">H</span>
+              <span><span class="m-name">Cô Hà</span> <span class="m-badge gray">Chủ trung tâm</span><br><span class="m-sub">tham gia 12·03·2026</span></span>
+              <span class="m-toggle off" aria-hidden="true">không áp dụng<span class="co-mark">1</span></span>
+            </div>
+            <div class="m-row">
+              <span class="m-ava">T</span>
+              <span><span class="m-name">Cô Thu</span> <span class="m-badge">Thư ký gửi báo cáo<span class="co-mark">2</span></span><br><span class="m-sub">tham gia 02·06·2026</span></span>
+              <span class="m-toggle">ĐANG BẬT<span class="co-mark">3</span></span>
+            </div>
+            <div class="m-row">
+              <span class="m-ava">L</span>
+              <span><span class="m-name">Thầy Long</span><br><span class="m-sub">tham gia 15·04·2026</span></span>
+              <span class="m-toggle off">TẮT</span>
+            </div>
+          </div>
+          <div class="m-modal">
+            <div class="hd">Cấp quyền gửi báo cáo cho Cô Thu?<span class="co-mark">4</span></div>
+            <div class="bd">Cô Thu sẽ đọc được bảng kê và công nợ của toàn trung tâm, và gửi báo cáo/nhắc nợ cho phụ huynh của mọi lớp bằng Zalo cá nhân của chính cô. Quyền không cho phép sửa điểm danh, lớp học, học phí hay danh bạ.</div>
+            <div class="ft"><button class="m-btn ghost" type="button" tabindex="-1">Huỷ</button><button class="m-btn" type="button" tabindex="-1">Cấp quyền</button></div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <h3 style="margin-bottom:var(--s4)">Grant / revoke của owner</h3>
+        <ul class="callouts">
+          <li><span class="co-n">1</span><span>Hàng owner không bao giờ có toggle — cờ chỉ dành cho member (D2). <span class="crit">acceptance: target = owner bị từ chối</span></span></li>
+          <li><span class="co-n">2</span><span>HvBadge màu accent chỉ hiện khi <code>can_send_reports = true</code>, render từ dữ liệu <code>/centers/me</code>, không từ state cục bộ. <span class="crit">token: --accent trên nền paper</span></span></li>
+          <li><span class="co-n">3</span><span>Toggle dựng từ HvButton hai trạng thái (repo không có switch); chỉ owner thấy, chỉ trên hàng non-owner — cùng gating với nút xoá member. <span class="crit">acceptance: member view không đổi</span></span></li>
+          <li><span class="co-n">4</span><span>HvModal xác nhận nêu rõ quyền cho và KHÔNG cho những gì; xác nhận xong bắn <code>POST …/send-reports</code>, roster invalidate. Revoke đối xứng qua <code>DELETE</code>. <span class="crit">audit: hai action phân biệt, owner là actor (D7)</span></span></li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Mockup B: secretary send -->
+    <div class="mockup">
+      <div>
+        <div class="mock-frame" role="img" aria-label="Mockup trải nghiệm gửi của thư ký: nav, danh sách period theo giáo viên, dialog ba bucket">
+          <div class="mock-title"><span>/reports · gửi báo cáo (view của thư ký)</span><span>Phase 4</span></div>
+          <div class="m-split">
+            <div class="m-nav" aria-hidden="true">
+              <div>Tổng quan</div><div>Lớp của tôi</div><div>Thu học phí</div>
+              <div class="on">Gửi báo cáo<span class="co-mark">1</span></div><div>Hồ sơ</div>
+            </div>
+            <div style="flex:1">
+              <div class="mock-body" style="padding-bottom:0">
+                <div class="m-group-h">Thầy Long — 3A Toán<span class="co-mark">2</span></div>
+                <div class="m-row"><span><span class="m-name">Kỳ 08/2026</span><br><span class="m-sub">đang mở · bảng kê sẵn sàng</span></span><span class="m-count">28 phụ huynh →</span></div>
+                <div class="m-group-h">Cô Hà — 5B Văn</div>
+                <div class="m-row"><span><span class="m-name">Kỳ 08/2026</span><br><span class="m-sub">đang mở · bảng kê sẵn sàng</span></span><span class="m-count">31 phụ huynh →</span></div>
+              </div>
+              <div class="m-modal">
+                <div class="hd">Gửi báo cáo — Kỳ 08/2026 · Thầy Long</div>
+                <div class="bd">
+                  <div class="bucket"><span class="bn">17</span><span class="bl"><b>Tự động</b> — đã ghép Zalo và là bạn bè, gửi từ Zalo của bạn<span class="co-mark">3</span></span></div>
+                  <div class="bucket"><span class="bn warn">6</span><span class="bl"><b>Đã ghép, chưa kết bạn</b> — có thể rơi vào hộp thư người lạ · <u>Kết bạn trước</u><span class="co-mark">4</span></span></div>
+                  <div class="bucket"><span class="bn">5</span><span class="bl"><b>Chưa ghép Zalo</b> — chuyển gói copy-dán thủ công</span></div>
+                </div>
+                <div class="ft"><span style="margin-right:auto;font-family:var(--mono);font-size:10.5px;color:var(--muted)">23/50 giới hạn mỗi đợt<span class="co-mark">5</span></span><button class="m-btn ghost" type="button" tabindex="-1">Huỷ</button><button class="m-btn danger" type="button" tabindex="-1">Gửi 17 tin</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <h3 style="margin-bottom:var(--s4)">Trải nghiệm gửi của thư ký</h3>
+        <ul class="callouts">
+          <li><span class="co-n">1</span><span>Mục nav mới chỉ hiện với <code>!isOwner &amp;&amp; canSendReports</code> — owner giữ nguyên luồng gửi hiện có; member thường thì MẤT các affordance gửi (D8): mọi entry point gate trên <code>canRunSends</code>. <span class="crit">acceptance: member thường không còn entry gửi; ledger vẫn đọc được</span></span></li>
+          <li><span class="co-n">2</span><span>Gộp theo giáo viên nhờ <code>teacher_id/teacher_name</code> mới trên <code>PeriodResponse</code> (Phase 2, thay đổi contract cộng thêm). Bấm hàng mở đúng trang gửi hiện có.</span></li>
+          <li><span class="co-n">3</span><span>Ba bucket do server tính qua <code>GET …/notifications/preview</code> trên TOÀN BỘ danh bạ — con số dialog không bao giờ lệch với hành động thật của BulkSend (fix undercount cap 100/trang).</span></li>
+          <li><span class="co-n">4</span><span>Cảnh báo befriend-first: giao tập với danh sách bạn bè Zalo CỦA THƯ KÝ; CTA dẫn tới flow gửi lời mời kết bạn có sẵn. <span class="crit">goal 4 · giảm rủi ro spam-heuristic</span></span></li>
+          <li><span class="co-n">5</span><span>Preview trả kèm <code>max_run_size</code> (hiện 50); vượt ngưỡng thì chặn confirm với thông báo rõ, không để server từ chối sau khi người dùng đã tin dialog.</span></li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============ RED TEAM ============ -->
+<section id="redteam">
+  <span class="rule-num">05</span>
+  <h2>Red team — 15 finding, áp dụng toàn bộ</h2>
+  <p>Ba reviewer đối kháng (Assumption Destroyer, Security Adversary, Failure Mode Analyst) chạy tier Full; mọi finding đều kèm bằng chứng file:line và được áp dụng ngày 29·08·2026 theo phê duyệt "apply all".</p>
+  <p><b>Đổi hướng sau red-team (29·08·2026 — D8):</b> chỉ thư ký &amp; owner gửi báo cáo; giáo viên thường chỉ nhập điểm danh/nhận xét và bị chặn gửi trên mọi kênh. Bảng finding bên dưới review bản kế hoạch TRƯỚC đổi hướng; delta D8 (gate gửi, ẩn UI, cập nhật test) <b>chưa</b> được re-red-team.</p>
+  <blockquote class="pull">"Bất biến 'một period chỉ có một người gửi' hiện được giữ gián tiếp bởi chính cái 409 mà kế hoạch này gỡ bỏ."
+    <cite>— Failure Mode Analyst, finding F5</cite></blockquote>
+  <div class="rt-grid">
+    <ol class="rt-list" aria-label="Finding 1 đến 8">
+      <li><span><span class="sev c">Critical</span><code>statements.scoped()</code> dùng chung → lộ quyền revoke link + generate độc lập → tách <code>scopedRead</code>, denial test</span></li>
+      <li><span><span class="sev c">Critical</span><code>billing.scoped()/invoiceScoped()</code> dùng chung → lộ chốt sổ/void/adjust → giữ nguyên, chỉ thêm read helper</span></li>
+      <li><span><span class="sev c">Critical</span><code>contacts.scoped()</code> dùng chung → lộ xoá contact + re-map Zalo → read helper cho list</span></li>
+      <li><span><span class="sev c">Critical</span>seed e2e không có dữ liệu cross-teacher, không period → seed giáo viên thứ hai đầy đủ</span></li>
+      <li><span><span class="sev c">Critical</span>gỡ 409 mở hai run song song cùng period (khoá theo teacher) → migration 000012 + pre-check (D6)</span></li>
+      <li><span><span class="sev h">High</span>thu hồi quyền không dừng run đang chạy; run mồ côi không resume được → re-check theo item, ResumeRun re-check, fail-out</span></li>
+      <li><span><span class="sev h">High</span>cơ chế audit mô tả không tồn tại; grant/revoke không phân biệt được → action registry + tách route (D7)</span></li>
+      <li><span><span class="sev h">High</span>quyền hồi sinh khi member rejoin (<code>OpenMembership</code> upsert giữ cột cũ) → reset cờ ở close + open</span></li>
+    </ol>
+    <ol class="rt-list" style="counter-reset:f 8" aria-label="Finding 9 đến 15">
+      <li><span><span class="sev h">High</span>wildcard phải là <code>:teacherId</code> (gin panic nếu lệch) + bẫy bind <code>bool</code> trần → route không body</span></li>
+      <li><span><span class="sev h">High</span>khung consent ZaloMappings viết ngược; befriend check phải server-side → sửa khung + preview endpoint</span></li>
+      <li><span><span class="sev h">High</span><code>collections</code> bị bỏ sót khỏi cụm nới → Goal 2 (đọc công nợ) không chạy, dialog đếm 0/0 → thêm vào cluster</span></li>
+      <li><span><span class="sev h">High</span><code>PeriodResponse</code> thiếu danh tính giáo viên → không gộp theo giáo viên được → thêm 2 field</span></li>
+      <li><span><span class="sev h">High</span>spec e2e không idempotent trên DB tái dùng → assert-then-set + afterEach revoke</span></li>
+      <li><span><span class="sev m">Medium</span>rollback là one-way với dữ liệu; ledger cross-attribution vô hình với giáo viên → ledger scope theo period</span></li>
+      <li><span><span class="sev m">Medium</span>lộ SĐT phụ huynh center-wide → trade-off chấp nhận, cùng mức nhìn của owner, ghi thành risk</span></li>
+    </ol>
+  </div>
+  <p class="diagram-caption" style="margin-top:var(--s5)">Quyết định của người dùng trong phiên review: cờ chỉ dành cho member (không owner self-grant) · bỏ qua validation interview. Toàn văn: <a href="./plan.md">plan.md § Red Team Review</a>.</p>
+</section>
+
+<!-- ============ CRITERIA / RISKS ============ -->
+<section id="criteria">
+  <span class="rule-num">06</span>
+  <h2>Tiêu chí nghiệm thu &amp; rủi ro</h2>
+  <div class="rt-grid">
+    <div>
+      <h3 style="margin-bottom:var(--s4)">Nghiệm thu (đối chiếu contract brainstorm)</h3>
+      <ul class="plain-list">
+        <li>Owner mời thư ký (flow hiện có) và cấp/thu hồi quyền; audit ghi owner là actor, grant ≠ revoke</li>
+        <li>Thư ký tự liên kết Zalo của mình qua flow per-teacher không đổi</li>
+        <li>Thư ký xem period/bảng kê toàn trung tâm và chạy đợt gửi theo nhịp; tin đi từ Zalo của cô; notification/run ghi nhận cô</li>
+        <li>Thư ký không sửa được điểm danh/lớp/học phí/danh bạ/thành viên — mỗi bề mặt một denial test theo convention</li>
+        <li>Hành vi owner không đổi, gồm cả 409 cross-teacher (suite regression pass nguyên vẹn)</li>
+        <li>Member thường không tạo được đợt gửi trên BẤT KỲ kênh nào, kể cả period của mình — 403 tường minh có test (D8); điểm danh &amp; nhận xét không đổi</li>
+        <li>Entry point gửi ẩn với member thường (nút "Nhắc nợ", link billing review, CTA trang gửi); ledger vẫn hiển thị read-only</li>
+        <li>Không period nào chạy hai đợt gửi cá nhân cùng lúc; giáo viên thấy các lần gửi thay mặt mình trong ledger</li>
+      </ul>
+    </div>
+    <div>
+      <h3 style="margin-bottom:var(--s4)">Rủi ro còn lại</h3>
+      <table class="hairline">
+        <tr><th>Rủi ro</th><th>Ứng phó</th></tr>
+        <tr><td>Heuristic chống spam của Zalo với tài khoản DM người lạ</td><td>Befriend-first UX, preview 3 bucket, pacing sẵn có; rủi ro vận hành, không test e2e được</td></tr>
+        <tr><td>Nới nhầm một scope function</td><td>Không đụng <code>scoped()</code> chung; inventory nhánh IsOwner; denial test từng bề mặt ghi</td></tr>
+        <tr><td>Thu hồi quyền không tức thời với run đang bay</td><td>Re-check theo item (vài giây theo pace) — ghi nhận trung thực thay vì hứa "instant"</td></tr>
+        <tr><td>Lộ SĐT + mapping Zalo center-wide cho người giữ quyền</td><td>Trade-off chấp nhận: cùng mức nhìn của owner, nội tại của mục đích; mapping read-only</td></tr>
+        <tr><td>D8 GỠ hành vi tự gửi của giáo viên hiện hữu (behavior removal khi deploy)</td><td>Release note + docs ở Phase 5; owner luôn gửi được (dự phòng); test self-send cũ đổi thành expect-denial một cách chủ đích, không weaken</td></tr>
+      </table>
+      <h3 style="margin:var(--s6) 0 var(--s3)">Câu hỏi còn mở</h3>
+      <p>Không còn. Hai câu hỏi của brainstorm và bốn câu hỏi của red team đã chốt trong D2/D3 và bảng rủi ro. Bốn quyết định của đổi hướng D8 đã chốt cùng ngày: chặn hẳn ở API, áp cho mọi kênh, owner giữ quyền gửi, nội dung báo cáo không đổi.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CITATIONS ============ -->
+<section>
+  <span class="rule-num">07</span>
+  <h2>Trích dẫn bằng chứng chính</h2>
+  <div class="cite-cols">
+    <span><b>plans/reports/brainstorm-260828-0849-secretary-report-sender.md</b> — contract nguồn</span>
+    <span><b>apps/api/internal/features/notifications/service.go:94-96,149-151</b> — 409 cross-teacher hiện tại</span>
+    <span><b>notifications/service.go:213,253-260</b> — stamp TeacherID của caller lên rows/runs</span>
+    <span><b>notifications/repository.go:114-123</b> — bất biến consent của ZaloMappings</span>
+    <span><b>notifications/run_manager.go:169-186</b> — Reserve khoá theo teacherID</span>
+    <span><b>migrations/000006_one_running_run_per_teacher.up.sql</b> — index run hiện tại</span>
+    <span><b>statements/repository.go:204-210,223-239,363-386</b> — scoped() / GetPeriodStatus / Revoke</span>
+    <span><b>billing/repository.go:265-280</b> — scoped()/invoiceScoped() gánh cả write</span>
+    <span><b>contacts/repository.go:62-71,130-180</b> — scoped() gánh SoftDelete + setZaloMapping</span>
+    <span><b>collections/repository.go:50-99</b> — nguồn dữ liệu công nợ của dialog</span>
+    <span><b>centers/repository.go:153-169,255-280</b> — ResolveScope / Open-CloseMembership</span>
+    <span><b>audit/action.go:14-30 · middleware/request_events.go:88-133</b> — convention audit</span>
+    <span><b>apps/web/…/collections/pages/notifications-page.tsx:80,92-106</b> — personalReady + undercount cap 100</span>
+    <span><b>apps/web/…/layouts/dashboard-layout.tsx:86-104</b> — nav gating theo vai</span>
+    <span><b>migrations/000004_zalo_accounts.up.sql</b> — 1 Zalo mỗi người</span>
+    <span><b>apps/api/seeds/seed.go:137-187</b> — seed đơn-scope hiện tại + scopeFor</span>
+  </div>
+</section>
+
+<footer>
+  <span>TEKA · plans/260829-1020-secretary-report-sender · plan.html là artifact cho người đọc; plan.md + phase-*.md là canonical cho /ak:cook</span>
+  <span>29·08·2026</span>
+</footer>
+</main>
+
+<!-- ============ PHASE MODAL ============ -->
+<dialog class="phase-modal" id="phaseModal" aria-labelledby="pmTitle">
+  <div class="pm-head"><span class="t" id="pmTitle">Phase</span><button class="pm-close" id="pmClose" type="button">Đóng ✕ (Esc)</button></div>
+  <div class="pm-body"><div class="pm-fm" id="pmFm"></div><div class="md" id="pmMd"></div></div>
+</dialog>
+
+<!-- Full phase markdown, embedded verbatim -->
+<script type="text/plain" id="md-1">
+# Phase 1: Permission model & scope resolution
+
+## Overview
+
+Add the `can_send_reports` membership permission (DB + authctx.Scope), the
+owner-only grant/revoke endpoints, and their audit actions. Pure additive
+backend foundation — no send-path behavior changes yet.
+
+## Requirements
+
+- Functional: owner can grant/revoke `can_send_reports` for an active non-owner
+  member; flag is resolved into request scope on every request; `/centers/me`
+  exposes the flag (owner sees it per member; a member sees their own). Owner
+  can NEVER hold the flag (member-only — user decision resolving the D2
+  ambiguity).
+- Non-functional: backward compatible — flag defaults `false`, no existing
+  behavior changes; scope resolution stays a single query; grant and revoke
+  produce distinguishable audit rows.
+
+## Architecture
+
+- **Storage:** boolean column on `center_members` (composite PK
+  `(teacher_id, center_id)`, active row = `left_at IS NULL` — see
+  `apps/api/migrations/000007_centers.up.sql:36-78`). A boolean flag, not a
+  role enum: brainstorm non-goal rules out a general role framework (YAGNI),
+  and V1 issues only `teachers` accounts, so no JWT/role change.
+- **Membership lifecycle (permission must NOT survive a rejoin):**
+  `OpenMembership` is an upsert `ON CONFLICT (teacher_id, center_id) DO UPDATE
+  SET left_at = NULL, joined_at = now()` (`centers/repository.go:255-266`) —
+  it reuses the old row, so a flag granted in a previous stint would silently
+  resurrect on re-invite. Add `can_send_reports = FALSE` to the `DO UPDATE SET`
+  list, and also reset it in `CloseMembership` (`repository.go:268-280`) as
+  defence in depth. Test: grant → close → open → ResolveScope returns false.
+- **Scope:** extend `authctx.Scope` (`apps/api/internal/shared/authctx/authctx.go:38-43`)
+  with `CanSendReports bool` and helper
+  `func (s Scope) ReportsOversight() bool { return s.IsOwner || s.CanSendReports }`.
+  The helper serves double duty (plan.md D3 + D8): read paths in later phases
+  branch on `ReportsOversight()`, and Phase 2 reuses the SAME helper as the
+  send-creation gate (only owner or secretary may send, any channel). The
+  cross-teacher personal-send 409 branches on `CanSendReports` only (owner
+  behavior unchanged, see plan.md decision D2).
+- **Resolution:** `centers/repository.go:153-169 ResolveScope` gains
+  `LEFT JOIN center_members cm ON cm.teacher_id = t.id AND cm.center_id = t.center_id AND cm.left_at IS NULL`
+  selecting `COALESCE(cm.can_send_reports, false)`. The same SQL exists in two
+  more copies that must stay in sync: `apps/api/internal/testutil/fixtures.go:140-158
+  ScopeFor` and `apps/api/seeds/seed.go:169-187 scopeFor` — update both.
+  Other places construct `Scope` literals directly (≈19 sites, mostly tests and
+  derived scopes like `periodScope`); they zero-value `CanSendReports=false`,
+  which is the safe default — no change needed, but note it in the PR.
+- **Grant/revoke — two routes, no body:**
+  `POST /centers/me/members/:teacherId/send-reports` (grant) and
+  `DELETE /centers/me/members/:teacherId/send-reports` (revoke), in the
+  existing centers feature module, owner-only like removeMember
+  (`centers/handler.go:99`, `centers/routes.go:10` — note the existing wildcard
+  is `:teacherId`; gin panics on conflicting wildcard names for the same
+  segment, so the new routes MUST reuse `:teacherId` exactly). Two verb routes
+  instead of a PATCH-with-body: no `*bool` binding pitfalls (a bare bool would
+  silently treat `{}` as revoke), and the audit action string distinguishes
+  grant from revoke for free (see Audit). Target must be an active, non-owner
+  member; otherwise the neutral not-found error per tenancy convention — this
+  also enforces the "owner can never hold the flag" decision.
+- **Audit:** the repo convention for mutating routes is an entry in the action
+  registry, NOT a bus event — `audit/action.go:14-30` ("when adding a mutating
+  route, add its entry here"); the middleware auto-publishes request completion
+  and the subscriber persists actor from request context
+  (`middleware/request_events.go:88-133`, `audit/subscriber.go:226-256`; no
+  request body is stored, which is why split routes are needed to tell grant
+  from revoke). Add two entries:
+  `POST /api/v1/centers/me/members/:teacherId/send-reports` →
+  `center.member.send_reports_grant` and the DELETE twin →
+  `center.member.send_reports_revoke` (naming after the existing
+  `center.member.remove` pattern). Do NOT publish a manual event — that path is
+  reserved for auth/invitation events and would double-log.
+
+## Related Code Files
+
+- Create: `apps/api/migrations/000011_center_member_send_reports.up.sql`,
+  `apps/api/migrations/000011_center_member_send_reports.down.sql`
+- Modify: `apps/api/internal/shared/authctx/authctx.go`
+- Modify: `apps/api/internal/features/centers/repository.go` (ResolveScope,
+  OpenMembership, CloseMembership, permission update), `service.go`,
+  `handler.go`, `routes.go`, `dto.go`
+- Modify: `apps/api/internal/features/audit/action.go` (two registry entries)
+- Modify: `apps/api/internal/testutil/fixtures.go` (ScopeFor query),
+  `apps/api/seeds/seed.go` (scopeFor query)
+- Modify: `apps/api/internal/features/centers/*_test.go` +
+  `*_integration_test.go`
+
+## Implementation Steps
+
+1. Write migration pair 000011: `ALTER TABLE center_members ADD COLUMN
+   can_send_reports BOOLEAN NOT NULL DEFAULT FALSE;` / drop column. Run
+   `migrations_test.go`.
+2. Extend `authctx.Scope` + `ReportsOversight()` helper; update ResolveScope
+   query and scan, plus the testutil and seeds copies of that query.
+3. Reset the flag in `OpenMembership`'s `DO UPDATE SET` and in
+   `CloseMembership`.
+4. Add `SetSendReports(centerID, teacherID, enabled)` repo+service:
+   `UPDATE center_members SET can_send_reports = $3 WHERE teacher_id = $2 AND
+   center_id = $1 AND left_at IS NULL AND teacher_id <> (owner)` guarded by
+   IsOwner; return not-found when no row updated.
+5. Add POST/DELETE handlers + routes behind `requireAuth, resolveScope`; swag
+   annotations; regenerate docs via `make api-docs` (never hand-edit
+   `apps/api/docs/`).
+6. Register both routes in `audit/action.go`; integration test asserts two
+   distinguishable audit rows (grant then revoke) with the owner as actor.
+7. Extend `/centers/me` DTOs: owner member rows and member self shape gain
+   `can_send_reports`.
+
+## Todo
+
+- [ ] Migration 000011 up/down + migrations test green
+- [ ] Scope carries CanSendReports; ResolveScope integration test (flag on/off,
+      left member resolves false)
+- [ ] Rejoin does not resurrect the flag: grant → close → open → false
+- [ ] POST/DELETE endpoints: owner 200; member caller → neutral not-found;
+      target = owner refused; target left member refused
+- [ ] `/centers/me` exposes flag in both shapes
+- [ ] Audit rows distinguish grant vs revoke, owner as actor
+- [ ] testutil `ScopeFor` + seeds `scopeFor` return the flag
+- [ ] `make test-api-unit` green; centers integration tests green
+
+## Success Criteria
+
+- [ ] Owner can toggle the permission via API; member sees own flag in
+      `/centers/me`
+- [ ] All existing tests pass unchanged (default-false compatibility)
+
+## Risk Assessment
+
+- ResolveScope is on every request's hot path — keep the join LEFT and
+  covered by the existing `uq_center_members_active` partial index; verify
+  query plan doesn't regress.
+- Rollback: the down migration drops the column and is schema-safe, but it is
+  one-way for DATA — once delegated sends have happened, notification/run rows
+  carry the secretary's `teacher_id` on another teacher's period. Phase 2's
+  period-scoped ledger reads keep those rows visible to the period's teacher
+  even after a revoke/rollback, so no invisible-history resend hazard remains.
+</script>
+
+<script type="text/plain" id="md-2">
+# Phase 2: API read oversight & delegated send path
+
+## Overview
+
+Let a `can_send_reports` holder read periods/statements/debt center-wide and
+run `zalo_personal` bulk sends for other teachers' periods from her own Zalo,
+with attribution to her. Make send creation exclusive to owner + capability
+holder (plan.md D8): plain members are denied on every channel, own periods
+included. Keep every write surface and the owner's current behavior untouched.
+
+## Requirements
+
+- Functional: capability holder can list billing periods (with the owning
+  teacher's identity), list/get statements, read period figures/debt
+  (collections), read contacts' Zalo-mapping status, run statement/reminder
+  bulk sends (all channels) for any center member's period, and list
+  notifications/runs. Notification + run rows stamp HER `TeacherID`. A
+  server-side pre-send preview returns the exact send buckets.
+- Functional (D8): a plain member calling BulkSend or ResumeRun — any channel,
+  even their own period — gets an explicit 403-style denial; `markSent` and
+  ledger reads keep working on existing rows.
+- Non-functional: no write access anywhere new (attendance, classes, billing
+  config, contacts, membership, imports, dashboard, audit stay as-is); owner
+  and plain-member READS behave exactly as before (member send removal is the
+  one intentional breaking change); no period can ever have two concurrent
+  personal-send runs.
+
+## Architecture
+
+- **Read oversight — dedicated read helpers, never the shared `scoped()`:**
+  the existing `scoped()` helpers back BOTH reads and writes, so relaxing them
+  would hand the secretary write powers:
+  - `statements/repository.go:204-210 scoped()` also backs `Revoke`
+    (`:363-386`) — revoking kills a parent's link permanently
+  - `billing/repository.go:265-280 scoped()/invoiceScoped()` also back
+    close/void/adjustments
+  - `contacts/repository.go:62-71 scoped()` also backs `SoftDelete` and
+    `setZaloMapping`
+  Instead, add a per-feature read-only helper (e.g. `scopedRead`) that filters
+  `center_id` always and `teacher_id` unless `sc.ReportsOversight()`, and wire
+  it ONLY into: statements List/Get/PeriodFigures
+  (`statements/service.go:141-163`), billing periods List/Get, collections
+  reads backing debt/balances (`collections/repository.go:50-99` — this
+  feature was previously missing from the cluster; Goal 2 "read debt" lives
+  here, and the web dialog's data comes from it), contacts roster read (the
+  list endpoint only), and `notifications/repository.go ZaloMappings`
+  (`:337-350`). Every write keeps the original `scoped()` / `!sc.IsOwner`
+  guard. Do NOT touch dashboard (`centers/dashboard.go:57` `if !sc.IsOwner`),
+  audit routes, invitations.
+- **Ledger reads become period-scoped:** `ListByPeriod`, `LatestRunByPeriod`
+  and `RunSnapshot` currently filter `n.teacher_id = sc.TeacherID`
+  (`notifications/repository.go:83-88,192-205`), so after a delegated send the
+  period's own teacher would see an EMPTY ledger and resend → duplicate DMs.
+  Rescope them by period ownership: visible when the period belongs to
+  `sc.TeacherID` OR `sc.ReportsOversight()`. This also keeps delegated history
+  visible after a revoke (see Phase 1 rollback note). No `on_behalf_of` column
+  — the period's `teacher_id` already identifies whose data was sent (YAGNI).
+- **Statement generation stays internal (decision D4):** `Generate` is gated by
+  `GetPeriodStatus`'s own `!sc.IsOwner` branch
+  (`statements/repository.go:223-239`), which ALSO gates the standalone
+  `POST /billing-periods/:id/statements/generate` route
+  (`statements/routes.go:9-14`). BulkSend must pass for a secretary
+  (`notifications/service.go:137` calls Generate), but the standalone endpoint
+  must NOT open up. Split the intent: `Generate` takes an internal
+  delegated-allowed flag (or a `GetPeriodStatusForSend` variant using
+  `ReportsOversight()`); the standalone handler keeps the old owner/own-period
+  guard. `Revoke` keeps `scoped()` untouched. Mandatory denial tests for both
+  standalone generate and revoke on a foreign period.
+- **Send exclusivity gate (D8):** at the TOP of `BulkSend` and `ResumeRun`
+  (`notifications/service.go`), before any channel/session work:
+
+  ```go
+  if !sc.ReportsOversight() {
+      return nil, apperror.Forbidden("sending reports requires the send-reports permission")
+  }
+  ```
+
+  Applies to every channel — `zalo_personal` and `zalo_manual` alike. This is
+  a deliberate deviation from the neutral not-found convention (plan.md D5):
+  the caller owns the period and can see it, so an honest 403 beats a lying
+  404. `markSent` keeps its current row-scoped guard (a member finishing
+  previously created manual rows must not brick), and the ledger/run reads
+  stay per the period-scoped rescope above. Existing integration tests where
+  a plain teacher self-sends are UPDATED to expect the denial (intentional,
+  not weakened); owner-send suites must pass untouched. Check `apperror` for
+  a Forbidden constructor first — if none exists, add one following the
+  existing `Conflict` pattern rather than overloading 409.
+- **Delegated personal send:** `notifications/service.go:149-151` currently
+  refuses a cross-teacher period on `zalo_personal` with 409. With the
+  exclusivity gate above, callers here are only the owner or a capability
+  holder; the cross-teacher branch below now only ever fires for the owner
+  (member-only flag, D2), preserving the 409 verbatim. New gate:
+
+  ```go
+  crossTeacher := len(gen.Statements) > 0 && gen.Statements[0].TeacherID != sc.TeacherID
+  if personal && crossTeacher && !sc.CanSendReports {
+      return apperror.Conflict("...existing message...")
+  }
+  ```
+
+  Owner never holds the flag (member-only, plan.md D2), so the owner's 409 is
+  preserved unconditionally. `verifyPersonalSession(ctx, sc.TeacherID)` stays
+  on the CALLER — the secretary's own linked Zalo, preserving the
+  1-Zalo-per-person invariant (`migrations/000004_zalo_accounts.up.sql`).
+- **One personal-send run per period (new invariant):** today "one period, one
+  personal sender" is enforced only INDIRECTLY by the 409 this phase removes —
+  `HasActiveRun`, `RunManager.Reserve` and the partial unique index
+  (`migrations/000006_one_running_run_per_teacher.up.sql`) are all keyed by
+  `teacher_id` (`notifications/repository.go:172-175`,
+  `run_manager.go:169-186`), so teacher and secretary sending the same period
+  concurrently would double-DM every parent. Add migration 000012: partial
+  unique index `ON notification_runs (billing_period_id) WHERE
+  status = 'running'`, plus a `HasActiveRunForPeriod(centerID, periodID)`
+  pre-check before `Reserve` for a clean 409. Integration test: two concurrent
+  callers on one period → exactly one run created.
+- **Revocation semantics (truthful, not "instant"):** a run is a background
+  goroutine holding all items in memory with a minimal scope
+  (`run_manager.go:48-54,82-84`); revoking the flag does NOT stop it by
+  itself. For cross-teacher runs the run loop re-checks `can_send_reports`
+  (one indexed read per item; pace is 3-8s so load is trivial) before each
+  `SendDM` and fails the remaining items with an explicit "permission revoked"
+  reason. `ResumeRun` (`service.go:413-433`) re-checks `CanSendReports` for a
+  cross-teacher run before resuming — its internal `Generate` call must use
+  the same delegated path as BulkSend. Recovery for orphaned runs (secretary
+  interrupted then revoked/left): the period's teacher — who now SEES the run
+  via period-scoped ledger reads — or the flow of a fresh send can fail-out
+  queued rows of a non-running cross-teacher run on their own period
+  (`FailQueuedInRun` with reason); tests cover "revoke mid-run" and
+  "close membership then resume".
+- **Pre-send preview endpoint (server-side buckets):** add read-only
+  `GET /billing-periods/:id/notifications/preview` returning the three buckets
+  the web confirm dialog needs — auto-send (mapped + friend), mapped-but-not-
+  friend, unmapped (manual fallback) — computed server-side from the FULL
+  contact set intersected with the caller's Zalo friend list (`zalo` feature,
+  live fetch `protocol/contacts.go:19-26`), plus `max_run_size`
+  (`config.go:114`, currently 50) so the client can warn/block oversized runs.
+  Rationale: the current client-side intersection stops at the 100-per-page
+  cap (`notifications-page.tsx:92-106` documents the undercount) — tolerable
+  for own-teacher rosters, guaranteed wrong center-wide, and a secretary
+  confirming a send she cannot verify must not be shown invented numbers.
+  Guarded by the same oversight/ownership rule as BulkSend.
+- **Attribution:** already correct — `service.go:213` stamps `sc.TeacherID` on
+  notification rows and `service.go:253-260` on runs; bulk-send's audit row
+  records the caller as actor via the middleware path. Add tests asserting the
+  secretary is the sender, never the period's teacher, never the owner.
+- **Privacy trade-off (documented, accepted):** oversight reads expose contact
+  names, phones and `zalo_user_id` center-wide to the capability holder — the
+  same visibility the owner already has, and intrinsic to the granted purpose
+  (she must send to those parents). The Zalo mapping remains the
+  period-owner's consent artifact (`notifications/repository.go:114-123`);
+  the delegated path reads it, never rewrites it.
+
+## Related Code Files
+
+- Create: `apps/api/migrations/000012_one_running_run_per_period.up.sql` +
+  `.down.sql`
+- Modify: `apps/api/internal/features/statements/repository.go` + `service.go`
+- Modify: `apps/api/internal/features/billing/repository.go` (read helper),
+  `dto.go` (PeriodResponse gains `teacher_id`, `teacher_name` — additive
+  public-contract change Phase 4 needs for group-by-teacher; `make api-docs`)
+- Modify: `apps/api/internal/features/collections/repository.go` (read helper)
+- Modify: `apps/api/internal/features/contacts/repository.go` (read helper,
+  list only)
+- Modify: `apps/api/internal/features/notifications/service.go`,
+  `repository.go`, `run_manager.go`, `handler.go`, `routes.go` (preview route)
+- Modify: `apps/api/internal/features/audit/action.go` (preview route is GET —
+  no entry needed; verify bulk route entries unchanged)
+- Modify: `apps/api/internal/features/*/auth_integration_test.go` (statements,
+  notifications, billing, contacts, collections)
+- Modify: `apps/api/internal/testutil/` — secretary fixture helper
+
+## Implementation Steps
+
+1. Inventory every repo scope function branching on `sc.IsOwner`
+   (`grep -rn "IsOwner" apps/api/internal/features/`); classify each as
+   reports-read (new `scopedRead`) or keep-as-is. Record the classification
+   table in the PR description.
+2. Add `testutil` helper (secretary fixture) reusing `Teacher` + membership +
+   flag update.
+3. Add `scopedRead` helpers + wire the read cluster (statements, billing,
+   collections, contacts list, ZaloMappings); extend `PeriodResponse` with
+   teacher identity; run statements/billing/collections integration tests.
+4. Rescope ledger reads (`ListByPeriod`, `LatestRunByPeriod`, `RunSnapshot`)
+   by period ownership; regression-test the teacher's view of a delegated send.
+5. Migration 000012 (per-period running index) + `HasActiveRunForPeriod`
+   pre-check; concurrent-send integration test.
+6. Add the `ReportsOversight()` exclusivity gate to BulkSend + ResumeRun
+   (Forbidden constructor if missing); soften the 409 gate to the
+   `CanSendReports` condition (owner-only in practice); internal
+   delegated-Generate path; per-item permission re-check in the run loop;
+   `ResumeRun` re-check + orphaned-run fail-out. Update plain-member
+   self-send tests to expect denial.
+7. Preview endpoint (buckets + max_run_size) + tests.
+8. Write the authorization matrix tests (see Todo).
+9. `make test-api` (integration, Docker) green.
+
+## Todo
+
+- [ ] Scope-branch inventory documented; only the read cluster gets
+      `scopedRead`; shared `scoped()` untouched everywhere
+- [ ] Secretary: periods list (with teacher identity), statements list/get,
+      figures, collections debt, notifications list return center-wide data
+- [ ] Secretary + `zalo_personal` on another teacher's period: run created,
+      run/notification rows stamp secretary's TeacherID, messages via
+      fakeZaloSender from her session
+- [ ] Period's teacher sees the delegated rows in their period ledger
+- [ ] Two concurrent senders on one period → exactly one run (index + 409)
+- [ ] Revoke mid-run → remaining items fail with explicit reason; resume after
+      revoke denied; orphaned queued rows can be failed out
+- [ ] Preview endpoint returns correct buckets past 100 contacts and exposes
+      max_run_size
+- [ ] Secretary send on period whose contacts are unmapped → rows fall back
+      manual (existing behavior)
+- [ ] Plain member (no flag): reads still own-scoped / neutral not-found
+      (regression); BulkSend + ResumeRun denied with 403 on their OWN period,
+      every channel (new); `markSent` on an existing row still works
+- [ ] Owner: cross-teacher `zalo_personal` still 409; own sends unchanged
+      (regression)
+- [ ] Secretary write attempts denied — attendance mutation, class mutation,
+      billing close/void/adjustment, contacts write, member remove, invitation
+      create, standalone statement generate, statement revoke — one test per
+      surface, per existing convention (neutral not-found / owner-only guard)
+- [ ] Secretary without linked Zalo → `verifyPersonalSession` refusal
+      unchanged
+
+## Success Criteria
+
+- [ ] Full authorization matrix green under `make test-api`
+- [ ] Owner suites pass untouched; plain-member READ suites pass untouched;
+      the only intentional diffs are member self-send tests now expecting
+      denial (D8)
+
+## Risk Assessment
+
+- Biggest risk is over-relaxing a scope function — mitigated by never touching
+  the shared `scoped()` helpers, the explicit inventory step, and one denial
+  test per write surface including statement generate/revoke.
+- Migration 000012 can fail on a live DB that already has two running runs for
+  one period — impossible today (the 409 blocks cross-teacher personal sends),
+  but the up migration should still be written to tolerate/clean terminal
+  states like `interrupted`.
+- Rollback: revoking the flag closes NEW sends immediately; an in-flight run
+  stops at the next item via the per-item re-check (seconds, not instant —
+  stated truthfully); delegated history stays visible via period-scoped reads.
+- D8 is a behavior removal: a center with no secretary has only the owner as
+  sender after deploy. Deliberate product decision (2026-08-29) — needs the
+  Phase 5 release note, and support playbook is "owner grants the flag".
+</script>
+
+<script type="text/plain" id="md-3">
+# Phase 3: Web: owner grant/revoke UI
+
+## Overview
+
+Give the owner a per-member toggle on the center page to grant/revoke the
+"gửi báo cáo" permission, with a badge showing who holds it.
+
+## Requirements
+
+- Functional: owner sees a toggle per active non-owner member on `/center`;
+  toggling asks for confirmation, calls the PATCH endpoint, refreshes the
+  roster; members holding the flag show a badge.
+- Non-functional: member view of `/center` unchanged; optimistic-free (simple
+  invalidate — roster is small); Vietnamese copy consistent with existing
+  center page tone.
+
+## Architecture
+
+- Extend `centerSchema` shapes (`apps/web/src/features/center/schemas/center-schemas.ts:4-51`):
+  `CenterMember` gains `can_send_reports: boolean`; the member (`CenterMeMember`)
+  shape gains own `can_send_reports` (needed by Phase 4 gating).
+- New API fns `grantSendReports(teacherId)` / `revokeSendReports(teacherId)`
+  in `features/center/api/` mapping to Phase 1's
+  `POST`/`DELETE /centers/me/members/:teacherId/send-reports`; one TanStack
+  mutation taking the desired state, invalidating the `/centers/me` query key
+  (pattern: existing remove-member mutation).
+- UI in `member-list.tsx:18-49`: alongside the existing `is_owner` badge and
+  remove button, render an HvBadge "Thư ký gửi báo cáo" when flagged and a
+  toggle built from HvButton states (no switch component exists in the
+  generated shadcn/ui set — do not add one; follow the hv design system),
+  gated the same way as `canRemove` (owner-only, non-owner rows). Confirm via `HvModal` (pattern:
+  `remove-member-dialog.tsx`), copy explaining what the permission allows:
+  đọc bảng kê/công nợ toàn trung tâm + gửi báo cáo bằng Zalo cá nhân của
+  chính thành viên đó. Copy must also state the exclusivity model (plan.md
+  D8): giáo viên thường không tự gửi báo cáo — chỉ người giữ quyền này (và
+  chủ trung tâm) gửi được, nên hãy đảm bảo luôn có ít nhất một người giữ
+  quyền khi trung tâm muốn thư ký phụ trách việc gửi.
+
+## Related Code Files
+
+- Modify: `apps/web/src/features/center/schemas/center-schemas.ts`
+- Modify: `apps/web/src/features/center/api/` (center API module)
+- Modify: `apps/web/src/features/center/components/member-list.tsx`
+- Create: `apps/web/src/features/center/components/send-reports-permission-dialog.tsx`
+- Modify: center feature unit tests (vitest + MSW)
+
+## Implementation Steps
+
+1. Extend schemas + API fns + mutation hook.
+2. Build the confirm dialog component; wire into `member-list.tsx` for owner.
+3. Unit tests: toggle visible only for owner and non-owner rows; grant fires
+   POST, revoke fires DELETE, both refresh the roster; badge renders from
+   data.
+
+## Todo
+
+- [ ] Schemas + API + mutation
+- [ ] Dialog + member-list wiring + badge
+- [ ] Vitest/MSW coverage for grant, revoke, member-view unchanged
+
+## Success Criteria
+
+- [ ] Owner toggles the permission end-to-end against the real API (manual
+      check on dev stack); roster reflects state after refresh
+
+## Risk Assessment
+
+- Low. Schema change is additive; parse failures guarded by zod defaults —
+  coordinate deploy order (API first) since zod will reject a missing required
+  field: mark `can_send_reports` with `.default(false)` to tolerate an older
+  API during rollout.
+</script>
+
+<script type="text/plain" id="md-4">
+# Phase 4: Web: secretary send experience
+
+## Overview
+
+Give a capability holder a "Gửi báo cáo" surface: center-wide period list,
+reuse of the existing notifications send page, a friend-status pre-send
+warning against HER Zalo friend list, and Zalo-link prompting. Hide every
+send entry point from plain members (D8 — teachers only input attendance +
+nhận xét; those teaching screens are untouched).
+
+## Requirements
+
+- Functional: nav entry "Gửi báo cáo" appears for `can_send_reports` holders
+  (non-owner); it opens a period list across all center teachers; each period
+  opens the existing send page (`/notifications/:periodId`) which now works for
+  capability holders; pre-send dialog additionally warns "N phụ huynh đã ghép
+  Zalo nhưng chưa là bạn bè của bạn" with a link to the friend-request flow;
+  if her Zalo is unlinked, the page shows the existing link-Zalo prompt
+  pointing to `/profile`.
+- Functional (D8): plain members no longer see send entry points — the
+  "Nhắc nợ" button (`contact-collection-row.tsx:83`), the notifications link
+  on `billing-review-page.tsx:143`, and the send CTA on the send page itself;
+  their period ledger (đã gửi gì, bởi ai) stays visible read-only.
+- Non-functional: owner UX unchanged; plain-member UX unchanged EXCEPT the
+  removed send affordances; read-only posture — no edit affordances (chốt sổ,
+  payment recording, roster edits) appear for the secretary;
+  reduced-motion/keyboard behavior per design system.
+
+## Architecture
+
+- **Gating:** `use-center-context.ts:24-37` gains `canSendReports` derived
+  from the member shape's new flag, plus derived `canRunSends = isOwner ||
+  canSendReports` mirroring the server's `ReportsOversight()` (one derived
+  boolean, not scattered `||`s). The secretary nav shows for
+  `!isOwner && canSendReports`; send affordances everywhere gate on
+  `canRunSends`. Nav wiring in `dashboard-layout.tsx:86-104` next to the
+  owner-only entries.
+- **Hide plain-member send entry points (D8):** gate the "Nhắc nợ" button in
+  `contact-collection-row.tsx` and the notifications `<Link>` in
+  `billing-review-page.tsx` on `canRunSends`. On `notifications-page.tsx`,
+  hide the send/confirm controls for `!canRunSends` while keeping the ledger
+  visible (a teacher checks what the secretary sent for their period); a
+  direct URL visit therefore degrades to read-only, and the server 403 is the
+  real enforcement. UX-only gating — no client-side security claims.
+- **Period list page:** new page `features/reports/pages/send-reports-page.tsx`
+  (new small feature folder per `docs/frontend-guidelines.md` layout) listing
+  billing periods center-wide (Phase 2 relaxed the list endpoint and added
+  `teacher_id`/`teacher_name` to `PeriodResponse` — group by those fields),
+  showing period status + statement availability; row → existing
+  `/notifications/:periodId`. Reuse HvCard/status-pill/header band patterns
+  (h1 font-display 26px pattern as on `center-page.tsx:56-58`).
+- **Send page access:** `notifications-page.tsx:23-384` currently has no role
+  check; it gains only the `canRunSends` affordance-gating above — no route
+  guard, no redirect (server authorizes).
+- **Pre-send buckets come from the server:** replace the client-side
+  contacts×collections intersection (`notifications-page.tsx:92-106` — its own
+  comment documents the 100-per-page undercount, which becomes guaranteed
+  wrong center-wide) with Phase 2's
+  `GET /billing-periods/:id/notifications/preview`. The confirm dialog renders
+  the three server-computed buckets — auto-send (mapped+friend),
+  mapped-but-not-friend (warn, still sendable, may land in stranger inbox /
+  fail), unmapped (manual fallback) — and blocks confirm with a clear message
+  when eligible count exceeds the returned `max_run_size`. CTA "Kết bạn trước"
+  linking to the friend-request flow (POST `/me/zalo/friends/request` UI
+  surface from the auto-map feature).
+- **Unlinked Zalo:** reuse the `personalReady` pattern
+  (`notifications-page.tsx:80`) — banner with link to `/profile`
+  ZaloConnectCard.
+
+## Related Code Files
+
+- Create: `apps/web/src/features/reports/{api,pages,routes.tsx,index.ts}`
+- Modify: `apps/web/src/features/teaching/hooks/use-center-context.ts`
+- Modify: `apps/web/src/layouts/dashboard-layout.tsx`
+- Modify: `apps/web/src/features/collections/pages/notifications-page.tsx`
+  (pre-send dialog buckets, oversight-safe queries, unlinked banner,
+  `canRunSends` affordance gating)
+- Modify: `apps/web/src/features/collections/components/contact-collection-row.tsx`
+  ("Nhắc nợ" gated on `canRunSends`)
+- Modify: `apps/web/src/features/billing/pages/billing-review-page.tsx`
+  (notifications link gated on `canRunSends`)
+- Modify: `apps/web/src/app/router.tsx` (mount reports routes)
+- Create/modify: vitest + MSW tests for the new page and dialog buckets
+
+## Implementation Steps
+
+1. Extend `use-center-context` + nav entry.
+2. Build reports feature folder: API fns (periods center-wide), page, route.
+3. Swap the dialog's count source to the preview endpoint (buckets +
+   max_run_size guard); unlinked banner.
+4. Gate the three plain-member send entry points on `canRunSends`
+   (contact-collection-row, billing-review-page link, send-page controls);
+   ledger stays rendered.
+5. Unit tests: nav gating (owner: no entry; member: no entry; secretary:
+   entry), period list grouping by teacher, dialog bucket rendering from MSW
+   preview payloads incl. the max_run_size block state, unlinked state, and
+   plain member sees no send affordances but still sees the ledger.
+
+## Todo
+
+- [ ] `canSendReports` in center context + nav entry
+- [ ] Reports period-list page + routing
+- [ ] Pre-send dialog: server-computed 3-bucket warning + max_run_size guard +
+      friend-request CTA
+- [ ] Unlinked-Zalo banner on send page for capability holders
+- [ ] Plain-member send entry points hidden (3 surfaces); ledger read-only
+- [ ] Vitest/MSW coverage per step 5
+
+## Success Criteria
+
+- [ ] Secretary journey works on dev stack: login → nav → pick period of
+      another teacher → send (manual + personal) with correct warnings
+- [ ] Owner UI snapshots unchanged; plain-member diffs limited to removed
+      send affordances (D8)
+
+## Risk Assessment
+
+- Bucket math is server-owned (Phase 2 preview endpoint), so the friend-list
+  contract risk moved to the API; the web only renders returned counts —
+  numbers can never silently diverge from what BulkSend will actually do.
+- Notifications page reuse risks hidden own-scope assumptions; mitigated by
+  e2e in Phase 5 covering a cross-teacher period.
+</script>
+
+<script type="text/plain" id="md-5">
+# Phase 5: E2E, regression & docs
+
+## Overview
+
+Prove the full secretary journey end-to-end, lock owner/member regressions,
+and record the permission in the docs that own tenancy/auth behavior.
+
+## Requirements
+
+- Functional: Playwright spec covers grant → secretary login → center-wide
+  period visibility → send (manual channel) → audit attribution to secretary.
+- Non-functional: existing e2e suite (statement, collections, audit) passes
+  unchanged; docs updated only in the owning surfaces.
+
+## Architecture
+
+- **Seed:** extend `apps/api/seeds/seed.go` with a second member ("secretary")
+  AND a second teaching member owning their own class, contacts, and an open
+  billing period — today every seeded row hangs off the owner's scope
+  (`seed.go:137-162`), so without cross-teacher data the spec has nothing
+  delegated to send. Do NOT seed a closed/locked period (period close is
+  irreversible and `billing.spec.ts:64-75` depends on the current state
+  machine). The grant happens through the UI inside the spec (exercises
+  Phase 3) rather than seeding the flag, keeping the seed neutral for other
+  specs.
+- **Idempotency on a reused DB:** the e2e stack reuses its database between
+  runs, so the spec must assert-then-set the toggle (grant only if not already
+  granted) and revoke in `afterEach`, leaving the flag false for the next run
+  and for unrelated specs.
+- **E2E channel choice:** `zalo_manual` only — real Zalo sessions don't exist
+  in the e2e stack; `zalo_personal` cross-teacher delivery is already covered
+  by Phase 2 integration tests with `fakeZaloSender`
+  (`notifications/auth_integration_test.go` pattern). The spec asserts the
+  copy-paste bundle renders and notification rows attribute the secretary.
+- **Audit check:** owner logs in, opens audit page (pattern:
+  `apps/web/e2e/audit.spec.ts`), sees the bulk-send action with the
+  secretary as actor.
+- **Isolated stack:** run per repo convention — `docker compose -p teka-e2e`
+  with port+URL overrides; statement specs need a fresh seed (recorded
+  operational note).
+- **Plain-teacher negative path (D8):** the seeded second teacher doubles as
+  the plain-member probe — log in as them, assert their own billing review /
+  collections view shows no "Nhắc nợ" or send link, and a direct visit to
+  `/notifications/:periodId` for their own period renders the ledger with no
+  send controls. (API-level 403s are covered in Phase 2 integration tests;
+  e2e only proves the UI removal.)
+- **Docs:** update `docs/api-guidelines.md` tenancy/auth section with the
+  `can_send_reports` capability, the `ReportsOversight()` read cluster, AND
+  the D8 send-exclusivity rule (only owner + capability holder create sends;
+  teachers provide attendance/nhận xét input only); add a short paragraph to
+  the architecture doc only if it already describes the owner-oversight
+  model. Write the release note for the behavior removal (teachers lose
+  self-send until the owner grants the flag) in the repo's existing release
+  notes surface if one exists — otherwise a paragraph in the same docs
+  update. No new doc files.
+
+## Related Code Files
+
+- Modify: `apps/api/seeds/seed.go`
+- Create: `apps/web/e2e/secretary-send.spec.ts`
+- Modify: `docs/api-guidelines.md` (+ architecture doc only if it owns the
+  oversight model today)
+
+## Implementation Steps
+
+1. Seed secretary member + second teaching member with class/contacts/open
+   period; verify `make seed` output and that existing specs still pass.
+2. Write `secretary-send.spec.ts`: owner grants via UI (assert-then-set) →
+   secretary login → nav entry visible → open the second teacher's period →
+   manual send → message cards render; owner audit page shows the grant action
+   and the bulk-send with secretary as actor; `afterEach` revokes the flag.
+3. Negative e2e assertions in the same spec: secretary has no owner-only nav
+   (Duyệt giáo án, Nhập từ Excel, Nhật ký hoạt động) and gets no roster edit
+   affordances; the plain second teacher sees no send entry points and a
+   send-control-free ledger on their own period (D8).
+4. Full verification ladder: `make test-api-unit` → `make test-api` → web
+   vitest → e2e suite on the isolated stack (fresh seed).
+5. Docs edits + link check.
+
+## Todo
+
+- [ ] Seed extended (secretary + second teacher with own period); other specs
+      unaffected
+- [ ] `secretary-send.spec.ts` green on isolated stack, twice in a row on the
+      same DB (idempotency)
+- [ ] Existing statement/collections/audit specs green (regression), with
+      intentional updates only where a spec exercised plain-member self-send
+- [ ] Plain-teacher negative assertions green (no send entry points)
+- [ ] Docs updated in owning surfaces only, incl. D8 rule + release note
+- [ ] Full ladder green
+
+## Success Criteria
+
+- [ ] Every acceptance criterion in plan.md checked off against a passing
+      test or manual dev-stack verification
+
+## Risk Assessment
+
+- Seed change can break specs that assume a single-member roster — run the
+  full e2e suite, not just the new spec.
+- E2E cannot prove real Zalo delivery/throttling; that risk stays operational
+  (befriend-first UX + pacing) and is documented, not tested here.
+</script>
+
+<script>
+(function(){
+  "use strict";
+  var FM = {
+    1:{phase:"1", title:"Permission model & scope resolution", status:"todo", priority:"P1", effort:"1.5d", deps:"—"},
+    2:{phase:"2", title:"API read oversight & delegated send path", status:"todo", priority:"P1", effort:"3d", deps:"1"},
+    3:{phase:"3", title:"Web: owner grant/revoke UI", status:"todo", priority:"P2", effort:"0.5d", deps:"1"},
+    4:{phase:"4", title:"Web: secretary send experience", status:"todo", priority:"P1", effort:"1.5d", deps:"2, 3"},
+    5:{phase:"5", title:"E2E, regression & docs", status:"todo", priority:"P2", effort:"1d", deps:"3, 4"}
+  };
+
+  function esc(s){
+    return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+  function inline(s){
+    // s is already HTML-escaped; apply inline markdown
+    s = s.replace(/`([^`]+)`/g, function(_,c){return "<code>"+c+"</code>";});
+    s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2">$1</a>');
+    return s;
+  }
+  function renderMd(src){
+    var lines = src.split("\n"), out = [], i = 0;
+    var inUl=false, inOl=false, inQuote=false;
+    function closeLists(){
+      if(inUl){out.push("</ul>"); inUl=false}
+      if(inOl){out.push("</ol>"); inOl=false}
+      if(inQuote){out.push("</blockquote>"); inQuote=false}
+    }
+    while(i < lines.length){
+      var raw = lines[i];
+      var l = raw.replace(/\s+$/,"");
+      // fenced code
+      if(/^```/.test(l)){
+        closeLists();
+        var buf=[]; i++;
+        while(i<lines.length && !/^```/.test(lines[i])){buf.push(lines[i]); i++}
+        i++;
+        out.push("<pre><code>"+esc(buf.join("\n"))+"</code></pre>");
+        continue;
+      }
+      // table
+      if(/^\|/.test(l) && i+1<lines.length && /^\|[\s:|-]+\|?\s*$/.test(lines[i+1])){
+        closeLists();
+        var head = l.split("|").slice(1,-1).map(function(c){return "<th>"+inline(esc(c.trim()))+"</th>"}).join("");
+        out.push("<table><thead><tr>"+head+"</tr></thead><tbody>");
+        i += 2;
+        while(i<lines.length && /^\|/.test(lines[i])){
+          var cells = lines[i].split("|").slice(1,-1).map(function(c){return "<td>"+inline(esc(c.trim()))+"</td>"}).join("");
+          out.push("<tr>"+cells+"</tr>");
+          i++;
+        }
+        out.push("</tbody></table>");
+        continue;
+      }
+      // hr
+      if(/^---\s*$/.test(l) || /^\*\*\*\s*$/.test(l)){ closeLists(); out.push("<hr>"); i++; continue; }
+      // headings
+      var h = l.match(/^(#{1,3})\s+(.*)$/);
+      if(h){ closeLists(); var n=h[1].length; out.push("<h"+n+">"+inline(esc(h[2]))+"</h"+n+">"); i++; continue; }
+      // blockquote
+      if(/^>\s?/.test(l)){
+        if(!inQuote){closeLists(); out.push("<blockquote>"); inQuote=true}
+        out.push("<p>"+inline(esc(l.replace(/^>\s?/,"")))+"</p>");
+        i++; continue;
+      }
+      // ordered list (merge wrapped continuation lines)
+      var ol = l.match(/^(\d+)\.\s+(.*)$/);
+      if(ol){
+        if(inUl){out.push("</ul>"); inUl=false}
+        if(inQuote){out.push("</blockquote>"); inQuote=false}
+        if(!inOl){out.push("<ol>"); inOl=true}
+        var item = ol[2];
+        while(i+1<lines.length && /^\s{2,}\S/.test(lines[i+1]) && !/^\s*[-*]\s/.test(lines[i+1]) && !/^\s*\d+\.\s/.test(lines[i+1])){
+          i++; item += " " + lines[i].trim();
+        }
+        out.push("<li>"+inline(esc(item))+"</li>");
+        i++; continue;
+      }
+      // unordered list / task list (support one nesting level via 2+ space indent)
+      var ul = l.match(/^(\s*)[-*]\s+(.*)$/);
+      if(ul){
+        if(inOl){out.push("</ol>"); inOl=false}
+        if(inQuote){out.push("</blockquote>"); inQuote=false}
+        if(!inUl){out.push("<ul>"); inUl=true}
+        var item2 = ul[2];
+        while(i+1<lines.length && /^\s{2,}\S/.test(lines[i+1]) && !/^\s*[-*]\s/.test(lines[i+1]) && !/^\s*\d+\.\s/.test(lines[i+1]) && !/^\s*#/.test(lines[i+1])){
+          i++; item2 += " " + lines[i].trim();
+        }
+        var task = item2.match(/^\[( |x|X)\]\s+(.*)$/);
+        if(task){
+          var done = task[1].toLowerCase()==="x";
+          out.push('<li class="task'+(done?" done":"")+'">'+inline(esc(task[2]))+"</li>");
+        } else {
+          out.push("<li>"+inline(esc(item2))+"</li>");
+        }
+        i++; continue;
+      }
+      // blank
+      if(l.trim()===""){ closeLists(); i++; continue; }
+      // paragraph (merge soft-wrapped lines)
+      closeLists();
+      var para = l;
+      while(i+1<lines.length && lines[i+1].trim()!=="" && !/^(#{1,3}\s|[-*]\s|\d+\.\s|```|\||>|---)/.test(lines[i+1].trim())){
+        i++; para += " " + lines[i].trim();
+      }
+      out.push("<p>"+inline(esc(para))+"</p>");
+      i++;
+    }
+    closeLists();
+    return out.join("\n");
+  }
+
+  var modal = document.getElementById("phaseModal");
+  var pmMd = document.getElementById("pmMd");
+  var pmFm = document.getElementById("pmFm");
+  var pmTitle = document.getElementById("pmTitle");
+  var lastFocus = null;
+  var cache = {};
+
+  function openPhase(n){
+    var fm = FM[n];
+    pmTitle.textContent = "Phase " + fm.phase + " · " + fm.title;
+    pmFm.innerHTML =
+      "<span><b>status</b>"+fm.status+"</span>"+
+      "<span><b>priority</b>"+fm.priority+"</span>"+
+      "<span><b>effort</b>"+fm.effort+"</span>"+
+      "<span><b>dependencies</b>"+fm.deps+"</span>";
+    if(!cache[n]){
+      var el = document.getElementById("md-"+n);
+      cache[n] = renderMd(el.textContent.trim());
+    }
+    pmMd.innerHTML = cache[n];
+    lastFocus = document.activeElement;
+    if(typeof modal.showModal === "function"){ modal.showModal(); }
+    else { modal.setAttribute("open",""); }
+    modal.querySelector(".pm-body").scrollTop = 0;
+  }
+  function closeModal(){
+    if(typeof modal.close === "function" && modal.open){ modal.close(); }
+    else { modal.removeAttribute("open"); }
+    if(lastFocus){ lastFocus.focus(); }
+  }
+
+  document.querySelectorAll(".phase-card").forEach(function(btn){
+    btn.addEventListener("click", function(){ openPhase(btn.getAttribute("data-phase")); });
+  });
+  document.getElementById("pmClose").addEventListener("click", closeModal);
+  modal.addEventListener("click", function(e){
+    // click on backdrop closes
+    if(e.target === modal){ closeModal(); }
+  });
+  modal.addEventListener("cancel", function(){ if(lastFocus){ lastFocus.focus(); } });
+
+  // nav dot highlighting
+  var sections = ["cover","decisions","workflow","phases","mockups","redteam","criteria"];
+  var dots = document.querySelectorAll(".dots a");
+  if("IntersectionObserver" in window){
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(en){
+        if(en.isIntersecting){
+          var idx = sections.indexOf(en.target.id);
+          dots.forEach(function(d,i){ d.classList.toggle("on", i===idx); });
+        }
+      });
+    }, {rootMargin:"-40% 0px -50% 0px"});
+    sections.forEach(function(id){
+      var el = document.getElementById(id);
+      if(el){ io.observe(el); }
+    });
+  }
+})();
+</script>
+</body>
+</html>
