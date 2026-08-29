@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -218,11 +219,13 @@ func (s *Service) attemptDM(ctx context.Context, ownerID uuid.UUID, phone, link 
 		return DMStatusSkipped
 	}
 	if err != nil {
+		slog.Warn("invite dm lookup failed", "teacher_id", ownerID, "error", err)
 		return DMStatusFailed
 	}
 
 	text := fmt.Sprintf("Bạn được mời tham gia trung tâm trên Teka. Bấm vào liên kết để tạo tài khoản: %s", link)
 	if _, err := s.zalo.SendDM(ctx, ownerID, uid, text); err != nil {
+		slog.Warn("invite dm send failed", "teacher_id", ownerID, "error", err)
 		return DMStatusFailed
 	}
 	return DMStatusSent

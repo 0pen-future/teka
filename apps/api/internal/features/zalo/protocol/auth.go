@@ -132,6 +132,7 @@ func seedServiceMapCookies(sess *Session, cred Credentials) {
 	allURLs = append(allURLs, sm.File...)
 	allURLs = append(allURLs, sm.Profile...)
 	allURLs = append(allURLs, sm.GroupPoll...)
+	allURLs = append(allURLs, sm.Friend...)
 
 	seen := make(map[string]struct{}, len(allURLs))
 	for _, raw := range allURLs {

@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -97,6 +99,56 @@ func TestQRCallbacks_ForwardsToHooks(t *testing.T) {
 	for i := range want {
 		if gotStates[i] != want[i] {
 			t.Errorf("state[%d] = %q, want %q", i, gotStates[i], want[i])
+		}
+	}
+}
+
+// Every service in the map lives on its own subdomain, and Go's cookiejar
+// does not propagate cookies across subdomains — so a host this function
+// skips makes every call to that service unauthenticated. The friend service
+// (FindUser, SendFriendRequest) was exactly that hole once.
+func TestSeedServiceMapCookies_CoversEveryServiceHost(t *testing.T) {
+	hosts := map[string]string{
+		"chat":       "https://tt-chat-wpa.chat.zalo.me/api",
+		"group":      "https://tt-group-wpa.chat.zalo.me/api",
+		"file":       "https://tt-files-wpa.chat.zalo.me/api",
+		"profile":    "https://tt-profile-wpa.chat.zalo.me/api",
+		"group_poll": "https://tt-group-poll-wpa.chat.zalo.me/api",
+		"friend":     "https://tt-friend-wpa.chat.zalo.me/api",
+	}
+
+	if n := reflect.TypeOf(ZpwServiceMapV3{}).NumField(); n != len(hosts) {
+		t.Fatalf("ZpwServiceMapV3 has %d services but this test covers %d; seedServiceMapCookies likely needs the new one too", n, len(hosts))
+	}
+
+	sess := NewSession()
+	sess.LoginInfo = &LoginInfo{ZpwServiceMapV3: ZpwServiceMapV3{
+		Chat:      []string{hosts["chat"]},
+		Group:     []string{hosts["group"]},
+		File:      []string{hosts["file"]},
+		Profile:   []string{hosts["profile"]},
+		GroupPoll: []string{hosts["group_poll"]},
+		Friend:    []string{hosts["friend"]},
+	}}
+	cred := Credentials{Cookie: &CookieUnion{cookies: []Cookie{
+		{Name: "zpw_sek", Value: "sek"},
+	}}}
+
+	seedServiceMapCookies(sess, cred)
+
+	for service, raw := range hosts {
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatalf("parse %q: %v", raw, err)
+		}
+		var found bool
+		for _, c := range sess.CookieJar.Cookies(&url.URL{Scheme: u.Scheme, Host: u.Host, Path: "/"}) {
+			if c.Name == "zpw_sek" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("service %q host %s did not get the session cookie seeded", service, u.Host)
 		}
 	}
 }
