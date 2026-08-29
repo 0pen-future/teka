@@ -79,14 +79,27 @@ type AttendanceSource interface {
 	SessionAttendance(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) ([]attendance.Record, error)
 }
 
+// PeriodWithTeacher is one billing period plus its owning teacher's display
+// name, produced in one query by the period read endpoints so a center-wide
+// (oversight) listing can group by teacher without an N+1.
+type PeriodWithTeacher struct {
+	Period      `gorm:"embedded"`
+	TeacherName string
+}
+
 // Repository is the persistence contract for billing periods and the
 // attendance-to-money assembler; the service depends on this interface,
 // tests supply a fake.
 type Repository interface {
 	CreatePeriod(ctx context.Context, p *Period) error
 	GetPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*Period, error)
+	// GetPeriodRead / ListPeriodsRead back the period read ENDPOINTS only:
+	// center-scoped with reports oversight (owner or can_send_reports
+	// holder), joined with the owning teacher's name. Write paths (draft,
+	// close, tally) keep the owner-gated GetPeriod.
+	GetPeriodRead(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*PeriodWithTeacher, error)
+	ListPeriodsRead(ctx context.Context, sc authctx.Scope, p pagination.Params) ([]PeriodWithTeacher, int64, error)
 	GetPeriodByYearMonth(ctx context.Context, sc authctx.Scope, year, month int16) (*Period, error)
-	ListPeriods(ctx context.Context, sc authctx.Scope, p pagination.Params) ([]Period, int64, error)
 	// PreviousClosedPeriod returns the most recently closed period whose
 	// period_end is strictly before `before` — the R3 carry-over source. A
 	// nil result with a nil error means there is no such period: the
@@ -270,6 +283,19 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 	return q
 }
 
+// scopedRead is scoped()'s read-only sibling: the teacher filter is lifted
+// for anyone with reports oversight (owner or can_send_reports holder), not
+// just the owner. It backs ONLY the period read endpoints (GetPeriodRead,
+// ListPeriodsRead) — every write keeps scoped(), so the delegated permission
+// never reaches draft/close/void/adjustment paths.
+func (r *gormRepository) scopedRead(ctx context.Context, sc authctx.Scope) *gorm.DB {
+	q := database.FromContext(ctx, r.db).Where("billing_periods.center_id = ?", sc.CenterID)
+	if !sc.ReportsOversight() {
+		q = q.Where("billing_periods.teacher_id = ?", sc.TeacherID)
+	}
+	return q
+}
+
 // invoiceScoped mirrors scoped for the invoices table.
 func (r *gormRepository) invoiceScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("invoices.center_id = ?", sc.CenterID)
@@ -313,9 +339,55 @@ func (r *gormRepository) GetPeriod(ctx context.Context, sc authctx.Scope, period
 	return &p, nil
 }
 
+func (r *gormRepository) GetPeriodRead(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*PeriodWithTeacher, error) {
+	var row PeriodWithTeacher
+	err := r.scopedRead(ctx, sc).Model(&Period{}).
+		Select("billing_periods.*, teachers.full_name AS teacher_name").
+		Joins("JOIN teachers ON teachers.id = billing_periods.teacher_id").
+		Take(&row, "billing_periods.id = ?", periodID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrPeriodNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+func (r *gormRepository) ListPeriodsRead(ctx context.Context, sc authctx.Scope, p pagination.Params) ([]PeriodWithTeacher, int64, error) {
+	q := r.scopedRead(ctx, sc).Model(&Period{})
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var rows []PeriodWithTeacher
+	// The id tie-breaker keeps pagination stable when several teachers hold
+	// periods for the same month (identical period_start). It must run as a
+	// scope after p.Scope: scopes apply at Find time, so a chained Order here
+	// would land before the pagination sort and hijack the primary order.
+	err := q.
+		Select("billing_periods.*, teachers.full_name AS teacher_name").
+		Joins("JOIN teachers ON teachers.id = billing_periods.teacher_id").
+		Scopes(p.Scope, func(db *gorm.DB) *gorm.DB { return db.Order("billing_periods.id") }).
+		Find(&rows).Error
+	if err != nil {
+		return nil, 0, err
+	}
+	return rows, total, nil
+}
+
+// GetPeriodByYearMonth resolves the CALLER'S OWN period for a month. It backs
+// EnsurePeriod's duplicate branch, where the conflict comes from the
+// (teacher_id, year, month) unique index — so the existing row is by
+// definition the caller's own. The teacher filter is pinned unconditionally:
+// scoped() would lift it for an owner, and in a center holding several
+// teachers' periods for the same month the owner would get an arbitrary
+// teacher's period back instead of their own.
 func (r *gormRepository) GetPeriodByYearMonth(ctx context.Context, sc authctx.Scope, year, month int16) (*Period, error) {
 	var p Period
-	err := r.scoped(ctx, sc).
+	err := database.FromContext(ctx, r.db).
+		Where("billing_periods.center_id = ?", sc.CenterID).
+		Where("billing_periods.teacher_id = ?", sc.TeacherID).
 		Take(&p, "billing_periods.year = ? AND billing_periods.month = ?", year, month).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrPeriodNotFound
@@ -324,19 +396,6 @@ func (r *gormRepository) GetPeriodByYearMonth(ctx context.Context, sc authctx.Sc
 		return nil, err
 	}
 	return &p, nil
-}
-
-func (r *gormRepository) ListPeriods(ctx context.Context, sc authctx.Scope, p pagination.Params) ([]Period, int64, error) {
-	q := r.scoped(ctx, sc).Model(&Period{})
-	var total int64
-	if err := q.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-	var rows []Period
-	if err := q.Scopes(p.Scope).Find(&rows).Error; err != nil {
-		return nil, 0, err
-	}
-	return rows, total, nil
 }
 
 func (r *gormRepository) PreviousClosedPeriod(ctx context.Context, sc authctx.Scope, before time.Time) (*Period, error) {

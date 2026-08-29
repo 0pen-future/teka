@@ -29,6 +29,10 @@ type interruptibleZalo struct {
 
 func (f *interruptibleZalo) VerifyAccount(context.Context, uuid.UUID) error { return nil }
 
+func (f *interruptibleZalo) ListFriends(context.Context, uuid.UUID) ([]zalo.Friend, error) {
+	return nil, nil
+}
+
 func (f *interruptibleZalo) SendDM(ctx context.Context, _ uuid.UUID, _, _ string) (string, error) {
 	f.mu.Lock()
 	call := f.calls

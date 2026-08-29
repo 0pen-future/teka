@@ -25,6 +25,9 @@ type MemberResponse struct {
 	FullName string    `json:"full_name"`
 	Phone    string    `json:"phone"`
 	IsOwner  bool      `json:"is_owner"`
+	// CanSendReports is the delegated report-sender permission; always false
+	// for the owner (member-only flag).
+	CanSendReports bool `json:"can_send_reports"`
 }
 
 // MeResponse is the body of GET /centers/me for the owner: the center plus
@@ -35,9 +38,11 @@ type MeResponse struct {
 }
 
 // MemberMeResponse is the body of GET /centers/me for a non-owner member —
-// the roster is owner-only data, so a member sees only the center's name.
+// the roster is owner-only data, so a member sees only the center's name
+// plus their own delegated-send permission.
 type MemberMeResponse struct {
-	CenterName string `json:"center_name"`
+	CenterName     string `json:"center_name"`
+	CanSendReports bool   `json:"can_send_reports"`
 }
 
 // TeacherStatsResponse is one roster row of GET /centers/dashboard/teachers:

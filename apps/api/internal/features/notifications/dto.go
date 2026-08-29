@@ -114,6 +114,31 @@ type NotificationResponse struct {
 	CreatedAt time.Time  `json:"created_at"`
 }
 
+// SendPreviewContact is one contact of a pre-send preview bucket.
+type SendPreviewContact struct {
+	ContactID   uuid.UUID `json:"contact_id"`
+	ContactName string    `json:"contact_name"`
+}
+
+// SendPreviewResponse is the server-computed pre-send preview: the exact
+// zalo_personal buckets a bulk send on the period would produce right now.
+// Buckets come from the FULL target set intersected with the caller's live
+// Zalo friend list, so the numbers hold past any roster page cap.
+type SendPreviewResponse struct {
+	// AutoSend: mapped contacts who are friends of the caller's Zalo account
+	// — these rows would queue into a paced background run.
+	AutoSend []SendPreviewContact `json:"auto_send"`
+	// MappedNotFriend: mapped, but the caller's account is not their friend —
+	// the DM may not reach them; they still queue as personal rows.
+	MappedNotFriend []SendPreviewContact `json:"mapped_not_friend"`
+	// Unmapped: no Zalo mapping — these rows would fall back to the manual
+	// copy-paste channel.
+	Unmapped []SendPreviewContact `json:"unmapped"`
+	// MaxRunSize is the server's cap on one run's auto-send count, so the
+	// client can warn about an oversized send before submitting it.
+	MaxRunSize int `json:"max_run_size"`
+}
+
 // fromListRow maps a ledger row onto its wire DTO.
 func fromListRow(r ListRow) NotificationResponse {
 	return NotificationResponse{

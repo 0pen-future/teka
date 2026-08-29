@@ -28,6 +28,10 @@ var actions = map[string]ActionSpec{
 	// centers
 	"PATCH /api/v1/centers/me":                     {Action: "center.rename", EntityType: "center"},
 	"DELETE /api/v1/centers/me/members/:teacherId": {Action: "center.member.remove", EntityType: "teacher", IDParam: "teacherId"},
+	// Grant and revoke are separate routes precisely so these two actions stay
+	// distinguishable — the middleware stores no request body.
+	"POST /api/v1/centers/me/members/:teacherId/send-reports":   {Action: "center.member.send_reports_grant", EntityType: "teacher", IDParam: "teacherId"},
+	"DELETE /api/v1/centers/me/members/:teacherId/send-reports": {Action: "center.member.send_reports_revoke", EntityType: "teacher", IDParam: "teacherId"},
 
 	// invitations (owner-managed). The public preview/accept routes are
 	// deliberately absent: the middleware skips principal-less requests, and

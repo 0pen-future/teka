@@ -128,6 +128,59 @@ func (h *Handler) removeMember(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// grantSendReports grants the delegated send-reports permission to an active
+// non-owner member; owner-only. Grant and revoke are two verb routes rather
+// than one PATCH-with-body so the audit middleware — which stores no request
+// body — records two distinguishable actions.
+//
+//	@Summary		Grant the send-reports permission (owner-only)
+//	@Description	Lets the member read billing periods/statements/debt center-wide and run report sends from their own Zalo. Member-only: the owner cannot be the target.
+//	@Tags			centers
+//	@Produce		json
+//	@Param			teacherId	path	string	true	"teacher id"	format(uuid)
+//	@Success		204
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}	"not the owner"
+//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}	"not an active non-owner member of this center"
+//	@Security		BearerAuth
+//	@Router			/centers/me/members/{teacherId}/send-reports [post]
+func (h *Handler) grantSendReports(c *gin.Context) {
+	h.setSendReports(c, true)
+}
+
+// revokeSendReports revokes the delegated send-reports permission; owner-only.
+//
+//	@Summary		Revoke the send-reports permission (owner-only)
+//	@Tags			centers
+//	@Produce		json
+//	@Param			teacherId	path	string	true	"teacher id"	format(uuid)
+//	@Success		204
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}	"not the owner"
+//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}	"not an active non-owner member of this center"
+//	@Security		BearerAuth
+//	@Router			/centers/me/members/{teacherId}/send-reports [delete]
+func (h *Handler) revokeSendReports(c *gin.Context) {
+	h.setSendReports(c, false)
+}
+
+func (h *Handler) setSendReports(c *gin.Context, enabled bool) {
+	scope, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	targetID, err := uuid.Parse(c.Param("teacherId"))
+	if err != nil {
+		response.Err(c, apperror.NotFound("member"))
+		return
+	}
+	if err := h.svc.SetSendReports(c.Request.Context(), scope, targetID, enabled); err != nil {
+		response.Err(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 // DashboardHandler exposes the owner dashboard endpoints.
 type DashboardHandler struct {
 	svc *Dashboard

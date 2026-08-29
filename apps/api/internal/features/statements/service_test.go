@@ -84,6 +84,17 @@ func (f *fakeRepository) GetPeriodStatus(_ context.Context, sc authctx.Scope, pe
 	return info, nil
 }
 
+func (f *fakeRepository) GetPeriodStatusRead(_ context.Context, sc authctx.Scope, periodID uuid.UUID) (PeriodInfo, error) {
+	info, ok := f.periods[periodID]
+	if !ok {
+		return PeriodInfo{}, ErrPeriodNotFound
+	}
+	if !sc.ReportsOversight() && info.TeacherID != sc.TeacherID {
+		return PeriodInfo{}, ErrPeriodNotFound
+	}
+	return info, nil
+}
+
 func (f *fakeRepository) TargetContacts(_ context.Context, _ authctx.Scope, periodID uuid.UUID) ([]TargetContact, error) {
 	return f.targets[periodID], nil
 }

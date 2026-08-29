@@ -254,6 +254,10 @@ definitions:
         type: string
       status:
         type: string
+      teacher_id:
+        type: string
+      teacher_name:
+        type: string
       year:
         type: integer
     type: object
@@ -365,6 +369,11 @@ definitions:
     type: object
   centers.MemberResponse:
     properties:
+      can_send_reports:
+        description: |-
+          CanSendReports is the delegated report-sender permission; always false
+          for the owner (member-only flag).
+        type: boolean
       full_name:
         type: string
       id:
@@ -1046,6 +1055,42 @@ definitions:
         type: string
       total:
         type: integer
+    type: object
+  notifications.SendPreviewContact:
+    properties:
+      contact_id:
+        type: string
+      contact_name:
+        type: string
+    type: object
+  notifications.SendPreviewResponse:
+    properties:
+      auto_send:
+        description: |-
+          AutoSend: mapped contacts who are friends of the caller's Zalo account
+          — these rows would queue into a paced background run.
+        items:
+          $ref: '#/definitions/notifications.SendPreviewContact'
+        type: array
+      mapped_not_friend:
+        description: |-
+          MappedNotFriend: mapped, but the caller's account is not their friend —
+          the DM may not reach them; they still queue as personal rows.
+        items:
+          $ref: '#/definitions/notifications.SendPreviewContact'
+        type: array
+      max_run_size:
+        description: |-
+          MaxRunSize is the server's cap on one run's auto-send count, so the
+          client can warn about an oversized send before submitting it.
+        type: integer
+      unmapped:
+        description: |-
+          Unmapped: no Zalo mapping — these rows would fall back to the manual
+          copy-paste channel.
+        items:
+          $ref: '#/definitions/notifications.SendPreviewContact'
+        type: array
     type: object
   payments.AllocationResponse:
     properties:
@@ -2432,6 +2477,15 @@ paths:
                 error:
                   $ref: '#/definitions/response.ErrorBody'
               type: object
+        "403":
+          description: caller lacks the send-reports permission
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
         "404":
           description: Not Found
           schema:
@@ -2462,6 +2516,86 @@ paths:
       security:
       - BearerAuth: []
       summary: Bulk-send statement notifications
+      tags:
+      - notifications
+  /billing-periods/{id}/notifications/preview:
+    get:
+      description: 'Computes, without writing anything, the exact buckets a zalo_personal
+        bulk send would produce right now: auto_send (mapped + friend of the caller''s
+        Zalo account), mapped_not_friend, and unmapped (manual fallback), plus the
+        server''s max_run_size cap. purpose=reminder narrows to contacts with outstanding
+        > 0.'
+      parameters:
+      - description: billing period id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: statements (default) or reminder
+        in: query
+        name: purpose
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/notifications.SendPreviewResponse'
+              type: object
+        "400":
+          description: no linked Zalo account
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: caller lacks the send-reports permission
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: cross-teacher period without the permission, or the Zalo session
+            expired
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Preview a zalo_personal bulk send
       tags:
       - notifications
   /billing-periods/{id}/notifications/run:
@@ -2546,6 +2680,15 @@ paths:
               type: object
         "401":
           description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: caller lacks the send-reports permission
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'
@@ -3300,6 +3443,100 @@ paths:
       security:
       - BearerAuth: []
       summary: Remove a member (owner-only)
+      tags:
+      - centers
+  /centers/me/members/{teacherId}/send-reports:
+    delete:
+      parameters:
+      - description: teacher id
+        format: uuid
+        in: path
+        name: teacherId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: not the owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: not an active non-owner member of this center
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Revoke the send-reports permission (owner-only)
+      tags:
+      - centers
+    post:
+      description: 'Lets the member read billing periods/statements/debt center-wide
+        and run report sends from their own Zalo. Member-only: the owner cannot be
+        the target.'
+      parameters:
+      - description: teacher id
+        format: uuid
+        in: path
+        name: teacherId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: not the owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: not an active non-owner member of this center
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Grant the send-reports permission (owner-only)
       tags:
       - centers
   /classes:

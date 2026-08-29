@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -24,23 +25,28 @@ import (
 // contact's per-period message figures in one round trip (so a message's
 // total can never disagree with what RenderPublic itself shows a parent),
 // and building the teacher-facing URL for one statement row.
+// GenerateForSend, not Generate: the send path is the one sanctioned caller
+// of the delegated (reports-oversight) generate — the standalone generate
+// endpoint keeps the strict owner/own-period guard (decision D4).
 // *statements.Service satisfies this — declared here, a consumer-defined
 // interface, so notifications depends on statements' public service
 // contract, never a second implementation of its sums.
 type StatementsSource interface {
-	Generate(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*statements.GenerateResult, error)
+	GenerateForSend(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*statements.GenerateResult, error)
 	PeriodFigures(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (map[uuid.UUID]statements.ContactFigures, error)
 	ToResponse(row statements.Row) statements.StatementResponse
 }
 
 // ZaloSender is the slice of the Zalo feature the personal channel needs:
-// checking the teacher's session is alive before a run is created, and the DM
-// send the run itself is made of. *zalo.Service satisfies this — a
+// checking the teacher's session is alive before a run is created, the DM
+// send the run itself is made of, and the caller's live friend list the
+// pre-send preview buckets by. *zalo.Service satisfies this — a
 // consumer-defined interface, so tests drive the channel without a Zalo
 // session and the zalo package never learns notifications exists.
 type ZaloSender interface {
 	DMSender
 	VerifyAccount(ctx context.Context, teacherID uuid.UUID) error
+	ListFriends(ctx context.Context, teacherID uuid.UUID) ([]zalo.Friend, error)
 }
 
 // Service owns notification queueing, sending, and status.
@@ -91,10 +97,19 @@ func (s *Service) Close() {
 // commit, unmapped contacts fall back to zalo_manual copy-paste rows exactly
 // as if the manual channel had been chosen for them. BulkText then carries
 // only the fallback rows — the auto-sent messages have nothing to copy.
-// zalo_personal also refuses a period owned by another teacher with a 409:
-// the linked account is personal, so only the period's own teacher can DM its
-// parents — an owner reaches a member's period through manual channels only.
+// Sending is exclusive to reports oversight (decision D8): the owner or a
+// can_send_reports holder — a plain member is refused with an explicit 403 on
+// every channel, own periods included. A capability holder may send another
+// teacher's period from her own Zalo (delegated send); an owner still cannot
+// — zalo_personal refuses the owner's cross-teacher combination with a 409,
+// since the owner reaches a member's period through manual channels only.
 func (s *Service) BulkSend(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, req BulkSendRequest) (*BulkSendResponse, error) {
+	// An honest 403, deliberately breaking the neutral not-found convention:
+	// the caller owns the period and can see it, the missing thing is the
+	// permission, and a lying 404 would send them hunting for a data bug.
+	if !sc.ReportsOversight() {
+		return nil, apperror.Forbidden("sending reports requires the send-reports permission")
+	}
 	purpose := normalizePurpose(req.Purpose)
 	channel := req.Channel
 	if channel == "" {
@@ -121,6 +136,16 @@ func (s *Service) BulkSend(ctx context.Context, sc authctx.Scope, periodID uuid.
 		if err != nil {
 			return nil, apperror.From(err)
 		}
+		if !active {
+			// The period-level twin of the teacher-level check above: with
+			// delegated sends, the teacher and the secretary could otherwise
+			// each pass their own-slot check and double-DM every parent.
+			// Migration 000012's partial unique index is the cross-process
+			// backstop; this pre-check turns the common case into a clean 409.
+			if active, err = s.repo.HasActiveRunForPeriod(ctx, sc.CenterID, periodID); err != nil {
+				return nil, apperror.From(err)
+			}
+		}
 		if active {
 			return nil, apperror.Conflict("a zalo_personal run is already sending; wait for it to finish")
 		}
@@ -133,21 +158,43 @@ func (s *Service) BulkSend(ctx context.Context, sc authctx.Scope, periodID uuid.
 	runID := id.New()
 	var runItems []RunItem
 	var resp BulkSendResponse
+	crossTeacher := false
 	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
-		genResult, err := s.statements.Generate(ctx, sc, periodID)
+		genResult, err := s.statements.GenerateForSend(ctx, sc, periodID)
 		if err != nil {
 			return err
 		}
 
+		// Statements are anchored on the period's own teacher, which is what
+		// identifies whose period this is regardless of who is sending.
+		crossTeacher = len(genResult.Statements) > 0 && genResult.Statements[0].TeacherID != sc.TeacherID
+
 		// A Zalo account is personal: DMs go out from the caller's own linked
-		// session, but a member's contacts live in the member's strict scope,
-		// so an owner opening a member's period here would find no mappings
-		// and the whole batch would silently fall back to copy-paste. Refuse
-		// the combination instead — the rollback also undoes the statement
-		// refresh, so nothing is written. Statements are anchored on the
-		// period's own teacher, which is what identifies whose period this is.
-		if personal && len(genResult.Statements) > 0 && genResult.Statements[0].TeacherID != sc.TeacherID {
+		// session. A can_send_reports holder is exactly the person trusted to
+		// do that for other teachers' periods (delegated send); the owner
+		// never holds the flag (member-only, decision D2), so for the owner
+		// this refusal is unchanged — an owner opening a member's period here
+		// would find the member's mappings but no basis to DM those parents.
+		// The rollback also undoes the statement refresh, so nothing is
+		// written.
+		if personal && crossTeacher && !sc.CanSendReports {
 			return apperror.Conflict("this period belongs to another teacher; zalo_personal sends only their own periods — ask them to send it, or use zalo_manual")
+		}
+
+		// A fresh send supersedes an abandoned run someone else left on this
+		// period (a secretary interrupted then revoked, or the reverse): its
+		// still-queued rows would otherwise sit "queued" forever, since only
+		// the run's own teacher can resume and this caller is not them. Fail
+		// them out with a reason, anchored on the stale run's own scope.
+		if stale, err := s.repo.LatestRunByPeriod(ctx, sc, periodID); err == nil {
+			if stale.Status != RunStatusRunning && stale.TeacherID != sc.TeacherID {
+				staleScope := authctx.Scope{TeacherID: stale.TeacherID, CenterID: sc.CenterID}
+				if err := s.repo.FailQueuedInRun(ctx, staleScope, stale.ID, orphanedRunFailureMessage); err != nil {
+					return apperror.From(err)
+				}
+			}
+		} else if !errors.Is(err, ErrRunNotFound) {
+			return apperror.From(err)
 		}
 
 		figures, err := s.statements.PeriodFigures(ctx, sc, periodID)
@@ -289,7 +336,7 @@ func (s *Service) BulkSend(ctx context.Context, sc authctx.Scope, periodID uuid.
 	}
 
 	if len(runItems) > 0 {
-		reservation.Start(runID, runItems)
+		reservation.Start(runID, runItems, crossTeacher)
 	}
 	return &resp, nil
 }
@@ -319,11 +366,16 @@ func (s *Service) renderMessage(target statements.Row, cf statements.ContactFigu
 }
 
 // verifyPersonalSession relogins the teacher's cached Zalo session and maps
-// the two expected failure modes onto client errors: never linked is a bad
-// request (the teacher skipped a setup step), expired is a conflict with the
-// account's current state (relink, then retry).
+// the two expected failure modes onto client errors.
 func (s *Service) verifyPersonalSession(ctx context.Context, teacherID uuid.UUID) error {
-	err := s.zalo.VerifyAccount(ctx, teacherID)
+	return mapZaloAccountError(s.zalo.VerifyAccount(ctx, teacherID))
+}
+
+// mapZaloAccountError maps the Zalo account's two expected failure modes onto
+// client errors: never linked is a bad request (the teacher skipped a setup
+// step), expired is a conflict with the account's current state (relink, then
+// retry).
+func mapZaloAccountError(err error) error {
 	switch {
 	case err == nil:
 		return nil
@@ -336,9 +388,86 @@ func (s *Service) verifyPersonalSession(ctx context.Context, teacherID uuid.UUID
 	}
 }
 
-// List returns one billing period's notification ledger, optionally
-// narrowed by filter. An owner sees every member's rows in the center; a
-// member sees only their own.
+// SendPreview computes, without writing anything, the exact zalo_personal
+// buckets a bulk send on this period would produce right now: auto-send
+// (mapped contact who is also a friend of the CALLER's Zalo account), mapped
+// but not a friend, and unmapped (manual copy-paste fallback) — from the full
+// target set intersected with the caller's live friend list, so the confirm
+// dialog never shows numbers truncated by a roster page cap. Guarded exactly
+// like BulkSend: reports oversight required, neutral not-found on a foreign
+// period, and the owner's cross-teacher personal refusal preserved.
+func (s *Service) SendPreview(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, purpose string) (*SendPreviewResponse, error) {
+	if !sc.ReportsOversight() {
+		return nil, apperror.Forbidden("sending reports requires the send-reports permission")
+	}
+	purpose = normalizePurpose(purpose)
+	periodTeacher, err := s.repo.PeriodTeacher(ctx, sc.CenterID, periodID)
+	if errors.Is(err, ErrPeriodNotFound) {
+		return nil, apperror.NotFound("billing period")
+	}
+	if err != nil {
+		return nil, apperror.From(err)
+	}
+	if periodTeacher != sc.TeacherID && !sc.CanSendReports {
+		return nil, apperror.Conflict("this period belongs to another teacher; zalo_personal sends only their own periods — ask them to send it, or use zalo_manual")
+	}
+
+	figures, err := s.statements.PeriodFigures(ctx, sc, periodID)
+	if err != nil {
+		return nil, err
+	}
+	targets := make([]statements.ContactFigures, 0, len(figures))
+	contactIDs := make([]uuid.UUID, 0, len(figures))
+	for _, cf := range figures {
+		if purpose == PurposeReminder && cf.Outstanding <= 0 {
+			continue
+		}
+		targets = append(targets, cf)
+		contactIDs = append(contactIDs, cf.ContactID)
+	}
+
+	mappings, err := s.repo.ZaloMappings(ctx, sc, contactIDs)
+	if err != nil {
+		return nil, apperror.From(err)
+	}
+	friends, err := s.zalo.ListFriends(ctx, sc.TeacherID)
+	if err != nil {
+		return nil, mapZaloAccountError(err)
+	}
+	friendUIDs := make(map[string]struct{}, len(friends))
+	for _, f := range friends {
+		friendUIDs[f.UserID] = struct{}{}
+	}
+
+	resp := &SendPreviewResponse{
+		AutoSend:        []SendPreviewContact{},
+		MappedNotFriend: []SendPreviewContact{},
+		Unmapped:        []SendPreviewContact{},
+		MaxRunSize:      s.cfg.MaxRunSize,
+	}
+	for _, cf := range targets {
+		row := SendPreviewContact{ContactID: cf.ContactID, ContactName: cf.ContactName}
+		uid, mapped := mappings[cf.ContactID]
+		_, friend := friendUIDs[uid]
+		switch {
+		case !mapped:
+			resp.Unmapped = append(resp.Unmapped, row)
+		case friend:
+			resp.AutoSend = append(resp.AutoSend, row)
+		default:
+			resp.MappedNotFriend = append(resp.MappedNotFriend, row)
+		}
+	}
+	for _, bucket := range [][]SendPreviewContact{resp.AutoSend, resp.MappedNotFriend, resp.Unmapped} {
+		sort.Slice(bucket, func(i, j int) bool { return bucket[i].ContactName < bucket[j].ContactName })
+	}
+	return resp, nil
+}
+
+// List returns one billing period's notification ledger, optionally narrowed
+// by filter. A reports-oversight caller (owner or can_send_reports holder)
+// sees any period's ledger in the center; a plain member sees the ledgers of
+// their own periods — delegated rows a secretary sent on them included.
 func (s *Service) List(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, filter ListFilter) ([]NotificationResponse, error) {
 	rows, err := s.repo.ListByPeriod(ctx, sc, periodID, filter)
 	if err != nil {
@@ -364,9 +493,10 @@ func (s *Service) MarkSent(ctx context.Context, sc authctx.Scope, ids []uuid.UUI
 
 // RunSnapshot reports the period's latest run and its row-derived progress.
 // A period that never had a run answers with the zero snapshot rather than an
-// error — "no run" is an ordinary poll result, not a missing resource. An
-// owner may read a member's run snapshot as oversight; a member sees only
-// their own.
+// error — "no run" is an ordinary poll result, not a missing resource.
+// Scoped like List: oversight callers see any period's run, a plain member
+// sees runs on their own periods — a delegated run someone else is sending on
+// their period included.
 func (s *Service) RunSnapshot(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*RunSnapshotResponse, error) {
 	run, err := s.repo.LatestRunByPeriod(ctx, sc, periodID)
 	if errors.Is(err, ErrRunNotFound) {
@@ -394,13 +524,14 @@ func (s *Service) RunSnapshot(ctx context.Context, sc authctx.Scope, periodID uu
 	}, nil
 }
 
-// Ledger messages for rows a resume cannot re-send. Like the run manager's
-// failure messages these are fixed constants: the ledger is teacher-facing and
-// must never echo internal detail.
+// Ledger messages for rows a resume cannot re-send, and for rows a superseded
+// run leaves behind. Like the run manager's failure messages these are fixed
+// constants: the ledger is teacher-facing and must never echo internal detail.
 const (
 	resumeUnmappedFailureMessage = "Chưa gán bạn Zalo"
 	resumePaidFailureMessage     = "Đã thanh toán đủ"
 	resumeStaleFailureMessage    = "Không còn dữ liệu để gửi"
+	orphanedRunFailureMessage    = "Đợt gửi mới đã thay thế đợt gửi bị bỏ dở"
 )
 
 // ResumeRun restarts the period's latest run after an interruption. Only a
@@ -411,14 +542,19 @@ const (
 // statement gone, or a reminder's balance since paid) are failed with a
 // reason instead of silently dropped.
 func (s *Service) ResumeRun(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*RunSnapshotResponse, error) {
+	// Resuming is sending — the same D8 exclusivity gate as BulkSend. This is
+	// also the revocation re-check for a delegated run: the scope is loaded
+	// fresh per request, so a secretary revoked after the interruption fails
+	// here, before any session or run work.
+	if !sc.ReportsOversight() {
+		return nil, apperror.Forbidden("sending reports requires the send-reports permission")
+	}
 	// A resume re-occupies the acting teacher's own Zalo session and run
-	// slot, never a member's, regardless of oversight rights — IsOwner is
-	// deliberately stripped here so LatestRunByPeriod's owner-bypass template
-	// degrades to a strict own-row match. An owner resuming a member's
-	// interrupted run must not be possible: it would send through the
-	// owner's own Zalo account under the member's run record.
-	ownScope := authctx.Scope{TeacherID: sc.TeacherID, CenterID: sc.CenterID}
-	run, err := s.repo.LatestRunByPeriod(ctx, ownScope, periodID)
+	// slot, never anyone else's, regardless of oversight rights — hence the
+	// own-run lookup. An owner resuming a member's (or a secretary's)
+	// interrupted run must not be possible: it would send through the owner's
+	// own Zalo account under the other person's run record.
+	run, err := s.repo.LatestOwnRunByPeriod(ctx, sc, periodID)
 	if errors.Is(err, ErrRunNotFound) {
 		return nil, apperror.NotFound("notification run")
 	}
@@ -449,11 +585,13 @@ func (s *Service) ResumeRun(ctx context.Context, sc authctx.Scope, periodID uuid
 	defer reservation.Release()
 
 	var items []RunItem
+	delegated := false
 	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
-		genResult, err := s.statements.Generate(ctx, sc, periodID)
+		genResult, err := s.statements.GenerateForSend(ctx, sc, periodID)
 		if err != nil {
 			return err
 		}
+		delegated = len(genResult.Statements) > 0 && genResult.Statements[0].TeacherID != sc.TeacherID
 		figures, err := s.statements.PeriodFigures(ctx, sc, periodID)
 		if err != nil {
 			return err
@@ -524,7 +662,7 @@ func (s *Service) ResumeRun(ctx context.Context, sc authctx.Scope, periodID uuid
 	}
 
 	if len(items) > 0 {
-		reservation.Start(run.ID, items)
+		reservation.Start(run.ID, items, delegated)
 	}
 	return s.RunSnapshot(ctx, sc, periodID)
 }

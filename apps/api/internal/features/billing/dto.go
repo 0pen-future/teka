@@ -17,9 +17,14 @@ type EnsurePeriodRequest struct {
 	Month int `json:"month" binding:"required,min=1,max=12"`
 }
 
-// PeriodResponse is the public billing_periods shape.
+// PeriodResponse is the public billing_periods shape. TeacherID/TeacherName
+// identify the period's owning teacher so a center-wide (oversight) listing
+// can group by teacher; TeacherName is only populated by the read endpoints'
+// joined rows and omitted elsewhere (e.g. the ensure-period response).
 type PeriodResponse struct {
 	ID          uuid.UUID  `json:"id"`
+	TeacherID   uuid.UUID  `json:"teacher_id"`
+	TeacherName string     `json:"teacher_name,omitempty"`
 	Year        int16      `json:"year"`
 	Month       int16      `json:"month"`
 	PeriodStart string     `json:"period_start"`
@@ -32,6 +37,7 @@ type PeriodResponse struct {
 func FromPeriodModel(p *Period) PeriodResponse {
 	return PeriodResponse{
 		ID:          p.ID,
+		TeacherID:   p.TeacherID,
 		Year:        p.Year,
 		Month:       p.Month,
 		PeriodStart: p.PeriodStart.Format(dateLayout),
@@ -41,11 +47,20 @@ func FromPeriodModel(p *Period) PeriodResponse {
 	}
 }
 
-// FromPeriodModels maps a page of billing periods onto their wire responses.
-func FromPeriodModels(rows []Period) []PeriodResponse {
+// FromPeriodRow maps one joined period-with-teacher row onto the wire
+// response, teacher name included.
+func FromPeriodRow(row *PeriodWithTeacher) PeriodResponse {
+	out := FromPeriodModel(&row.Period)
+	out.TeacherName = row.TeacherName
+	return out
+}
+
+// FromPeriodRows maps a page of joined period-with-teacher rows onto their
+// wire responses.
+func FromPeriodRows(rows []PeriodWithTeacher) []PeriodResponse {
 	out := make([]PeriodResponse, 0, len(rows))
 	for i := range rows {
-		out = append(out, FromPeriodModel(&rows[i]))
+		out = append(out, FromPeriodRow(&rows[i]))
 	}
 	return out
 }

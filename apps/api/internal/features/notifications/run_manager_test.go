@@ -29,6 +29,22 @@ type fakeRunStore struct {
 	outcomes []outcomeCall
 	failed   []string // reasons passed to FailQueuedInRun
 	statuses []string // statuses passed to UpdateRunStatus
+	// canSend answers the delegated per-item permission probe; nil means
+	// always permitted, matching a run whose flag never moves.
+	canSend func(call int) (bool, error)
+	sendChk int // how many times CanSendReports was asked
+}
+
+func (s *fakeRunStore) CanSendReports(_ context.Context, _, _ uuid.UUID) (bool, error) {
+	s.mu.Lock()
+	call := s.sendChk
+	s.sendChk++
+	probe := s.canSend
+	s.mu.Unlock()
+	if probe == nil {
+		return true, nil
+	}
+	return probe(call)
 }
 
 func (s *fakeRunStore) MarkOutcome(_ context.Context, _ authctx.Scope, id uuid.UUID, status string, providerMsgID, errorMessage *string) error {
@@ -308,7 +324,7 @@ func TestReserveHoldsTheTeacherSlotUntilReleasedOrStarted(t *testing.T) {
 
 	res2, err := m.Reserve(teacherID, uuid.New())
 	require.NoError(t, err, "a released slot is free again")
-	res2.Start(uuid.New(), testItems(1))
+	res2.Start(uuid.New(), testItems(1), false)
 	res2.Release() // a no-op after Start: it must not kill the running send
 	waitForTerminalStatus(t, store)
 	_, _, statuses := store.snapshot()
@@ -361,6 +377,47 @@ func TestRunManagerBreakerResetsOnASuccessfulSend(t *testing.T) {
 	require.Len(t, dm.sent(), 6, "a success resets the streak — the run keeps going")
 	require.Len(t, outcomes, 6)
 	require.Empty(t, failed)
+	require.Equal(t, []string{RunStatusCompleted}, statuses)
+}
+
+func TestDelegatedRunStopsWhenThePermissionIsRevokedMidRun(t *testing.T) {
+	t.Parallel()
+	store := &fakeRunStore{canSend: func(call int) (bool, error) {
+		// Permitted for the first item, revoked before the second — the
+		// remaining rows must fail with the revoked reason, not stay queued.
+		return call == 0, nil
+	}}
+	dm := &fakeDM{send: func(int, string) (string, error) { return "msg-1", nil }}
+	m := newTestRunManager(t, store, dm, time.Second, time.Second)
+	m.sleep = (&recordedSleep{}).hook
+
+	res, err := m.Reserve(uuid.New(), uuid.New())
+	require.NoError(t, err)
+	res.Start(uuid.New(), testItems(3), true)
+	waitForTerminalStatus(t, store)
+
+	outcomes, failed, statuses := store.snapshot()
+	require.Len(t, outcomes, 1, "only the pre-revocation item was sent")
+	require.Equal(t, StatusSent, outcomes[0].status)
+	require.Len(t, dm.sent(), 1)
+	require.Equal(t, []string{runRevokedFailureMessage}, failed)
+	require.Equal(t, []string{RunStatusInterrupted}, statuses)
+}
+
+func TestOwnRunNeverProbesTheSendPermission(t *testing.T) {
+	t.Parallel()
+	store := &fakeRunStore{canSend: func(int) (bool, error) {
+		t.Error("a non-delegated run must not ask about can_send_reports")
+		return false, nil
+	}}
+	dm := &fakeDM{send: func(int, string) (string, error) { return "msg-1", nil }}
+	m := newTestRunManager(t, store, dm, time.Second, time.Second)
+	m.sleep = (&recordedSleep{}).hook
+
+	require.NoError(t, m.Start(uuid.New(), uuid.New(), uuid.New(), testItems(2)))
+	waitForTerminalStatus(t, store)
+
+	_, _, statuses := store.snapshot()
 	require.Equal(t, []string{RunStatusCompleted}, statuses)
 }
 

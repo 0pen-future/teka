@@ -55,7 +55,12 @@ func (s *Service) ResolveScope(ctx context.Context, teacherID uuid.UUID) (authct
 	if err != nil {
 		return authctx.Scope{}, apperror.Internal(err)
 	}
-	return authctx.Scope{TeacherID: teacherID, CenterID: row.CenterID, IsOwner: row.IsOwner}, nil
+	return authctx.Scope{
+		TeacherID:      teacherID,
+		CenterID:       row.CenterID,
+		IsOwner:        row.IsOwner,
+		CanSendReports: row.CanSendReports,
+	}, nil
 }
 
 // CenterOwner returns the owner teacher id of teacherID's current center, and
@@ -179,7 +184,7 @@ func (s *Service) Me(ctx context.Context, scope authctx.Scope) (any, error) {
 		return nil, apperror.Internal(err)
 	}
 	if !scope.IsOwner {
-		return &MemberMeResponse{CenterName: center.Name}, nil
+		return &MemberMeResponse{CenterName: center.Name, CanSendReports: scope.CanSendReports}, nil
 	}
 	members, err := s.repo.ListMembers(ctx, scope.CenterID)
 	if err != nil {
@@ -202,6 +207,26 @@ func (s *Service) Rename(ctx context.Context, scope authctx.Scope, req RenameReq
 	err := s.repo.Rename(ctx, scope.CenterID, req.Name)
 	if errors.Is(err, ErrNotFound) {
 		return apperror.NotFound("center")
+	}
+	if err != nil {
+		return apperror.Internal(err)
+	}
+	return nil
+}
+
+// SetSendReports grants or revokes the delegated send-reports permission on
+// a member's live stint; owner-only. The owner can never be the target — the
+// permission is member-only by product decision, which also keeps the owner's
+// send behavior (incl. the cross-teacher 409) frozen. An owner target, a left
+// member, or a stranger all collapse into the same not-found per the tenancy
+// convention.
+func (s *Service) SetSendReports(ctx context.Context, scope authctx.Scope, targetID uuid.UUID, enabled bool) error {
+	if !scope.IsOwner {
+		return apperror.Forbidden("only the owner can manage the send-reports permission")
+	}
+	err := s.repo.SetSendReports(ctx, scope.CenterID, targetID, enabled)
+	if errors.Is(err, ErrNotFound) {
+		return apperror.NotFound("member")
 	}
 	if err != nil {
 		return apperror.Internal(err)

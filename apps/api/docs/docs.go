@@ -1289,6 +1289,24 @@ const docTemplate = `{
                             ]
                         }
                     },
+                    "403": {
+                        "description": "caller lacks the send-reports permission",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
                         "schema": {
@@ -1327,6 +1345,148 @@ const docTemplate = `{
                     },
                     "422": {
                         "description": "validation failed",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/billing-periods/{id}/notifications/preview": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Computes, without writing anything, the exact buckets a zalo_personal bulk send would produce right now: auto_send (mapped + friend of the caller's Zalo account), mapped_not_friend, and unmapped (manual fallback), plus the server's max_run_size cap. purpose=reminder narrows to contacts with outstanding \u003e 0.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "notifications"
+                ],
+                "summary": "Preview a zalo_personal bulk send",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "billing period id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "statements (default) or reminder",
+                        "name": "purpose",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/notifications.SendPreviewResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "no linked Zalo account",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "caller lacks the send-reports permission",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "409": {
+                        "description": "cross-teacher period without the permission, or the Zalo session expired",
                         "schema": {
                             "allOf": [
                                 {
@@ -1491,6 +1651,24 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "caller lacks the send-reports permission",
                         "schema": {
                             "allOf": [
                                 {
@@ -2851,6 +3029,175 @@ const docTemplate = `{
                     },
                     "422": {
                         "description": "owner cannot remove themselves",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/centers/me/members/{teacherId}/send-reports": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lets the member read billing periods/statements/debt center-wide and run report sends from their own Zalo. Member-only: the owner cannot be the target.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "centers"
+                ],
+                "summary": "Grant the send-reports permission (owner-only)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "teacher id",
+                        "name": "teacherId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "not the owner",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "not an active non-owner member of this center",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "centers"
+                ],
+                "summary": "Revoke the send-reports permission (owner-only)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "teacher id",
+                        "name": "teacherId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "not the owner",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "not an active non-owner member of this center",
                         "schema": {
                             "allOf": [
                                 {
@@ -10610,6 +10957,12 @@ const docTemplate = `{
                 "status": {
                     "type": "string"
                 },
+                "teacher_id": {
+                    "type": "string"
+                },
+                "teacher_name": {
+                    "type": "string"
+                },
                 "year": {
                     "type": "integer"
                 }
@@ -10780,6 +11133,10 @@ const docTemplate = `{
         "centers.MemberResponse": {
             "type": "object",
             "properties": {
+                "can_send_reports": {
+                    "description": "CanSendReports is the delegated report-sender permission; always false\nfor the owner (member-only flag).",
+                    "type": "boolean"
+                },
                 "full_name": {
                     "type": "string"
                 },
@@ -11744,6 +12101,47 @@ const docTemplate = `{
                 },
                 "total": {
                     "type": "integer"
+                }
+            }
+        },
+        "notifications.SendPreviewContact": {
+            "type": "object",
+            "properties": {
+                "contact_id": {
+                    "type": "string"
+                },
+                "contact_name": {
+                    "type": "string"
+                }
+            }
+        },
+        "notifications.SendPreviewResponse": {
+            "type": "object",
+            "properties": {
+                "auto_send": {
+                    "description": "AutoSend: mapped contacts who are friends of the caller's Zalo account\n— these rows would queue into a paced background run.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/notifications.SendPreviewContact"
+                    }
+                },
+                "mapped_not_friend": {
+                    "description": "MappedNotFriend: mapped, but the caller's account is not their friend —\nthe DM may not reach them; they still queue as personal rows.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/notifications.SendPreviewContact"
+                    }
+                },
+                "max_run_size": {
+                    "description": "MaxRunSize is the server's cap on one run's auto-send count, so the\nclient can warn about an oversized send before submitting it.",
+                    "type": "integer"
+                },
+                "unmapped": {
+                    "description": "Unmapped: no Zalo mapping — these rows would fall back to the manual\ncopy-paste channel.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/notifications.SendPreviewContact"
+                    }
                 }
             }
         },

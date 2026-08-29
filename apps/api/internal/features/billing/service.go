@@ -96,14 +96,17 @@ func (s *Service) EnsurePeriod(ctx context.Context, sc authctx.Scope, year, mont
 	return period, nil
 }
 
-// ListPeriods returns a page of the tenant's billing periods.
-func (s *Service) ListPeriods(ctx context.Context, sc authctx.Scope, p pagination.Params) ([]Period, int64, error) {
-	return s.repo.ListPeriods(ctx, sc, p)
+// ListPeriods returns a page of the tenant's billing periods with each
+// period's owning teacher — center-wide for a reports-oversight caller
+// (owner or can_send_reports holder), own rows only for a plain member.
+func (s *Service) ListPeriods(ctx context.Context, sc authctx.Scope, p pagination.Params) ([]PeriodWithTeacher, int64, error) {
+	return s.repo.ListPeriodsRead(ctx, sc, p)
 }
 
-// GetPeriod returns one billing period.
-func (s *Service) GetPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*Period, error) {
-	p, err := s.repo.GetPeriod(ctx, sc, periodID)
+// GetPeriod returns one billing period with its owning teacher, scoped like
+// ListPeriods.
+func (s *Service) GetPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*PeriodWithTeacher, error) {
+	p, err := s.repo.GetPeriodRead(ctx, sc, periodID)
 	if errors.Is(err, ErrPeriodNotFound) {
 		return nil, apperror.NotFound("billing period")
 	}

@@ -26,8 +26,9 @@ var (
 
 // ScopeRow is the per-request tenant context read straight from the database.
 type ScopeRow struct {
-	CenterID uuid.UUID
-	IsOwner  bool
+	CenterID       uuid.UUID
+	IsOwner        bool
+	CanSendReports bool
 }
 
 // OwnerRow is the current center owner of one teacher, and whether that
@@ -39,10 +40,11 @@ type OwnerRow struct {
 
 // MemberRow is one member of a center joined with their account phone.
 type MemberRow struct {
-	ID       uuid.UUID
-	FullName string
-	Phone    string
-	IsOwner  bool
+	ID             uuid.UUID
+	FullName       string
+	Phone          string
+	IsOwner        bool
+	CanSendReports bool
 }
 
 // TeacherRow is the slice of a teachers row the remove flow needs.
@@ -111,6 +113,11 @@ type Repository interface {
 	// CloseMembership stamps left_at on the live stint; ErrNotFound when a
 	// concurrent transaction already closed it.
 	CloseMembership(ctx context.Context, teacherID, centerID uuid.UUID) error
+	// SetSendReports flips the delegated send-reports permission on the
+	// target's live membership stint. The owner can never hold the flag —
+	// the update refuses an owner target at the SQL level; ErrNotFound covers
+	// every refused variant (left member, other center's member, owner).
+	SetSendReports(ctx context.Context, centerID, teacherID uuid.UUID, enabled bool) error
 	// SwitchTeacherCenter moves teachers.center_id to centerID
 	// unconditionally; ErrNotFound when the teacher is unknown or
 	// soft-deleted.
@@ -153,10 +160,13 @@ func NewRepository(db *gorm.DB) Repository {
 func (r *gormRepository) ResolveScope(ctx context.Context, teacherID uuid.UUID) (*ScopeRow, error) {
 	var row ScopeRow
 	res := database.FromContext(ctx, r.db).Raw(`
-		SELECT t.center_id, (c.owner_id = t.id) AS is_owner
+		SELECT t.center_id, (c.owner_id = t.id) AS is_owner,
+			COALESCE(cm.can_send_reports, FALSE) AS can_send_reports
 		FROM teachers t
 		JOIN centers c ON c.id = t.center_id AND c.deleted_at IS NULL
 		JOIN user_accounts ua ON ua.id = t.id AND ua.deleted_at IS NULL AND ua.status = ?
+		LEFT JOIN center_members cm ON cm.teacher_id = t.id
+			AND cm.center_id = t.center_id AND cm.left_at IS NULL
 		WHERE t.id = ? AND t.deleted_at IS NULL`,
 		teachers.StatusActive, teacherID).Scan(&row)
 	if res.Error != nil {
@@ -206,10 +216,13 @@ func (r *gormRepository) ListMembers(ctx context.Context, centerID uuid.UUID) ([
 	// its own: it stays pointing at a removed member's last center until they
 	// are reactivated elsewhere.
 	err := database.FromContext(ctx, r.db).Raw(`
-		SELECT t.id, t.full_name, ua.phone, (c.owner_id = t.id) AS is_owner
+		SELECT t.id, t.full_name, ua.phone, (c.owner_id = t.id) AS is_owner,
+			COALESCE(cm.can_send_reports, FALSE) AS can_send_reports
 		FROM teachers t
 		JOIN user_accounts ua ON ua.id = t.id AND ua.deleted_at IS NULL AND ua.status = ?
 		JOIN centers c ON c.id = t.center_id
+		LEFT JOIN center_members cm ON cm.teacher_id = t.id
+			AND cm.center_id = t.center_id AND cm.left_at IS NULL
 		WHERE t.center_id = ? AND t.deleted_at IS NULL
 		ORDER BY is_owner DESC, t.full_name, t.id`, teachers.StatusActive, centerID).Scan(&rows).Error
 	return rows, err
@@ -254,10 +267,12 @@ func (r *gormRepository) CreateCenter(ctx context.Context, c *Center) error {
 
 func (r *gormRepository) OpenMembership(ctx context.Context, teacherID, centerID uuid.UUID) (time.Time, error) {
 	var joinedAt time.Time
+	// can_send_reports resets on reopen: the permission belongs to a stint,
+	// not the person — a re-invited member must be granted afresh.
 	err := database.FromContext(ctx, r.db).Raw(`
 		INSERT INTO center_members (teacher_id, center_id) VALUES (?, ?)
 		ON CONFLICT (teacher_id, center_id)
-		DO UPDATE SET left_at = NULL, joined_at = now()
+		DO UPDATE SET left_at = NULL, joined_at = now(), can_send_reports = FALSE
 		RETURNING joined_at`, teacherID, centerID).Scan(&joinedAt).Error
 	if err != nil {
 		return time.Time{}, translateError(err)
@@ -266,10 +281,28 @@ func (r *gormRepository) OpenMembership(ctx context.Context, teacherID, centerID
 }
 
 func (r *gormRepository) CloseMembership(ctx context.Context, teacherID, centerID uuid.UUID) error {
+	// Defence in depth alongside OpenMembership's reset: a closed stint never
+	// keeps the permission, so no code path can resurrect it from a stale row.
 	res := database.FromContext(ctx, r.db).Exec(`
-		UPDATE center_members SET left_at = now()
+		UPDATE center_members SET left_at = now(), can_send_reports = FALSE
 		WHERE teacher_id = ? AND center_id = ? AND left_at IS NULL`,
 		teacherID, centerID)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *gormRepository) SetSendReports(ctx context.Context, centerID, teacherID uuid.UUID, enabled bool) error {
+	res := database.FromContext(ctx, r.db).Exec(`
+		UPDATE center_members cm SET can_send_reports = ?
+		FROM centers c
+		WHERE cm.teacher_id = ? AND cm.center_id = ? AND cm.left_at IS NULL
+			AND c.id = cm.center_id AND c.owner_id <> cm.teacher_id`,
+		enabled, teacherID, centerID)
 	if res.Error != nil {
 		return res.Error
 	}

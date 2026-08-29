@@ -30,14 +30,16 @@ func TestOwnerHasOversightReadAndSendsAsSelfOnMembersPeriod(t *testing.T) {
 	member, _ := testutil.Teacher(t, d.db)
 	ownerScope := testutil.ScopeFor(t, d.db, owner.ID)
 	testutil.JoinCenter(t, d.db, member.ID, ownerScope.CenterID)
+	testutil.GrantSendReports(t, d.db, member.ID, true)
 	memberScope := testutil.ScopeFor(t, d.db, member.ID)
 	require.Equal(t, ownerScope.CenterID, memberScope.CenterID, "member must have joined the owner's center")
 
 	periodID, contacts := closedPeriodWithContacts(t, d, member.ID, 1)
 	mapContact(t, d.db, contacts[0], "uid-member-own")
 
-	// The member sends their own zalo_personal run under their own Zalo
-	// session — this must succeed exactly as it would with no owner involved.
+	// The member holds can_send_reports (creating sends requires it for any
+	// non-owner) and sends their own zalo_personal run under their own Zalo
+	// session.
 	memberResp, err := d.notifications.BulkSend(ctx, memberScope, periodID, notifications.BulkSendRequest{
 		Purpose: "statement",
 		Channel: notifications.ChannelZaloPersonal,
@@ -104,6 +106,7 @@ func TestPeerInSameCenterCannotReadOrActOnAnotherMembersNotifications(t *testing
 	ownerCenter := testutil.ScopeFor(t, d.db, owner.ID).CenterID
 	testutil.JoinCenter(t, d.db, memberA.ID, ownerCenter)
 	testutil.JoinCenter(t, d.db, memberB.ID, ownerCenter)
+	testutil.GrantSendReports(t, d.db, memberA.ID, true)
 	scopeA := testutil.ScopeFor(t, d.db, memberA.ID)
 	scopeB := testutil.ScopeFor(t, d.db, memberB.ID)
 
@@ -130,12 +133,12 @@ func TestPeerInSameCenterCannotReadOrActOnAnotherMembersNotifications(t *testing
 	require.False(t, snap.Active)
 	require.Nil(t, snap.RunID, "a peer must not see another member's run")
 
-	// A peer cannot even generate against another member's closed period —
-	// statements.Generate refuses before BulkSend gets anywhere near sending.
+	// A peer without can_send_reports cannot create sends at all — the
+	// permission gate refuses honestly with a 403 before any period lookup.
 	_, err = d.notifications.BulkSend(ctx, scopeB, periodID, notifications.BulkSendRequest{Purpose: "reminder"})
 	require.Error(t, err)
-	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
-		"a peer acting on another member's period must be refused like a missing resource")
+	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code,
+		"a member without the send-reports permission must get an explicit 403")
 
 	// A peer cannot mark another member's notification sent either.
 	require.NoError(t, d.notifications.MarkSent(ctx, scopeB, []uuid.UUID{resp.Rows[0].NotificationID}))

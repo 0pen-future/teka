@@ -54,9 +54,13 @@ type PeriodInfo struct {
 type Repository interface {
 	// GetPeriodStatus reads one billing period's status and owning teacher,
 	// center-scoped by sc with owner oversight — Generate's closed-period
-	// precondition and authorization check, and List/Get's existence check
-	// for a period id.
+	// precondition and authorization check.
 	GetPeriodStatus(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (PeriodInfo, error)
+	// GetPeriodStatusRead is GetPeriodStatus with reports oversight instead
+	// of owner oversight: a can_send_reports holder resolves any center
+	// period, like the owner. Backs read paths (List, PeriodFigures) and the
+	// delegated send's GenerateForSend — never the standalone generate route.
+	GetPeriodStatusRead(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (PeriodInfo, error)
 	// TargetContacts returns every contact with at least one non-void
 	// invoice in periodID — Generate's candidate set. sc must be the
 	// period's own owner scope (see Service.Generate's periodScope), not
@@ -80,10 +84,11 @@ type Repository interface {
 	// member's statements never reassigns them to itself.
 	UpsertStatement(ctx context.Context, sc authctx.Scope, stmt *Statement) (created, skippedRevoked bool, err error)
 	// ListByPeriod returns a page of one period's statements with contact
-	// display fields, center-scoped by sc with owner oversight.
+	// display fields, center-scoped by sc with reports oversight (owner or
+	// can_send_reports holder).
 	ListByPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, p pagination.Params) ([]Row, int64, error)
 	// GetByID returns one statement with contact display fields,
-	// center-scoped by sc with owner oversight.
+	// center-scoped by sc with reports oversight.
 	GetByID(ctx context.Context, sc authctx.Scope, statementID uuid.UUID) (*Row, error)
 	// GetByTokenHash resolves a statement by its token's hash. See the
 	// Repository doc comment: the one method in this package with no scope
@@ -209,24 +214,45 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 	return q
 }
 
+// scopedRead is scoped()'s read-only sibling: the teacher filter is lifted
+// for anyone with reports oversight (owner or can_send_reports holder), not
+// just the owner. It backs ONLY read paths (ListByPeriod, GetByID) — writes
+// like Revoke keep scoped(), so the delegated permission never gains write
+// reach here.
+func (r *gormRepository) scopedRead(ctx context.Context, sc authctx.Scope) *gorm.DB {
+	q := database.FromContext(ctx, r.db).Model(&Statement{}).Where("statements.center_id = ?", sc.CenterID)
+	if !sc.ReportsOversight() {
+		q = q.Where("statements.teacher_id = ?", sc.TeacherID)
+	}
+	return q
+}
+
 // withContact joins in the contact display fields ListByPeriod/GetByID
 // return alongside each statement. The join switches to center_id, not
-// teacher_id: an owner's row set spans every teacher in the center, so
-// matching on teacher_id here would silently drop a member's own contacts
-// from an owner's read.
+// teacher_id: an oversight caller's row set spans every teacher in the
+// center, so matching on teacher_id here would silently drop a member's own
+// contacts from such a read.
 func (r *gormRepository) withContact(ctx context.Context, sc authctx.Scope) *gorm.DB {
-	return r.scoped(ctx, sc).
+	return r.scopedRead(ctx, sc).
 		Select(`statements.*, contacts.full_name AS contact_full_name, contacts.phone AS contact_phone`).
 		Joins("JOIN contacts ON contacts.id = statements.contact_id AND contacts.center_id = statements.center_id")
 }
 
 func (r *gormRepository) GetPeriodStatus(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (PeriodInfo, error) {
+	return r.periodStatus(ctx, sc, periodID, sc.IsOwner)
+}
+
+func (r *gormRepository) GetPeriodStatusRead(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (PeriodInfo, error) {
+	return r.periodStatus(ctx, sc, periodID, sc.ReportsOversight())
+}
+
+func (r *gormRepository) periodStatus(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, centerWide bool) (PeriodInfo, error) {
 	var rows []PeriodInfo
 	q := database.FromContext(ctx, r.db).
 		Table("billing_periods").
 		Select("status, teacher_id").
 		Where("id = ? AND center_id = ? AND deleted_at IS NULL", periodID, sc.CenterID)
-	if !sc.IsOwner {
+	if !centerWide {
 		q = q.Where("teacher_id = ?", sc.TeacherID)
 	}
 	if err := q.Find(&rows).Error; err != nil {
@@ -322,7 +348,7 @@ func (r *gormRepository) UpsertStatement(ctx context.Context, sc authctx.Scope, 
 
 func (r *gormRepository) ListByPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, p pagination.Params) ([]Row, int64, error) {
 	var total int64
-	if err := r.scoped(ctx, sc).Where("statements.period_id = ?", periodID).Count(&total).Error; err != nil {
+	if err := r.scopedRead(ctx, sc).Where("statements.period_id = ?", periodID).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var rows []Row

@@ -28,6 +28,9 @@ const (
 	// runExpiredFailureMessage marks the rows swept when the Zalo session died
 	// mid-run.
 	runExpiredFailureMessage = "Phiên Zalo đã hết hạn"
+	// runRevokedFailureMessage marks the rows swept when a delegated run's
+	// sender lost the can_send_reports flag mid-run.
+	runRevokedFailureMessage = "Quyền gửi báo cáo đã bị thu hồi"
 )
 
 // runWriteTimeout bounds each outcome write. Writes ride a context that
@@ -61,6 +64,10 @@ type RunStore interface {
 	MarkOutcome(ctx context.Context, sc authctx.Scope, id uuid.UUID, status string, providerMsgID, errorMessage *string) error
 	FailQueuedInRun(ctx context.Context, sc authctx.Scope, runID uuid.UUID, reason string) error
 	UpdateRunStatus(ctx context.Context, sc authctx.Scope, runID uuid.UUID, status string) error
+	// CanSendReports is the delegated run's per-item permission probe:
+	// revoking the flag cannot reach into a goroutine holding its items in
+	// memory, so the loop asks before every send instead.
+	CanSendReports(ctx context.Context, centerID, teacherID uuid.UUID) (bool, error)
 }
 
 // DMSender is the consumer-defined slice of the Zalo service a run sends
@@ -73,6 +80,10 @@ type runJob struct {
 	teacherID uuid.UUID
 	centerID  uuid.UUID
 	runID     uuid.UUID
+	// delegated marks a run sending another teacher's period under the
+	// can_send_reports flag; only such runs pay the per-item permission
+	// re-check, an own-period run has no flag to lose.
+	delegated bool
 	cancel    context.CancelFunc
 	done      chan struct{}
 }
@@ -187,16 +198,19 @@ func (m *RunManager) Reserve(teacherID, centerID uuid.UUID) (*RunReservation, er
 	return &RunReservation{m: m, ctx: ctx, job: job}, nil
 }
 
-// Start consumes the reservation and begins sending in the background. It
-// always launches the goroutine, even during shutdown: the goroutine observes
-// the cancelled context, exits without writing, and — crucially — closes the
-// job's done channel so a concurrent Close is never left waiting.
-func (r *RunReservation) Start(runID uuid.UUID, items []RunItem) {
+// Start consumes the reservation and begins sending in the background.
+// delegated marks a run sending another teacher's period, subjecting it to the
+// per-item permission re-check. Start always launches the goroutine, even
+// during shutdown: the goroutine observes the cancelled context, exits without
+// writing, and — crucially — closes the job's done channel so a concurrent
+// Close is never left waiting.
+func (r *RunReservation) Start(runID uuid.UUID, items []RunItem, delegated bool) {
 	if r.settled {
 		return
 	}
 	r.settled = true
 	r.job.runID = runID
+	r.job.delegated = delegated
 	go r.m.run(r.ctx, r.job, items)
 }
 
@@ -212,14 +226,14 @@ func (r *RunReservation) Release() {
 	close(r.job.done)
 }
 
-// Start reserves and immediately starts in one call, for callers whose items
-// already exist. ErrRunBusy as in Reserve.
+// Start reserves and immediately starts a non-delegated run in one call, for
+// callers whose items already exist. ErrRunBusy as in Reserve.
 func (m *RunManager) Start(teacherID, centerID, runID uuid.UUID, items []RunItem) error {
 	res, err := m.Reserve(teacherID, centerID)
 	if err != nil {
 		return err
 	}
-	res.Start(runID, items)
+	res.Start(runID, items, false)
 	return nil
 }
 
@@ -257,6 +271,10 @@ func (m *RunManager) run(ctx context.Context, job *runJob, items []RunItem) {
 			return
 		}
 		if ctx.Err() != nil {
+			return
+		}
+		if job.delegated && !m.stillPermitted(ctx, job) {
+			m.revokeRun(ctx, job)
 			return
 		}
 
@@ -314,6 +332,42 @@ func (m *RunManager) markOutcome(ctx context.Context, job *runJob, id uuid.UUID,
 	if err := m.store.MarkOutcome(writeCtx, job.scope(), id, status, providerMsgID, errorMessage); err != nil {
 		m.log.Error("notification run: recording outcome failed",
 			"teacher_id", job.teacherID, "notification_id", id, "error", err)
+	}
+}
+
+// stillPermitted asks whether a delegated run's sender still holds
+// can_send_reports. A lookup error deliberately reads as "still permitted":
+// the check runs again before the very next send, so a transient database
+// blip pauses enforcement by one item instead of killing a healthy run.
+func (m *RunManager) stillPermitted(ctx context.Context, job *runJob) bool {
+	can, err := m.store.CanSendReports(ctx, job.centerID, job.teacherID)
+	if err != nil {
+		if ctx.Err() != nil {
+			return true
+		}
+		m.log.Warn("notification run: permission re-check failed, continuing",
+			"teacher_id", job.teacherID, "run_id", job.runID, "error", err)
+		return true
+	}
+	return can
+}
+
+// revokeRun is the permission-revoked ending: like expireRun, every remaining
+// queued row fails with one sweep — here with the revoked reason — and the run
+// record says interrupted, truthfully "stopped before finishing". A resume
+// needs the flag back, and by then finds nothing queued.
+func (m *RunManager) revokeRun(ctx context.Context, job *runJob) {
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runWriteTimeout)
+	defer cancel()
+	m.log.Warn("notification run: stopping, send-reports permission revoked",
+		"teacher_id", job.teacherID, "run_id", job.runID)
+	if err := m.store.FailQueuedInRun(writeCtx, job.scope(), job.runID, runRevokedFailureMessage); err != nil {
+		m.log.Error("notification run: sweeping rows after permission revocation failed",
+			"teacher_id", job.teacherID, "run_id", job.runID, "error", err)
+	}
+	if err := m.store.UpdateRunStatus(writeCtx, job.scope(), job.runID, RunStatusInterrupted); err != nil {
+		m.log.Error("notification run: marking revoked run interrupted failed",
+			"teacher_id", job.teacherID, "run_id", job.runID, "error", err)
 	}
 }
 

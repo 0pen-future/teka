@@ -39,6 +39,9 @@ type Member struct {
 	CenterID  uuid.UUID `gorm:"type:uuid;primaryKey"`
 	JoinedAt  time.Time
 	LeftAt    *time.Time
+	// CanSendReports is the delegated report-sender permission, scoped to
+	// this stint: closing or reopening the membership resets it to false.
+	CanSendReports bool
 }
 
 // TableName pins the table name explicitly.

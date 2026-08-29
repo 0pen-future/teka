@@ -68,11 +68,19 @@ func (f *fakeRepository) GetPeriodByYearMonth(_ context.Context, sc authctx.Scop
 	return nil, ErrPeriodNotFound
 }
 
-func (f *fakeRepository) ListPeriods(_ context.Context, sc authctx.Scope, _ pagination.Params) ([]Period, int64, error) {
-	var out []Period
+func (f *fakeRepository) GetPeriodRead(_ context.Context, sc authctx.Scope, periodID uuid.UUID) (*PeriodWithTeacher, error) {
+	p, ok := f.periods[periodID]
+	if !ok || (!sc.ReportsOversight() && p.TeacherID != sc.TeacherID) {
+		return nil, ErrPeriodNotFound
+	}
+	return &PeriodWithTeacher{Period: p}, nil
+}
+
+func (f *fakeRepository) ListPeriodsRead(_ context.Context, sc authctx.Scope, _ pagination.Params) ([]PeriodWithTeacher, int64, error) {
+	var out []PeriodWithTeacher
 	for _, p := range f.periods {
-		if p.TeacherID == sc.TeacherID {
-			out = append(out, p)
+		if sc.ReportsOversight() || p.TeacherID == sc.TeacherID {
+			out = append(out, PeriodWithTeacher{Period: p})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].PeriodStart.After(out[j].PeriodStart) })

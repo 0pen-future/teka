@@ -77,9 +77,26 @@ type GenerateResult struct {
 // so an owner generating a member's statements never reassigns them to
 // itself.
 func (s *Service) Generate(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*GenerateResult, error) {
+	return s.generate(ctx, sc, periodID, false)
+}
+
+// GenerateForSend is Generate for the delegated send path only: the period is
+// resolved with reports oversight, so a can_send_reports holder can (re)issue
+// statements as part of a bulk send on another teacher's period. The
+// standalone generate endpoint keeps calling Generate — delegation includes
+// no standalone generate right (plan decision D4).
+func (s *Service) GenerateForSend(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*GenerateResult, error) {
+	return s.generate(ctx, sc, periodID, true)
+}
+
+func (s *Service) generate(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, oversight bool) (*GenerateResult, error) {
 	var result GenerateResult
 	err := s.tx.WithinTx(ctx, func(ctx context.Context) error {
-		info, err := s.repo.GetPeriodStatus(ctx, sc, periodID)
+		lookup := s.repo.GetPeriodStatus
+		if oversight {
+			lookup = s.repo.GetPeriodStatusRead
+		}
+		info, err := lookup(ctx, sc, periodID)
 		if err != nil {
 			return s.translate(err)
 		}
@@ -139,10 +156,11 @@ func (s *Service) Generate(ctx context.Context, sc authctx.Scope, periodID uuid.
 }
 
 // List returns a page of one period's statements, center-scoped by sc with
-// owner oversight. periodID must be visible to sc; an unknown or
-// out-of-tenancy id is reported as if the period does not exist.
+// reports oversight (owner or can_send_reports holder). periodID must be
+// visible to sc; an unknown or out-of-tenancy id is reported as if the
+// period does not exist.
 func (s *Service) List(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, p pagination.Params) ([]Row, int64, error) {
-	if _, err := s.repo.GetPeriodStatus(ctx, sc, periodID); err != nil {
+	if _, err := s.repo.GetPeriodStatusRead(ctx, sc, periodID); err != nil {
 		return nil, 0, s.translate(err)
 	}
 	rows, total, err := s.repo.ListByPeriod(ctx, sc, periodID, p)
@@ -311,13 +329,13 @@ type ContactFigures struct {
 // a bulk-sent message's total can never disagree with the number a parent
 // sees at their own statement link.
 //
-// sc authorizes the call like Generate (owner may act on any teacher's
-// period in the center; a member only on their own), then the read is
-// derived from periodScope — the period's own owning teacher — so an
-// owner's bulk send over a member's period reads exactly that member's
-// figures.
+// sc authorizes the call with reports oversight (owner or can_send_reports
+// holder may act on any teacher's period in the center; a plain member only
+// on their own), then the read is derived from periodScope — the period's
+// own owning teacher — so an oversight caller's bulk send over a member's
+// period reads exactly that member's figures.
 func (s *Service) PeriodFigures(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (map[uuid.UUID]ContactFigures, error) {
-	info, err := s.repo.GetPeriodStatus(ctx, sc, periodID)
+	info, err := s.repo.GetPeriodStatusRead(ctx, sc, periodID)
 	if err != nil {
 		return nil, s.translate(err)
 	}

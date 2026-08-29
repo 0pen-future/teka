@@ -24,8 +24,9 @@ type Filter struct {
 
 // Repository is the read-only data access surface behind the collection
 // board. No method mutates a row: every query here scopes strictly by center,
-// further narrowed to one teacher's own rows unless the caller owns the
-// center, and never opens a transaction.
+// further narrowed to one teacher's own rows unless the caller has reports
+// oversight (center owner or can_send_reports holder), and never opens a
+// transaction.
 type Repository interface {
 	PeriodExists(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (bool, error)
 	ContactBalances(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, filter Filter, p pagination.Params) ([]ContactBalanceRow, int64, error)
@@ -43,16 +44,18 @@ func NewRepository(db *gorm.DB) Repository {
 }
 
 // PeriodExists reports whether periodID belongs to sc's center — and, unless
-// sc is the center's owner, to sc's own teacher — the sole tenant check every
+// sc has reports oversight, to sc's own teacher — the sole tenant check every
 // handler in this package runs before touching any reporting query. An owner
-// matches any teacher's period in the center, mirroring the oversight rule
-// every other scoped query in this package applies.
+// or can_send_reports holder matches any teacher's period in the center
+// (this feature is read-only end to end — Goal 2's "read debt" lives here),
+// mirroring the oversight rule every other scoped query in this package
+// applies.
 func (r *gormRepository) PeriodExists(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (bool, error) {
 	var count int64
 	q := database.FromContext(ctx, r.db).
 		Table("billing_periods").
 		Where("id = ? AND center_id = ? AND deleted_at IS NULL", periodID, sc.CenterID)
-	if !sc.IsOwner {
+	if !sc.ReportsOversight() {
 		q = q.Where("teacher_id = ?", sc.TeacherID)
 	}
 	err := q.Count(&count).Error
@@ -82,8 +85,9 @@ type contactScanRow struct {
 // this joins straight to contacts for the display name.
 //
 // vcb.center_id anchors the tenant filter unconditionally; vcb.teacher_id is
-// only added when sc is not the center's owner, so an owner's read resolves
-// every member's rows in one query instead of narrowing to their own.
+// only added when sc lacks reports oversight, so an owner's or secretary's
+// read resolves every member's rows in one query instead of narrowing to
+// their own.
 //
 // The contacts join deliberately omits "AND c.deleted_at IS NULL" — a
 // contact who still owes money for a period must keep showing up here even
@@ -95,7 +99,7 @@ func (r *gormRepository) contactBalanceQuery(ctx context.Context, sc authctx.Sco
 		Table("v_contact_balance AS vcb").
 		Joins("JOIN contacts c ON c.id = vcb.contact_id AND c.center_id = vcb.center_id").
 		Where("vcb.center_id = ? AND vcb.period_id = ?", sc.CenterID, periodID)
-	if !sc.IsOwner {
+	if !sc.ReportsOversight() {
 		q = q.Where("vcb.teacher_id = ?", sc.TeacherID)
 	}
 	if filter.Status != "" {
@@ -188,7 +192,7 @@ func (r *gormRepository) childInvoicesByContact(ctx context.Context, sc authctx.
 		Table("invoices").
 		Select("contact_id AS contact_id, id AS invoice_id, student_name AS student_name, total_due AS total_due, paid_amount AS paid_amount").
 		Where("center_id = ? AND period_id = ? AND contact_id IN ? AND status <> ?", sc.CenterID, periodID, contactIDs, statusVoid)
-	if !sc.IsOwner {
+	if !sc.ReportsOversight() {
 		q = q.Where("teacher_id = ?", sc.TeacherID)
 	}
 	var rows []scanRow
@@ -247,7 +251,7 @@ func (r *gormRepository) classCollectionsQuery(ctx context.Context, sc authctx.S
 		Joins("JOIN invoices i ON i.id = il.invoice_id AND i.center_id = il.center_id").
 		Joins("JOIN enrollments e ON e.id = il.enrollment_id AND e.center_id = il.center_id AND e.deleted_at IS NULL").
 		Where("i.center_id = ? AND i.period_id = ? AND i.status <> ?", sc.CenterID, periodID, statusVoid)
-	if !sc.IsOwner {
+	if !sc.ReportsOversight() {
 		q = q.Where("i.teacher_id = ?", sc.TeacherID)
 	}
 	if filter.ClassID != nil {
@@ -325,7 +329,7 @@ func (r *gormRepository) PeriodSummary(ctx context.Context, sc authctx.Scope, pe
 			COALESCE(SUM(total_due),0) AS total_due, COALESCE(SUM(paid_amount),0) AS total_paid,
 			COALESCE(SUM(total_due - paid_amount),0) AS total_outstanding`).
 		Where("center_id = ? AND period_id = ? AND status <> ?", sc.CenterID, periodID, statusVoid)
-	if !sc.IsOwner {
+	if !sc.ReportsOversight() {
 		totalsQ = totalsQ.Where("teacher_id = ?", sc.TeacherID)
 	}
 	if err := totalsQ.Take(&totals).Error; err != nil {
@@ -343,7 +347,7 @@ func (r *gormRepository) PeriodSummary(ctx context.Context, sc authctx.Scope, pe
 			COUNT(*) FILTER (WHERE outstanding > 0 AND total_paid = 0) AS unpaid,
 			COUNT(*) FILTER (WHERE outstanding > 0 AND total_paid > 0) AS partial`).
 		Where("center_id = ? AND period_id = ?", sc.CenterID, periodID)
-	if !sc.IsOwner {
+	if !sc.ReportsOversight() {
 		statusQ = statusQ.Where("teacher_id = ?", sc.TeacherID)
 	}
 	if err := statusQ.Take(&statusCounts).Error; err != nil {
@@ -358,7 +362,7 @@ func (r *gormRepository) PeriodSummary(ctx context.Context, sc authctx.Scope, pe
 	// a reversal's allocations the same way for the identical reason).
 	//
 	// Every fragment below repeats the (? OR x.teacher_id = ?) pair so
-	// sc.IsOwner short-circuits the teacher_id check via SQL OR — the same
+	// reports oversight short-circuits the teacher_id check via SQL OR — the same
 	// trick payments' candidateInvoicesQuery and billing's
 	// RecalcInvoiceTotals use — because this single statement joins a
 	// subquery and a correlated subquery, each independently tenant-scoped,
@@ -371,14 +375,14 @@ func (r *gormRepository) PeriodSummary(ctx context.Context, sc authctx.Scope, pe
 		Joins(`LEFT JOIN (
 			SELECT payment_id, SUM(amount) AS total FROM payment_allocations
 			WHERE center_id = ? AND (? OR teacher_id = ?) GROUP BY payment_id
-		) alloc ON alloc.payment_id = p.id`, sc.CenterID, sc.IsOwner, sc.TeacherID).
+		) alloc ON alloc.payment_id = p.id`, sc.CenterID, sc.ReportsOversight(), sc.TeacherID).
 		Where(`p.center_id = ? AND (? OR p.teacher_id = ?) AND p.reversed_at IS NULL AND p.reverses_payment_id IS NULL
 			AND p.contact_id IN (
 				SELECT DISTINCT contact_id FROM v_contact_balance
 				WHERE center_id = ? AND (? OR teacher_id = ?) AND period_id = ?
 			)`,
-			sc.CenterID, sc.IsOwner, sc.TeacherID,
-			sc.CenterID, sc.IsOwner, sc.TeacherID, periodID).
+			sc.CenterID, sc.ReportsOversight(), sc.TeacherID,
+			sc.CenterID, sc.ReportsOversight(), sc.TeacherID, periodID).
 		Row()
 	if err := row.Scan(&unallocated); err != nil {
 		return nil, err
