@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { afterEach, describe, expect, it } from "vitest";
@@ -10,7 +10,9 @@ import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
 
 import { CenterPage } from "../pages/center-page";
+import { CenterPermissionsPage } from "../pages/center-permissions-page";
 import {
+  makeCenterMeMember,
   makeCenterMeOwner,
   makeCenterPermissions,
   makeMember,
@@ -26,6 +28,15 @@ function renderCenter() {
   return renderWithProviders(<CenterPage />, { route: "/center", path: "/center" });
 }
 
+function renderPermissionsPage() {
+  signInAs(testPrimaryTeacher);
+  return renderWithProviders(<CenterPermissionsPage />, {
+    route: "/center/permissions",
+    path: "/center/permissions",
+    extraRoutes: [{ path: "/", element: <div>Trang tổng quan</div> }],
+  });
+}
+
 function ownerSelf() {
   return makeMember({
     id: testPrimaryTeacher.id,
@@ -39,9 +50,8 @@ afterEach(() => {
   useAuthStore.getState().clearSession();
 });
 
-describe("PermissionMatrix on the owner center page", () => {
+describe("PermissionMatrix on the owner permissions page", () => {
   it("renders API labels per role and keeps the reports.send row disabled", async () => {
-    mockInvites([]);
     mockCenterMe(makeCenterMeOwner({ members: [ownerSelf()] }));
     mockCenterPermissions(
       makeCenterPermissions({
@@ -51,7 +61,7 @@ describe("PermissionMatrix on the owner center page", () => {
         ],
       }),
     );
-    renderCenter();
+    renderPermissionsPage();
 
     // Labels come from the API catalog, one checkbox per role column.
     const auditCell = await screen.findByRole("checkbox", {
@@ -72,7 +82,6 @@ describe("PermissionMatrix on the owner center page", () => {
   });
 
   it("saves a role's full checked set through the role save button", async () => {
-    mockInvites([]);
     mockCenterMe(makeCenterMeOwner({ members: [ownerSelf()] }));
     mockCenterPermissions(makeCenterPermissions());
     let savedRoleId = "";
@@ -84,7 +93,7 @@ describe("PermissionMatrix on the owner center page", () => {
         return new HttpResponse(null, { status: 204 });
       }),
     );
-    renderCenter();
+    renderPermissionsPage();
     const user = userEvent.setup();
 
     await user.click(
@@ -103,6 +112,17 @@ describe("PermissionMatrix on the owner center page", () => {
     expect(await screen.findByText("Đã lưu quyền cho vai trò Học vụ")).toBeInTheDocument();
     expect(savedRoleId).toBe(HOC_VU.id);
     expect(received).toEqual({ permissions: ["audit.read", "dashboard.view"] });
+  });
+
+  it("redirects a non-owner deep link to the dashboard without fetching the matrix", async () => {
+    mockCenterMe(makeCenterMeMember());
+    const matrix = mockCenterPermissions(makeCenterPermissions());
+    const { router } = renderPermissionsPage();
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    expect(await screen.findByText("Trang tổng quan")).toBeInTheDocument();
+    // The owner-only read model never fires for a redirected member.
+    expect(matrix.calls).toBe(0);
   });
 });
 

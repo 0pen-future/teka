@@ -10,4 +10,10 @@ export const centerRoutes: RouteObject[] = [
     path: "center",
     lazy: async () => ({ Component: (await import("./pages/center-page")).CenterPage }),
   },
+  {
+    path: "center/permissions",
+    lazy: async () => ({
+      Component: (await import("./pages/center-permissions-page")).CenterPermissionsPage,
+    }),
+  },
 ];

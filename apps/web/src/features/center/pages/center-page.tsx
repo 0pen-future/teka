@@ -1,12 +1,12 @@
-import { PencilIcon } from "lucide-react";
+import { ChevronRightIcon, PencilIcon } from "lucide-react";
 import { useState } from "react";
+import { Link } from "react-router";
 
 import { HvBadge, HvButton, HvCard } from "@/components/hv";
 import { InviteSection } from "@/features/invitation";
 
 import { MemberList } from "../components/member-list";
 import { MemberPermissionsDialog } from "../components/member-permissions-dialog";
-import { PermissionMatrix } from "../components/permission-matrix";
 import { RemoveMemberDialog } from "../components/remove-member-dialog";
 import { RenameCenterDialog } from "../components/rename-center-dialog";
 import { useCenter } from "../hooks/use-center";
@@ -97,13 +97,21 @@ export function CenterPage() {
           />
         </HvCard>
 
-        <HvCard>
-          <p className="font-display text-[17px] font-bold text-ink-900">Phân quyền vai trò</p>
-          <p className="mt-1 text-[13px] text-ink-500">
-            Quyền của mỗi vai trò áp dụng cho mọi thành viên giữ vai trò đó. Cấp hoặc chặn riêng
-            từng người bằng nút "Phân quyền" ở danh sách giáo viên.
-          </p>
-          <PermissionMatrix />
+        <HvCard interactive className="p-0">
+          <Link
+            to="/center/permissions"
+            aria-label="Phân quyền vai trò"
+            className="flex items-center gap-3 rounded-[inherit] p-[var(--pad-card)] focus-visible:outline-none focus-visible:ring-4"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="font-display text-[17px] font-bold text-ink-900">Phân quyền vai trò</p>
+              <p className="mt-1 text-[13px] text-ink-500">
+                Quyền của mỗi vai trò áp dụng cho mọi thành viên giữ vai trò đó. Cấp hoặc chặn riêng
+                từng người bằng nút "Phân quyền" ở danh sách giáo viên.
+              </p>
+            </div>
+            <ChevronRightIcon aria-hidden className="size-5 shrink-0 text-ink-400" />
+          </Link>
         </HvCard>
 
         <InviteSection />

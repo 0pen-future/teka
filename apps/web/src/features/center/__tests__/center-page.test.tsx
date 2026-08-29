@@ -57,6 +57,11 @@ describe("CenterPage — owner", () => {
     expect(screen.getByText("Chủ trung tâm")).toBeInTheDocument();
     expect(screen.getByText("Giáo Viên A")).toBeInTheDocument();
     expect(await screen.findByLabelText("Số điện thoại")).toBeInTheDocument();
+    // The role matrix moved to its own page; the card here is only a link.
+    expect(screen.getByRole("link", { name: /Phân quyền vai trò/ })).toHaveAttribute(
+      "href",
+      "/center/permissions",
+    );
   });
 
   it("renames the center through the owner-only dialog", async () => {

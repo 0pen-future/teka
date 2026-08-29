@@ -8,6 +8,7 @@ import {
   HistoryIcon,
   IdCardIcon,
   LogOutIcon,
+  ShieldCheckIcon,
   type LucideProps,
 } from "lucide-react";
 import { createContext, useContext, useState, type ComponentType } from "react";
@@ -109,6 +110,10 @@ function useNavGroups(): NavGroup[] {
         ...(isResolved && !isOwner && canSendReports
           ? [{ label: "Gửi báo cáo", to: "/reports", Icon: HvSendIcon }]
           : []),
+        // Owner-only: the role-permission read model itself is owner-only.
+        ...(isResolved && isOwner
+          ? [{ label: "Phân quyền vai trò", to: "/center/permissions", Icon: ShieldCheckIcon }]
+          : []),
         { label: "Cài đặt trung tâm", to: "/center", Icon: Building2Icon },
       ],
     },
@@ -131,6 +136,7 @@ const OVERFLOW_LABELS = new Set([
   "Duyệt giáo án",
   "Nhập từ Excel",
   "Nhật ký hoạt động",
+  "Phân quyền vai trò",
   "Cài đặt trung tâm",
 ]);
 

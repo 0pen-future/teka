@@ -73,7 +73,13 @@ describe("grouped sidebar", () => {
     const expected: Record<string, string[]> = {
       "Dạy học": ["Điểm danh", "Quản lý lớp học", "Hồ sơ học sinh", "Lớp & học sinh", "Phụ huynh"],
       "Học phí": ["Chốt sổ", "Gửi thông báo", "Thu tiền"],
-      "Trung tâm": ["Duyệt giáo án", "Nhập từ Excel", "Nhật ký hoạt động", "Cài đặt trung tâm"],
+      "Trung tâm": [
+        "Duyệt giáo án",
+        "Nhập từ Excel",
+        "Nhật ký hoạt động",
+        "Phân quyền vai trò",
+        "Cài đặt trung tâm",
+      ],
     };
     for (const [header, labels] of Object.entries(expected)) {
       const group = within(sidebarNav).getByRole("group", { name: header });
@@ -151,6 +157,19 @@ describe("bottom tab bar", () => {
     // /students/import is a subpath of /students; only the deeper entry lights up.
     expect(importLink).toHaveAttribute("aria-current", "page");
     expect(studentsLink).not.toHaveAttribute("aria-current");
+  });
+
+  it("keeps only Phân quyền vai trò active on /center/permissions, not Cài đặt trung tâm", async () => {
+    renderLayout("/center/permissions");
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+
+    const permissionsLink = await within(sidebarNav).findByRole("link", {
+      name: "Phân quyền vai trò",
+    });
+    const centerLink = within(sidebarNav).getByRole("link", { name: "Cài đặt trung tâm" });
+    // /center/permissions is a subpath of /center; only the deeper entry lights up.
+    expect(permissionsLink).toHaveAttribute("aria-current", "page");
+    expect(centerLink).not.toHaveAttribute("aria-current");
   });
 
   it("keeps the parent entry active on a student detail route", async () => {
@@ -258,8 +277,28 @@ describe("teaching v2 nav", () => {
       "Duyệt giáo án",
       "Nhập từ Excel",
       "Nhật ký hoạt động",
+      "Phân quyền vai trò",
       "Cài đặt trung tâm",
     ]);
+  });
+
+  it("shows Phân quyền vai trò to owners linking /center/permissions", async () => {
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+    expect(
+      await within(sidebarNav).findByRole("link", { name: "Phân quyền vai trò" }),
+    ).toHaveAttribute("href", "/center/permissions");
+  });
+
+  it("hides Phân quyền vai trò from non-owner members", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh" })),
+      ),
+    );
+    renderLayout();
+    await screen.findByText("Giáo viên");
+    expect(screen.queryByRole("link", { name: "Phân quyền vai trò" })).not.toBeInTheDocument();
   });
 
   it("shows Nhật ký hoạt động to owners linking /audit", async () => {
