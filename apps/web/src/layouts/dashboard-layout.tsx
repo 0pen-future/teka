@@ -53,7 +53,7 @@ interface NavGroup {
 function useNavGroups(): NavGroup[] {
   const { data: period } = useCurrentPeriod();
   const { data: pendingSessionsResponse } = usePendingSessions();
-  const { isOwner, canSendReports, isResolved } = useCenterContext();
+  const { isOwner, canSendReports, isResolved, has } = useCenterContext();
   const pendingPlanCount = usePendingPlanCount();
   const periodId = period?.id ?? null;
   const hasPending = (pendingSessionsResponse?.total ?? 0) > 0;
@@ -85,9 +85,10 @@ function useNavGroups(): NavGroup[] {
     {
       header: "Trung tâm",
       entries: [
-        // Owner-gated, and only after /centers/me resolves — rendering it
-        // optimistically would flash the entry for members on load.
-        ...(isResolved && isOwner
+        // Permission-gated (the owner's effective set is the full catalog),
+        // and only after /centers/me resolves — rendering optimistically
+        // would flash the entries for members on load.
+        ...(isResolved && has("teaching.review_queue")
           ? [
               {
                 label: "Duyệt giáo án",
@@ -95,9 +96,13 @@ function useNavGroups(): NavGroup[] {
                 Icon: ClipboardCheckIcon,
                 pending: pendingPlanCount > 0,
               },
-              { label: "Nhập từ Excel", to: "/students/import", Icon: FileSpreadsheetIcon },
-              { label: "Nhật ký hoạt động", to: "/audit", Icon: HistoryIcon },
             ]
+          : []),
+        ...(isResolved && has("imports.run")
+          ? [{ label: "Nhập từ Excel", to: "/students/import", Icon: FileSpreadsheetIcon }]
+          : []),
+        ...(isResolved && has("audit.read")
+          ? [{ label: "Nhật ký hoạt động", to: "/audit", Icon: HistoryIcon }]
           : []),
         // Secretary-only (owner reaches every period through Học phí already;
         // the flag itself is member-only, so owner never matches).

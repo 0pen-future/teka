@@ -9,19 +9,20 @@ export interface MemberListProps {
   canRemove: boolean;
   onRemove: (member: CenterMember) => void;
   /**
-   * Owner viewers also manage the delegated send-reports permission; the
-   * toggle shares the remove action's gating (owner-only, non-owner rows).
+   * Owner viewers also manage per-member roles and permission overrides
+   * (including the delegated send-reports grant); the action shares the
+   * remove action's gating (owner-only, non-owner rows).
    */
-  onToggleSendReports?: (member: CenterMember) => void;
+  onManagePermissions?: (member: CenterMember) => void;
 }
 
 /**
  * The owner row never gets a remove button — the API rejects owner
  * self-removal (a center cannot be left ownerless), so the control would only
- * manufacture an error. The send-reports toggle skips the owner row for the
- * same reason: the owner can never be its target.
+ * manufacture an error. The permissions action skips the owner row for the
+ * same reason: the owner is an implicit superuser the API refuses to target.
  */
-export function MemberList({ members, canRemove, onRemove, onToggleSendReports }: MemberListProps) {
+export function MemberList({ members, canRemove, onRemove, onManagePermissions }: MemberListProps) {
   return (
     <ul className="flex flex-col divide-y divide-line-200">
       {members.map((member) => (
@@ -42,19 +43,15 @@ export function MemberList({ members, canRemove, onRemove, onToggleSendReports }
             </p>
             <p className="text-[12.5px] text-ink-500">{formatPhoneLocal(member.phone)}</p>
           </div>
-          {canRemove && !member.is_owner && onToggleSendReports ? (
+          {canRemove && !member.is_owner && onManagePermissions ? (
             <HvButton
               type="button"
               variant="ghost"
               size="sm"
-              aria-label={
-                member.can_send_reports
-                  ? `Thu hồi quyền gửi báo cáo của ${member.full_name}`
-                  : `Giao quyền gửi báo cáo cho ${member.full_name}`
-              }
-              onClick={() => onToggleSendReports(member)}
+              aria-label={`Phân quyền cho ${member.full_name}`}
+              onClick={() => onManagePermissions(member)}
             >
-              {member.can_send_reports ? "Thu quyền gửi" : "Giao quyền gửi"}
+              Phân quyền
             </HvButton>
           ) : null}
           {canRemove && !member.is_owner ? (

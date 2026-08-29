@@ -282,6 +282,30 @@ describe("teaching v2 nav", () => {
     expect(screen.queryByRole("link", { name: "Nhật ký hoạt động" })).not.toBeInTheDocument();
   });
 
+  it("shows granted surfaces to a member holding the matching permissions", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(
+          ok({
+            center_name: "Trung Tâm Bình Minh",
+            permissions: ["audit.read", "imports.run"],
+          }),
+        ),
+      ),
+    );
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+    expect(
+      await within(sidebarNav).findByRole("link", { name: "Nhật ký hoạt động" }),
+    ).toHaveAttribute("href", "/audit");
+    expect(within(sidebarNav).getByRole("link", { name: "Nhập từ Excel" })).toHaveAttribute(
+      "href",
+      "/students/import",
+    );
+    // Keys the member does not hold stay hidden.
+    expect(screen.queryByRole("link", { name: "Duyệt giáo án" })).not.toBeInTheDocument();
+  });
+
   it("shows Nhập từ Excel to owners and hides it from members", async () => {
     renderLayout();
     const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;

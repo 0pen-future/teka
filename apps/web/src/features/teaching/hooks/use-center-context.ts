@@ -13,6 +13,10 @@ export interface CenterContext {
   isResolved: boolean;
   /** True when /centers/me failed after retries — callers must not blank forever. */
   isError: boolean;
+  /** The caller's effective permission keys from `/centers/me` (owner: full catalog). */
+  permissions: string[];
+  /** True when the effective set holds `key`; false until `/centers/me` resolves. */
+  has: (key: string) => boolean;
 }
 
 /**
@@ -36,11 +40,14 @@ export function useCenterContext(): CenterContext {
       canRunSends: false,
       isResolved: false,
       isError,
+      permissions: [],
+      has: () => false,
     };
   }
   const isOwner = "members" in data;
   const centerName = isOwner ? data.center.name : data.center_name;
   const canSendReports = isOwner ? false : data.can_send_reports;
+  const permissions = data.permissions;
   return {
     centerId: centerName,
     centerName,
@@ -49,5 +56,11 @@ export function useCenterContext(): CenterContext {
     canRunSends: isOwner || canSendReports,
     isResolved: true,
     isError: false,
+    permissions,
+    // The server already folds the owner bypass into the array (an owner's
+    // effective set is the whole catalog). The explicit owner short-circuit
+    // covers a rollout skew where an older API omits `permissions` (schema
+    // defaults it to []) — the owner must never lose owner-only surfaces.
+    has: (key: string) => isOwner || permissions.includes(key),
   };
 }

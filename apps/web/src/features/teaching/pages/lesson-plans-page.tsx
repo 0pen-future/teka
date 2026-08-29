@@ -17,13 +17,16 @@ import { nextLessonIndex } from "../lib/classbook-stats";
 import { transitionLessonPlanStatus, type LessonPlanAction } from "../lib/teaching-store";
 
 /**
- * Duyệt giáo án — owner-only review queue across all active classes, closing
- * the loop the teacher's classbook screen opens. Nav hiding alone is not a
- * guard: non-owners landing here (deep link, stale bookmark) are routed back
- * to the classbook once the role resolves.
+ * Duyệt giáo án — review queue across all active classes, closing the loop
+ * the teacher's classbook screen opens. Reading takes the
+ * `teaching.review_queue` permission (the owner always holds it); the
+ * approve/redo/reopen writes stay owner-only, so a grantee gets a read-only
+ * panel. Nav hiding alone is not a guard: accounts without the permission
+ * landing here (deep link, stale bookmark) are routed back to the classbook
+ * once the permission resolves.
  */
 export function LessonPlansPage() {
-  const { centerId, isOwner, isResolved, isError } = useCenterContext();
+  const { centerId, isOwner, isResolved, isError, has } = useCenterContext();
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
 
   const month = currentMonth();
@@ -137,9 +140,9 @@ export function LessonPlansPage() {
   if (!isResolved && !isError) {
     return null;
   }
-  // Unresolvable role (query failed) degrades like non-owner — a redirect,
-  // never a permanently blank page.
-  if (!isOwner) {
+  // Unresolvable permissions (query failed) degrade like no permission — a
+  // redirect, never a permanently blank page.
+  if (!has("teaching.review_queue")) {
     return <Navigate to="/classbook" replace />;
   }
 
@@ -178,6 +181,7 @@ export function LessonPlansPage() {
               onRequestRedo={requestRedo}
               onReopen={reopen}
               onRemind={remind}
+              canAct={isOwner}
             />
           ) : null}
         </div>

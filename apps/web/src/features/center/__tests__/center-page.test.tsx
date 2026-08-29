@@ -10,7 +10,15 @@ import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
 
 import { CenterPage } from "../pages/center-page";
-import { makeCenterMeMember, makeCenterMeOwner, makeMember, mockCenterMe } from "./center-handlers";
+import {
+  makeCenterMeMember,
+  makeCenterMeOwner,
+  makeCenterPermissions,
+  makeMember,
+  makeMemberPermissions,
+  mockCenterMe,
+  mockCenterPermissions,
+} from "./center-handlers";
 
 function renderCenter() {
   signInAs(testPrimaryTeacher);
@@ -186,64 +194,70 @@ describe("CenterPage — owner", () => {
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", {
-        name: `Giao quyền gửi báo cáo cho ${testPrimaryTeacher.full_name}`,
+        name: `Phân quyền cho ${testPrimaryTeacher.full_name}`,
       }),
     ).not.toBeInTheDocument();
   });
 
-  it("grants the send-reports permission after a confirm that states the exclusivity", async () => {
+  it("grants reports.send through the permissions dialog and shows the badge after refetch", async () => {
     mockInvites([]);
+    const memberA = makeMember({ full_name: "Giáo Viên A" });
     mockCenterMe(
+      makeCenterMeOwner({ members: [selfMember(true), memberA] }),
       makeCenterMeOwner({
-        members: [selfMember(true), makeMember({ full_name: "Giáo Viên A" })],
-      }),
-      makeCenterMeOwner({
-        members: [
-          selfMember(true),
-          makeMember({ full_name: "Giáo Viên A", can_send_reports: true }),
-        ],
+        members: [selfMember(true), { ...memberA, can_send_reports: true }],
       }),
     );
-    let postedTeacherId = "";
+    // A single scripted payload: the dialog's own mount refetch would consume
+    // a "post-save" second payload early and erase the draft's dirtiness.
+    mockCenterPermissions(makeCenterPermissions({ members: [makeMemberPermissions(memberA)] }));
+    let targetId = "";
+    let received: unknown;
     server.use(
-      http.post(`${API_URL}/centers/me/members/:teacherId/send-reports`, ({ params }) => {
-        postedTeacherId = String(params.teacherId);
-        return new HttpResponse(null, { status: 204 });
-      }),
+      http.put(
+        `${API_URL}/centers/me/members/:teacherId/overrides`,
+        async ({ params, request }) => {
+          targetId = String(params.teacherId);
+          received = await request.json();
+          return new HttpResponse(null, { status: 204 });
+        },
+      ),
     );
     renderCenter();
     const user = userEvent.setup();
 
-    await user.click(
-      await screen.findByRole("button", { name: "Giao quyền gửi báo cáo cho Giáo Viên A" }),
+    await user.click(await screen.findByRole("button", { name: "Phân quyền cho Giáo Viên A" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.selectOptions(
+      await within(dialog).findByRole("combobox", { name: "Quyền Gửi báo cáo học phí" }),
+      "grant",
     );
-    expect(
-      await screen.findByText(/chỉ người giữ quyền này và chủ trung tâm gửi được/),
-    ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Giao quyền" }));
+    await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
 
-    expect(await screen.findByText("Đã giao quyền gửi báo cáo")).toBeInTheDocument();
-    expect(postedTeacherId).not.toBe("");
+    expect(await screen.findByText("Đã lưu phân quyền")).toBeInTheDocument();
+    expect(targetId).toBe(memberA.id);
+    expect(received).toEqual({ grants: ["reports.send"], denies: [] });
     expect(await screen.findByText("Thư ký gửi báo cáo")).toBeInTheDocument();
   });
 
-  it("revokes the send-reports permission and drops the badge after refetch", async () => {
+  it("clears the reports.send grant and drops the badge after refetch", async () => {
     mockInvites([]);
+    const memberA = makeMember({ full_name: "Giáo Viên A", can_send_reports: true });
     mockCenterMe(
+      makeCenterMeOwner({ members: [selfMember(true), memberA] }),
       makeCenterMeOwner({
-        members: [
-          selfMember(true),
-          makeMember({ full_name: "Giáo Viên A", can_send_reports: true }),
-        ],
-      }),
-      makeCenterMeOwner({
-        members: [selfMember(true), makeMember({ full_name: "Giáo Viên A" })],
+        members: [selfMember(true), { ...memberA, can_send_reports: false }],
       }),
     );
-    let deletedTeacherId = "";
+    mockCenterPermissions(
+      makeCenterPermissions({
+        members: [makeMemberPermissions(memberA, { grants: ["reports.send"] })],
+      }),
+    );
+    let received: unknown;
     server.use(
-      http.delete(`${API_URL}/centers/me/members/:teacherId/send-reports`, ({ params }) => {
-        deletedTeacherId = String(params.teacherId);
+      http.put(`${API_URL}/centers/me/members/:teacherId/overrides`, async ({ request }) => {
+        received = await request.json();
         return new HttpResponse(null, { status: 204 });
       }),
     );
@@ -251,30 +265,39 @@ describe("CenterPage — owner", () => {
     const user = userEvent.setup();
 
     expect(await screen.findByText("Thư ký gửi báo cáo")).toBeInTheDocument();
-    await user.click(
-      screen.getByRole("button", { name: "Thu hồi quyền gửi báo cáo của Giáo Viên A" }),
+    await user.click(screen.getByRole("button", { name: "Phân quyền cho Giáo Viên A" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.selectOptions(
+      await within(dialog).findByRole("combobox", { name: "Quyền Gửi báo cáo học phí" }),
+      "inherit",
     );
-    await user.click(await screen.findByRole("button", { name: "Thu hồi quyền" }));
+    await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
 
-    expect(await screen.findByText("Đã thu hồi quyền gửi báo cáo")).toBeInTheDocument();
-    expect(deletedTeacherId).not.toBe("");
+    expect(await screen.findByText("Đã lưu phân quyền")).toBeInTheDocument();
+    expect(received).toEqual({ grants: [], denies: [] });
     await waitFor(() => expect(screen.queryByText("Thư ký gửi báo cáo")).not.toBeInTheDocument());
   });
 
-  it("surfaces a failure toast when the permission change errors", async () => {
-    mockSharedCenter();
+  it("surfaces a failure toast when the override save errors", async () => {
+    mockInvites([]);
+    const memberA = makeMember({ full_name: "Giáo Viên A" });
+    mockCenterMe(makeCenterMeOwner({ members: [selfMember(true), memberA] }));
+    mockCenterPermissions(makeCenterPermissions({ members: [makeMemberPermissions(memberA)] }));
     server.use(
-      http.post(`${API_URL}/centers/me/members/:teacherId/send-reports`, () =>
+      http.put(`${API_URL}/centers/me/members/:teacherId/overrides`, () =>
         HttpResponse.json(fail("INTERNAL_ERROR", "boom"), { status: 500 }),
       ),
     );
     renderCenter();
     const user = userEvent.setup();
 
-    await user.click(
-      await screen.findByRole("button", { name: "Giao quyền gửi báo cáo cho Giáo Viên A" }),
+    await user.click(await screen.findByRole("button", { name: "Phân quyền cho Giáo Viên A" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.selectOptions(
+      await within(dialog).findByRole("combobox", { name: "Quyền Gửi báo cáo học phí" }),
+      "grant",
     );
-    await user.click(await screen.findByRole("button", { name: "Giao quyền" }));
+    await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
 
     expect(await screen.findByText("Có lỗi xảy ra, thử lại sau")).toBeInTheDocument();
   });

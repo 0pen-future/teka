@@ -5,9 +5,10 @@ import { HvBadge, HvButton, HvCard } from "@/components/hv";
 import { InviteSection } from "@/features/invitation";
 
 import { MemberList } from "../components/member-list";
+import { MemberPermissionsDialog } from "../components/member-permissions-dialog";
+import { PermissionMatrix } from "../components/permission-matrix";
 import { RemoveMemberDialog } from "../components/remove-member-dialog";
 import { RenameCenterDialog } from "../components/rename-center-dialog";
-import { SendReportsPermissionDialog } from "../components/send-reports-permission-dialog";
 import { useCenter } from "../hooks/use-center";
 import type { CenterMember } from "../schemas/center-schemas";
 
@@ -21,7 +22,7 @@ export function CenterPage() {
   const { data, isPending, isError } = useCenter();
   const [renameOpen, setRenameOpen] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<CenterMember | null>(null);
-  const [sendReportsTarget, setSendReportsTarget] = useState<CenterMember | null>(null);
+  const [permissionsTarget, setPermissionsTarget] = useState<CenterMember | null>(null);
 
   if (isPending) {
     return <p className="text-[14px] text-ink-400">Đang tải…</p>;
@@ -92,8 +93,17 @@ export function CenterPage() {
             members={members}
             canRemove
             onRemove={(member) => setRemoveTarget(member)}
-            onToggleSendReports={(member) => setSendReportsTarget(member)}
+            onManagePermissions={(member) => setPermissionsTarget(member)}
           />
+        </HvCard>
+
+        <HvCard>
+          <p className="font-display text-[17px] font-bold text-ink-900">Phân quyền vai trò</p>
+          <p className="mt-1 text-[13px] text-ink-500">
+            Quyền của mỗi vai trò áp dụng cho mọi thành viên giữ vai trò đó. Cấp hoặc chặn riêng
+            từng người bằng nút "Phân quyền" ở danh sách giáo viên.
+          </p>
+          <PermissionMatrix />
         </HvCard>
 
         <InviteSection />
@@ -115,15 +125,15 @@ export function CenterPage() {
           member={removeTarget}
         />
       ) : null}
-      {sendReportsTarget ? (
-        <SendReportsPermissionDialog
+      {permissionsTarget ? (
+        <MemberPermissionsDialog
           open
           onOpenChange={(open) => {
             if (!open) {
-              setSendReportsTarget(null);
+              setPermissionsTarget(null);
             }
           }}
-          member={sendReportsTarget}
+          teacherId={permissionsTarget.id}
         />
       ) : null}
     </div>

@@ -23,39 +23,27 @@ async function login(page: Page, phone: string, password: string, displayName: s
 
 /**
  * The e2e database is reused between runs, so the grant must be
- * assert-then-set: the member row shows exactly one of the grant/revoke
- * buttons, and only the missing state is changed. Returns after the roster
- * reflects the requested state.
+ * assert-then-set: the member permissions dialog shows the current
+ * `reports.send` override, and only a differing state is saved. Returns
+ * after the roster badge reflects the requested state.
  */
 async function setSendReportsGrant(page: Page, granted: boolean) {
   await page.goto("/center");
-  const grantButton = page.getByRole("button", {
-    name: "Giao quyền gửi báo cáo cho Cô Thu",
-  });
-  const revokeButton = page.getByRole("button", {
-    name: "Thu hồi quyền gửi báo cáo của Cô Thu",
-  });
-  // One of the two is always rendered for a non-owner row once the roster
-  // loads; waiting on their union avoids racing the /centers/me fetch.
-  await expect(grantButton.or(revokeButton)).toBeVisible();
+  await page.getByRole("button", { name: "Phân quyền cho Cô Thu" }).click();
+  const dialog = page.getByRole("dialog");
+  const reportsSend = dialog.getByRole("combobox", { name: "Quyền Gửi báo cáo học phí" });
+  await expect(reportsSend).toBeVisible();
 
-  if (granted) {
-    if (await revokeButton.isVisible()) {
-      return; // already granted by an earlier interrupted run
-    }
-    await grantButton.click();
-    await page.getByRole("dialog").getByRole("button", { name: "Giao quyền" }).click();
-    await expect(page.getByText("Đã giao quyền gửi báo cáo")).toBeVisible();
-    await expect(page.getByText("Thư ký gửi báo cáo")).toBeVisible();
-    return;
+  const target = granted ? "grant" : "inherit";
+  if ((await reportsSend.inputValue()) === target) {
+    await dialog.getByRole("button", { name: "Đóng", exact: true }).click();
+  } else {
+    await reportsSend.selectOption(target);
+    await dialog.getByRole("button", { name: "Lưu" }).click();
+    await expect(page.getByText("Đã lưu phân quyền")).toBeVisible();
   }
-
-  if (await grantButton.isVisible()) {
-    return; // already revoked
-  }
-  await revokeButton.click();
-  await page.getByRole("dialog").getByRole("button", { name: "Thu hồi quyền" }).click();
-  await expect(page.getByText("Đã thu hồi quyền gửi báo cáo")).toBeVisible();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText("Thư ký gửi báo cáo")).toHaveCount(granted ? 1 : 0);
 }
 
 async function revokeGrant(browser: Browser) {
@@ -152,9 +140,9 @@ test("owner grants send-reports; secretary sends another teacher's period; audit
     owner.getByText(`POST /api/v1/billing-periods/${periodId}/notifications/bulk`),
   ).toBeVisible();
 
-  // The grant itself is captured too.
+  // The grant itself is captured too (the override save is the audited write).
   await expect(
-    owner.getByRole("row").filter({ hasText: "center.member.send_reports_grant" }).first(),
+    owner.getByRole("row").filter({ hasText: "center.member.overrides_update" }).first(),
   ).toBeVisible();
 
   await secretaryContext.close();

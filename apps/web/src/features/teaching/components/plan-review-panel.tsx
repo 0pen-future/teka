@@ -16,6 +16,12 @@ interface PlanReviewPanelProps {
   onRequestRedo: (comment: string) => void;
   onReopen: () => void;
   onRemind: () => void;
+  /**
+   * Whether the viewer may approve/redo/reopen. The API's write gate is
+   * owner-only, so a `teaching.review_queue` grantee gets a read-only panel —
+   * rendering the buttons would only manufacture 403s.
+   */
+  canAct: boolean;
 }
 
 const statusSubtitles: Record<string, string> = {
@@ -39,6 +45,7 @@ export function PlanReviewPanel({
   onRequestRedo,
   onReopen,
   onRemind,
+  canAct,
 }: PlanReviewPanelProps) {
   const [comment, setComment] = useState("");
   const status = plan?.status ?? "none";
@@ -95,7 +102,7 @@ export function PlanReviewPanel({
           </>
         ) : null}
 
-        {status === "pending" ? (
+        {status === "pending" && canAct ? (
           <>
             <label
               htmlFor="owner-review-comment"
@@ -136,7 +143,7 @@ export function PlanReviewPanel({
           </>
         ) : null}
 
-        {status === "approved" || status === "redo" ? (
+        {(status === "approved" || status === "redo") && canAct ? (
           <button
             type="button"
             onClick={onReopen}
