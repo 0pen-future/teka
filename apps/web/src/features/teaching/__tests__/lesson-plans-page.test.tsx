@@ -1,8 +1,10 @@
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
+import { API_URL, ok } from "@/test/msw/handlers";
 import {
   classWithSchedule,
   resetRosterStore,
@@ -86,6 +88,29 @@ describe("LessonPlansPage queue", () => {
 });
 
 describe("LessonPlansPage review actions", () => {
+  it("hides the review actions from a granted member — read-only queue", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(
+          ok({
+            center_name: "Trung Tâm Bình Minh",
+            permissions: ["teaching.review_queue"],
+          }),
+        ),
+      ),
+    );
+    seedCurriculum(CLASS_ID, LESSONS);
+    seedNextPlan({ status: "pending" });
+    renderPage();
+
+    // The queue and plan detail render for the grantee…
+    expect(await screen.findByText("Hiểu số thập phân")).toBeInTheDocument();
+    // …but the write actions stay owner-only (the API 403s them anyway).
+    expect(screen.queryByRole("button", { name: "Duyệt giáo án" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Yêu cầu sửa" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("NHẬN XÉT CỦA CHỦ TRUNG TÂM")).not.toBeInTheDocument();
+  });
+
   it("approves with a comment, then reopens back to pending", async () => {
     seedCurriculum(CLASS_ID, LESSONS);
     seedNextPlan({ status: "pending" });

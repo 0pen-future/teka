@@ -49,7 +49,7 @@ func newCLIEnv(t *testing.T) *cliEnv {
 	db := testutil.StartPostgres(t)
 	tx := database.NewTxManager(db)
 	teachersSvc := teachers.NewService(teachers.NewRepository(db))
-	centersSvc := centers.NewService(centers.NewRepository(db), tx)
+	centersSvc := centers.NewService(centers.NewRepository(db), tx, nil)
 	jwtCfg := config.JWTConfig{Secret: testutil.JWTSecret, AccessTTL: 15 * time.Minute}
 	onboardingCfg := config.OnboardingConfig{InviteTTL: 72 * time.Hour, ResetTTL: 48 * time.Hour, ResetCooldown: 15 * time.Minute}
 	authSvc := auth.NewService(teachersSvc, auth.NewRepository(db), auth.NewTokenIssuer(jwtCfg), tx,

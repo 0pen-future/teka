@@ -5,11 +5,13 @@ import {
   bulkSendResponseSchema,
   notificationRowSchema,
   runSnapshotSchema,
+  sendPreviewSchema,
   type BulkSendInput,
   type BulkSendResponse,
   type MarkSentInput,
   type NotificationRow,
   type RunSnapshot,
+  type SendPreview,
 } from "../schemas/collections-schemas";
 
 /**
@@ -57,6 +59,22 @@ export async function listNotifications(
     params,
   });
   return parseArray(notificationRowSchema, res.data);
+}
+
+/**
+ * `GET /billing-periods/:id/notifications/preview` — pure read; guarded like
+ * BulkSend (reports oversight required, so never call it for a plain member)
+ * and it intersects with the caller's LIVE Zalo friend list, so only fetch it
+ * when the confirm dialog actually needs the buckets.
+ */
+export async function getSendPreview(
+  periodId: string,
+  purpose: "statements" | "reminder",
+): Promise<SendPreview> {
+  const res = await apiClient.get<unknown>(`/billing-periods/${periodId}/notifications/preview`, {
+    params: { purpose },
+  });
+  return parseData(sendPreviewSchema, res.data);
 }
 
 /** `POST /notifications/mark-sent` — idempotent; unknown/foreign/already-sent ids are silently skipped. */

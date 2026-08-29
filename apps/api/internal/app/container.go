@@ -84,7 +84,7 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 	bus.Subscribe("audit", cfg.Audit.BufferSize, auditSub.Handle)
 
 	teachersSvc := teachers.NewService(teachers.NewRepository(db))
-	centersSvc := centers.NewService(centers.NewRepository(db), txMgr)
+	centersSvc := centers.NewService(centers.NewRepository(db), txMgr, bus)
 	// centersSvc is auth's OwnerResolver (owner-exclusion + DM anchor for
 	// forgot-password) and zaloSvc is its ResetDMSender — both already exist
 	// by this point, so these are plain constructor parameters, not setters.

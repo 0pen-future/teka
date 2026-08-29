@@ -314,9 +314,10 @@ func TestDownFoldsPersonalChannelIntoManual(t *testing.T) {
 		 VALUES (?, ?, ?, ?, 'zalo_personal')`,
 		notifID, f.teacherID, f.centerID, f.statementID).Error)
 
-	// Roll back through 000005 (zalo_personal_mapping): six steps now that the
-	// additive 000008 sits on top of the seven migrations this test predates.
-	require.NoError(t, database.MigrateDown(m, 6))
+	// Roll back through 000005 (zalo_personal_mapping): nine steps now that
+	// the additive 000008-000013 sit on top of the migrations this test
+	// predates.
+	require.NoError(t, database.MigrateDown(m, 9))
 
 	var channel string
 	require.NoError(t, db.Raw(
@@ -874,4 +875,105 @@ func TestRefreshTokensFKTargetsUserAccounts(t *testing.T) {
 	target, deleteRule := row.TableName, row.DeleteRule
 	require.Equal(t, "user_accounts", target)
 	require.Equal(t, "CASCADE", deleteRule)
+}
+
+// rbacMember seeds one member account plus a membership stint in the given
+// center, in the pre-RBAC shape (no role_id column yet).
+func rbacMember(t *testing.T, db *gorm.DB, centerID uuid.UUID, phone string, canSend, closed bool) uuid.UUID {
+	t.Helper()
+	teacherID := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO user_accounts (id, role, phone) VALUES (?, 'teachers', ?)`,
+		teacherID, phone).Error)
+	leftAt := "NULL"
+	if closed {
+		leftAt = "now()"
+	}
+	// teachers and the membership stint reference each other through the
+	// deferrable fk_teachers_membership, so both rows land in one transaction.
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(
+			`INSERT INTO teachers (id, full_name, center_id) VALUES (?, 'Giáo Viên', ?)`,
+			teacherID, centerID).Error; err != nil {
+			return err
+		}
+		return tx.Exec(fmt.Sprintf(
+			`INSERT INTO center_members (teacher_id, center_id, can_send_reports, left_at)
+			 VALUES (?, ?, ?, %s)`, leftAt),
+			teacherID, centerID, canSend).Error
+	}))
+	return teacherID
+}
+
+// The RBAC backfill must be observed over pre-existing data: a plain
+// integration test migrates an empty schema and can never see it. Step back to
+// the pre-RBAC version, seed the old shape, migrate forward, and check what
+// the backfill wrote.
+func TestCenterRBACBackfill(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+	// Step back below 000013 (the RBAC migration) and seed the pre-RBAC shape.
+	require.NoError(t, m.Migrate(12))
+
+	db := openDB(t, url)
+	live := seedNotificationParents(t, db, "+84900000501")
+	flagged := rbacMember(t, db, live.centerID, "+84900000502", true, false)
+	plain := rbacMember(t, db, live.centerID, "+84900000503", false, false)
+	// A closed stint that still carries the flag: dead state must not seed
+	// grants or roles.
+	former := rbacMember(t, db, live.centerID, "+84900000504", true, true)
+	// A retired center gets no roles at all.
+	retired := seedNotificationParents(t, db, "+84900000505")
+	require.NoError(t, db.Exec(
+		`UPDATE centers SET deleted_at = now() WHERE id = ?`, retired.centerID).Error)
+
+	require.NoError(t, database.MigrateUp(m))
+
+	// Every live center owns exactly its three system roles.
+	roleNames := nameSet(t, db, fmt.Sprintf(
+		`SELECT key FROM center_roles WHERE center_id = '%s'`, live.centerID))
+	require.Equal(t, map[string]bool{"giao_vien": true, "hoc_vu": true, "tro_giang": true}, roleNames)
+	var n int64
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM center_roles WHERE center_id = ? AND NOT is_system`,
+		live.centerID).Scan(&n).Error)
+	require.Zero(t, n, "backfilled roles are all system roles")
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM center_roles WHERE center_id = ?`, retired.centerID).Scan(&n).Error)
+	require.Zero(t, n, "a retired center gets no roles")
+
+	// Live member stints land on giao_vien; the owner and closed stints stay
+	// outside the role system.
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM center_members cm
+		 JOIN center_roles cr ON cr.id = cm.role_id
+		 WHERE cm.teacher_id IN (?, ?) AND cr.key = 'giao_vien' AND cr.center_id = ?`,
+		flagged, plain, live.centerID).Scan(&n).Error)
+	require.EqualValues(t, 2, n, "live member stints must get the default giao_vien role")
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM center_members
+		 WHERE teacher_id IN (?, ?) AND role_id IS NOT NULL`,
+		live.teacherID, former).Scan(&n).Error)
+	require.Zero(t, n, "the owner and closed stints must keep a NULL role")
+
+	// The can_send_reports flag becomes exactly one reports.send grant row —
+	// live flagged stints only.
+	var rows []struct {
+		TeacherID uuid.UUID
+		Allowed   bool
+	}
+	require.NoError(t, db.Raw(
+		`SELECT teacher_id, allowed FROM center_member_permissions
+		 WHERE permission_key = 'reports.send'`).Scan(&rows).Error)
+	require.Len(t, rows, 1)
+	require.Equal(t, flagged, rows[0].TeacherID)
+	require.True(t, rows[0].Allowed)
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM center_member_permissions`).Scan(&n).Error)
+	require.EqualValues(t, 1, n, "backfill writes nothing but the send-reports parity rows")
 }

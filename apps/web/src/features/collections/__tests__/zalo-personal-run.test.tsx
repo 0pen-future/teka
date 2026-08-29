@@ -16,9 +16,11 @@ import {
   fixturePeriod,
   holdRunProgress,
   interruptRun,
+  markZaloNotFriend,
   resetCollectionsStore,
   seedOldRunFailure,
   seedRunMidFlight,
+  setPreviewMaxRunSize,
 } from "./collections-handlers";
 
 /** Polling runs on a real 2s interval, so run-progress waits need headroom. */
@@ -54,11 +56,26 @@ function renderNotificationsPage() {
   });
 }
 
+/**
+ * The confirm dialog's counts render across nested tags (`<strong>2</strong>
+ * phụ huynh…`), so line assertions match on the whole element's textContent.
+ */
+function findDialogLine(text: string) {
+  return screen.findByText((_, element) => element?.textContent === text);
+}
+
+/** Confirms the personal send once the preview resolves (Gửi is disabled until then). */
+async function confirmSend(user: ReturnType<typeof userEvent.setup>) {
+  const send = await screen.findByRole("button", { name: "Gửi" });
+  await waitFor(() => expect(send).toBeEnabled());
+  await user.click(send);
+}
+
 async function sendPersonal(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByText("Chưa có thông báo nào cho kỳ này.");
   await user.click(screen.getByRole("radio", { name: "Gửi qua Zalo (tự động)" }));
   await user.click(screen.getByRole("button", { name: "Tạo thông báo học phí" }));
-  await user.click(await screen.findByRole("button", { name: "Gửi" }));
+  await confirmSend(user);
 }
 
 beforeEach(() => {
@@ -118,9 +135,11 @@ describe("NotificationsPage zalo_personal channel", () => {
     await user.click(screen.getByRole("radio", { name: "Gửi qua Zalo (tự động)" }));
     await user.click(screen.getByRole("button", { name: "Tạo thông báo học phí" }));
 
-    // Nothing may be sent before the teacher confirms the split.
+    // Nothing may be sent before the teacher confirms the split. The counts
+    // come from the server preview: 2 mapped friends, 2 unmapped.
+    expect(await findDialogLine("2 phụ huynh gửi tự động (đã là bạn Zalo).")).toBeInTheDocument();
     expect(
-      await screen.findByText("2 phụ huynh gửi tự động · 2 dùng copy thủ công — tiếp tục?"),
+      await findDialogLine("2 phụ huynh chưa ghép Zalo — dùng copy thủ công."),
     ).toBeInTheDocument();
     expect(screen.queryAllByRole("button", { name: "Sao chép" })).toHaveLength(0);
     await user.click(screen.getByRole("button", { name: "Gửi" }));
@@ -149,8 +168,9 @@ describe("NotificationsPage zalo_personal channel", () => {
     await user.click(await screen.findByRole("button", { name: "Tạo nhắc nợ" }));
 
     // Hùng is fully paid, so the reminder pool is Lan + Mai (mapped) + Bình.
+    expect(await findDialogLine("2 phụ huynh gửi tự động (đã là bạn Zalo).")).toBeInTheDocument();
     expect(
-      await screen.findByText("2 phụ huynh gửi tự động · 1 dùng copy thủ công — tiếp tục?"),
+      await findDialogLine("1 phụ huynh chưa ghép Zalo — dùng copy thủ công."),
     ).toBeInTheDocument();
   });
 
@@ -184,7 +204,7 @@ describe("NotificationsPage zalo_personal channel", () => {
     await screen.findByRole("button", { name: "Tạo thông báo học phí" });
     await user.click(screen.getByRole("radio", { name: "Gửi qua Zalo (tự động)" }));
     await user.click(screen.getByRole("button", { name: "Tạo thông báo học phí" }));
-    await user.click(await screen.findByRole("button", { name: "Gửi" }));
+    await confirmSend(user);
 
     expect(await screen.findByText("Đã gửi 1 · Lỗi 1", undefined, pollTimeout)).toBeInTheDocument();
     expect(
@@ -208,7 +228,7 @@ describe("NotificationsPage zalo_personal channel", () => {
 
     await user.click(screen.getByRole("radio", { name: "Gửi qua Zalo (tự động)" }));
     await user.click(screen.getByRole("button", { name: "Tạo thông báo học phí" }));
-    await user.click(await screen.findByRole("button", { name: "Gửi" }));
+    await confirmSend(user);
 
     expect(await screen.findByText("Đang có lượt gửi chạy, đợi xong đã")).toBeInTheDocument();
   }, 15000);
@@ -270,6 +290,77 @@ describe("NotificationsPage zalo_personal channel", () => {
     await user.click(screen.getByRole("button", { name: "Ẩn" }));
     expect(screen.queryByText("Đã gửi 2 · Lỗi 0")).not.toBeInTheDocument();
   }, 15000);
+
+  it("warns about mapped-but-not-friend parents and links the befriend flow", async () => {
+    server.use(linkedZaloHandler);
+    markZaloNotFriend(contactSingleChildOwing.id);
+    const user = userEvent.setup();
+    renderNotificationsPage();
+
+    await screen.findByText("Chưa có thông báo nào cho kỳ này.");
+    await user.click(screen.getByRole("radio", { name: "Gửi qua Zalo (tự động)" }));
+    await user.click(screen.getByRole("button", { name: "Tạo thông báo học phí" }));
+
+    // Lan moved out of auto_send into the not-friend bucket: 1 auto, 1 warned.
+    expect(await findDialogLine("1 phụ huynh gửi tự động (đã là bạn Zalo).")).toBeInTheDocument();
+    expect(
+      screen.getByText(/phụ huynh đã ghép Zalo nhưng chưa là bạn bè của bạn/),
+    ).toBeInTheDocument();
+    // The befriend CTA points at the contacts page, which owns the flow.
+    expect(screen.getByRole("link", { name: "Kết bạn trước" })).toHaveAttribute(
+      "href",
+      "/contacts",
+    );
+    // A not-friend split warns but never blocks — the send stays available.
+    const send = screen.getByRole("button", { name: "Gửi" });
+    await waitFor(() => expect(send).toBeEnabled());
+  });
+
+  it("blocks the send while the run would exceed max_run_size", async () => {
+    server.use(linkedZaloHandler);
+    // Both mapped contacts (2) queue into the run; a cap of 1 must block.
+    setPreviewMaxRunSize(1);
+    const user = userEvent.setup();
+    renderNotificationsPage();
+
+    await screen.findByText("Chưa có thông báo nào cho kỳ này.");
+    await user.click(screen.getByRole("radio", { name: "Gửi qua Zalo (tự động)" }));
+    await user.click(screen.getByRole("button", { name: "Tạo thông báo học phí" }));
+
+    expect(
+      await screen.findByText(
+        "Vượt giới hạn 1 tin tự động mỗi lượt — hãy gửi thành các đợt nhỏ hơn.",
+      ),
+    ).toBeInTheDocument();
+    // The confirm stays disabled — the server would reject this run anyway —
+    // while cancel remains available.
+    expect(screen.getByRole("button", { name: "Gửi" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Huỷ" })).toBeEnabled();
+  });
+
+  it("still allows sending when the preview itself fails", async () => {
+    server.use(
+      linkedZaloHandler,
+      http.get(`${API_URL}/billing-periods/:id/notifications/preview`, () =>
+        HttpResponse.json(fail("INTERNAL", "boom"), { status: 500 }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderNotificationsPage();
+
+    await screen.findByText("Chưa có thông báo nào cho kỳ này.");
+    await user.click(screen.getByRole("radio", { name: "Gửi qua Zalo (tự động)" }));
+    await user.click(screen.getByRole("button", { name: "Tạo thông báo học phí" }));
+
+    // The dialog explains the degraded state but the server stays the
+    // authority — the teacher can still send.
+    expect(
+      await screen.findByText(
+        "Không kiểm tra được danh sách bạn bè Zalo — vẫn gửi được, nhưng tin tới người chưa là bạn có thể không đến nơi.",
+      ),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Gửi" })).toBeEnabled());
+  });
 
   it("polls the run endpoint exactly once when the period has no run", async () => {
     let calls = 0;

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 
 import { HvButton, HvCard, StatusPill } from "@/components/hv";
+import { useCenterContext } from "@/features/teaching";
 import { formatMoney, formatPhoneLocal } from "@/lib/utils";
 
 import type { ContactBalanceRow } from "../schemas/collections-schemas";
@@ -29,6 +30,9 @@ export function ContactCollectionRow({
 }: ContactCollectionRowProps) {
   const [expanded, setExpanded] = useState(false);
   const navigate = useNavigate();
+  // D8: creating sends is owner/send-reports-holder work — a plain member
+  // keeps Thu tiền but loses the send entry point (server enforces anyway).
+  const { canRunSends } = useCenterContext();
 
   return (
     <HvCard variant="flat" className="flex flex-col gap-3">
@@ -77,13 +81,15 @@ export function ContactCollectionRow({
         <HvButton variant="primary" size="sm" onClick={() => onRecordPayment(row)}>
           Thu tiền
         </HvButton>
-        <HvButton
-          variant="ghost"
-          size="sm"
-          onClick={() => void navigate(`/notifications/${periodId}`)}
-        >
-          Nhắc nợ
-        </HvButton>
+        {canRunSends ? (
+          <HvButton
+            variant="ghost"
+            size="sm"
+            onClick={() => void navigate(`/notifications/${periodId}`)}
+          >
+            Nhắc nợ
+          </HvButton>
+        ) : null}
       </div>
     </HvCard>
   );

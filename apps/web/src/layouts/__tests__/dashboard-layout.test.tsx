@@ -282,6 +282,30 @@ describe("teaching v2 nav", () => {
     expect(screen.queryByRole("link", { name: "Nhật ký hoạt động" })).not.toBeInTheDocument();
   });
 
+  it("shows granted surfaces to a member holding the matching permissions", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(
+          ok({
+            center_name: "Trung Tâm Bình Minh",
+            permissions: ["audit.read", "imports.run"],
+          }),
+        ),
+      ),
+    );
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+    expect(
+      await within(sidebarNav).findByRole("link", { name: "Nhật ký hoạt động" }),
+    ).toHaveAttribute("href", "/audit");
+    expect(within(sidebarNav).getByRole("link", { name: "Nhập từ Excel" })).toHaveAttribute(
+      "href",
+      "/students/import",
+    );
+    // Keys the member does not hold stay hidden.
+    expect(screen.queryByRole("link", { name: "Duyệt giáo án" })).not.toBeInTheDocument();
+  });
+
   it("shows Nhập từ Excel to owners and hides it from members", async () => {
     renderLayout();
     const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
@@ -321,6 +345,51 @@ describe("teaching v2 nav", () => {
     expect(screen.queryByRole("link", { name: "Duyệt giáo án" })).not.toBeInTheDocument();
     // The nav-dot query is role-gated: a member must never hit the endpoint.
     expect(queueRequests).toBe(0);
+  });
+
+  it("shows Gửi báo cáo to a member holding can_send_reports, linking /reports", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh", can_send_reports: true })),
+      ),
+    );
+    const user = userEvent.setup();
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+
+    const link = await within(sidebarNav).findByRole("link", { name: "Gửi báo cáo" });
+    expect(link).toHaveAttribute("href", "/reports");
+    const group = within(sidebarNav).getByRole("group", { name: "Trung tâm" });
+    expect(within(group).getByRole("link", { name: "Gửi báo cáo" })).toBeInTheDocument();
+
+    // The entry also reaches the mobile Thêm sheet, never the primary tabs.
+    const moreTab = await screen.findByRole("button", { name: "Thêm" });
+    await user.click(moreTab);
+    const sheet = await screen.findByRole("dialog");
+    expect(within(sheet).getByRole("link", { name: "Gửi báo cáo" })).toHaveAttribute(
+      "href",
+      "/reports",
+    );
+  });
+
+  it("hides Gửi báo cáo from a plain member without the flag", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh" })),
+      ),
+    );
+    renderLayout();
+    // Member role label proves /centers/me resolved member-shaped.
+    await screen.findByText("Giáo viên");
+    expect(screen.queryByRole("link", { name: "Gửi báo cáo" })).not.toBeInTheDocument();
+  });
+
+  it("hides Gửi báo cáo from the owner, who reaches every period through Học phí", async () => {
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+    // Owner-shaped default: wait for the slowest owner entry to appear first.
+    await within(sidebarNav).findByRole("link", { name: "Duyệt giáo án" });
+    expect(screen.queryByRole("link", { name: "Gửi báo cáo" })).not.toBeInTheDocument();
   });
 
   it("marks Duyệt giáo án pending while a plan awaits review", async () => {

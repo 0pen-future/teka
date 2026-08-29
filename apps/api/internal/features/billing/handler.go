@@ -106,7 +106,7 @@ func (h *Handler) list(c *gin.Context) {
 		response.Err(c, err)
 		return
 	}
-	response.List(c, FromPeriodModels(rows), params.Meta(total))
+	response.List(c, FromPeriodRows(rows), params.Meta(total))
 }
 
 // get returns one billing period.
@@ -134,7 +134,7 @@ func (h *Handler) get(c *gin.Context) {
 		response.Err(c, err)
 		return
 	}
-	response.OK(c, http.StatusOK, FromPeriodModel(period))
+	response.OK(c, http.StatusOK, FromPeriodRow(period))
 }
 
 // preview computes the chốt sổ review screen for a period without writing

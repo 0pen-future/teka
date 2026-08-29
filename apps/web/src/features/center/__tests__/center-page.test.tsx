@@ -10,7 +10,15 @@ import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
 
 import { CenterPage } from "../pages/center-page";
-import { makeCenterMeMember, makeCenterMeOwner, makeMember, mockCenterMe } from "./center-handlers";
+import {
+  makeCenterMeMember,
+  makeCenterMeOwner,
+  makeCenterPermissions,
+  makeMember,
+  makeMemberPermissions,
+  mockCenterMe,
+  mockCenterPermissions,
+} from "./center-handlers";
 
 function renderCenter() {
   signInAs(testPrimaryTeacher);
@@ -184,6 +192,114 @@ describe("CenterPage — owner", () => {
     expect(
       screen.queryByRole("button", { name: `Xoá ${testPrimaryTeacher.full_name}` }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: `Phân quyền cho ${testPrimaryTeacher.full_name}`,
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("grants reports.send through the permissions dialog and shows the badge after refetch", async () => {
+    mockInvites([]);
+    const memberA = makeMember({ full_name: "Giáo Viên A" });
+    mockCenterMe(
+      makeCenterMeOwner({ members: [selfMember(true), memberA] }),
+      makeCenterMeOwner({
+        members: [selfMember(true), { ...memberA, can_send_reports: true }],
+      }),
+    );
+    // A single scripted payload: the dialog's own mount refetch would consume
+    // a "post-save" second payload early and erase the draft's dirtiness.
+    mockCenterPermissions(makeCenterPermissions({ members: [makeMemberPermissions(memberA)] }));
+    let targetId = "";
+    let received: unknown;
+    server.use(
+      http.put(
+        `${API_URL}/centers/me/members/:teacherId/overrides`,
+        async ({ params, request }) => {
+          targetId = String(params.teacherId);
+          received = await request.json();
+          return new HttpResponse(null, { status: 204 });
+        },
+      ),
+    );
+    renderCenter();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Phân quyền cho Giáo Viên A" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.selectOptions(
+      await within(dialog).findByRole("combobox", { name: "Quyền Gửi báo cáo học phí" }),
+      "grant",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
+
+    expect(await screen.findByText("Đã lưu phân quyền")).toBeInTheDocument();
+    expect(targetId).toBe(memberA.id);
+    expect(received).toEqual({ grants: ["reports.send"], denies: [] });
+    expect(await screen.findByText("Thư ký gửi báo cáo")).toBeInTheDocument();
+  });
+
+  it("clears the reports.send grant and drops the badge after refetch", async () => {
+    mockInvites([]);
+    const memberA = makeMember({ full_name: "Giáo Viên A", can_send_reports: true });
+    mockCenterMe(
+      makeCenterMeOwner({ members: [selfMember(true), memberA] }),
+      makeCenterMeOwner({
+        members: [selfMember(true), { ...memberA, can_send_reports: false }],
+      }),
+    );
+    mockCenterPermissions(
+      makeCenterPermissions({
+        members: [makeMemberPermissions(memberA, { grants: ["reports.send"] })],
+      }),
+    );
+    let received: unknown;
+    server.use(
+      http.put(`${API_URL}/centers/me/members/:teacherId/overrides`, async ({ request }) => {
+        received = await request.json();
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    renderCenter();
+    const user = userEvent.setup();
+
+    expect(await screen.findByText("Thư ký gửi báo cáo")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Phân quyền cho Giáo Viên A" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.selectOptions(
+      await within(dialog).findByRole("combobox", { name: "Quyền Gửi báo cáo học phí" }),
+      "inherit",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
+
+    expect(await screen.findByText("Đã lưu phân quyền")).toBeInTheDocument();
+    expect(received).toEqual({ grants: [], denies: [] });
+    await waitFor(() => expect(screen.queryByText("Thư ký gửi báo cáo")).not.toBeInTheDocument());
+  });
+
+  it("surfaces a failure toast when the override save errors", async () => {
+    mockInvites([]);
+    const memberA = makeMember({ full_name: "Giáo Viên A" });
+    mockCenterMe(makeCenterMeOwner({ members: [selfMember(true), memberA] }));
+    mockCenterPermissions(makeCenterPermissions({ members: [makeMemberPermissions(memberA)] }));
+    server.use(
+      http.put(`${API_URL}/centers/me/members/:teacherId/overrides`, () =>
+        HttpResponse.json(fail("INTERNAL_ERROR", "boom"), { status: 500 }),
+      ),
+    );
+    renderCenter();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Phân quyền cho Giáo Viên A" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.selectOptions(
+      await within(dialog).findByRole("combobox", { name: "Quyền Gửi báo cáo học phí" }),
+      "grant",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
+
+    expect(await screen.findByText("Có lỗi xảy ra, thử lại sau")).toBeInTheDocument();
   });
 });
 
@@ -200,6 +316,7 @@ describe("CenterPage — regular member", () => {
     expect(screen.getByText("Thành viên")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Đổi tên trung tâm" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Xoá / })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /quyền gửi báo cáo/ })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Số điện thoại")).not.toBeInTheDocument();
   });
 });

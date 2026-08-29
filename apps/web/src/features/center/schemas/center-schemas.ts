@@ -6,6 +6,8 @@ export const centerMemberSchema = z.object({
   full_name: z.string(),
   phone: z.string(),
   is_owner: z.boolean(),
+  // Defaulted so an older API without the field still parses during rollout.
+  can_send_reports: z.boolean().default(false),
 });
 
 export type CenterMember = z.infer<typeof centerMemberSchema>;
@@ -27,6 +29,10 @@ export const centerSchema = z.object({
 export const centerMeOwnerSchema = z.object({
   center: centerSchema,
   members: z.array(centerMemberSchema),
+  // The caller's effective permission keys (role ∪ grants − denies; the
+  // owner gets the full catalog). Defaulted so an older API still parses
+  // during rollout.
+  permissions: z.array(z.string()).default([]),
 });
 
 export type CenterMeOwner = z.infer<typeof centerMeOwnerSchema>;
@@ -37,6 +43,11 @@ export type CenterMeOwner = z.infer<typeof centerMeOwnerSchema>;
  */
 export const centerMeMemberSchema = z.object({
   center_name: z.string(),
+  // The member's own delegated send-reports permission; the reports feature
+  // gates on it. Defaulted so an older API still parses during rollout.
+  can_send_reports: z.boolean().default(false),
+  // Same effective-permission array as the owner shape, for nav/page gating.
+  permissions: z.array(z.string()).default([]),
 });
 
 export type CenterMeMember = z.infer<typeof centerMeMemberSchema>;

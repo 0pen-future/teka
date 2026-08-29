@@ -38,7 +38,7 @@ func newFixture(t *testing.T) fixture {
 	db := testutil.StartPostgres(t)
 	txMgr := database.NewTxManager(db)
 
-	centersSvc := centers.NewService(centers.NewRepository(db), txMgr)
+	centersSvc := centers.NewService(centers.NewRepository(db), txMgr, nil)
 	classesSvc := classes.NewService(classes.NewRepository(db), txMgr)
 	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db))
 	teachersSvc := teachers.NewService(teachers.NewRepository(db))

@@ -68,11 +68,11 @@ func NewService(store ListStore) *Service {
 }
 
 // List returns one page of the center's audit trail, newest first, plus the
-// cursor for the next page ("" when this is the last one). Only owners may
-// read the trail; visibility is bounded to the caller's center by the store.
+// cursor for the next page ("" when this is the last one). Reading the trail
+// takes audit.read; visibility is bounded to the caller's center by the store.
 func (s *Service) List(ctx context.Context, sc authctx.Scope, q ListQuery) ([]Row, string, error) {
-	if !sc.IsOwner {
-		return nil, "", apperror.Forbidden("only the center owner can read the audit log")
+	if !sc.Has(authctx.PermAuditRead) {
+		return nil, "", apperror.Forbidden("you are not allowed to read the audit log")
 	}
 
 	limit := q.Limit

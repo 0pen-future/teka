@@ -28,6 +28,12 @@ type fakeZaloSender struct {
 	send  func(call int, toUID string) (string, error)
 	uids  []string
 	texts []string
+	// senders records which teacher's Zalo session each DM went out on —
+	// delegated-send tests assert attribution with it.
+	senders []uuid.UUID
+	// friends is what ListFriends answers; friendsErr wins when set.
+	friends    []zalo.Friend
+	friendsErr error
 }
 
 func (f *fakeZaloSender) VerifyAccount(_ context.Context, _ uuid.UUID) error {
@@ -36,11 +42,12 @@ func (f *fakeZaloSender) VerifyAccount(_ context.Context, _ uuid.UUID) error {
 	return f.verifyErr
 }
 
-func (f *fakeZaloSender) SendDM(_ context.Context, _ uuid.UUID, toUID, text string) (string, error) {
+func (f *fakeZaloSender) SendDM(_ context.Context, teacherID uuid.UUID, toUID, text string) (string, error) {
 	f.mu.Lock()
 	call := len(f.uids)
 	f.uids = append(f.uids, toUID)
 	f.texts = append(f.texts, text)
+	f.senders = append(f.senders, teacherID)
 	send := f.send
 	f.mu.Unlock()
 	if send == nil {
@@ -49,10 +56,25 @@ func (f *fakeZaloSender) SendDM(_ context.Context, _ uuid.UUID, toUID, text stri
 	return send(call, toUID)
 }
 
+func (f *fakeZaloSender) ListFriends(_ context.Context, _ uuid.UUID) ([]zalo.Friend, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.friendsErr != nil {
+		return nil, f.friendsErr
+	}
+	return append([]zalo.Friend(nil), f.friends...), nil
+}
+
 func (f *fakeZaloSender) sent() (uids, texts []string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.uids...), append([]string(nil), f.texts...)
+}
+
+func (f *fakeZaloSender) sentBy() []uuid.UUID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]uuid.UUID(nil), f.senders...)
 }
 
 // mapContact gives a contact a Zalo friend mapping, the way the picker

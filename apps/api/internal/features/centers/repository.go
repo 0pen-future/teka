@@ -25,9 +25,16 @@ var (
 )
 
 // ScopeRow is the per-request tenant context read straight from the database.
+// The permission lists arrive comma-joined (string_agg) rather than as
+// Postgres arrays — the stdlib pgx driver GORM sits on cannot scan text[]
+// into []string; keys are dot-separated identifiers, so ',' never collides.
 type ScopeRow struct {
-	CenterID uuid.UUID
-	IsOwner  bool
+	CenterID       uuid.UUID
+	IsOwner        bool
+	CanSendReports bool
+	RolePerms      string
+	Grants         string
+	Denies         string
 }
 
 // OwnerRow is the current center owner of one teacher, and whether that
@@ -39,10 +46,31 @@ type OwnerRow struct {
 
 // MemberRow is one member of a center joined with their account phone.
 type MemberRow struct {
-	ID       uuid.UUID
-	FullName string
-	Phone    string
-	IsOwner  bool
+	ID             uuid.UUID
+	FullName       string
+	Phone          string
+	IsOwner        bool
+	CanSendReports bool
+}
+
+// RoleRow is one center role with its permission keys, comma-joined like
+// ScopeRow's lists (same text[] scanning limitation).
+type RoleRow struct {
+	ID    uuid.UUID
+	Key   string
+	Name  string
+	Perms string
+}
+
+// MemberRBACRow is one live non-owner member's RBAC state: assigned role plus
+// comma-joined grant/deny override keys. RoleKey is "" for a role-less stint.
+type MemberRBACRow struct {
+	TeacherID uuid.UUID
+	FullName  string
+	RoleID    *uuid.UUID
+	RoleKey   string
+	Grants    string
+	Denies    string
 }
 
 // TeacherRow is the slice of a teachers row the remove flow needs.
@@ -111,6 +139,36 @@ type Repository interface {
 	// CloseMembership stamps left_at on the live stint; ErrNotFound when a
 	// concurrent transaction already closed it.
 	CloseMembership(ctx context.Context, teacherID, centerID uuid.UUID) error
+	// SetSendReports flips the delegated send-reports permission on the
+	// target's live membership stint. The owner can never hold the flag —
+	// the update refuses an owner target at the SQL level; ErrNotFound covers
+	// every refused variant (left member, other center's member, owner).
+	SetSendReports(ctx context.Context, centerID, teacherID uuid.UUID, enabled bool) error
+	// ListRoles returns the center's roles with their permission sets, in
+	// stable key order.
+	ListRoles(ctx context.Context, centerID uuid.UUID) ([]RoleRow, error)
+	// GetRole loads one role of the center; ErrNotFound also for another
+	// center's role (the path id is the target, tenancy comes from centerID).
+	GetRole(ctx context.Context, centerID, roleID uuid.UUID) (*RoleRow, error)
+	// ReplaceRolePermissions swaps the role's permission set for keys. The
+	// caller resolves the role to its center first (GetRole) inside the same
+	// transaction.
+	ReplaceRolePermissions(ctx context.Context, roleID uuid.UUID, keys []string) error
+	// ListMemberRBAC returns the live non-owner members with their role and
+	// override lists (the owner sits outside the role system).
+	ListMemberRBAC(ctx context.Context, centerID uuid.UUID) ([]MemberRBACRow, error)
+	// GetMemberRBAC loads one live non-owner member's RBAC state; ErrNotFound
+	// covers a left member, another center's member, and the owner (mirrors
+	// SetSendReports' owner refusal).
+	GetMemberRBAC(ctx context.Context, centerID, teacherID uuid.UUID) (*MemberRBACRow, error)
+	// SetMemberRole assigns the live stint's role; ErrNotFound for every
+	// refused variant (left member, other center, owner).
+	SetMemberRole(ctx context.Context, centerID, teacherID, roleID uuid.UUID) error
+	// ReplaceMemberOverrides swaps the member's override rows for the given
+	// grant/deny lists and dual-writes can_send_reports = canSend on the live
+	// stint (the legacy column stays authoritative while both live). The
+	// caller verifies the target via GetMemberRBAC in the same transaction.
+	ReplaceMemberOverrides(ctx context.Context, centerID, teacherID uuid.UUID, grants, denies []string, canSend bool) error
 	// SwitchTeacherCenter moves teachers.center_id to centerID
 	// unconditionally; ErrNotFound when the teacher is unknown or
 	// soft-deleted.
@@ -152,11 +210,28 @@ func NewRepository(db *gorm.DB) Repository {
 
 func (r *gormRepository) ResolveScope(ctx context.Context, teacherID uuid.UUID) (*ScopeRow, error) {
 	var row ScopeRow
+	// Still one round trip: the three permission lists ride along as
+	// correlated subqueries. On a NULL cm (no live stint) they all collapse
+	// to '' — an empty permission set.
 	res := database.FromContext(ctx, r.db).Raw(`
-		SELECT t.center_id, (c.owner_id = t.id) AS is_owner
+		SELECT t.center_id, (c.owner_id = t.id) AS is_owner,
+			COALESCE(cm.can_send_reports, FALSE) AS can_send_reports,
+			COALESCE((SELECT string_agg(rp.permission_key, ',')
+				FROM center_role_permissions rp
+				WHERE rp.role_id = cm.role_id), '') AS role_perms,
+			COALESCE((SELECT string_agg(mp.permission_key, ',')
+				FROM center_member_permissions mp
+				WHERE mp.teacher_id = cm.teacher_id AND mp.center_id = cm.center_id
+					AND mp.allowed), '') AS grants,
+			COALESCE((SELECT string_agg(mp.permission_key, ',')
+				FROM center_member_permissions mp
+				WHERE mp.teacher_id = cm.teacher_id AND mp.center_id = cm.center_id
+					AND NOT mp.allowed), '') AS denies
 		FROM teachers t
 		JOIN centers c ON c.id = t.center_id AND c.deleted_at IS NULL
 		JOIN user_accounts ua ON ua.id = t.id AND ua.deleted_at IS NULL AND ua.status = ?
+		LEFT JOIN center_members cm ON cm.teacher_id = t.id
+			AND cm.center_id = t.center_id AND cm.left_at IS NULL
 		WHERE t.id = ? AND t.deleted_at IS NULL`,
 		teachers.StatusActive, teacherID).Scan(&row)
 	if res.Error != nil {
@@ -206,10 +281,13 @@ func (r *gormRepository) ListMembers(ctx context.Context, centerID uuid.UUID) ([
 	// its own: it stays pointing at a removed member's last center until they
 	// are reactivated elsewhere.
 	err := database.FromContext(ctx, r.db).Raw(`
-		SELECT t.id, t.full_name, ua.phone, (c.owner_id = t.id) AS is_owner
+		SELECT t.id, t.full_name, ua.phone, (c.owner_id = t.id) AS is_owner,
+			COALESCE(cm.can_send_reports, FALSE) AS can_send_reports
 		FROM teachers t
 		JOIN user_accounts ua ON ua.id = t.id AND ua.deleted_at IS NULL AND ua.status = ?
 		JOIN centers c ON c.id = t.center_id
+		LEFT JOIN center_members cm ON cm.teacher_id = t.id
+			AND cm.center_id = t.center_id AND cm.left_at IS NULL
 		WHERE t.center_id = ? AND t.deleted_at IS NULL
 		ORDER BY is_owner DESC, t.full_name, t.id`, teachers.StatusActive, centerID).Scan(&rows).Error
 	return rows, err
@@ -249,16 +327,43 @@ func (r *gormRepository) Rename(ctx context.Context, centerID uuid.UUID, name st
 }
 
 func (r *gormRepository) CreateCenter(ctx context.Context, c *Center) error {
-	return translateError(database.FromContext(ctx, r.db).Create(c).Error)
+	if err := translateError(database.FromContext(ctx, r.db).Create(c).Error); err != nil {
+		return err
+	}
+	// Every center is born with its three system roles; members default to
+	// giao_vien on join, the owner stays outside the role system entirely.
+	return database.FromContext(ctx, r.db).Exec(`
+		INSERT INTO center_roles (id, center_id, key, name)
+		VALUES (gen_random_uuid(), @cid, 'giao_vien', 'Giáo viên'),
+			(gen_random_uuid(), @cid, 'hoc_vu', 'Học vụ'),
+			(gen_random_uuid(), @cid, 'tro_giang', 'Trợ giảng')`,
+		map[string]any{"cid": c.ID}).Error
 }
 
 func (r *gormRepository) OpenMembership(ctx context.Context, teacherID, centerID uuid.UUID) (time.Time, error) {
 	var joinedAt time.Time
+	// Permissions reset on reopen: they belong to a stint, not the person —
+	// a re-invited member must be granted afresh. The override delete rides
+	// in a data-modifying CTE so reset + reopen stay one atomic statement
+	// even outside a caller transaction. The role subquery yields NULL for
+	// the center owner (owner_id check) and for centers without seeded roles
+	// (raw-SQL fixtures) — NULL role_id is defined as "no role permissions".
 	err := database.FromContext(ctx, r.db).Raw(`
-		INSERT INTO center_members (teacher_id, center_id) VALUES (?, ?)
+		WITH cleared AS (
+			DELETE FROM center_member_permissions
+			WHERE teacher_id = @tid AND center_id = @cid
+		)
+		INSERT INTO center_members (teacher_id, center_id, role_id)
+		VALUES (@tid, @cid, (
+			SELECT cr.id FROM center_roles cr
+			JOIN centers c ON c.id = cr.center_id AND c.owner_id <> @tid
+			WHERE cr.center_id = @cid AND cr.key = 'giao_vien'
+		))
 		ON CONFLICT (teacher_id, center_id)
-		DO UPDATE SET left_at = NULL, joined_at = now()
-		RETURNING joined_at`, teacherID, centerID).Scan(&joinedAt).Error
+		DO UPDATE SET left_at = NULL, joined_at = now(),
+			can_send_reports = FALSE, role_id = EXCLUDED.role_id
+		RETURNING joined_at`,
+		map[string]any{"tid": teacherID, "cid": centerID}).Scan(&joinedAt).Error
 	if err != nil {
 		return time.Time{}, translateError(err)
 	}
@@ -266,10 +371,212 @@ func (r *gormRepository) OpenMembership(ctx context.Context, teacherID, centerID
 }
 
 func (r *gormRepository) CloseMembership(ctx context.Context, teacherID, centerID uuid.UUID) error {
+	// Defence in depth alongside OpenMembership's reset: a closed stint never
+	// keeps permissions, so no code path can resurrect them from stale rows.
+	// The override delete is unconditional on purpose — orphaned rows of an
+	// already-closed stint are equally dead — and the CTE keeps delete +
+	// close one atomic statement.
 	res := database.FromContext(ctx, r.db).Exec(`
-		UPDATE center_members SET left_at = now()
+		WITH cleared AS (
+			DELETE FROM center_member_permissions
+			WHERE teacher_id = @tid AND center_id = @cid
+		)
+		UPDATE center_members SET left_at = now(), can_send_reports = FALSE
+		WHERE teacher_id = @tid AND center_id = @cid AND left_at IS NULL`,
+		map[string]any{"tid": teacherID, "cid": centerID})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *gormRepository) SetSendReports(ctx context.Context, centerID, teacherID uuid.UUID, enabled bool) error {
+	// Dual life: the legacy column stays authoritative while the permission
+	// system ramps up, so every mutation mirrors into a reports.send override
+	// row in the same statement — the flagged CTE only fires when the column
+	// update accepted the target (live member, not the owner). Revoke deletes
+	// the grant row rather than writing a deny: default members hold no
+	// reports.send, so absence already means revoked.
+	query := `
+		WITH flagged AS (
+			UPDATE center_members cm SET can_send_reports = @enabled
+			FROM centers c
+			WHERE cm.teacher_id = @tid AND cm.center_id = @cid AND cm.left_at IS NULL
+				AND c.id = cm.center_id AND c.owner_id <> cm.teacher_id
+			RETURNING cm.teacher_id, cm.center_id
+		)
+		INSERT INTO center_member_permissions (teacher_id, center_id, permission_key, allowed)
+		SELECT teacher_id, center_id, 'reports.send', TRUE FROM flagged
+		ON CONFLICT (teacher_id, center_id, permission_key) DO UPDATE SET allowed = TRUE
+		RETURNING teacher_id`
+	if !enabled {
+		query = `
+		WITH flagged AS (
+			UPDATE center_members cm SET can_send_reports = @enabled
+			FROM centers c
+			WHERE cm.teacher_id = @tid AND cm.center_id = @cid AND cm.left_at IS NULL
+				AND c.id = cm.center_id AND c.owner_id <> cm.teacher_id
+			RETURNING cm.teacher_id, cm.center_id
+		), unflagged AS (
+			DELETE FROM center_member_permissions mp
+			USING flagged f
+			WHERE mp.teacher_id = f.teacher_id AND mp.center_id = f.center_id
+				AND mp.permission_key = 'reports.send'
+		)
+		SELECT teacher_id FROM flagged`
+	}
+	var touched []uuid.UUID
+	err := database.FromContext(ctx, r.db).Raw(query,
+		map[string]any{"enabled": enabled, "tid": teacherID, "cid": centerID}).
+		Pluck("teacher_id", &touched).Error
+	if err != nil {
+		return err
+	}
+	if len(touched) == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *gormRepository) ListRoles(ctx context.Context, centerID uuid.UUID) ([]RoleRow, error) {
+	var rows []RoleRow
+	err := database.FromContext(ctx, r.db).Raw(`
+		SELECT cr.id, cr.key, cr.name,
+			COALESCE((SELECT string_agg(rp.permission_key, ',' ORDER BY rp.permission_key)
+				FROM center_role_permissions rp
+				WHERE rp.role_id = cr.id), '') AS perms
+		FROM center_roles cr
+		WHERE cr.center_id = ?
+		ORDER BY cr.key`, centerID).Scan(&rows).Error
+	return rows, err
+}
+
+func (r *gormRepository) GetRole(ctx context.Context, centerID, roleID uuid.UUID) (*RoleRow, error) {
+	var row RoleRow
+	res := database.FromContext(ctx, r.db).Raw(`
+		SELECT cr.id, cr.key, cr.name,
+			COALESCE((SELECT string_agg(rp.permission_key, ',' ORDER BY rp.permission_key)
+				FROM center_role_permissions rp
+				WHERE rp.role_id = cr.id), '') AS perms
+		FROM center_roles cr
+		WHERE cr.id = ? AND cr.center_id = ?`, roleID, centerID).Scan(&row)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return nil, ErrNotFound
+	}
+	return &row, nil
+}
+
+func (r *gormRepository) ReplaceRolePermissions(ctx context.Context, roleID uuid.UUID, keys []string) error {
+	db := database.FromContext(ctx, r.db)
+	if err := db.Exec(`DELETE FROM center_role_permissions WHERE role_id = ?`, roleID).Error; err != nil {
+		return err
+	}
+	// One statement per key: the set is bounded by the registry (single
+	// digits), and the surrounding transaction keeps the swap atomic.
+	for _, key := range keys {
+		if err := db.Exec(`
+			INSERT INTO center_role_permissions (role_id, permission_key)
+			VALUES (?, ?)`, roleID, key).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// memberRBACSelect is the shared projection of one live non-owner stint's
+// RBAC state; the owner is excluded here the same way SetSendReports refuses
+// them — they sit outside the role system entirely.
+const memberRBACSelect = `
+	SELECT cm.teacher_id, t.full_name, cm.role_id, COALESCE(cr.key, '') AS role_key,
+		COALESCE((SELECT string_agg(mp.permission_key, ',' ORDER BY mp.permission_key)
+			FROM center_member_permissions mp
+			WHERE mp.teacher_id = cm.teacher_id AND mp.center_id = cm.center_id
+				AND mp.allowed), '') AS grants,
+		COALESCE((SELECT string_agg(mp.permission_key, ',' ORDER BY mp.permission_key)
+			FROM center_member_permissions mp
+			WHERE mp.teacher_id = cm.teacher_id AND mp.center_id = cm.center_id
+				AND NOT mp.allowed), '') AS denies
+	FROM center_members cm
+	JOIN centers c ON c.id = cm.center_id AND c.owner_id <> cm.teacher_id
+	JOIN teachers t ON t.id = cm.teacher_id AND t.deleted_at IS NULL
+	JOIN user_accounts ua ON ua.id = t.id AND ua.deleted_at IS NULL AND ua.status = ?
+	LEFT JOIN center_roles cr ON cr.id = cm.role_id`
+
+func (r *gormRepository) ListMemberRBAC(ctx context.Context, centerID uuid.UUID) ([]MemberRBACRow, error) {
+	var rows []MemberRBACRow
+	// Same live-roster semantics as ListMembers: a disabled account is a
+	// removed member.
+	err := database.FromContext(ctx, r.db).Raw(memberRBACSelect+`
+		WHERE cm.center_id = ? AND cm.left_at IS NULL
+		ORDER BY t.full_name, t.id`, teachers.StatusActive, centerID).Scan(&rows).Error
+	return rows, err
+}
+
+func (r *gormRepository) GetMemberRBAC(ctx context.Context, centerID, teacherID uuid.UUID) (*MemberRBACRow, error) {
+	var row MemberRBACRow
+	res := database.FromContext(ctx, r.db).Raw(memberRBACSelect+`
+		WHERE cm.center_id = ? AND cm.teacher_id = ? AND cm.left_at IS NULL`,
+		teachers.StatusActive, centerID, teacherID).Scan(&row)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return nil, ErrNotFound
+	}
+	return &row, nil
+}
+
+func (r *gormRepository) SetMemberRole(ctx context.Context, centerID, teacherID, roleID uuid.UUID) error {
+	// Owner exclusion at the SQL level, exactly like SetSendReports: a role on
+	// the owner's stint would be dead weight at best and confusing at worst.
+	res := database.FromContext(ctx, r.db).Exec(`
+		UPDATE center_members cm SET role_id = @rid
+		FROM centers c
+		WHERE cm.teacher_id = @tid AND cm.center_id = @cid AND cm.left_at IS NULL
+			AND c.id = cm.center_id AND c.owner_id <> cm.teacher_id`,
+		map[string]any{"rid": roleID, "tid": teacherID, "cid": centerID})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *gormRepository) ReplaceMemberOverrides(ctx context.Context, centerID, teacherID uuid.UUID, grants, denies []string, canSend bool) error {
+	db := database.FromContext(ctx, r.db)
+	if err := db.Exec(`
+		DELETE FROM center_member_permissions
+		WHERE teacher_id = ? AND center_id = ?`, teacherID, centerID).Error; err != nil {
+		return err
+	}
+	for _, key := range grants {
+		if err := db.Exec(`
+			INSERT INTO center_member_permissions (teacher_id, center_id, permission_key, allowed)
+			VALUES (?, ?, ?, TRUE)`, teacherID, centerID, key).Error; err != nil {
+			return err
+		}
+	}
+	for _, key := range denies {
+		if err := db.Exec(`
+			INSERT INTO center_member_permissions (teacher_id, center_id, permission_key, allowed)
+			VALUES (?, ?, ?, FALSE)`, teacherID, centerID, key).Error; err != nil {
+			return err
+		}
+	}
+	// Dual life: the legacy column mirrors whether the new set grants
+	// reports.send, keeping the phase-4 parity gate honest.
+	res := db.Exec(`
+		UPDATE center_members SET can_send_reports = ?
 		WHERE teacher_id = ? AND center_id = ? AND left_at IS NULL`,
-		teacherID, centerID)
+		canSend, teacherID, centerID)
 	if res.Error != nil {
 		return res.Error
 	}

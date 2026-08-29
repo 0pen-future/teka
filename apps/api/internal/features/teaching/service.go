@@ -233,10 +233,12 @@ func (s *Service) ReopenPlan(ctx context.Context, sc authctx.Scope, classID uuid
 	})
 }
 
-// ReviewQueue lists the center's pending giáo án for the owner screen and
-// the nav dot (its length), oldest submission first.
+// ReviewQueue lists the center's pending giáo án for the review screen and
+// the nav dot (its length), oldest submission first. Reading the queue takes
+// teaching.review_queue; the review WRITE actions (approve/request-redo/
+// reopen) stay owner-only in resolveReviewedClass.
 func (s *Service) ReviewQueue(ctx context.Context, sc authctx.Scope) ([]QueueItemResponse, error) {
-	if !sc.IsOwner {
+	if !sc.Has(authctx.PermTeachingReviewQueue) {
 		return nil, ownerOnly()
 	}
 	rows, err := s.repo.ReviewQueue(ctx, sc)

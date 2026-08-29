@@ -8,6 +8,7 @@ func RegisterRoutes(rg *gin.RouterGroup, h *Handler, requireAuth, resolveScope g
 	periods := rg.Group("/billing-periods", requireAuth, resolveScope)
 	periods.POST("/:id/notifications/bulk", h.bulkSend)
 	periods.GET("/:id/notifications", h.list)
+	periods.GET("/:id/notifications/preview", h.sendPreview)
 	periods.GET("/:id/notifications/run", h.runSnapshot)
 	periods.POST("/:id/notifications/run/resume", h.resumeRun)
 

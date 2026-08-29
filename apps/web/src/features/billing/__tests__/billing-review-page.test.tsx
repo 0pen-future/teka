@@ -1,7 +1,9 @@
 import { screen, within } from "@testing-library/react";
+import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
+import { API_URL, ok } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
 
@@ -83,5 +85,19 @@ describe("BillingReviewPage", () => {
     expect(screen.getByRole("table")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Chốt kỳ/ })).not.toBeInTheDocument();
     expect(screen.queryByText("Không tải được kỳ thu học phí này.")).not.toBeInTheDocument();
+  });
+
+  it("hides the notifications link from a plain member on a closed period (D8)", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh" })),
+      ),
+    );
+    seedClosedPeriod();
+    renderReviewPage();
+
+    // The locked footer still renders; only the send entry point is gone.
+    expect(await screen.findByText("✓ Đã chốt — kỳ đã khóa")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Gửi thông báo/ })).not.toBeInTheDocument();
   });
 });

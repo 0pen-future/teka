@@ -79,7 +79,7 @@ func NewRepository(db *gorm.DB) Repository {
 // carries the same center_id/teacher_id column names.
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("attendance_records.center_id = ?", sc.CenterID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("attendance_records.teacher_id = ?", sc.TeacherID)
 	}
 	return q
@@ -146,7 +146,7 @@ func (r *gormRepository) StudentNames(ctx context.Context, sc authctx.Scope, stu
 		Table("students").
 		Select("id, full_name, display_note").
 		Where("center_id = ? AND id IN ?", sc.CenterID, studentIDs)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("teacher_id = ?", sc.TeacherID)
 	}
 	if err := q.Find(&rows).Error; err != nil {

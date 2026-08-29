@@ -8,14 +8,21 @@ export interface MemberListProps {
   /** Owner viewers get the remove action; members see a read-only roster. */
   canRemove: boolean;
   onRemove: (member: CenterMember) => void;
+  /**
+   * Owner viewers also manage per-member roles and permission overrides
+   * (including the delegated send-reports grant); the action shares the
+   * remove action's gating (owner-only, non-owner rows).
+   */
+  onManagePermissions?: (member: CenterMember) => void;
 }
 
 /**
  * The owner row never gets a remove button — the API rejects owner
  * self-removal (a center cannot be left ownerless), so the control would only
- * manufacture an error.
+ * manufacture an error. The permissions action skips the owner row for the
+ * same reason: the owner is an implicit superuser the API refuses to target.
  */
-export function MemberList({ members, canRemove, onRemove }: MemberListProps) {
+export function MemberList({ members, canRemove, onRemove, onManagePermissions }: MemberListProps) {
   return (
     <ul className="flex flex-col divide-y divide-line-200">
       {members.map((member) => (
@@ -28,9 +35,25 @@ export function MemberList({ members, canRemove, onRemove }: MemberListProps) {
                   Chủ
                 </HvBadge>
               ) : null}
+              {member.can_send_reports ? (
+                <HvBadge variant="info" size="sm">
+                  Thư ký gửi báo cáo
+                </HvBadge>
+              ) : null}
             </p>
             <p className="text-[12.5px] text-ink-500">{formatPhoneLocal(member.phone)}</p>
           </div>
+          {canRemove && !member.is_owner && onManagePermissions ? (
+            <HvButton
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-label={`Phân quyền cho ${member.full_name}`}
+              onClick={() => onManagePermissions(member)}
+            >
+              Phân quyền
+            </HvButton>
+          ) : null}
           {canRemove && !member.is_owner ? (
             <HvButton
               type="button"

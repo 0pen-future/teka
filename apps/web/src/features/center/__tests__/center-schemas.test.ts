@@ -16,6 +16,27 @@ describe("centerMeSchema", () => {
     }
     expect(me.center.is_owner).toBe(true);
     expect(me.members).toHaveLength(2);
+    // An older API without the field still parses, defaulting to false.
+    expect(me.members[0]?.can_send_reports).toBe(false);
+  });
+
+  it("carries a member's send-reports flag when the API sends it", () => {
+    const me = centerMeSchema.parse({
+      center: { id: "c1", name: "Trung Tâm Bình Minh", is_owner: true },
+      members: [
+        {
+          id: "t2",
+          full_name: "Giáo Viên A",
+          phone: "+84901000002",
+          is_owner: false,
+          can_send_reports: true,
+        },
+      ],
+    });
+    if (!("members" in me)) {
+      throw new Error("expected the owner shape");
+    }
+    expect(me.members[0]?.can_send_reports).toBe(true);
   });
 
   it("parses the member-shaped GET /centers/me contract", () => {
@@ -24,6 +45,16 @@ describe("centerMeSchema", () => {
       throw new Error("expected the member shape");
     }
     expect(me.center_name).toBe("Trung Tâm Bình Minh");
+    // Same rollout default on the member's own flag.
+    expect(me.can_send_reports).toBe(false);
+  });
+
+  it("carries the member's own send-reports flag when the API sends it", () => {
+    const me = centerMeSchema.parse({ center_name: "Trung Tâm Bình Minh", can_send_reports: true });
+    if ("members" in me) {
+      throw new Error("expected the member shape");
+    }
+    expect(me.can_send_reports).toBe(true);
   });
 
   it("rejects a payload matching neither role shape", () => {

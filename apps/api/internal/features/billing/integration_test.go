@@ -283,6 +283,37 @@ func TestEnsurePeriodIdempotentAcrossCalls(t *testing.T) {
 	require.EqualValues(t, 1, count)
 }
 
+// EnsurePeriod's duplicate branch resolves the conflict row by (teacher,
+// year, month) — the caller's own period. An owner's read scope spans the
+// whole center, so when a member already opened the same month the lookup
+// must NOT widen to center scope, or the owner's ensure would come back with
+// an arbitrary teacher's period instead of their own.
+func TestEnsurePeriodReturnsCallersOwnPeriodWhenMemberSharesTheMonth(t *testing.T) {
+	t.Parallel()
+	svc, _, _, _, db := newIntegrationDeps(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, db)
+	_, member := testutil.Teacher(t, db)
+	ownerScope := testutil.ScopeFor(t, db, owner.ID)
+	testutil.JoinCenter(t, db, member.ID, ownerScope.CenterID)
+	memberScope := testutil.ScopeFor(t, db, member.ID)
+
+	memberPeriod, err := svc.EnsurePeriod(ctx, memberScope, 2026, 6)
+	require.NoError(t, err)
+
+	first, err := svc.EnsurePeriod(ctx, ownerScope, 2026, 6)
+	require.NoError(t, err)
+	require.Equal(t, owner.ID, first.TeacherID)
+	require.NotEqual(t, memberPeriod.ID, first.ID)
+
+	// The second call takes the duplicate branch (the owner's row now
+	// exists); it must still resolve to the owner's own period.
+	second, err := svc.EnsurePeriod(ctx, ownerScope, 2026, 6)
+	require.NoError(t, err)
+	require.Equal(t, first.ID, second.ID)
+	require.Equal(t, owner.ID, second.TeacherID)
+}
+
 // TestGetPeriodCrossTenantIsNotFound proves no cross-teacher existence leak:
 // another teacher's billing period must read as 404, not 403 or 200.
 func TestGetPeriodCrossTenantIsNotFound(t *testing.T) {

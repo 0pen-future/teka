@@ -13,6 +13,58 @@ export const API_URL = "http://localhost:8080/api/v1";
  */
 export const PUBLIC_API_URL = API_URL.replace(/\/api\/v1\/?$/, "");
 
+/**
+ * The full permission catalog, mirroring `authctx/permissions.go` (keys and
+ * Vietnamese labels) in registry order. The owner's `/centers/me` body
+ * carries every key — the server folds the owner bypass into the effective
+ * array.
+ */
+export const PERMISSION_CATALOG = [
+  { key: "data.view_center_wide", label: "Xem dữ liệu toàn trung tâm" },
+  { key: "reports.send", label: "Gửi báo cáo học phí" },
+  { key: "members.manage", label: "Quản lý thành viên" },
+  { key: "center.manage", label: "Quản lý trung tâm" },
+  { key: "invitations.manage", label: "Quản lý lời mời" },
+  { key: "audit.read", label: "Xem nhật ký hoạt động" },
+  { key: "imports.run", label: "Import dữ liệu" },
+  { key: "dashboard.view", label: "Xem dashboard trung tâm" },
+  { key: "teaching.review_queue", label: "Xem hàng chờ duyệt giáo án" },
+];
+
+export const ALL_PERMISSION_KEYS = PERMISSION_CATALOG.map((p) => p.key);
+
+/**
+ * Default RBAC read model for `GET /centers/me/permissions`: the three
+ * system roles born with empty permission sets (v1 parity) and no member
+ * rows. Tests override with `server.use` for populated states.
+ */
+export const DEFAULT_ROLES = {
+  giaoVien: {
+    id: "50000000-0000-4000-8000-000000000001",
+    key: "giao_vien",
+    name: "Giáo viên",
+    permissions: [] as string[],
+  },
+  hocVu: {
+    id: "50000000-0000-4000-8000-000000000002",
+    key: "hoc_vu",
+    name: "Học vụ",
+    permissions: [] as string[],
+  },
+  troGiang: {
+    id: "50000000-0000-4000-8000-000000000003",
+    key: "tro_giang",
+    name: "Trợ giảng",
+    permissions: [] as string[],
+  },
+};
+
+export const DEFAULT_CENTER_PERMISSIONS = {
+  catalog: PERMISSION_CATALOG,
+  roles: [DEFAULT_ROLES.giaoVien, DEFAULT_ROLES.hocVu, DEFAULT_ROLES.troGiang],
+  members: [],
+};
+
 // --- Envelope builders (mirror the Go API's response shape exactly) ---
 
 export function ok<T>(data: T, meta?: Meta) {
@@ -438,8 +490,27 @@ export const handlers = [
           is_owner: true,
         },
         members: [],
+        permissions: ALL_PERMISSION_KEYS,
       }),
     ),
+  ),
+  // Owner-only RBAC read model; role/override tests override with server.use.
+  http.get(`${API_URL}/centers/me/permissions`, () =>
+    HttpResponse.json(ok(DEFAULT_CENTER_PERMISSIONS)),
+  ),
+  // RBAC writes succeed silently by default; tests asserting payloads
+  // override these with server.use and capture the body.
+  http.put(
+    `${API_URL}/centers/me/roles/:roleId/permissions`,
+    () => new HttpResponse(null, { status: 204 }),
+  ),
+  http.put(
+    `${API_URL}/centers/me/members/:teacherId/role`,
+    () => new HttpResponse(null, { status: 204 }),
+  ),
+  http.put(
+    `${API_URL}/centers/me/members/:teacherId/overrides`,
+    () => new HttpResponse(null, { status: 204 }),
   ),
   // A test teacher has no linked Zalo account unless the test says otherwise.
   http.get(`${API_URL}/me/zalo`, () => HttpResponse.json(ok({ linked: false }))),
@@ -485,6 +556,7 @@ export const handlers = [
           is_owner: true,
         },
         members: [],
+        permissions: ALL_PERMISSION_KEYS,
       }),
     ),
   ),

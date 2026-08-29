@@ -74,28 +74,97 @@ without exception:
   request body, query string, or path segment. A client-supplied `center_id`
   or `teacher_id` is an authorization bypass, and it looks completely ordinary
   in a diff.
-- `Scope{TeacherID, CenterID, IsOwner}` is resolved fresh from the database on
-  every request by `middleware.ResolveScope` and never cached in the JWT, so a
-  membership change (kick, leave, join) takes effect on the very next request.
+- `Scope{TeacherID, CenterID, IsOwner, CanSendReports, Perms}` is resolved
+  fresh from the database on every request by `middleware.ResolveScope` and
+  never cached in the JWT, so a membership or permission change (kick, leave,
+  join, grant, revoke, role edit) takes effect on the very next request.
 - Every repository over a tenant table funnels reads through a `scoped`
-  helper: always filter by center; non-owners additionally filter by their own
-  `teacher_id` (reference implementation:
+  helper: always filter by center; callers without center-wide data access
+  additionally filter by their own `teacher_id` (reference implementation:
   `apps/api/internal/features/students/repository.go`):
 
 ```go
-// scoped returns a query bound to one center. An owner sees every student in
-// their center; a member sees only the rows they created themselves.
+// scoped returns a query bound to one center. A center-wide caller sees every
+// student in the center; anyone else sees only the rows they created.
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
     q := database.FromContext(ctx, r.db).Where("students.center_id = ?", sc.CenterID)
-    if !sc.IsOwner {
+    if !sc.CenterWide() {
         q = q.Where("students.teacher_id = ?", sc.TeacherID)
     }
     return q
 }
 ```
 
+`Scope.CenterWide()` (`IsOwner || Has(data.view_center_wide)`) is the **only**
+data-scoping switch repositories may branch on — never `IsOwner` directly, so
+an owner-granted permission widens reads without touching every repository.
+
 - Writes keep the invariant `teacher_id = $self` for the teacher role; owners
   may write on behalf of any teacher in their center.
+
+**Delegated report sending (`can_send_reports`)**: a boolean permission on the
+member's live `center_members` stint, granted and revoked only by the owner
+(`POST`/`DELETE /centers/me/members/:teacherId/send-reports`). It is a
+capability flag, not a role, and it is member-only — the grant endpoint
+refuses the owner as target, so `IsOwner` and `CanSendReports` never combine.
+`Scope.ReportsOversight()` (`IsOwner || CanSendReports`) is the single helper
+both capabilities branch on:
+
+- **Center-wide read cluster**: billing periods, statements, debt views, the
+  contact list (`GET /contacts` — recipient names and phones, needed to
+  address a send), and the notification ledger (per-period sends and runs)
+  scope to the whole center for a `ReportsOversight()` caller instead of the
+  member's own rows. Everything else — classes, attendance, payments, single
+  contact reads (`GET /contacts/:id`), and every write — keeps the plain
+  member scoping above.
+- **Send exclusivity**: only `ReportsOversight()` callers may create report
+  sends — bulk send, run resume, and the pre-send preview all refuse everyone
+  else. This 403 is deliberately honest (not the neutral not-found used for
+  cross-tenant probes): the caller can see the period; the missing thing is
+  the permission. Plain teachers provide attendance and remarks input and keep
+  a read-only ledger of what was sent for their periods; they do not send.
+
+*Release note (behavior removal)*: before this permission existed every
+teacher could generate and send statements for their own periods. Now sending
+is exclusive to the owner and `can_send_reports` holders — a teacher keeps
+that ability only after the owner grants them the flag.
+
+**Configurable permissions (RBAC, migration 000013)**: authorization checks
+branch on a permission catalog, not on `IsOwner` (the sole exceptions are
+listed below). Rules:
+
+- The catalog is **code-owned**: keys, registry order, and Vietnamese labels
+  live in `apps/api/internal/shared/authctx/permissions.go`. The database
+  stores keys only; a key unknown to the running binary is ignored on read, so
+  rolling the code back never grants or crashes anything.
+- Effective set = (role permissions ∪ per-member grants) − per-member denies.
+  Roles are per-center rows (`center_roles`, three system roles `giao_vien`,
+  `hoc_vu`, `tro_giang`, born with empty sets); overrides are per-stint rows in
+  `center_member_permissions`. Both are wiped when a membership closes and
+  reset to defaults on reopen — permission state never survives a stint.
+- The **owner is an implicit superuser outside the role tables**: their stint
+  holds no role row, `Scope.Has(key)` is unconditionally true for them, and
+  member-targeted permission endpoints refuse the owner as target (404, the
+  `SetSendReports` precedent). Handlers gate with `scope.Has(authctx.Perm…)`;
+  repositories branch only on `Scope.CenterWide()` as above.
+- **Owner-only by design, not by catalog key**: the permission-management
+  endpoints themselves (`GET /centers/me/permissions`, `PUT
+  /centers/me/roles/:roleId/permissions`, `PUT
+  /centers/me/members/:teacherId/role`, `PUT
+  /centers/me/members/:teacherId/overrides`) check `scope.IsOwner` directly —
+  a grantable "manage permissions" key would be one hop from self-escalation.
+  Member removal and the send-reports grant stay owner-only for the same
+  reason.
+- **Dual life of `reports.send`** (until the flag column is dropped): the
+  `can_send_reports` column stays authoritative; every mutation dual-writes
+  column + override row in one transaction, the role matrix rejects
+  `reports.send` (per-member only), and `ResolveScope` computes
+  `CanSendReports = column OR Has(reports.send)`.
+- Permission mutations are audited twice under the same action name: the
+  request middleware row is the HTTP evidence (status, IP, failed attempts)
+  and a service-published event row carries the committed before/after diff
+  (empty `Method` distinguishes it). Clients read their own effective set from
+  the `permissions` array on `GET /centers/me`.
 
 `deleted_at IS NULL` comes free from `gorm.DeletedAt` on model-based queries;
 raw SQL and `Table()` queries must add it by hand. Postgres row-level security

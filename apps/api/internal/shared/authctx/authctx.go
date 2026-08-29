@@ -40,6 +40,24 @@ type Scope struct {
 	TeacherID uuid.UUID
 	CenterID  uuid.UUID
 	IsOwner   bool
+	// CanSendReports is the delegated report-sender permission on the
+	// caller's live membership stint. Member-only: the owner never holds it
+	// (grant refuses the owner as target), so IsOwner and CanSendReports are
+	// mutually exclusive in practice.
+	CanSendReports bool
+	// Perms is the caller's effective permission set, resolved fresh from
+	// the database alongside the rest of the scope. Read-only after
+	// SetScope — Scope copies share the map.
+	Perms PermSet
+}
+
+// ReportsOversight reports whether the caller may read billing
+// periods/statements/debt center-wide AND create report sends — the owner or
+// a member holding the delegated send-reports permission. Read paths and the
+// send-creation gate both branch on this one helper so the two capabilities
+// can never drift apart.
+func (s Scope) ReportsOversight() bool {
+	return s.IsOwner || s.CanSendReports
 }
 
 const (

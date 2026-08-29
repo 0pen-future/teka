@@ -26,6 +26,20 @@ export async function renameCenter(input: RenameCenterInput): Promise<CenterMeOw
 }
 
 /**
+ * Grant and revoke are two verb routes on the same path (the audit trail
+ * records them as distinct actions); both answer 204, so the caller
+ * re-reads the roster instead of parsing a body.
+ */
+export async function setSendReports(teacherId: string, granted: boolean): Promise<void> {
+  const path = `/centers/me/members/${teacherId}/send-reports`;
+  if (granted) {
+    await apiClient.post(path);
+  } else {
+    await apiClient.delete(path);
+  }
+}
+
+/**
  * Removing a membership is idempotent from the caller's point of view: a 404
  * means the member is already gone — the state the user asked for — so it
  * converges instead of surfacing an error.

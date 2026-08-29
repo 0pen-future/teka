@@ -56,6 +56,7 @@ func pathID(c *gin.Context, param, resource string) (uuid.UUID, bool) {
 //	@Param			request	body		BulkSendRequest	true	"purpose and optional channel"
 //	@Success		200		{object}	response.Envelope{data=BulkSendResponse}
 //	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403		{object}	response.Envelope{error=response.ErrorBody}	"caller lacks the send-reports permission"
 //	@Failure		404		{object}	response.Envelope{error=response.ErrorBody}
 //	@Failure		409		{object}	response.Envelope{error=response.ErrorBody}	"period is not closed"
 //	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}	"validation failed"
@@ -81,6 +82,39 @@ func (h *Handler) bulkSend(c *gin.Context) {
 		return
 	}
 	response.OK(c, http.StatusOK, result)
+}
+
+// sendPreview returns the server-computed pre-send buckets for one period.
+//
+//	@Summary		Preview a zalo_personal bulk send
+//	@Description	Computes, without writing anything, the exact buckets a zalo_personal bulk send would produce right now: auto_send (mapped + friend of the caller's Zalo account), mapped_not_friend, and unmapped (manual fallback), plus the server's max_run_size cap. purpose=reminder narrows to contacts with outstanding > 0.
+//	@Tags			notifications
+//	@Produce		json
+//	@Param			id		path		string	true	"billing period id"
+//	@Param			purpose	query		string	false	"statements (default) or reminder"
+//	@Success		200		{object}	response.Envelope{data=SendPreviewResponse}
+//	@Failure		400		{object}	response.Envelope{error=response.ErrorBody}	"no linked Zalo account"
+//	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403		{object}	response.Envelope{error=response.ErrorBody}	"caller lacks the send-reports permission"
+//	@Failure		404		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		409		{object}	response.Envelope{error=response.ErrorBody}	"cross-teacher period without the permission, or the Zalo session expired"
+//	@Security		BearerAuth
+//	@Router			/billing-periods/{id}/notifications/preview [get]
+func (h *Handler) sendPreview(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	periodID, ok := pathID(c, "id", "billing period")
+	if !ok {
+		return
+	}
+	preview, err := h.svc.SendPreview(c.Request.Context(), sc, periodID, c.Query("purpose"))
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, preview)
 }
 
 // runSnapshot reports the period's latest zalo_personal run and its progress.
@@ -122,6 +156,7 @@ func (h *Handler) runSnapshot(c *gin.Context) {
 //	@Success		200	{object}	response.Envelope{data=RunSnapshotResponse}
 //	@Failure		400	{object}	response.Envelope{error=response.ErrorBody}	"no linked Zalo account"
 //	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}	"caller lacks the send-reports permission"
 //	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}	"period has no run"
 //	@Failure		409	{object}	response.Envelope{error=response.ErrorBody}	"run is not interrupted, another run is sending, or the Zalo session expired"
 //	@Security		BearerAuth

@@ -39,6 +39,14 @@ type Member struct {
 	CenterID  uuid.UUID `gorm:"type:uuid;primaryKey"`
 	JoinedAt  time.Time
 	LeftAt    *time.Time
+	// CanSendReports is the delegated report-sender permission, scoped to
+	// this stint: closing or reopening the membership resets it to false.
+	CanSendReports bool
+	// RoleID is the stint's center role. NULL means "no role permissions" —
+	// the owner's stint always, and raw-insert paths that predate role
+	// seeding. Reopening a membership resets it to the center's default
+	// giao_vien role.
+	RoleID *uuid.UUID `gorm:"type:uuid"`
 }
 
 // TableName pins the table name explicitly.

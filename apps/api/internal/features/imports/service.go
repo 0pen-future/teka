@@ -100,7 +100,7 @@ func NewService(
 
 // Template returns the blank workbook the operator fills in.
 func (s *Service) Template(_ context.Context, scope authctx.Scope) ([]byte, error) {
-	if err := requireOwner(scope); err != nil {
+	if err := requireImportsRun(scope); err != nil {
 		return nil, err
 	}
 	b, err := BuildTemplate()
@@ -118,7 +118,7 @@ func (s *Service) Template(_ context.Context, scope authctx.Scope) ([]byte, erro
 // Any invalid row rejects the whole file: a partially imported roster is worse
 // than none, because the operator cannot tell which half landed.
 func (s *Service) Import(ctx context.Context, scope authctx.Scope, file []byte, dryRun bool) (*Report, error) {
-	if err := requireOwner(scope); err != nil {
+	if err := requireImportsRun(scope); err != nil {
 		return nil, err
 	}
 
@@ -201,11 +201,11 @@ func (s *Service) Import(ctx context.Context, scope authctx.Scope, file []byte, 
 // rolling back releases the center lock at once.
 var errDryRunRollback = errors.New("imports: dry run complete")
 
-// requireOwner gates every import route: assigning a class to a teacher is an
-// owner's job, and members do not import on each other's behalf.
-func requireOwner(scope authctx.Scope) error {
-	if !scope.IsOwner {
-		return apperror.Forbidden("chỉ chủ trung tâm được import dữ liệu")
+// requireImportsRun gates every import route: assigning a class to a teacher
+// is center administration, so members import only when granted imports.run.
+func requireImportsRun(scope authctx.Scope) error {
+	if !scope.Has(authctx.PermImportsRun) {
+		return apperror.Forbidden("bạn không có quyền import dữ liệu")
 	}
 	return nil
 }

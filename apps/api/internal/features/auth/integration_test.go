@@ -63,7 +63,7 @@ func newIntegrationService(t *testing.T) (*auth.Service, *gorm.DB, *centers.Serv
 	db := testutil.StartPostgres(t)
 	txMgr := database.NewTxManager(db)
 	teachersSvc := teachers.NewService(teachers.NewRepository(db))
-	centersSvc := centers.NewService(centers.NewRepository(db), txMgr)
+	centersSvc := centers.NewService(centers.NewRepository(db), txMgr, nil)
 	dmSender := &capturingDMSender{lookupOK: true}
 	issuer := auth.NewTokenIssuer(config.JWTConfig{
 		Secret:     testutil.JWTSecret,

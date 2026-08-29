@@ -54,7 +54,7 @@ func newEnv(t *testing.T) *env {
 	db := testutil.StartPostgres(t)
 	txMgr := database.NewTxManager(db)
 	teachersSvc := teachers.NewService(teachers.NewRepository(db))
-	centersSvc := centers.NewService(centers.NewRepository(db), txMgr)
+	centersSvc := centers.NewService(centers.NewRepository(db), txMgr, nil)
 	jwtCfg := config.JWTConfig{Secret: testutil.JWTSecret, AccessTTL: 15 * time.Minute}
 	onboardingCfg := config.OnboardingConfig{InviteTTL: 72 * time.Hour, ResetTTL: 48 * time.Hour, ResetCooldown: 15 * time.Minute}
 	// centersSvc is auth's OwnerResolver and stubZaloSender its ResetDMSender —

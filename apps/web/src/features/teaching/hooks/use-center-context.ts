@@ -5,10 +5,18 @@ export interface CenterContext {
   centerId: string | null;
   centerName: string | null;
   isOwner: boolean;
+  /** The member's own send-reports flag; always false for the owner (flag is member-only). */
+  canSendReports: boolean;
+  /** Mirrors the server's ReportsOversight(): owner or flagged member may create sends. */
+  canRunSends: boolean;
   /** True once /centers/me resolved — gate owner-only UI on this to avoid flicker. */
   isResolved: boolean;
   /** True when /centers/me failed after retries — callers must not blank forever. */
   isError: boolean;
+  /** The caller's effective permission keys from `/centers/me` (owner: full catalog). */
+  permissions: string[];
+  /** True when the effective set holds `key`; false until `/centers/me` resolves. */
+  has: (key: string) => boolean;
 }
 
 /**
@@ -24,14 +32,35 @@ export interface CenterContext {
 export function useCenterContext(): CenterContext {
   const { data, isError } = useCenter();
   if (!data) {
-    return { centerId: null, centerName: null, isOwner: false, isResolved: false, isError };
+    return {
+      centerId: null,
+      centerName: null,
+      isOwner: false,
+      canSendReports: false,
+      canRunSends: false,
+      isResolved: false,
+      isError,
+      permissions: [],
+      has: () => false,
+    };
   }
-  const centerName = "members" in data ? data.center.name : data.center_name;
+  const isOwner = "members" in data;
+  const centerName = isOwner ? data.center.name : data.center_name;
+  const canSendReports = isOwner ? false : data.can_send_reports;
+  const permissions = data.permissions;
   return {
     centerId: centerName,
     centerName,
-    isOwner: "members" in data,
+    isOwner,
+    canSendReports,
+    canRunSends: isOwner || canSendReports,
     isResolved: true,
     isError: false,
+    permissions,
+    // The server already folds the owner bypass into the array (an owner's
+    // effective set is the whole catalog). The explicit owner short-circuit
+    // covers a rollout skew where an older API omits `permissions` (schema
+    // defaults it to []) — the owner must never lose owner-only surfaces.
+    has: (key: string) => isOwner || permissions.includes(key),
   };
 }

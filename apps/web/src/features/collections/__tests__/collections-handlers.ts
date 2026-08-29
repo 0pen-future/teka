@@ -267,6 +267,10 @@ interface Store {
   runFailures: Map<string, string>;
   /** When true, snapshot reads stop advancing the run — it stays running. */
   runHeld: boolean;
+  /** Mapped contacts the preview reports as not (yet) Zalo friends. */
+  notFriendContacts: Set<string>;
+  /** The preview's `max_run_size`; 0 means no cap, like the real config default. */
+  previewMaxRunSize: number;
 }
 
 function seedCollectionsStore(): Store {
@@ -278,6 +282,8 @@ function seedCollectionsStore(): Store {
     run: null,
     runFailures: new Map(),
     runHeld: false,
+    notFriendContacts: new Set(),
+    previewMaxRunSize: 0,
   };
 }
 
@@ -290,6 +296,16 @@ export function resetCollectionsStore() {
 /** Makes the run row for this contact fail with `reason` instead of delivering. */
 export function failRunRowFor(contactId: string, reason: string) {
   store.runFailures.set(contactId, reason);
+}
+
+/** Moves a mapped contact into the preview's `mapped_not_friend` bucket. */
+export function markZaloNotFriend(contactId: string) {
+  store.notFriendContacts.add(contactId);
+}
+
+/** Sets the preview's `max_run_size` cap (0 = no cap). */
+export function setPreviewMaxRunSize(size: number) {
+  store.previewMaxRunSize = size;
 }
 
 /** Freezes run progression so a test can act while the run is still running. */
@@ -622,6 +638,46 @@ export const collectionsHandlers = [
     payment.unallocated_amount =
       payment.amount - nextAllocations.reduce((sum, line) => sum + line.amount, 0);
     return HttpResponse.json(ok(payment));
+  }),
+
+  // Mirrors the real preview: the purpose's full target set split by the
+  // caller's live Zalo state — mapped+friend, mapped-not-friend, unmapped —
+  // each bucket sorted by contact name, plus the run-size cap.
+  http.get(`${API_URL}/billing-periods/:id/notifications/preview`, ({ request }) => {
+    const url = new URL(request.url);
+    const purpose = url.searchParams.get("purpose");
+    const rows = buildContactRows().filter((row) =>
+      purpose === "reminder" ? row.outstanding > 0 : true,
+    );
+    const contact = (row: ContactBalanceRow) => ({
+      contact_id: row.contact_id,
+      contact_name: row.full_name,
+    });
+    const byName = (a: { contact_name: string }, b: { contact_name: string }) =>
+      a.contact_name.localeCompare(b.contact_name);
+    return HttpResponse.json(
+      ok({
+        auto_send: rows
+          .filter(
+            (row) =>
+              row.contact_id in zaloMappedContacts && !store.notFriendContacts.has(row.contact_id),
+          )
+          .map(contact)
+          .sort(byName),
+        mapped_not_friend: rows
+          .filter(
+            (row) =>
+              row.contact_id in zaloMappedContacts && store.notFriendContacts.has(row.contact_id),
+          )
+          .map(contact)
+          .sort(byName),
+        unmapped: rows
+          .filter((row) => !(row.contact_id in zaloMappedContacts))
+          .map(contact)
+          .sort(byName),
+        max_run_size: store.previewMaxRunSize,
+      }),
+    );
   }),
 
   http.post(`${API_URL}/billing-periods/:id/notifications/bulk`, async ({ request }) => {

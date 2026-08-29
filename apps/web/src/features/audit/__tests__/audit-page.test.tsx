@@ -151,6 +151,20 @@ describe("AuditPage", () => {
     expect(screen.getByText("auth.login")).toBeInTheDocument();
   });
 
+  it("renders the log for a member granted audit.read", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh", permissions: ["audit.read"] })),
+      ),
+    );
+    renderAuditPage();
+
+    expect(await screen.findByText("class.create")).toBeInTheDocument();
+    // The teacher filter offers only the roster the caller can see — a
+    // grantee gets no member list from /centers/me, so just the trigger.
+    expect(screen.getByRole("combobox", { name: "Giáo viên" })).toBeInTheDocument();
+  });
+
   it("redirects members to the dashboard without fetching logs", async () => {
     server.use(
       http.get(`${API_URL}/centers/me`, () =>

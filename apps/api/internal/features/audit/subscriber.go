@@ -3,6 +3,7 @@ package audit
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -10,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"teka/apps/api/internal/features/auth"
+	"teka/apps/api/internal/features/centers"
 	"teka/apps/api/internal/features/invitations"
 	"teka/apps/api/internal/middleware"
 	"teka/apps/api/internal/shared/events"
@@ -202,6 +204,54 @@ func (s *Subscriber) toRow(e events.Event) (Log, bool) {
 			Action:      "auth.logout",
 			IP:          ev.IP,
 			UserAgent:   ev.UserAgent,
+		}, true
+	case centers.RolePermissionsChanged:
+		// Service events carry the before/after sets the request middleware
+		// cannot see; the middleware row for the same request stays the HTTP
+		// evidence. Same action name, distinguishable by the Method field.
+		return Log{
+			ID:          id.New(),
+			OccurredAt:  ev.OccurredAt,
+			CenterID:    nilIfZero(ev.CenterID),
+			ActorUserID: nilIfZero(ev.ActorID),
+			Action:      "center.role.permissions_update",
+			EntityType:  "center_role",
+			EntityID:    ev.RoleID.String(),
+			Metadata: Metadata{
+				"role_key": ev.RoleKey,
+				"before":   strings.Join(ev.Before, ","),
+				"after":    strings.Join(ev.After, ","),
+			},
+		}, true
+	case centers.MemberRoleChanged:
+		return Log{
+			ID:          id.New(),
+			OccurredAt:  ev.OccurredAt,
+			CenterID:    nilIfZero(ev.CenterID),
+			ActorUserID: nilIfZero(ev.ActorID),
+			Action:      "center.member.role_update",
+			EntityType:  "teacher",
+			EntityID:    ev.TeacherID.String(),
+			Metadata: Metadata{
+				"before": ev.Before,
+				"after":  ev.After,
+			},
+		}, true
+	case centers.MemberOverridesChanged:
+		return Log{
+			ID:          id.New(),
+			OccurredAt:  ev.OccurredAt,
+			CenterID:    nilIfZero(ev.CenterID),
+			ActorUserID: nilIfZero(ev.ActorID),
+			Action:      "center.member.overrides_update",
+			EntityType:  "teacher",
+			EntityID:    ev.TeacherID.String(),
+			Metadata: Metadata{
+				"before_grants": strings.Join(ev.BeforeGrants, ","),
+				"before_denies": strings.Join(ev.BeforeDenies, ","),
+				"after_grants":  strings.Join(ev.AfterGrants, ","),
+				"after_denies":  strings.Join(ev.AfterDenies, ","),
+			},
 		}, true
 	case invitations.MemberJoined:
 		// The service event, not the middleware, carries this action: the

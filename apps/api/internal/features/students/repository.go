@@ -66,7 +66,7 @@ func NewRepository(db *gorm.DB) Repository {
 // FKs stop cross-center writes; only this filter stops cross-tenant reads.
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("students.center_id = ?", sc.CenterID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("students.teacher_id = ?", sc.TeacherID)
 	}
 	return q
@@ -150,7 +150,7 @@ func (r *gormRepository) ContactExists(ctx context.Context, sc authctx.Scope, co
 	q := database.FromContext(ctx, r.db).
 		Table("contacts").
 		Where("id = ? AND center_id = ? AND deleted_at IS NULL", contactID, sc.CenterID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("teacher_id = ?", sc.TeacherID)
 	}
 	err := q.Count(&n).Error

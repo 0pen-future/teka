@@ -41,6 +41,23 @@ describe("lesson plans owner gate", () => {
     await waitFor(() => expect(router.state.location.pathname).toBe("/classbook"));
   });
 
+  it("renders the queue for a member granted teaching.review_queue", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(
+          ok({
+            center_name: "Trung Tâm Bình Minh",
+            permissions: ["teaching.review_queue"],
+          }),
+        ),
+      ),
+    );
+    renderPage();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Duyệt giáo án" }),
+    ).toBeInTheDocument();
+  });
+
   it("redirects a non-owner to /classbook", async () => {
     server.use(
       http.get(`${API_URL}/centers/me`, () =>

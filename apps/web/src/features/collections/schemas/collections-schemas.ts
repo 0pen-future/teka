@@ -292,3 +292,30 @@ export const markSentInputSchema = z.object({
 });
 
 export type MarkSentInput = z.infer<typeof markSentInputSchema>;
+
+/** `notifications.SendPreviewContact` — one contact of a pre-send preview bucket. */
+export const sendPreviewContactSchema = z.object({
+  contact_id: z.string(),
+  contact_name: z.string(),
+});
+
+export type SendPreviewContact = z.infer<typeof sendPreviewContactSchema>;
+
+/**
+ * `notifications.SendPreviewResponse`
+ * (`GET /billing-periods/:id/notifications/preview`) — the server-computed
+ * buckets a `zalo_personal` bulk send would produce right now: mapped+friend
+ * (auto-send), mapped but not a friend of the caller's Zalo (may not reach),
+ * unmapped (manual copy-paste fallback). Computed from the FULL target set
+ * intersected with the caller's live friend list, so the numbers hold past
+ * any roster page cap; `max_run_size` is the server's cap on one run's
+ * auto-send count.
+ */
+export const sendPreviewSchema = z.object({
+  auto_send: z.array(sendPreviewContactSchema),
+  mapped_not_friend: z.array(sendPreviewContactSchema),
+  unmapped: z.array(sendPreviewContactSchema),
+  max_run_size: z.number().int(),
+});
+
+export type SendPreview = z.infer<typeof sendPreviewSchema>;

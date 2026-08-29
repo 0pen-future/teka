@@ -52,7 +52,7 @@ func newTestRouterEnv(t *testing.T, env string) http.Handler {
 	// through them.
 	txMgr := database.NewTxManager(nil)
 	teachersSvc := teachers.NewService(teachers.NewRepository(nil))
-	centersSvc := centers.NewService(centers.NewRepository(nil), txMgr)
+	centersSvc := centers.NewService(centers.NewRepository(nil), txMgr, nil)
 	authSvc := auth.NewService(teachersSvc, auth.NewRepository(nil), auth.NewTokenIssuer(cfg.JWT), txMgr,
 		centersSvc, zaloSvc, cfg.Onboarding, cfg.Statements.PublicBaseURL, nil)
 	centersSvc.SetAccountDisabler(authSvc)

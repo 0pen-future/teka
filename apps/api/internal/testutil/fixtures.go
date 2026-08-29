@@ -93,6 +93,16 @@ func Teacher(t *testing.T, db *gorm.DB, opts ...TeacherOption) (*teachers.Accoun
 		}).Error; err != nil {
 			return err
 		}
+		// Same born-with-roles invariant as the real creation paths, so
+		// permission tests can assign roles without seeding them by hand.
+		if err := tx.Exec(`
+			INSERT INTO center_roles (id, center_id, key, name)
+			VALUES (gen_random_uuid(), @cid, 'giao_vien', 'Giáo viên'),
+				(gen_random_uuid(), @cid, 'hoc_vu', 'Học vụ'),
+				(gen_random_uuid(), @cid, 'tro_giang', 'Trợ giảng')`,
+			map[string]any{"cid": teacher.CenterID}).Error; err != nil {
+			return err
+		}
 		if err := tx.Create(acct).Error; err != nil {
 			return err
 		}
@@ -140,13 +150,17 @@ func centerOf(t *testing.T, db *gorm.DB, teacherID uuid.UUID) uuid.UUID {
 func ScopeFor(t *testing.T, db *gorm.DB, teacherID uuid.UUID) authctx.Scope {
 	t.Helper()
 	var row struct {
-		CenterID uuid.UUID
-		IsOwner  bool
+		CenterID       uuid.UUID
+		IsOwner        bool
+		CanSendReports bool
 	}
 	err := db.Raw(`
-		SELECT t.center_id, (c.owner_id = t.id) AS is_owner
+		SELECT t.center_id, (c.owner_id = t.id) AS is_owner,
+			COALESCE(cm.can_send_reports, FALSE) AS can_send_reports
 		FROM teachers t
 		JOIN centers c ON c.id = t.center_id
+		LEFT JOIN center_members cm ON cm.teacher_id = t.id
+			AND cm.center_id = t.center_id AND cm.left_at IS NULL
 		WHERE t.id = ?`, teacherID).Scan(&row).Error
 	if err != nil {
 		t.Fatalf("resolve fixture scope for %s: %v", teacherID, err)
@@ -154,7 +168,12 @@ func ScopeFor(t *testing.T, db *gorm.DB, teacherID uuid.UUID) authctx.Scope {
 	if row.CenterID == uuid.Nil {
 		t.Fatalf("fixture teacher %s has no center row", teacherID)
 	}
-	return authctx.Scope{TeacherID: teacherID, CenterID: row.CenterID, IsOwner: row.IsOwner}
+	return authctx.Scope{
+		TeacherID:      teacherID,
+		CenterID:       row.CenterID,
+		IsOwner:        row.IsOwner,
+		CanSendReports: row.CanSendReports,
+	}
 }
 
 // JoinCenter moves the teacher into the target center directly (bypassing the
@@ -185,6 +204,32 @@ func JoinCenter(t *testing.T, db *gorm.DB, teacherID, centerID uuid.UUID) {
 	if err != nil {
 		t.Fatalf("move fixture teacher %s into center %s: %v", teacherID, centerID, err)
 	}
+}
+
+// GrantSendReports sets the teacher's can_send_reports flag on their live
+// membership directly (bypassing the owner grant flow), so authorization
+// tests can make — or revoke — a delegated report sender in one call.
+func GrantSendReports(t *testing.T, db *gorm.DB, teacherID uuid.UUID, granted bool) {
+	t.Helper()
+	res := db.Exec(
+		"UPDATE center_members SET can_send_reports = ? WHERE teacher_id = ? AND left_at IS NULL",
+		granted, teacherID)
+	if res.Error != nil {
+		t.Fatalf("set can_send_reports=%v for fixture teacher %s: %v", granted, teacherID, res.Error)
+	}
+	if res.RowsAffected == 0 {
+		t.Fatalf("fixture teacher %s has no live membership to flag", teacherID)
+	}
+}
+
+// Secretary creates a member teacher in centerID already holding
+// can_send_reports — the delegated report sender the authorization matrix
+// revolves around.
+func Secretary(t *testing.T, db *gorm.DB, centerID uuid.UUID) (*teachers.Account, *teachers.Teacher) {
+	account, teacher := Teacher(t, db)
+	JoinCenter(t, db, teacher.ID, centerID)
+	GrantSendReports(t, db, teacher.ID, true)
+	return account, teacher
 }
 
 // ContactOption customizes a fixture contact before insertion.

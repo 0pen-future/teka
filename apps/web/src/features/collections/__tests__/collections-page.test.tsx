@@ -1,8 +1,10 @@
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
+import { API_URL, ok } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
 
@@ -52,5 +54,26 @@ describe("CollectionsPage", () => {
     expect(await screen.findByText(contactSingleChildOwing.full_name)).toBeInTheDocument();
     expect(screen.queryByText(contactTwoChildren.full_name)).not.toBeInTheDocument();
     expect(screen.queryByText(contactUnderpaid.full_name)).not.toBeInTheDocument();
+  });
+
+  it("keeps Thu tiền but hides Nhắc nợ from a plain member (D8)", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh" })),
+      ),
+    );
+    renderCollectionsPage();
+
+    await screen.findByText(contactTwoChildren.full_name);
+    // Payments stay member work; creating reminder sends does not.
+    expect(screen.getAllByRole("button", { name: "Thu tiền" }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Nhắc nợ" })).not.toBeInTheDocument();
+  });
+
+  it("offers Nhắc nợ to the owner by default", async () => {
+    renderCollectionsPage();
+
+    // findAll: the button appears only once /centers/me resolves owner-shaped.
+    expect((await screen.findAllByRole("button", { name: "Nhắc nợ" })).length).toBeGreaterThan(0);
   });
 });

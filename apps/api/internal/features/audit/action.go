@@ -28,6 +28,17 @@ var actions = map[string]ActionSpec{
 	// centers
 	"PATCH /api/v1/centers/me":                     {Action: "center.rename", EntityType: "center"},
 	"DELETE /api/v1/centers/me/members/:teacherId": {Action: "center.member.remove", EntityType: "teacher", IDParam: "teacherId"},
+	// Grant and revoke are separate routes precisely so these two actions stay
+	// distinguishable — the middleware stores no request body.
+	"POST /api/v1/centers/me/members/:teacherId/send-reports":   {Action: "center.member.send_reports_grant", EntityType: "teacher", IDParam: "teacherId"},
+	"DELETE /api/v1/centers/me/members/:teacherId/send-reports": {Action: "center.member.send_reports_revoke", EntityType: "teacher", IDParam: "teacherId"},
+	// The permission-management routes share their action names with the
+	// centers service events: this row is the HTTP evidence (status code, IP —
+	// including rejected attempts), while the service event row carries the
+	// committed before/after diff the middleware cannot see.
+	"PUT /api/v1/centers/me/roles/:roleId/permissions":    {Action: "center.role.permissions_update", EntityType: "center_role", IDParam: "roleId"},
+	"PUT /api/v1/centers/me/members/:teacherId/role":      {Action: "center.member.role_update", EntityType: "teacher", IDParam: "teacherId"},
+	"PUT /api/v1/centers/me/members/:teacherId/overrides": {Action: "center.member.overrides_update", EntityType: "teacher", IDParam: "teacherId"},
 
 	// invitations (owner-managed). The public preview/accept routes are
 	// deliberately absent: the middleware skips principal-less requests, and

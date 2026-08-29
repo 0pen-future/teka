@@ -79,7 +79,7 @@ func NewRepository(db *gorm.DB) Repository {
 // which carries the same column name.
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("class_sessions.center_id = ?", sc.CenterID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("class_sessions.teacher_id = ?", sc.TeacherID)
 	}
 	return q
