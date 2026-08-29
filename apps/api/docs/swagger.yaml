@@ -366,6 +366,43 @@ definitions:
         items:
           $ref: '#/definitions/centers.MemberResponse'
         type: array
+      permissions:
+        description: |-
+          Permissions is the caller's effective permission key list; the owner
+          always holds the full catalog (implicit superuser).
+        items:
+          type: string
+        type: array
+    type: object
+  centers.MemberOverridesRequest:
+    properties:
+      denies:
+        items:
+          type: string
+        type: array
+      grants:
+        items:
+          type: string
+        type: array
+    type: object
+  centers.MemberPermissionsResponse:
+    properties:
+      denies:
+        items:
+          type: string
+        type: array
+      full_name:
+        type: string
+      grants:
+        items:
+          type: string
+        type: array
+      role_id:
+        type: string
+      role_key:
+        type: string
+      teacher_id:
+        type: string
     type: object
   centers.MemberResponse:
     properties:
@@ -382,6 +419,13 @@ definitions:
         type: boolean
       phone:
         type: string
+    type: object
+  centers.MemberRoleRequest:
+    properties:
+      role_id:
+        type: string
+    required:
+    - role_id
     type: object
   centers.OverviewClassResponse:
     properties:
@@ -426,6 +470,28 @@ definitions:
       teacher_name:
         type: string
     type: object
+  centers.PermissionInfo:
+    properties:
+      key:
+        type: string
+      label:
+        type: string
+    type: object
+  centers.PermissionsResponse:
+    properties:
+      catalog:
+        items:
+          $ref: '#/definitions/centers.PermissionInfo'
+        type: array
+      members:
+        items:
+          $ref: '#/definitions/centers.MemberPermissionsResponse'
+        type: array
+      roles:
+        items:
+          $ref: '#/definitions/centers.RoleResponse'
+        type: array
+    type: object
   centers.RenameRequest:
     properties:
       name:
@@ -434,6 +500,26 @@ definitions:
         type: string
     required:
     - name
+    type: object
+  centers.RolePermissionsRequest:
+    properties:
+      permissions:
+        items:
+          type: string
+        type: array
+    type: object
+  centers.RoleResponse:
+    properties:
+      id:
+        type: string
+      key:
+        type: string
+      name:
+        type: string
+      permissions:
+        items:
+          type: string
+        type: array
     type: object
   centers.SessionAttendanceRow:
     properties:
@@ -3445,6 +3531,136 @@ paths:
       summary: Remove a member (owner-only)
       tags:
       - centers
+  /centers/me/members/{teacherId}/overrides:
+    put:
+      consumes:
+      - application/json
+      description: PUT-replace semantics over both lists. A reports.send grant dual-writes
+        the legacy can_send_reports flag in the same transaction.
+      parameters:
+      - description: teacher id
+        format: uuid
+        in: path
+        name: teacherId
+        required: true
+        type: string
+      - description: full grant and deny key lists
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/centers.MemberOverridesRequest'
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: not the owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: member not in this center, or target is the owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: unknown key, or key both granted and denied
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Replace a member's grant/deny overrides (owner-only)
+      tags:
+      - centers
+  /centers/me/members/{teacherId}/role:
+    put:
+      consumes:
+      - application/json
+      description: Role and member must both belong to the caller's center. The owner
+        cannot be the target — they sit outside the role system.
+      parameters:
+      - description: teacher id
+        format: uuid
+        in: path
+        name: teacherId
+        required: true
+        type: string
+      - description: role to assign
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/centers.MemberRoleRequest'
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: not the owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: role or member not in this center, or target is the owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: validation failed
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Assign a member's role (owner-only)
+      tags:
+      - centers
   /centers/me/members/{teacherId}/send-reports:
     delete:
       parameters:
@@ -3537,6 +3753,111 @@ paths:
       security:
       - BearerAuth: []
       summary: Grant the send-reports permission (owner-only)
+      tags:
+      - centers
+  /centers/me/permissions:
+    get:
+      description: Code-owned catalog (keys + Vietnamese labels), the center's roles
+        with their permission sets, and non-owner members with role + overrides.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/centers.PermissionsResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: not the owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get the permission-management read model (owner-only)
+      tags:
+      - centers
+  /centers/me/roles/{roleId}/permissions:
+    put:
+      consumes:
+      - application/json
+      description: PUT-replace semantics; keys are validated against the code-owned
+        catalog. reports.send is rejected here — it stays a per-member grant while
+        the legacy can_send_reports column lives.
+      parameters:
+      - description: role id
+        format: uuid
+        in: path
+        name: roleId
+        required: true
+        type: string
+      - description: full permission key list
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/centers.RolePermissionsRequest'
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: not the owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: role not in this center
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: unknown key, or reports.send on a role
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Replace a role's permission set (owner-only)
       tags:
       - centers
   /classes:

@@ -11,6 +11,10 @@ func RegisterRoutes(rg *gin.RouterGroup, h *Handler, requireAuth, resolveScope g
 	g.DELETE("/me/members/:teacherId", h.removeMember)
 	g.POST("/me/members/:teacherId/send-reports", h.grantSendReports)
 	g.DELETE("/me/members/:teacherId/send-reports", h.revokeSendReports)
+	g.GET("/me/permissions", h.permissions)
+	g.PUT("/me/roles/:roleId/permissions", h.replaceRolePermissions)
+	g.PUT("/me/members/:teacherId/role", h.assignMemberRole)
+	g.PUT("/me/members/:teacherId/overrides", h.replaceMemberOverrides)
 }
 
 // RegisterDashboardRoutes mounts the owner dashboard separately from

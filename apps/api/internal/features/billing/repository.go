@@ -277,7 +277,7 @@ func NewRepository(db *gorm.DB, attendanceSvc AttendanceSource) Repository {
 // center_id/teacher_id column names.
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("billing_periods.center_id = ?", sc.CenterID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("billing_periods.teacher_id = ?", sc.TeacherID)
 	}
 	return q
@@ -299,7 +299,7 @@ func (r *gormRepository) scopedRead(ctx context.Context, sc authctx.Scope) *gorm
 // invoiceScoped mirrors scoped for the invoices table.
 func (r *gormRepository) invoiceScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("invoices.center_id = ?", sc.CenterID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("invoices.teacher_id = ?", sc.TeacherID)
 	}
 	return q
@@ -471,7 +471,7 @@ func (r *gormRepository) TallyAttendance(ctx context.Context, sc authctx.Scope, 
 		Joins("JOIN contacts ON contacts.id = students.contact_id AND contacts.center_id = students.center_id").
 		Joins("JOIN classes ON classes.id = enrollments.class_id AND classes.center_id = enrollments.center_id").
 		Where("enrollments.center_id = ? AND enrollments.id IN ?", sc.CenterID, enrollmentIDs)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("enrollments.teacher_id = ?", sc.TeacherID)
 	}
 	var meta []tallyMetadataRow
@@ -515,7 +515,7 @@ func (r *gormRepository) OpeningBalances(ctx context.Context, sc authctx.Scope, 
 		Table("invoices").
 		Select("student_id, total_due, paid_amount").
 		Where("center_id = ? AND period_id = ? AND student_id IN ? AND status <> ?", sc.CenterID, prevPeriodID, studentIDs, InvoiceVoid)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("teacher_id = ?", sc.TeacherID)
 	}
 	var rows []row
@@ -557,7 +557,7 @@ func (r *gormRepository) AdjustmentTotals(ctx context.Context, sc authctx.Scope,
 		Select("invoice_adjustments.invoice_id AS invoice_id, SUM(invoice_adjustments.amount) AS total").
 		Joins("JOIN invoices ON invoices.id = invoice_adjustments.invoice_id AND invoices.center_id = invoice_adjustments.center_id").
 		Where("invoice_adjustments.center_id = ? AND invoices.period_id = ? AND invoice_adjustments.deleted_at IS NULL", sc.CenterID, periodID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("invoice_adjustments.teacher_id = ?", sc.TeacherID)
 	}
 	var rows []row
@@ -587,7 +587,7 @@ func (r *gormRepository) CarriedDebtStudents(ctx context.Context, sc authctx.Sco
 		Joins("JOIN contacts ON contacts.id = students.contact_id AND contacts.center_id = students.center_id").
 		Where("invoices.center_id = ? AND invoices.period_id = ? AND invoices.status <> ? AND (invoices.total_due - invoices.paid_amount) > 0",
 			sc.CenterID, prevPeriodID, InvoiceVoid)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("invoices.teacher_id = ?", sc.TeacherID)
 	}
 	var rows []CarriedDebtStudent
@@ -663,7 +663,7 @@ func (r *gormRepository) ZeroUnmatchedLines(ctx context.Context, sc authctx.Scop
 	q := database.FromContext(ctx, r.db).
 		Model(&InvoiceLine{}).
 		Where("center_id = ? AND invoice_id = ?", sc.CenterID, invoiceID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("teacher_id = ?", sc.TeacherID)
 	}
 	if len(keepEnrollmentIDs) > 0 {
@@ -675,7 +675,7 @@ func (r *gormRepository) ZeroUnmatchedLines(ctx context.Context, sc authctx.Scop
 func (r *gormRepository) ListInvoices(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) ([]Invoice, error) {
 	q := database.FromContext(ctx, r.db).
 		Where("center_id = ? AND period_id = ?", sc.CenterID, periodID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("teacher_id = ?", sc.TeacherID)
 	}
 	var rows []Invoice
@@ -720,7 +720,7 @@ func (r *gormRepository) IssueDraftInvoices(ctx context.Context, sc authctx.Scop
 	q := database.FromContext(ctx, r.db).
 		Model(&Invoice{}).
 		Where("center_id = ? AND period_id = ? AND status = ?", sc.CenterID, periodID, InvoiceDraft)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("teacher_id = ?", sc.TeacherID)
 	}
 	res := q.Updates(map[string]any{"status": InvoiceIssued, "updated_at": gorm.Expr("now()")})
@@ -738,7 +738,7 @@ func (r *gormRepository) VoidInvoices(ctx context.Context, sc authctx.Scope, per
 		Model(&Invoice{}).
 		Where("center_id = ? AND period_id = ? AND status = ? AND current_charge = 0 AND opening_balance = 0 AND adjustment_total = 0",
 			sc.CenterID, periodID, InvoiceDraft)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("teacher_id = ?", sc.TeacherID)
 	}
 	res := q.Updates(map[string]any{
@@ -809,7 +809,7 @@ func (r *gormRepository) CreateAdjustment(ctx context.Context, adj *InvoiceAdjus
 func (r *gormRepository) ListAdjustments(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID) ([]InvoiceAdjustment, error) {
 	q := database.FromContext(ctx, r.db).
 		Where("center_id = ? AND invoice_id = ? AND deleted_at IS NULL", sc.CenterID, invoiceID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("teacher_id = ?", sc.TeacherID)
 	}
 	var rows []InvoiceAdjustment
@@ -826,7 +826,7 @@ func (r *gormRepository) AdjustmentsBySourcePeriod(ctx context.Context, sc authc
 		Joins("JOIN billing_periods ON billing_periods.id = ? AND billing_periods.center_id = invoice_adjustments.center_id", periodID).
 		Where("invoice_adjustments.center_id = ? AND invoices.student_id = ? AND invoice_adjustments.deleted_at IS NULL", sc.CenterID, studentID).
 		Where("class_sessions.session_date BETWEEN billing_periods.period_start AND billing_periods.period_end")
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("invoice_adjustments.teacher_id = ?", sc.TeacherID)
 	}
 	var total int64
@@ -838,7 +838,7 @@ func (r *gormRepository) AdjustmentsBySourcePeriod(ctx context.Context, sc authc
 }
 
 func (r *gormRepository) RecalcInvoiceTotals(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID) error {
-	// The trailing (? OR invoices.teacher_id = ?) lets an owner's sc.IsOwner
+	// The trailing (? OR invoices.teacher_id = ?) lets an owner's sc.CenterWide()
 	// short-circuit the teacher_id check via SQL OR, mirroring scoped()'s Go
 	// conditional in a statement that must stay one atomic UPDATE.
 	res := database.FromContext(ctx, r.db).Exec(`
@@ -861,7 +861,7 @@ func (r *gormRepository) RecalcInvoiceTotals(ctx context.Context, sc authctx.Sco
 	`,
 		InvoiceDraft, InvoiceVoid, InvoiceIssued, InvoicePartiallyPaid, InvoicePaid,
 		invoiceID, sc.CenterID,
-		invoiceID, sc.CenterID, sc.IsOwner, sc.TeacherID,
+		invoiceID, sc.CenterID, sc.CenterWide(), sc.TeacherID,
 	)
 	if res.Error != nil {
 		return res.Error
@@ -945,7 +945,7 @@ func (r *gormRepository) SessionMeta(ctx context.Context, sc authctx.Scope, sess
 			class_sessions.center_id AS center_id`).
 		Joins("JOIN classes ON classes.id = class_sessions.class_id AND classes.center_id = class_sessions.center_id").
 		Where("class_sessions.center_id = ? AND class_sessions.id = ? AND class_sessions.deleted_at IS NULL", sc.CenterID, sessionID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("class_sessions.teacher_id = ?", sc.TeacherID)
 	}
 	var rows []row
@@ -971,7 +971,7 @@ func (r *gormRepository) StudentSnapshot(ctx context.Context, sc authctx.Scope, 
 		Select("students.contact_id AS contact_id, students.full_name AS student_name, contacts.full_name AS contact_name").
 		Joins("JOIN contacts ON contacts.id = students.contact_id AND contacts.center_id = students.center_id").
 		Where("students.center_id = ? AND students.id = ?", sc.CenterID, studentID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("students.teacher_id = ?", sc.TeacherID)
 	}
 	var rows []row

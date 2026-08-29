@@ -51,11 +51,12 @@ func NewDashboard(repo Repository, classes ClassReader, sessions SessionReader, 
 	return &Dashboard{repo: repo, classes: classes, sessions: sessions, attendance: attendance}
 }
 
-// requireOwner gates every dashboard read: members manage their own data
-// through the regular feature endpoints and never see each other's.
-func requireOwner(sc authctx.Scope) error {
-	if !sc.IsOwner {
-		return apperror.Forbidden("only the center owner can view the dashboard")
+// requireDashboardView gates every dashboard read: members manage their own
+// data through the regular feature endpoints and only see the center-wide
+// screens when granted dashboard.view.
+func requireDashboardView(sc authctx.Scope) error {
+	if !sc.Has(authctx.PermDashboardView) {
+		return apperror.Forbidden("you are not allowed to view the center dashboard")
 	}
 	return nil
 }
@@ -108,7 +109,7 @@ func monthRange(month string) (time.Time, time.Time, error) {
 
 // Teachers returns the roster with per-teacher activity counts.
 func (d *Dashboard) Teachers(ctx context.Context, sc authctx.Scope) ([]TeacherStatsResponse, error) {
-	if err := requireOwner(sc); err != nil {
+	if err := requireDashboardView(sc); err != nil {
 		return nil, err
 	}
 	rows, err := d.repo.DashboardTeacherStats(ctx, sc.CenterID)
@@ -130,7 +131,7 @@ func (d *Dashboard) Teachers(ctx context.Context, sc authctx.Scope) ([]TeacherSt
 // every live class of the center — including classes whose teacher has left —
 // so nothing the center paid for can disappear from sight.
 func (d *Dashboard) Overview(ctx context.Context, sc authctx.Scope, month string) ([]OverviewTeacherResponse, error) {
-	if err := requireOwner(sc); err != nil {
+	if err := requireDashboardView(sc); err != nil {
 		return nil, err
 	}
 	from, to, err := monthRange(month)
@@ -193,7 +194,7 @@ func (d *Dashboard) Overview(ctx context.Context, sc authctx.Scope, month string
 // TeacherClasses lists one teacher's classes for drill-down, reusing the
 // classes feature's own scoped listing.
 func (d *Dashboard) TeacherClasses(ctx context.Context, sc authctx.Scope, teacherID uuid.UUID, filter classes.ListFilter, p pagination.Params) ([]classes.Class, int64, error) {
-	if err := requireOwner(sc); err != nil {
+	if err := requireDashboardView(sc); err != nil {
 		return nil, 0, err
 	}
 	if err := d.requireCenterTeacher(ctx, sc, teacherID); err != nil {
@@ -205,7 +206,7 @@ func (d *Dashboard) TeacherClasses(ctx context.Context, sc authctx.Scope, teache
 // ClassSessions lists one class's materialised sessions in [from, to] with
 // per-session attendance stats, without generating anything.
 func (d *Dashboard) ClassSessions(ctx context.Context, sc authctx.Scope, teacherID, classID uuid.UUID, from, to time.Time) ([]SessionRowResponse, error) {
-	if err := requireOwner(sc); err != nil {
+	if err := requireDashboardView(sc); err != nil {
 		return nil, err
 	}
 	if err := d.requireCenterTeacher(ctx, sc, teacherID); err != nil {
@@ -245,7 +246,7 @@ func (d *Dashboard) ClassSessions(ctx context.Context, sc authctx.Scope, teacher
 // Session returns one session with its full attendance sheet and both revenue
 // numbers.
 func (d *Dashboard) Session(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*SessionDetailResponse, error) {
-	if err := requireOwner(sc); err != nil {
+	if err := requireDashboardView(sc); err != nil {
 		return nil, err
 	}
 	det, err := d.sessions.Get(ctx, sc, sessionID)

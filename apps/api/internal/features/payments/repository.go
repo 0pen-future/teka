@@ -138,7 +138,7 @@ func NewRepository(db *gorm.DB) Repository {
 // one teacher's own rows unless the caller is the center's owner.
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("payments.center_id = ?", sc.CenterID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("payments.teacher_id = ?", sc.TeacherID)
 	}
 	return q
@@ -147,7 +147,7 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 // allocationScoped mirrors scoped for the payment_allocations table.
 func (r *gormRepository) allocationScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("payment_allocations.center_id = ?", sc.CenterID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("payment_allocations.teacher_id = ?", sc.TeacherID)
 	}
 	return q
@@ -195,7 +195,7 @@ func (r *gormRepository) ListPayments(ctx context.Context, sc authctx.Scope, fil
 			Select("1").
 			Joins("JOIN invoices i ON i.id = pa.invoice_id AND i.center_id = pa.center_id").
 			Where("pa.payment_id = payments.id AND pa.center_id = ? AND i.period_id = ?", sc.CenterID, filter.PeriodID)
-		if !sc.IsOwner {
+		if !sc.CenterWide() {
 			sub = sub.Where("pa.teacher_id = ?", sc.TeacherID)
 		}
 		q = q.Where("EXISTS (?)", sub)
@@ -226,7 +226,7 @@ func (r *gormRepository) ListPayments(ctx context.Context, sc authctx.Scope, fil
 // Postgres's "FOR UPDATE cannot be applied to the nullable side of an outer
 // join" restriction, which only concerns columns from the locked relation.
 //
-// The (? OR i.teacher_id = ?) pair lets sc.IsOwner short-circuit the
+// The (? OR i.teacher_id = ?) pair lets sc.CenterWide() short-circuit the
 // teacher_id check via SQL OR, the same trick RecalcInvoiceTotals uses in
 // billing/repository.go, so the owner-oversight rule holds inside one raw
 // statement rather than a Go conditional building two SQL strings.
@@ -263,7 +263,7 @@ const candidateInvoicesQuery = `
 func (r *gormRepository) CandidateInvoices(ctx context.Context, sc authctx.Scope, contactID uuid.UUID) ([]Candidate, error) {
 	var rows []Candidate
 	err := database.FromContext(ctx, r.db).
-		Raw(candidateInvoicesQuery, sc.CenterID, sc.IsOwner, sc.TeacherID, contactID).
+		Raw(candidateInvoicesQuery, sc.CenterID, sc.CenterWide(), sc.TeacherID, contactID).
 		Scan(&rows).Error
 	if err != nil {
 		return nil, err
@@ -301,7 +301,7 @@ func (r *gormRepository) InvoicesByIDs(ctx context.Context, sc authctx.Scope, id
 		Table("invoices").
 		Select("id, contact_id, status, total_due, paid_amount").
 		Where("center_id = ? AND id IN ?", sc.CenterID, ids)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("teacher_id = ?", sc.TeacherID)
 	}
 	var rows []InvoiceRow
@@ -374,7 +374,7 @@ const recalcInvoicePaidQuery = `
 
 func (r *gormRepository) RecalcInvoicePaid(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID) error {
 	res := database.FromContext(ctx, r.db).
-		Exec(recalcInvoicePaidQuery, invoiceID, invoiceID, sc.CenterID, sc.IsOwner, sc.TeacherID)
+		Exec(recalcInvoicePaidQuery, invoiceID, invoiceID, sc.CenterID, sc.CenterWide(), sc.TeacherID)
 	return res.Error
 }
 
@@ -387,7 +387,7 @@ func (r *gormRepository) ResolveContactScope(ctx context.Context, sc authctx.Sco
 		Table("contacts").
 		Select("teacher_id").
 		Where("center_id = ? AND id = ?", sc.CenterID, contactID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("teacher_id = ?", sc.TeacherID)
 	}
 	if err := q.Find(&rows).Error; err != nil {
@@ -417,7 +417,7 @@ func (r *gormRepository) ListAllocations(ctx context.Context, sc authctx.Scope, 
 		Select(allocationRowSelect).
 		Joins("JOIN invoices i ON i.id = pa.invoice_id AND i.center_id = pa.center_id").
 		Where("pa.center_id = ? AND pa.payment_id = ?", sc.CenterID, paymentID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("pa.teacher_id = ?", sc.TeacherID)
 	}
 	var rows []AllocationRow
@@ -434,7 +434,7 @@ func (r *gormRepository) ListAllocationsForPayments(ctx context.Context, sc auth
 		Select(allocationRowSelect).
 		Joins("JOIN invoices i ON i.id = pa.invoice_id AND i.center_id = pa.center_id").
 		Where("pa.center_id = ? AND pa.payment_id IN ?", sc.CenterID, paymentIDs)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("pa.teacher_id = ?", sc.TeacherID)
 	}
 	var rows []AllocationRow

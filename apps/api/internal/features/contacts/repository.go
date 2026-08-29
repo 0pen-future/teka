@@ -63,7 +63,7 @@ func NewRepository(db *gorm.DB) Repository {
 // their center; a member sees only the rows they created themselves. Composite
 // FKs stop cross-center writes; only this filter stops cross-tenant reads.
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
-	return r.scopedBy(ctx, sc, sc.IsOwner)
+	return r.scopedBy(ctx, sc, sc.CenterWide())
 }
 
 // scopedRead is scoped()'s read-only sibling: the teacher filter is lifted
@@ -85,7 +85,7 @@ func (r *gormRepository) scopedBy(ctx context.Context, sc authctx.Scope, centerW
 // withStudentCount selects contacts joined against a grouped subquery of live
 // students, exposing student_count without a per-row query.
 func (r *gormRepository) withStudentCount(ctx context.Context, sc authctx.Scope) *gorm.DB {
-	return r.withStudentCountBy(ctx, sc, sc.IsOwner)
+	return r.withStudentCountBy(ctx, sc, sc.CenterWide())
 }
 
 func (r *gormRepository) withStudentCountBy(ctx context.Context, sc authctx.Scope, centerWide bool) *gorm.DB {
@@ -160,7 +160,7 @@ func (r *gormRepository) CountActiveStudents(ctx context.Context, sc authctx.Sco
 	q := database.FromContext(ctx, r.db).
 		Table("students").
 		Where("center_id = ? AND contact_id = ? AND deleted_at IS NULL", sc.CenterID, contactID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("teacher_id = ?", sc.TeacherID)
 	}
 	err := q.Count(&n).Error
@@ -172,7 +172,7 @@ func (r *gormRepository) ListStudentNames(ctx context.Context, sc authctx.Scope,
 	q := database.FromContext(ctx, r.db).
 		Table("students").
 		Where("center_id = ? AND contact_id = ? AND deleted_at IS NULL", sc.CenterID, contactID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("teacher_id = ?", sc.TeacherID)
 	}
 	err := q.Order("full_name").Limit(limit).Pluck("full_name", &names).Error

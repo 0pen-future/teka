@@ -35,7 +35,7 @@ func TestMemberIDsByPhoneKeysOnStorageForm(t *testing.T) {
 		{ID: teacher, FullName: "Nguyễn Văn Nam", Phone: "+84912345678"},
 		{ID: other, FullName: "Trần Thị Lan", Phone: "0987654321"},
 	}}
-	svc := NewService(repo, nil)
+	svc := NewService(repo, nil, nil)
 	scope := authctx.Scope{TeacherID: teacher, CenterID: uuid.New(), IsOwner: true}
 
 	dir, err := svc.MemberIDsByPhone(context.Background(), scope)
@@ -56,7 +56,7 @@ func TestMemberIDsByPhoneOmitsNonMembers(t *testing.T) {
 	// appears. The absence IS the authorization result — there is no second
 	// check to forget.
 	repo := &directoryRepo{rows: nil}
-	svc := NewService(repo, nil)
+	svc := NewService(repo, nil, nil)
 
 	dir, err := svc.MemberIDsByPhone(context.Background(), authctx.Scope{CenterID: uuid.New()})
 	require.NoError(t, err)
@@ -73,7 +73,7 @@ func TestMemberIDsByPhoneRejectsSharedPhone(t *testing.T) {
 		{ID: uuid.New(), Phone: "0912345678"},
 		{ID: uuid.New(), Phone: "+84912345678"},
 	}}
-	svc := NewService(repo, nil)
+	svc := NewService(repo, nil, nil)
 
 	_, err := svc.MemberIDsByPhone(context.Background(), authctx.Scope{CenterID: uuid.New()})
 	require.Error(t, err)
@@ -86,7 +86,7 @@ func TestMemberIDsByPhoneToleratesRepeatedRowForSameTeacher(t *testing.T) {
 		{ID: id, Phone: "0912345678"},
 		{ID: id, Phone: "+84912345678"},
 	}}
-	svc := NewService(repo, nil)
+	svc := NewService(repo, nil, nil)
 
 	dir, err := svc.MemberIDsByPhone(context.Background(), authctx.Scope{CenterID: uuid.New()})
 	require.NoError(t, err, "the same teacher under both spellings is not a conflict")
@@ -96,7 +96,7 @@ func TestMemberIDsByPhoneToleratesRepeatedRowForSameTeacher(t *testing.T) {
 func TestMemberIDsByPhonePropagatesRepositoryFailure(t *testing.T) {
 	t.Parallel()
 	repo := &directoryRepo{err: errors.New("boom")}
-	svc := NewService(repo, nil)
+	svc := NewService(repo, nil, nil)
 
 	_, err := svc.MemberIDsByPhone(context.Background(), authctx.Scope{CenterID: uuid.New()})
 	require.Error(t, err)

@@ -332,6 +332,18 @@ func ensureOwner(ctx context.Context, db *gorm.DB, log *slog.Logger, s seedTeach
 		).Error; err != nil {
 			return err
 		}
+		// Every center carries its three system roles from birth, the same
+		// invariant repository CreateCenter enforces; the owner's own
+		// membership stays roleless (owner is outside the role system).
+		if err := tx.Exec(`
+			INSERT INTO center_roles (id, center_id, key, name)
+			VALUES (gen_random_uuid(), @cid, 'giao_vien', 'Giáo viên'),
+				(gen_random_uuid(), @cid, 'hoc_vu', 'Học vụ'),
+				(gen_random_uuid(), @cid, 'tro_giang', 'Trợ giảng')`,
+			map[string]any{"cid": centerID},
+		).Error; err != nil {
+			return err
+		}
 		if err := tx.Exec(
 			"INSERT INTO user_accounts (id, role, phone, password_hash, status) VALUES (?, 'teachers', ?, ?, 'active')",
 			accountID, s.Phone, string(hash),

@@ -82,7 +82,7 @@ center, or to recover a center whose owner account was lost.`,
 // id — a self-referencing placeholder that satisfies the NOT NULL constraint
 // while its real FK check is deferred to commit, per migration
 // 000007_centers.up.sql) -> create the owner's teacher account in that center
-// -> open its membership -> rewrite owner_id to the real account id. If the
+// -> rewrite owner_id to the real account id -> open its membership. If the
 // phone already has an account, CreateInCenter fails and the whole
 // transaction — including the placeholder center row — rolls back, so there
 // is never a center left ownerless or an account left centerless.
@@ -108,14 +108,19 @@ func bootstrapCenter(ctx context.Context, db *gorm.DB, tx database.TxManager, te
 		}
 		accountID = aid
 
-		if err := centersSvc.OpenMembership(ctx, accountID, centerID); err != nil {
+		// owner_id must point at the real account BEFORE the membership
+		// opens: OpenMembership assigns the default member role to everyone
+		// except the center's owner, and against the placeholder it would
+		// misread the owner as a plain member. The FK is deferred, so the
+		// order swap is free.
+		if err := database.FromContext(ctx, db).
+			Model(&centers.Center{}).
+			Where("id = ?", centerID).
+			Update("owner_id", accountID).Error; err != nil {
 			return err
 		}
 
-		return database.FromContext(ctx, db).
-			Model(&centers.Center{}).
-			Where("id = ?", centerID).
-			Update("owner_id", accountID).Error
+		return centersSvc.OpenMembership(ctx, accountID, centerID)
 	})
 	if err != nil {
 		return uuid.Nil, uuid.Nil, err

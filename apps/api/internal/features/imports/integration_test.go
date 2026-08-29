@@ -48,7 +48,7 @@ func newRoster(t *testing.T) roster {
 	db := testutil.StartPostgres(t)
 	txMgr := database.NewTxManager(db)
 
-	centersSvc := centers.NewService(centers.NewRepository(db), txMgr)
+	centersSvc := centers.NewService(centers.NewRepository(db), txMgr, nil)
 	classesSvc := classes.NewService(classes.NewRepository(db), txMgr)
 	contactsSvc := contacts.NewService(contacts.NewRepository(db))
 	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db))

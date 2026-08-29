@@ -45,6 +45,10 @@ type Scope struct {
 	// (grant refuses the owner as target), so IsOwner and CanSendReports are
 	// mutually exclusive in practice.
 	CanSendReports bool
+	// Perms is the caller's effective permission set, resolved fresh from
+	// the database alongside the rest of the scope. Read-only after
+	// SetScope — Scope copies share the map.
+	Perms PermSet
 }
 
 // ReportsOversight reports whether the caller may read billing

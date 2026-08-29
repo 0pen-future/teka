@@ -70,7 +70,7 @@ func NewRepository(db *gorm.DB) Repository {
 // reads.
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("classes.center_id = ?", sc.CenterID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("classes.teacher_id = ?", sc.TeacherID)
 	}
 	return q
@@ -79,7 +79,7 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 // scopedSchedules is scoped's counterpart for the class_schedules table.
 func (r *gormRepository) scopedSchedules(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("class_schedules.center_id = ?", sc.CenterID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("class_schedules.teacher_id = ?", sc.TeacherID)
 	}
 	return q
@@ -171,7 +171,7 @@ func (r *gormRepository) CountOpenEnrollments(ctx context.Context, sc authctx.Sc
 	q := database.FromContext(ctx, r.db).
 		Table("enrollments").
 		Where("center_id = ? AND class_id = ? AND ended_on IS NULL AND deleted_at IS NULL", sc.CenterID, classID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("teacher_id = ?", sc.TeacherID)
 	}
 	err := q.Count(&n).Error

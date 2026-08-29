@@ -208,7 +208,7 @@ func NewRepository(db *gorm.DB) Repository {
 // one teacher's own rows unless the caller is the center's owner.
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Model(&Statement{}).Where("statements.center_id = ?", sc.CenterID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("statements.teacher_id = ?", sc.TeacherID)
 	}
 	return q
@@ -239,7 +239,7 @@ func (r *gormRepository) withContact(ctx context.Context, sc authctx.Scope) *gor
 }
 
 func (r *gormRepository) GetPeriodStatus(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (PeriodInfo, error) {
-	return r.periodStatus(ctx, sc, periodID, sc.IsOwner)
+	return r.periodStatus(ctx, sc, periodID, sc.CenterWide())
 }
 
 func (r *gormRepository) GetPeriodStatusRead(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (PeriodInfo, error) {

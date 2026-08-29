@@ -79,7 +79,7 @@ func NewRepository(db *gorm.DB) Repository {
 // join students and classes, which carry the same column name.
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("enrollments.center_id = ?", sc.CenterID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("enrollments.teacher_id = ?", sc.TeacherID)
 	}
 	return q
@@ -209,7 +209,7 @@ func (r *gormRepository) ClassDefaultPrice(ctx context.Context, sc authctx.Scope
 	q := database.FromContext(ctx, r.db).
 		Table("classes").
 		Where("id = ? AND center_id = ? AND deleted_at IS NULL", classID, sc.CenterID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("teacher_id = ?", sc.TeacherID)
 	}
 	err := q.Pluck("default_unit_price", &prices).Error
@@ -227,7 +227,7 @@ func (r *gormRepository) StudentExists(ctx context.Context, sc authctx.Scope, st
 	q := database.FromContext(ctx, r.db).
 		Table("students").
 		Where("id = ? AND center_id = ? AND deleted_at IS NULL", studentID, sc.CenterID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("teacher_id = ?", sc.TeacherID)
 	}
 	err := q.Count(&n).Error

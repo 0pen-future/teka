@@ -125,11 +125,11 @@ func (s *Service) publish(e events.Event) {
 	}
 }
 
-// requireOwner gates every invitation write: members do not manage
-// onboarding, only the center owner does.
-func requireOwner(sc authctx.Scope) error {
-	if !sc.IsOwner {
-		return apperror.Forbidden("only the center owner can manage invitations")
+// requireInvitationsManage gates every invitation write: onboarding is center
+// administration, open only to holders of invitations.manage.
+func requireInvitationsManage(sc authctx.Scope) error {
+	if !sc.Has(authctx.PermInvitationsManage) {
+		return apperror.Forbidden("you are not allowed to manage invitations")
 	}
 	return nil
 }
@@ -142,7 +142,7 @@ func requireOwner(sc authctx.Scope) error {
 // belongs to an existing account (anti-enumeration): the service never looks
 // that up.
 func (s *Service) Create(ctx context.Context, sc authctx.Scope, req CreateRequest) (*CreateResponse, error) {
-	if err := requireOwner(sc); err != nil {
+	if err := requireInvitationsManage(sc); err != nil {
 		return nil, err
 	}
 	phone := validation.NormalizePhone(req.Phone)
@@ -231,7 +231,7 @@ func (s *Service) attemptDM(ctx context.Context, ownerID uuid.UUID, phone, link 
 // List returns every invitation in the caller's center, pending first, with
 // the expired status derived at read time.
 func (s *Service) List(ctx context.Context, sc authctx.Scope) ([]InvitationResponse, error) {
-	if err := requireOwner(sc); err != nil {
+	if err := requireInvitationsManage(sc); err != nil {
 		return nil, err
 	}
 	rows, err := s.repo.List(ctx, sc.CenterID)
@@ -251,7 +251,7 @@ func (s *Service) List(ctx context.Context, sc authctx.Scope) ([]InvitationRespo
 // for an id belonging to another center — the same denial a missing id gets,
 // so cross-center existence is never distinguishable.
 func (s *Service) Revoke(ctx context.Context, sc authctx.Scope, invID uuid.UUID) error {
-	if err := requireOwner(sc); err != nil {
+	if err := requireInvitationsManage(sc); err != nil {
 		return err
 	}
 	if err := s.repo.Revoke(ctx, sc.CenterID, invID); err != nil {

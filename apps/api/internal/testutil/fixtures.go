@@ -93,6 +93,16 @@ func Teacher(t *testing.T, db *gorm.DB, opts ...TeacherOption) (*teachers.Accoun
 		}).Error; err != nil {
 			return err
 		}
+		// Same born-with-roles invariant as the real creation paths, so
+		// permission tests can assign roles without seeding them by hand.
+		if err := tx.Exec(`
+			INSERT INTO center_roles (id, center_id, key, name)
+			VALUES (gen_random_uuid(), @cid, 'giao_vien', 'Giáo viên'),
+				(gen_random_uuid(), @cid, 'hoc_vu', 'Học vụ'),
+				(gen_random_uuid(), @cid, 'tro_giang', 'Trợ giảng')`,
+			map[string]any{"cid": teacher.CenterID}).Error; err != nil {
+			return err
+		}
 		if err := tx.Create(acct).Error; err != nil {
 			return err
 		}

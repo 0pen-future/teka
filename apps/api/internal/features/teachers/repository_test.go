@@ -44,7 +44,7 @@ func TestCreateInCenterPhoneFormsCollide(t *testing.T) {
 	db := testutil.StartPostgres(t)
 	svc := teachers.NewService(teachers.NewRepository(db))
 	txMgr := database.NewTxManager(db)
-	centersSvc := centers.NewService(centers.NewRepository(db), txMgr)
+	centersSvc := centers.NewService(centers.NewRepository(db), txMgr, nil)
 	ctx := context.Background()
 	_, owner := testutil.Teacher(t, db)
 

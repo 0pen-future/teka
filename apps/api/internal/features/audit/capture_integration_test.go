@@ -68,7 +68,7 @@ func TestAuthFlowsWriteAuditRows(t *testing.T) {
 
 	txMgr := database.NewTxManager(db)
 	teachersSvc := teachers.NewService(teachers.NewRepository(db))
-	centersSvc := centers.NewService(centers.NewRepository(db), txMgr)
+	centersSvc := centers.NewService(centers.NewRepository(db), txMgr, nil)
 	issuer := auth.NewTokenIssuer(config.JWTConfig{
 		Secret:     testutil.JWTSecret,
 		AccessTTL:  15 * time.Minute,

@@ -63,7 +63,7 @@ func (h *Handler) create(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := requireOwner(sc); err != nil {
+	if err := requireInvitationsManage(sc); err != nil {
 		response.Err(c, err)
 		return
 	}
@@ -96,7 +96,7 @@ func (h *Handler) list(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := requireOwner(sc); err != nil {
+	if err := requireInvitationsManage(sc); err != nil {
 		response.Err(c, err)
 		return
 	}
@@ -126,7 +126,7 @@ func (h *Handler) revoke(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := requireOwner(sc); err != nil {
+	if err := requireInvitationsManage(sc); err != nil {
 		response.Err(c, err)
 		return
 	}

@@ -35,6 +35,9 @@ type MemberResponse struct {
 type MeResponse struct {
 	Center  CenterResponse   `json:"center"`
 	Members []MemberResponse `json:"members"`
+	// Permissions is the caller's effective permission key list; the owner
+	// always holds the full catalog (implicit superuser).
+	Permissions []string `json:"permissions"`
 }
 
 // MemberMeResponse is the body of GET /centers/me for a non-owner member —
@@ -43,6 +46,61 @@ type MeResponse struct {
 type MemberMeResponse struct {
 	CenterName     string `json:"center_name"`
 	CanSendReports bool   `json:"can_send_reports"`
+	// Permissions is the caller's effective permission key list — the client's
+	// source for gating navigation and pages.
+	Permissions []string `json:"permissions"`
+}
+
+// PermissionInfo is one catalog entry: a stable key plus its Vietnamese
+// display label. The catalog is code-owned; clients render labels from here
+// and keep no copy.
+type PermissionInfo struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+}
+
+// RoleResponse is one center role with its current permission set.
+type RoleResponse struct {
+	ID          uuid.UUID `json:"id"`
+	Key         string    `json:"key"`
+	Name        string    `json:"name"`
+	Permissions []string  `json:"permissions"`
+}
+
+// MemberPermissionsResponse is one non-owner member's RBAC state: assigned
+// role plus per-member overrides. RoleKey is "" when the stint holds no role.
+type MemberPermissionsResponse struct {
+	TeacherID uuid.UUID  `json:"teacher_id"`
+	FullName  string     `json:"full_name"`
+	RoleID    *uuid.UUID `json:"role_id"`
+	RoleKey   string     `json:"role_key"`
+	Grants    []string   `json:"grants"`
+	Denies    []string   `json:"denies"`
+}
+
+// PermissionsResponse is the body of GET /centers/me/permissions — the
+// owner's full permission-management read model.
+type PermissionsResponse struct {
+	Catalog []PermissionInfo            `json:"catalog"`
+	Roles   []RoleResponse              `json:"roles"`
+	Members []MemberPermissionsResponse `json:"members"`
+}
+
+// RolePermissionsRequest replaces a role's permission set. An empty list is
+// valid — it strips the role of every permission.
+type RolePermissionsRequest struct {
+	Permissions []string `json:"permissions"`
+}
+
+// MemberRoleRequest assigns a member's role.
+type MemberRoleRequest struct {
+	RoleID uuid.UUID `json:"role_id" binding:"required"`
+}
+
+// MemberOverridesRequest replaces a member's grant/deny override lists.
+type MemberOverridesRequest struct {
+	Grants []string `json:"grants"`
+	Denies []string `json:"denies"`
 }
 
 // TeacherStatsResponse is one roster row of GET /centers/dashboard/teachers:

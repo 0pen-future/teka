@@ -167,11 +167,11 @@ func NewRepository(db *gorm.DB) Repository {
 }
 
 // scoped binds a notifications-table query to sc's center, further narrowed
-// to sc's own rows unless sc is the center's owner — the standard
+// to sc's own rows unless sc sees center-wide data — the standard
 // owner-oversight template for the plain reads (List, MarkSent).
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("notifications.center_id = ?", sc.CenterID)
-	if !sc.IsOwner {
+	if !sc.CenterWide() {
 		q = q.Where("notifications.teacher_id = ?", sc.TeacherID)
 	}
 	return q

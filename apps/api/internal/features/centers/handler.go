@@ -181,6 +181,144 @@ func (h *Handler) setSendReports(c *gin.Context, enabled bool) {
 	c.Status(http.StatusNoContent)
 }
 
+// permissions returns the permission-management read model; owner-only.
+//
+//	@Summary		Get the permission-management read model (owner-only)
+//	@Description	Code-owned catalog (keys + Vietnamese labels), the center's roles with their permission sets, and non-owner members with role + overrides.
+//	@Tags			centers
+//	@Produce		json
+//	@Success		200	{object}	response.Envelope{data=PermissionsResponse}
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}	"not the owner"
+//	@Security		BearerAuth
+//	@Router			/centers/me/permissions [get]
+func (h *Handler) permissions(c *gin.Context) {
+	scope, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	resp, err := h.svc.Permissions(c.Request.Context(), scope)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, resp)
+}
+
+// replaceRolePermissions replaces a role's permission set; owner-only.
+//
+//	@Summary		Replace a role's permission set (owner-only)
+//	@Description	PUT-replace semantics; keys are validated against the code-owned catalog. reports.send is rejected here — it stays a per-member grant while the legacy can_send_reports column lives.
+//	@Tags			centers
+//	@Accept			json
+//	@Produce		json
+//	@Param			roleId	path	string					true	"role id"	format(uuid)
+//	@Param			request	body	RolePermissionsRequest	true	"full permission key list"
+//	@Success		204
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}	"not the owner"
+//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}	"role not in this center"
+//	@Failure		422	{object}	response.Envelope{error=response.ErrorBody}	"unknown key, or reports.send on a role"
+//	@Security		BearerAuth
+//	@Router			/centers/me/roles/{roleId}/permissions [put]
+func (h *Handler) replaceRolePermissions(c *gin.Context) {
+	scope, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	roleID, err := uuid.Parse(c.Param("roleId"))
+	if err != nil {
+		response.Err(c, apperror.NotFound("role"))
+		return
+	}
+	var req RolePermissionsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Err(c, validation.BindError(err))
+		return
+	}
+	if err := h.svc.ReplaceRolePermissions(c.Request.Context(), scope, roleID, req); err != nil {
+		response.Err(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// assignMemberRole assigns a member's role; owner-only.
+//
+//	@Summary		Assign a member's role (owner-only)
+//	@Description	Role and member must both belong to the caller's center. The owner cannot be the target — they sit outside the role system.
+//	@Tags			centers
+//	@Accept			json
+//	@Produce		json
+//	@Param			teacherId	path	string				true	"teacher id"	format(uuid)
+//	@Param			request		body	MemberRoleRequest	true	"role to assign"
+//	@Success		204
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}	"not the owner"
+//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}	"role or member not in this center, or target is the owner"
+//	@Failure		422	{object}	response.Envelope{error=response.ErrorBody}	"validation failed"
+//	@Security		BearerAuth
+//	@Router			/centers/me/members/{teacherId}/role [put]
+func (h *Handler) assignMemberRole(c *gin.Context) {
+	scope, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	targetID, err := uuid.Parse(c.Param("teacherId"))
+	if err != nil {
+		response.Err(c, apperror.NotFound("member"))
+		return
+	}
+	var req MemberRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Err(c, validation.BindError(err))
+		return
+	}
+	if err := h.svc.AssignMemberRole(c.Request.Context(), scope, targetID, req); err != nil {
+		response.Err(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// replaceMemberOverrides replaces a member's override lists; owner-only.
+//
+//	@Summary		Replace a member's grant/deny overrides (owner-only)
+//	@Description	PUT-replace semantics over both lists. A reports.send grant dual-writes the legacy can_send_reports flag in the same transaction.
+//	@Tags			centers
+//	@Accept			json
+//	@Produce		json
+//	@Param			teacherId	path	string					true	"teacher id"	format(uuid)
+//	@Param			request		body	MemberOverridesRequest	true	"full grant and deny key lists"
+//	@Success		204
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}	"not the owner"
+//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}	"member not in this center, or target is the owner"
+//	@Failure		422	{object}	response.Envelope{error=response.ErrorBody}	"unknown key, or key both granted and denied"
+//	@Security		BearerAuth
+//	@Router			/centers/me/members/{teacherId}/overrides [put]
+func (h *Handler) replaceMemberOverrides(c *gin.Context) {
+	scope, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	targetID, err := uuid.Parse(c.Param("teacherId"))
+	if err != nil {
+		response.Err(c, apperror.NotFound("member"))
+		return
+	}
+	var req MemberOverridesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Err(c, validation.BindError(err))
+		return
+	}
+	if err := h.svc.ReplaceMemberOverrides(c.Request.Context(), scope, targetID, req); err != nil {
+		response.Err(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 // DashboardHandler exposes the owner dashboard endpoints.
 type DashboardHandler struct {
 	svc *Dashboard
@@ -302,7 +440,7 @@ func (h *DashboardHandler) teacherClasses(c *gin.Context) {
 	// Authorization outranks validation: a non-owner gets the same 403
 	// whatever they send, learning nothing about parameter shapes. The
 	// service re-checks ownership as the real gate.
-	if err := requireOwner(scope); err != nil {
+	if err := requireDashboardView(scope); err != nil {
 		response.Err(c, err)
 		return
 	}
@@ -356,7 +494,7 @@ func (h *DashboardHandler) classSessions(c *gin.Context) {
 		return
 	}
 	// Same authorization-before-validation order as teacherClasses.
-	if err := requireOwner(scope); err != nil {
+	if err := requireDashboardView(scope); err != nil {
 		response.Err(c, err)
 		return
 	}

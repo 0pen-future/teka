@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/shared/authctx"
+	"teka/apps/api/internal/shared/events"
 	"teka/apps/api/internal/shared/validation"
 )
 
@@ -27,11 +30,23 @@ type Service struct {
 	repo     Repository
 	disabler AccountDisabler
 	tx       database.TxManager
+	// bus receives the permission-mutation events for the audit trail. Nil is
+	// a supported state — publish goes through the nil-safe helper below.
+	bus events.Bus
 }
 
-// NewService builds the centers service.
-func NewService(repo Repository, tx database.TxManager) *Service {
-	return &Service{repo: repo, tx: tx}
+// NewService builds the centers service. The bus is a constructor parameter
+// rather than a setter because it exists before centers is built (unlike the
+// auth cross-wiring below, there is no construction cycle to break).
+func NewService(repo Repository, tx database.TxManager, bus events.Bus) *Service {
+	return &Service{repo: repo, tx: tx, bus: bus}
+}
+
+// publish emits e when a bus is wired; a nil bus makes every publish a no-op.
+func (s *Service) publish(e events.Event) {
+	if s.bus != nil {
+		s.bus.Publish(e)
+	}
 }
 
 // SetAccountDisabler wires the auth dependency after construction — a
@@ -55,12 +70,27 @@ func (s *Service) ResolveScope(ctx context.Context, teacherID uuid.UUID) (authct
 	if err != nil {
 		return authctx.Scope{}, apperror.Internal(err)
 	}
+	perms := authctx.BuildPermSet(splitKeys(row.RolePerms), splitKeys(row.Grants), splitKeys(row.Denies))
 	return authctx.Scope{
-		TeacherID:      teacherID,
-		CenterID:       row.CenterID,
-		IsOwner:        row.IsOwner,
-		CanSendReports: row.CanSendReports,
+		TeacherID: teacherID,
+		CenterID:  row.CenterID,
+		IsOwner:   row.IsOwner,
+		// Dual life: the column stays authoritative while grant/revoke
+		// mirrors into reports.send override rows; the OR only widens, and
+		// membership close/reopen resets both sides atomically so a revoked
+		// permission cannot resurrect through either source.
+		CanSendReports: row.CanSendReports || perms.HasKey(authctx.PermReportsSend),
+		Perms:          perms,
 	}, nil
+}
+
+// splitKeys undoes the repository's string_agg(',') packing; empty input
+// means no keys.
+func splitKeys(joined string) []string {
+	if joined == "" {
+		return nil
+	}
+	return strings.Split(joined, ",")
 }
 
 // CenterOwner returns the owner teacher id of teacherID's current center, and
@@ -184,14 +214,19 @@ func (s *Service) Me(ctx context.Context, scope authctx.Scope) (any, error) {
 		return nil, apperror.Internal(err)
 	}
 	if !scope.IsOwner {
-		return &MemberMeResponse{CenterName: center.Name, CanSendReports: scope.CanSendReports}, nil
+		return &MemberMeResponse{
+			CenterName:     center.Name,
+			CanSendReports: scope.CanSendReports,
+			Permissions:    scope.EffectiveKeys(),
+		}, nil
 	}
 	members, err := s.repo.ListMembers(ctx, scope.CenterID)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
 	resp := &MeResponse{
-		Center: CenterResponse{ID: center.ID, Name: center.Name, IsOwner: true},
+		Center:      CenterResponse{ID: center.ID, Name: center.Name, IsOwner: true},
+		Permissions: scope.EffectiveKeys(),
 	}
 	for _, m := range members {
 		resp.Members = append(resp.Members, MemberResponse(m))
@@ -199,10 +234,10 @@ func (s *Service) Me(ctx context.Context, scope authctx.Scope) (any, error) {
 	return resp, nil
 }
 
-// Rename changes the center's display name; owners only.
+// Rename changes the center's display name; takes center.manage.
 func (s *Service) Rename(ctx context.Context, scope authctx.Scope, req RenameRequest) error {
-	if !scope.IsOwner {
-		return apperror.Forbidden("only the center owner can rename it")
+	if !scope.Has(authctx.PermCenterManage) {
+		return apperror.Forbidden("you are not allowed to rename the center")
 	}
 	err := s.repo.Rename(ctx, scope.CenterID, req.Name)
 	if errors.Is(err, ErrNotFound) {
@@ -234,21 +269,28 @@ func (s *Service) SetSendReports(ctx context.Context, scope authctx.Scope, targe
 	return nil
 }
 
-// RemoveMember offboards a member: owner-only. The membership stint closes
+// RemoveMember offboards a member: takes members.manage. The membership stint closes
 // and the account is disabled — status flips to disabled and every refresh
 // token it holds is revoked, via AccountDisabler (*auth.Service.Disable) — no
 // new center is provisioned; the member simply loses access until re-invited.
 // teachers.center_id is left pointing at this center: ResolveScope already
 // 401s a disabled account, and the accept flow's reactivate path is what
-// eventually moves it on re-invite. The owner cannot remove themselves: with
-// members around it would orphan the center, and alone there is nothing to
-// remove.
+// eventually moves it on re-invite. Nobody removes themselves, and the owner
+// can never be the target: removing them would orphan the center — a
+// members.manage grant must not become an escalation path over the owner.
 func (s *Service) RemoveMember(ctx context.Context, scope authctx.Scope, targetID uuid.UUID) error {
-	if !scope.IsOwner {
-		return apperror.Forbidden("only the owner can remove a member")
+	if !scope.Has(authctx.PermMembersManage) {
+		return apperror.Forbidden("you are not allowed to remove a member")
 	}
 	if targetID == scope.TeacherID {
-		return apperror.Invalid("the owner cannot remove themselves", nil)
+		return apperror.Invalid("you cannot remove yourself", nil)
+	}
+	center, err := s.repo.GetCenter(ctx, scope.CenterID)
+	if err != nil {
+		return apperror.Internal(err)
+	}
+	if targetID == center.OwnerID {
+		return apperror.Invalid("the center owner cannot be removed", nil)
 	}
 	if _, err := s.repo.GetTeacherInCenter(ctx, scope.CenterID, targetID); err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -257,7 +299,7 @@ func (s *Service) RemoveMember(ctx context.Context, scope authctx.Scope, targetI
 		return apperror.Internal(err)
 	}
 
-	err := s.tx.WithinTx(ctx, func(ctx context.Context) error {
+	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
 		if err := s.repo.CloseMembership(ctx, targetID, scope.CenterID); err != nil {
 			return err
 		}
@@ -269,5 +311,246 @@ func (s *Service) RemoveMember(ctx context.Context, scope authctx.Scope, targetI
 		}
 		return apperror.From(err)
 	}
+	return nil
+}
+
+// requirePermissionAdmin gates the permission-management endpoints. This is
+// deliberately Scope.IsOwner, NOT a catalog key: whoever manages permissions
+// can grant themselves everything, so delegating it would be a one-hop
+// escalation path.
+func requirePermissionAdmin(scope authctx.Scope) error {
+	if !scope.IsOwner {
+		return apperror.Forbidden("only the owner can manage permissions")
+	}
+	return nil
+}
+
+// normalizeKeys validates keys against the registry and returns them deduped
+// in stable registry order; an unknown key is a 422 on the given field.
+func normalizeKeys(field string, keys []string) ([]string, error) {
+	for _, key := range keys {
+		if !authctx.KnownPerm(key) {
+			return nil, apperror.Invalid("validation failed",
+				map[string]string{field: fmt.Sprintf("unknown permission key %q", key)})
+		}
+	}
+	seen := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		seen[key] = struct{}{}
+	}
+	out := make([]string, 0, len(seen))
+	for _, key := range authctx.PermKeys() {
+		if _, ok := seen[key]; ok {
+			out = append(out, key)
+		}
+	}
+	return out, nil
+}
+
+// knownKeysOf filters a comma-joined DB list through the registry into stable
+// order — assignments for keys a code rollback no longer defines stay in the
+// database but never surface in responses or events.
+func knownKeysOf(joined string) []string {
+	set := make(map[string]struct{})
+	for _, key := range splitKeys(joined) {
+		if authctx.KnownPerm(key) {
+			set[key] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(set))
+	for _, key := range authctx.PermKeys() {
+		if _, ok := set[key]; ok {
+			out = append(out, key)
+		}
+	}
+	return out
+}
+
+// Permissions returns the owner's permission-management read model: the
+// code-owned catalog, the center's roles with their sets, and the non-owner
+// members with role + overrides.
+func (s *Service) Permissions(ctx context.Context, scope authctx.Scope) (*PermissionsResponse, error) {
+	if err := requirePermissionAdmin(scope); err != nil {
+		return nil, err
+	}
+	roles, err := s.repo.ListRoles(ctx, scope.CenterID)
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+	members, err := s.repo.ListMemberRBAC(ctx, scope.CenterID)
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+	resp := &PermissionsResponse{
+		Catalog: make([]PermissionInfo, 0, len(authctx.PermKeys())),
+		Roles:   make([]RoleResponse, 0, len(roles)),
+		Members: make([]MemberPermissionsResponse, 0, len(members)),
+	}
+	for _, key := range authctx.PermKeys() {
+		resp.Catalog = append(resp.Catalog, PermissionInfo{Key: key, Label: authctx.PermLabel(key)})
+	}
+	for _, r := range roles {
+		resp.Roles = append(resp.Roles, RoleResponse{
+			ID: r.ID, Key: r.Key, Name: r.Name, Permissions: knownKeysOf(r.Perms),
+		})
+	}
+	for _, m := range members {
+		resp.Members = append(resp.Members, MemberPermissionsResponse{
+			TeacherID: m.TeacherID,
+			FullName:  m.FullName,
+			RoleID:    m.RoleID,
+			RoleKey:   m.RoleKey,
+			Grants:    knownKeysOf(m.Grants),
+			Denies:    knownKeysOf(m.Denies),
+		})
+	}
+	return resp, nil
+}
+
+// ReplaceRolePermissions swaps a role's permission set; owner-only. The role
+// must belong to the caller's center — the path id is only the target,
+// tenancy comes from scope.
+func (s *Service) ReplaceRolePermissions(ctx context.Context, scope authctx.Scope, roleID uuid.UUID, req RolePermissionsRequest) error {
+	if err := requirePermissionAdmin(scope); err != nil {
+		return err
+	}
+	keys, err := normalizeKeys("permissions", req.Permissions)
+	if err != nil {
+		return err
+	}
+	// Dual life: while the legacy can_send_reports column is authoritative,
+	// reports.send is assignable per member only — a role-held grant has no
+	// column to mirror into and would break the phase-4 parity check.
+	for _, key := range keys {
+		if key == authctx.PermReportsSend {
+			return apperror.Invalid("validation failed", map[string]string{
+				"permissions": "reports.send can only be granted per member"})
+		}
+	}
+	var ev RolePermissionsChanged
+	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		role, err := s.repo.GetRole(ctx, scope.CenterID, roleID)
+		if err != nil {
+			return err
+		}
+		ev = RolePermissionsChanged{
+			OccurredAt: time.Now(),
+			CenterID:   scope.CenterID,
+			ActorID:    scope.TeacherID,
+			RoleID:     role.ID,
+			RoleKey:    role.Key,
+			Before:     knownKeysOf(role.Perms),
+			After:      keys,
+		}
+		return s.repo.ReplaceRolePermissions(ctx, roleID, keys)
+	})
+	if errors.Is(err, ErrNotFound) {
+		return apperror.NotFound("role")
+	}
+	if err != nil {
+		return apperror.From(err)
+	}
+	s.publish(ev)
+	return nil
+}
+
+// AssignMemberRole assigns a member's role; owner-only. Role and member must
+// both resolve inside the caller's center; the owner can never be the target
+// (they sit outside the role system, same refusal as SetSendReports).
+func (s *Service) AssignMemberRole(ctx context.Context, scope authctx.Scope, targetID uuid.UUID, req MemberRoleRequest) error {
+	if err := requirePermissionAdmin(scope); err != nil {
+		return err
+	}
+	// The role resolves outside the transaction: roles are never deleted (the
+	// three system roles have no delete path), so there is no window in which
+	// a resolved role could vanish before the assignment below.
+	role, err := s.repo.GetRole(ctx, scope.CenterID, req.RoleID)
+	if errors.Is(err, ErrNotFound) {
+		return apperror.NotFound("role")
+	}
+	if err != nil {
+		return apperror.Internal(err)
+	}
+	var ev MemberRoleChanged
+	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		member, err := s.repo.GetMemberRBAC(ctx, scope.CenterID, targetID)
+		if err != nil {
+			return err
+		}
+		ev = MemberRoleChanged{
+			OccurredAt: time.Now(),
+			CenterID:   scope.CenterID,
+			ActorID:    scope.TeacherID,
+			TeacherID:  targetID,
+			Before:     member.RoleKey,
+			After:      role.Key,
+		}
+		return s.repo.SetMemberRole(ctx, scope.CenterID, targetID, role.ID)
+	})
+	if errors.Is(err, ErrNotFound) {
+		return apperror.NotFound("member")
+	}
+	if err != nil {
+		return apperror.From(err)
+	}
+	s.publish(ev)
+	return nil
+}
+
+// ReplaceMemberOverrides swaps a member's grant/deny override lists;
+// owner-only. Adding or removing a reports.send grant dual-writes the legacy
+// can_send_reports column in the same transaction — the column stays
+// authoritative until phase 4 drops it.
+func (s *Service) ReplaceMemberOverrides(ctx context.Context, scope authctx.Scope, targetID uuid.UUID, req MemberOverridesRequest) error {
+	if err := requirePermissionAdmin(scope); err != nil {
+		return err
+	}
+	grants, err := normalizeKeys("grants", req.Grants)
+	if err != nil {
+		return err
+	}
+	denies, err := normalizeKeys("denies", req.Denies)
+	if err != nil {
+		return err
+	}
+	for _, key := range denies {
+		for _, g := range grants {
+			if key == g {
+				return apperror.Invalid("validation failed", map[string]string{
+					"denies": fmt.Sprintf("key %q cannot be both granted and denied", key)})
+			}
+		}
+	}
+	canSend := false
+	for _, key := range grants {
+		if key == authctx.PermReportsSend {
+			canSend = true
+		}
+	}
+	var ev MemberOverridesChanged
+	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		member, err := s.repo.GetMemberRBAC(ctx, scope.CenterID, targetID)
+		if err != nil {
+			return err
+		}
+		ev = MemberOverridesChanged{
+			OccurredAt:   time.Now(),
+			CenterID:     scope.CenterID,
+			ActorID:      scope.TeacherID,
+			TeacherID:    targetID,
+			BeforeGrants: knownKeysOf(member.Grants),
+			BeforeDenies: knownKeysOf(member.Denies),
+			AfterGrants:  grants,
+			AfterDenies:  denies,
+		}
+		return s.repo.ReplaceMemberOverrides(ctx, scope.CenterID, targetID, grants, denies, canSend)
+	})
+	if errors.Is(err, ErrNotFound) {
+		return apperror.NotFound("member")
+	}
+	if err != nil {
+		return apperror.From(err)
+	}
+	s.publish(ev)
 	return nil
 }
