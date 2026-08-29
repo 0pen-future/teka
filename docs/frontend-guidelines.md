@@ -62,6 +62,19 @@ secrets. The dev server reads `apps/web/.env.development`; production builds
 must receive `VITE_API_URL` at build time (owned by the Docker/CI setup) — a
 build without it renders a readable startup error, not a working app.
 
+## Permission gating
+
+- Gate role-dependent nav entries and pages on the caller's effective
+  permission keys via `useCenterContext().has(key)` — never on `isOwner`
+  alone. The server folds the owner bypass into the `permissions` array from
+  `GET /centers/me` (and `has` still short-circuits owners as rollout
+  tolerance), so a plain key lookup is correct for both roles.
+- A gated page needs both the hidden nav entry AND its own deep-link guard
+  (redirect or enabled-gated query); hiding the link is not authorization.
+  Write actions the API reserves for the owner stay behind `isOwner`.
+- Permission labels come from the API catalog response only — no TS-side
+  label map.
+
 ## Forms and validation
 
 react-hook-form + zod resolvers; schemas colocated with the feature. Surface
