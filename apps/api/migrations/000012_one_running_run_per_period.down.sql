@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS uq_notification_runs_one_active_period;
