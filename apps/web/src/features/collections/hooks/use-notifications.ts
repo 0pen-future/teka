@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   bulkSendNotifications,
   getNotificationRun,
+  getSendPreview,
   listNotifications,
   markNotificationsSent,
   resumeNotificationRun,
@@ -19,7 +20,28 @@ export const notificationsKeys = {
   list: (periodId: string, params: ListNotificationsParams) =>
     [...notificationsKeys.lists(), periodId, params] as const,
   run: (periodId: string) => [...notificationsKeys.all, "run", periodId] as const,
+  preview: (periodId: string, purpose: string) =>
+    [...notificationsKeys.all, "preview", periodId, purpose] as const,
 };
+
+/**
+ * The pre-send buckets for the confirm dialog. Server-guarded like BulkSend
+ * (reports oversight) and backed by a live Zalo friend-list call, so callers
+ * enable it only while the dialog is open — never as a page-level fetch.
+ * `staleTime: 0` (default) + refetch on each open keeps the counts honest
+ * against friend-list changes between opens.
+ */
+export function useSendPreview(
+  periodId: string | undefined,
+  purpose: "statements" | "reminder",
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: notificationsKeys.preview(periodId ?? "", purpose),
+    queryFn: () => getSendPreview(periodId!, purpose),
+    enabled: Boolean(periodId) && enabled,
+  });
+}
 
 /**
  * Reads back persisted delivery bookkeeping only (`status`/`sent_at`) — the

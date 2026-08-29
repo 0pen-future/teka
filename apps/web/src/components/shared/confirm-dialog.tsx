@@ -20,6 +20,8 @@ interface ConfirmDialogProps {
   destructive?: boolean;
   /** Disables both buttons and keeps the dialog open while the action runs. */
   pending?: boolean;
+  /** Disables only the confirm button — cancel stays available (e.g. a blocked send). */
+  confirmDisabled?: boolean;
   onConfirm: () => void;
 }
 
@@ -31,6 +33,7 @@ export function ConfirmDialog({
   confirmLabel = "Xác nhận",
   destructive = false,
   pending = false,
+  confirmDisabled = false,
   onConfirm,
 }: ConfirmDialogProps) {
   return (
@@ -48,7 +51,7 @@ export function ConfirmDialog({
           </DialogClose>
           <Button
             variant={destructive ? "destructive" : "default"}
-            disabled={pending}
+            disabled={pending || confirmDisabled}
             onClick={onConfirm}
           >
             {pending ? "Đang xử lý…" : confirmLabel}

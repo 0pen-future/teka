@@ -7,6 +7,7 @@ import { InviteSection } from "@/features/invitation";
 import { MemberList } from "../components/member-list";
 import { RemoveMemberDialog } from "../components/remove-member-dialog";
 import { RenameCenterDialog } from "../components/rename-center-dialog";
+import { SendReportsPermissionDialog } from "../components/send-reports-permission-dialog";
 import { useCenter } from "../hooks/use-center";
 import type { CenterMember } from "../schemas/center-schemas";
 
@@ -20,6 +21,7 @@ export function CenterPage() {
   const { data, isPending, isError } = useCenter();
   const [renameOpen, setRenameOpen] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<CenterMember | null>(null);
+  const [sendReportsTarget, setSendReportsTarget] = useState<CenterMember | null>(null);
 
   if (isPending) {
     return <p className="text-[14px] text-ink-400">Đang tải…</p>;
@@ -86,7 +88,12 @@ export function CenterPage() {
           <p className="font-display text-[17px] font-bold text-ink-900">
             Giáo viên trong trung tâm
           </p>
-          <MemberList members={members} canRemove onRemove={(member) => setRemoveTarget(member)} />
+          <MemberList
+            members={members}
+            canRemove
+            onRemove={(member) => setRemoveTarget(member)}
+            onToggleSendReports={(member) => setSendReportsTarget(member)}
+          />
         </HvCard>
 
         <InviteSection />
@@ -106,6 +113,17 @@ export function CenterPage() {
             }
           }}
           member={removeTarget}
+        />
+      ) : null}
+      {sendReportsTarget ? (
+        <SendReportsPermissionDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) {
+              setSendReportsTarget(null);
+            }
+          }}
+          member={sendReportsTarget}
         />
       ) : null}
     </div>

@@ -11,6 +11,7 @@ import { collectionsRoutes } from "@/features/collections/routes";
 import { dashboardRoutes } from "@/features/dashboard/routes";
 import { invitationRoutes } from "@/features/invitation";
 import { profileRoutes } from "@/features/profile/routes";
+import { reportsRoutes } from "@/features/reports";
 import { rosterRoutes } from "@/features/roster/routes";
 import { statementRoutes } from "@/features/statement";
 import { teachingRoutes } from "@/features/teaching/routes";
@@ -45,6 +46,7 @@ export const router = createBrowserRouter([
           ...attendanceRoutes,
           ...billingRoutes,
           ...collectionsRoutes,
+          ...reportsRoutes,
           ...profileRoutes,
           ...centerRoutes,
           ...auditRoutes,

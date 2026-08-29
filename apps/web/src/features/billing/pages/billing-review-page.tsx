@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useParams } from "react-router";
 
 import { HvButton, hvToast } from "@/components/hv";
+import { useCenterContext } from "@/features/teaching";
 import { cn, formatMoney } from "@/lib/utils";
 
 import { AdjustmentDialog } from "../components/adjustment-dialog";
@@ -51,6 +52,9 @@ export function BillingReviewPage() {
     period?.period_end,
   );
   const closeMutation = useClosePeriod(periodId ?? "");
+  // Sending is owner/send-reports-holder work — a plain member still closes
+  // periods but loses the send entry point (server enforces regardless).
+  const { canRunSends } = useCenterContext();
 
   const [adjustRow, setAdjustRow] = useState<ReviewRow | null>(null);
   const [closeDialogOpen, setCloseDialogOpen] = useState(false);
@@ -140,9 +144,11 @@ export function BillingReviewPage() {
             <span className="rounded-[var(--radius-pill)] bg-mint-50 px-3 py-1.5 font-display text-[13px] font-bold text-mint-600">
               ✓ Đã chốt — kỳ đã khóa
             </span>
-            <Link to={`/notifications/${periodId}`} className={secondaryLinkButtonClassName}>
-              Gửi thông báo →
-            </Link>
+            {canRunSends ? (
+              <Link to={`/notifications/${periodId}`} className={secondaryLinkButtonClassName}>
+                Gửi thông báo →
+              </Link>
+            ) : null}
           </div>
         ) : (
           <HvButton

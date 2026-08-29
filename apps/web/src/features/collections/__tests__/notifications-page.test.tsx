@@ -1,8 +1,10 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
+import { API_URL, ok } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
 
@@ -13,6 +15,7 @@ import {
   contactUnderpaid,
   fixturePeriod,
   resetCollectionsStore,
+  seedOldRunFailure,
 } from "./collections-handlers";
 
 function renderNotificationsPage() {
@@ -89,5 +92,45 @@ describe("NotificationsPage", () => {
     expect(updatedButtons[3]).toBeEnabled();
 
     expect(screen.getByText(contactUnderpaid.full_name)).toBeInTheDocument();
+  });
+});
+
+describe("NotificationsPage member gating (D8)", () => {
+  it("renders a read-only ledger without send affordances for a plain member", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh" })),
+      ),
+    );
+    // A failed personal row from an earlier run keeps the ledger non-empty.
+    seedOldRunFailure("Phiên Zalo đã hết hạn");
+    renderNotificationsPage();
+
+    expect(
+      await screen.findByText(/Việc gửi báo cáo do người được giao quyền hoặc chủ trung tâm/),
+    ).toBeInTheDocument();
+    // The member still sees what was sent for their period: who, how, status.
+    expect(await screen.findByText(contactUnderpaid.full_name)).toBeInTheDocument();
+    expect(screen.getByText("Zalo tự động")).toBeInTheDocument();
+    expect(screen.getByText("Không gửi được")).toBeInTheDocument();
+    // ...but every send affordance is gone (server 403s them regardless).
+    expect(screen.queryByRole("button", { name: "Tạo thông báo học phí" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Sao chép tất cả chưa gửi" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+  });
+
+  it("keeps the full send UI for a member holding can_send_reports", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh", can_send_reports: true })),
+      ),
+    );
+    renderNotificationsPage();
+
+    expect(await screen.findByText("Chưa có thông báo nào cho kỳ này.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Tạo thông báo học phí" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Zalo thủ công" })).toBeInTheDocument();
   });
 });

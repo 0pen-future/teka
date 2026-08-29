@@ -184,6 +184,99 @@ describe("CenterPage — owner", () => {
     expect(
       screen.queryByRole("button", { name: `Xoá ${testPrimaryTeacher.full_name}` }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: `Giao quyền gửi báo cáo cho ${testPrimaryTeacher.full_name}`,
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("grants the send-reports permission after a confirm that states the exclusivity", async () => {
+    mockInvites([]);
+    mockCenterMe(
+      makeCenterMeOwner({
+        members: [selfMember(true), makeMember({ full_name: "Giáo Viên A" })],
+      }),
+      makeCenterMeOwner({
+        members: [
+          selfMember(true),
+          makeMember({ full_name: "Giáo Viên A", can_send_reports: true }),
+        ],
+      }),
+    );
+    let postedTeacherId = "";
+    server.use(
+      http.post(`${API_URL}/centers/me/members/:teacherId/send-reports`, ({ params }) => {
+        postedTeacherId = String(params.teacherId);
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    renderCenter();
+    const user = userEvent.setup();
+
+    await user.click(
+      await screen.findByRole("button", { name: "Giao quyền gửi báo cáo cho Giáo Viên A" }),
+    );
+    expect(
+      await screen.findByText(/chỉ người giữ quyền này và chủ trung tâm gửi được/),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Giao quyền" }));
+
+    expect(await screen.findByText("Đã giao quyền gửi báo cáo")).toBeInTheDocument();
+    expect(postedTeacherId).not.toBe("");
+    expect(await screen.findByText("Thư ký gửi báo cáo")).toBeInTheDocument();
+  });
+
+  it("revokes the send-reports permission and drops the badge after refetch", async () => {
+    mockInvites([]);
+    mockCenterMe(
+      makeCenterMeOwner({
+        members: [
+          selfMember(true),
+          makeMember({ full_name: "Giáo Viên A", can_send_reports: true }),
+        ],
+      }),
+      makeCenterMeOwner({
+        members: [selfMember(true), makeMember({ full_name: "Giáo Viên A" })],
+      }),
+    );
+    let deletedTeacherId = "";
+    server.use(
+      http.delete(`${API_URL}/centers/me/members/:teacherId/send-reports`, ({ params }) => {
+        deletedTeacherId = String(params.teacherId);
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    renderCenter();
+    const user = userEvent.setup();
+
+    expect(await screen.findByText("Thư ký gửi báo cáo")).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Thu hồi quyền gửi báo cáo của Giáo Viên A" }),
+    );
+    await user.click(await screen.findByRole("button", { name: "Thu hồi quyền" }));
+
+    expect(await screen.findByText("Đã thu hồi quyền gửi báo cáo")).toBeInTheDocument();
+    expect(deletedTeacherId).not.toBe("");
+    await waitFor(() => expect(screen.queryByText("Thư ký gửi báo cáo")).not.toBeInTheDocument());
+  });
+
+  it("surfaces a failure toast when the permission change errors", async () => {
+    mockSharedCenter();
+    server.use(
+      http.post(`${API_URL}/centers/me/members/:teacherId/send-reports`, () =>
+        HttpResponse.json(fail("INTERNAL_ERROR", "boom"), { status: 500 }),
+      ),
+    );
+    renderCenter();
+    const user = userEvent.setup();
+
+    await user.click(
+      await screen.findByRole("button", { name: "Giao quyền gửi báo cáo cho Giáo Viên A" }),
+    );
+    await user.click(await screen.findByRole("button", { name: "Giao quyền" }));
+
+    expect(await screen.findByText("Có lỗi xảy ra, thử lại sau")).toBeInTheDocument();
   });
 });
 
@@ -200,6 +293,7 @@ describe("CenterPage — regular member", () => {
     expect(screen.getByText("Thành viên")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Đổi tên trung tâm" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Xoá / })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /quyền gửi báo cáo/ })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Số điện thoại")).not.toBeInTheDocument();
   });
 });

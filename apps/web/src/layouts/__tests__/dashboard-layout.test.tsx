@@ -323,6 +323,51 @@ describe("teaching v2 nav", () => {
     expect(queueRequests).toBe(0);
   });
 
+  it("shows Gửi báo cáo to a member holding can_send_reports, linking /reports", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh", can_send_reports: true })),
+      ),
+    );
+    const user = userEvent.setup();
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+
+    const link = await within(sidebarNav).findByRole("link", { name: "Gửi báo cáo" });
+    expect(link).toHaveAttribute("href", "/reports");
+    const group = within(sidebarNav).getByRole("group", { name: "Trung tâm" });
+    expect(within(group).getByRole("link", { name: "Gửi báo cáo" })).toBeInTheDocument();
+
+    // The entry also reaches the mobile Thêm sheet, never the primary tabs.
+    const moreTab = await screen.findByRole("button", { name: "Thêm" });
+    await user.click(moreTab);
+    const sheet = await screen.findByRole("dialog");
+    expect(within(sheet).getByRole("link", { name: "Gửi báo cáo" })).toHaveAttribute(
+      "href",
+      "/reports",
+    );
+  });
+
+  it("hides Gửi báo cáo from a plain member without the flag", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh" })),
+      ),
+    );
+    renderLayout();
+    // Member role label proves /centers/me resolved member-shaped.
+    await screen.findByText("Giáo viên");
+    expect(screen.queryByRole("link", { name: "Gửi báo cáo" })).not.toBeInTheDocument();
+  });
+
+  it("hides Gửi báo cáo from the owner, who reaches every period through Học phí", async () => {
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+    // Owner-shaped default: wait for the slowest owner entry to appear first.
+    await within(sidebarNav).findByRole("link", { name: "Duyệt giáo án" });
+    expect(screen.queryByRole("link", { name: "Gửi báo cáo" })).not.toBeInTheDocument();
+  });
+
   it("marks Duyệt giáo án pending while a plan awaits review", async () => {
     resetTeachingApiStore();
     server.use(...teachingHandlers);

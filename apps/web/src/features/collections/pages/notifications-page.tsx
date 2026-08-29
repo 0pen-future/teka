@@ -1,24 +1,24 @@
 import { useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 
-import { HvButton, HvCard, hvToast } from "@/components/hv";
+import { HvBadge, HvButton, HvCard, hvToast, type HvBadgeVariant } from "@/components/hv";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { useZaloStatus } from "@/features/profile";
-import { useContactsList } from "@/features/roster";
+import { useCenterContext } from "@/features/teaching";
 import { ApiError } from "@/lib/api/errors";
-import { copyToClipboard, cn } from "@/lib/utils";
+import { copyToClipboard, cn, formatDateTime } from "@/lib/utils";
 
 import { MessageCard } from "../components/message-card";
 import { RunProgressBanner } from "../components/run-progress-banner";
-import { useContactCollectionsList } from "../hooks/use-collections";
 import {
   useBulkSendNotifications,
   useMarkNotificationsSent,
   useNotificationRun,
   useNotificationsList,
   useResumeNotificationRun,
+  useSendPreview,
 } from "../hooks/use-notifications";
-import type { BulkSendRow } from "../schemas/collections-schemas";
+import type { BulkSendRow, NotificationRow } from "../schemas/collections-schemas";
 
 type Purpose = "statements" | "reminder";
 type SendChannel = "zalo_manual" | "zalo_personal";
@@ -37,6 +37,42 @@ const generateLabel: Record<Purpose, string> = {
 // wire-level discriminator is the server's fixed message text. Keep the
 // coupled substring in one visible place.
 const EXPIRED_SESSION_409 = "session has expired";
+
+const ledgerStatusMeta: Record<
+  NotificationRow["status"],
+  { label: string; variant: HvBadgeVariant }
+> = {
+  queued: { label: "Chờ gửi", variant: "neutral" },
+  sent: { label: "Đã gửi", variant: "success" },
+  delivered: { label: "Đã nhận", variant: "success" },
+  failed: { label: "Không gửi được", variant: "danger" },
+};
+
+const ledgerChannelLabels: Record<NotificationRow["channel"], string> = {
+  zalo_manual: "Zalo thủ công",
+  zalo_personal: "Zalo tự động",
+  zalo_zns: "Zalo ZNS",
+  sms: "SMS",
+};
+
+/** One read-only ledger line for the plain-member view (D8): who, how, when, status. */
+function LedgerRow({ row }: { row: NotificationRow }) {
+  const status = ledgerStatusMeta[row.status];
+  return (
+    <div className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
+      <div className="min-w-0">
+        <p className="truncate text-[14px] font-bold text-ink-900">{row.contact_name}</p>
+        <p className="text-[12px] text-ink-400">
+          {ledgerChannelLabels[row.channel]}
+          {row.sent_at ? ` · ${formatDateTime(row.sent_at)}` : ""}
+        </p>
+      </div>
+      <HvBadge variant={status.variant} size="sm">
+        {status.label}
+      </HvBadge>
+    </div>
+  );
+}
 
 /**
  * "Gửi thông báo". The real API never persists `message_text` — it exists
@@ -89,21 +125,23 @@ export function NotificationsPage() {
   // the other purpose tab never bleeds in.
   const activeRun = run.data?.purpose === purpose && run.data.run_id ? run.data : undefined;
 
-  // The auto/manual split in the confirm dialog mirrors the send's real pool:
-  // this period's balances (statements = every contact with an invoice,
-  // reminder = still owing) joined with the contacts' Zalo mapping — there is
-  // no preview endpoint. Both reads stop at the server's 100-per-page cap, so
-  // past that the split undercounts; acceptable for an informational dialog.
-  const { data: contacts } = useContactsList({ per_page: 100 });
-  const { data: balances } = useContactCollectionsList(periodId, { per_page: 100 });
-  const mappedContactIds = new Set(
-    (contacts?.items ?? []).filter((contact) => contact.zalo_user_id).map((contact) => contact.id),
-  );
-  const eligibleRows = (balances?.items ?? []).filter(
-    (row) => purpose === "statements" || row.outstanding > 0,
-  );
-  const mappedCount = eligibleRows.filter((row) => mappedContactIds.has(row.contact_id)).length;
-  const unmappedCount = eligibleRows.length - mappedCount;
+  // Send-affordance gating (D8): only reports oversight (owner or
+  // can_send_reports holder) may create sends; a plain member keeps this
+  // page read-only over the ledger. UX-only — the server is the authority.
+  const { canRunSends, isResolved } = useCenterContext();
+
+  // The confirm dialog's auto/manual split comes from the server's pre-send
+  // preview — the full target set intersected with the caller's live Zalo
+  // friend list — fetched only while the dialog is open (each fetch is a live
+  // friend-list call, and the endpoint 403s for plain members).
+  const preview = useSendPreview(periodId, purpose, confirmOpen && canRunSends);
+  const autoCount = preview.data?.auto_send.length ?? 0;
+  const notFriendCount = preview.data?.mapped_not_friend.length ?? 0;
+  const unmappedCount = preview.data?.unmapped.length ?? 0;
+  // Mirrors BulkSend's cap: every mapped contact (friend or not) queues into
+  // the run, and the server rejects a run larger than max_run_size (0 = no cap).
+  const maxRunSize = preview.data?.max_run_size ?? 0;
+  const overRunCap = maxRunSize > 0 && autoCount + notFriendCount > maxRunSize;
 
   function generate() {
     if (!periodId) {
@@ -220,34 +258,67 @@ export function NotificationsPage() {
     });
   }
 
+  const header = (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <h1 className="font-display text-[22px] font-bold text-ink-900">Gửi thông báo</h1>
+      <div className="inline-flex rounded-[var(--radius-pill)] border border-line-200 bg-white p-1">
+        {purposeOptions.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            role="tab"
+            aria-selected={purpose === option.value}
+            onClick={() => {
+              const next = new URLSearchParams(searchParams);
+              next.set("purpose", option.value);
+              setSearchParams(next, { replace: true });
+            }}
+            className={cn(
+              "min-h-9 rounded-[var(--radius-pill)] px-4 font-display text-[14px] font-bold transition-colors",
+              purpose === option.value
+                ? "bg-mint-400 text-white"
+                : "text-ink-500 hover:bg-cream-100",
+            )}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  // D8: a plain member keeps this page as a read-only ledger — what was sent
+  // for their period, by whom-ever held the send right — with every send
+  // affordance gone. Gated on `isResolved` so the send UI never flashes for a
+  // member while `/centers/me` loads (the server 403s them regardless).
+  if (isResolved && !canRunSends) {
+    return (
+      <div className="flex flex-col gap-4">
+        {header}
+        <p className="text-[13px] text-ink-400">
+          Việc gửi báo cáo do người được giao quyền hoặc chủ trung tâm thực hiện. Dưới đây là các
+          thông báo đã tạo cho kỳ này.
+        </p>
+        {ledgerPending ? (
+          <p className="text-[14px] text-ink-400">Đang tải…</p>
+        ) : (ledger?.length ?? 0) === 0 ? (
+          <HvCard variant="flat" className="text-center text-[13px] text-ink-400">
+            Chưa có thông báo nào cho kỳ này.
+          </HvCard>
+        ) : (
+          <HvCard variant="flat" className="flex flex-col divide-y divide-line-200">
+            {(ledger ?? []).map((row) => (
+              <LedgerRow key={row.id} row={row} />
+            ))}
+          </HvCard>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="font-display text-[22px] font-bold text-ink-900">Gửi thông báo</h1>
-        <div className="inline-flex rounded-[var(--radius-pill)] border border-line-200 bg-white p-1">
-          {purposeOptions.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              role="tab"
-              aria-selected={purpose === option.value}
-              onClick={() => {
-                const next = new URLSearchParams(searchParams);
-                next.set("purpose", option.value);
-                setSearchParams(next, { replace: true });
-              }}
-              className={cn(
-                "min-h-9 rounded-[var(--radius-pill)] px-4 font-display text-[14px] font-bold transition-colors",
-                purpose === option.value
-                  ? "bg-mint-400 text-white"
-                  : "text-ink-500 hover:bg-cream-100",
-              )}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      {header}
 
       <HvCard variant="flat" className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -364,9 +435,42 @@ export function NotificationsPage() {
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
         title="Gửi tự động qua Zalo?"
-        description={`${mappedCount} phụ huynh gửi tự động · ${unmappedCount} dùng copy thủ công — tiếp tục?`}
+        description={
+          preview.isPending ? (
+            "Đang kiểm tra danh sách bạn bè Zalo…"
+          ) : preview.isError ? (
+            "Không kiểm tra được danh sách bạn bè Zalo — vẫn gửi được, nhưng tin tới người chưa là bạn có thể không đến nơi."
+          ) : (
+            <span className="flex flex-col gap-1.5 text-left">
+              <span>
+                <strong className="font-display text-ink-900">{autoCount}</strong> phụ huynh gửi tự
+                động (đã là bạn Zalo).
+              </span>
+              {notFriendCount > 0 ? (
+                <span className="text-coral-600">
+                  <strong className="font-display">{notFriendCount}</strong> phụ huynh đã ghép Zalo
+                  nhưng chưa là bạn bè của bạn — tin có thể rơi vào hộp thư người lạ hoặc không đến
+                  nơi.{" "}
+                  <Link to="/contacts" className="font-bold underline">
+                    Kết bạn trước
+                  </Link>
+                </span>
+              ) : null}
+              <span>
+                <strong className="font-display text-ink-900">{unmappedCount}</strong> phụ huynh
+                chưa ghép Zalo — dùng copy thủ công.
+              </span>
+              {overRunCap ? (
+                <span className="font-bold text-coral-600">
+                  Vượt giới hạn {maxRunSize} tin tự động mỗi lượt — hãy gửi thành các đợt nhỏ hơn.
+                </span>
+              ) : null}
+            </span>
+          )
+        }
         confirmLabel="Gửi"
         pending={bulkSend.isPending}
+        confirmDisabled={preview.isPending || overRunCap}
         onConfirm={sendPersonal}
       />
 
