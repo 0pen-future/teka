@@ -10,4 +10,6 @@ export const teachingKeys = {
   classMarks: (classId: string) => [...teachingKeys.all, "marks", classId] as const,
   marks: (classId: string, month: string) => [...teachingKeys.classMarks(classId), month] as const,
   reviewQueue: () => [...teachingKeys.all, "review-queue"] as const,
+  scoreComponents: (classId: string) => [...teachingKeys.all, "score-components", classId] as const,
+  sessionScores: (sessionId: string) => [...teachingKeys.all, "session-scores", sessionId] as const,
 };

@@ -31,6 +31,8 @@ var domainTables = []string{
 	"center_members", "invitations", "password_reset_tokens",
 	"class_curricula", "lesson_plans", "session_notes", "session_marks",
 	"audit_logs",
+	"score_sets", "score_set_components", "class_score_components",
+	"student_scores",
 }
 
 // centerTables is every business table 000007 re-keyed to the center tenant.
@@ -314,10 +316,10 @@ func TestDownFoldsPersonalChannelIntoManual(t *testing.T) {
 		 VALUES (?, ?, ?, ?, 'zalo_personal')`,
 		notifID, f.teacherID, f.centerID, f.statementID).Error)
 
-	// Roll back through 000005 (zalo_personal_mapping): nine steps now that
-	// the additive 000008-000013 sit on top of the migrations this test
+	// Roll back through 000005 (zalo_personal_mapping): ten steps now that
+	// the additive 000008-000014 sit on top of the migrations this test
 	// predates.
-	require.NoError(t, database.MigrateDown(m, 9))
+	require.NoError(t, database.MigrateDown(m, 10))
 
 	var channel string
 	require.NoError(t, db.Raw(

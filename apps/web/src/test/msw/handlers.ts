@@ -534,6 +534,15 @@ export const handlers = [
     HttpResponse.json(ok({ session_notes: [], marks: [] })),
   ),
   http.get(`${API_URL}/teaching/review-queue`, () => HttpResponse.json(ok([]))),
+  // No configured score components by default — the classbook scores tab
+  // renders its plain general-score block; a test opting into the
+  // per-component grid overrides this with server.use().
+  http.get(`${API_URL}/classes/:id/score-components`, ({ params }) =>
+    HttpResponse.json(ok({ class_id: params.id as string, components: [] })),
+  ),
+  http.get(`${API_URL}/sessions/:id/scores`, () =>
+    HttpResponse.json(ok({ components: [], scores: [] })),
+  ),
   http.get(`${API_URL}/students`, () => HttpResponse.json(ok([], listMeta(0)))),
   http.get(`${API_URL}/billing-periods/:id/preview`, () => HttpResponse.json(ok(makePreview()))),
   http.get(`${API_URL}/billing-periods/:id/collections/summary`, () =>

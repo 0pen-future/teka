@@ -112,3 +112,52 @@ export const queueItemResponseSchema = z.object({
 });
 
 export type QueueItemResponse = z.infer<typeof queueItemResponseSchema>;
+
+/** One configured score column for a class (`teaching.ClassScoreComponentResponse`). */
+export const classScoreComponentSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  position: z.number().int(),
+});
+
+export type ClassScoreComponent = z.infer<typeof classScoreComponentSchema>;
+
+/**
+ * `GET /classes/:id/score-components`. An empty `components` array is the
+ * signal the class uses the plain general-score entry instead of the
+ * per-component grid — never treated as an error state.
+ */
+export const classScoreComponentsResponseSchema = z.object({
+  class_id: z.string(),
+  components: z.array(classScoreComponentSchema),
+});
+
+export type ClassScoreComponentsResponse = z.infer<typeof classScoreComponentsResponseSchema>;
+
+/**
+ * One student×component cell, from `GET /sessions/:id/scores` or the `PUT`
+ * echo. `score` is nullable defensively (mirrors `MarkResponse`) even though
+ * the GET read only ever lists filled cells.
+ */
+export const sessionScoreEntrySchema = z.object({
+  student_id: z.string(),
+  component_id: z.string(),
+  score: z.number().nullable(),
+});
+
+export type SessionScoreEntry = z.infer<typeof sessionScoreEntrySchema>;
+
+/** `GET /sessions/:id/scores` — the session's component set plus filled-in cells. */
+export const sessionScoresResponseSchema = z.object({
+  components: z.array(classScoreComponentSchema),
+  scores: z.array(sessionScoreEntrySchema),
+});
+
+export type SessionScoresResponse = z.infer<typeof sessionScoresResponseSchema>;
+
+/** `PUT /sessions/:id/scores` request row — `score: null` clears that cell. */
+export interface PutSessionScoreEntryInput {
+  student_id: string;
+  component_id: string;
+  score: number | null;
+}

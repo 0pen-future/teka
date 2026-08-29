@@ -278,6 +278,7 @@ describe("teaching v2 nav", () => {
       "Nhập từ Excel",
       "Nhật ký hoạt động",
       "Phân quyền vai trò",
+      "Cấu hình lớp học",
       "Cài đặt trung tâm",
     ]);
   });

@@ -905,6 +905,89 @@ definitions:
       unit_price:
         type: integer
     type: object
+  grading.AssignScoreSetRequest:
+    properties:
+      set_id:
+        type: string
+    required:
+    - set_id
+    type: object
+  grading.ClassComponentResponse:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+      position:
+        type: integer
+    type: object
+  grading.ClassComponentsResponse:
+    properties:
+      class_id:
+        type: string
+      components:
+        items:
+          $ref: '#/definitions/grading.ClassComponentResponse'
+        type: array
+    type: object
+  grading.ScoreEntryRequest:
+    properties:
+      component_id:
+        type: string
+      score:
+        type: number
+      student_id:
+        type: string
+    required:
+    - component_id
+    - student_id
+    type: object
+  grading.ScoreResponse:
+    properties:
+      component_id:
+        type: string
+      score:
+        type: number
+      student_id:
+        type: string
+    type: object
+  grading.ScoreSetRequest:
+    properties:
+      components:
+        items:
+          type: string
+        maxItems: 10
+        minItems: 1
+        type: array
+      name:
+        maxLength: 100
+        type: string
+    required:
+    - components
+    - name
+    type: object
+  grading.ScoreSetResponse:
+    properties:
+      components:
+        items:
+          type: string
+        type: array
+      id:
+        type: string
+      name:
+        type: string
+    type: object
+  grading.SessionScoresResponse:
+    properties:
+      components:
+        items:
+          $ref: '#/definitions/grading.ClassComponentResponse'
+        type: array
+      scores:
+        items:
+          $ref: '#/definitions/grading.ScoreResponse'
+        type: array
+    type: object
   handoff.ReassignRequest:
     properties:
       teacher_id:
@@ -4943,6 +5026,180 @@ paths:
       summary: Update schedule row
       tags:
       - classes
+  /classes/{id}/score-components:
+    get:
+      description: The class's snapshot components (score grid columns), position
+        order. An empty list means the class uses the plain general-score UI. Readable
+        by the class's teacher and any center-wide reader.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/grading.ClassComponentsResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get a class's score components
+      tags:
+      - grading
+  /classes/{id}/score-set:
+    delete:
+      description: Removes the class's snapshot components — the fix for a wrong assignment.
+        Owner only, and refused with 409 if the class already has recorded scores.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: cleared
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: caller is not the center owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: class already has recorded scores
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Clear a class's score set
+      tags:
+      - grading
+    post:
+      consumes:
+      - application/json
+      description: Snapshots the set's components into the class (class_score_components),
+        replacing whatever it had. Owner only. A class that already carries any score
+        refuses with 409 — replacing the components would cascade-delete recorded
+        grades.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: set to assign
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/grading.AssignScoreSetRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/grading.ClassComponentsResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: caller is not the center owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: class or set not found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: class already has recorded scores
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Assign a score set to a class
+      tags:
+      - grading
   /classes/{id}/sessions:
     get:
       description: 'Generates any session rows missing for [from, to] from the class''s
@@ -7040,6 +7297,240 @@ paths:
       summary: Get a parent's statement payment QR code
       tags:
       - public
+  /score-sets:
+    get:
+      description: Every live score set (bộ điểm) in the center with its component
+        names in position order. Owner only — this is a center-configuration surface.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/grading.ScoreSetResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: caller is not the center owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List score sets
+      tags:
+      - grading
+    post:
+      consumes:
+      - application/json
+      description: Creates a named set with its ordered component names (1..10, unique
+        case-insensitively within the set). Owner only. A duplicate live name in the
+        center is a 409.
+      parameters:
+      - description: set name and components
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/grading.ScoreSetRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/grading.ScoreSetResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: caller is not the center owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: a set with this name already exists
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: invalid or duplicate component names
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Create a score set
+      tags:
+      - grading
+  /score-sets/{id}:
+    delete:
+      description: Soft-deletes the set. Owner only. Classes already using a snapshot
+        of it keep their components.
+      parameters:
+      - description: score set id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: deleted
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: caller is not the center owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a score set
+      tags:
+      - grading
+    put:
+      consumes:
+      - application/json
+      description: Renames the set and whole-replaces its component list. Owner only.
+        Per-class snapshots taken from this set earlier are untouched — that is the
+        point of the snapshot design.
+      parameters:
+      - description: score set id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: set name and components
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/grading.ScoreSetRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/grading.ScoreSetResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: caller is not the center owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: a set with this name already exists
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: invalid or duplicate component names
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Update a score set
+      tags:
+      - grading
   /sessions/{id}:
     delete:
       description: Refuses (409) a session whose attendance is already confirmed.
@@ -7503,6 +7994,131 @@ paths:
       summary: Save a session note
       tags:
       - teaching
+  /sessions/{id}/scores:
+    get:
+      description: The class's component columns plus every recorded cell for the
+        session — one round-trip the score grid rebuilds from. Read gate is session
+        resolution (the session's teacher and any center-wide reader).
+      parameters:
+      - description: session id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/grading.SessionScoresResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get session component scores
+      tags:
+      - grading
+    put:
+      consumes:
+      - application/json
+      description: Batch merge of per-cell scores. Per entry a value upserts the cell
+        and null deletes it; the table never holds empty cells. A new cell requires
+        the student to have been on the session's roster; an already-scored student
+        stays editable after their enrollment ends. Returns the session's full score
+        set after the write. Writable by the session's teacher OR the center owner
+        (deliberate divergence from marks, which are teacher-only).
+      parameters:
+      - description: session id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: score entries
+        in: body
+        name: request
+        required: true
+        schema:
+          items:
+            $ref: '#/definitions/grading.ScoreEntryRequest'
+          type: array
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/grading.ScoreResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: caller is neither the session's teacher nor the owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: duplicate cell, score outside 0–10, component not in the class,
+            or student not on the roster
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Save session component scores
+      tags:
+      - grading
   /sessions/{id}/uncancel:
     post:
       parameters:

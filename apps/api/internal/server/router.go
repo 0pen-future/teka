@@ -23,6 +23,7 @@ import (
 	"teka/apps/api/internal/features/collections"
 	"teka/apps/api/internal/features/contacts"
 	"teka/apps/api/internal/features/enrollments"
+	"teka/apps/api/internal/features/grading"
 	"teka/apps/api/internal/features/handoff"
 	"teka/apps/api/internal/features/imports"
 	"teka/apps/api/internal/features/invitations"
@@ -190,6 +191,13 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	// transaction via txMgr.
 	teachingSvc := teaching.NewService(teaching.NewRepository(db), classesSvc, sessionsSvc, enrollmentsSvc, txMgr)
 	teaching.RegisterRoutes(v1, teaching.NewHandler(teachingSvc), requireAuth, resolveScope)
+
+	// grading (component score sets + per-session scores) consumes the same
+	// three services through its own consumer interfaces; class/session
+	// resolution doubles as its read gate, and assign/clear plus the score
+	// batch write rows inside one transaction via txMgr.
+	gradingSvc := grading.NewService(grading.NewRepository(db), classesSvc, sessionsSvc, enrollmentsSvc, txMgr)
+	grading.RegisterRoutes(v1, grading.NewHandler(gradingSvc), requireAuth, resolveScope)
 
 	// The owner dashboard reads through classes, sessions, and attendance
 	// (ClassReader, SessionReader, AttendanceReader), so it mounts here —

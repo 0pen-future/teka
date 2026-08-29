@@ -96,6 +96,16 @@ var actions = map[string]ActionSpec{
 	"PUT /api/v1/sessions/:id/note":                             {Action: "session.note.update", EntityType: "session", IDParam: "id"},
 	"PUT /api/v1/sessions/:id/marks":                            {Action: "session.marks.update", EntityType: "session", IDParam: "id"},
 
+	// grading (score sets, class snapshot, component scores). The session
+	// scores row is the trail for who entered a component score — the owner may
+	// write on any teacher's behalf, so this row is the only evidence of that.
+	"POST /api/v1/score-sets":              {Action: "score_set.create", EntityType: "score_set"},
+	"PUT /api/v1/score-sets/:id":           {Action: "score_set.update", EntityType: "score_set", IDParam: "id"},
+	"DELETE /api/v1/score-sets/:id":        {Action: "score_set.delete", EntityType: "score_set", IDParam: "id"},
+	"POST /api/v1/classes/:id/score-set":   {Action: "class.score_set.assign", EntityType: "class", IDParam: "id"},
+	"DELETE /api/v1/classes/:id/score-set": {Action: "class.score_set.clear", EntityType: "class", IDParam: "id"},
+	"PUT /api/v1/sessions/:id/scores":      {Action: "session.scores.update", EntityType: "session", IDParam: "id"},
+
 	// billing periods, invoices, adjustments
 	"POST /api/v1/billing-periods":           {Action: "billing.period.create", EntityType: "billing_period"},
 	"POST /api/v1/billing-periods/:id/draft": {Action: "billing.period.draft", EntityType: "billing_period", IDParam: "id"},

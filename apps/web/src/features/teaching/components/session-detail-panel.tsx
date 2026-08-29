@@ -8,11 +8,14 @@ import { cn, formatSessionDate } from "@/lib/utils";
 import type { SessionDerived } from "../lib/classbook-stats";
 import { parseScoreInput } from "../lib/classbook-stats";
 import { useClassMarks } from "../hooks/use-class-marks";
+import { useClassScoreComponents } from "../hooks/use-component-scores";
 import { useClassTeaching } from "../hooks/use-class-teaching";
 import { useSaveMarks, useSaveSessionNote } from "../hooks/use-teaching-mutations";
+import { saveButtonActive, saveButtonIdle } from "../lib/save-button-styles";
 import { lessonPlanKey } from "../lib/teaching-store";
 import type { MarkEntryInput } from "../schemas/teaching-schemas";
 import { vnd } from "../lib/vnd";
+import { ComponentScoreGrid } from "./component-score-grid";
 import { PlanStatusPill } from "./plan-status-pill";
 import { PlanSummary } from "./plan-summary";
 
@@ -31,11 +34,6 @@ const detailTabs: { id: DetailTab; label: string }[] = [
   { id: "plan", label: "Giáo án" },
   { id: "scores", label: "Điểm buổi" },
 ];
-
-const saveButtonActive =
-  "cursor-pointer rounded-[14px] bg-mint-400 px-5 py-[9px] text-[13px] font-extrabold text-white shadow-press-mint transition-transform active:translate-y-[3px] active:shadow-none";
-const saveButtonIdle =
-  "cursor-default rounded-[14px] bg-cream-200 px-5 py-[9px] text-[13px] font-extrabold text-ink-400";
 
 /**
  * Slide-in card for one session: whole-class note, giáo án read view, and
@@ -60,6 +58,11 @@ export function SessionDetailPanel({
   const saveNoteMutation = useSaveSessionNote(classId, month);
   const saveMarksMutation = useSaveMarks(classId, month);
   const rosterQuery = useSessionRoster(session.id);
+  // Empty (or still loading) components means the plain general-score block
+  // below stays exactly as it was — the grid only replaces it once the class
+  // is actually configured with components.
+  const scoreComponentsQuery = useClassScoreComponents(classId);
+  const hasScoreComponents = (scoreComponentsQuery.data?.components.length ?? 0) > 0;
 
   const [tab, setTab] = useState<DetailTab>("note");
   const [noteDraft, setNoteDraft] = useState<string | null>(null);
@@ -264,74 +267,85 @@ export function SessionDetailPanel({
         ) : null}
 
         {tab === "scores" ? (
-          <>
-            <div className="mb-1.5 text-[12px] text-ink-400">
-              Chấm điểm kiểm tra cuối buổi (0–10) rồi bấm lưu.
-            </div>
-            {rosterQuery.isPending ? (
-              <p className="text-[13px] text-ink-500">Đang tải danh sách học sinh…</p>
-            ) : rosterQuery.isError ? (
-              <p className="text-[13px] text-coral-600">Không tải được danh sách học sinh.</p>
-            ) : (
-              <div className="flex max-h-[280px] flex-col gap-1 overflow-y-auto">
-                {rosterQuery.data.rows.map((row) => {
-                  const absent = row.status === "absent" || row.status === "excused";
-                  const editable = held && row.status === "present";
-                  const stored = storedScores[row.student_id];
-                  return (
-                    <div
-                      key={row.student_id}
-                      className="flex items-center gap-2.5 rounded-[10px] px-2 py-1 hover:bg-cream-100"
-                    >
-                      <span className="flex-1 text-[13.5px] font-bold text-ink-700">
-                        {row.student_name}
-                      </span>
-                      {editable ? (
-                        <input
-                          type="number"
-                          min={0}
-                          max={10}
-                          step={0.5}
-                          aria-label={`Điểm ${row.student_name}`}
-                          value={scoreDraft[row.student_id] ?? stored?.toString() ?? ""}
-                          onChange={(event) =>
-                            setScoreDraft((draft) => ({
-                              ...draft,
-                              [row.student_id]: event.target.value,
-                            }))
-                          }
-                          className="w-16 rounded-[10px] border-2 border-line-200 px-2 py-[5px] text-center text-[13.5px] font-extrabold text-ink-900 outline-none focus:border-mint-400"
-                        />
-                      ) : (
-                        <span
-                          className={cn(
-                            "ml-auto rounded-full px-2.5 py-[3px] text-[13px] font-extrabold",
-                            absent && held
-                              ? "bg-coral-100 text-coral-600"
-                              : "bg-cream-200 text-ink-400",
-                          )}
-                        >
-                          {!held ? "—" : absent ? "Vắng" : "—"}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
+          hasScoreComponents ? (
+            <ComponentScoreGrid
+              sessionId={session.id}
+              held={held}
+              rosterRows={rosterQuery.data?.rows ?? []}
+              rosterPending={rosterQuery.isPending}
+              rosterError={rosterQuery.isError}
+              sessionLabel={sessionLabel}
+            />
+          ) : (
+            <>
+              <div className="mb-1.5 text-[12px] text-ink-400">
+                Chấm điểm kiểm tra cuối buổi (0–10) rồi bấm lưu.
               </div>
-            )}
-            <div className="mt-2.5 flex items-center gap-2.5">
-              <button
-                type="button"
-                onClick={saveScores}
-                className={scoresDirty ? saveButtonActive : saveButtonIdle}
-              >
-                Lưu điểm buổi
-              </button>
-              <span className="text-[12.5px] font-bold text-sun-600">
-                {scoresDirty ? "Chưa lưu" : ""}
-              </span>
-            </div>
-          </>
+              {rosterQuery.isPending ? (
+                <p className="text-[13px] text-ink-500">Đang tải danh sách học sinh…</p>
+              ) : rosterQuery.isError ? (
+                <p className="text-[13px] text-coral-600">Không tải được danh sách học sinh.</p>
+              ) : (
+                <div className="flex max-h-[280px] flex-col gap-1 overflow-y-auto">
+                  {rosterQuery.data.rows.map((row) => {
+                    const absent = row.status === "absent" || row.status === "excused";
+                    const editable = held && row.status === "present";
+                    const stored = storedScores[row.student_id];
+                    return (
+                      <div
+                        key={row.student_id}
+                        className="flex items-center gap-2.5 rounded-[10px] px-2 py-1 hover:bg-cream-100"
+                      >
+                        <span className="flex-1 text-[13.5px] font-bold text-ink-700">
+                          {row.student_name}
+                        </span>
+                        {editable ? (
+                          <input
+                            type="number"
+                            min={0}
+                            max={10}
+                            step={0.5}
+                            aria-label={`Điểm ${row.student_name}`}
+                            value={scoreDraft[row.student_id] ?? stored?.toString() ?? ""}
+                            onChange={(event) =>
+                              setScoreDraft((draft) => ({
+                                ...draft,
+                                [row.student_id]: event.target.value,
+                              }))
+                            }
+                            className="w-16 rounded-[10px] border-2 border-line-200 px-2 py-[5px] text-center text-[13.5px] font-extrabold text-ink-900 outline-none focus:border-mint-400"
+                          />
+                        ) : (
+                          <span
+                            className={cn(
+                              "ml-auto rounded-full px-2.5 py-[3px] text-[13px] font-extrabold",
+                              absent && held
+                                ? "bg-coral-100 text-coral-600"
+                                : "bg-cream-200 text-ink-400",
+                            )}
+                          >
+                            {!held ? "—" : absent ? "Vắng" : "—"}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="mt-2.5 flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={saveScores}
+                  className={scoresDirty ? saveButtonActive : saveButtonIdle}
+                >
+                  Lưu điểm buổi
+                </button>
+                <span className="text-[12.5px] font-bold text-sun-600">
+                  {scoresDirty ? "Chưa lưu" : ""}
+                </span>
+              </div>
+            </>
+          )
         ) : null}
       </div>
     </section>
