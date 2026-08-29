@@ -74,9 +74,10 @@ without exception:
   request body, query string, or path segment. A client-supplied `center_id`
   or `teacher_id` is an authorization bypass, and it looks completely ordinary
   in a diff.
-- `Scope{TeacherID, CenterID, IsOwner}` is resolved fresh from the database on
-  every request by `middleware.ResolveScope` and never cached in the JWT, so a
-  membership change (kick, leave, join) takes effect on the very next request.
+- `Scope{TeacherID, CenterID, IsOwner, CanSendReports}` is resolved fresh from
+  the database on every request by `middleware.ResolveScope` and never cached
+  in the JWT, so a membership change (kick, leave, join, grant, revoke) takes
+  effect on the very next request.
 - Every repository over a tenant table funnels reads through a `scoped`
   helper: always filter by center; non-owners additionally filter by their own
   `teacher_id` (reference implementation:
@@ -96,6 +97,33 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 
 - Writes keep the invariant `teacher_id = $self` for the teacher role; owners
   may write on behalf of any teacher in their center.
+
+**Delegated report sending (`can_send_reports`)**: a boolean permission on the
+member's live `center_members` stint, granted and revoked only by the owner
+(`POST`/`DELETE /centers/me/members/:teacherId/send-reports`). It is a
+capability flag, not a role, and it is member-only — the grant endpoint
+refuses the owner as target, so `IsOwner` and `CanSendReports` never combine.
+`Scope.ReportsOversight()` (`IsOwner || CanSendReports`) is the single helper
+both capabilities branch on:
+
+- **Center-wide read cluster**: billing periods, statements, debt views, the
+  contact list (`GET /contacts` — recipient names and phones, needed to
+  address a send), and the notification ledger (per-period sends and runs)
+  scope to the whole center for a `ReportsOversight()` caller instead of the
+  member's own rows. Everything else — classes, attendance, payments, single
+  contact reads (`GET /contacts/:id`), and every write — keeps the plain
+  member scoping above.
+- **Send exclusivity**: only `ReportsOversight()` callers may create report
+  sends — bulk send, run resume, and the pre-send preview all refuse everyone
+  else. This 403 is deliberately honest (not the neutral not-found used for
+  cross-tenant probes): the caller can see the period; the missing thing is
+  the permission. Plain teachers provide attendance and remarks input and keep
+  a read-only ledger of what was sent for their periods; they do not send.
+
+*Release note (behavior removal)*: before this permission existed every
+teacher could generate and send statements for their own periods. Now sending
+is exclusive to the owner and `can_send_reports` holders — a teacher keeps
+that ability only after the owner grants them the flag.
 
 `deleted_at IS NULL` comes free from `gorm.DeletedAt` on model-based queries;
 raw SQL and `Table()` queries must add it by hand. Postgres row-level security
