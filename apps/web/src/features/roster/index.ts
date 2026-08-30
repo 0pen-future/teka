@@ -25,3 +25,4 @@ export type { Class, Contact, Enrollment, Schedule, Student } from "./schemas/ro
 export { formatScheduleSummary, formatWeekday } from "./lib/roster-format";
 export { currentMonth } from "./lib/current-month";
 export { activeSchedules } from "./lib/schedule-diff";
+export { canRecordAttendance, canSendClassReports, canWriteClass } from "./lib/class-permissions";

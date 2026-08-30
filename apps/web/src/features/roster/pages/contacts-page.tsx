@@ -4,6 +4,7 @@ import { Link, useSearchParams } from "react-router";
 import { HvBadge, HvButton, HvCard } from "@/components/hv";
 import { Input } from "@/components/ui/input";
 import { useZaloStatus } from "@/features/profile";
+import { useCenterContext } from "@/features/teaching";
 import { formatPhoneLocal } from "@/lib/utils";
 
 import { ContactDialog } from "../components/contact-dialog";
@@ -21,6 +22,10 @@ export function ContactsPage() {
   // The match endpoint needs a live session; "expired" shows the disabled
   // trigger too — re-linking happens on the profile page, not here.
   const zaloReady = zaloStatus?.linked === true && zaloStatus.status === "linked";
+  // Contacts are owner-managed center data; a plain member gets an empty
+  // list from the server, so create is hidden and the empty state explains
+  // who manages the roster instead of implying a search miss.
+  const { isOwner } = useCenterContext();
 
   useEffect(() => {
     // Arm the timer only while the input and the URL actually disagree —
@@ -64,7 +69,9 @@ export function ContactsPage() {
           >
             Tự động ghép Zalo
           </HvButton>
-          <HvButton onClick={() => setDialogOpen(true)}>Thêm người liên hệ</HvButton>
+          {isOwner ? (
+            <HvButton onClick={() => setDialogOpen(true)}>Thêm người liên hệ</HvButton>
+          ) : null}
         </div>
       </div>
       {zaloStatus && !zaloReady ? (
@@ -90,7 +97,9 @@ export function ContactsPage() {
       {isPending ? <p className="text-[13px] text-ink-400">Đang tải…</p> : null}
       {!isPending && contacts.length === 0 ? (
         <HvCard variant="flat" className="text-center text-[13px] text-ink-400">
-          Không tìm thấy người liên hệ.
+          {isOwner
+            ? "Không tìm thấy người liên hệ."
+            : "Chủ trung tâm quản lý danh bạ & hồ sơ học sinh."}
         </HvCard>
       ) : null}
       <div className="flex flex-col gap-2">

@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router";
 import { HvBadge, HvButton, HvCard, hvToast } from "@/components/hv";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { useZaloStatus } from "@/features/profile";
+import { useCenterContext } from "@/features/teaching";
 import { formatPhoneLocal } from "@/lib/utils";
 
 import { ContactDialog } from "../components/contact-dialog";
@@ -115,6 +116,9 @@ export function ContactDetailPage() {
   const students = studentsPage?.items ?? [];
   const [editOpen, setEditOpen] = useState(false);
   const [addStudentOpen, setAddStudentOpen] = useState(false);
+  // Contact and student records are owner-managed; a reader who is not the
+  // owner (an oversight secretary) sees the data without the edit controls.
+  const { isOwner } = useCenterContext();
 
   if (isPending) {
     return <p className="text-[13px] text-ink-400">Đang tải…</p>;
@@ -136,18 +140,22 @@ export function ContactDetailPage() {
             {formatPhoneLocal(contact.phone)}
           </a>
         </div>
-        <HvButton variant="ghost" size="sm" onClick={() => setEditOpen(true)}>
-          Sửa
-        </HvButton>
+        {isOwner ? (
+          <HvButton variant="ghost" size="sm" onClick={() => setEditOpen(true)}>
+            Sửa
+          </HvButton>
+        ) : null}
       </HvCard>
 
       <ContactZaloCard contact={contact} />
 
       <div className="flex items-center justify-between">
         <h2 className="font-display text-[16px] font-bold text-ink-900">Học sinh</h2>
-        <HvButton size="sm" onClick={() => setAddStudentOpen(true)}>
-          Thêm học sinh
-        </HvButton>
+        {isOwner ? (
+          <HvButton size="sm" onClick={() => setAddStudentOpen(true)}>
+            Thêm học sinh
+          </HvButton>
+        ) : null}
       </div>
       <div className="flex flex-col gap-2">
         {students.map((student) => (

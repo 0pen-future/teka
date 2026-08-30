@@ -45,7 +45,8 @@ export function ContactCollectionRow({
           <div>
             <p className="font-display text-[15px] font-bold text-ink-900">{row.full_name}</p>
             <p className="text-[13px] text-ink-400">
-              {row.student_count} con · {formatPhoneLocal(row.phone)}
+              {row.student_count} con
+              {row.phone ? ` · ${formatPhoneLocal(row.phone)}` : ""}
             </p>
           </div>
         </button>

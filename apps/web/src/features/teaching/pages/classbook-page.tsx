@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router";
 
 import { hvToast } from "@/components/hv";
 import {
+  canWriteClass,
   ClassSearchEmptyNote,
   ClassSearchInput,
   useClassSearch,
@@ -48,7 +49,7 @@ export function ClassbookPage() {
   const [view, setView] = useState<ClassbookView>("sessions");
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
 
-  const { centerId } = useCenterContext();
+  const { centerId, isOwner } = useCenterContext();
 
   // per_page mirrors the students page: the class-search empty note asserts
   // over the full active-class list, so it must not be a truncated page.
@@ -60,6 +61,7 @@ export function ClassbookPage() {
   // with no per-class queries instead of fetching garbage.
   const selectedClass = classes.find((klass) => klass.id === effectiveClassId);
   const selectedClassId = selectedClass?.id;
+  const canWrite = selectedClass ? canWriteClass(isOwner, selectedClass) : false;
 
   const { month, sessions, heldSessions, rosters, sessionsPending } =
     useMonthSessions(selectedClassId);
@@ -288,6 +290,7 @@ export function ClassbookPage() {
               classId={selectedClass.id}
               classTitle={selectedClass.name}
               derived={selectedDerived}
+              canWrite={canWrite}
               onClose={() => setSelectedSessionId(null)}
             />
           ) : null}
@@ -302,6 +305,7 @@ export function ClassbookPage() {
           monthStart={month.from}
           monthNumber={monthNumber}
           previousMonthNumber={previousMonthNumber}
+          canWrite={canWrite}
         />
       ) : null}
     </div>

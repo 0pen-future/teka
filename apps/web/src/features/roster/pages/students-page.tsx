@@ -3,17 +3,21 @@ import { Link, useSearchParams } from "react-router";
 
 import { HvBadge, HvButton, HvCard, hvToast } from "@/components/hv";
 import { useSessionsList } from "@/features/attendance";
+import { ClassSendPeriodsDialog } from "@/features/reports";
+import { useCenterContext } from "@/features/teaching";
 import { cn, formatDayMonth, formatPhoneLocal } from "@/lib/utils";
 
 import { AnonymizeStudentDialog } from "../components/anonymize-student-dialog";
 import { ClassDialog } from "../components/class-dialog";
 import { ClassSearchEmptyNote, ClassSearchInput } from "../components/class-search";
+import { EnrollExistingStudentDialog } from "../components/enroll-existing-student-dialog";
 import { EnrollStudentDialog } from "../components/enroll-student-dialog";
 import { StudentDialog } from "../components/student-dialog";
 import { useClassesList } from "../hooks/use-classes";
 import { useClassSearch } from "../hooks/use-class-search";
 import { useEnrollmentsList } from "../hooks/use-enrollments";
 import { useStudentsList } from "../hooks/use-students";
+import { canSendClassReports, canWriteClass } from "../lib/class-permissions";
 import { currentMonth } from "../lib/current-month";
 import type { Enrollment, Student } from "../schemas/roster-schemas";
 
@@ -51,6 +55,14 @@ export function StudentsPage() {
   /** Step 2 of the add-student wizard, or a direct enroll from the unenrolled tab. */
   const [enrolling, setEnrolling] = useState<Student | undefined>(undefined);
   const [enrollFromWizard, setEnrollFromWizard] = useState(false);
+  /** The picker flow: enroll an existing student into the selected class. */
+  const [enrollExistingOpen, setEnrollExistingOpen] = useState(false);
+  // Student records (like the contacts they hang off) are owner-managed
+  // center data; members enroll existing students but never create or edit
+  // the records themselves, so those controls are hidden rather than 403ing.
+  const { isOwner, canRunSends } = useCenterContext();
+  /** The class-scoped send's period picker (hoc_vu or oversight only). */
+  const [sendPeriodsOpen, setSendPeriodsOpen] = useState(false);
 
   useEffect(() => {
     // Arm the timer only while the input and the URL actually disagree.
@@ -100,9 +112,8 @@ export function StudentsPage() {
 
   // A stale or mistyped class_id in the URL (or the unenrolled tab) matches
   // no class: no settings link, no per-class queries.
-  const selectedClassId = classes.some((klass) => klass.id === effectiveClassId)
-    ? effectiveClassId
-    : undefined;
+  const selectedClass = classes.find((klass) => klass.id === effectiveClassId);
+  const selectedClassId = selectedClass?.id;
 
   // BUỔI T{m} counts the selected class's scheduled (non-cancelled) sessions
   // month-to-date — the roster screen's workload view; attendance detail
@@ -195,15 +206,27 @@ export function StudentsPage() {
           <HvButton variant="secondary" size="sm" onClick={() => setClassDialogOpen(true)}>
             + Tạo lớp mới
           </HvButton>
-          <HvButton
-            size="sm"
-            onClick={() => {
-              setEditingStudent(undefined);
-              setStudentDialogOpen(true);
-            }}
-          >
-            + Thêm học sinh
-          </HvButton>
+          {selectedClass && canSendClassReports(canRunSends, selectedClass) ? (
+            <HvButton variant="secondary" size="sm" onClick={() => setSendPeriodsOpen(true)}>
+              Gửi báo cáo
+            </HvButton>
+          ) : null}
+          {selectedClass && canWriteClass(isOwner, selectedClass) ? (
+            <HvButton variant="secondary" size="sm" onClick={() => setEnrollExistingOpen(true)}>
+              + Ghi danh học sinh
+            </HvButton>
+          ) : null}
+          {isOwner ? (
+            <HvButton
+              size="sm"
+              onClick={() => {
+                setEditingStudent(undefined);
+                setStudentDialogOpen(true);
+              }}
+            >
+              + Thêm học sinh
+            </HvButton>
+          ) : null}
         </div>
         <p className="mt-1 text-[13.5px] text-ink-500">
           Chỉ lưu: họ tên · ngày nhập học · lớp · người liên hệ. Không thu thập gì thêm.
@@ -285,9 +308,11 @@ export function StudentsPage() {
             <Link to={`/contacts/${student.contact_id}`} className="text-[13px] text-ink-500">
               {student.contact_name}
             </Link>
-            <a href={`tel:${student.contact_phone}`} className="text-[13px] text-mint-600">
-              {formatPhoneLocal(student.contact_phone)}
-            </a>
+            {student.contact_phone ? (
+              <a href={`tel:${student.contact_phone}`} className="text-[13px] text-mint-600">
+                {formatPhoneLocal(student.contact_phone)}
+              </a>
+            ) : null}
             <div className="flex gap-2">
               {isUnenrolledTab ? (
                 <HvButton
@@ -300,19 +325,23 @@ export function StudentsPage() {
                   Ghi danh vào lớp
                 </HvButton>
               ) : null}
-              <HvButton
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setEditingStudent(student);
-                  setStudentDialogOpen(true);
-                }}
-              >
-                Sửa
-              </HvButton>
-              <HvButton variant="danger" size="sm" onClick={() => setAnonymizing(student)}>
-                Xoá
-              </HvButton>
+              {isOwner ? (
+                <>
+                  <HvButton
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setEditingStudent(student);
+                      setStudentDialogOpen(true);
+                    }}
+                  >
+                    Sửa
+                  </HvButton>
+                  <HvButton variant="danger" size="sm" onClick={() => setAnonymizing(student)}>
+                    Xoá
+                  </HvButton>
+                </>
+              ) : null}
             </div>
           </HvCard>
         ))}
@@ -366,12 +395,14 @@ export function StudentsPage() {
                     >
                       {student.contact_name}
                     </Link>
-                    <a
-                      href={`tel:${student.contact_phone}`}
-                      className="text-[12.5px] text-ink-400 hover:text-mint-600"
-                    >
-                      {formatPhoneLocal(student.contact_phone)}
-                    </a>
+                    {student.contact_phone ? (
+                      <a
+                        href={`tel:${student.contact_phone}`}
+                        className="text-[12.5px] text-ink-400 hover:text-mint-600"
+                      >
+                        {formatPhoneLocal(student.contact_phone)}
+                      </a>
+                    ) : null}
                   </td>
                   <td className={cn(tableCellClassName, "text-ink-500")}>
                     {enrollmentStartLabel(student.id)}
@@ -400,19 +431,27 @@ export function StudentsPage() {
                           Ghi danh vào lớp
                         </HvButton>
                       ) : null}
-                      <HvButton
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setEditingStudent(student);
-                          setStudentDialogOpen(true);
-                        }}
-                      >
-                        Sửa
-                      </HvButton>
-                      <HvButton variant="danger" size="sm" onClick={() => setAnonymizing(student)}>
-                        Xoá
-                      </HvButton>
+                      {isOwner ? (
+                        <>
+                          <HvButton
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setEditingStudent(student);
+                              setStudentDialogOpen(true);
+                            }}
+                          >
+                            Sửa
+                          </HvButton>
+                          <HvButton
+                            variant="danger"
+                            size="sm"
+                            onClick={() => setAnonymizing(student)}
+                          >
+                            Xoá
+                          </HvButton>
+                        </>
+                      ) : null}
                     </div>
                   </td>
                 </tr>
@@ -423,6 +462,21 @@ export function StudentsPage() {
       </div>
 
       <ClassDialog open={classDialogOpen} onOpenChange={setClassDialogOpen} />
+      {selectedClass && sendPeriodsOpen ? (
+        <ClassSendPeriodsDialog
+          open={sendPeriodsOpen}
+          onOpenChange={setSendPeriodsOpen}
+          classId={selectedClass.id}
+          className={selectedClass.name}
+        />
+      ) : null}
+      {selectedClass ? (
+        <EnrollExistingStudentDialog
+          open={enrollExistingOpen}
+          onOpenChange={setEnrollExistingOpen}
+          klass={selectedClass}
+        />
+      ) : null}
       <StudentDialog
         open={studentDialogOpen}
         onOpenChange={(open) => {

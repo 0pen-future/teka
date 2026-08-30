@@ -41,7 +41,9 @@ export type ContactChildInvoiceRow = z.infer<typeof contactChildInvoiceRowSchema
 export const contactBalanceRowSchema = z.object({
   contact_id: z.string(),
   full_name: z.string(),
-  phone: z.string(),
+  // Null when the caller may not see the contact's phone (phone privacy:
+  // owner/oversight or an assigned hoc_vu see it, other staff do not).
+  phone: z.string().nullable(),
   contact_archived: z.boolean(),
   student_count: z.number().int(),
   total_due: z.number(),
@@ -231,6 +233,10 @@ export const bulkSendResponseSchema = z.object({
   fallback_manual_count: z.number().int(),
   bulk_text: z.string(),
   rows: z.array(bulkSendRowSchema),
+  // Set when the other statement dimension (family vs class copy) already
+  // sent this period — parents may get both. Informational, never blocking;
+  // omitempty on the wire.
+  overlap_warning: z.string().optional(),
 });
 
 export type BulkSendResponse = z.infer<typeof bulkSendResponseSchema>;
@@ -262,7 +268,9 @@ export const notificationRowSchema = z.object({
   id: z.string(),
   contact_id: z.string(),
   contact_name: z.string(),
-  phone: z.string(),
+  // Null when the caller may not see the contact's phone — see
+  // contactBalanceRowSchema.phone.
+  phone: z.string().nullable(),
   channel: notificationChannelSchema,
   purpose: notificationPurposeSchema,
   status: notificationStatusSchema,
@@ -282,6 +290,10 @@ export type NotificationRow = z.infer<typeof notificationRowSchema>;
 export const bulkSendInputSchema = z.object({
   purpose: z.enum(["statements", "reminder"]),
   channel: notificationChannelSchema.optional(),
+  // Switches the send onto the class dimension: that class's class-scoped
+  // statement copies go out instead of the family statements. Gated by the
+  // caller's class-send access, not the center-wide send permission.
+  class_id: z.string().optional(),
 });
 
 export type BulkSendInput = z.infer<typeof bulkSendInputSchema>;
@@ -316,6 +328,8 @@ export const sendPreviewSchema = z.object({
   mapped_not_friend: z.array(sendPreviewContactSchema),
   unmapped: z.array(sendPreviewContactSchema),
   max_run_size: z.number().int(),
+  // Mirrors bulkSendResponseSchema.overlap_warning for the pre-send dialog.
+  overlap_warning: z.string().optional(),
 });
 
 export type SendPreview = z.infer<typeof sendPreviewSchema>;

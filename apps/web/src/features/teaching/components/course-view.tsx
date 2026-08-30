@@ -24,6 +24,8 @@ interface CourseViewProps {
   monthStart: string;
   monthNumber: number;
   previousMonthNumber: number;
+  /** Whether the viewer may edit curriculum/giáo án — see `SessionDetailPanel`'s prop of the same name. */
+  canWrite: boolean;
 }
 
 /**
@@ -42,6 +44,7 @@ export function CourseView({
   monthStart,
   monthNumber,
   previousMonthNumber,
+  canWrite,
 }: CourseViewProps) {
   const { curriculum, lessonPlans } = useClassTeaching(classId);
   const saveCurriculumMutation = useSaveCurriculum(classId);
@@ -126,6 +129,7 @@ export function CourseView({
         curriculum={curriculum}
         doneCount={doneCount}
         onEdit={() => setOpenModal("curriculum")}
+        canWrite={canWrite}
       />
       <div className="flex min-w-[270px] flex-1 flex-col gap-3.5">
         {curriculum ? (
@@ -137,6 +141,7 @@ export function CourseView({
             onEdit={() => setOpenModal("plan")}
             onAttachFile={attachFile}
             onSubmit={submitPlan}
+            canWrite={canWrite}
           />
         ) : null}
         <MonthlyHeadcountCard

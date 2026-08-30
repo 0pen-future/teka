@@ -24,6 +24,13 @@ interface SessionDetailPanelProps {
   classId: string;
   classTitle: string;
   derived: SessionDerived;
+  /**
+   * Whether the viewer may edit this session's note/scores. The API's write
+   * gate is owner-or-giao_vien-only, so a hoc_vu/tro_giang class-staff
+   * grantee gets a read-only panel — rendering the inputs would only
+   * manufacture 403s.
+   */
+  canWrite: boolean;
   onClose: () => void;
 }
 
@@ -47,6 +54,7 @@ export function SessionDetailPanel({
   classId,
   classTitle,
   derived,
+  canWrite,
   onClose,
 }: SessionDetailPanelProps) {
   const { session } = derived;
@@ -203,39 +211,50 @@ export function SessionDetailPanel({
 
       <div className="px-[18px] pt-3.5 pb-4">
         {tab === "note" ? (
-          <>
-            <label
-              htmlFor={`session-note-${session.id}`}
-              className="block text-[12px] font-extrabold tracking-[0.3px] text-ink-400"
-            >
-              NHẬN XÉT CHUNG CỦA BUỔI
-            </label>
-            <textarea
-              id={`session-note-${session.id}`}
-              rows={5}
-              value={noteValue}
-              onChange={(event) => setNoteDraft(event.target.value)}
-              placeholder="Không khí lớp, phần yếu cần lưu ý cho họp tuần…"
-              className="mt-1.5 w-full resize-y rounded-[14px] border-2 border-line-200 px-3 py-2.5 text-[13.5px] outline-none focus:border-mint-400"
-            />
-            <div className="mt-2 flex items-center gap-2.5">
-              <button
-                type="button"
-                onClick={saveNote}
-                className={noteDirty ? saveButtonActive : saveButtonIdle}
+          canWrite ? (
+            <>
+              <label
+                htmlFor={`session-note-${session.id}`}
+                className="block text-[12px] font-extrabold tracking-[0.3px] text-ink-400"
               >
-                Lưu nhận xét
-              </button>
-              <span
-                className={cn(
-                  "text-[12.5px] font-bold",
-                  noteDirty ? "text-sun-600" : "text-mint-600",
-                )}
-              >
-                {noteDirty ? "Chưa lưu" : storedNote.trim() ? "Đã lưu ✓" : ""}
-              </span>
-            </div>
-          </>
+                NHẬN XÉT CHUNG CỦA BUỔI
+              </label>
+              <textarea
+                id={`session-note-${session.id}`}
+                rows={5}
+                value={noteValue}
+                onChange={(event) => setNoteDraft(event.target.value)}
+                placeholder="Không khí lớp, phần yếu cần lưu ý cho họp tuần…"
+                className="mt-1.5 w-full resize-y rounded-[14px] border-2 border-line-200 px-3 py-2.5 text-[13.5px] outline-none focus:border-mint-400"
+              />
+              <div className="mt-2 flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={saveNote}
+                  className={noteDirty ? saveButtonActive : saveButtonIdle}
+                >
+                  Lưu nhận xét
+                </button>
+                <span
+                  className={cn(
+                    "text-[12.5px] font-bold",
+                    noteDirty ? "text-sun-600" : "text-mint-600",
+                  )}
+                >
+                  {noteDirty ? "Chưa lưu" : storedNote.trim() ? "Đã lưu ✓" : ""}
+                </span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-[12px] font-extrabold tracking-[0.3px] text-ink-400">
+                NHẬN XÉT CHUNG CỦA BUỔI
+              </div>
+              <p className="mt-1.5 text-[13.5px] text-ink-700">
+                {storedNote.trim() || "Chưa có nhận xét."}
+              </p>
+            </>
+          )
         ) : null}
 
         {tab === "plan" ? (
@@ -275,6 +294,7 @@ export function SessionDetailPanel({
               rosterPending={rosterQuery.isPending}
               rosterError={rosterQuery.isError}
               sessionLabel={sessionLabel}
+              canWrite={canWrite}
             />
           ) : (
             <>
@@ -289,7 +309,7 @@ export function SessionDetailPanel({
                 <div className="flex max-h-[280px] flex-col gap-1 overflow-y-auto">
                   {rosterQuery.data.rows.map((row) => {
                     const absent = row.status === "absent" || row.status === "excused";
-                    const editable = held && row.status === "present";
+                    const editable = held && row.status === "present" && canWrite;
                     const stored = storedScores[row.student_id];
                     return (
                       <div
@@ -332,18 +352,20 @@ export function SessionDetailPanel({
                   })}
                 </div>
               )}
-              <div className="mt-2.5 flex items-center gap-2.5">
-                <button
-                  type="button"
-                  onClick={saveScores}
-                  className={scoresDirty ? saveButtonActive : saveButtonIdle}
-                >
-                  Lưu điểm buổi
-                </button>
-                <span className="text-[12.5px] font-bold text-sun-600">
-                  {scoresDirty ? "Chưa lưu" : ""}
-                </span>
-              </div>
+              {canWrite ? (
+                <div className="mt-2.5 flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={saveScores}
+                    className={scoresDirty ? saveButtonActive : saveButtonIdle}
+                  >
+                    Lưu điểm buổi
+                  </button>
+                  <span className="text-[12.5px] font-bold text-sun-600">
+                    {scoresDirty ? "Chưa lưu" : ""}
+                  </span>
+                </div>
+              ) : null}
             </>
           )
         ) : null}

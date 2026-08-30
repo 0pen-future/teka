@@ -11,6 +11,14 @@ export interface ConfirmAttendanceBarProps {
    * and the confirm handler can never disagree.
    */
   settled: boolean;
+  /** Whether the viewer may confirm attendance — hoc_vu class staff and handed-off teachers read only. */
+  canWrite: boolean;
+  /**
+   * False while the class (and with it the viewer's staff roles) is still
+   * loading — the bar waits in a neutral disabled state instead of flashing
+   * the denial label at a teacher who may write.
+   */
+  accessResolved: boolean;
   onConfirm: () => void;
 }
 
@@ -26,11 +34,17 @@ export function ConfirmAttendanceBar({
   pending,
   closedPeriod,
   settled,
+  canWrite,
+  accessResolved,
   onConfirm,
 }: ConfirmAttendanceBarProps) {
-  const label = settled
-    ? "ĐÃ XÁC NHẬN ✓"
-    : `${closedPeriod ? "LƯU VÀ TẠO ĐIỀU CHỈNH" : "XÁC NHẬN BUỔI HỌC"} · ${absentCount} vắng`;
+  const label = !accessResolved
+    ? "Đang tải…"
+    : !canWrite
+      ? "CHỈ GIÁO VIÊN, TRỢ GIẢNG LỚP HOẶC CHỦ TRUNG TÂM MỚI XÁC NHẬN ĐƯỢC"
+      : settled
+        ? "ĐÃ XÁC NHẬN ✓"
+        : `${closedPeriod ? "LƯU VÀ TẠO ĐIỀU CHỈNH" : "XÁC NHẬN BUỔI HỌC"} · ${absentCount} vắng`;
   return (
     <div className="sticky bottom-14 z-10 rounded-b-[28px] border-t border-line-100 bg-white px-4 py-[14px] pb-[max(14px,env(safe-area-inset-bottom))] md:bottom-0">
       <HvButton
@@ -38,7 +52,7 @@ export function ConfirmAttendanceBar({
         variant={closedPeriod && !settled ? "reward" : "primary"}
         size="lg"
         block
-        disabled={pending}
+        disabled={pending || !canWrite}
         onClick={onConfirm}
       >
         {pending ? "Đang lưu…" : label}

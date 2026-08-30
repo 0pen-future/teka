@@ -16,6 +16,8 @@ interface ComponentScoreGridProps {
   rosterPending: boolean;
   rosterError: boolean;
   sessionLabel: string;
+  /** Whether the viewer may edit cells — see `SessionDetailPanel`'s prop of the same name. */
+  canWrite: boolean;
 }
 
 function cellKey(studentId: string, componentId: string): string {
@@ -36,6 +38,7 @@ export function ComponentScoreGrid({
   rosterPending,
   rosterError,
   sessionLabel,
+  canWrite,
 }: ComponentScoreGridProps) {
   const scoresQuery = useSessionScores(sessionId);
   const saveMutation = useSaveSessionScores(sessionId);
@@ -123,7 +126,7 @@ export function ComponentScoreGrid({
             <tbody>
               {rosterRows.map((row) => {
                 const absent = row.status === "absent" || row.status === "excused";
-                const editable = held && row.status === "present";
+                const editable = held && row.status === "present" && canWrite;
                 return (
                   <tr key={row.student_id} className="hover:bg-cream-100">
                     <td className="sticky left-0 z-10 bg-white px-2 py-1 whitespace-nowrap text-ink-700">
@@ -169,16 +172,18 @@ export function ComponentScoreGrid({
           </table>
         </div>
       )}
-      <div className="mt-2.5 flex items-center gap-2.5">
-        <button
-          type="button"
-          onClick={saveScores}
-          className={dirty ? saveButtonActive : saveButtonIdle}
-        >
-          Lưu điểm thành phần
-        </button>
-        <span className="text-[12.5px] font-bold text-sun-600">{dirty ? "Chưa lưu" : ""}</span>
-      </div>
+      {canWrite ? (
+        <div className="mt-2.5 flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={saveScores}
+            className={dirty ? saveButtonActive : saveButtonIdle}
+          >
+            Lưu điểm thành phần
+          </button>
+          <span className="text-[12.5px] font-bold text-sun-600">{dirty ? "Chưa lưu" : ""}</span>
+        </div>
+      ) : null}
     </>
   );
 }
