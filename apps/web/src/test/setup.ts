@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 
 import { cleanup } from "@testing-library/react";
+import { toast } from "sonner";
 import { afterAll, afterEach, beforeAll, beforeEach } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
@@ -14,6 +15,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   server.resetHandlers();
   cleanup();
+  toast.dismiss();
 });
 afterAll(() => server.close());
 

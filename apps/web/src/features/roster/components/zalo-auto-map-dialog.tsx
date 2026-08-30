@@ -299,7 +299,7 @@ export function ZaloAutoMapDialog({ open, onOpenChange }: ZaloAutoMapDialogProps
         </HvButton>
       </div>
     );
-  } else if (contactsData && contactsData.contacts.length === 0) {
+  } else if (contactsData?.contacts.length === 0) {
     body = <p className="text-[13px] text-ink-400">Tất cả người liên hệ đã được ghép.</p>;
   } else if (!groups) {
     body = <p className="text-[13px] text-ink-400">Đang đối chiếu với danh bạ Zalo…</p>;
