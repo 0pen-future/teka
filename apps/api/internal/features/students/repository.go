@@ -72,6 +72,28 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 	return q
 }
 
+// readScoped additionally lets a member read students enrolled in classes
+// currently assigned to them. A class handoff moves the class but never the
+// student rows, so without this widening the new teacher's student list and
+// detail pages stay empty even though the enrollment reads were widened the
+// same way. Reads only: editing or anonymizing a student stays with its
+// creator or the owner, so write paths keep scoped.
+func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+	q := database.FromContext(ctx, r.db).Where("students.center_id = ?", sc.CenterID)
+	if !sc.CenterWide() {
+		q = q.Where(`(students.teacher_id = ? OR EXISTS (
+			SELECT 1 FROM enrollments
+			JOIN classes ON classes.id = enrollments.class_id
+			  AND classes.center_id = enrollments.center_id
+			  AND classes.deleted_at IS NULL
+			WHERE enrollments.student_id = students.id
+			  AND enrollments.center_id = students.center_id
+			  AND enrollments.deleted_at IS NULL
+			  AND classes.teacher_id = ?))`, sc.TeacherID, sc.TeacherID)
+	}
+	return q
+}
+
 // withContact joins the owning contact and selects its name and phone
 // alongside the student columns.
 func withContact(q *gorm.DB) *gorm.DB {
@@ -92,7 +114,7 @@ func (r *gormRepository) Create(ctx context.Context, s *Student) error {
 
 func (r *gormRepository) GetByID(ctx context.Context, sc authctx.Scope, studentID uuid.UUID) (*Row, error) {
 	var row Row
-	err := withContact(r.scoped(ctx, sc).Model(&Student{})).
+	err := withContact(r.readScoped(ctx, sc).Model(&Student{})).
 		Where("students.id = ?", studentID).
 		Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -105,7 +127,7 @@ func (r *gormRepository) GetByID(ctx context.Context, sc authctx.Scope, studentI
 }
 
 func (r *gormRepository) List(ctx context.Context, sc authctx.Scope, filter ListFilter, p pagination.Params) ([]Row, int64, error) {
-	q := r.scoped(ctx, sc).Model(&Student{})
+	q := r.readScoped(ctx, sc).Model(&Student{})
 	if filter.Query != "" {
 		q = q.Where("students.full_name ILIKE ?", "%"+filter.Query+"%")
 	}

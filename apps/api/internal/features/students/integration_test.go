@@ -357,3 +357,70 @@ func (c *sqlCounter) Trace(ctx context.Context, begin time.Time, fc func() (stri
 	c.n.Add(1)
 	c.Interface.Trace(ctx, begin, fc, err)
 }
+
+// A class handoff moves the class to a new teacher but leaves the student
+// rows with their creator. The new teacher must still read those students —
+// the roster tab lists them and their detail pages resolve — while editing
+// and deleting stay with the creator or the owner, and an unassigned peer
+// keeps seeing nothing.
+func TestHandedOffClassStudentsAreReadableByNewTeacher(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, db)
+	newTeacher, _ := testutil.Teacher(t, db)
+	peer, _ := testutil.Teacher(t, db)
+	ownerCenter := testutil.ScopeFor(t, db, owner.ID).CenterID
+
+	testutil.JoinCenter(t, db, newTeacher.ID, ownerCenter)
+	testutil.JoinCenter(t, db, peer.ID, ownerCenter)
+	ownerScope := testutil.ScopeFor(t, db, owner.ID)
+	newTeacherScope := testutil.ScopeFor(t, db, newTeacher.ID)
+	peerScope := testutil.ScopeFor(t, db, peer.ID)
+
+	// The owner built the class and its roster, then handed the class over.
+	contact := testutil.Contact(t, db, owner.ID)
+	class := testutil.Class(t, db, owner.ID)
+	student, err := svc.Create(ctx, ownerScope, students.CreateRequest{FullName: "Bé An", ContactID: contact.ID})
+	require.NoError(t, err)
+	insertEnrollment(t, db, ownerCenter, owner.ID, student.ID, class.ID)
+	require.NoError(t, db.Exec(
+		"UPDATE classes SET teacher_id = ? WHERE id = ?", newTeacher.ID, class.ID).Error,
+		"simulate the handoff move of classes.teacher_id")
+
+	rows, total, err := svc.List(ctx, newTeacherScope, students.ListFilter{ClassID: class.ID}, listParams(t))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total, "the new teacher must see the handed-off class's students")
+	require.Equal(t, student.ID, rows[0].ID)
+	require.Equal(t, contact.FullName, rows[0].ContactName, "rows carry the contact join")
+
+	_, total, err = svc.List(ctx, newTeacherScope, students.ListFilter{}, listParams(t))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total, "the unfiltered list must include the handed-off student")
+
+	got, err := svc.Get(ctx, newTeacherScope, student.ID)
+	require.NoError(t, err, "the new teacher must open the student's detail page")
+	require.Equal(t, student.ID, got.ID)
+
+	// Reads widened, writes not: the student still belongs to the owner.
+	_, err = svc.Update(ctx, newTeacherScope, student.ID,
+		students.UpdateRequest{FullName: "Bé An (edited)", ContactID: contact.ID})
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
+		"the new teacher must not edit a student they do not own")
+	err = svc.Delete(ctx, newTeacherScope, student.ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
+		"the new teacher must not delete a student they do not own")
+
+	// The widening is keyed on class assignment, not center membership: an
+	// unassigned peer still sees nothing.
+	_, total, err = svc.List(ctx, peerScope, students.ListFilter{ClassID: class.ID}, listParams(t))
+	require.NoError(t, err)
+	require.EqualValues(t, 0, total, "an unassigned peer must not see the students")
+	_, err = svc.Get(ctx, peerScope, student.ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+
+	// The owner keeps full oversight after the handoff.
+	_, total, err = svc.List(ctx, ownerScope, students.ListFilter{ClassID: class.ID}, listParams(t))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+}

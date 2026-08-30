@@ -82,6 +82,13 @@ func (s *Service) Update(ctx context.Context, sc authctx.Scope, studentID uuid.U
 	if err != nil {
 		return nil, translate(err)
 	}
+	// GetByID also matches students enrolled in a class assigned to the
+	// caller (widened reads for handed-off classes), but editing stays with
+	// the creator or the owner — repo.Update saves by primary key, so the
+	// ownership gate has to live here.
+	if !sc.CenterWide() && row.TeacherID != sc.TeacherID {
+		return nil, translate(ErrNotFound)
+	}
 	if req.ContactID != row.ContactID {
 		if err := s.checkContact(ctx, sc, req.ContactID); err != nil {
 			return nil, err
