@@ -24,7 +24,14 @@ import (
 // authorization gate (non-owners cannot resolve another teacher's class).
 // *classes.Service satisfies this.
 type ClassSource interface {
-	Get(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, error)
+	// GetWritable is the write gate: the owner always passes, a member only
+	// with an active class_staff stint whose role carries the given
+	// capability. Every curriculum/plan write resolves through it. Readable
+	// but not writable resolves to 403, unreadable to 404.
+	GetWritable(ctx context.Context, sc authctx.Scope, classID uuid.UUID, capability authctx.ClassCapability) (*classes.Class, error)
+	// GetReadable is the read port: own classes OR classes the caller holds a
+	// class_staff stint on (ended included). The roles slice is unused here.
+	GetReadable(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, []string, error)
 }
 
 // SessionSource is the slice of the sessions feature teaching needs:
@@ -32,7 +39,10 @@ type ClassSource interface {
 // the note/marks writes, exactly as ClassSource gates the class routes.
 // *sessions.Service satisfies this.
 type SessionSource interface {
-	GetByID(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*sessions.Session, error)
+	// GetWritable admits the owner and members whose active class_staff role
+	// carries the given capability; readable-but-not-writable is 403,
+	// unreadable 404.
+	GetWritable(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID, capability authctx.ClassCapability) (*sessions.Session, error)
 }
 
 // RosterSource is the slice of the enrollments feature teaching needs: the
@@ -63,7 +73,7 @@ func NewService(repo Repository, classSource ClassSource, sessionSource SessionS
 // GetCurriculum returns the class's giáo trình, or the empty default when
 // none was ever saved — 200 either way, so the UI needs no null branch.
 func (s *Service) GetCurriculum(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*CurriculumResponse, error) {
-	if _, err := s.resolveClass(ctx, sc, classID); err != nil {
+	if _, err := s.resolveReadableClass(ctx, sc, classID); err != nil {
 		return nil, err
 	}
 	cur, err := s.repo.GetCurriculum(ctx, sc, classID)
@@ -78,14 +88,11 @@ func (s *Service) GetCurriculum(ctx context.Context, sc authctx.Scope, classID u
 
 // PutCurriculum whole-replaces the class's lesson list (the editor modal
 // always saves the entire list) and clamps the progress pointer into the new
-// range. Class-teacher only — the owner's reach into another teacher's class
-// is read + review actions, never content.
+// range. Gated by the lesson-plan capability: the owner and the class's
+// active giáo viên may edit content.
 func (s *Service) PutCurriculum(ctx context.Context, sc authctx.Scope, classID uuid.UUID, req PutCurriculumRequest) (*CurriculumResponse, error) {
-	class, err := s.resolveClass(ctx, sc, classID)
+	class, err := s.resolveClass(ctx, sc, classID, authctx.CapLessonPlanWrite)
 	if err != nil {
-		return nil, err
-	}
-	if err := requireClassTeacher(class, sc); err != nil {
 		return nil, err
 	}
 	lessons := req.Lessons
@@ -115,7 +122,7 @@ func (s *Service) PutCurriculum(ctx context.Context, sc authctx.Scope, classID u
 // resolved. Missing indexes are simply absent — the web maps them to its
 // virtual "none" status.
 func (s *Service) ListPlans(ctx context.Context, sc authctx.Scope, classID uuid.UUID) ([]PlanResponse, error) {
-	if _, err := s.resolveClass(ctx, sc, classID); err != nil {
+	if _, err := s.resolveReadableClass(ctx, sc, classID); err != nil {
 		return nil, err
 	}
 	plans, err := s.repo.ListPlans(ctx, sc, classID)
@@ -130,11 +137,8 @@ func (s *Service) ListPlans(ctx context.Context, sc authctx.Scope, classID uuid.
 // save creates the row as draft; saving under redo keeps redo so the owner's
 // note stays visible); a plan under or after review has no legal save — 409.
 func (s *Service) SavePlan(ctx context.Context, sc authctx.Scope, classID uuid.UUID, lessonIndex int, req SavePlanRequest) (*PlanResponse, error) {
-	class, err := s.resolveClass(ctx, sc, classID)
+	class, err := s.resolveClass(ctx, sc, classID, authctx.CapLessonPlanWrite)
 	if err != nil {
-		return nil, err
-	}
-	if err := requireClassTeacher(class, sc); err != nil {
 		return nil, err
 	}
 	if err := s.validateLessonIndex(ctx, sc, classID, lessonIndex); err != nil {
@@ -173,11 +177,7 @@ func (s *Service) SavePlan(ctx context.Context, sc authctx.Scope, classID uuid.U
 // pending, the redo note is consumed, and the submitter is stamped — the
 // review queue shows who actually pressed submit.
 func (s *Service) SubmitPlan(ctx context.Context, sc authctx.Scope, classID uuid.UUID, lessonIndex int) (*PlanResponse, error) {
-	class, err := s.resolveClass(ctx, sc, classID)
-	if err != nil {
-		return nil, err
-	}
-	if err := requireClassTeacher(class, sc); err != nil {
+	if _, err := s.resolveClass(ctx, sc, classID, authctx.CapLessonPlanWrite); err != nil {
 		return nil, err
 	}
 	if err := s.validateLessonIndex(ctx, sc, classID, lessonIndex); err != nil {
@@ -264,7 +264,7 @@ func (s *Service) GetMonthMarks(ctx context.Context, sc authctx.Scope, classID u
 		})
 	}
 	to := from.AddDate(0, 1, 0)
-	if _, err := s.resolveClass(ctx, sc, classID); err != nil {
+	if _, err := s.resolveReadableClass(ctx, sc, classID); err != nil {
 		return nil, err
 	}
 	notes, err := s.repo.ListNotesForClassMonth(ctx, sc, classID, from, to)
@@ -290,13 +290,10 @@ func (s *Service) GetMonthMarks(ctx context.Context, sc authctx.Scope, classID u
 
 // PutNote upserts the session's whole-class nhận xét; an empty body deletes
 // the row — the UI has one text box and empty means "no note", so the table
-// never stores empty strings. Session-teacher only.
+// never stores empty strings. Gated by the remarks capability.
 func (s *Service) PutNote(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID, req PutNoteRequest) (*NoteResponse, error) {
-	session, err := s.resolveSession(ctx, sc, sessionID)
+	session, err := s.resolveSession(ctx, sc, sessionID, authctx.CapRemarksWrite)
 	if err != nil {
-		return nil, err
-	}
-	if err := requireSessionTeacher(session, sc); err != nil {
 		return nil, err
 	}
 	if trimmedPtr(req.Body) == nil {
@@ -326,11 +323,8 @@ func (s *Service) PutNote(ctx context.Context, sc authctx.Scope, sessionID uuid.
 // score never becomes immutable history. Returns the session's full mark set
 // after the write so the client can reconcile its cache.
 func (s *Service) PutMarks(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID, entries []MarkEntryRequest) ([]MarkResponse, error) {
-	session, err := s.resolveSession(ctx, sc, sessionID)
+	session, err := s.resolveSession(ctx, sc, sessionID, authctx.CapRemarksWrite)
 	if err != nil {
-		return nil, err
-	}
-	if err := requireSessionTeacher(session, sc); err != nil {
 		return nil, err
 	}
 	if err := validateMarkEntries(entries); err != nil {
@@ -461,10 +455,11 @@ func markResponse(mark SessionMark) MarkResponse {
 	}
 }
 
-// resolveSession is resolveClass's session counterpart: normalise the
-// SessionSource error shape into this package's 404 contract.
-func (s *Service) resolveSession(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*sessions.Session, error) {
-	session, err := s.sessions.GetByID(ctx, sc, sessionID)
+// resolveSession is resolveClass's session counterpart: resolve on the write
+// port under the given capability and normalise the SessionSource error shape
+// into this package's 404 contract.
+func (s *Service) resolveSession(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID, capability authctx.ClassCapability) (*sessions.Session, error) {
+	session, err := s.sessions.GetWritable(ctx, sc, sessionID, capability)
 	if err != nil {
 		var appErr *apperror.AppError
 		if errors.As(err, &appErr) {
@@ -506,7 +501,7 @@ func (s *Service) resolveReviewedClass(ctx context.Context, sc authctx.Scope, cl
 	if !sc.IsOwner {
 		return ownerOnly()
 	}
-	_, err := s.resolveClass(ctx, sc, classID)
+	_, err := s.resolveClass(ctx, sc, classID, authctx.CapLessonPlanWrite)
 	return err
 }
 
@@ -549,12 +544,23 @@ func (s *Service) writePlan(ctx context.Context, plan *Plan) error {
 	return nil
 }
 
-// resolveClass fetches the class through the ClassSource contract and
-// normalises whatever error shape it returns (a pre-translated *AppError
-// from the real classes.Service, or a raw classes.ErrNotFound from a test
-// fake) into this package's 404 contract.
-func (s *Service) resolveClass(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, error) {
-	class, err := s.classes.Get(ctx, sc, classID)
+// resolveClass fetches the class through the ClassSource write gate under the
+// given capability and normalises whatever error shape it returns (a
+// pre-translated *AppError from the real classes.Service, or a raw
+// classes.ErrNotFound from a test fake) into this package's 404 contract.
+func (s *Service) resolveClass(ctx context.Context, sc authctx.Scope, classID uuid.UUID, capability authctx.ClassCapability) (*classes.Class, error) {
+	return normalizeClassErr(s.classes.GetWritable(ctx, sc, classID, capability))
+}
+
+// resolveReadableClass is resolveClass on the read port: a class_staff stint
+// (active or ended) also resolves. GETs only — every curriculum/plan write
+// keeps resolveClass as its gate.
+func (s *Service) resolveReadableClass(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, error) {
+	class, _, err := s.classes.GetReadable(ctx, sc, classID)
+	return normalizeClassErr(class, err)
+}
+
+func normalizeClassErr(class *classes.Class, err error) (*classes.Class, error) {
 	if err != nil {
 		var appErr *apperror.AppError
 		if errors.As(err, &appErr) {
@@ -650,12 +656,6 @@ func transitionConflict(status, action string) error {
 	return appErr
 }
 
-func notClassTeacher() error {
-	appErr := apperror.Forbidden("only the class teacher can edit teaching content")
-	appErr.Err = ErrNotClassTeacher
-	return appErr
-}
-
 func ownerOnly() error {
 	appErr := apperror.Forbidden("only the center owner can review lesson plans")
 	appErr.Err = ErrOwnerOnly
@@ -674,34 +674,8 @@ func indexOutOfRange(index, length int) error {
 	})
 }
 
-// requireClassTeacher bounds content writes (curriculum, plan save/submit)
-// to the class's own teacher. The owner deliberately included: their reach
-// into another teacher's class is read + the three review actions.
-func requireClassTeacher(class *classes.Class, sc authctx.Scope) error {
-	if class.TeacherID != sc.TeacherID {
-		return notClassTeacher()
-	}
-	return nil
-}
-
 func sessionNotFound() error {
 	appErr := apperror.NotFound("session")
 	appErr.Err = ErrSessionNotFound
 	return appErr
-}
-
-func notSessionTeacher() error {
-	appErr := apperror.Forbidden("only the session's teacher can record notes and marks")
-	appErr.Err = ErrNotSessionTeacher
-	return appErr
-}
-
-// requireSessionTeacher bounds note/marks writes to the session's own
-// teacher — the owner reads center-wide but never records another teacher's
-// scores or notes.
-func requireSessionTeacher(session *sessions.Session, sc authctx.Scope) error {
-	if session.TeacherID != sc.TeacherID {
-		return notSessionTeacher()
-	}
-	return nil
 }

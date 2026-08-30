@@ -155,7 +155,10 @@ func (f *fakeRoster) AddSchedule(_ context.Context, sc authctx.Scope, classID uu
 
 func (f *fakeRoster) FindIDByPhone(_ context.Context, sc authctx.Scope, phone string) (uuid.UUID, bool, error) {
 	for _, c := range f.contactRows {
-		if c.TeacherID == sc.TeacherID && c.CenterID == sc.CenterID && c.Phone == phone {
+		// The real repository's owner read is center-wide; a non-owner scope
+		// would be narrowed to what it can reach, which the fake approximates
+		// with the anchor-teacher filter.
+		if c.CenterID == sc.CenterID && (sc.IsOwner || c.TeacherID == sc.TeacherID) && c.Phone == phone {
 			return c.ID, true, nil
 		}
 	}
@@ -182,7 +185,8 @@ func (f *fakeRoster) CreateContact(_ context.Context, sc authctx.Scope, req cont
 func (f *fakeRoster) FindIDByName(_ context.Context, sc authctx.Scope, contactID uuid.UUID,
 	fullName string, note *string) (uuid.UUID, bool, error) {
 	for _, s := range f.studentRows {
-		if s.TeacherID == sc.TeacherID && s.CenterID == sc.CenterID &&
+		// Owner reads are center-wide, matching the students repository.
+		if s.CenterID == sc.CenterID && (sc.IsOwner || s.TeacherID == sc.TeacherID) &&
 			s.ContactID == contactID && s.FullName == fullName && samePtr(s.DisplayNote, note) {
 			return s.ID, true, nil
 		}

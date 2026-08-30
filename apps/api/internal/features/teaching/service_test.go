@@ -39,7 +39,7 @@ func (f *fakeClassSource) addClass(teacherID, centerID uuid.UUID) *classes.Class
 	return class
 }
 
-func (f *fakeClassSource) Get(_ context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, error) {
+func (f *fakeClassSource) GetWritable(_ context.Context, sc authctx.Scope, classID uuid.UUID, _ authctx.ClassCapability) (*classes.Class, error) {
 	class, ok := f.rows[classID]
 	if !ok || class.CenterID != sc.CenterID {
 		return nil, classes.ErrNotFound
@@ -59,6 +59,17 @@ type fakeSessionSource struct {
 	rows map[uuid.UUID]*sessions.Session
 }
 
+// GetReadable mirrors GetWritable: the unit fakes carry no class_staff table,
+// so the readable port collapses onto the own-rows one; the widened behavior
+// is covered by integration tests.
+func (f *fakeClassSource) GetReadable(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, []string, error) {
+	class, err := f.GetWritable(ctx, sc, classID, authctx.CapLessonPlanWrite)
+	if err != nil {
+		return nil, nil, err
+	}
+	return class, nil, nil
+}
+
 func newFakeSessionSource() *fakeSessionSource {
 	return &fakeSessionSource{rows: map[uuid.UUID]*sessions.Session{}}
 }
@@ -69,7 +80,7 @@ func (f *fakeSessionSource) addSession(teacherID, centerID, classID uuid.UUID, d
 	return session
 }
 
-func (f *fakeSessionSource) GetByID(_ context.Context, sc authctx.Scope, sessionID uuid.UUID) (*sessions.Session, error) {
+func (f *fakeSessionSource) GetWritable(_ context.Context, sc authctx.Scope, sessionID uuid.UUID, _ authctx.ClassCapability) (*sessions.Session, error) {
 	session, ok := f.rows[sessionID]
 	if !ok || session.CenterID != sc.CenterID {
 		return nil, sessions.ErrNotFound
@@ -550,9 +561,10 @@ func TestReviewActionsAreOwnerOnly(t *testing.T) {
 	}
 }
 
-// The owner reads center-wide but never edits another teacher's content:
-// curriculum replace, plan save, and submit are all 403 on a member's class.
-func TestContentWritesRequireClassTeacher(t *testing.T) {
+// The owner's center-wide scope passes the capability gate on every content
+// write: curriculum replace, plan save, and submit all work on a member's
+// class, and the rows keep the class teacher's anchor.
+func TestOwnerContentWritesOnMemberClass(t *testing.T) {
 	svc, deps := newTestService()
 	ownerScope, _ := ownerSetUp(deps)
 	memberID := uuid.New()
@@ -560,20 +572,22 @@ func TestContentWritesRequireClassTeacher(t *testing.T) {
 	deps.repo.curricula[memberClass.ID] = &Curriculum{ID: id.New(), ClassID: memberClass.ID, TeacherID: memberID, CenterID: ownerScope.CenterID, Lessons: StringList{"Bài 1"}}
 	ctx := context.Background()
 
-	if _, err := svc.PutCurriculum(ctx, ownerScope, memberClass.ID, PutCurriculumRequest{Lessons: []string{"x"}}); err == nil {
-		t.Fatal("owner curriculum write on a member's class must fail")
-	} else {
-		wantAppError(t, err, http.StatusForbidden)
+	cur, err := svc.PutCurriculum(ctx, ownerScope, memberClass.ID, PutCurriculumRequest{Lessons: []string{"x"}})
+	if err != nil {
+		t.Fatalf("owner curriculum write on a member's class must work: %v", err)
 	}
-	if _, err := svc.SavePlan(ctx, ownerScope, memberClass.ID, 0, SavePlanRequest{Goal: "g"}); err == nil {
-		t.Fatal("owner plan save on a member's class must fail")
-	} else {
-		wantAppError(t, err, http.StatusForbidden)
+	if len(cur.Lessons) != 1 || cur.Lessons[0] != "x" {
+		t.Fatalf("curriculum not replaced: %+v", cur.Lessons)
 	}
-	if _, err := svc.SubmitPlan(ctx, ownerScope, memberClass.ID, 0); err == nil {
-		t.Fatal("owner submit on a member's class must fail")
-	} else {
-		wantAppError(t, err, http.StatusForbidden)
+	// The row anchor stays the class teacher, not the writer.
+	if got := deps.repo.curricula[memberClass.ID].TeacherID; got != memberID {
+		t.Fatalf("curriculum anchor must stay the class teacher, got %s", got)
+	}
+	if _, err := svc.SavePlan(ctx, ownerScope, memberClass.ID, 0, SavePlanRequest{Goal: "g"}); err != nil {
+		t.Fatalf("owner plan save on a member's class must work: %v", err)
+	}
+	if _, err := svc.SubmitPlan(ctx, ownerScope, memberClass.ID, 0); err != nil {
+		t.Fatalf("owner submit on a member's class must work: %v", err)
 	}
 
 	// Reading stays allowed — that is the owner's oversight.
@@ -903,11 +917,11 @@ func TestGetMonthMarksWindowAndValidation(t *testing.T) {
 	}
 }
 
-// Note/marks writes are session-teacher only: the owner resolves a member's
-// session (their oversight is read) but gets 403 on both writes, while a peer
-// cannot even resolve it — 404. The owner's month read of the member's class
-// stays allowed.
-func TestSessionWritesRequireSessionTeacher(t *testing.T) {
+// Note/marks writes follow the capability gate: the owner's center-wide
+// scope passes on a member's session, while a peer with no staff stint cannot
+// even resolve it — 404. The owner's month read of the member's class stays
+// allowed.
+func TestOwnerSessionWritesOnMemberSession(t *testing.T) {
 	svc, deps := newTestService()
 	ownerScope, _ := ownerSetUp(deps)
 	memberID := uuid.New()
@@ -917,19 +931,19 @@ func TestSessionWritesRequireSessionTeacher(t *testing.T) {
 	deps.roster.enroll(memberClass.ID, student)
 	ctx := context.Background()
 
-	if _, err := svc.PutNote(ctx, ownerScope, session.ID, PutNoteRequest{Body: "x"}); err == nil {
-		t.Fatal("owner note write on a member's session must fail")
-	} else {
-		wantAppError(t, err, http.StatusForbidden)
+	note, err := svc.PutNote(ctx, ownerScope, session.ID, PutNoteRequest{Body: "x"})
+	if err != nil {
+		t.Fatalf("owner note write on a member's session must work: %v", err)
 	}
-	if _, err := svc.PutMarks(ctx, ownerScope, session.ID, []MarkEntryRequest{{StudentID: student, Score: setTo(5.0)}}); err == nil {
-		t.Fatal("owner marks write on a member's session must fail")
-	} else {
-		wantAppError(t, err, http.StatusForbidden)
+	if note.Body != "x" {
+		t.Fatalf("note not written: %+v", note)
+	}
+	if _, err := svc.PutMarks(ctx, ownerScope, session.ID, []MarkEntryRequest{{StudentID: student, Score: setTo(5.0)}}); err != nil {
+		t.Fatalf("owner marks write on a member's session must work: %v", err)
 	}
 
 	peerScope := authctx.Scope{TeacherID: uuid.New(), CenterID: ownerScope.CenterID, IsOwner: false}
-	_, err := svc.PutNote(ctx, peerScope, session.ID, PutNoteRequest{Body: "x"})
+	_, err = svc.PutNote(ctx, peerScope, session.ID, PutNoteRequest{Body: "x"})
 	wantAppError(t, err, http.StatusNotFound)
 
 	if _, err := svc.GetMonthMarks(ctx, ownerScope, memberClass.ID, "2026-08"); err != nil {

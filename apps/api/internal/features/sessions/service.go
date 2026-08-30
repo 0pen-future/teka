@@ -21,6 +21,19 @@ import (
 // an accidental denial of service against the database.
 const maxRangeDays = 400
 
+// validateRange guards every range-listing entry point with the same order
+// and cap rules, so the two read ports cannot drift apart.
+func validateRange(from, to time.Time) error {
+	if to.Before(from) {
+		return apperror.Invalid("validation failed", map[string]string{"to": "must not be before from"})
+	}
+	if days := int(to.Sub(from).Hours() / 24); days > maxRangeDays {
+		return apperror.Invalid("validation failed",
+			map[string]string{"to": fmt.Sprintf("range must not exceed %d days", maxRangeDays)})
+	}
+	return nil
+}
+
 // ClassSource is the slice of the classes feature session generation needs:
 // reading a class for its [start_date, end_date] clamp, and listing schedule
 // rows effective within a window. *classes.Service satisfies this — declared
@@ -28,7 +41,14 @@ const maxRangeDays = 400
 // students.EnrollmentEnder) so sessions depends on classes' public service
 // contract, never its repository type.
 type ClassSource interface {
-	Get(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, error)
+	// GetWritable is the shared WRITE gate: the owner, or an ACTIVE stint in
+	// a role the capability admits. Every session-mutating flow (generation,
+	// ad-hoc create) resolves through it, and it answers 403 (readable but
+	// wrong role) vs 404 (no relationship) itself.
+	GetWritable(ctx context.Context, sc authctx.Scope, classID uuid.UUID, capability authctx.ClassCapability) (*classes.Class, error)
+	// GetReadable is the read port: own classes OR classes the caller holds a
+	// class_staff stint on (ended included). The roles slice is unused here.
+	GetReadable(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, []string, error)
 	ListEffectiveSchedules(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]classes.Schedule, error)
 }
 
@@ -77,15 +97,11 @@ func NewService(repo Repository, classes ClassSource, teachers TeacherSource, en
 // fills gaps, never duplicates or moves an existing row (cancelled sessions
 // keep occupying their date and are never regenerated over).
 func (s *Service) ListRange(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]Detail, error) {
-	if to.Before(from) {
-		return nil, apperror.Invalid("validation failed", map[string]string{"to": "must not be before from"})
-	}
-	if days := int(to.Sub(from).Hours() / 24); days > maxRangeDays {
-		return nil, apperror.Invalid("validation failed",
-			map[string]string{"to": fmt.Sprintf("range must not exceed %d days", maxRangeDays)})
+	if err := validateRange(from, to); err != nil {
+		return nil, err
 	}
 
-	class, err := s.classes.Get(ctx, sc, classID)
+	class, err := s.classes.GetWritable(ctx, sc, classID, authctx.CapSessionsWrite)
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +156,47 @@ func (s *Service) ListRange(ctx context.Context, sc authctx.Scope, classID uuid.
 		return nil, apperror.Internal(err)
 	}
 
-	listed, err := s.repo.ListByClassAndRange(ctx, sc, classID, from, to)
+	// The write gate already admitted the caller; the listing itself is a
+	// read, and it must include rows anchored to a previous teacher (a
+	// handed-off class's history), which the own-rows port would drop.
+	listed, err := s.repo.ListByClassAndRangeReadable(ctx, sc, classID, from, to)
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+	details := make([]Detail, 0, len(listed))
+	for i := range listed {
+		detail, err := s.toDetail(ctx, sc, &listed[i])
+		if err != nil {
+			return nil, err
+		}
+		details = append(details, *detail)
+	}
+	return details, nil
+}
+
+// ListRangeReadable is the classbook GET port. A caller who may write the
+// class's sessions (the owner, or an ACTIVE stint in a sessions.write role)
+// gets the full ListRange behavior, generation included. A caller who merely
+// holds any other stint — a different role, or an ended one — gets the
+// already-materialised sessions read-only: staff reads must never insert rows.
+func (s *Service) ListRangeReadable(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]Detail, error) {
+	_, roles, err := s.classes.GetReadable(ctx, sc, classID)
+	if err != nil {
+		return nil, err
+	}
+	canGenerate := sc.CenterWide()
+	for _, role := range roles {
+		if authctx.StaffRoleCan(role, authctx.CapSessionsWrite) {
+			canGenerate = true
+		}
+	}
+	if canGenerate {
+		return s.ListRange(ctx, sc, classID, from, to)
+	}
+	if err := validateRange(from, to); err != nil {
+		return nil, err
+	}
+	listed, err := s.repo.ListByClassAndRangeReadable(ctx, sc, classID, from, to)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
@@ -230,9 +286,9 @@ func (s *Service) CreateAdHoc(ctx context.Context, sc authctx.Scope, classID uui
 	}
 
 	// The composite FK would refuse a foreign class_id anyway; checking first
-	// turns that refusal into a clean 404 instead of a constraint-violation
+	// turns that refusal into a clean 404/403 instead of a constraint-violation
 	// 500.
-	class, err := s.classes.Get(ctx, sc, classID)
+	class, err := s.classes.GetWritable(ctx, sc, classID, authctx.CapSessionsWrite)
 	if err != nil {
 		return nil, err
 	}
@@ -258,42 +314,80 @@ func (s *Service) CreateAdHoc(ctx context.Context, sc authctx.Scope, classID uui
 	if err := s.repo.Create(ctx, session); err != nil {
 		return nil, translate(err)
 	}
-	row, err := s.repo.GetByID(ctx, sc, session.ID)
+	// Read back through the read port: the row inherits the class's anchors,
+	// so a writer who is not the anchored teacher would miss it on own-rows.
+	row, err := s.repo.GetReadableByID(ctx, sc, session.ID)
 	if err != nil {
 		return nil, translate(err)
 	}
 	return s.toDetail(ctx, sc, row)
 }
 
-// Get returns one session with its class name and roster preview.
-func (s *Service) Get(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*Detail, error) {
-	row, err := s.repo.GetByID(ctx, sc, sessionID)
+// GetReadable is the GET port: a class_staff stint (active or ended) on the
+// session's class grants the read, so lifecycle writers can also read back
+// what they changed even when the row is anchored to another teacher.
+func (s *Service) GetReadable(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*Detail, error) {
+	row, err := s.repo.GetReadableByID(ctx, sc, sessionID)
 	if err != nil {
 		return nil, translate(err)
 	}
 	return s.toDetail(ctx, sc, row)
 }
 
-// GetByID returns one bare session, without the class name and roster
-// preview Get enriches with. This is the shape other features consume
-// through a narrow consumer interface (e.g. attendance's SessionStore),
-// which resolve their own related data instead of paying for
-// toDetail's roster query on every call.
-func (s *Service) GetByID(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*Session, error) {
-	row, err := s.repo.GetByID(ctx, sc, sessionID)
+// GetReadableByID is GetByID on the read port — the shape read-only consumers
+// (attendance's sheet GET) resolve a session through.
+func (s *Service) GetReadableByID(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*Session, error) {
+	row, err := s.repo.GetReadableByID(ctx, sc, sessionID)
 	if err != nil {
 		return nil, translate(err)
 	}
 	return &row.Session, nil
 }
 
+// GetWritable returns one bare session through the capability write gate —
+// the shape write-path consumers (attendance's SessionStore, grading's and
+// teaching's SessionSource) resolve a session through, each naming the
+// capability it is about to exercise. The bare Session skips toDetail's
+// roster query; consumers resolve their own related data.
+func (s *Service) GetWritable(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID, capability authctx.ClassCapability) (*Session, error) {
+	row, err := s.getWritableRow(ctx, sc, sessionID, capability)
+	if err != nil {
+		return nil, err
+	}
+	return &row.Session, nil
+}
+
+// getWritableRow fetches through the write port, then disambiguates a miss
+// through the read port: readable means the caller has SOME stint on the
+// class (ended, or a different role) but not this capability → honest 403;
+// unreadable → 404, so outsiders cannot probe session ids.
+func (s *Service) getWritableRow(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID, capability authctx.ClassCapability) (*Row, error) {
+	roles := authctx.StaffRolesFor(capability)
+	row, err := s.repo.GetWritableByID(ctx, sc, sessionID, roles)
+	if err == nil {
+		return row, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	if _, rerr := s.repo.GetReadableByID(ctx, sc, sessionID); rerr == nil {
+		return nil, apperror.Forbidden("your role on this class does not allow this action")
+	} else if !errors.Is(rerr, ErrNotFound) {
+		return nil, rerr
+	}
+	return nil, apperror.NotFound("session")
+}
+
 // MarkHeldAndConfirmed transitions a session planned->held and stamps
 // attendance_confirmed_at. Exposed for the attendance feature's SessionStore
 // contract; runs against database.FromContext(ctx, ...) so a caller invoking
 // this from inside its own WithinTx block shares that same transaction,
-// committing session status and attendance records atomically.
+// committing session status and attendance records atomically. The write
+// scope binds the attendance.write roles: whoever may confirm attendance may
+// also perform its implicit held transition.
 func (s *Service) MarkHeldAndConfirmed(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID, at time.Time) error {
-	return translate(s.repo.MarkHeldAndConfirmed(ctx, sc, sessionID, at))
+	roles := authctx.StaffRolesFor(authctx.CapAttendanceWrite)
+	return translate(s.repo.MarkHeldAndConfirmed(ctx, sc, roles, sessionID, at))
 }
 
 // Cancel marks a session cancelled with a reason — the line parents see on
@@ -306,17 +400,18 @@ func (s *Service) Cancel(ctx context.Context, sc authctx.Scope, sessionID uuid.U
 	if reason == "" {
 		return nil, reasonRequired()
 	}
-	row, err := s.repo.GetByID(ctx, sc, sessionID)
+	row, err := s.getWritableRow(ctx, sc, sessionID, authctx.CapSessionsWrite)
 	if err != nil {
-		return nil, translate(err)
+		return nil, err
 	}
 	if row.AttendanceConfirmedAt != nil {
 		return nil, attendanceConfirmedConflict("cancel")
 	}
-	if err := s.repo.UpdateStatus(ctx, sc, sessionID, StatusCancelled, &reason); err != nil {
+	roles := authctx.StaffRolesFor(authctx.CapSessionsWrite)
+	if err := s.repo.UpdateStatus(ctx, sc, roles, sessionID, StatusCancelled, &reason); err != nil {
 		return nil, translate(err)
 	}
-	return s.Get(ctx, sc, sessionID)
+	return s.GetReadable(ctx, sc, sessionID)
 }
 
 // Uncancel returns a cancelled session to planned and clears its reason. It
@@ -325,17 +420,18 @@ func (s *Service) Cancel(ctx context.Context, sc authctx.Scope, sessionID uuid.U
 // place, producing a "planned but confirmed" row that billing (which counts
 // only held sessions) would silently drop.
 func (s *Service) Uncancel(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*Detail, error) {
-	row, err := s.repo.GetByID(ctx, sc, sessionID)
+	row, err := s.getWritableRow(ctx, sc, sessionID, authctx.CapSessionsWrite)
 	if err != nil {
-		return nil, translate(err)
+		return nil, err
 	}
 	if row.Status != StatusCancelled {
 		return nil, invalidTransition("un-cancel a session that is not cancelled")
 	}
-	if err := s.repo.UpdateStatus(ctx, sc, sessionID, StatusPlanned, nil); err != nil {
+	roles := authctx.StaffRolesFor(authctx.CapSessionsWrite)
+	if err := s.repo.UpdateStatus(ctx, sc, roles, sessionID, StatusPlanned, nil); err != nil {
 		return nil, translate(err)
 	}
-	return s.Get(ctx, sc, sessionID)
+	return s.GetReadable(ctx, sc, sessionID)
 }
 
 // Hold marks a session held — the explicit action a teacher can take ahead of
@@ -343,30 +439,32 @@ func (s *Service) Uncancel(ctx context.Context, sc authctx.Scope, sessionID uuid
 // session must be un-cancelled first: holding it directly would resurrect it
 // with its stale cancel reason still attached.
 func (s *Service) Hold(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*Detail, error) {
-	row, err := s.repo.GetByID(ctx, sc, sessionID)
+	row, err := s.getWritableRow(ctx, sc, sessionID, authctx.CapSessionsWrite)
 	if err != nil {
-		return nil, translate(err)
+		return nil, err
 	}
 	if row.Status == StatusCancelled {
 		return nil, invalidTransition("hold a cancelled session; un-cancel it first")
 	}
-	if err := s.repo.UpdateStatus(ctx, sc, sessionID, StatusHeld, nil); err != nil {
+	roles := authctx.StaffRolesFor(authctx.CapSessionsWrite)
+	if err := s.repo.UpdateStatus(ctx, sc, roles, sessionID, StatusHeld, nil); err != nil {
 		return nil, translate(err)
 	}
-	return s.Get(ctx, sc, sessionID)
+	return s.GetReadable(ctx, sc, sessionID)
 }
 
 // Delete soft-deletes a session. Refuses (409) a session whose attendance is
 // already confirmed, for the same reason Cancel does.
 func (s *Service) Delete(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) error {
-	row, err := s.repo.GetByID(ctx, sc, sessionID)
+	row, err := s.getWritableRow(ctx, sc, sessionID, authctx.CapSessionsWrite)
 	if err != nil {
-		return translate(err)
+		return err
 	}
 	if row.AttendanceConfirmedAt != nil {
 		return attendanceConfirmedConflict("delete")
 	}
-	return translate(s.repo.SoftDelete(ctx, sc, sessionID))
+	roles := authctx.StaffRolesFor(authctx.CapSessionsWrite)
+	return translate(s.repo.SoftDelete(ctx, sc, roles, sessionID))
 }
 
 // ReassignPlanned moves the class's future planned sessions to newTeacherID and

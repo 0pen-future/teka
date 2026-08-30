@@ -226,7 +226,7 @@ func resolveStudents(rows []StudentRow, dir map[string]uuid.UUID, ownerID uuid.U
 	var errs []RowError
 	out := make([]resolvedStudent, 0, len(rows))
 	seen := make(map[studentKey]int, len(rows))
-	contactNames := make(map[contactKey]nameAt, len(rows))
+	contactNames := make(map[string]nameAt, len(rows))
 
 	for _, r := range rows {
 		teacherID, rerr := resolveTeacher(SheetStudents, r.Line,
@@ -247,16 +247,16 @@ func resolveStudents(rows []StudentRow, dir map[string]uuid.UUID, ownerID uuid.U
 			continue
 		}
 
-		// One phone is one parent. Two spellings of the name under the same
-		// teacher means the file is ambiguous about who owns the number.
-		ck := contactKey{teacherID: teacherID, phone: r.ContactPhone}
-		if prev, dup := contactNames[ck]; dup && prev.name != r.ContactName {
+		// One phone is one parent — center-wide, since contacts anchor on the
+		// owner and dedupe by phone alone. Two spellings of the name anywhere
+		// in the file means it is ambiguous about who owns the number.
+		if prev, dup := contactNames[r.ContactPhone]; dup && prev.name != r.ContactName {
 			errs = append(errs, rowErr(SheetStudents, r.Line, studentHeaders[colContactName],
 				CodeContactNameConflct, "số %s đã ghi tên phụ huynh là %q ở dòng %d",
 				r.ContactPhone, prev.name, prev.line))
 			continue
 		}
-		contactNames[ck] = nameAt{name: r.ContactName, line: r.Line}
+		contactNames[r.ContactPhone] = nameAt{name: r.ContactName, line: r.Line}
 
 		sk := studentKey{class: key, contactPhone: r.ContactPhone, studentName: r.StudentName, displayNote: r.DisplayNote}
 		if prevLine, dup := seen[sk]; dup {
@@ -298,11 +298,6 @@ func resolveStudents(rows []StudentRow, dir map[string]uuid.UUID, ownerID uuid.U
 		})
 	}
 	return out, errs
-}
-
-type contactKey struct {
-	teacherID uuid.UUID
-	phone     string
 }
 
 type nameAt struct {

@@ -66,17 +66,18 @@ func TestImportCommitCreatesEveryEntity(t *testing.T) {
 
 	require.Equal(t, ReportEntity{Created: 2}, rep.Classes)
 	require.Equal(t, ReportEntity{Created: 3}, rep.Schedules, "Toán 9A runs twice a week")
-	require.Equal(t, ReportEntity{Created: 3}, rep.Contacts)
+	require.Equal(t, ReportEntity{Created: 2, Reused: 1}, rep.Contacts,
+		"one parent under two teachers is still one contact")
 	require.Equal(t, ReportEntity{Created: 3}, rep.Students)
 	require.Equal(t, ReportEntity{Created: 3}, rep.Enrollments)
 
 	require.Len(t, f.store.classRows, 2)
 	require.Len(t, f.store.scheduleRows, 3)
-	require.Len(t, f.store.contactRows, 3)
+	require.Len(t, f.store.contactRows, 2)
 	require.Len(t, f.store.studentRows, 3)
 	require.Len(t, f.store.enrollRows, 3)
 
-	// Every row lands on the class's teacher, not on the importing owner.
+	// Classes land on their teacher, not on the importing owner.
 	for _, c := range f.store.classRows {
 		require.NotEqual(t, f.scope.TeacherID, c.TeacherID)
 		require.Equal(t, f.scope.CenterID, c.CenterID)
@@ -84,17 +85,21 @@ func TestImportCommitCreatesEveryEntity(t *testing.T) {
 	require.Equal(t, f.nam, f.store.classRows[0].TeacherID)
 	require.Equal(t, f.lan, f.store.classRows[1].TeacherID)
 
-	// One parent with children under two teachers becomes two contacts:
-	// uq_contacts_phone is (teacher_id, phone), so each teacher gets their own
-	// row, their own statement link, and their own balance.
-	var hung []*struct{ teacher uuid.UUID }
+	// Contacts and students are center data: every row anchors on the owner,
+	// so Hùng — a parent with children under two teachers — is one row.
+	for _, c := range f.store.contactRows {
+		require.Equal(t, f.scope.TeacherID, c.TeacherID)
+	}
+	for _, s := range f.store.studentRows {
+		require.Equal(t, f.scope.TeacherID, s.TeacherID)
+	}
+	var hung int
 	for _, c := range f.store.contactRows {
 		if c.Phone == "+84901234567" {
-			hung = append(hung, &struct{ teacher uuid.UUID }{c.TeacherID})
+			hung++
 		}
 	}
-	require.Len(t, hung, 2)
-	require.NotEqual(t, hung[0].teacher, hung[1].teacher)
+	require.Equal(t, 1, hung)
 }
 
 func TestImportSecondRunReusesEverything(t *testing.T) {
@@ -230,9 +235,11 @@ func TestImportSurfacesLockerFailure(t *testing.T) {
 	require.Empty(t, f.store.calls)
 }
 
-func TestImportRequiresOwner(t *testing.T) {
+func TestImportRequiresImportsRunPermission(t *testing.T) {
 	t.Parallel()
 	f := newImportFixture()
+	// A member without the imports.run grant. The owner passes via the
+	// owner bypass inside Scope.Has.
 	f.scope.IsOwner = false
 
 	_, err := f.importFile(validWorkbook(t), true)

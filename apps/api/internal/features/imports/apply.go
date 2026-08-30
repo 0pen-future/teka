@@ -27,22 +27,21 @@ const (
 // write, so the check and the real pass produce the same counts and the same
 // conflicts — a clean check cannot be followed by a surprise at commit.
 //
-// Every row is anchored on the class's teacher, never on the caller:
+// Two anchors are in play, matching who owns what:
 //
-//	anchor := authctx.Scope{TeacherID: <class teacher>, CenterID: sc.CenterID}
-//
-// IsOwner is deliberately false on that anchor. The four services read it to
-// decide whether to widen a lookup to the whole center, so leaving it false
-// keeps every reference check narrowed to the anchor teacher's own rows: an
-// imported student can only ever point at a contact belonging to the same
-// teacher, and cross-teacher stitching stays impossible even though the caller
-// is an owner.
-func (s *Service) apply(ctx context.Context, sc authctx.Scope, plan *resolvedPlan, dryRun bool, rep *Report) ([]RowError, error) {
+//   - Contacts and students are center data: every lookup and write runs
+//     under owner — the caller's center owner with IsOwner true, built by
+//     Import — so the rows anchor on the owner and dedupe center-wide no
+//     matter which teacher's class a child appears under.
+//   - Classes and their enrollments are pedagogical data: they anchor on the
+//     class's teacher via anchorFor, whose IsOwner stays false so each class
+//     reference check stays narrowed to that teacher's own rows.
+func (s *Service) apply(ctx context.Context, owner authctx.Scope, plan *resolvedPlan, dryRun bool, rep *Report) ([]RowError, error) {
 	var rowErrs []RowError
 	classIDs := make(map[classKey]uuid.UUID, len(plan.classes))
 
 	for _, c := range plan.classes {
-		anchor := anchorFor(c.key.teacherID, sc.CenterID)
+		anchor := anchorFor(c.key.teacherID, owner.CenterID)
 		id, errs, err := s.applyClass(ctx, anchor, c, dryRun, rep)
 		if err != nil {
 			return nil, err
@@ -61,8 +60,8 @@ func (s *Service) apply(ctx context.Context, sc authctx.Scope, plan *resolvedPla
 
 	planned := newPlannedRows()
 	for _, st := range plan.students {
-		anchor := anchorFor(st.teacherID, sc.CenterID)
-		errs, err := s.applyStudent(ctx, anchor, st, classIDs[st.class], dryRun, planned, rep)
+		enrollAnchor := anchorFor(st.teacherID, owner.CenterID)
+		errs, err := s.applyStudent(ctx, owner, enrollAnchor, st, classIDs[st.class], dryRun, planned, rep)
 		if err != nil {
 			return nil, err
 		}
@@ -80,15 +79,16 @@ func (s *Service) apply(ctx context.Context, sc authctx.Scope, plan *resolvedPla
 // own decisions. The commit needs none of this: its first row is in the
 // transaction by the time the second one looks.
 type plannedRows struct {
-	contacts map[contactKey]struct{}
+	contacts map[string]struct{}
 	students map[plannedStudentKey]struct{}
 }
 
 // plannedStudentKey is the student natural key as a dry run can see it. It
 // carries the contact's phone rather than its id, because a contact this run
-// has only planned has no id yet.
+// has only planned has no id yet. No teacher dimension: contacts and students
+// anchor on the owner, so a phone-plus-name-plus-note identifies one child
+// center-wide.
 type plannedStudentKey struct {
-	teacherID    uuid.UUID
 	contactPhone string
 	fullName     string
 	displayNote  string
@@ -96,15 +96,15 @@ type plannedStudentKey struct {
 
 func newPlannedRows() *plannedRows {
 	return &plannedRows{
-		contacts: map[contactKey]struct{}{},
+		contacts: map[string]struct{}{},
 		students: map[plannedStudentKey]struct{}{},
 	}
 }
 
 // mark records the key and reports whether it was already there.
-func (p *plannedRows) markContact(k contactKey) bool {
-	_, seen := p.contacts[k]
-	p.contacts[k] = struct{}{}
+func (p *plannedRows) markContact(phone string) bool {
+	_, seen := p.contacts[phone]
+	p.contacts[phone] = struct{}{}
 	return seen
 }
 
@@ -172,23 +172,25 @@ func (s *Service) applyClass(ctx context.Context, anchor authctx.Scope, c *resol
 }
 
 // applyStudent creates or reuses the contact, the student, and the enrollment
-// behind one HocSinh row.
-func (s *Service) applyStudent(ctx context.Context, anchor authctx.Scope, st resolvedStudent, classID uuid.UUID, dryRun bool, planned *plannedRows, rep *Report) ([]RowError, error) {
-	contactID, found, err := s.contacts.FindIDByPhone(ctx, anchor, st.contactPhone)
+// behind one HocSinh row. Contact and student calls run under owner; only the
+// enrollment (and the class it references) carries enrollAnchor, the class
+// teacher's scope.
+func (s *Service) applyStudent(ctx context.Context, owner, enrollAnchor authctx.Scope, st resolvedStudent, classID uuid.UUID, dryRun bool, planned *plannedRows, rep *Report) ([]RowError, error) {
+	contactID, found, err := s.contacts.FindIDByPhone(ctx, owner, st.contactPhone)
 	if err != nil {
 		return nil, err
 	}
 	switch {
 	case found:
 		rep.Contacts.Reused++
-	case dryRun && planned.markContact(contactKey{teacherID: anchor.TeacherID, phone: st.contactPhone}):
+	case dryRun && planned.markContact(st.contactPhone):
 		// An earlier row in this same run already planned this parent, which
 		// is what the commit will find when it gets here.
 		rep.Contacts.Reused++
 	default:
 		rep.Contacts.Created++
 		if !dryRun {
-			row, err := s.contacts.Create(ctx, anchor, contacts.CreateRequest{
+			row, err := s.contacts.Create(ctx, owner, contacts.CreateRequest{
 				FullName: st.contactName,
 				Phone:    st.contactPhone,
 			})
@@ -206,7 +208,7 @@ func (s *Service) applyStudent(ctx context.Context, anchor authctx.Scope, st res
 
 	studentID := uuid.Nil
 	if contactID != uuid.Nil {
-		studentID, found, err = s.students.FindIDByName(ctx, anchor, contactID, st.studentName, note)
+		studentID, found, err = s.students.FindIDByName(ctx, owner, contactID, st.studentName, note)
 		if err != nil {
 			return nil, err
 		}
@@ -219,7 +221,6 @@ func (s *Service) applyStudent(ctx context.Context, anchor authctx.Scope, st res
 	case found:
 		rep.Students.Reused++
 	case dryRun && planned.markStudent(plannedStudentKey{
-		teacherID:    anchor.TeacherID,
 		contactPhone: st.contactPhone,
 		fullName:     st.studentName,
 		displayNote:  st.displayNote,
@@ -230,7 +231,7 @@ func (s *Service) applyStudent(ctx context.Context, anchor authctx.Scope, st res
 	default:
 		rep.Students.Created++
 		if !dryRun {
-			row, err := s.students.Create(ctx, anchor, students.CreateRequest{
+			row, err := s.students.Create(ctx, owner, students.CreateRequest{
 				FullName:    st.studentName,
 				ContactID:   contactID,
 				DisplayNote: st.displayNote,
@@ -248,7 +249,7 @@ func (s *Service) applyStudent(ctx context.Context, anchor authctx.Scope, st res
 		return nil, nil
 	}
 
-	existing, found, err := s.enrollments.FindByStudentAndClass(ctx, anchor, studentID, classID)
+	existing, found, err := s.enrollments.FindByStudentAndClass(ctx, enrollAnchor, studentID, classID)
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +273,7 @@ func (s *Service) applyStudent(ctx context.Context, anchor authctx.Scope, st res
 	if dryRun {
 		return nil, nil
 	}
-	_, err = s.enrollments.Create(ctx, anchor, enrollments.CreateRequest{
+	_, err = s.enrollments.Create(ctx, enrollAnchor, enrollments.CreateRequest{
 		StudentID: studentID,
 		ClassID:   classID,
 		StartedOn: st.startedOn.Format(dateWireLayout),

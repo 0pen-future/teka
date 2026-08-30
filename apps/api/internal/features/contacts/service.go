@@ -31,10 +31,14 @@ func NewService(repo Repository) *Service {
 }
 
 // Create inserts a contact with a normalised E.164 phone. Duplicate phones are
-// detected by the partial unique index, never by a pre-check SELECT. The
-// contact is always stamped as the caller's own — including an owner, who
-// creates rows as themselves, never on behalf of another teacher.
+// detected by the partial unique index, never by a pre-check SELECT.
+// Owner-only: contacts anchor to the center's owner, so no member creates
+// them — the import path reaches this same service under a server-side owner
+// scope, never through a widened gate.
 func (s *Service) Create(ctx context.Context, sc authctx.Scope, req CreateRequest) (*Row, error) {
+	if !sc.IsOwner {
+		return nil, apperror.Forbidden("chỉ chủ trung tâm quản lý danh bạ phụ huynh")
+	}
 	c := &Contact{
 		ID:        id.New(),
 		TeacherID: sc.TeacherID,
@@ -63,8 +67,13 @@ func (s *Service) List(ctx context.Context, sc authctx.Scope, filter ListFilter,
 	return s.repo.List(ctx, sc, filter, p)
 }
 
-// Update replaces both editable fields, re-normalising the phone.
+// Update replaces both editable fields, re-normalising the phone. Owner-only,
+// like Create — the reach-widened GetByID cannot leak writability because the
+// gate fires before the fetch.
 func (s *Service) Update(ctx context.Context, sc authctx.Scope, contactID uuid.UUID, req UpdateRequest) (*Row, error) {
+	if !sc.IsOwner {
+		return nil, apperror.Forbidden("chỉ chủ trung tâm quản lý danh bạ phụ huynh")
+	}
 	row, err := s.repo.GetByID(ctx, sc, contactID)
 	if err != nil {
 		return nil, translate(err)
@@ -85,6 +94,9 @@ func (s *Service) Update(ctx context.Context, sc authctx.Scope, contactID uuid.U
 // worst case (soft-deleted contact with a live student) is visible and
 // reversible. Do not add locking for a single-teacher workload.
 func (s *Service) Delete(ctx context.Context, sc authctx.Scope, contactID uuid.UUID) error {
+	if !sc.IsOwner {
+		return apperror.Forbidden("chỉ chủ trung tâm quản lý danh bạ phụ huynh")
+	}
 	if _, err := s.repo.GetByID(ctx, sc, contactID); err != nil {
 		return translate(err)
 	}

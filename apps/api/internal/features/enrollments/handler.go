@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -100,6 +101,41 @@ func (h *Handler) create(c *gin.Context) {
 		return
 	}
 	response.OK(c, http.StatusCreated, FromRow(row))
+}
+
+// enrollableStudents serves the enrollment picker: live center students by
+// name fragment, names only.
+//
+//	@Summary		Search enrollable students
+//	@Description	Autocomplete for enrolling an existing student. Rows carry id and full_name only — never phone or contact. Callable by the owner or the class's active giao_vien; other class staff get 403 and unassigned members 404. Queries under two characters return an empty list; at most 20 rows, sorted by name.
+//	@Tags			enrollments
+//	@Produce		json
+//	@Param			id		path		string	true	"class id"
+//	@Param			q		query		string	false	"name fragment, minimum two characters"
+//	@Param			limit	query		int		false	"max rows, capped at 20"
+//	@Success		200		{object}	response.Envelope{data=[]PickerStudent}
+//	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403		{object}	response.Envelope{error=response.ErrorBody}	"assigned to the class but not its active teacher"
+//	@Failure		404		{object}	response.Envelope{error=response.ErrorBody}	"class not found"
+//	@Security		BearerAuth
+//	@Router			/classes/{id}/enrollable-students [get]
+func (h *Handler) enrollableStudents(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	classID, ok := pathID(c, "id", "class")
+	if !ok {
+		return
+	}
+	// A malformed limit falls through as 0 and takes the server cap.
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	rows, err := h.svc.EnrollableStudents(c.Request.Context(), sc, classID, c.Query("q"), limit)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, rows)
 }
 
 // list returns a page of enrollments.

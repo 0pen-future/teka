@@ -27,13 +27,25 @@ const maxScoreEntries = 500
 // class under the caller's scope — the read/authz gate (non-owners cannot
 // resolve another teacher's class). *classes.Service satisfies this.
 type ClassSource interface {
+	// Get is the write gate: own classes only for a member. Score-set
+	// assignment and clearing resolve through it.
 	Get(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, error)
+	// GetReadable is the read port: own classes OR classes the caller holds a
+	// class_staff stint on (ended included). The roles slice is unused here.
+	GetReadable(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, []string, error)
 }
 
 // SessionSource is the slice of the sessions feature grading needs: resolving
 // one session under the caller's scope. *sessions.Service satisfies this.
 type SessionSource interface {
-	GetByID(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*sessions.Session, error)
+	// GetWritable is the write gate — PutSessionScores resolves through it
+	// with the scores capability, so only staff whose active role carries
+	// that capability (or the owner) reach the score write path. Readable but
+	// not writable resolves to 403, unreadable to 404.
+	GetWritable(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID, capability authctx.ClassCapability) (*sessions.Session, error)
+	// GetReadableByID is the read port — the score-grid GET resolves through
+	// it, so any staff assignment on the class can read scores.
+	GetReadableByID(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*sessions.Session, error)
 }
 
 // RosterSource is the slice of the enrollments feature grading needs: the
@@ -260,10 +272,11 @@ func (s *Service) ClearScoreSet(ctx context.Context, sc authctx.Scope, classID u
 
 // GetClassComponents returns a class's snapshot components — the shared read
 // behind both the owner config page and the classbook score grid. Read gate is
-// class resolution: the class's own teacher and any center-wide reader see it;
-// another teacher's member gets the class's own 404.
+// readable class resolution: the class's own teacher, any center-wide reader,
+// and any class_staff assignment holder (ended included) see it; a member with
+// no relationship to the class gets the class's own 404.
 func (s *Service) GetClassComponents(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*ClassComponentsResponse, error) {
-	if _, err := s.resolveClass(ctx, sc, classID); err != nil {
+	if _, err := s.resolveReadableClass(ctx, sc, classID); err != nil {
 		return nil, err
 	}
 	components, err := s.repo.GetClassComponents(ctx, sc, classID)
@@ -277,9 +290,9 @@ func (s *Service) GetClassComponents(ctx context.Context, sc authctx.Scope, clas
 
 // GetSessionScores returns the class's component columns and every recorded
 // cell for the session, in one round-trip the grid rebuilds from. Read gate is
-// session resolution (same as the class read).
+// readable session resolution (same widening as the class read).
 func (s *Service) GetSessionScores(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*SessionScoresResponse, error) {
-	session, err := s.resolveSession(ctx, sc, sessionID)
+	session, err := s.resolveReadableSession(ctx, sc, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -309,19 +322,15 @@ func (s *Service) GetSessionScores(ctx context.Context, sc authctx.Scope, sessio
 // never holds empty cells. Returns the session's full score set after the
 // write so the client can reconcile.
 //
-// WRITE GATE — deliberate divergence from teaching.PutMarks: the session's
-// teacher OR the center owner may write (teaching is session-teacher-only, the
-// owner blocked). The brainstorm contract (AC4) puts the owner on the write
-// path here; who actually entered a score is traced through the audit log, not
-// a column, so PUT /sessions/:id/scores must stay registered in audit/action.go.
-// Do not "align" this gate with teaching.
+// WRITE GATE — the capability model decides who writes: the owner
+// (center-wide scope) always passes, and a member passes only with an active
+// class_staff stint whose role carries the scores capability. Who actually
+// entered a score is traced through the audit log, not a column, so
+// PUT /sessions/:id/scores must stay registered in audit/action.go.
 func (s *Service) PutSessionScores(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID, entries []ScoreEntryRequest) ([]ScoreResponse, error) {
 	session, err := s.resolveSession(ctx, sc, sessionID)
 	if err != nil {
 		return nil, err
-	}
-	if session.TeacherID != sc.TeacherID && !sc.IsOwner {
-		return nil, notSessionTeacher()
 	}
 	if err := validateScoreEntries(entries); err != nil {
 		return nil, err
@@ -523,7 +532,17 @@ func classComponentsResponse(classID uuid.UUID, components []ClassComponent) *Cl
 // its error shape (a pre-translated *AppError from the real service, or a raw
 // classes.ErrNotFound from a fake) into this package's 404 contract.
 func (s *Service) resolveClass(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, error) {
-	class, err := s.classes.Get(ctx, sc, classID)
+	return normalizeClassErr(s.classes.Get(ctx, sc, classID))
+}
+
+// resolveReadableClass is resolveClass on the read port: a class_staff stint
+// (active or ended) also resolves. GETs only — writes keep resolveClass.
+func (s *Service) resolveReadableClass(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, error) {
+	class, _, err := s.classes.GetReadable(ctx, sc, classID)
+	return normalizeClassErr(class, err)
+}
+
+func normalizeClassErr(class *classes.Class, err error) (*classes.Class, error) {
 	if err != nil {
 		var appErr *apperror.AppError
 		if errors.As(err, &appErr) {
@@ -537,9 +556,19 @@ func (s *Service) resolveClass(ctx context.Context, sc authctx.Scope, classID uu
 	return class, nil
 }
 
-// resolveSession is resolveClass's session counterpart.
+// resolveSession is resolveClass's session counterpart, on the write port
+// with the scores capability.
 func (s *Service) resolveSession(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*sessions.Session, error) {
-	session, err := s.sessions.GetByID(ctx, sc, sessionID)
+	return normalizeSessionErr(s.sessions.GetWritable(ctx, sc, sessionID, authctx.CapScoresWrite))
+}
+
+// resolveReadableSession is resolveSession on the read port: a class_staff
+// stint (active or ended) on the session's class also resolves. GETs only.
+func (s *Service) resolveReadableSession(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*sessions.Session, error) {
+	return normalizeSessionErr(s.sessions.GetReadableByID(ctx, sc, sessionID))
+}
+
+func normalizeSessionErr(session *sessions.Session, err error) (*sessions.Session, error) {
 	if err != nil {
 		var appErr *apperror.AppError
 		if errors.As(err, &appErr) {
@@ -574,12 +603,6 @@ func classNotFound() error {
 func sessionNotFound() error {
 	appErr := apperror.NotFound("session")
 	appErr.Err = ErrSessionNotFound
-	return appErr
-}
-
-func notSessionTeacher() error {
-	appErr := apperror.Forbidden("only the session's teacher or the owner can record scores")
-	appErr.Err = ErrNotSessionTeacher
 	return appErr
 }
 

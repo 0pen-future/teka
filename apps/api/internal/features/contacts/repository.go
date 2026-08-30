@@ -10,6 +10,7 @@ import (
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/shared/authctx"
+	"teka/apps/api/internal/shared/classscope"
 	"teka/apps/api/internal/shared/pagination"
 )
 
@@ -59,45 +60,46 @@ func NewRepository(db *gorm.DB) Repository {
 	return &gormRepository{db: db}
 }
 
-// scoped returns a query bound to one center. An owner sees every contact in
-// their center; a member sees only the rows they created themselves. Composite
-// FKs stop cross-center writes; only this filter stops cross-tenant reads.
+// scoped returns a query bound to one center. It backs the write paths, whose
+// services all gate on ownership first, plus FindIDByPhone; the teacher filter
+// only still bites for a non-owner scope that survived the gates, which the
+// legacy-scoping cleanup will retire.
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
-	return r.scopedBy(ctx, sc, sc.CenterWide())
-}
-
-// scopedRead is scoped()'s read-only sibling: the teacher filter is lifted
-// for anyone with reports oversight (owner or can_send_reports holder). It
-// backs ONLY the roster List endpoint — every other method, GetByID and all
-// writes included, keeps scoped().
-func (r *gormRepository) scopedRead(ctx context.Context, sc authctx.Scope) *gorm.DB {
-	return r.scopedBy(ctx, sc, sc.ReportsOversight())
-}
-
-func (r *gormRepository) scopedBy(ctx context.Context, sc authctx.Scope, centerWide bool) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("contacts.center_id = ?", sc.CenterID)
-	if !centerWide {
+	if !sc.CenterWide() {
 		q = q.Where("contacts.teacher_id = ?", sc.TeacherID)
 	}
 	return q
 }
 
-// withStudentCount selects contacts joined against a grouped subquery of live
-// students, exposing student_count without a per-row query.
-func (r *gormRepository) withStudentCount(ctx context.Context, sc authctx.Scope) *gorm.DB {
-	return r.withStudentCountBy(ctx, sc, sc.CenterWide())
+// scopedRead bounds every contact read — and the zalo-mapping write, which
+// exists so hoc_vu can wire up the parents they can already see. Reports
+// oversight (owner or can_send_reports) reads the whole center; anyone else
+// reaches exactly what the one phone rule shows them: contacts with a student
+// actively enrolled in a live class the caller holds an ACTIVE hoc_vu stint
+// on. A contact row IS its phone, so reach and phone visibility are one
+// predicate and this surface needs no per-row masking. The row's teacher_id
+// deliberately plays no part: contacts are center data, whoever anchored them.
+func (r *gormRepository) scopedRead(ctx context.Context, sc authctx.Scope) *gorm.DB {
+	q := database.FromContext(ctx, r.db).Where("contacts.center_id = ?", sc.CenterID)
+	if !sc.ReportsOversight() {
+		frag, _ := classscope.PhoneVisibleViaContact("contacts.id")
+		q = q.Where(frag, sc.TeacherID, sc.CenterID)
+	}
+	return q
 }
 
-func (r *gormRepository) withStudentCountBy(ctx context.Context, sc authctx.Scope, centerWide bool) *gorm.DB {
+// withStudentCount selects readable contacts joined against a grouped subquery
+// of live students, exposing student_count without a per-row query. The count
+// is always center-wide: it answers "how many students share this contact",
+// which does not depend on who is asking.
+func (r *gormRepository) withStudentCount(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	counts := database.FromContext(ctx, r.db).
 		Table("students").
-		Select("contact_id, COUNT(*) AS n")
-	counts = counts.Where("center_id = ? AND deleted_at IS NULL", sc.CenterID)
-	if !centerWide {
-		counts = counts.Where("teacher_id = ?", sc.TeacherID)
-	}
-	counts = counts.Group("contact_id")
-	return r.scopedBy(ctx, sc, centerWide).
+		Select("contact_id, COUNT(*) AS n").
+		Where("center_id = ? AND deleted_at IS NULL", sc.CenterID).
+		Group("contact_id")
+	return r.scopedRead(ctx, sc).
 		Model(&Contact{}).
 		Select("contacts.*, COALESCE(sc.n, 0) AS student_count").
 		Joins("LEFT JOIN (?) sc ON sc.contact_id = contacts.id", counts)
@@ -120,7 +122,7 @@ func (r *gormRepository) GetByID(ctx context.Context, sc authctx.Scope, id uuid.
 }
 
 func (r *gormRepository) List(ctx context.Context, sc authctx.Scope, filter ListFilter, p pagination.Params) ([]Row, int64, error) {
-	q := r.withStudentCountBy(ctx, sc, sc.ReportsOversight())
+	q := r.withStudentCount(ctx, sc)
 	base := r.scopedRead(ctx, sc).Model(&Contact{})
 	if filter.Query != "" {
 		like := "%" + filter.Query + "%"
@@ -187,10 +189,11 @@ func (r *gormRepository) ClearZaloMapping(ctx context.Context, sc authctx.Scope,
 	return r.setZaloMapping(ctx, sc, contactID, nil, nil)
 }
 
-// setZaloMapping writes both mapping columns in one scope-bound UPDATE;
-// RowsAffected 0 means the contact is missing, deleted, or out of scope.
+// setZaloMapping writes both mapping columns in one UPDATE bound by the read
+// predicate — whoever can see the contact can (re)wire its Zalo mapping;
+// RowsAffected 0 means missing, deleted, or out of reach, all one neutral 404.
 func (r *gormRepository) setZaloMapping(ctx context.Context, sc authctx.Scope, contactID uuid.UUID, zaloUserID, zaloName *string) error {
-	res := r.scoped(ctx, sc).
+	res := r.scopedRead(ctx, sc).
 		Model(&Contact{}).
 		Where("id = ?", contactID).
 		Updates(map[string]any{"zalo_user_id": zaloUserID, "zalo_name": zaloName})

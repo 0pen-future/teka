@@ -91,8 +91,10 @@ func (h *Handler) ensurePeriod(c *gin.Context) {
 //	@Param			page		query		int		false	"page number"
 //	@Param			per_page	query		int		false	"page size (max 100)"
 //	@Param			sort		query		string	false	"period_start or created_at; - prefix for desc"
+//	@Param			class_id	query		string	false	"only periods carrying this class's charges; requires a class_staff stint on the class (or oversight)"
 //	@Success		200			{object}	response.Envelope{data=[]PeriodResponse,meta=response.Meta}
 //	@Failure		401			{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404			{object}	response.Envelope{error=response.ErrorBody}	"class not found or not readable"
 //	@Security		BearerAuth
 //	@Router			/billing-periods [get]
 func (h *Handler) list(c *gin.Context) {
@@ -101,6 +103,20 @@ func (h *Handler) list(c *gin.Context) {
 		return
 	}
 	params := pagination.Parse(c, "-period_start", listSorts)
+	if raw := c.Query("class_id"); raw != "" {
+		classID, err := uuid.Parse(raw)
+		if err != nil {
+			response.Err(c, apperror.NotFound("class"))
+			return
+		}
+		rows, total, err := h.svc.ListPeriodsClass(c.Request.Context(), sc, classID, params)
+		if err != nil {
+			response.Err(c, err)
+			return
+		}
+		response.List(c, FromPeriodRows(rows), params.Meta(total))
+		return
+	}
 	rows, total, err := h.svc.ListPeriods(c.Request.Context(), sc, params)
 	if err != nil {
 		response.Err(c, err)

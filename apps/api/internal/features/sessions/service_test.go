@@ -68,12 +68,23 @@ func (f *fakeClassSource) addSchedule(classID uuid.UUID, weekday int16, startTim
 	})
 }
 
-func (f *fakeClassSource) Get(_ context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, error) {
+func (f *fakeClassSource) GetWritable(_ context.Context, sc authctx.Scope, classID uuid.UUID, _ authctx.ClassCapability) (*classes.Class, error) {
 	c, ok := f.rows[classID]
 	if !ok || c.teacherID != sc.TeacherID {
 		return nil, apperror.NotFound("class")
 	}
 	return c.class, nil
+}
+
+// GetReadable mirrors GetWritable: the unit fakes carry no class_staff table,
+// so the readable port collapses onto the own-rows one; the widened behavior
+// is covered by integration tests.
+func (f *fakeClassSource) GetReadable(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, []string, error) {
+	class, err := f.GetWritable(ctx, sc, classID, authctx.CapSessionsWrite)
+	if err != nil {
+		return nil, nil, err
+	}
+	return class, nil, nil
 }
 
 func (f *fakeClassSource) ListEffectiveSchedules(_ context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]classes.Schedule, error) {
@@ -224,7 +235,21 @@ func (f *fakeRepository) GetByID(_ context.Context, sc authctx.Scope, id uuid.UU
 	return &row, nil
 }
 
-func (f *fakeRepository) UpdateStatus(_ context.Context, sc authctx.Scope, id uuid.UUID, status string, cancelReason *string) error {
+// The readable ports collapse onto the own-rows ones in the unit fakes,
+// which carry no class_staff table; the widening is integration-tested.
+func (f *fakeRepository) ListByClassAndRangeReadable(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]Row, error) {
+	return f.ListByClassAndRange(ctx, sc, classID, from, to)
+}
+
+func (f *fakeRepository) GetReadableByID(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Row, error) {
+	return f.GetByID(ctx, sc, id)
+}
+
+func (f *fakeRepository) GetWritableByID(ctx context.Context, sc authctx.Scope, id uuid.UUID, _ []string) (*Row, error) {
+	return f.GetByID(ctx, sc, id)
+}
+
+func (f *fakeRepository) UpdateStatus(_ context.Context, sc authctx.Scope, _ []string, id uuid.UUID, status string, cancelReason *string) error {
 	r, ok := f.rows[id]
 	if !ok || r.deleted || !visible(sc, r) {
 		return ErrNotFound
@@ -234,7 +259,7 @@ func (f *fakeRepository) UpdateStatus(_ context.Context, sc authctx.Scope, id uu
 	return nil
 }
 
-func (f *fakeRepository) SoftDelete(_ context.Context, sc authctx.Scope, id uuid.UUID) error {
+func (f *fakeRepository) SoftDelete(_ context.Context, sc authctx.Scope, _ []string, id uuid.UUID) error {
 	r, ok := f.rows[id]
 	if !ok || r.deleted || !visible(sc, r) {
 		return ErrNotFound
@@ -258,7 +283,7 @@ func (f *fakeRepository) ReassignPlanned(_ context.Context, sc authctx.Scope, cl
 	return moved, nil
 }
 
-func (f *fakeRepository) MarkHeldAndConfirmed(_ context.Context, sc authctx.Scope, id uuid.UUID, at time.Time) error {
+func (f *fakeRepository) MarkHeldAndConfirmed(_ context.Context, sc authctx.Scope, _ []string, id uuid.UUID, at time.Time) error {
 	r, ok := f.rows[id]
 	if !ok || r.deleted || !visible(sc, r) {
 		return ErrNotFound
@@ -548,7 +573,7 @@ func TestDeleteRefusesWhenAttendanceConfirmed(t *testing.T) {
 	if err := svc.Delete(ctx, sc, rows[1].ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if _, err := svc.Get(ctx, sc, rows[1].ID); apperror.From(err).Code != apperror.CodeNotFound {
+	if _, err := svc.GetReadableByID(ctx, sc, rows[1].ID); apperror.From(err).Code != apperror.CodeNotFound {
 		t.Fatalf("deleted session must read as 404, got %v", err)
 	}
 }
@@ -692,7 +717,7 @@ func TestGetByIDReturnsBareSession(t *testing.T) {
 		t.Fatalf("generate: %v", err)
 	}
 
-	session, err := svc.GetByID(ctx, sc, rows[0].ID)
+	session, err := svc.GetReadableByID(ctx, sc, rows[0].ID)
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
@@ -700,7 +725,7 @@ func TestGetByIDReturnsBareSession(t *testing.T) {
 		t.Fatalf("GetByID must return the requested session, got %+v", session)
 	}
 
-	if _, err := svc.GetByID(ctx, sc, id.New()); apperror.From(err).Code != apperror.CodeNotFound {
+	if _, err := svc.GetReadableByID(ctx, sc, id.New()); apperror.From(err).Code != apperror.CodeNotFound {
 		t.Fatalf("missing session must be 404, got %v", err)
 	}
 }
@@ -722,7 +747,7 @@ func TestMarkHeldAndConfirmedTransitionsStatus(t *testing.T) {
 	if err := svc.MarkHeldAndConfirmed(ctx, sc, rows[0].ID, at); err != nil {
 		t.Fatalf("MarkHeldAndConfirmed: %v", err)
 	}
-	session, err := svc.GetByID(ctx, sc, rows[0].ID)
+	session, err := svc.GetReadableByID(ctx, sc, rows[0].ID)
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
@@ -754,7 +779,7 @@ func TestCrossTenantReadsAreNotFound(t *testing.T) {
 		t.Fatalf("generate: %v", err)
 	}
 
-	if _, err := svc.Get(ctx, strangerScope, rows[0].ID); apperror.From(err).Code != apperror.CodeNotFound {
+	if _, err := svc.GetReadableByID(ctx, strangerScope, rows[0].ID); apperror.From(err).Code != apperror.CodeNotFound {
 		t.Fatalf("cross-tenant get must be 404, got %v", err)
 	}
 	if _, err := svc.ListRange(ctx, strangerScope, classID, d("2026-01-01"), d("2026-01-31")); apperror.From(err).Code != apperror.CodeNotFound {

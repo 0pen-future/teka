@@ -24,14 +24,17 @@ type UpdateRequest struct {
 }
 
 // StudentResponse is the public student shape, carrying the contact's name and
-// phone so the roster screen needs no second call.
+// phone so the roster screen needs no second call. ContactPhone is null for
+// callers outside the phone rule (owner, reports oversight, active hoc_vu on a
+// class the student is actively enrolled in) — never an empty string, so the
+// client can tell "hidden" from "no phone".
 type StudentResponse struct {
 	ID           uuid.UUID `json:"id"`
 	FullName     string    `json:"full_name"`
 	DisplayNote  string    `json:"display_note"`
 	ContactID    uuid.UUID `json:"contact_id"`
 	ContactName  string    `json:"contact_name"`
-	ContactPhone string    `json:"contact_phone"`
+	ContactPhone *string   `json:"contact_phone"`
 	CreatedAt    time.Time `json:"created_at"`
 }
 

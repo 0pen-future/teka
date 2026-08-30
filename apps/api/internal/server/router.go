@@ -20,6 +20,7 @@ import (
 	"teka/apps/api/internal/features/billing"
 	"teka/apps/api/internal/features/centers"
 	"teka/apps/api/internal/features/classes"
+	"teka/apps/api/internal/features/classstaff"
 	"teka/apps/api/internal/features/collections"
 	"teka/apps/api/internal/features/contacts"
 	"teka/apps/api/internal/features/enrollments"
@@ -127,13 +128,17 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	contactsSvc := contacts.NewService(contacts.NewRepository(db))
 	contacts.RegisterRoutes(v1, contacts.NewHandler(contactsSvc), requireAuth, resolveScope)
 
-	classesSvc := classes.NewService(classes.NewRepository(db), txMgr)
+	classStaffRepo := classstaff.NewRepository(db)
+	classesSvc := classes.NewService(classes.NewRepository(db), txMgr, classStaffRepo)
 	classes.RegisterRoutes(v1, classes.NewHandler(classesSvc), requireAuth, resolveScope)
+
+	classStaffSvc := classstaff.NewService(classStaffRepo, centersSvc)
+	classstaff.RegisterRoutes(v1, classstaff.NewHandler(classStaffSvc), requireAuth, resolveScope)
 
 	// Construction order matters: the students service consumes the
 	// enrollments service through students.EnrollmentEnder so deleting a
 	// student closes their open enrollments in the same transaction.
-	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db))
+	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db), bus)
 	enrollments.RegisterRoutes(v1, enrollments.NewHandler(enrollmentsSvc), requireAuth, resolveScope)
 
 	studentsSvc := students.NewService(students.NewRepository(db), enrollmentsSvc, txMgr)
@@ -172,7 +177,7 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	// with imports so the two center-wide writers exclude each other. It owns no
 	// tables: the class and its schedules move through classesSvc, the future
 	// planned sessions through sessionsSvc, in one transaction.
-	handoffSvc := handoff.NewService(classesSvc, sessionsSvc, centersSvc, centerLocker, txMgr)
+	handoffSvc := handoff.NewService(classesSvc, sessionsSvc, centersSvc, classStaffRepo, centerLocker, txMgr)
 	handoff.RegisterRoutes(v1, handoff.NewHandler(handoffSvc), requireAuth, resolveScope)
 
 	// attendance consumes enrollments and sessions through consumer

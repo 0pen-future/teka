@@ -19,9 +19,11 @@ func TestReassignMovesClassAndPlannedSessions(t *testing.T) {
 	require.Equal(t, f.newTeacher, res.TeacherID)
 	require.Equal(t, int64(3), res.MovedPlannedSessions)
 
-	// Both the class and its future planned sessions move, to the same teacher.
+	// The class, its future planned sessions, and the giao_vien stint all move
+	// to the same teacher — the dual write runs inside the same transaction.
 	require.Equal(t, []reassignCall{{f.classID, f.newTeacher}}, f.classes.reassigned)
 	require.Equal(t, []reassignCall{{f.classID, f.newTeacher}}, f.sessions.reassigned)
+	require.Equal(t, []reassignCall{{f.classID, f.newTeacher}}, f.staff.synced)
 	// The future boundary is anchored on the pre-handoff teacher's timezone.
 	require.Equal(t, f.oldTeacher, f.sessions.gotOldTeacher)
 
@@ -39,12 +41,16 @@ func TestReassignToSameTeacherIsNoOp(t *testing.T) {
 	require.Equal(t, f.oldTeacher, res.TeacherID)
 	require.Zero(t, res.MovedPlannedSessions)
 
-	// Nothing moves, no membership check, no lock: re-affirming the current
-	// teacher must never touch the database or fail on their roster status.
+	// Nothing moves and no membership check: re-affirming the current teacher
+	// must never fail on their roster status.
 	require.Empty(t, f.members.checked)
 	require.Empty(t, f.classes.reassigned)
 	require.Empty(t, f.sessions.reassigned)
-	require.Empty(t, f.locker.centers)
+
+	// But it is the class_staff repair command: the giao_vien stint re-syncs
+	// under the center lock, healing any drift.
+	require.Equal(t, []uuid.UUID{f.scope.CenterID}, f.locker.centers)
+	require.Equal(t, []reassignCall{{f.classID, f.oldTeacher}}, f.staff.synced)
 }
 
 func TestReassignRequiresOwner(t *testing.T) {

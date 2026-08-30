@@ -51,9 +51,22 @@ func (noopTx) WithinTx(ctx context.Context, fn func(ctx context.Context) error) 
 	return fn(ctx)
 }
 
+// noopStaffSeeder satisfies StaffSeeder without touching class_staff; the
+// unit fakes carry no staff table, so the seed is a no-op here and covered by
+// the classstaff integration tests.
+type noopStaffSeeder struct{}
+
+func (noopStaffSeeder) SyncPrimaryTeacher(context.Context, uuid.UUID, uuid.UUID, uuid.UUID) error {
+	return nil
+}
+
+func (noopStaffSeeder) RolesByClass(context.Context, uuid.UUID, uuid.UUID, []uuid.UUID) (map[uuid.UUID][]string, error) {
+	return map[uuid.UUID][]string{}, nil
+}
+
 func newTestService() (*Service, *fakeRepository) {
 	repo := newFakeRepository()
-	return NewService(repo, noopTx{}), repo
+	return NewService(repo, noopTx{}, noopStaffSeeder{}), repo
 }
 
 // ownerScope returns a scope for a teacher who owns their own center.
@@ -113,6 +126,21 @@ func (f *fakeRepository) GetByID(_ context.Context, sc authctx.Scope, classID uu
 	out := c.Class
 	out.Schedules = f.liveSchedules(classID)
 	return &out, nil
+}
+
+// The unit fakes carry no class_staff table, so the readable ports collapse
+// onto the own-rows ones; the widened behavior is covered by integration
+// tests.
+func (f *fakeRepository) GetReadableByID(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*Class, error) {
+	return f.GetByID(ctx, sc, classID)
+}
+
+func (f *fakeRepository) ListReadable(ctx context.Context, sc authctx.Scope, filter ListFilter, p pagination.Params) ([]Class, int64, error) {
+	return f.List(ctx, sc, filter, p)
+}
+
+func (f *fakeRepository) GetWritableByID(ctx context.Context, sc authctx.Scope, classID uuid.UUID, _ []string) (*Class, error) {
+	return f.GetByID(ctx, sc, classID)
 }
 
 func (f *fakeRepository) List(_ context.Context, sc authctx.Scope, filter ListFilter, _ pagination.Params) ([]Class, int64, error) {

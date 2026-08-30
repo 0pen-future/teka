@@ -9,6 +9,7 @@ import (
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/shared/authctx"
+	"teka/apps/api/internal/shared/classscope"
 	"teka/apps/api/internal/shared/pagination"
 )
 
@@ -24,11 +25,15 @@ type ListFilter struct {
 }
 
 // Row is a student joined with its contact's name and phone, so the roster
-// screen needs no second call.
+// screen needs no second call. ContactPhone is a pointer because the service
+// nulls it for callers outside the phone rule; PhoneVisible is the repo-derived
+// row grant (active hoc_vu stint on a class with an active enrollment) that
+// Scope.PhoneVisible combines with the owner/oversight bypass.
 type Row struct {
 	Student      `gorm:"embedded"`
 	ContactName  string
-	ContactPhone string
+	ContactPhone *string
+	PhoneVisible bool
 }
 
 // Repository is the persistence contract for students; the service depends on
@@ -73,33 +78,31 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 }
 
 // readScoped additionally lets a member read students enrolled in classes
-// currently assigned to them. A class handoff moves the class but never the
-// student rows, so without this widening the new teacher's student list and
-// detail pages stay empty even though the enrollment reads were widened the
-// same way. Reads only: editing or anonymizing a student stays with its
-// creator or the owner, so write paths keep scoped.
+// they hold a class_staff stint on — the current teacher after a handoff
+// (rows never move), and any other staff assignment, ended ones included.
+// Reads only: editing or anonymizing a student stays with its creator or the
+// owner, so write paths keep scoped.
 func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("students.center_id = ?", sc.CenterID)
 	if !sc.CenterWide() {
-		q = q.Where(`(students.teacher_id = ? OR EXISTS (
-			SELECT 1 FROM enrollments
-			JOIN classes ON classes.id = enrollments.class_id
-			  AND classes.center_id = enrollments.center_id
-			  AND classes.deleted_at IS NULL
-			WHERE enrollments.student_id = students.id
-			  AND enrollments.center_id = students.center_id
-			  AND enrollments.deleted_at IS NULL
-			  AND classes.teacher_id = ?))`, sc.TeacherID, sc.TeacherID)
+		frag, _ := classscope.ReadExistsViaEnrollment("students.id")
+		q = q.Where("(students.teacher_id = ? OR "+frag+")",
+			sc.TeacherID, sc.TeacherID, sc.CenterID)
 	}
 	return q
 }
 
 // withContact joins the owning contact and selects its name and phone
-// alongside the student columns.
-func withContact(q *gorm.DB) *gorm.DB {
+// alongside the student columns, plus the phone_visible derived column the
+// service needs to apply the phone rule. The EXISTS runs for every caller —
+// owner included — because whether the CALLER may bypass it is the service's
+// call, not this query's.
+func withContact(q *gorm.DB, sc authctx.Scope) *gorm.DB {
+	frag, _ := classscope.PhoneVisibleViaStudent("students.id")
 	return q.
 		Joins("JOIN contacts ON contacts.id = students.contact_id AND contacts.center_id = students.center_id").
-		Select("students.*, contacts.full_name AS contact_name, contacts.phone AS contact_phone")
+		Select("students.*, contacts.full_name AS contact_name, contacts.phone AS contact_phone, "+
+			frag+" AS phone_visible", sc.TeacherID, sc.CenterID)
 }
 
 func (r *gormRepository) Create(ctx context.Context, s *Student) error {
@@ -114,7 +117,7 @@ func (r *gormRepository) Create(ctx context.Context, s *Student) error {
 
 func (r *gormRepository) GetByID(ctx context.Context, sc authctx.Scope, studentID uuid.UUID) (*Row, error) {
 	var row Row
-	err := withContact(r.readScoped(ctx, sc).Model(&Student{})).
+	err := withContact(r.readScoped(ctx, sc).Model(&Student{}), sc).
 		Where("students.id = ?", studentID).
 		Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -153,7 +156,7 @@ func (r *gormRepository) List(ctx context.Context, sc authctx.Scope, filter List
 		return nil, 0, err
 	}
 	var rows []Row
-	if err := withContact(q).Scopes(p.Scope).Find(&rows).Error; err != nil {
+	if err := withContact(q, sc).Scopes(p.Scope).Find(&rows).Error; err != nil {
 		return nil, 0, err
 	}
 	return rows, total, nil

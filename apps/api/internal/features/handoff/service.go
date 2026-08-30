@@ -45,6 +45,14 @@ type MemberChecker interface {
 	IsActiveMember(ctx context.Context, sc authctx.Scope, teacherID uuid.UUID) (bool, error)
 }
 
+// StaffReassigner maintains the class_staff mirror of classes.teacher_id — the
+// dual-write invariant: after a handoff, the new teacher holds the class's one
+// active giao_vien stint and the old teacher's stint is soft-closed (history
+// reads survive). classstaff.Repository satisfies it structurally.
+type StaffReassigner interface {
+	SyncPrimaryTeacher(ctx context.Context, classID, centerID, teacherID uuid.UUID) error
+}
+
 // Locker guards a center against a concurrent write. It is the same advisory
 // lock imports takes, keyed on the same center — the two features exclude each
 // other so a handoff cannot interleave with an in-flight import mid-transaction.
@@ -69,6 +77,7 @@ type Service struct {
 	classes  ClassReassigner
 	sessions SessionReassigner
 	members  MemberChecker
+	staff    StaffReassigner
 	locker   Locker
 	tx       database.TxManager
 }
@@ -78,6 +87,7 @@ func NewService(
 	classSvc ClassReassigner,
 	sessionSvc SessionReassigner,
 	memberChecker MemberChecker,
+	staff StaffReassigner,
 	locker Locker,
 	tx database.TxManager,
 ) *Service {
@@ -85,6 +95,7 @@ func NewService(
 		classes:  classSvc,
 		sessions: sessionSvc,
 		members:  memberChecker,
+		staff:    staff,
 		locker:   locker,
 		tx:       tx,
 	}
@@ -111,7 +122,15 @@ func (s *Service) Reassign(ctx context.Context, sc authctx.Scope, classID, newTe
 	if newTeacherID == class.TeacherID {
 		// Already this teacher's class: nothing to move, and no membership
 		// check — the current teacher owns it regardless of their present
-		// roster status, so re-affirming it must never fail.
+		// roster status, so re-affirming it must never fail. It is not a pure
+		// no-op though: re-syncing the giao_vien stint here makes the handoff
+		// the repair command for class_staff drift.
+		err := s.withCenterLock(ctx, sc, func(ctx context.Context) error {
+			return s.staff.SyncPrimaryTeacher(ctx, classID, sc.CenterID, newTeacherID)
+		})
+		if err != nil {
+			return nil, err
+		}
 		return &Result{ClassID: classID, TeacherID: newTeacherID}, nil
 	}
 
@@ -125,26 +144,19 @@ func (s *Service) Reassign(ctx context.Context, sc authctx.Scope, classID, newTe
 	}
 
 	var moved int64
-	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
-		// Same center key as imports: refuse rather than wait, so one tenant's
-		// slow import cannot park a pooled connection the handoff is blocked on.
-		locked, err := s.locker.TryLockCenter(ctx, sc.CenterID)
-		if err != nil {
-			return err
-		}
-		if !locked {
-			return apperror.Conflict("một thao tác khác của trung tâm đang chạy; thử lại sau")
-		}
-		if err := s.locker.SetStatementTimeout(ctx); err != nil {
-			return err
-		}
+	err = s.withCenterLock(ctx, sc, func(ctx context.Context) error {
 		if err := s.classes.ReassignTeacher(ctx, sc, classID, newTeacherID); err != nil {
 			return err
 		}
 		// class.TeacherID is the pre-handoff teacher (read before the tx); its
 		// timezone anchors the future-session boundary.
 		moved, err = s.sessions.ReassignPlanned(ctx, sc, classID, class.TeacherID, newTeacherID)
-		return err
+		if err != nil {
+			return err
+		}
+		// Dual write: teacher_id and the giao_vien stint change in the same
+		// transaction — the old teacher's stint soft-closes, the new one opens.
+		return s.staff.SyncPrimaryTeacher(ctx, classID, sc.CenterID, newTeacherID)
 	})
 	if err != nil {
 		return nil, err
@@ -155,4 +167,24 @@ func (s *Service) Reassign(ctx context.Context, sc authctx.Scope, classID, newTe
 		TeacherID:            newTeacherID,
 		MovedPlannedSessions: moved,
 	}, nil
+}
+
+// withCenterLock runs fn in a transaction holding the center's advisory lock —
+// the same center key imports takes, so the two features exclude each other.
+// It refuses rather than waits, so one tenant's slow import cannot park a
+// pooled connection the handoff is blocked on.
+func (s *Service) withCenterLock(ctx context.Context, sc authctx.Scope, fn func(ctx context.Context) error) error {
+	return s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		locked, err := s.locker.TryLockCenter(ctx, sc.CenterID)
+		if err != nil {
+			return err
+		}
+		if !locked {
+			return apperror.Conflict("một thao tác khác của trung tâm đang chạy; thử lại sau")
+		}
+		if err := s.locker.SetStatementTimeout(ctx); err != nil {
+			return err
+		}
+		return fn(ctx)
+	})
 }

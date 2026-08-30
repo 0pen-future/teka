@@ -50,6 +50,15 @@ var authSessionRoutes = map[string]bool{
 	"/api/v1/auth/refresh": true,
 }
 
+// serviceAuditedRoutes are mutating routes whose owning feature publishes its
+// own domain event for the same action — publishing here too would land two
+// audit rows for one request. The service event is the richer of the pair
+// (enrollments.StudentEnrolled carries the class and student ids the request
+// row could not), so the request row is the one that yields.
+var serviceAuditedRoutes = map[string]bool{
+	"/api/v1/enrollments": true,
+}
+
 // anonymousAuditedRoutes are the only unauthenticated mutations worth a row:
 // a password change must never escape the trail even though the caller has
 // no session yet. Every other principal-less mutation (public invitation
@@ -94,7 +103,7 @@ func publishRequest(c *gin.Context, bus events.Bus, status int) {
 	// An empty template means no registered route matched: arbitrary
 	// attacker-chosen 404 paths stay out of the audit table.
 	route := c.FullPath()
-	if route == "" || authSessionRoutes[route] {
+	if route == "" || authSessionRoutes[route] || serviceAuditedRoutes[route] {
 		return
 	}
 	p, authed := authctx.From(c)

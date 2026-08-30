@@ -77,7 +77,12 @@ type ClassResponse struct {
 	DefaultUnitPrice int64              `json:"default_unit_price"`
 	Status           string             `json:"status"`
 	Schedules        []ScheduleResponse `json:"schedules"`
-	CreatedAt        time.Time          `json:"created_at"`
+	// MyStaffRoles lists the CALLER's active class_staff role keys on this
+	// class — per-caller data, so only the readable GET paths fill it (via
+	// FromModelWithRoles); every other producer, the dashboard included,
+	// leaves it empty.
+	MyStaffRoles []string  `json:"my_staff_roles"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 // FromSchedule maps a schedule row onto the response DTO.
@@ -108,8 +113,20 @@ func FromModel(class *Class) ClassResponse {
 		DefaultUnitPrice: class.DefaultUnitPrice,
 		Status:           class.Status,
 		Schedules:        schedules,
+		MyStaffRoles:     []string{},
 		CreatedAt:        class.CreatedAt,
 	}
+}
+
+// FromModelWithRoles is FromModel plus the caller's active staff roles. Kept
+// separate so FromModel stays a pure mapper shared with per-teacher surfaces
+// like the dashboard, which must never carry per-caller fields.
+func FromModelWithRoles(class *Class, roles []string) ClassResponse {
+	resp := FromModel(class)
+	if len(roles) > 0 {
+		resp.MyStaffRoles = roles
+	}
+	return resp
 }
 
 // parseDate converts a binding-validated YYYY-MM-DD string; a parse failure

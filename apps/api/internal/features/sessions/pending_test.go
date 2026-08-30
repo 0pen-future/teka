@@ -53,14 +53,26 @@ func (f *fakePendingRepo) ListByClassAndRange(context.Context, authctx.Scope, uu
 func (f *fakePendingRepo) GetByID(context.Context, authctx.Scope, uuid.UUID) (*Row, error) {
 	return nil, ErrNotFound
 }
-func (f *fakePendingRepo) UpdateStatus(context.Context, authctx.Scope, uuid.UUID, string, *string) error {
+func (f *fakePendingRepo) ListByClassAndRangeReadable(context.Context, authctx.Scope, uuid.UUID, time.Time, time.Time) ([]Row, error) {
+	return nil, nil
+}
+func (f *fakePendingRepo) GetReadableByID(context.Context, authctx.Scope, uuid.UUID) (*Row, error) {
+	return nil, ErrNotFound
+}
+func (f *fakePendingRepo) GetWritableByID(context.Context, authctx.Scope, uuid.UUID, []string) (*Row, error) {
+	return nil, ErrNotFound
+}
+
+func (f *fakePendingRepo) UpdateStatus(context.Context, authctx.Scope, []string, uuid.UUID, string, *string) error {
 	return nil
 }
-func (f *fakePendingRepo) SoftDelete(context.Context, authctx.Scope, uuid.UUID) error { return nil }
+func (f *fakePendingRepo) SoftDelete(context.Context, authctx.Scope, []string, uuid.UUID) error {
+	return nil
+}
 func (f *fakePendingRepo) ReassignPlanned(context.Context, authctx.Scope, uuid.UUID, uuid.UUID, time.Time) (int64, error) {
 	return 0, nil
 }
-func (f *fakePendingRepo) MarkHeldAndConfirmed(context.Context, authctx.Scope, uuid.UUID, time.Time) error {
+func (f *fakePendingRepo) MarkHeldAndConfirmed(context.Context, authctx.Scope, []string, uuid.UUID, time.Time) error {
 	return nil
 }
 

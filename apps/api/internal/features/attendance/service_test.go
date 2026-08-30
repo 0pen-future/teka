@@ -75,13 +75,19 @@ func visibleSession(sc authctx.Scope, r *fakeSession) bool {
 	return sc.IsOwner || r.TeacherID == sc.TeacherID
 }
 
-func (f *fakeSessionStore) GetByID(_ context.Context, sc authctx.Scope, sessionID uuid.UUID) (*sessions.Session, error) {
+func (f *fakeSessionStore) GetWritable(_ context.Context, sc authctx.Scope, sessionID uuid.UUID, _ authctx.ClassCapability) (*sessions.Session, error) {
 	r, ok := f.rows[sessionID]
 	if !ok || !visibleSession(sc, r) {
 		return nil, sessions.ErrNotFound
 	}
 	cp := r.Session
 	return &cp, nil
+}
+
+// GetReadableByID mirrors GetWritable: the unit fakes carry no class_staff
+// table, so the readable port collapses onto the own-rows one.
+func (f *fakeSessionStore) GetReadableByID(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*sessions.Session, error) {
+	return f.GetWritable(ctx, sc, sessionID, authctx.CapAttendanceWrite)
 }
 
 func (f *fakeSessionStore) MarkHeldAndConfirmed(_ context.Context, sc authctx.Scope, sessionID uuid.UUID, at time.Time) error {

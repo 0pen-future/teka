@@ -35,16 +35,16 @@ func NewService(repo Repository, ender EnrollmentEnder, tx database.TxManager) *
 	return &Service{repo: repo, ender: ender, tx: tx}
 }
 
-// Create inserts a student after checking the contact is in scope. The
-// composite FK would refuse a foreign contact anyway; the check exists to turn
-// that refusal into a clean 422 instead of a 500. The student is always
-// stamped as the caller's own, so the contact check runs with owner rights
-// stripped: a student created under a member's contact would carry the
-// owner's anchor while the contact stays the member's. A member's contacts
-// are view-only for creation; the owner creates only under their own.
+// Create inserts a student. Owner-only: students anchor to the center's
+// owner, so no member — teacher or otherwise — creates them. The contact
+// check turns the composite FK's refusal of a foreign contact into a clean
+// 422; it asks only that the contact belongs to the center, since every
+// contact anchors to the owner too.
 func (s *Service) Create(ctx context.Context, sc authctx.Scope, req CreateRequest) (*Row, error) {
-	ownScope := authctx.Scope{TeacherID: sc.TeacherID, CenterID: sc.CenterID}
-	if err := s.checkContact(ctx, ownScope, req.ContactID); err != nil {
+	if !sc.IsOwner {
+		return nil, apperror.Forbidden("chỉ chủ trung tâm quản lý hồ sơ học sinh")
+	}
+	if err := s.checkContact(ctx, sc, req.ContactID); err != nil {
 		return nil, err
 	}
 	student := &Student{
@@ -58,7 +58,8 @@ func (s *Service) Create(ctx context.Context, sc authctx.Scope, req CreateReques
 	if err := s.repo.Create(ctx, student); err != nil {
 		return nil, translate(err)
 	}
-	return s.repo.GetByID(ctx, sc, student.ID)
+	row, err := s.repo.GetByID(ctx, sc, student.ID)
+	return maskPhone(sc, row), err
 }
 
 // Get returns one student with its contact details.
@@ -67,27 +68,39 @@ func (s *Service) Get(ctx context.Context, sc authctx.Scope, studentID uuid.UUID
 	if err != nil {
 		return nil, translate(err)
 	}
-	return row, nil
+	return maskPhone(sc, row), nil
 }
 
 // List returns a page of students with contact details.
 func (s *Service) List(ctx context.Context, sc authctx.Scope, filter ListFilter, p pagination.Params) ([]Row, int64, error) {
-	return s.repo.List(ctx, sc, filter, p)
+	rows, total, err := s.repo.List(ctx, sc, filter, p)
+	for i := range rows {
+		maskPhone(sc, &rows[i])
+	}
+	return rows, total, err
 }
 
-// Update edits the closed field list, re-checking contact ownership when the
-// contact changes.
+// maskPhone enforces the one phone rule at the service boundary: the repo's
+// phone_visible column carries the row grant (active hoc_vu on a class with an
+// active enrollment); the owner/oversight bypass lives in Scope.PhoneVisible.
+// Masked means nil — the wire form is JSON null, never an empty string.
+func maskPhone(sc authctx.Scope, row *Row) *Row {
+	if row != nil && !sc.PhoneVisible(row.PhoneVisible) {
+		row.ContactPhone = nil
+	}
+	return row
+}
+
+// Update edits the closed field list, re-checking the contact when it
+// changes. Owner-only, like Create — the widened GetByID read cannot leak
+// writability because the gate fires before the fetch.
 func (s *Service) Update(ctx context.Context, sc authctx.Scope, studentID uuid.UUID, req UpdateRequest) (*Row, error) {
+	if !sc.IsOwner {
+		return nil, apperror.Forbidden("chỉ chủ trung tâm quản lý hồ sơ học sinh")
+	}
 	row, err := s.repo.GetByID(ctx, sc, studentID)
 	if err != nil {
 		return nil, translate(err)
-	}
-	// GetByID also matches students enrolled in a class assigned to the
-	// caller (widened reads for handed-off classes), but editing stays with
-	// the creator or the owner — repo.Update saves by primary key, so the
-	// ownership gate has to live here.
-	if !sc.CenterWide() && row.TeacherID != sc.TeacherID {
-		return nil, translate(ErrNotFound)
 	}
 	if req.ContactID != row.ContactID {
 		if err := s.checkContact(ctx, sc, req.ContactID); err != nil {
@@ -101,7 +114,8 @@ func (s *Service) Update(ctx context.Context, sc authctx.Scope, studentID uuid.U
 	if err := s.repo.Update(ctx, &student); err != nil {
 		return nil, translate(err)
 	}
-	return s.repo.GetByID(ctx, sc, studentID)
+	updated, err := s.repo.GetByID(ctx, sc, studentID)
+	return maskPhone(sc, updated), err
 }
 
 // Delete anonymises rather than erases: in one transaction it ends the
@@ -110,6 +124,9 @@ func (s *Service) Update(ctx context.Context, sc authctx.Scope, studentID uuid.U
 // attendance records are untouched — deleting them would change billable
 // counts already reported to a parent.
 func (s *Service) Delete(ctx context.Context, sc authctx.Scope, studentID uuid.UUID) error {
+	if !sc.IsOwner {
+		return apperror.Forbidden("chỉ chủ trung tâm quản lý hồ sơ học sinh")
+	}
 	if _, err := s.repo.GetByID(ctx, sc, studentID); err != nil {
 		return translate(err)
 	}
