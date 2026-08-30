@@ -102,6 +102,16 @@ an owner-granted permission widens reads without touching every repository.
 - Writes keep the invariant `teacher_id = $self` for the teacher role; owners
   may write on behalf of any teacher in their center.
 
+**Class-teacher roster reads**: a class handoff moves `classes.teacher_id`
+(plus schedules and future sessions) but never the enrollment or student rows,
+so own-rows scoping alone would show the new teacher an empty roster. Roster
+READ paths therefore widen to "own rows OR the row's class is currently
+assigned to the caller": `enrollments` `GetByID`/`List`/`ActiveOn`
+(`readScoped` in `enrollments/repository.go`) and attendance's `StudentNames`.
+Everything else keeps plain member scoping — enrollment writes (end, delete,
+create) stay with the creator or the owner, and the contact list is untouched:
+the class teacher sees student names, not parent contact details.
+
 **Delegated report sending (`can_send_reports`)**: a boolean permission on the
 member's live `center_members` stint, granted and revoked only by the owner
 (`POST`/`DELETE /centers/me/members/:teacherId/send-reports`). It is a

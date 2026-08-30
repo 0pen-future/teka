@@ -479,6 +479,49 @@ func TestAnonymisedStudentNameStaysReadableOnHistoricalSheet(t *testing.T) {
 		"an anonymised student's name must still resolve on a historical attendance sheet, not vanish")
 }
 
+// After a class handoff the new teacher owns the class and its future
+// sessions, but the enrollment and student rows stay with their creator. The
+// attendance sheet must still work end to end for the new teacher: roster
+// resolved through the handed-off class, student names included, and confirm
+// writing records under the session's own (new) teacher.
+func TestHandedOffClassAttendanceSheetWorksForNewTeacher(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, db)
+	newTeacher, _ := testutil.Teacher(t, db)
+	ownerCenter := testutil.ScopeFor(t, db, owner.ID).CenterID
+
+	testutil.JoinCenter(t, db, newTeacher.ID, ownerCenter)
+	newTeacherScope := testutil.ScopeFor(t, db, newTeacher.ID)
+
+	// The owner built the class, roster, and a planned session…
+	contact := testutil.Contact(t, db, owner.ID)
+	class := testutil.Class(t, db, owner.ID, testutil.WithClassStartDate(date("2026-01-01")))
+	session := testutil.Session(t, db, owner.ID, class.ID, date("2026-01-06"))
+	student := testutil.Student(t, db, owner.ID, contact.ID, testutil.WithStudentFullName("Bé Bình"))
+	testutil.Enrollment(t, db, owner.ID, student.ID, class.ID, date("2026-01-01"))
+
+	// …then handed the class over: class and future sessions move, the
+	// enrollment and student rows do not (mirrors handoff's writes).
+	require.NoError(t, db.Exec(
+		"UPDATE classes SET teacher_id = ? WHERE id = ?", newTeacher.ID, class.ID).Error)
+	require.NoError(t, db.Exec(
+		"UPDATE class_sessions SET teacher_id = ? WHERE id = ?", newTeacher.ID, session.ID).Error)
+
+	got, err := svc.Get(ctx, newTeacherScope, session.ID)
+	require.NoError(t, err, "the new teacher must read the handed-off session's sheet")
+	require.Len(t, got.Rows, 1)
+	require.Equal(t, "Bé Bình", got.Rows[0].StudentName,
+		"the owner-created student's name must resolve on the new teacher's sheet")
+
+	out, err := svc.Confirm(ctx, newTeacherScope, session.ID, attendance.ConfirmRequest{})
+	require.NoError(t, err, "the new teacher must confirm attendance on their handed-off class")
+	require.Len(t, out.Rows, 1)
+	require.NotNil(t, out.Rows[0].Status)
+	require.Equal(t, attendance.StatusPresent, *out.Rows[0].Status)
+}
+
 // sqlCapture is a minimal gorm logger.Interface that records the last
 // statement traced, so a test can assert on the exact SQL a repository method
 // emits without executing against a real connection twice.

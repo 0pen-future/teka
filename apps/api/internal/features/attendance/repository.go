@@ -147,7 +147,20 @@ func (r *gormRepository) StudentNames(ctx context.Context, sc authctx.Scope, stu
 		Select("id, full_name, display_note").
 		Where("center_id = ? AND id IN ?", sc.CenterID, studentIDs)
 	if !sc.CenterWide() {
-		q = q.Where("teacher_id = ?", sc.TeacherID)
+		// Own students, plus students enrolled in a class currently assigned
+		// to the caller: a handoff moves the class but not the student rows,
+		// and the new teacher's attendance sheet must still show names. The
+		// enrollment may be ended — history stays readable — but never
+		// soft-deleted.
+		q = q.Where(`(teacher_id = ? OR EXISTS (
+			SELECT 1 FROM enrollments
+			JOIN classes ON classes.id = enrollments.class_id
+			  AND classes.center_id = enrollments.center_id
+			  AND classes.deleted_at IS NULL
+			WHERE enrollments.student_id = students.id
+			  AND enrollments.center_id = students.center_id
+			  AND enrollments.deleted_at IS NULL
+			  AND classes.teacher_id = ?))`, sc.TeacherID, sc.TeacherID)
 	}
 	if err := q.Find(&rows).Error; err != nil {
 		return nil, err

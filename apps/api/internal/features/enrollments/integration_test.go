@@ -393,3 +393,67 @@ func TestPeersInSameCenterCannotSeeEachOthersEnrollments(t *testing.T) {
 	})
 	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code, "a peer must not reference another member's student")
 }
+
+// A class handoff moves the class to a new teacher but leaves the enrollment
+// rows with their creator. The new teacher must still read the roster of the
+// class now assigned to them — reads only: managing those enrollments stays
+// with the creator or the owner, and an unassigned peer keeps seeing nothing.
+func TestHandedOffClassRosterIsReadableByNewTeacher(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, db)
+	newTeacher, _ := testutil.Teacher(t, db)
+	peer, _ := testutil.Teacher(t, db)
+	ownerCenter := testutil.ScopeFor(t, db, owner.ID).CenterID
+
+	testutil.JoinCenter(t, db, newTeacher.ID, ownerCenter)
+	testutil.JoinCenter(t, db, peer.ID, ownerCenter)
+	ownerScope := testutil.ScopeFor(t, db, owner.ID)
+	newTeacherScope := testutil.ScopeFor(t, db, newTeacher.ID)
+	peerScope := testutil.ScopeFor(t, db, peer.ID)
+
+	// The owner built the class and its roster, then handed the class over.
+	contact := testutil.Contact(t, db, owner.ID)
+	class := testutil.Class(t, db, owner.ID)
+	student := testutil.Student(t, db, owner.ID, contact.ID)
+	row := testutil.Enrollment(t, db, owner.ID, student.ID, class.ID, date("2026-01-05"))
+	require.NoError(t, db.Exec(
+		"UPDATE classes SET teacher_id = ? WHERE id = ?", newTeacher.ID, class.ID).Error,
+		"simulate the handoff move of classes.teacher_id")
+
+	rows, total, err := svc.List(ctx, newTeacherScope, enrollments.ListFilter{ClassID: class.ID}, listParams(t))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total, "the new teacher must see the handed-off class's roster")
+	require.Equal(t, row.ID, rows[0].ID)
+	require.NotEmpty(t, rows[0].StudentName, "roster rows must resolve the student's name")
+
+	got, err := svc.Get(ctx, newTeacherScope, row.ID)
+	require.NoError(t, err, "the new teacher must read a roster enrollment")
+	require.Equal(t, row.ID, got.ID)
+
+	active, err := svc.ActiveOn(ctx, newTeacherScope, class.ID, date("2026-01-10"))
+	require.NoError(t, err)
+	require.Len(t, active, 1, "the attendance roster must include the owner-created enrollment")
+
+	// Reads widened, writes not: the enrollment still belongs to the owner.
+	_, err = svc.End(ctx, newTeacherScope, row.ID, enrollments.EndRequest{})
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
+		"the new teacher must not end an enrollment they do not own")
+	err = svc.Delete(ctx, newTeacherScope, row.ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
+		"the new teacher must not delete an enrollment they do not own")
+
+	// The widening is keyed on class assignment, not center membership: an
+	// unassigned peer still sees nothing.
+	_, total, err = svc.List(ctx, peerScope, enrollments.ListFilter{ClassID: class.ID}, listParams(t))
+	require.NoError(t, err)
+	require.EqualValues(t, 0, total, "an unassigned peer must not see the roster")
+	_, err = svc.Get(ctx, peerScope, row.ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+
+	// The owner keeps full oversight after the handoff.
+	_, total, err = svc.List(ctx, ownerScope, enrollments.ListFilter{ClassID: class.ID}, listParams(t))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+}

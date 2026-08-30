@@ -85,6 +85,24 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 	return q
 }
 
+// readScoped additionally lets a member read enrollments of classes currently
+// assigned to them. A class handoff moves the class (and its future sessions)
+// but never the enrollment rows, so without this widening the new teacher
+// would see an empty roster. Reads only: managing an enrollment (end, delete)
+// stays with its creator or the owner, so write paths keep scoped.
+func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+	q := database.FromContext(ctx, r.db).Where("enrollments.center_id = ?", sc.CenterID)
+	if !sc.CenterWide() {
+		q = q.Where(`(enrollments.teacher_id = ? OR EXISTS (
+			SELECT 1 FROM classes
+			WHERE classes.id = enrollments.class_id
+			  AND classes.center_id = enrollments.center_id
+			  AND classes.teacher_id = ?
+			  AND classes.deleted_at IS NULL))`, sc.TeacherID, sc.TeacherID)
+	}
+	return q
+}
+
 // withNames joins the display names onto an enrollment query. Same-center
 // join conditions keep the composite-key discipline even though the FKs
 // already guarantee it — matching on center_id (not teacher_id) lets an
@@ -106,7 +124,7 @@ func (r *gormRepository) Create(ctx context.Context, e *Enrollment) error {
 
 func (r *gormRepository) GetByID(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Row, error) {
 	var row Row
-	err := withNames(r.scoped(ctx, sc).Model(&Enrollment{})).
+	err := withNames(r.readScoped(ctx, sc).Model(&Enrollment{})).
 		Where("enrollments.id = ?", id).
 		Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -119,7 +137,7 @@ func (r *gormRepository) GetByID(ctx context.Context, sc authctx.Scope, id uuid.
 }
 
 func (r *gormRepository) List(ctx context.Context, sc authctx.Scope, filter ListFilter, p pagination.Params) ([]Row, int64, error) {
-	q := r.scoped(ctx, sc).Model(&Enrollment{})
+	q := r.readScoped(ctx, sc).Model(&Enrollment{})
 	if filter.StudentID != uuid.Nil {
 		q = q.Where("enrollments.student_id = ?", filter.StudentID)
 	}
@@ -186,7 +204,7 @@ func (r *gormRepository) SoftDelete(ctx context.Context, sc authctx.Scope, id uu
 
 func (r *gormRepository) ActiveOn(ctx context.Context, sc authctx.Scope, classID uuid.UUID, on time.Time) ([]Enrollment, error) {
 	var rows []Enrollment
-	err := r.scoped(ctx, sc).
+	err := r.readScoped(ctx, sc).
 		Where("enrollments.class_id = ?", classID).
 		Where("enrollments.started_on <= ? AND (enrollments.ended_on IS NULL OR enrollments.ended_on >= ?)", on, on).
 		Order("enrollments.started_on, enrollments.id").
