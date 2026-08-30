@@ -35,15 +35,12 @@ func NewService(repo Repository, ender EnrollmentEnder, tx database.TxManager) *
 	return &Service{repo: repo, ender: ender, tx: tx}
 }
 
-// Create inserts a student. Owner-only: students anchor to the center's
-// owner, so no member — teacher or otherwise — creates them. The contact
+// Create inserts a student anchored to its creator — the route policy
+// (students.create) decides who may call this; rows a member creates stay
+// inside their own visibility unless a view_all grant widens it. The contact
 // check turns the composite FK's refusal of a foreign contact into a clean
-// 422; it asks only that the contact belongs to the center, since every
-// contact anchors to the owner too.
+// 422; it asks only that the contact is visible to the caller.
 func (s *Service) Create(ctx context.Context, sc authctx.Scope, req CreateRequest) (*Row, error) {
-	if !sc.IsOwner {
-		return nil, apperror.Forbidden("chỉ chủ trung tâm quản lý hồ sơ học sinh")
-	}
 	if err := s.checkContact(ctx, sc, req.ContactID); err != nil {
 		return nil, err
 	}
@@ -92,12 +89,10 @@ func maskPhone(sc authctx.Scope, row *Row) *Row {
 }
 
 // Update edits the closed field list, re-checking the contact when it
-// changes. Owner-only, like Create — the widened GetByID read cannot leak
-// writability because the gate fires before the fetch.
+// changes. The route policy (students.edit) decides who may call this; the
+// write-scoped repo.Update keeps a member inside their own rows, so the
+// widened read scope (class-staff stints) cannot leak writability.
 func (s *Service) Update(ctx context.Context, sc authctx.Scope, studentID uuid.UUID, req UpdateRequest) (*Row, error) {
-	if !sc.IsOwner {
-		return nil, apperror.Forbidden("chỉ chủ trung tâm quản lý hồ sơ học sinh")
-	}
 	row, err := s.repo.GetByID(ctx, sc, studentID)
 	if err != nil {
 		return nil, translate(err)
@@ -111,7 +106,7 @@ func (s *Service) Update(ctx context.Context, sc authctx.Scope, studentID uuid.U
 	student.ContactID = req.ContactID
 	student.FullName = req.FullName
 	student.DisplayNote = notePtr(req.DisplayNote)
-	if err := s.repo.Update(ctx, &student); err != nil {
+	if err := s.repo.Update(ctx, sc, &student); err != nil {
 		return nil, translate(err)
 	}
 	updated, err := s.repo.GetByID(ctx, sc, studentID)
@@ -123,10 +118,11 @@ func (s *Service) Update(ctx context.Context, sc authctx.Scope, studentID uuid.U
 // attendance sheets) and issues the scrub-and-stamp UPDATE. Historical
 // attendance records are untouched — deleting them would change billable
 // counts already reported to a parent.
+//
+// The route policy (students.delete) decides who may call this; the scoped
+// AnonymizeAndDelete masks rows outside the caller's write scope as not-found,
+// so a member with the grant can only anonymise their own students.
 func (s *Service) Delete(ctx context.Context, sc authctx.Scope, studentID uuid.UUID) error {
-	if !sc.IsOwner {
-		return apperror.Forbidden("chỉ chủ trung tâm quản lý hồ sơ học sinh")
-	}
 	if _, err := s.repo.GetByID(ctx, sc, studentID); err != nil {
 		return translate(err)
 	}

@@ -42,7 +42,7 @@ type Repository interface {
 	Create(ctx context.Context, s *Student) error
 	GetByID(ctx context.Context, sc authctx.Scope, studentID uuid.UUID) (*Row, error)
 	List(ctx context.Context, sc authctx.Scope, filter ListFilter, p pagination.Params) ([]Row, int64, error)
-	Update(ctx context.Context, s *Student) error
+	Update(ctx context.Context, sc authctx.Scope, s *Student) error
 	// ContactExists reports whether the contact is live under this scope —
 	// the clean-422 check in front of the composite-FK safety net.
 	ContactExists(ctx context.Context, sc authctx.Scope, contactID uuid.UUID) (bool, error)
@@ -71,7 +71,22 @@ func NewRepository(db *gorm.DB) Repository {
 // FKs stop cross-center writes; only this filter stops cross-tenant reads.
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("students.center_id = ?", sc.CenterID)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermStudentsViewAll) {
+		q = q.Where("students.teacher_id = ?", sc.TeacherID)
+	}
+	return q
+}
+
+// writeScoped is the scope for mutating queries: own rows only, owner
+// excepted. students.view_all is a visibility key — it widens scoped and
+// readScoped, never writes — because every legacy data.view_center_wide
+// holder receives it in the backfill, and pre-catalog those members could not
+// touch student rows at all. A mutation matching zero rows here is reported
+// as not-found by the callers, masking rows the caller can read but not
+// write.
+func (r *gormRepository) writeScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+	q := database.FromContext(ctx, r.db).Where("students.center_id = ?", sc.CenterID)
+	if !sc.IsOwner {
 		q = q.Where("students.teacher_id = ?", sc.TeacherID)
 	}
 	return q
@@ -84,7 +99,7 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 // owner, so write paths keep scoped.
 func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("students.center_id = ?", sc.CenterID)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermStudentsViewAll) {
 		frag, _ := classscope.ReadExistsViaEnrollment("students.id")
 		q = q.Where("(students.teacher_id = ? OR "+frag+")",
 			sc.TeacherID, sc.TeacherID, sc.CenterID)
@@ -162,12 +177,29 @@ func (r *gormRepository) List(ctx context.Context, sc authctx.Scope, filter List
 	return rows, total, nil
 }
 
-func (r *gormRepository) Update(ctx context.Context, s *Student) error {
-	err := database.FromContext(ctx, r.db).Save(s).Error
-	if errors.Is(err, gorm.ErrForeignKeyViolated) {
+// Update writes through the write scope, not the widened read scope: a
+// member may read a student via a class-staff stint yet must not edit it, so
+// a row outside their own is masked as not-found — the same shape
+// AnonymizeAndDelete answers with.
+func (r *gormRepository) Update(ctx context.Context, sc authctx.Scope, s *Student) error {
+	res := r.writeScoped(ctx, sc).
+		Model(&Student{}).
+		Where("students.id = ?", s.ID).
+		Updates(map[string]any{
+			"contact_id":   s.ContactID,
+			"full_name":    s.FullName,
+			"display_note": s.DisplayNote,
+		})
+	if errors.Is(res.Error, gorm.ErrForeignKeyViolated) {
 		return ErrContactNotOwned
 	}
-	return err
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (r *gormRepository) ContactExists(ctx context.Context, sc authctx.Scope, contactID uuid.UUID) (bool, error) {
@@ -175,7 +207,7 @@ func (r *gormRepository) ContactExists(ctx context.Context, sc authctx.Scope, co
 	q := database.FromContext(ctx, r.db).
 		Table("contacts").
 		Where("id = ? AND center_id = ? AND deleted_at IS NULL", contactID, sc.CenterID)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermStudentsViewAll) {
 		q = q.Where("teacher_id = ?", sc.TeacherID)
 	}
 	err := q.Count(&n).Error
@@ -183,7 +215,7 @@ func (r *gormRepository) ContactExists(ctx context.Context, sc authctx.Scope, co
 }
 
 func (r *gormRepository) AnonymizeAndDelete(ctx context.Context, sc authctx.Scope, studentID uuid.UUID, placeholder string) error {
-	res := r.scoped(ctx, sc).
+	res := r.writeScoped(ctx, sc).
 		Model(&Student{}).
 		Where("students.id = ?", studentID).
 		Updates(map[string]any{

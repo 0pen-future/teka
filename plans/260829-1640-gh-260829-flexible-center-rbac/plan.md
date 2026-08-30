@@ -6,6 +6,7 @@ priority: P1
 effort: "5.5d"
 tags: [api, web, db, security, authz]
 created: 2026-08-29
+blockedBy: [260830-2310-resource-action-rbac-permission-catalog]
 ---
 
 # Flexible Center RBAC

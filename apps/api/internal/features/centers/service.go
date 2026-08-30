@@ -325,13 +325,20 @@ func requirePermissionAdmin(scope authctx.Scope) error {
 	return nil
 }
 
-// normalizeKeys validates keys against the registry and returns them deduped
-// in stable registry order; an unknown key is a 422 on the given field.
+// normalizeKeys validates keys against the catalog and returns them deduped
+// in stable registry order. An unknown key is a 422 on the given field, and
+// so is a deprecated or otherwise non-grantable key — existing rows for those
+// stay effective, but new assignment writes must use the canonical keys.
 func normalizeKeys(field string, keys []string) ([]string, error) {
 	for _, key := range keys {
-		if !authctx.KnownPerm(key) {
+		d, ok := authctx.PermDefOf(key)
+		if !ok {
 			return nil, apperror.Invalid("validation failed",
 				map[string]string{field: fmt.Sprintf("unknown permission key %q", key)})
+		}
+		if !d.Grantable {
+			return nil, apperror.Invalid("validation failed",
+				map[string]string{field: fmt.Sprintf("permission key %q is not assignable", key)})
 		}
 	}
 	seen := make(map[string]struct{}, len(keys))
@@ -349,11 +356,17 @@ func normalizeKeys(field string, keys []string) ([]string, error) {
 
 // knownKeysOf filters a comma-joined DB list through the registry into stable
 // order — assignments for keys a code rollback no longer defines stay in the
-// database but never surface in responses or events.
+// database but never surface in responses or events. Deprecated keys are
+// filtered too: their rows stay effective through alias expansion, but the
+// PUT endpoints accept only grantable keys, so emitting one would make every
+// read-modify-write save of that role or member fail 422. The backfill
+// materialized each deprecated row's canonical equivalents, so a save built
+// from this list preserves effective access while converging storage onto
+// canonical keys.
 func knownKeysOf(joined string) []string {
 	set := make(map[string]struct{})
 	for _, key := range splitKeys(joined) {
-		if authctx.KnownPerm(key) {
+		if d, ok := authctx.PermDefOf(key); ok && !d.Deprecated {
 			set[key] = struct{}{}
 		}
 	}
@@ -381,30 +394,60 @@ func (s *Service) Permissions(ctx context.Context, scope authctx.Scope) (*Permis
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
+	defs := authctx.PermDefs()
 	resp := &PermissionsResponse{
-		Catalog: make([]PermissionInfo, 0, len(authctx.PermKeys())),
-		Roles:   make([]RoleResponse, 0, len(roles)),
-		Members: make([]MemberPermissionsResponse, 0, len(members)),
+		Catalog:        make([]PermissionInfo, 0, len(defs)),
+		Roles:          make([]RoleResponse, 0, len(roles)),
+		Members:        make([]MemberPermissionsResponse, 0, len(members)),
+		CatalogVersion: authctx.CatalogVersion,
 	}
-	for _, key := range authctx.PermKeys() {
-		resp.Catalog = append(resp.Catalog, PermissionInfo{Key: key, Label: authctx.PermLabel(key)})
+	// Deprecated keys stay out of the assignment catalog: they are not
+	// grantable, and the UI must steer owners to the canonical keys.
+	for _, d := range defs {
+		if d.Deprecated {
+			continue
+		}
+		resp.Catalog = append(resp.Catalog, PermissionInfo{
+			Key: d.Key, Label: d.Label,
+			Resource: d.Resource, Action: d.Action,
+			Kind: string(d.Kind), Risk: string(d.Risk),
+			Description: d.Description,
+		})
 	}
 	for _, r := range roles {
 		resp.Roles = append(resp.Roles, RoleResponse{
 			ID: r.ID, Key: r.Key, Name: r.Name, Permissions: knownKeysOf(r.Perms),
+			AssignmentVersion: r.AssignmentVersion,
 		})
 	}
 	for _, m := range members {
 		resp.Members = append(resp.Members, MemberPermissionsResponse{
-			TeacherID: m.TeacherID,
-			FullName:  m.FullName,
-			RoleID:    m.RoleID,
-			RoleKey:   m.RoleKey,
-			Grants:    knownKeysOf(m.Grants),
-			Denies:    knownKeysOf(m.Denies),
+			TeacherID:         m.TeacherID,
+			FullName:          m.FullName,
+			RoleID:            m.RoleID,
+			RoleKey:           m.RoleKey,
+			Grants:            knownKeysOf(m.Grants),
+			Denies:            knownKeysOf(m.Denies),
+			AssignmentVersion: m.AssignmentVersion,
 		})
 	}
 	return resp, nil
+}
+
+// staleAssignmentConflict is the 409 both replacement writes return on a CAS
+// miss: the client's read model is behind, reloading is the only cure.
+func staleAssignmentConflict() error {
+	return apperror.Conflict("Cấu hình quyền đã thay đổi từ lần tải trước, hãy tải lại rồi lưu lại")
+}
+
+// checkCatalogVersion rejects writes composed against a different catalog
+// generation than the server's. Zero means a pre-CAS client — allowed until
+// the UI cutover completes.
+func checkCatalogVersion(v int) error {
+	if v != 0 && v != authctx.CatalogVersion {
+		return staleAssignmentConflict()
+	}
+	return nil
 }
 
 // ReplaceRolePermissions swaps a role's permission set; owner-only. The role
@@ -412,6 +455,9 @@ func (s *Service) Permissions(ctx context.Context, scope authctx.Scope) (*Permis
 // tenancy comes from scope.
 func (s *Service) ReplaceRolePermissions(ctx context.Context, scope authctx.Scope, roleID uuid.UUID, req RolePermissionsRequest) error {
 	if err := requirePermissionAdmin(scope); err != nil {
+		return err
+	}
+	if err := checkCatalogVersion(req.CatalogVersion); err != nil {
 		return err
 	}
 	keys, err := normalizeKeys("permissions", req.Permissions)
@@ -442,10 +488,13 @@ func (s *Service) ReplaceRolePermissions(ctx context.Context, scope authctx.Scop
 			Before:     knownKeysOf(role.Perms),
 			After:      keys,
 		}
-		return s.repo.ReplaceRolePermissions(ctx, roleID, keys)
+		return s.repo.ReplaceRolePermissions(ctx, roleID, keys, req.AssignmentVersion)
 	})
 	if errors.Is(err, ErrNotFound) {
 		return apperror.NotFound("role")
+	}
+	if errors.Is(err, ErrStaleVersion) {
+		return staleAssignmentConflict()
 	}
 	if err != nil {
 		return apperror.From(err)
@@ -505,6 +554,9 @@ func (s *Service) ReplaceMemberOverrides(ctx context.Context, scope authctx.Scop
 	if err := requirePermissionAdmin(scope); err != nil {
 		return err
 	}
+	if err := checkCatalogVersion(req.CatalogVersion); err != nil {
+		return err
+	}
 	grants, err := normalizeKeys("grants", req.Grants)
 	if err != nil {
 		return err
@@ -543,10 +595,13 @@ func (s *Service) ReplaceMemberOverrides(ctx context.Context, scope authctx.Scop
 			AfterGrants:  grants,
 			AfterDenies:  denies,
 		}
-		return s.repo.ReplaceMemberOverrides(ctx, scope.CenterID, targetID, grants, denies, canSend)
+		return s.repo.ReplaceMemberOverrides(ctx, scope.CenterID, targetID, grants, denies, canSend, req.AssignmentVersion)
 	})
 	if errors.Is(err, ErrNotFound) {
 		return apperror.NotFound("member")
+	}
+	if errors.Is(err, ErrStaleVersion) {
+		return staleAssignmentConflict()
 	}
 	if err != nil {
 		return apperror.From(err)

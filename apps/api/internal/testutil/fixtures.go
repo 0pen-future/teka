@@ -3,6 +3,7 @@ package testutil
 import (
 	"encoding/binary"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,6 +102,17 @@ func Teacher(t *testing.T, db *gorm.DB, opts ...TeacherOption) (*teachers.Accoun
 				(gen_random_uuid(), @cid, 'hoc_vu', 'Học vụ'),
 				(gen_random_uuid(), @cid, 'tro_giang', 'Trợ giảng')`,
 			map[string]any{"cid": teacher.CenterID}).Error; err != nil {
+			return err
+		}
+		// And the same born-with-defaults invariant: roles start from the
+		// operational baseline, matching repository CreateCenter.
+		if err := tx.Exec(`
+			INSERT INTO center_role_permissions (role_id, permission_key)
+			SELECT cr.id, k
+			FROM center_roles cr
+			CROSS JOIN unnest(string_to_array(?, ',')) AS k
+			WHERE cr.center_id = ?`,
+			strings.Join(authctx.DefaultRoleKeys(), ","), teacher.CenterID).Error; err != nil {
 			return err
 		}
 		if err := tx.Create(acct).Error; err != nil {

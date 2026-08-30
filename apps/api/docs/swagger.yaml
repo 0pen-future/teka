@@ -376,6 +376,10 @@ definitions:
     type: object
   centers.MemberOverridesRequest:
     properties:
+      assignment_version:
+        type: integer
+      catalog_version:
+        type: integer
       denies:
         items:
           type: string
@@ -387,6 +391,11 @@ definitions:
     type: object
   centers.MemberPermissionsResponse:
     properties:
+      assignment_version:
+        description: |-
+          AssignmentVersion is the CAS token for this member's override set —
+          same contract as RoleResponse.AssignmentVersion.
+        type: integer
       denies:
         items:
           type: string
@@ -472,9 +481,19 @@ definitions:
     type: object
   centers.PermissionInfo:
     properties:
+      action:
+        type: string
+      description:
+        type: string
       key:
         type: string
+      kind:
+        type: string
       label:
+        type: string
+      resource:
+        type: string
+      risk:
         type: string
     type: object
   centers.PermissionsResponse:
@@ -483,6 +502,12 @@ definitions:
         items:
           $ref: '#/definitions/centers.PermissionInfo'
         type: array
+      catalog_version:
+        description: |-
+          CatalogVersion identifies the catalog generation this read model was
+          rendered under; writes echo it so a client holding a stale catalog
+          gets 409 instead of silently assigning keys it never displayed.
+        type: integer
       members:
         items:
           $ref: '#/definitions/centers.MemberPermissionsResponse'
@@ -503,6 +528,10 @@ definitions:
     type: object
   centers.RolePermissionsRequest:
     properties:
+      assignment_version:
+        type: integer
+      catalog_version:
+        type: integer
       permissions:
         items:
           type: string
@@ -510,6 +539,12 @@ definitions:
     type: object
   centers.RoleResponse:
     properties:
+      assignment_version:
+        description: |-
+          AssignmentVersion is the CAS token for this role's permission set:
+          echo it back on a replacement write; a mismatch means someone else
+          saved in between and the write returns 409 without mutating.
+        type: integer
       id:
         type: string
       key:

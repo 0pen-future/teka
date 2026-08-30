@@ -6,7 +6,7 @@ priority: P1
 effort: "11d"
 tags: [api, web, db, security, authz, migration]
 created: 2026-08-30
-blockedBy: []
+blockedBy: [260830-2310-resource-action-rbac-permission-catalog]
 blocks: []
 ---
 

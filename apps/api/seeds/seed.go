@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -399,6 +400,18 @@ func ensureOwner(ctx context.Context, db *gorm.DB, log *slog.Logger, s seedTeach
 				(gen_random_uuid(), @cid, 'hoc_vu', 'Học vụ'),
 				(gen_random_uuid(), @cid, 'tro_giang', 'Trợ giảng')`,
 			map[string]any{"cid": centerID},
+		).Error; err != nil {
+			return err
+		}
+		// Roles start from the operational default baseline, the same
+		// invariant repository CreateCenter enforces.
+		if err := tx.Exec(`
+			INSERT INTO center_role_permissions (role_id, permission_key)
+			SELECT cr.id, k
+			FROM center_roles cr
+			CROSS JOIN unnest(string_to_array(?, ',')) AS k
+			WHERE cr.center_id = ?`,
+			strings.Join(authctx.DefaultRoleKeys(), ","), centerID,
 		).Error; err != nil {
 			return err
 		}

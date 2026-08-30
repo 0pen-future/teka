@@ -4,8 +4,8 @@ import "github.com/gin-gonic/gin"
 
 // RegisterRoutes mounts the class endpoints under /classes, all behind
 // authentication; schedules are a nested sub-resource.
-func RegisterRoutes(rg *gin.RouterGroup, h *Handler, requireAuth, resolveScope gin.HandlerFunc) {
-	g := rg.Group("/classes", requireAuth, resolveScope)
+func RegisterRoutes(rg *gin.RouterGroup, h *Handler, auth ...gin.HandlerFunc) {
+	g := rg.Group("/classes", auth...)
 	g.POST("", h.create)
 	g.GET("", h.list)
 	g.GET("/:id", h.get)

@@ -13122,6 +13122,12 @@ const docTemplate = `{
         "centers.MemberOverridesRequest": {
             "type": "object",
             "properties": {
+                "assignment_version": {
+                    "type": "integer"
+                },
+                "catalog_version": {
+                    "type": "integer"
+                },
                 "denies": {
                     "type": "array",
                     "items": {
@@ -13139,6 +13145,10 @@ const docTemplate = `{
         "centers.MemberPermissionsResponse": {
             "type": "object",
             "properties": {
+                "assignment_version": {
+                    "description": "AssignmentVersion is the CAS token for this member's override set —\nsame contract as RoleResponse.AssignmentVersion.",
+                    "type": "integer"
+                },
                 "denies": {
                     "type": "array",
                     "items": {
@@ -13251,10 +13261,25 @@ const docTemplate = `{
         "centers.PermissionInfo": {
             "type": "object",
             "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
                 "key": {
                     "type": "string"
                 },
+                "kind": {
+                    "type": "string"
+                },
                 "label": {
+                    "type": "string"
+                },
+                "resource": {
+                    "type": "string"
+                },
+                "risk": {
                     "type": "string"
                 }
             }
@@ -13267,6 +13292,10 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/centers.PermissionInfo"
                     }
+                },
+                "catalog_version": {
+                    "description": "CatalogVersion identifies the catalog generation this read model was\nrendered under; writes echo it so a client holding a stale catalog\ngets 409 instead of silently assigning keys it never displayed.",
+                    "type": "integer"
                 },
                 "members": {
                     "type": "array",
@@ -13298,6 +13327,12 @@ const docTemplate = `{
         "centers.RolePermissionsRequest": {
             "type": "object",
             "properties": {
+                "assignment_version": {
+                    "type": "integer"
+                },
+                "catalog_version": {
+                    "type": "integer"
+                },
                 "permissions": {
                     "type": "array",
                     "items": {
@@ -13309,6 +13344,10 @@ const docTemplate = `{
         "centers.RoleResponse": {
             "type": "object",
             "properties": {
+                "assignment_version": {
+                    "description": "AssignmentVersion is the CAS token for this role's permission set:\necho it back on a replacement write; a mismatch means someone else\nsaved in between and the write returns 409 without mutating.",
+                    "type": "integer"
+                },
                 "id": {
                     "type": "string"
                 },

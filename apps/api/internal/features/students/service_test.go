@@ -58,8 +58,8 @@ func (f *fakeRepository) row(s *fakeStudent) Row {
 	return Row{Student: s.Student, ContactName: c.name, ContactPhone: &phone}
 }
 
-// addStudent seeds a row directly, bypassing the service's owner gate — the
-// shape of pre-migration data still anchored to a member.
+// addStudent seeds a row directly under an arbitrary teacher — the shape of
+// pre-migration data still anchored to a member.
 func (f *fakeRepository) addStudent(teacherID, centerID, contactID uuid.UUID, name string) uuid.UUID {
 	sid := id.New()
 	f.rows[sid] = &fakeStudent{Student: Student{
@@ -110,7 +110,13 @@ func (f *fakeRepository) List(_ context.Context, sc authctx.Scope, filter ListFi
 	return out, int64(len(out)), nil
 }
 
-func (f *fakeRepository) Update(_ context.Context, s *Student) error {
+func (f *fakeRepository) Update(_ context.Context, sc authctx.Scope, s *Student) error {
+	existing, ok := f.rows[s.ID]
+	if !ok || !visible(existing, sc) {
+		// Mirrors the scoped UPDATE's RowsAffected==0: rows outside the write
+		// scope are masked as not-found.
+		return ErrNotFound
+	}
 	if c, ok := f.contacts[s.ContactID]; !ok || c.centerID != s.CenterID {
 		return ErrContactNotOwned
 	}
@@ -318,23 +324,40 @@ func TestCrossTenantReadsAsNotFound(t *testing.T) {
 	}
 }
 
-// Student CRUD is the owner's alone: every member — the row's legacy creator
-// included — gets an honest 403, before any lookup can leak existence.
-func TestMemberWritesForbidden(t *testing.T) {
-	svc, repo, _ := newTestService()
+// Who may call student CRUD is the route policy's decision (students.create /
+// students.edit / students.delete); inside the service, the write scope is the
+// boundary — a member operates freely on their own rows and gets not-found on
+// anything else.
+func TestMemberWritesStayInsideOwnRows(t *testing.T) {
+	svc, repo, ender := newTestService()
 	center := id.New()
 	member := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
 	contactID := repo.addContactIn(member.TeacherID, center)
 	sid := repo.addStudent(member.TeacherID, center, contactID, "Bé An")
 
-	if _, err := svc.Create(context.Background(), member, CreateRequest{FullName: "Bé Bình", ContactID: contactID}); apperror.From(err).Status != 403 {
-		t.Fatalf("member create must be 403, got %v", err)
+	peerID := id.New()
+	peerContact := repo.addContactIn(peerID, center)
+	peerStudent := repo.addStudent(peerID, center, peerContact, "Bé Bình")
+
+	if _, err := svc.Create(context.Background(), member, CreateRequest{FullName: "Bé Cường", ContactID: contactID}); err != nil {
+		t.Fatalf("member create on own contact must succeed, got %v", err)
 	}
-	if _, err := svc.Update(context.Background(), member, sid, UpdateRequest{FullName: "Bé An (sửa)", ContactID: contactID}); apperror.From(err).Status != 403 {
-		t.Fatalf("member update must be 403, got %v", err)
+	if _, err := svc.Update(context.Background(), member, sid, UpdateRequest{FullName: "Bé An (sửa)", ContactID: contactID}); err != nil {
+		t.Fatalf("member update on own row must succeed, got %v", err)
 	}
-	if err := svc.Delete(context.Background(), member, sid); apperror.From(err).Status != 403 {
-		t.Fatalf("member delete must be 403, got %v", err)
+	if err := svc.Delete(context.Background(), member, sid); err != nil {
+		t.Fatalf("member delete on own row must succeed, got %v", err)
+	}
+	if len(ender.calls) != 1 || ender.calls[0] != sid {
+		t.Fatal("member delete must still close open enrollments")
+	}
+
+	var appErr *apperror.AppError
+	if _, err := svc.Update(context.Background(), member, peerStudent, UpdateRequest{FullName: "Chiếm", ContactID: contactID}); !errors.As(err, &appErr) || appErr.Code != apperror.CodeNotFound {
+		t.Fatalf("member update on a peer's row must be NOT_FOUND, got %v", err)
+	}
+	if err := svc.Delete(context.Background(), member, peerStudent); !errors.As(err, &appErr) || appErr.Code != apperror.CodeNotFound {
+		t.Fatalf("member delete on a peer's row must be NOT_FOUND, got %v", err)
 	}
 }
 

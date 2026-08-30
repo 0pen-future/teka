@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
 import { mockInvites } from "@/features/invitation/__tests__/invitation-handlers";
-import { API_URL, DEFAULT_CENTER_PERMISSIONS, DEFAULT_ROLES } from "@/test/msw/handlers";
+import { API_URL, DEFAULT_CENTER_PERMISSIONS, DEFAULT_ROLES, fail } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
 
@@ -111,7 +111,106 @@ describe("PermissionMatrix on the owner permissions page", () => {
 
     expect(await screen.findByText("Đã lưu quyền cho vai trò Học vụ")).toBeInTheDocument();
     expect(savedRoleId).toBe(HOC_VU.id);
-    expect(received).toEqual({ permissions: ["audit.read", "dashboard.view"] });
+    // The CAS pair rides along: the catalog generation and the role's
+    // assignment version from the read model the edit was composed on.
+    expect(received).toEqual({
+      permissions: ["audit.read", "dashboard.view"],
+      catalog_version: 2,
+      assignment_version: HOC_VU.assignment_version,
+    });
+  });
+
+  it("groups the catalog by resource with Vietnamese headings", async () => {
+    mockCenterMe(makeCenterMeOwner({ members: [ownerSelf()] }));
+    mockCenterPermissions(makeCenterPermissions());
+    renderPermissionsPage();
+
+    expect(await screen.findByRole("heading", { name: "Lớp học" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Học phí" })).toBeInTheDocument();
+    // Scope keys carry the high-risk marker inside their resource group.
+    expect(screen.getAllByText("Rủi ro cao").length).toBeGreaterThan(0);
+  });
+
+  it("asks for confirmation with the affected-member count before a high-risk save", async () => {
+    const memberA = makeMember({ full_name: "Giáo Viên A" });
+    mockCenterMe(makeCenterMeOwner({ members: [ownerSelf(), memberA] }));
+    mockCenterPermissions(
+      makeCenterPermissions({
+        members: [makeMemberPermissions(memberA, { role_id: HOC_VU.id, role_key: HOC_VU.key })],
+      }),
+    );
+    let puts = 0;
+    server.use(
+      http.put(`${API_URL}/centers/me/roles/:roleId/permissions`, () => {
+        puts += 1;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    renderPermissionsPage();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("checkbox", { name: "Chốt kỳ học phí — Học vụ" }));
+    const saveButtons = screen.getAllByRole("button", { name: "Lưu" });
+    const hocVuSave = saveButtons[1];
+    if (!hocVuSave) {
+      throw new Error("missing the Học vụ save button");
+    }
+    await user.click(hocVuSave);
+
+    // The confirmation summarizes the high-risk keys and who is affected.
+    const confirm = await screen.findByRole("dialog");
+    expect(within(confirm).getByText(/Chốt kỳ học phí/)).toBeInTheDocument();
+    expect(within(confirm).getByText(/1 thành viên/)).toBeInTheDocument();
+    await user.click(within(confirm).getByRole("button", { name: "Hủy" }));
+    expect(puts).toBe(0);
+
+    await user.click(hocVuSave);
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Xác nhận" }),
+    );
+    expect(await screen.findByText("Đã lưu quyền cho vai trò Học vụ")).toBeInTheDocument();
+    expect(puts).toBe(1);
+  });
+
+  it("keeps the draft and refetches on a stale-version 409 without auto-retrying", async () => {
+    mockCenterMe(makeCenterMeOwner({ members: [ownerSelf()] }));
+    const matrix = mockCenterPermissions(
+      makeCenterPermissions(),
+      makeCenterPermissions({
+        roles: [
+          DEFAULT_CENTER_PERMISSIONS.roles[0]!,
+          { ...HOC_VU, permissions: ["classes.create"], assignment_version: 2 },
+          DEFAULT_CENTER_PERMISSIONS.roles[2]!,
+        ],
+      }),
+    );
+    const conflictMessage = "Cấu hình quyền đã thay đổi từ lần tải trước, hãy tải lại rồi lưu lại";
+    let puts = 0;
+    server.use(
+      http.put(`${API_URL}/centers/me/roles/:roleId/permissions`, () => {
+        puts += 1;
+        return HttpResponse.json(fail("CONFLICT", conflictMessage), { status: 409 });
+      }),
+    );
+    renderPermissionsPage();
+    const user = userEvent.setup();
+
+    const auditBox = await screen.findByRole("checkbox", {
+      name: "Xem nhật ký hoạt động — Học vụ",
+    });
+    await user.click(auditBox);
+    const hocVuSave = screen.getAllByRole("button", { name: "Lưu" })[1];
+    if (!hocVuSave) {
+      throw new Error("missing the Học vụ save button");
+    }
+    await user.click(hocVuSave);
+
+    // The API's conflict message surfaces verbatim and the read model
+    // refetches, but the owner's draft stays for a reviewed re-save.
+    expect(await screen.findByText(conflictMessage)).toBeInTheDocument();
+    await waitFor(() => expect(matrix.calls).toBe(2));
+    expect(puts).toBe(1);
+    expect(screen.getByRole("checkbox", { name: "Xem nhật ký hoạt động — Học vụ" })).toBeChecked();
   });
 
   it("redirects a non-owner deep link to the dashboard without fetching the matrix", async () => {
@@ -190,6 +289,8 @@ describe("MemberPermissionsDialog", () => {
     // Effective sources: role-inherited vs. individually granted.
     expect(await within(dialog).findByText("Từ vai trò")).toBeInTheDocument();
     expect(within(dialog).getByText("Cấp riêng", { selector: "span" })).toBeInTheDocument();
+    // The precedence rule is stated where overrides are edited.
+    expect(within(dialog).getByText(/Chặn riêng luôn thắng/)).toBeInTheDocument();
 
     await user.selectOptions(
       within(dialog).getByRole("combobox", { name: "Quyền Xem nhật ký hoạt động" }),
@@ -199,6 +300,12 @@ describe("MemberPermissionsDialog", () => {
     await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
 
     expect(await screen.findByText("Đã lưu phân quyền")).toBeInTheDocument();
-    expect(received).toEqual({ grants: ["imports.run"], denies: ["audit.read"] });
+    // Overrides carry the same CAS pair, from the member's own row.
+    expect(received).toEqual({
+      grants: ["imports.run"],
+      denies: ["audit.read"],
+      catalog_version: 2,
+      assignment_version: 1,
+    });
   });
 });

@@ -28,33 +28,15 @@ const (
 	PermTeachingReviewQueue = "teaching.review_queue"
 )
 
-// permRegistry is the closed set of valid keys, in stable display order.
-var permRegistry = []string{
-	PermDataViewCenterWide,
-	PermReportsSend,
-	PermMembersManage,
-	PermCenterManage,
-	PermInvitationsManage,
-	PermAuditRead,
-	PermImportsRun,
-	PermDashboardView,
-	PermTeachingReviewQueue,
-}
-
-// permLabels carries the Vietnamese display label per registry key. The API
-// response is the single label source — the web renders what it receives and
-// keeps no duplicate label map.
-var permLabels = map[string]string{
-	PermDataViewCenterWide:  "Xem dữ liệu toàn trung tâm",
-	PermReportsSend:         "Gửi báo cáo học phí",
-	PermMembersManage:       "Quản lý thành viên",
-	PermCenterManage:        "Quản lý trung tâm",
-	PermInvitationsManage:   "Quản lý lời mời",
-	PermAuditRead:           "Xem nhật ký hoạt động",
-	PermImportsRun:          "Import dữ liệu",
-	PermDashboardView:       "Xem dashboard trung tâm",
-	PermTeachingReviewQueue: "Xem hàng chờ duyệt giáo án",
-}
+// permRegistry is the closed set of valid keys in stable display order, and
+// permLabels the Vietnamese label per key. Both are derived views over
+// permCatalog (catalog.go), filled by its init — the catalog is the single
+// definition source. The API response is the single label source — the web
+// renders what it receives and keeps no duplicate label map.
+var (
+	permRegistry = make([]string, 0, 80)
+	permLabels   = make(map[string]string, 80)
+)
 
 // PermKeys returns the registered permission keys in stable order; callers
 // get a copy and cannot mutate the registry.
@@ -88,21 +70,31 @@ type PermSet map[string]struct{}
 // BuildPermSet combines role permissions with member overrides into the
 // effective set: (role ∪ grants) − denies. Keys outside the registry are
 // dropped — the database may hold assignments for keys a code rollback no
-// longer defines.
+// longer defines. Aliased keys expand on every input list before the set
+// algebra, so a legacy grant grants its whole canonical equivalence class and
+// a legacy deny removes it; a canonical key never expands back to its legacy
+// alias.
 func BuildPermSet(rolePerms, grants, denies []string) PermSet {
 	set := make(PermSet, len(rolePerms)+len(grants))
-	for _, key := range rolePerms {
+	add := func(key string) {
 		if KnownPerm(key) {
 			set[key] = struct{}{}
+		}
+		for _, alias := range permAliases[key] {
+			set[alias] = struct{}{}
 		}
 	}
+	for _, key := range rolePerms {
+		add(key)
+	}
 	for _, key := range grants {
-		if KnownPerm(key) {
-			set[key] = struct{}{}
-		}
+		add(key)
 	}
 	for _, key := range denies {
 		delete(set, key)
+		for _, alias := range permAliases[key] {
+			delete(set, alias)
+		}
 	}
 	return set
 }
@@ -118,7 +110,7 @@ func (p PermSet) HasKey(key string) bool {
 // Has reports whether the caller holds the permission. The owner is the
 // implicit superuser outside the role tables: Has is true unconditionally
 // for them. Repositories must not call Has — data scoping goes through
-// CenterWide() only.
+// CenterWideFor(<resource>.view_all) only.
 func (s Scope) Has(key string) bool {
 	if s.IsOwner {
 		return true

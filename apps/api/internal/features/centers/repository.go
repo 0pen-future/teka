@@ -3,6 +3,7 @@ package centers
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,11 +12,16 @@ import (
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/teachers"
+	"teka/apps/api/internal/shared/authctx"
 )
 
 // Sentinel errors the service translates into API errors.
 var (
 	ErrNotFound = errors.New("centers: not found")
+	// ErrStaleVersion is a CAS miss on a permission-assignment write: the
+	// caller's assignment_version no longer matches the row, so another write
+	// landed since their read. Nothing was mutated.
+	ErrStaleVersion = errors.New("centers: stale assignment version")
 	// ErrOwnerHasLiveCenter is the uq_centers_owner violation: the teacher
 	// already owns a live center.
 	ErrOwnerHasLiveCenter = errors.New("centers: owner already has a live center")
@@ -56,21 +62,23 @@ type MemberRow struct {
 // RoleRow is one center role with its permission keys, comma-joined like
 // ScopeRow's lists (same text[] scanning limitation).
 type RoleRow struct {
-	ID    uuid.UUID
-	Key   string
-	Name  string
-	Perms string
+	ID                uuid.UUID
+	Key               string
+	Name              string
+	Perms             string
+	AssignmentVersion int64
 }
 
 // MemberRBACRow is one live non-owner member's RBAC state: assigned role plus
 // comma-joined grant/deny override keys. RoleKey is "" for a role-less stint.
 type MemberRBACRow struct {
-	TeacherID uuid.UUID
-	FullName  string
-	RoleID    *uuid.UUID
-	RoleKey   string
-	Grants    string
-	Denies    string
+	TeacherID         uuid.UUID
+	FullName          string
+	RoleID            *uuid.UUID
+	RoleKey           string
+	Grants            string
+	Denies            string
+	AssignmentVersion int64
 }
 
 // TeacherRow is the slice of a teachers row the remove flow needs.
@@ -152,8 +160,10 @@ type Repository interface {
 	GetRole(ctx context.Context, centerID, roleID uuid.UUID) (*RoleRow, error)
 	// ReplaceRolePermissions swaps the role's permission set for keys. The
 	// caller resolves the role to its center first (GetRole) inside the same
-	// transaction.
-	ReplaceRolePermissions(ctx context.Context, roleID uuid.UUID, keys []string) error
+	// transaction. expectedVersion is the CAS guard: 0 skips the check
+	// (pre-CAS clients), otherwise a mismatch returns ErrStaleVersion with
+	// nothing mutated. The version row-lock also serializes concurrent swaps.
+	ReplaceRolePermissions(ctx context.Context, roleID uuid.UUID, keys []string, expectedVersion int64) error
 	// ListMemberRBAC returns the live non-owner members with their role and
 	// override lists (the owner sits outside the role system).
 	ListMemberRBAC(ctx context.Context, centerID uuid.UUID) ([]MemberRBACRow, error)
@@ -168,7 +178,9 @@ type Repository interface {
 	// grant/deny lists and dual-writes can_send_reports = canSend on the live
 	// stint (the legacy column stays authoritative while both live). The
 	// caller verifies the target via GetMemberRBAC in the same transaction.
-	ReplaceMemberOverrides(ctx context.Context, centerID, teacherID uuid.UUID, grants, denies []string, canSend bool) error
+	// expectedVersion is the CAS guard, same contract as
+	// ReplaceRolePermissions.
+	ReplaceMemberOverrides(ctx context.Context, centerID, teacherID uuid.UUID, grants, denies []string, canSend bool, expectedVersion int64) error
 	// SwitchTeacherCenter moves teachers.center_id to centerID
 	// unconditionally; ErrNotFound when the teacher is unknown or
 	// soft-deleted.
@@ -332,12 +344,25 @@ func (r *gormRepository) CreateCenter(ctx context.Context, c *Center) error {
 	}
 	// Every center is born with its three system roles; members default to
 	// giao_vien on join, the owner stays outside the role system entirely.
-	return database.FromContext(ctx, r.db).Exec(`
+	if err := database.FromContext(ctx, r.db).Exec(`
 		INSERT INTO center_roles (id, center_id, key, name)
 		VALUES (gen_random_uuid(), @cid, 'giao_vien', 'Giáo viên'),
 			(gen_random_uuid(), @cid, 'hoc_vu', 'Học vụ'),
 			(gen_random_uuid(), @cid, 'tro_giang', 'Trợ giảng')`,
-		map[string]any{"cid": c.ID}).Error
+		map[string]any{"cid": c.ID}).Error; err != nil {
+		return err
+	}
+	// New roles start from the operational default baseline, mirroring the
+	// backfill of pre-catalog centers: membership used to grant all
+	// operational access, so a fresh role denying everything would make new
+	// centers behave differently from existing ones.
+	return database.FromContext(ctx, r.db).Exec(`
+		INSERT INTO center_role_permissions (role_id, permission_key)
+		SELECT cr.id, k
+		FROM center_roles cr
+		CROSS JOIN unnest(string_to_array(?, ',')) AS k
+		WHERE cr.center_id = ?`,
+		strings.Join(authctx.DefaultRoleKeys(), ","), c.ID).Error
 }
 
 func (r *gormRepository) OpenMembership(ctx context.Context, teacherID, centerID uuid.UUID) (time.Time, error) {
@@ -464,7 +489,7 @@ func (r *gormRepository) SetSendReports(ctx context.Context, centerID, teacherID
 func (r *gormRepository) ListRoles(ctx context.Context, centerID uuid.UUID) ([]RoleRow, error) {
 	var rows []RoleRow
 	err := database.FromContext(ctx, r.db).Raw(`
-		SELECT cr.id, cr.key, cr.name,
+		SELECT cr.id, cr.key, cr.name, cr.assignment_version,
 			COALESCE((SELECT string_agg(rp.permission_key, ',' ORDER BY rp.permission_key)
 				FROM center_role_permissions rp
 				WHERE rp.role_id = cr.id), '') AS perms
@@ -477,7 +502,7 @@ func (r *gormRepository) ListRoles(ctx context.Context, centerID uuid.UUID) ([]R
 func (r *gormRepository) GetRole(ctx context.Context, centerID, roleID uuid.UUID) (*RoleRow, error) {
 	var row RoleRow
 	res := database.FromContext(ctx, r.db).Raw(`
-		SELECT cr.id, cr.key, cr.name,
+		SELECT cr.id, cr.key, cr.name, cr.assignment_version,
 			COALESCE((SELECT string_agg(rp.permission_key, ',' ORDER BY rp.permission_key)
 				FROM center_role_permissions rp
 				WHERE rp.role_id = cr.id), '') AS perms
@@ -492,8 +517,24 @@ func (r *gormRepository) GetRole(ctx context.Context, centerID, roleID uuid.UUID
 	return &row, nil
 }
 
-func (r *gormRepository) ReplaceRolePermissions(ctx context.Context, roleID uuid.UUID, keys []string) error {
+func (r *gormRepository) ReplaceRolePermissions(ctx context.Context, roleID uuid.UUID, keys []string, expectedVersion int64) error {
 	db := database.FromContext(ctx, r.db)
+	// CAS bump first: the UPDATE takes the row lock, so concurrent
+	// replacements of the same role serialize here and the loser's re-check
+	// of assignment_version fails cleanly. The caller resolved the role via
+	// GetRole in this transaction, so zero rows can only mean a version
+	// mismatch. expectedVersion 0 is a pre-CAS client: bump without checking
+	// (last write wins, the legacy behavior).
+	bump := db.Exec(`
+		UPDATE center_roles SET assignment_version = assignment_version + 1, updated_at = now()
+		WHERE id = @rid AND (@expected = 0 OR assignment_version = @expected)`,
+		map[string]any{"rid": roleID, "expected": expectedVersion})
+	if bump.Error != nil {
+		return bump.Error
+	}
+	if bump.RowsAffected == 0 {
+		return ErrStaleVersion
+	}
 	if err := db.Exec(`DELETE FROM center_role_permissions WHERE role_id = ?`, roleID).Error; err != nil {
 		return err
 	}
@@ -513,7 +554,8 @@ func (r *gormRepository) ReplaceRolePermissions(ctx context.Context, roleID uuid
 // RBAC state; the owner is excluded here the same way SetSendReports refuses
 // them — they sit outside the role system entirely.
 const memberRBACSelect = `
-	SELECT cm.teacher_id, t.full_name, cm.role_id, COALESCE(cr.key, '') AS role_key,
+	SELECT cm.teacher_id, t.full_name, cm.role_id, cm.assignment_version,
+		COALESCE(cr.key, '') AS role_key,
 		COALESCE((SELECT string_agg(mp.permission_key, ',' ORDER BY mp.permission_key)
 			FROM center_member_permissions mp
 			WHERE mp.teacher_id = cm.teacher_id AND mp.center_id = cm.center_id
@@ -570,8 +612,27 @@ func (r *gormRepository) SetMemberRole(ctx context.Context, centerID, teacherID,
 	return nil
 }
 
-func (r *gormRepository) ReplaceMemberOverrides(ctx context.Context, centerID, teacherID uuid.UUID, grants, denies []string, canSend bool) error {
+func (r *gormRepository) ReplaceMemberOverrides(ctx context.Context, centerID, teacherID uuid.UUID, grants, denies []string, canSend bool, expectedVersion int64) error {
 	db := database.FromContext(ctx, r.db)
+	// CAS bump + legacy dual-write in one statement, before the row swap so
+	// the version row lock serializes concurrent replacements. The caller
+	// verified the live stint via GetMemberRBAC in this transaction, so zero
+	// rows means the version went stale, not that the member vanished.
+	// can_send_reports mirrors whether the new set grants reports.send,
+	// keeping the phase-4 parity gate honest. expectedVersion 0 is a pre-CAS
+	// client: bump without checking.
+	bump := db.Exec(`
+		UPDATE center_members
+		SET assignment_version = assignment_version + 1, can_send_reports = @can_send
+		WHERE teacher_id = @tid AND center_id = @cid AND left_at IS NULL
+			AND (@expected = 0 OR assignment_version = @expected)`,
+		map[string]any{"can_send": canSend, "tid": teacherID, "cid": centerID, "expected": expectedVersion})
+	if bump.Error != nil {
+		return bump.Error
+	}
+	if bump.RowsAffected == 0 {
+		return ErrStaleVersion
+	}
 	if err := db.Exec(`
 		DELETE FROM center_member_permissions
 		WHERE teacher_id = ? AND center_id = ?`, teacherID, centerID).Error; err != nil {
@@ -590,18 +651,6 @@ func (r *gormRepository) ReplaceMemberOverrides(ctx context.Context, centerID, t
 			VALUES (?, ?, ?, FALSE)`, teacherID, centerID, key).Error; err != nil {
 			return err
 		}
-	}
-	// Dual life: the legacy column mirrors whether the new set grants
-	// reports.send, keeping the phase-4 parity gate honest.
-	res := db.Exec(`
-		UPDATE center_members SET can_send_reports = ?
-		WHERE teacher_id = ? AND center_id = ? AND left_at IS NULL`,
-		canSend, teacherID, centerID)
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return ErrNotFound
 	}
 	return nil
 }

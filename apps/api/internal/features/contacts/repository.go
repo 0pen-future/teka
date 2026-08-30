@@ -66,7 +66,7 @@ func NewRepository(db *gorm.DB) Repository {
 // legacy-scoping cleanup will retire.
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("contacts.center_id = ?", sc.CenterID)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermContactsViewAll) {
 		q = q.Where("contacts.teacher_id = ?", sc.TeacherID)
 	}
 	return q
@@ -162,7 +162,7 @@ func (r *gormRepository) CountActiveStudents(ctx context.Context, sc authctx.Sco
 	q := database.FromContext(ctx, r.db).
 		Table("students").
 		Where("center_id = ? AND contact_id = ? AND deleted_at IS NULL", sc.CenterID, contactID)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermContactsViewAll) {
 		q = q.Where("teacher_id = ?", sc.TeacherID)
 	}
 	err := q.Count(&n).Error
@@ -174,7 +174,7 @@ func (r *gormRepository) ListStudentNames(ctx context.Context, sc authctx.Scope,
 	q := database.FromContext(ctx, r.db).
 		Table("students").
 		Where("center_id = ? AND contact_id = ? AND deleted_at IS NULL", sc.CenterID, contactID)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermContactsViewAll) {
 		q = q.Where("teacher_id = ?", sc.TeacherID)
 	}
 	err := q.Order("full_name").Limit(limit).Pluck("full_name", &names).Error

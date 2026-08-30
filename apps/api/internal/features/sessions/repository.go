@@ -92,7 +92,7 @@ func NewRepository(db *gorm.DB) Repository {
 // which carries the same column name.
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("class_sessions.center_id = ?", sc.CenterID)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermSessionsViewAll) {
 		q = q.Where("class_sessions.teacher_id = ?", sc.TeacherID)
 	}
 	return q
@@ -105,7 +105,7 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 // owner-driven handoff flow.
 func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("class_sessions.center_id = ?", sc.CenterID)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermSessionsViewAll) {
 		frag, _ := classscope.ReadExists("class_sessions.class_id")
 		q = q.Where("(class_sessions.teacher_id = ? OR "+frag+")",
 			sc.TeacherID, sc.TeacherID, sc.CenterID)
@@ -120,7 +120,7 @@ func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm
 // comes from the service's capability-map lookup; this method only binds it.
 func (r *gormRepository) writeScoped(ctx context.Context, sc authctx.Scope, roles []string) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("class_sessions.center_id = ?", sc.CenterID)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermSessionsViewAll) {
 		frag, _ := classscope.WriteExists("class_sessions.class_id")
 		q = q.Where(frag, sc.TeacherID, sc.CenterID, roles)
 	}

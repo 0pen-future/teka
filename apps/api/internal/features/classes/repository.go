@@ -84,7 +84,7 @@ func NewRepository(db *gorm.DB) Repository {
 // reads.
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("classes.center_id = ?", sc.CenterID)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermClassesViewAll) {
 		q = q.Where("classes.teacher_id = ?", sc.TeacherID)
 	}
 	return q
@@ -96,7 +96,7 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 // using scoped.
 func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("classes.center_id = ?", sc.CenterID)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermClassesViewAll) {
 		frag, _ := classscope.ReadExists("classes.id")
 		q = q.Where("(classes.teacher_id = ? OR "+frag+")",
 			sc.TeacherID, sc.TeacherID, sc.CenterID)
@@ -111,7 +111,7 @@ func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm
 // the service's capability-map lookup; this method only binds it.
 func (r *gormRepository) writeScoped(ctx context.Context, sc authctx.Scope, roles []string) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("classes.center_id = ?", sc.CenterID)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermClassesViewAll) {
 		frag, _ := classscope.WriteExists("classes.id")
 		q = q.Where(frag, sc.TeacherID, sc.CenterID, roles)
 	}
@@ -121,7 +121,7 @@ func (r *gormRepository) writeScoped(ctx context.Context, sc authctx.Scope, role
 // scopedSchedules is scoped's counterpart for the class_schedules table.
 func (r *gormRepository) scopedSchedules(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("class_schedules.center_id = ?", sc.CenterID)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermClassesViewAll) {
 		q = q.Where("class_schedules.teacher_id = ?", sc.TeacherID)
 	}
 	return q
@@ -249,7 +249,7 @@ func (r *gormRepository) CountOpenEnrollments(ctx context.Context, sc authctx.Sc
 	q := database.FromContext(ctx, r.db).
 		Table("enrollments").
 		Where("center_id = ? AND class_id = ? AND ended_on IS NULL AND deleted_at IS NULL", sc.CenterID, classID)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermClassesViewAll) {
 		q = q.Where("teacher_id = ?", sc.TeacherID)
 	}
 	err := q.Count(&n).Error

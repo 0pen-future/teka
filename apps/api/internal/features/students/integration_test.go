@@ -204,9 +204,10 @@ func TestCrossCenterReadsAreNotFound(t *testing.T) {
 
 // An owner sees, updates, and deletes a student still anchored to a member
 // (the pre-migration shape) — center-wide oversight, not per-teacher
-// isolation. Members themselves get an honest 403 on every write: student
-// CRUD is the owner's alone, and the owner creates under any of the center's
-// contacts, a member-anchored one included.
+// isolation. The route policy decides which members may call the write
+// endpoints; at the service layer a member's create anchors the row to
+// themselves, and the owner creates under any of the center's contacts, a
+// member-anchored one included.
 func TestOwnerHasFullOversightOfMembersStudents(t *testing.T) {
 	t.Parallel()
 	svc, db := newIntegrationService(t)
@@ -222,9 +223,6 @@ func TestOwnerHasFullOversightOfMembersStudents(t *testing.T) {
 
 	memberContact := testutil.Contact(t, db, member.ID)
 	row := testutil.Student(t, db, member.ID, memberContact.ID)
-
-	_, err := svc.Create(ctx, memberScope, students.CreateRequest{FullName: "Bé An", ContactID: memberContact.ID})
-	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code, "member create must be 403")
 
 	got, err := svc.Get(ctx, ownerScope, row.ID)
 	require.NoError(t, err, "owner must read a member-anchored student")
@@ -248,6 +246,12 @@ func TestOwnerHasFullOversightOfMembersStudents(t *testing.T) {
 	require.NoError(t, svc.Delete(ctx, ownerScope, row.ID), "owner must delete a member-anchored student")
 	_, err = svc.Get(ctx, ownerScope, row.ID)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+
+	// A member's create anchors the row to themselves — the route policy
+	// (students.create) is what decides whether the call arrives at all.
+	memberRow, err := svc.Create(ctx, memberScope, students.CreateRequest{FullName: "Bé An", ContactID: memberContact.ID})
+	require.NoError(t, err, "member create must anchor to the member")
+	require.Equal(t, member.ID, memberRow.TeacherID)
 }
 
 // Two non-owning teachers in the same center are still isolated from each
@@ -404,14 +408,15 @@ func TestHandedOffClassStudentsAreReadableByNewTeacher(t *testing.T) {
 	require.NoError(t, err, "the new teacher must open the student's detail page")
 	require.Equal(t, student.ID, got.ID)
 
-	// Reads widened, writes not: student CRUD is the owner's alone, and the
-	// member gate answers 403 before any lookup.
+	// Reads widened, writes not: the service keeps writes inside the caller's
+	// own rows, so a stint-readable student created by someone else is masked
+	// as not-found on edit and delete.
 	_, err = svc.Update(ctx, newTeacherScope, student.ID,
 		students.UpdateRequest{FullName: "Bé An (edited)", ContactID: contact.ID})
-	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code,
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
 		"the new teacher must not edit a student")
 	err = svc.Delete(ctx, newTeacherScope, student.ID)
-	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code,
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
 		"the new teacher must not delete a student")
 
 	// The widening is keyed on class assignment, not center membership: an
@@ -426,4 +431,53 @@ func TestHandedOffClassStudentsAreReadableByNewTeacher(t *testing.T) {
 	_, total, err = svc.List(ctx, ownerScope, students.ListFilter{ClassID: class.ID}, listParams(t))
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
+}
+
+// TestViewAllWidensStudentReadsNotWrites pins the scope-key contract on the
+// students write paths: students.view_all is a visibility key. A member
+// holding it — which after the backfill includes every legacy
+// data.view_center_wide holder — reads the whole center, but editing or
+// anonymizing a student outside their own rows stays masked as not-found.
+// Anything else would turn the backfill into an escalation: pre-catalog,
+// student writes were owner-only.
+func TestViewAllWidensStudentReadsNotWrites(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+
+	_, owner := testutil.Teacher(t, db)
+	scOwner := testutil.ScopeFor(t, db, owner.ID)
+	_, member := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, member.ID, scOwner.CenterID)
+
+	contact := testutil.Contact(t, db, owner.ID)
+	student := testutil.Student(t, db, owner.ID, contact.ID)
+
+	// The permission set a granted member arrives with after ResolveScope —
+	// the HTTP resolution itself is pinned by the server policy suites.
+	scMember := testutil.ScopeFor(t, db, member.ID)
+	scMember.Perms = authctx.BuildPermSet(nil, []string{authctx.PermStudentsViewAll}, nil)
+	require.True(t, scMember.CenterWideFor(authctx.PermStudentsViewAll))
+
+	// Reads widen to the whole center.
+	got, err := svc.Get(ctx, scMember, student.ID)
+	require.NoError(t, err)
+	require.Equal(t, student.ID, got.ID)
+
+	// Writes do not: the owner's row is masked as not-found.
+	_, err = svc.Update(ctx, scMember, student.ID,
+		students.UpdateRequest{FullName: "Bé Sửa Trộm", ContactID: contact.ID})
+	require.Equal(t, 404, apperror.From(err).Status,
+		"a visibility key must not widen edits")
+	require.Equal(t, 404, apperror.From(svc.Delete(ctx, scMember, student.ID)).Status,
+		"a visibility key must not widen irreversible deletion")
+
+	// Their own rows stay writable.
+	ownContact := testutil.Contact(t, db, member.ID)
+	own, err := svc.Create(ctx, scMember,
+		students.CreateRequest{FullName: "Bé Nhà Mình", ContactID: ownContact.ID})
+	require.NoError(t, err)
+	_, err = svc.Update(ctx, scMember, own.ID,
+		students.UpdateRequest{FullName: "Bé Đổi Tên", ContactID: ownContact.ID})
+	require.NoError(t, err)
 }

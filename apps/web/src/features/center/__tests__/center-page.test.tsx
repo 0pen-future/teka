@@ -241,7 +241,12 @@ describe("CenterPage — owner", () => {
 
     expect(await screen.findByText("Đã lưu phân quyền")).toBeInTheDocument();
     expect(targetId).toBe(memberA.id);
-    expect(received).toEqual({ grants: ["reports.send"], denies: [] });
+    expect(received).toEqual({
+      grants: ["reports.send"],
+      denies: [],
+      catalog_version: 2,
+      assignment_version: 1,
+    });
     expect(await screen.findByText("Thư ký gửi báo cáo")).toBeInTheDocument();
   });
 
@@ -279,7 +284,12 @@ describe("CenterPage — owner", () => {
     await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
 
     expect(await screen.findByText("Đã lưu phân quyền")).toBeInTheDocument();
-    expect(received).toEqual({ grants: [], denies: [] });
+    expect(received).toEqual({
+      grants: [],
+      denies: [],
+      catalog_version: 2,
+      assignment_version: 1,
+    });
     await waitFor(() => expect(screen.queryByText("Thư ký gửi báo cáo")).not.toBeInTheDocument());
   });
 

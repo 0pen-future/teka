@@ -3,10 +3,11 @@ package invitations
 import "github.com/gin-gonic/gin"
 
 // RegisterRoutes mounts the invitation endpoints under /centers/me/invitations,
-// behind authentication and center-scope resolution. Every handler further
-// enforces scope.IsOwner — members do not manage onboarding.
-func RegisterRoutes(rg *gin.RouterGroup, h *Handler, requireAuth, resolveScope gin.HandlerFunc) {
-	g := rg.Group("/centers/me/invitations", requireAuth, resolveScope)
+// behind the auth chain (authentication, scope resolution, route policy).
+// Every handler further enforces scope.IsOwner — members do not manage
+// onboarding until that delegation is deliberately activated.
+func RegisterRoutes(rg *gin.RouterGroup, h *Handler, auth ...gin.HandlerFunc) {
+	g := rg.Group("/centers/me/invitations", auth...)
 	g.POST("", h.create)
 	g.GET("", h.list)
 	g.DELETE("/:id", h.revoke)

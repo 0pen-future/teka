@@ -17,8 +17,8 @@ func TestPermRegistryCompleteAndUnique(t *testing.T) {
 		PermDashboardView,
 		PermTeachingReviewQueue,
 	}
-	if len(permRegistry) != len(constants) {
-		t.Fatalf("registry has %d keys, %d constants declared", len(permRegistry), len(constants))
+	if len(permRegistry) != len(permCatalog) {
+		t.Fatalf("registry has %d keys, catalog defines %d", len(permRegistry), len(permCatalog))
 	}
 	seen := map[string]bool{}
 	for _, key := range permRegistry {

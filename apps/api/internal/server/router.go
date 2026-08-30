@@ -80,7 +80,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *gorm.DB, zaloSvc *zalo.
 	// its work post-c.Next(), so the principal/scope the per-route auth
 	// middleware resolves is already on the context when it publishes.
 	v1.Use(middleware.RequestEvents(bus))
-	registerFeatures(v1, cfg, db, zaloSvc, statementsSvc, notificationsSvc, teachersSvc, centersSvc, authSvc, bus)
+	registerFeatures(v1, cfg, log, db, zaloSvc, statementsSvc, notificationsSvc, teachersSvc, centersSvc, authSvc, bus)
 
 	// Deliberately outside v1 and outside requireAuth: the only unauthenticated
 	// route in the product that serves child/money data.
@@ -98,21 +98,28 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *gorm.DB, zaloSvc *zalo.
 // decoupled from bootstrap; the process-lifetime services (zalo, statements,
 // notifications) arrive already built from the container and are only
 // mounted.
-func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zaloSvc *zalo.Service, statementsSvc *statements.Service, notificationsSvc *notifications.Service, teachersSvc *teachers.Service, centersSvc *centers.Service, authSvc *auth.Service, bus events.Bus) {
-	requireAuth := middleware.RequireAuth(cfg.JWT)
+func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, log *slog.Logger, db *gorm.DB, zaloSvc *zalo.Service, statementsSvc *statements.Service, notificationsSvc *notifications.Service, teachersSvc *teachers.Service, centersSvc *centers.Service, authSvc *auth.Service, bus events.Bus) {
 	txMgr := database.NewTxManager(db)
 
 	// teachersSvc, centersSvc, and authSvc arrive already built and
 	// cross-wired (SetAccountDisabler/SetTokenRevoker) from app.Container —
 	// see its NewContainer for that wiring; only route registration happens
 	// here.
-	// resolveScope re-reads center membership from the database on every
-	// request (never from JWT claims) so removals bite immediately.
-	resolveScope := middleware.ResolveScope(centersSvc)
-	centers.RegisterRoutes(v1, centers.NewHandler(centersSvc), requireAuth, resolveScope)
+	// authChain is the one ordered chain every authenticated feature route mounts:
+	// authentication, then fresh membership (ResolveScope re-reads center
+	// membership from the database on every request — never from JWT claims —
+	// so removals bite immediately), then the route-policy manifest. Building
+	// it in one place is what guarantees the ordering; features never assemble
+	// their own.
+	authChain := []gin.HandlerFunc{
+		middleware.RequireAuth(cfg.JWT),
+		middleware.ResolveScope(centersSvc),
+		enforceRoutePolicy(log),
+	}
+	centers.RegisterRoutes(v1, centers.NewHandler(centersSvc), authChain...)
 
 	auditSvc := audit.NewService(audit.NewRepository(db))
-	audit.RegisterRoutes(v1, audit.NewHandler(auditSvc), requireAuth, resolveScope)
+	audit.RegisterRoutes(v1, audit.NewHandler(auditSvc), authChain...)
 
 	authHandler := auth.NewHandler(authSvc, cfg)
 	auth.RegisterRoutes(v1, authHandler)
@@ -123,26 +130,26 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	auth.RegisterPublicRoutes(v1, authHandler,
 		middleware.RateLimit(middleware.JSONBodyKey("phone"), 5, time.Minute),
 		middleware.RateLimit(middleware.JSONBodyKey("token"), 10, time.Minute))
-	teachers.RegisterRoutes(v1, teachers.NewHandler(teachersSvc), requireAuth, resolveScope)
+	teachers.RegisterRoutes(v1, teachers.NewHandler(teachersSvc), authChain...)
 
 	contactsSvc := contacts.NewService(contacts.NewRepository(db))
-	contacts.RegisterRoutes(v1, contacts.NewHandler(contactsSvc), requireAuth, resolveScope)
+	contacts.RegisterRoutes(v1, contacts.NewHandler(contactsSvc), authChain...)
 
 	classStaffRepo := classstaff.NewRepository(db)
 	classesSvc := classes.NewService(classes.NewRepository(db), txMgr, classStaffRepo)
-	classes.RegisterRoutes(v1, classes.NewHandler(classesSvc), requireAuth, resolveScope)
+	classes.RegisterRoutes(v1, classes.NewHandler(classesSvc), authChain...)
 
 	classStaffSvc := classstaff.NewService(classStaffRepo, centersSvc)
-	classstaff.RegisterRoutes(v1, classstaff.NewHandler(classStaffSvc), requireAuth, resolveScope)
+	classstaff.RegisterRoutes(v1, classstaff.NewHandler(classStaffSvc), authChain...)
 
 	// Construction order matters: the students service consumes the
 	// enrollments service through students.EnrollmentEnder so deleting a
 	// student closes their open enrollments in the same transaction.
 	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db), bus)
-	enrollments.RegisterRoutes(v1, enrollments.NewHandler(enrollmentsSvc), requireAuth, resolveScope)
+	enrollments.RegisterRoutes(v1, enrollments.NewHandler(enrollmentsSvc), authChain...)
 
 	studentsSvc := students.NewService(students.NewRepository(db), enrollmentsSvc, txMgr)
-	students.RegisterRoutes(v1, students.NewHandler(studentsSvc), requireAuth, resolveScope)
+	students.RegisterRoutes(v1, students.NewHandler(studentsSvc), authChain...)
 
 	// The roster import drives classes, contacts, students and enrollments
 	// through their own services, so it mounts after all four exist. It writes
@@ -162,14 +169,14 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	centerLocker := imports.NewLocker(db)
 	importsSvc := imports.NewService(centersSvc, classesSvc, contactsSvc, studentsSvc, enrollmentsSvc,
 		centerLocker, txMgr)
-	imports.RegisterRoutes(v1, imports.NewHandler(importsSvc), requireAuth, resolveScope,
-		middleware.RateLimit(middleware.TeacherKey(), 10, time.Minute))
+	imports.RegisterRoutes(v1, imports.NewHandler(importsSvc),
+		middleware.RateLimit(middleware.TeacherKey(), 10, time.Minute), authChain...)
 
 	// sessions consumes classes, teachers, and enrollments through consumer
 	// interfaces (ClassSource, TeacherSource, EnrollmentSource) rather than
 	// their repository types, so all three services must exist first.
 	sessionsSvc := sessions.NewService(sessions.NewRepository(db), classesSvc, teachersSvc, enrollmentsSvc)
-	sessions.RegisterRoutes(v1, sessions.NewHandler(sessionsSvc), requireAuth, resolveScope)
+	sessions.RegisterRoutes(v1, sessions.NewHandler(sessionsSvc), authChain...)
 
 	// handoff reassigns a class to another teacher. It coordinates classes and
 	// sessions through consumer interfaces and validates the target through
@@ -178,7 +185,7 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	// tables: the class and its schedules move through classesSvc, the future
 	// planned sessions through sessionsSvc, in one transaction.
 	handoffSvc := handoff.NewService(classesSvc, sessionsSvc, centersSvc, classStaffRepo, centerLocker, txMgr)
-	handoff.RegisterRoutes(v1, handoff.NewHandler(handoffSvc), requireAuth, resolveScope)
+	handoff.RegisterRoutes(v1, handoff.NewHandler(handoffSvc), authChain...)
 
 	// attendance consumes enrollments and sessions through consumer
 	// interfaces (RosterSource, SessionStore) rather than their repository
@@ -187,7 +194,7 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	// attendance records and the session's held+confirmed status commit
 	// atomically.
 	attendanceSvc := attendance.NewService(attendance.NewRepository(db), enrollmentsSvc, sessionsSvc, txMgr)
-	attendance.RegisterRoutes(v1, attendance.NewHandler(attendanceSvc), requireAuth, resolveScope)
+	attendance.RegisterRoutes(v1, attendance.NewHandler(attendanceSvc), authChain...)
 
 	// teaching consumes classes, sessions, and enrollments through consumer
 	// interfaces (ClassSource, SessionSource, RosterSource) — class/session
@@ -195,20 +202,20 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	// must exist first. The marks batch upserts and deletes rows inside one
 	// transaction via txMgr.
 	teachingSvc := teaching.NewService(teaching.NewRepository(db), classesSvc, sessionsSvc, enrollmentsSvc, txMgr)
-	teaching.RegisterRoutes(v1, teaching.NewHandler(teachingSvc), requireAuth, resolveScope)
+	teaching.RegisterRoutes(v1, teaching.NewHandler(teachingSvc), authChain...)
 
 	// grading (component score sets + per-session scores) consumes the same
 	// three services through its own consumer interfaces; class/session
 	// resolution doubles as its read gate, and assign/clear plus the score
 	// batch write rows inside one transaction via txMgr.
 	gradingSvc := grading.NewService(grading.NewRepository(db), classesSvc, sessionsSvc, enrollmentsSvc, txMgr)
-	grading.RegisterRoutes(v1, grading.NewHandler(gradingSvc), requireAuth, resolveScope)
+	grading.RegisterRoutes(v1, grading.NewHandler(gradingSvc), authChain...)
 
 	// The owner dashboard reads through classes, sessions, and attendance
 	// (ClassReader, SessionReader, AttendanceReader), so it mounts here —
 	// after all three exist — rather than next to the membership routes.
 	centersDashboard := centers.NewDashboard(centers.NewRepository(db), classesSvc, sessionsSvc, attendanceSvc)
-	centers.RegisterDashboardRoutes(v1, centers.NewDashboardHandler(centersDashboard), requireAuth, resolveScope)
+	centers.RegisterDashboardRoutes(v1, centers.NewDashboardHandler(centersDashboard), authChain...)
 
 	// billing consumes attendance through billing.AttendanceSource — the
 	// batched per-enrollment tally — rather than re-aggregating
@@ -218,7 +225,7 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	// membership check its post-close reconciliation's rare no-invoice-line
 	// case reuses — so it is constructed after all three.
 	billingSvc := billing.NewService(billing.NewRepository(db, attendanceSvc), txMgr, sessionsSvc, enrollmentsSvc)
-	billing.RegisterRoutes(v1, billing.NewHandler(billingSvc), requireAuth, resolveScope)
+	billing.RegisterRoutes(v1, billing.NewHandler(billingSvc), authChain...)
 
 	// attendance.Confirm carries a post-close attendance edit's money delta
 	// onto the next open period through billingSvc, which can only be wired in
@@ -229,18 +236,18 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	attendanceSvc.SetReconciler(billingSvc)
 
 	paymentsSvc := payments.NewService(payments.NewRepository(db), txMgr)
-	payments.RegisterRoutes(v1, payments.NewHandler(paymentsSvc), requireAuth, resolveScope)
+	payments.RegisterRoutes(v1, payments.NewHandler(paymentsSvc), authChain...)
 
 	// collections is read-only reporting over billing_periods/invoices/
 	// payments — no writes, so no transaction manager.
 	collectionsSvc := collections.NewService(collections.NewRepository(db))
-	collections.RegisterRoutes(v1, collections.NewHandler(collectionsSvc), requireAuth, resolveScope)
+	collections.RegisterRoutes(v1, collections.NewHandler(collectionsSvc), authChain...)
 
-	statements.RegisterRoutes(v1, statements.NewHandler(statementsSvc), requireAuth, resolveScope)
+	statements.RegisterRoutes(v1, statements.NewHandler(statementsSvc), authChain...)
 
-	notifications.RegisterRoutes(v1, notifications.NewHandler(notificationsSvc), requireAuth, resolveScope)
+	notifications.RegisterRoutes(v1, notifications.NewHandler(notificationsSvc), authChain...)
 
-	zalo.RegisterRoutes(v1, zalo.NewHandler(zaloSvc), requireAuth, resolveScope)
+	zalo.RegisterRoutes(v1, zalo.NewHandler(zaloSvc), authChain...)
 
 	// invitations consumes zaloSvc through invitations.ZaloSender (its
 	// LookupPhone adapter) for the best-effort DM, teachersSvc as
@@ -251,7 +258,7 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, db *gorm.DB, zalo
 	invitationsSvc := invitations.NewService(
 		invitations.NewRepository(db), zaloSvc, teachersSvc, centersSvc, txMgr, cfg.Onboarding, cfg.Statements.PublicBaseURL, bus)
 	invitationsHandler := invitations.NewHandler(invitationsSvc)
-	invitations.RegisterRoutes(v1, invitationsHandler, requireAuth, resolveScope)
+	invitations.RegisterRoutes(v1, invitationsHandler, authChain...)
 	// The token is the only credential guarding an accept — these two routes
 	// are the sole unauthenticated write surface in the product, so each gets
 	// its own per-token rate limit keyed on the request body, not the caller's

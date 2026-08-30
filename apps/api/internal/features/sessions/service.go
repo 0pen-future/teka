@@ -184,7 +184,7 @@ func (s *Service) ListRangeReadable(ctx context.Context, sc authctx.Scope, class
 	if err != nil {
 		return nil, err
 	}
-	canGenerate := sc.CenterWide()
+	canGenerate := sc.CenterWideFor(authctx.PermSessionsViewAll)
 	for _, role := range roles {
 		if authctx.StaffRoleCan(role, authctx.CapSessionsWrite) {
 			canGenerate = true

@@ -8,7 +8,8 @@ import (
 // /api/v1). Both operate on "the authenticated teacher", so both sit behind
 // requireAuth plus scope resolution — the scope is where account liveness is
 // enforced.
-func RegisterRoutes(rg *gin.RouterGroup, h *Handler, requireAuth, resolveScope gin.HandlerFunc) {
-	rg.GET("/me", requireAuth, resolveScope, h.me)
-	rg.PUT("/me", requireAuth, resolveScope, h.updateMe)
+func RegisterRoutes(rg *gin.RouterGroup, h *Handler, auth ...gin.HandlerFunc) {
+	g := rg.Group("", auth...)
+	g.GET("/me", h.me)
+	g.PUT("/me", h.updateMe)
 }

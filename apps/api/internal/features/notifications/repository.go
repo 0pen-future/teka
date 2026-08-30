@@ -207,7 +207,7 @@ func NewRepository(db *gorm.DB) Repository {
 // owner-oversight template for the plain reads (List, MarkSent).
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("notifications.center_id = ?", sc.CenterID)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermNotificationsViewAll) {
 		q = q.Where("notifications.teacher_id = ?", sc.TeacherID)
 	}
 	return q
