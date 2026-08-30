@@ -20,6 +20,7 @@ import (
 	"teka/apps/api/internal/features/audit"
 	"teka/apps/api/internal/features/auth"
 	"teka/apps/api/internal/features/centers"
+	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/middleware"
 	"teka/apps/api/internal/shared/authctx"
@@ -160,6 +161,57 @@ func TestMutationRequestWritesOneAuditRow(t *testing.T) {
 	require.Equal(t, http.StatusCreated, row.StatusCode)
 	require.NotEmpty(t, row.RequestID)
 	require.Equal(t, "audit-itest", row.UserAgent)
+}
+
+// Enrollment create is audited by the service's StudentEnrolled event alone —
+// the richer row carrying class and student ids. The request middleware must
+// stay silent for that route, or the same request lands twice in the trail.
+func TestEnrollmentCreateWritesExactlyOneAuditRow(t *testing.T) {
+	db, bus, _ := newCapture(t, 1)
+
+	actor := uuid.New()
+	center := uuid.New()
+	enrollmentID := uuid.New()
+	classID := uuid.New()
+	studentID := uuid.New()
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(middleware.RequestID())
+	v1 := r.Group("/api/v1")
+	v1.Use(middleware.RequestEvents(bus))
+	v1.POST("/enrollments", func(c *gin.Context) {
+		authctx.Set(c, authctx.Principal{UserID: actor, Role: "teachers"})
+		authctx.SetScope(c, authctx.Scope{TeacherID: actor, CenterID: center, IsOwner: true})
+		c.Next()
+	}, func(c *gin.Context) {
+		// The real handler's service publishes this event on success.
+		bus.Publish(enrollments.StudentEnrolled{
+			OccurredAt:   time.Now(),
+			CenterID:     center,
+			ActorID:      actor,
+			EnrollmentID: enrollmentID,
+			ClassID:      classID,
+			StudentID:    studentID,
+		})
+		c.JSON(http.StatusCreated, gin.H{})
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollments", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	rows := auditRows(t, db)
+	require.Len(t, rows, 1, "one enrollment create must land as exactly one audit row")
+	row := rows[0]
+	require.Equal(t, "enrollment.create", row.Action)
+	require.Equal(t, "enrollment", row.EntityType)
+	require.Equal(t, enrollmentID.String(), row.EntityID)
+	require.Equal(t, audit.Metadata{
+		"class_id":   classID.String(),
+		"student_id": studentID.String(),
+	}, row.Metadata)
 }
 
 // TestShutdownDrainsAsyncBus publishes through the real AsyncBus and closes

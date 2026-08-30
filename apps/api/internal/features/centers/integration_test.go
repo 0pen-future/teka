@@ -22,6 +22,7 @@ import (
 	"teka/apps/api/internal/features/billing"
 	"teka/apps/api/internal/features/centers"
 	"teka/apps/api/internal/features/classes"
+	"teka/apps/api/internal/features/classstaff"
 	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/features/sessions"
 	"teka/apps/api/internal/features/teachers"
@@ -283,6 +284,50 @@ func TestRemoveMemberByOwnerDataStaysBehind(t *testing.T) {
 	require.EqualValues(t, 1, stayed)
 }
 
+// Class-staff stints belong to a membership stint: removal soft-closes every
+// active one (history reads survive as ended rows), and reopening a membership
+// never resurrects them — even a stint a non-standard close path left active.
+func TestMembershipCloseAndReopenEndStaffStints(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := context.Background()
+
+	owner, ownerTeacher := testutil.Teacher(t, e.db)
+	member, _ := testutil.Teacher(t, e.db)
+	e.join(t, member.ID, owner.ID)
+	classID := insertClass(t, e.db, member.ID, ownerTeacher.CenterID)
+
+	activeStints := func() int64 {
+		var n int64
+		require.NoError(t, e.db.Raw(
+			`SELECT count(*) FROM class_staff
+			 WHERE teacher_id = ? AND center_id = ? AND ended_at IS NULL`,
+			member.ID, ownerTeacher.CenterID).Scan(&n).Error)
+		return n
+	}
+	addStint := func(roleKey string) {
+		require.NoError(t, e.db.Exec(
+			`INSERT INTO class_staff (class_id, center_id, teacher_id, role_key)
+			 VALUES (?, ?, ?, ?)`,
+			classID, ownerTeacher.CenterID, member.ID, roleKey).Error)
+	}
+
+	addStint("giao_vien")
+	require.NoError(t, e.centersSvc.RemoveMember(ctx, e.scope(t, owner.ID), member.ID))
+	require.Zero(t, activeStints(), "removal soft-closes every active stint")
+
+	var total int64
+	require.NoError(t, e.db.Raw(
+		`SELECT count(*) FROM class_staff WHERE teacher_id = ?`, member.ID).Scan(&total).Error)
+	require.EqualValues(t, 1, total, "the stint is closed, not deleted")
+
+	// A stint left active by a non-standard close path dies on reopen too.
+	addStint("hoc_vu")
+	_, err := centers.NewRepository(e.db).OpenMembership(ctx, member.ID, ownerTeacher.CenterID)
+	require.NoError(t, err)
+	require.Zero(t, activeStints(), "reopening a membership resurrects no stint")
+}
+
 func TestRemoveMemberAuthorizationMatrix(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -438,8 +483,8 @@ func TestCentersRoutesEndToEnd(t *testing.T) {
 // newDashboard mirrors router wiring: the dashboard consumes classes,
 // sessions, and attendance through read-only consumer interfaces.
 func newDashboard(e *env) *centers.Dashboard {
-	classesSvc := classes.NewService(classes.NewRepository(e.db), e.tx)
-	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(e.db))
+	classesSvc := classes.NewService(classes.NewRepository(e.db), e.tx, classstaff.NewRepository(e.db))
+	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(e.db), nil)
 	sessionsSvc := sessions.NewService(sessions.NewRepository(e.db), classesSvc, e.teachersSvc, enrollmentsSvc)
 	attendanceSvc := attendance.NewService(attendance.NewRepository(e.db), enrollmentsSvc, sessionsSvc, e.tx)
 	return centers.NewDashboard(centers.NewRepository(e.db), classesSvc, sessionsSvc, attendanceSvc)

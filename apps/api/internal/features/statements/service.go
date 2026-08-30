@@ -29,6 +29,12 @@ const (
 // longer be resolved, independent of revocation.
 const statementTTL = 90 * 24 * time.Hour
 
+// statementSendRoles is the capability map's answer to which class-staff
+// roles may send statements, resolved once here — the service layer is the
+// capability map's home. Repository SQL only ever binds this slice; it never
+// consults the map itself.
+var statementSendRoles = authctx.StaffRolesFor(authctx.CapStatementSend)
+
 // Service owns statement generation and the teacher-facing reads/writes
 // around it: token derivation is keyed on cfg.TokenKey, and links are built
 // against cfg.PublicBaseURL. Both are required to construct a Service, which
@@ -89,14 +95,45 @@ func (s *Service) GenerateForSend(ctx context.Context, sc authctx.Scope, periodI
 	return s.generate(ctx, sc, periodID, true)
 }
 
-func (s *Service) generate(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, oversight bool) (*GenerateResult, error) {
+// AuthorizeClassSend is the one authorization gate every class-scoped
+// statement path (and notifications' class-scoped send) runs: reports
+// oversight (owner or can_send_reports holder) passes outright, as does an
+// active sending-role stint on the class. A caller who can read the class
+// (any stint, ended included) but may not send gets an honest 403; anyone
+// else — including a caller probing a class that exists but was never theirs
+// — gets the same neutral 404 a nonexistent class produces.
+func (s *Service) AuthorizeClassSend(ctx context.Context, sc authctx.Scope, classID uuid.UUID) error {
+	sendable, readable, err := s.repo.ClassSendAccess(ctx, sc, classID, statementSendRoles)
+	if err != nil {
+		return s.translate(err)
+	}
+	if sc.ReportsOversight() || sendable {
+		return nil
+	}
+	if readable {
+		return apperror.Forbidden("your role on this class does not allow this action")
+	}
+	return apperror.NotFound("class")
+}
+
+// GenerateForSendClass mints/refreshes CLASS-scoped statement copies for one
+// class in one period — the class staff's counterpart of GenerateForSend.
+// Authorization is the class-send gate, never period ownership: the period is
+// resolved center-wide because a class's students can be billed under any
+// teacher's period after a handoff, and it is the caller's active stint on
+// the class (or oversight) that entitles them to act. Targeting requires a
+// still-active class enrollment; the money written is the period's class
+// charges as invoiced (see the repository's class query doc comments). Every
+// class copy derives its token WITH the class id, so its link can never
+// resolve the family statement, and upserts land on the class partial unique
+// — a class send never touches the family row.
+func (s *Service) GenerateForSendClass(ctx context.Context, sc authctx.Scope, periodID, classID uuid.UUID) (*GenerateResult, error) {
 	var result GenerateResult
 	err := s.tx.WithinTx(ctx, func(ctx context.Context) error {
-		lookup := s.repo.GetPeriodStatus
-		if oversight {
-			lookup = s.repo.GetPeriodStatusRead
+		if err := s.AuthorizeClassSend(ctx, sc, classID); err != nil {
+			return err
 		}
-		info, err := lookup(ctx, sc, periodID)
+		info, err := s.repo.GetPeriodStatusCenter(ctx, sc, periodID)
 		if err != nil {
 			return s.translate(err)
 		}
@@ -105,11 +142,11 @@ func (s *Service) generate(ctx context.Context, sc authctx.Scope, periodID uuid.
 		}
 		periodScope := authctx.Scope{TeacherID: info.TeacherID, CenterID: sc.CenterID}
 
-		targets, err := s.repo.TargetContacts(ctx, periodScope, periodID)
+		targets, err := s.repo.TargetContactsClass(ctx, periodScope, sc, periodID, classID)
 		if err != nil {
 			return apperror.From(err)
 		}
-		totals, err := s.repo.ContactTotals(ctx, periodScope, periodID)
+		totals, err := s.repo.ContactClassTotals(ctx, periodScope, periodID, classID)
 		if err != nil {
 			return apperror.From(err)
 		}
@@ -118,11 +155,13 @@ func (s *Service) generate(ctx context.Context, sc authctx.Scope, periodID uuid.
 		rows := make([]Row, 0, len(targets))
 		for _, target := range targets {
 			statementID := id.New()
+			classRef := classID
 			candidate := &Statement{
 				ID:        statementID,
 				ContactID: target.ContactID,
 				PeriodID:  periodID,
-				TokenHash: hashToken(deriveToken(s.cfg.TokenKey, statementID)),
+				ClassID:   &classRef,
+				TokenHash: hashToken(deriveToken(s.cfg.TokenKey, statementID, &classRef)),
 				ExpiresAt: now.Add(statementTTL),
 				TotalDue:  totals[target.ContactID],
 			}
@@ -144,6 +183,76 @@ func (s *Service) generate(ctx context.Context, sc authctx.Scope, periodID uuid.
 				Statement:       *candidate,
 				ContactFullName: target.FullName,
 				ContactPhone:    target.Phone,
+				PhoneVisible:    target.PhoneVisible,
+			})
+		}
+		result.Statements = rows
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (s *Service) generate(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, oversight bool) (*GenerateResult, error) {
+	var result GenerateResult
+	err := s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		lookup := s.repo.GetPeriodStatus
+		if oversight {
+			lookup = s.repo.GetPeriodStatusRead
+		}
+		info, err := lookup(ctx, sc, periodID)
+		if err != nil {
+			return s.translate(err)
+		}
+		if info.Status != periodStatusClosed {
+			return apperror.Conflict("period is not closed")
+		}
+		periodScope := authctx.Scope{TeacherID: info.TeacherID, CenterID: sc.CenterID}
+
+		targets, err := s.repo.TargetContacts(ctx, periodScope, sc, periodID)
+		if err != nil {
+			return apperror.From(err)
+		}
+		totals, err := s.repo.ContactTotals(ctx, periodScope, periodID)
+		if err != nil {
+			return apperror.From(err)
+		}
+
+		now := s.now()
+		rows := make([]Row, 0, len(targets))
+		for _, target := range targets {
+			statementID := id.New()
+			candidate := &Statement{
+				ID:        statementID,
+				ContactID: target.ContactID,
+				PeriodID:  periodID,
+				// This path mints family statements only (ClassID nil), so the
+				// token is derived without a class component.
+				TokenHash: hashToken(deriveToken(s.cfg.TokenKey, statementID, nil)),
+				ExpiresAt: now.Add(statementTTL),
+				TotalDue:  totals[target.ContactID],
+			}
+
+			created, skippedRevoked, err := s.repo.UpsertStatement(ctx, periodScope, candidate)
+			if err != nil {
+				return apperror.From(err)
+			}
+			if skippedRevoked {
+				result.SkippedRevoked++
+				continue
+			}
+			if created {
+				result.Created++
+			} else {
+				result.Refreshed++
+			}
+			rows = append(rows, Row{
+				Statement:       *candidate,
+				ContactFullName: target.FullName,
+				ContactPhone:    target.Phone,
+				PhoneVisible:    target.PhoneVisible,
 			})
 		}
 		result.Statements = rows
@@ -164,6 +273,24 @@ func (s *Service) List(ctx context.Context, sc authctx.Scope, periodID uuid.UUID
 		return nil, 0, s.translate(err)
 	}
 	rows, total, err := s.repo.ListByPeriod(ctx, sc, periodID, p)
+	if err != nil {
+		return nil, 0, apperror.From(err)
+	}
+	return rows, total, nil
+}
+
+// ListClass returns a page of one period's CLASS-scoped statement copies for
+// one class. Gated by AuthorizeClassSend (so it 404s/403s exactly like the
+// class send itself), then resolved center-wide like every class-scoped path
+// — see GenerateForSendClass.
+func (s *Service) ListClass(ctx context.Context, sc authctx.Scope, periodID, classID uuid.UUID, p pagination.Params) ([]Row, int64, error) {
+	if err := s.AuthorizeClassSend(ctx, sc, classID); err != nil {
+		return nil, 0, err
+	}
+	if _, err := s.repo.GetPeriodStatusCenter(ctx, sc, periodID); err != nil {
+		return nil, 0, s.translate(err)
+	}
+	rows, total, err := s.repo.ListByPeriodClass(ctx, sc, periodID, classID, p)
 	if err != nil {
 		return nil, 0, apperror.From(err)
 	}
@@ -196,21 +323,67 @@ func (s *Service) Revoke(ctx context.Context, sc authctx.Scope, statementID uuid
 // place a caller can ever see it again. This method, and therefore the
 // token/URL fields it produces, must only ever be reached from a
 // teacher-authenticated request path.
-func (s *Service) ToResponse(row Row) StatementResponse {
-	token := deriveToken(s.cfg.TokenKey, row.ID)
-	return StatementResponse{
+//
+// sc masks the privacy-sensitive fields: the phone follows the one phone rule
+// (Scope.PhoneVisible over the row's derived grant), and the URL — a public
+// bearer token for the whole family's statement — is derived only for
+// owner/oversight callers; for anyone else the token is never even computed.
+func (s *Service) ToResponse(sc authctx.Scope, row Row) StatementResponse {
+	resp := StatementResponse{
 		ID:            row.ID,
 		ContactID:     row.ContactID,
 		ContactName:   row.ContactFullName,
-		Phone:         row.ContactPhone,
+		ClassID:       row.ClassID,
 		TotalDue:      row.TotalDue,
-		URL:           s.cfg.PublicBaseURL + "/s/" + token,
 		ExpiresAt:     row.ExpiresAt,
 		RevokedAt:     row.RevokedAt,
 		ViewCount:     row.ViewCount,
 		FirstViewedAt: row.FirstViewedAt,
 		LastViewedAt:  row.LastViewedAt,
 	}
+	if sc.PhoneVisible(row.PhoneVisible) {
+		resp.Phone = &row.ContactPhone
+	}
+	if sc.ReportsOversight() {
+		resp.URL = s.linkFor(row)
+	}
+	return resp
+}
+
+// linkFor derives one row's public link. Callers gate WHO may see it; this
+// only builds it.
+func (s *Service) linkFor(row Row) *string {
+	url := s.cfg.PublicBaseURL + "/s/" + deriveToken(s.cfg.TokenKey, row.ID, row.ClassID)
+	return &url
+}
+
+// ToResponseForSend is ToResponse with the URL unconditionally derived — for
+// callers that have ALREADY passed a send authorization (reports oversight,
+// the period's own teacher sending their own statements, or the class-send
+// gate). The notifications sender uses it to put each family's link into the
+// message it queues; it must never back a plain read endpoint.
+func (s *Service) ToResponseForSend(sc authctx.Scope, row Row) StatementResponse {
+	resp := s.ToResponse(sc, row)
+	if resp.URL == nil {
+		resp.URL = s.linkFor(row)
+	}
+	return resp
+}
+
+// ToResponseAuthorized is ToResponse plus the class-send grant resolved live:
+// a caller below reports oversight still gets a CLASS copy's URL when they
+// hold an active sending-role stint on that class — the same right that let
+// them mint the copy lets them re-read its link. A failed (or erroring) gate
+// leaves the URL null rather than failing the read; the row itself was
+// already visible through scopedRead.
+func (s *Service) ToResponseAuthorized(ctx context.Context, sc authctx.Scope, row Row) StatementResponse {
+	resp := s.ToResponse(sc, row)
+	if resp.URL == nil && row.ClassID != nil {
+		if err := s.AuthorizeClassSend(ctx, sc, *row.ClassID); err == nil {
+			resp.URL = s.linkFor(row)
+		}
+	}
+	return resp
 }
 
 // LookupPublic resolves a plaintext token to its statement for the public,
@@ -260,17 +433,32 @@ func (s *Service) RenderPublic(ctx context.Context, stmt *Statement) (*PublicSta
 	if err != nil {
 		return nil, "", apperror.Internal(err)
 	}
-	adjustmentRows, err := s.repo.Adjustments(ctx, scope, stmt.ContactID, stmt.PeriodID)
-	if err != nil {
-		return nil, "", apperror.Internal(err)
-	}
 
-	payload := buildPublicStatement(invoiceRows, sessionRows, adjustmentRows)
+	var payload PublicStatement
+	if stmt.ClassID != nil {
+		// A class copy shows only its own class's charges: no opening
+		// balance, no adjustments (they are family-level money), no payment
+		// breakdown. buildClassStatement zeroes Outstanding when the family
+		// owes nothing across the class's invoices, so the shared
+		// paid-up-means-gone rule below retires the class link exactly when
+		// it retires the family one. Children empty means the class has no
+		// line at all on this family's period — same neutral 404.
+		payload = buildClassStatement(invoiceRows, sessionRows, *stmt.ClassID)
+		if len(payload.Children) == 0 {
+			return nil, "", ErrNotFound
+		}
+	} else {
+		adjustmentRows, err := s.repo.Adjustments(ctx, scope, stmt.ContactID, stmt.PeriodID)
+		if err != nil {
+			return nil, "", apperror.Internal(err)
+		}
+		payload = buildPublicStatement(invoiceRows, sessionRows, adjustmentRows)
+	}
 	if payload.Totals.Outstanding <= 0 {
 		return nil, "", ErrNotFound
 	}
 
-	token := deriveToken(s.cfg.TokenKey, stmt.ID)
+	token := deriveToken(s.cfg.TokenKey, stmt.ID, stmt.ClassID)
 	qrPayload := attachQR(&payload, s.qr, s.bank, s.cfg.PublicBaseURL, token)
 	return &payload, qrPayload, nil
 }
@@ -405,6 +593,89 @@ func assemblePeriodFigures(rows []InvoiceLineRow) map[uuid.UUID]ContactFigures {
 	return out
 }
 
+// PeriodFiguresClass is PeriodFigures for one class's copies: the same
+// single-round-trip guarantee, but figures assembled from the class's own
+// lines only — matching what buildClassStatement shows a parent at the class
+// link. Gated by AuthorizeClassSend and resolved center-wide, like every
+// class-scoped path.
+func (s *Service) PeriodFiguresClass(ctx context.Context, sc authctx.Scope, periodID, classID uuid.UUID) (map[uuid.UUID]ContactFigures, error) {
+	if err := s.AuthorizeClassSend(ctx, sc, classID); err != nil {
+		return nil, err
+	}
+	info, err := s.repo.GetPeriodStatusCenter(ctx, sc, periodID)
+	if err != nil {
+		return nil, s.translate(err)
+	}
+	periodScope := authctx.Scope{TeacherID: info.TeacherID, CenterID: sc.CenterID}
+
+	rows, err := s.repo.PeriodClassInvoiceLines(ctx, periodScope, periodID, classID)
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+	return assembleClassFigures(rows), nil
+}
+
+// assembleClassFigures groups periodClassInvoiceLinesQuery's rows into one
+// ContactFigures per contact, mirroring assemblePeriodFigures' linear pass
+// but with class-copy money semantics: a child's Amount and the contact's
+// TotalDue are the CLASS lines' sum (never the invoice totals), opening
+// balance and adjustments stay zero (family-level money), and Outstanding is
+// all-or-nothing — the full class total while the family still owes anything
+// across the class's invoices, zero once they've paid up, matching
+// buildClassStatement. Pure: no I/O. Every row is a real class line (the
+// query INNER JOINs), so the Line* pointers are never nil here.
+func assembleClassFigures(rows []InvoiceLineRow) map[uuid.UUID]ContactFigures {
+	byContact := make(map[uuid.UUID]*ContactFigures)
+	familyOutstanding := make(map[uuid.UUID]int64)
+
+	var currentContact *ContactFigures
+	var currentChild *ChildFigures
+	var currentInvoiceID uuid.UUID
+
+	flushChild := func() {
+		if currentChild != nil && currentContact != nil {
+			currentContact.Children = append(currentContact.Children, *currentChild)
+		}
+		currentChild = nil
+	}
+
+	for _, row := range rows {
+		if currentContact == nil || row.ContactID != currentContact.ContactID {
+			flushChild()
+			cf, ok := byContact[row.ContactID]
+			if !ok {
+				cf = &ContactFigures{
+					ContactID:   row.ContactID,
+					ContactName: row.ContactName,
+					PeriodLabel: fmt.Sprintf("%02d/%d", row.PeriodMonth, row.PeriodYear),
+				}
+				byContact[row.ContactID] = cf
+			}
+			currentContact = cf
+		}
+		if currentChild == nil || row.InvoiceID != currentInvoiceID {
+			flushChild()
+			currentInvoiceID = row.InvoiceID
+			currentChild = &ChildFigures{StudentName: row.StudentName}
+			familyOutstanding[row.ContactID] += row.TotalDue - row.PaidAmount
+		}
+		currentChild.BillableCount += *row.BillableCount
+		currentChild.AbsentCount += *row.AbsentCount
+		currentChild.Amount += *row.LineAmount
+		currentContact.TotalDue += *row.LineAmount
+	}
+	flushChild()
+
+	out := make(map[uuid.UUID]ContactFigures, len(byContact))
+	for contactID, cf := range byContact {
+		if familyOutstanding[contactID] > 0 {
+			cf.Outstanding = cf.TotalDue
+		}
+		out[contactID] = *cf
+	}
+	return out
+}
+
 // translate maps domain errors onto the API error contract, keeping the
 // domain error as the cause so errors.Is still works on the result.
 func (s *Service) translate(err error) error {
@@ -415,6 +686,8 @@ func (s *Service) translate(err error) error {
 		return apperror.NotFound("statement")
 	case errors.Is(err, ErrPeriodNotFound):
 		return apperror.NotFound("billing period")
+	case errors.Is(err, ErrClassNotFound):
+		return apperror.NotFound("class")
 	default:
 		return apperror.From(err)
 	}

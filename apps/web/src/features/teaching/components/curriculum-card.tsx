@@ -11,16 +11,24 @@ interface CurriculumCardProps {
   /** Lessons already taught — held sessions on the lesson axis. */
   doneCount: number;
   onEdit: () => void;
+  /** Whether the viewer may edit the curriculum — see `SessionDetailPanel`'s prop of the same name. */
+  canWrite: boolean;
 }
 
 /**
  * CHƯƠNG TRÌNH card: course progress bar, current/next lesson lines, and the
  * expandable two-column lesson list with done/current/future styling.
  */
-export function CurriculumCard({ classTitle, curriculum, doneCount, onEdit }: CurriculumCardProps) {
+export function CurriculumCard({
+  classTitle,
+  curriculum,
+  doneCount,
+  onEdit,
+  canWrite,
+}: CurriculumCardProps) {
   const [expanded, setExpanded] = useState(false);
 
-  const editLink = (
+  const editLink = canWrite ? (
     <button
       type="button"
       onClick={onEdit}
@@ -28,7 +36,7 @@ export function CurriculumCard({ classTitle, curriculum, doneCount, onEdit }: Cu
     >
       ✎ Sửa chương trình
     </button>
-  );
+  ) : null;
 
   if (!curriculum) {
     return (

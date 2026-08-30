@@ -2,12 +2,16 @@ import { apiClient } from "@/lib/api/client";
 import { parseArray, parseData } from "@/lib/api/envelope";
 
 import {
+  classScoreComponentsResponseSchema,
   curriculumResponseSchema,
   markResponseSchema,
   monthMarksResponseSchema,
   noteResponseSchema,
   planResponseSchema,
   queueItemResponseSchema,
+  sessionScoreEntrySchema,
+  sessionScoresResponseSchema,
+  type ClassScoreComponentsResponse,
   type CurriculumResponse,
   type MarkEntryInput,
   type MarkResponse,
@@ -16,8 +20,11 @@ import {
   type PlanActionName,
   type PlanResponse,
   type PutCurriculumInput,
+  type PutSessionScoreEntryInput,
   type QueueItemResponse,
   type SavePlanInput,
+  type SessionScoreEntry,
+  type SessionScoresResponse,
 } from "../schemas/teaching-schemas";
 
 /**
@@ -106,4 +113,34 @@ export async function putMarks(
 export async function getReviewQueue(): Promise<QueueItemResponse[]> {
   const res = await apiClient.get<unknown>(`/teaching/review-queue`);
   return parseArray(queueItemResponseSchema, res.data);
+}
+
+/**
+ * `GET /classes/:id/score-components` — an empty `components` list means the
+ * class uses the plain general-score entry, not the per-component grid.
+ */
+export async function getClassScoreComponents(
+  classId: string,
+): Promise<ClassScoreComponentsResponse> {
+  const res = await apiClient.get<unknown>(`/classes/${classId}/score-components`);
+  return parseData(classScoreComponentsResponseSchema, res.data);
+}
+
+/** `GET /sessions/:id/scores` — the session's component×student score grid. */
+export async function getSessionScores(sessionId: string): Promise<SessionScoresResponse> {
+  const res = await apiClient.get<unknown>(`/sessions/${sessionId}/scores`);
+  return parseData(sessionScoresResponseSchema, res.data);
+}
+
+/**
+ * `PUT /sessions/:id/scores` — batch upsert/clear of student×component
+ * cells; the request body is a bare array, not wrapped in an object. Writable
+ * by the session's teacher or the center owner.
+ */
+export async function putSessionScores(
+  sessionId: string,
+  entries: PutSessionScoreEntryInput[],
+): Promise<SessionScoreEntry[]> {
+  const res = await apiClient.put<unknown>(`/sessions/${sessionId}/scores`, entries);
+  return parseArray(sessionScoreEntrySchema, res.data);
 }

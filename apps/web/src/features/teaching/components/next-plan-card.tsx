@@ -10,6 +10,8 @@ interface NextPlanCardProps {
   /** Called with the picked file's name — the UI stores the name only, no upload. */
   onAttachFile: (fileName: string) => void;
   onSubmit: () => void;
+  /** Whether the viewer may edit/submit this giáo án — see `SessionDetailPanel`'s prop of the same name. */
+  canWrite: boolean;
 }
 
 /**
@@ -24,12 +26,13 @@ export function NextPlanCard({
   onEdit,
   onAttachFile,
   onSubmit,
+  canWrite,
 }: NextPlanCardProps) {
   const status = plan?.status ?? "none";
-  const canSubmit = plan !== undefined && (status === "draft" || status === "redo");
+  const canSubmit = canWrite && plan !== undefined && (status === "draft" || status === "redo");
   // The status machine has no "save" from pending/approved: content under or
   // after review is locked until the owner responds or reopens it.
-  const canEdit = status !== "pending" && status !== "approved";
+  const canEdit = canWrite && status !== "pending" && status !== "approved";
 
   return (
     <section className="rounded-[24px] bg-white px-5 py-[18px] shadow-soft-md">
@@ -80,9 +83,11 @@ export function NextPlanCard({
         </>
       ) : (
         <div className="mt-2.5 rounded-[14px] bg-cream-100 px-3.5 py-2.5 text-[12.5px] text-ink-500">
-          {status === "pending"
-            ? "Đã nộp duyệt — chờ chủ trung tâm phản hồi trước khi sửa."
-            : "Đã duyệt — cần sửa thì nhờ chủ trung tâm mở lại để duyệt lại."}
+          {!canWrite
+            ? "Chỉ giáo viên phụ trách hoặc chủ trung tâm mới soạn được giáo án."
+            : status === "pending"
+              ? "Đã nộp duyệt — chờ chủ trung tâm phản hồi trước khi sửa."
+              : "Đã duyệt — cần sửa thì nhờ chủ trung tâm mở lại để duyệt lại."}
         </div>
       )}
       {canSubmit ? (

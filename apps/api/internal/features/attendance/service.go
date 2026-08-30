@@ -26,7 +26,14 @@ type RosterSource interface {
 // resolving one session, and transitioning it to held+confirmed inside the
 // caller's transaction. *sessions.Service satisfies this.
 type SessionStore interface {
-	GetByID(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*sessions.Session, error)
+	// GetWritable is the write gate — the owner, or an ACTIVE stint in a role
+	// the named capability admits; Confirm resolves through it with
+	// attendance.write so assistants can reach the write path but ended
+	// stints and wrong roles cannot.
+	GetWritable(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID, capability authctx.ClassCapability) (*sessions.Session, error)
+	// GetReadableByID is the read port — a class_staff stint (active or
+	// ended) on the session's class also resolves; the sheet GET uses it.
+	GetReadableByID(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*sessions.Session, error)
 	MarkHeldAndConfirmed(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID, at time.Time) error
 }
 
@@ -106,7 +113,7 @@ func (s *Service) SessionAttendance(ctx context.Context, sc authctx.Scope, sessi
 // enrolled as of the session date, with a null status if the session has
 // never been confirmed.
 func (s *Service) Get(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*Response, error) {
-	session, err := s.resolveSession(ctx, sc, sessionID)
+	session, err := s.resolveSessionVia(ctx, s.sessions.GetReadableByID, sc, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -147,11 +154,11 @@ func (s *Service) Confirm(ctx context.Context, sc authctx.Scope, sessionID uuid.
 		}
 		records = append(records, Record{
 			ID: id.New(),
-			// A record belongs to the session's own teacher and center, not
-			// the confirming caller — an owner confirming a member's session
-			// must not silently reassign its attendance rows to the owner,
-			// the same precedent sessions' generated/ad-hoc rows follow.
-			TeacherID:    session.TeacherID,
+			// teacher_id is last-writer attribution: whoever saves the sheet
+			// takes the credit, assistant edits over a teacher's rows
+			// included. It is never a row filter — pricing and roster-diff
+			// deletes select rows by enrollment/session, not by recorder.
+			TeacherID:    sc.TeacherID,
 			CenterID:     session.CenterID,
 			SessionID:    sessionID,
 			StudentID:    e.StudentID,
@@ -262,12 +269,20 @@ func (s *Service) buildResponse(ctx context.Context, sc authctx.Scope, session *
 	}, nil
 }
 
-// resolveSession fetches a session through the SessionStore contract and
-// normalises whatever error shape it returns (a pre-translated *AppError
+// resolveSession fetches a session through the SessionStore's write gate —
+// Confirm's authorization boundary.
+func (s *Service) resolveSession(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*sessions.Session, error) {
+	return s.resolveSessionVia(ctx, func(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*sessions.Session, error) {
+		return s.sessions.GetWritable(ctx, sc, sessionID, authctx.CapAttendanceWrite)
+	}, sc, sessionID)
+}
+
+// resolveSessionVia fetches a session through the given SessionStore method
+// and normalises whatever error shape it returns (a pre-translated *AppError
 // from the real sessions.Service, or a raw sessions.ErrNotFound from a test
 // fake) into this package's 404 contract.
-func (s *Service) resolveSession(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*sessions.Session, error) {
-	session, err := s.sessions.GetByID(ctx, sc, sessionID)
+func (s *Service) resolveSessionVia(ctx context.Context, fetch func(context.Context, authctx.Scope, uuid.UUID) (*sessions.Session, error), sc authctx.Scope, sessionID uuid.UUID) (*sessions.Session, error) {
+	session, err := fetch(ctx, sc, sessionID)
 	if err != nil {
 		var appErr *apperror.AppError
 		if errors.As(err, &appErr) {

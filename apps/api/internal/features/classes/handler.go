@@ -116,14 +116,14 @@ func (h *Handler) list(c *gin.Context) {
 		return
 	}
 	params := pagination.Parse(c, "name", listSorts)
-	rows, total, err := h.svc.List(c.Request.Context(), sc, filter, params)
+	rows, roles, total, err := h.svc.ListReadable(c.Request.Context(), sc, filter, params)
 	if err != nil {
 		response.Err(c, err)
 		return
 	}
 	out := make([]ClassResponse, 0, len(rows))
 	for i := range rows {
-		out = append(out, FromModel(&rows[i]))
+		out = append(out, FromModelWithRoles(&rows[i], roles[rows[i].ID]))
 	}
 	response.List(c, out, params.Meta(total))
 }
@@ -149,12 +149,12 @@ func (h *Handler) get(c *gin.Context) {
 	if !ok {
 		return
 	}
-	class, err := h.svc.Get(c.Request.Context(), sc, classID)
+	class, roles, err := h.svc.GetReadable(c.Request.Context(), sc, classID)
 	if err != nil {
 		response.Err(c, err)
 		return
 	}
-	response.OK(c, http.StatusOK, FromModel(class))
+	response.OK(c, http.StatusOK, FromModelWithRoles(class, roles))
 }
 
 // update edits the class's own fields.

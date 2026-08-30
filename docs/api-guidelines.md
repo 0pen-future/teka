@@ -99,8 +99,114 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 data-scoping switch repositories may branch on — never `IsOwner` directly, so
 an owner-granted permission widens reads without touching every repository.
 
-- Writes keep the invariant `teacher_id = $self` for the teacher role; owners
-  may write on behalf of any teacher in their center.
+- Writes on class-anchored artifacts resolve through the class-staff
+  capability map (see class-staff writes below); the written rows still stamp
+  `teacher_id = $self` as last-writer attribution, and owners may write on
+  behalf of any teacher in their center. Contacts and students are the
+  exception: they anchor to the owner (see contact-book ownership below).
+
+**Class-staff reads**: `class_staff` stints (giao_vien / hoc_vu / tro_giang)
+are the read-granting relationship for class-anchored data. A class handoff
+moves `classes.teacher_id` (plus schedules, future sessions, and the giao_vien
+stint — a dual write) but never the enrollment or student rows, and hoc_vu /
+tro_giang members own no rows at all, so own-rows scoping alone would show
+them nothing. READ paths therefore widen to "own rows OR the row's class
+carries a class_staff stint for the caller — ended stints included, so
+history stays readable after a soft-close". The shared SQL fragments live in
+`internal/shared/classscope` (`ReadExists` for class-keyed rows,
+`ReadExistsViaEnrollment` for student rows); each repository composes them in
+a `readScoped` helper next to its own-rows `scoped`, and services expose the
+widened queries as separate read ports (`GetReadable*`, `ListReadable`,
+`ListRangeReadable`) so every write keeps resolving through the own-rows
+gates. A soft-deleted class grants nothing. Widened today: classes,
+enrollments, students, sessions, attendance sheets, grading reads, teaching
+reads, and the class staff list itself. Everything else keeps plain member
+scoping — writes resolve through the capability map below, never through a
+read stint. Widened student rows carry the linked contact's name, but the phone
+follows the phone-privacy rule below, and staff cannot browse or manage the
+contact book (student record writes are owner-only, so the widened `GetByID`
+never feeds a member save). Class responses carry a
+per-caller `my_staff_roles` array, but only the GET paths populate it —
+create/update/archive responses return it empty, so clients must invalidate
+their class caches after a mutation rather than seeding them from the
+response.
+
+**Class-staff writes (capability map)**: class-anchored writes require an
+ACTIVE stint whose role appears in the capability's role list —
+`apps/api/internal/shared/authctx/class_staff.go` is the one authority:
+`attendance.write` = giao_vien + tro_giang; `scores.write`, `remarks.write`,
+`lesson_plan.write`, `enrollment.write`, `sessions.write` = giao_vien;
+`statement.send` = hoc_vu. Owners pass every gate. The shared fragment is
+`classscope.WriteExists` (active stint + role list), composed into per-table
+`writeScoped` helpers; services resolve writes through `GetWritable*` ports
+that disambiguate a miss honestly — a caller who can read the class (any
+stint) but lacks the capability gets 403, an outsider gets 404, so session
+and class ids cannot be probed. Consequences worth knowing:
+
+- A handoff flips writes instantly: the outgoing giao_vien keeps history
+  reads, but every write — including sessions they themselves recorded before
+  the handoff — answers 403 the moment the stint closes.
+- `teacher_id` on a written row (attendance records especially) is last-writer
+  attribution, never a row filter: a trợ giảng saving over a teacher's rows
+  takes the credit, and pricing tallies key on the enrollment/session, so
+  assistant-recorded sessions bill fully into the class's period.
+- Class-scoped statements (migration 000017): statements and notification
+  runs carry a `class_id`; an assigned hoc_vu generates and sends a
+  class-scoped statement copy through their own linked `zalo_personal`
+  channel, the run is attributed to the sender, a class copy's URL token
+  cannot open the family statement, and two hoc_vu sending for different
+  classes in the same period do not conflict.
+- `GET /billing-periods?class_id=` lets a class-staff member discover the
+  period their class bills under (handed-off classes bill under another
+  teacher's period, so the query deliberately drops the own-teacher filter);
+  it requires a stint on that class or `ReportsOversight()`.
+
+*Release note (behavior removal)*: before the capability map, writes followed
+row ownership — a teacher who handed off a class could still edit the
+sessions and attendance rows they had created. Now the active giao_vien stint
+is the write anchor: the previous teacher's writes freeze at handoff, and
+assistants/secretaries write only what their role's capabilities admit.
+
+**Contact-book ownership (migration 000016)**: contacts and students are
+center data anchored to the owner — `teacher_id = owner` on every row, seeded,
+imported, or created. Create/update/delete on both is owner-only at the
+service (an honest 403); a plain member's `GET /contacts` returns an empty
+list rather than 403, and reads stay owner + `ReportsOversight()`. Imports
+keep the grantable `imports.run` gate, but every imported contact/student row
+is stamped with the owner anchor server-side regardless of who runs the
+import, and dedupe resolves in owner scope. Migration 000016 merged duplicate
+contacts per `(center_id, phone)` (earliest row survives), re-keyed the unique
+indexes from per-teacher to `(center_id, phone)` / `(center_id,
+zalo_user_id)`, then re-anchored existing rows — journaling every change in
+`owner_anchor_backfill` for the down path. Teachers put existing students into
+their classes through the enrollments picker (`GET
+/classes/:id/enrollable-students` — names only, `q` ≥ 2 runes, capped at 20)
+instead of creating records; enrollment creation is open to the class's active
+giao_vien and publishes an audit event. Payments derive contact scope from
+`contacts.teacher_id`, so new payments anchor to the owner and a member's debt
+views drain over time.
+
+*Release note (behavior removal)*: before this change every teacher kept a
+private contact book and saw every phone they created. Now the owner manages
+one center-wide contact book, members no longer create or edit contact and
+student records, and a member sees a contact's phone only through the
+phone-privacy rule below.
+
+**Phone privacy**: one rule for every surface, list and detail alike — a
+caller sees a contact's phone iff `IsOwner || ReportsOversight()` or the
+caller holds an active hoc_vu stint on a class where a student of that contact
+is actively enrolled. Repositories compute the per-row arm as a derived
+`phone_visible` column (an EXISTS in the same query — fragments
+`classscope.PhoneVisibleViaStudent` / `PhoneVisibleViaContact`); services
+combine it through `Scope.PhoneVisible(rowVisible)` and null the DTO field —
+`null`, never an empty string. Masked surfaces: student reads, statements
+(including the family statement URL, which is a bearer token and is returned
+only to `ReportsOversight()` callers), the notification ledger, and
+collections. Sending paths (statements, notifications, zalo) read the phone
+server-side, so a sender who cannot see a phone can still send.
+`ContactResponse.Phone` stays a non-null string because contact reads are
+already owner/oversight-only. Zalo friend-match and per-contact zalo-mapping
+stay open to assigned hoc_vu — their send path depends on mapping.
 
 **Delegated report sending (`can_send_reports`)**: a boolean permission on the
 member's live `center_members` stint, granted and revoked only by the owner

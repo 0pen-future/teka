@@ -1,8 +1,10 @@
 import { apiClient } from "@/lib/api/client";
-import { parseData, parseList, type Paginated } from "@/lib/api/envelope";
+import { parseArray, parseData, parseList, type Paginated } from "@/lib/api/envelope";
 
 import {
+  enrollableStudentSchema,
   enrollmentSchema,
+  type EnrollableStudent,
   type Enrollment,
   type EnrollmentCreateInput,
 } from "../schemas/roster-schemas";
@@ -39,6 +41,22 @@ export async function getEnrollment(id: string): Promise<Enrollment> {
 export async function createEnrollment(input: EnrollmentCreateInput): Promise<Enrollment> {
   const res = await apiClient.post<unknown>("/enrollments", input);
   return parseData(enrollmentSchema, res.data);
+}
+
+/**
+ * `GET /classes/:id/enrollable-students` — names-only autocomplete for
+ * enrolling an existing student into the class. The server answers an empty
+ * list to queries under two characters and caps results at 20 rows, so no
+ * pagination is involved.
+ */
+export async function searchEnrollableStudents(
+  classId: string,
+  q: string,
+): Promise<EnrollableStudent[]> {
+  const res = await apiClient.get<unknown>(`/classes/${classId}/enrollable-students`, {
+    params: { q },
+  });
+  return parseArray(enrollableStudentSchema, res.data);
 }
 
 /**

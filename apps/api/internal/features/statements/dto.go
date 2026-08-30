@@ -9,14 +9,22 @@ import (
 // StatementResponse is the teacher-facing statement shape. It carries the
 // parent-facing token/url — built fresh per response by Service.ToResponse,
 // never read back from storage — so this DTO must only ever leave a
-// teacher-authenticated endpoint.
+// teacher-authenticated endpoint. Phone is null unless the caller may see the
+// contact's phone (owner, reports oversight, or an active hoc_vu stint over
+// one of the contact's enrolled students); URL is null for everyone below
+// reports oversight — the link is a public bearer token, so a caller who may
+// not see the phone must not be able to hand out the family's statement
+// either.
 type StatementResponse struct {
-	ID            uuid.UUID  `json:"id"`
-	ContactID     uuid.UUID  `json:"contact_id"`
-	ContactName   string     `json:"contact_name"`
-	Phone         string     `json:"phone"`
+	ID          uuid.UUID `json:"id"`
+	ContactID   uuid.UUID `json:"contact_id"`
+	ContactName string    `json:"contact_name"`
+	Phone       *string   `json:"phone"`
+	// ClassID is null on a family statement and set on a class-scoped copy —
+	// see the Statement model.
+	ClassID       *uuid.UUID `json:"class_id"`
 	TotalDue      int64      `json:"total_due"`
-	URL           string     `json:"url"`
+	URL           *string    `json:"url"`
 	ExpiresAt     time.Time  `json:"expires_at"`
 	RevokedAt     *time.Time `json:"revoked_at"`
 	ViewCount     int        `json:"view_count"`

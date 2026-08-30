@@ -127,7 +127,7 @@ func TestRunLifecycleIsDBBacked(t *testing.T) {
 	active, err := repo.HasActiveRun(ctx, sc)
 	require.NoError(t, err)
 	require.False(t, active)
-	_, err = repo.LatestRunByPeriod(ctx, sc, f.periodID)
+	_, err = repo.LatestRunByPeriod(ctx, sc, f.periodID, nil)
 	require.ErrorIs(t, err, notifications.ErrRunNotFound)
 
 	run := seedRun(t, repo, f)
@@ -156,7 +156,7 @@ func TestRunLifecycleIsDBBacked(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, active, "a completed run is no longer active")
 
-	got, err := repo.LatestRunByPeriod(ctx, sc, f.periodID)
+	got, err := repo.LatestRunByPeriod(ctx, sc, f.periodID, nil)
 	require.NoError(t, err)
 	require.Equal(t, run.ID, got.ID)
 	require.Equal(t, notifications.RunStatusCompleted, got.Status)
@@ -164,12 +164,12 @@ func TestRunLifecycleIsDBBacked(t *testing.T) {
 
 	// Reopening the run (manual resume) clears the finish stamp.
 	require.NoError(t, repo.UpdateRunStatus(ctx, sc, run.ID, notifications.RunStatusRunning))
-	got, err = repo.LatestRunByPeriod(ctx, sc, f.periodID)
+	got, err = repo.LatestRunByPeriod(ctx, sc, f.periodID, nil)
 	require.NoError(t, err)
 	require.Nil(t, got.FinishedAt)
 
 	// The other teacher can neither read nor move this run.
-	_, err = repo.LatestRunByPeriod(ctx, other.scope(), f.periodID)
+	_, err = repo.LatestRunByPeriod(ctx, other.scope(), f.periodID, nil)
 	require.ErrorIs(t, err, notifications.ErrRunNotFound)
 }
 
@@ -351,7 +351,7 @@ func TestMarkInterruptedReconcilesEveryRunningRun(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 1, n)
 
-	got, err := repo.LatestRunByPeriod(ctx, running.scope(), running.periodID)
+	got, err := repo.LatestRunByPeriod(ctx, running.scope(), running.periodID, nil)
 	require.NoError(t, err)
 	require.Equal(t, notifications.RunStatusInterrupted, got.Status)
 	// Its rows stay queued: interruption is the process dying, not the sends failing.
@@ -359,7 +359,7 @@ func TestMarkInterruptedReconcilesEveryRunningRun(t *testing.T) {
 	require.NoError(t, db.Table("notifications").Select("status").Where("run_id = ?", runningRun.ID).Take(&status).Error)
 	require.Equal(t, notifications.StatusQueued, status)
 
-	got, err = repo.LatestRunByPeriod(ctx, finished.scope(), finished.periodID)
+	got, err = repo.LatestRunByPeriod(ctx, finished.scope(), finished.periodID, nil)
 	require.NoError(t, err)
 	require.Equal(t, notifications.RunStatusCompleted, got.Status, "a finished run is not the reconciler's business")
 }

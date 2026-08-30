@@ -117,7 +117,7 @@ func TestRunSnapshotReportsTheLatestRunOrNoneAtAll(t *testing.T) {
 	sc := testutil.ScopeFor(t, d.db, teacher.ID)
 	periodID, contacts := closedPeriodWithContacts(t, d, teacher.ID, 2)
 
-	snap, err := d.notifications.RunSnapshot(ctx, sc, periodID)
+	snap, err := d.notifications.RunSnapshot(ctx, sc, periodID, nil)
 	require.NoError(t, err)
 	require.False(t, snap.Active)
 	require.Nil(t, snap.RunID, "a period that never ran reports nothing, not a 404")
@@ -131,7 +131,7 @@ func TestRunSnapshotReportsTheLatestRunOrNoneAtAll(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, notifications.RunStatusCompleted, waitForRunOutcome(t, d.db, *resp.RunID))
 
-	snap, err = d.notifications.RunSnapshot(ctx, sc, periodID)
+	snap, err = d.notifications.RunSnapshot(ctx, sc, periodID, nil)
 	require.NoError(t, err)
 	require.False(t, snap.Active, "a finished run is history, not activity")
 	require.NotNil(t, snap.RunID)
@@ -155,14 +155,14 @@ func TestReconcileThenResumeSendsOnlyTheStrandedRows(t *testing.T) {
 		`UPDATE contacts SET zalo_user_id = NULL, zalo_name = NULL WHERE id = ?`, f.contacts[2]).Error)
 
 	require.NoError(t, f.d.notifications.ReconcileInterrupted(ctx))
-	snap, err := f.d.notifications.RunSnapshot(ctx, f.scope, f.periodID)
+	snap, err := f.d.notifications.RunSnapshot(ctx, f.scope, f.periodID, nil)
 	require.NoError(t, err)
 	require.Equal(t, notifications.RunStatusInterrupted, snap.Status)
 	require.Equal(t, 3, snap.Total)
 	require.Equal(t, 1, snap.Sent)
 	require.Zero(t, snap.Failed)
 
-	resumed, err := f.d.notifications.ResumeRun(ctx, f.scope, f.periodID)
+	resumed, err := f.d.notifications.ResumeRun(ctx, f.scope, f.periodID, nil)
 	require.NoError(t, err)
 	require.NotNil(t, resumed.RunID)
 	require.Equal(t, f.runID, *resumed.RunID, "a resume continues the same run, never a new one")
@@ -196,7 +196,7 @@ func TestReconcileThenResumeSendsOnlyTheStrandedRows(t *testing.T) {
 		"an unmapped row cannot be auto-sent")
 
 	// The finished run cannot be resumed again.
-	_, err = f.d.notifications.ResumeRun(ctx, f.scope, f.periodID)
+	_, err = f.d.notifications.ResumeRun(ctx, f.scope, f.periodID, nil)
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
 }
@@ -209,7 +209,7 @@ func TestResumeRefusesWhenThereIsNothingToResume(t *testing.T) {
 	sc := testutil.ScopeFor(t, d.db, teacher.ID)
 	periodID, _ := closedPeriodWithContacts(t, d, teacher.ID, 1)
 
-	_, err := d.notifications.ResumeRun(ctx, sc, periodID)
+	_, err := d.notifications.ResumeRun(ctx, sc, periodID, nil)
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code, "no run ever existed for this period")
 }
@@ -221,7 +221,7 @@ func TestResumeRefusesWhenTheSessionIsDead(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, f.d.notifications.ReconcileInterrupted(ctx))
 
-	_, err := f.d.notifications.ResumeRun(ctx, f.scope, f.periodID)
+	_, err := f.d.notifications.ResumeRun(ctx, f.scope, f.periodID, nil)
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
 	require.Equal(t, notifications.RunStatusInterrupted, runStatusOf(t, f.d.db, f.runID),

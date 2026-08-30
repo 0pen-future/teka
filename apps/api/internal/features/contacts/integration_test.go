@@ -120,10 +120,10 @@ func TestCrossCenterReadsAreNotFound(t *testing.T) {
 	}
 }
 
-// An owner sees, reads, updates, and deletes a contact created by a teacher
-// who joined their center — center-wide oversight, not per-teacher isolation.
-// An owner-created contact is stamped as the owner's own, never on behalf of
-// someone else.
+// An owner sees, reads, updates, and deletes a contact still anchored on a
+// member from before the ownership migration — center-wide oversight, not
+// per-teacher isolation. A member never writes the directory: their create is
+// an explicit 403, and new rows are the owner's own.
 func TestOwnerHasFullOversightOfMembersContacts(t *testing.T) {
 	t.Parallel()
 	svc, db := newIntegrationService(t)
@@ -137,23 +137,27 @@ func TestOwnerHasFullOversightOfMembersContacts(t *testing.T) {
 	memberScope := testutil.ScopeFor(t, db, member.ID)
 	require.Equal(t, ownerScope.CenterID, memberScope.CenterID, "member must have joined the owner's center")
 
-	row, err := svc.Create(ctx, memberScope, contacts.CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
-	require.NoError(t, err)
+	_, err := svc.Create(ctx, memberScope, contacts.CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
+	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code,
+		"only the owner manages the parent directory")
+
+	row := testutil.Contact(t, db, member.ID,
+		testutil.WithContactFullName("Chị Hoa"), testutil.WithContactPhone("+84912345678"))
 
 	got, err := svc.Get(ctx, ownerScope, row.ID)
-	require.NoError(t, err, "owner must read a member's contact")
+	require.NoError(t, err, "owner must read a member-anchored contact")
 	require.Equal(t, row.ID, got.ID)
 
 	rows, total, err := svc.List(ctx, ownerScope, contacts.ListFilter{}, listParams(t, ""))
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
-	require.Equal(t, row.ID, rows[0].ID, "owner's list must include the member's contact")
+	require.Equal(t, row.ID, rows[0].ID, "owner's list must include the member-anchored contact")
 
 	updated, err := svc.Update(ctx, ownerScope, row.ID, contacts.UpdateRequest{FullName: "Chị Hoa (updated)", Phone: "0912345678"})
-	require.NoError(t, err, "owner must update a member's contact")
+	require.NoError(t, err, "owner must update a member-anchored contact")
 	require.Equal(t, "Chị Hoa (updated)", updated.FullName)
 
-	require.NoError(t, svc.Delete(ctx, ownerScope, row.ID), "owner must delete a member's contact")
+	require.NoError(t, svc.Delete(ctx, ownerScope, row.ID), "owner must delete a member-anchored contact")
 	_, err = svc.Get(ctx, ownerScope, row.ID)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
 
@@ -163,8 +167,9 @@ func TestOwnerHasFullOversightOfMembersContacts(t *testing.T) {
 	require.Equal(t, owner.ID, ownerRow.TeacherID, "owner-created contact must be stamped as the owner's own")
 }
 
-// Two non-owning teachers in the same center are still isolated from each
-// other: center scope grants the owner oversight, not peer-to-peer access.
+// Two non-owning teachers in the same center have no reach into each other's
+// legacy-anchored contacts: contact reach needs reports oversight or an
+// active hoc_vu stint, and a plain peer has neither.
 func TestPeersInSameCenterCannotSeeEachOthersContacts(t *testing.T) {
 	t.Parallel()
 	svc, db := newIntegrationService(t)
@@ -176,13 +181,12 @@ func TestPeersInSameCenterCannotSeeEachOthersContacts(t *testing.T) {
 
 	testutil.JoinCenter(t, db, memberB.ID, ownerCenter)
 	testutil.JoinCenter(t, db, memberC.ID, ownerCenter)
-	scopeB := testutil.ScopeFor(t, db, memberB.ID)
 	scopeC := testutil.ScopeFor(t, db, memberC.ID)
 
-	row, err := svc.Create(ctx, scopeB, contacts.CreateRequest{FullName: "Chị Hoa", Phone: "0912345678"})
-	require.NoError(t, err)
+	row := testutil.Contact(t, db, memberB.ID,
+		testutil.WithContactFullName("Chị Hoa"), testutil.WithContactPhone("+84912345678"))
 
-	_, err = svc.Get(ctx, scopeC, row.ID)
+	_, err := svc.Get(ctx, scopeC, row.ID)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code, "a peer must not read another member's contact")
 
 	rows, total, err := svc.List(ctx, scopeC, contacts.ListFilter{}, listParams(t, ""))

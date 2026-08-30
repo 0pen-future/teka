@@ -3,7 +3,14 @@ import { http, HttpResponse } from "msw";
 import type { Session } from "@/features/attendance";
 import { API_URL, fail, listMeta, ok } from "@/test/msw/handlers";
 
-import type { Class, Contact, Enrollment, Schedule, Student } from "../schemas/roster-schemas";
+import type {
+  Class,
+  ClassStaff,
+  Contact,
+  Enrollment,
+  Schedule,
+  Student,
+} from "../schemas/roster-schemas";
 
 // --- Fixtures ---
 // Two contacts; the second has two children who share a full name, exactly
@@ -74,6 +81,44 @@ export const classWithSchedule: Class = {
   status: "active",
   schedules: [classSchedule],
   created_at: "2026-01-01T08:00:00Z",
+  my_staff_roles: [],
+};
+
+/**
+ * Member fixtures for the class-staff mock only, independent of the center
+ * feature's own fixtures: two candidates for hoc_vu/tro_giang plus the
+ * class's current teacher, who already holds the giao_vien stint below.
+ */
+export const staffCandidateHocVu = {
+  id: "73000000-0000-4000-8000-000000000002",
+  full_name: "Thầy Nam",
+};
+export const staffCandidateTroGiang = {
+  id: "73000000-0000-4000-8000-000000000003",
+  full_name: "Cô Hương",
+};
+
+const staffMemberNames: Record<string, string> = {
+  [classWithSchedule.teacher_id]: "Cô Lan",
+  [staffCandidateHocVu.id]: staffCandidateHocVu.full_name,
+  [staffCandidateTroGiang.id]: staffCandidateTroGiang.full_name,
+};
+
+/** Internal store shape for a `class_staff` row — `class_id` never reaches the wire. */
+interface ClassStaffFixture extends ClassStaff {
+  class_id: string;
+}
+
+/** The class's dual-write giao_vien stint, seeded like Phase 1's backfill. */
+export const classStaffGiaoVien: ClassStaffFixture = {
+  id: "90000000-0000-4000-8000-000000000001",
+  class_id: classWithSchedule.id,
+  teacher_id: classWithSchedule.teacher_id,
+  teacher_name: "Cô Lan",
+  role_key: "giao_vien",
+  role_label: "Giáo viên",
+  started_at: "2026-01-01T08:00:00Z",
+  ended_at: null,
 };
 
 export const enrollmentActive: Enrollment = {
@@ -123,6 +168,7 @@ export function seedRosterStore() {
       ...student,
     })),
     classes: [{ ...classWithSchedule, schedules: [{ ...classSchedule }] }],
+    classStaff: [{ ...classStaffGiaoVien }],
     enrollments: [{ ...enrollmentActive }],
     // Four countable sessions this month plus one cancelled — the BUỔI T{m}
     // column must skip the cancelled one.
@@ -360,6 +406,7 @@ export const rosterHandlers = [
         effective_to: orNull(schedule.effective_to),
       })),
       created_at: new Date().toISOString(),
+      my_staff_roles: [],
     };
     store.classes.push(klass);
     return HttpResponse.json(ok(klass), { status: 201 });
@@ -441,6 +488,70 @@ export const rosterHandlers = [
     return new HttpResponse(null, { status: 204 });
   }),
 
+  http.get(`${API_URL}/classes/:classId/staff`, ({ params }) => {
+    const items = store.classStaff.filter((item) => item.class_id === params.classId);
+    return HttpResponse.json(ok(items));
+  }),
+  http.post(`${API_URL}/classes/:classId/staff`, async ({ params, request }) => {
+    const klass = store.classes.find((item) => item.id === params.classId);
+    if (!klass) {
+      return HttpResponse.json(fail("NOT_FOUND", "class not found"), { status: 404 });
+    }
+    const body = (await request.json()) as { teacher_id: string; role_key: string };
+    if (body.role_key === "giao_vien") {
+      return HttpResponse.json(fail("CONFLICT", "giáo viên chính chỉ thay đổi qua bàn giao lớp"), {
+        status: 409,
+      });
+    }
+    if (body.role_key !== "hoc_vu" && body.role_key !== "tro_giang") {
+      return HttpResponse.json(fail("VALIDATION_ERROR", "vai trò không hợp lệ"), { status: 422 });
+    }
+    const alreadyActive = store.classStaff.some(
+      (item) => item.class_id === klass.id && item.teacher_id === body.teacher_id && !item.ended_at,
+    );
+    if (alreadyActive) {
+      return HttpResponse.json(
+        fail("CONFLICT", "người này đã có vai trò đang hoạt động trong lớp"),
+        { status: 409 },
+      );
+    }
+    const staff: ClassStaffFixture = {
+      id: nextId("staff-"),
+      class_id: klass.id,
+      teacher_id: body.teacher_id,
+      teacher_name: staffMemberNames[body.teacher_id] ?? "Thành viên",
+      role_key: body.role_key,
+      role_label: body.role_key === "hoc_vu" ? "Học vụ" : "Trợ giảng",
+      started_at: new Date().toISOString(),
+      ended_at: null,
+    };
+    store.classStaff.push(staff);
+    return HttpResponse.json(ok(staff), { status: 201 });
+  }),
+  http.delete(`${API_URL}/classes/:classId/staff/:staffId`, ({ params, request }) => {
+    const staff = store.classStaff.find(
+      (item) => item.id === params.staffId && item.class_id === params.classId,
+    );
+    if (!staff) {
+      return HttpResponse.json(fail("NOT_FOUND", "staff assignment not found"), { status: 404 });
+    }
+    if (staff.role_key === "giao_vien" && !staff.ended_at) {
+      return HttpResponse.json(fail("CONFLICT", "giáo viên chính chỉ thay đổi qua bàn giao lớp"), {
+        status: 409,
+      });
+    }
+    const url = new URL(request.url);
+    if (url.searchParams.get("mode") === "void") {
+      store.classStaff = store.classStaff.filter((item) => item.id !== staff.id);
+      return new HttpResponse(null, { status: 204 });
+    }
+    if (staff.ended_at) {
+      return HttpResponse.json(fail("NOT_FOUND", "staff assignment not found"), { status: 404 });
+    }
+    staff.ended_at = new Date().toISOString();
+    return new HttpResponse(null, { status: 204 });
+  }),
+
   http.get(`${API_URL}/classes/:classId/sessions`, ({ params, request }) => {
     const url = new URL(request.url);
     const from = url.searchParams.get("from");
@@ -493,6 +604,25 @@ export const rosterHandlers = [
     );
   }),
 
+  http.get(`${API_URL}/classes/:classId/enrollable-students`, ({ params, request }) => {
+    const klass = store.classes.find((item) => item.id === params.classId);
+    if (!klass) {
+      return HttpResponse.json(fail("NOT_FOUND", "class not found"), { status: 404 });
+    }
+    const url = new URL(request.url);
+    const q = url.searchParams.get("q")?.trim().toLowerCase() ?? "";
+    // Mirrors the API: under two characters the answer is an empty list, and
+    // rows carry names only — never phone or contact.
+    const items =
+      q.length < 2
+        ? []
+        : store.students
+            .filter((student) => student.full_name.toLowerCase().includes(q))
+            .map((student) => ({ id: student.id, full_name: student.full_name }))
+            .sort((a, b) => a.full_name.localeCompare(b.full_name))
+            .slice(0, 20);
+    return HttpResponse.json(ok(items));
+  }),
   http.get(`${API_URL}/enrollments`, ({ request }) => {
     const url = new URL(request.url);
     const studentId = url.searchParams.get("student_id");

@@ -187,6 +187,14 @@ func JoinCenter(t *testing.T, db *gorm.DB, teacherID, centerID uuid.UUID) {
 			teacherID).Error; err != nil {
 			return err
 		}
+		// Class-staff stints follow the membership like production's
+		// CloseMembership: closing without this would let a later test pass
+		// on a stale active stint the real leave path always ends.
+		if err := tx.Exec(
+			"UPDATE class_staff SET ended_at = now() WHERE teacher_id = ? AND ended_at IS NULL",
+			teacherID).Error; err != nil {
+			return err
+		}
 		if err := tx.Exec(`
 			INSERT INTO center_members (teacher_id, center_id) VALUES (?, ?)
 			ON CONFLICT (teacher_id, center_id) DO UPDATE SET left_at = NULL, joined_at = now()`,
@@ -299,8 +307,8 @@ func WithStudentDisplayNote(note string) StudentOption {
 }
 
 // Student inserts a students row for the teacher directly (bypassing the
-// service). The contact must belong to the same teacher — the composite FK
-// rejects the insert otherwise.
+// service). The contact must belong to the same center — the composite FK
+// (contact_id, center_id) rejects the insert otherwise.
 func Student(t *testing.T, db *gorm.DB, teacherID, contactID uuid.UUID, opts ...StudentOption) *students.Student {
 	t.Helper()
 	s := &students.Student{
@@ -361,7 +369,31 @@ func Class(t *testing.T, db *gorm.DB, teacherID uuid.UUID, opts ...ClassOption) 
 	if err := db.Omit("Schedules").Create(c).Error; err != nil {
 		t.Fatalf("insert fixture class %s: %v", c.Name, err)
 	}
+	// Mirror the classes create hook: every class is born with its teacher's
+	// active giao_vien stint, the invariant assignment-scoped reads rely on.
+	if err := db.Exec(`
+		INSERT INTO class_staff (class_id, center_id, teacher_id, role_key)
+		VALUES (?, ?, ?, 'giao_vien')
+		ON CONFLICT (class_id, teacher_id) WHERE ended_at IS NULL DO NOTHING`,
+		c.ID, c.CenterID, c.TeacherID).Error; err != nil {
+		t.Fatalf("insert fixture giao_vien stint for class %s: %v", c.Name, err)
+	}
 	return c
+}
+
+// StaffAssignment inserts an active class_staff stint directly — for wiring a
+// hoc_vu or tro_giang member onto a fixture class without the service stack.
+func StaffAssignment(t *testing.T, db *gorm.DB, class *classes.Class, teacherID uuid.UUID, roleKey string) uuid.UUID {
+	t.Helper()
+	var staffID uuid.UUID
+	if err := db.Raw(`
+		INSERT INTO class_staff (class_id, center_id, teacher_id, role_key)
+		VALUES (?, ?, ?, ?)
+		RETURNING id`,
+		class.ID, class.CenterID, teacherID, roleKey).Row().Scan(&staffID); err != nil {
+		t.Fatalf("insert fixture staff assignment for class %s: %v", class.Name, err)
+	}
+	return staffID
 }
 
 // Schedule inserts a class_schedules row for the class directly. The row's

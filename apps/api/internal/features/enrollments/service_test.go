@@ -10,9 +10,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 
 	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/shared/authctx"
+	"teka/apps/api/internal/shared/events"
 	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/shared/pagination"
 )
@@ -110,12 +112,11 @@ func visibleClass(c fakeClass, sc authctx.Scope) bool {
 	return sc.IsOwner || c.teacherID == sc.TeacherID
 }
 
-// visibleStudent is visibleEnrollment's counterpart for StudentExists.
+// visibleStudent mirrors the real StudentExists: center-only. Students anchor
+// on the center owner, so a per-teacher filter would refuse every legitimate
+// reference; the class check is what stays per-teacher.
 func visibleStudent(s fakeStudent, sc authctx.Scope) bool {
-	if s.centerID != sc.CenterID {
-		return false
-	}
-	return sc.IsOwner || s.teacherID == sc.TeacherID
+	return s.centerID == sc.CenterID
 }
 
 func (f *fakeRepository) Create(_ context.Context, e *Enrollment) error {
@@ -136,6 +137,12 @@ func (f *fakeRepository) GetByID(_ context.Context, sc authctx.Scope, id uuid.UU
 	}
 	row := f.row(e)
 	return &row, nil
+}
+
+// GetWritableByID collapses onto GetByID: the unit fakes carry no
+// class_staff table; the capability gate is integration-tested.
+func (f *fakeRepository) GetWritableByID(ctx context.Context, sc authctx.Scope, id uuid.UUID, _ []string) (*Row, error) {
+	return f.GetByID(ctx, sc, id)
 }
 
 func (f *fakeRepository) List(_ context.Context, sc authctx.Scope, filter ListFilter, _ pagination.Params) ([]Row, int64, error) {
@@ -159,7 +166,7 @@ func (f *fakeRepository) List(_ context.Context, sc authctx.Scope, filter ListFi
 	return out, int64(len(out)), nil
 }
 
-func (f *fakeRepository) End(_ context.Context, sc authctx.Scope, id uuid.UUID, endedOn time.Time) error {
+func (f *fakeRepository) End(_ context.Context, sc authctx.Scope, _ []string, id uuid.UUID, endedOn time.Time) error {
 	e, ok := f.rows[id]
 	if !ok || !visibleEnrollment(e, sc) {
 		return ErrNotFound
@@ -173,7 +180,7 @@ func (f *fakeRepository) End(_ context.Context, sc authctx.Scope, id uuid.UUID, 
 	return nil
 }
 
-func (f *fakeRepository) SoftDelete(_ context.Context, sc authctx.Scope, id uuid.UUID) error {
+func (f *fakeRepository) SoftDelete(_ context.Context, sc authctx.Scope, _ []string, id uuid.UUID) error {
 	e, ok := f.rows[id]
 	if !ok || !visibleEnrollment(e, sc) {
 		return ErrNotFound
@@ -222,9 +229,46 @@ func (f *fakeRepository) StudentExists(_ context.Context, sc authctx.Scope, stud
 	return ok && visibleStudent(s, sc), nil
 }
 
+func (f *fakeRepository) ClassInCenter(_ context.Context, sc authctx.Scope, classID uuid.UUID) (bool, error) {
+	c, ok := f.classes[classID]
+	return ok && c.centerID == sc.CenterID, nil
+}
+
+// CallerClassStanding models the invariant the fake lives under: the class's
+// anchor teacher is its active giao_vien, and no other stints exist.
+func (f *fakeRepository) CallerClassStanding(_ context.Context, sc authctx.Scope, classID uuid.UUID) (bool, bool, error) {
+	c, ok := f.classes[classID]
+	teaching := ok && c.centerID == sc.CenterID && c.teacherID == sc.TeacherID
+	return teaching, teaching, nil
+}
+
+func (f *fakeRepository) SearchEnrollableStudents(_ context.Context, sc authctx.Scope, classID uuid.UUID, q string, limit int) ([]PickerStudent, error) {
+	var rows []PickerStudent
+	for studentID, s := range f.students {
+		if s.centerID != sc.CenterID || !strings.Contains(strings.ToLower(s.name), strings.ToLower(q)) {
+			continue
+		}
+		enrolled := false
+		for _, e := range f.rows {
+			if !e.deleted && e.StudentID == studentID && e.ClassID == classID && e.EndedOn == nil {
+				enrolled = true
+				break
+			}
+		}
+		if !enrolled {
+			rows = append(rows, PickerStudent{ID: studentID, FullName: s.name})
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].FullName < rows[j].FullName })
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+	return rows, nil
+}
+
 func newTestService() (*Service, *fakeRepository) {
 	repo := newFakeRepository()
-	return NewService(repo), repo
+	return NewService(repo, nil), repo
 }
 
 func enroll(t *testing.T, svc *Service, sc authctx.Scope, studentID, classID uuid.UUID, startedOn string) *Row {
@@ -445,9 +489,9 @@ func TestCrossTenantReadsAsNotFound(t *testing.T) {
 }
 
 // An owner reads and manages a member's existing enrollment — center
-// oversight. Creating is stricter: a row is always stamped as the caller's
-// own, so the owner may only reference their own students and classes; a
-// member's rows are view-only for creation and refused with a 422.
+// oversight. Creating stamps the row as the caller's own and requires the
+// caller's own class; the student may be any center student, since students
+// anchor on the owner.
 func TestOwnerScopeSeesAndManagesMembersEnrollment(t *testing.T) {
 	svc, repo := newTestService()
 	center := id.New()
@@ -483,10 +527,14 @@ func TestOwnerScopeSeesAndManagesMembersEnrollment(t *testing.T) {
 	if created.TeacherID != owner.TeacherID {
 		t.Fatalf("an enrollment created by the owner must be stamped as the owner's own, got %s", created.TeacherID)
 	}
-	if _, err := svc.Create(context.Background(), owner, CreateRequest{
+	mixed, err := svc.Create(context.Background(), owner, CreateRequest{
 		StudentID: otherStudent, ClassID: ownClass,
-	}); apperror.From(err).Code != apperror.CodeValidation {
-		t.Fatalf("owner referencing a member's student must be a 422, got %v", err)
+	})
+	if err != nil {
+		t.Fatalf("a center student must be enrollable into the owner's own class, got %v", err)
+	}
+	if mixed.TeacherID != owner.TeacherID {
+		t.Fatalf("the enrollment must be stamped as the owner's own, got %s", mixed.TeacherID)
 	}
 }
 
@@ -579,4 +627,42 @@ func TestFindByStudentAndClassStaysWithinTheAnchorTeacher(t *testing.T) {
 	if _, found, err := svc.FindByStudentAndClass(context.Background(), peer, studentID, classID); err != nil || found {
 		t.Fatalf("another teacher's enrollment must not be found, got found=%v err=%v", found, err)
 	}
+}
+
+// Enrolling a student widens what the enrolling teacher can read and feeds the
+// next billing close, so every successful create must leave an event for the
+// audit trail — carrying the actor and the exact enrollment it produced.
+func TestCreatePublishesStudentEnrolledEvent(t *testing.T) {
+	repo := newFakeRepository()
+	bus := events.NewSync()
+	var got []events.Event
+	bus.Subscribe("test", 0, func(_ context.Context, e events.Event) { got = append(got, e) })
+	svc := NewService(repo, bus)
+
+	teacherID := uuid.New()
+	sc := selfScope(teacherID)
+	classID := repo.addClass(teacherID, 100_000)
+	studentID := repo.addStudent(teacherID)
+
+	row, err := svc.Create(context.Background(), sc, CreateRequest{
+		StudentID: studentID, ClassID: classID, StartedOn: "2026-01-05",
+	})
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	ev, ok := got[0].(StudentEnrolled)
+	require.True(t, ok, "want a StudentEnrolled event, got %T", got[0])
+	require.Equal(t, row.ID, ev.EnrollmentID)
+	require.Equal(t, teacherID, ev.ActorID)
+	require.Equal(t, sc.CenterID, ev.CenterID)
+	require.Equal(t, classID, ev.ClassID)
+	require.Equal(t, studentID, ev.StudentID)
+	require.False(t, ev.OccurredAt.IsZero())
+
+	// A refused create publishes nothing — the trail records what happened,
+	// not what was attempted and rejected.
+	_, err = svc.Create(context.Background(), sc, CreateRequest{
+		StudentID: studentID, ClassID: classID,
+	})
+	require.Error(t, err)
+	require.Len(t, got, 1)
 }

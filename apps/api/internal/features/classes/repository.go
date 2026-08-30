@@ -10,6 +10,7 @@ import (
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/shared/authctx"
+	"teka/apps/api/internal/shared/classscope"
 	"teka/apps/api/internal/shared/pagination"
 )
 
@@ -27,6 +28,19 @@ type Repository interface {
 	CreateWithSchedules(ctx context.Context, class *Class, schedules []Schedule) error
 	GetByID(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Class, error)
 	List(ctx context.Context, sc authctx.Scope, filter ListFilter, p pagination.Params) ([]Class, int64, error)
+	// GetReadableByID and ListReadable are the READ port: own rows plus any
+	// class the caller holds a class_staff stint on (ended included — history
+	// reads). GetByID/List stay own-rows because they double as the write
+	// gate for teaching, sessions, grading, and the dashboard.
+	GetReadableByID(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Class, error)
+	ListReadable(ctx context.Context, sc authctx.Scope, filter ListFilter, p pagination.Params) ([]Class, int64, error)
+	// GetWritableByID is the WRITE port: the class is reachable only through
+	// an ACTIVE class_staff stint whose role is in roles (owner bypasses via
+	// CenterWide). roles is the service's capability-map lookup — this method
+	// only binds it. ErrNotFound both when the class does not exist and when
+	// the caller merely lacks the capability; the service disambiguates 403
+	// vs 404 through the read port.
+	GetWritableByID(ctx context.Context, sc authctx.Scope, id uuid.UUID, roles []string) (*Class, error)
 	Update(ctx context.Context, class *Class) error
 	Archive(ctx context.Context, sc authctx.Scope, id uuid.UUID) error
 	SoftDelete(ctx context.Context, sc authctx.Scope, id uuid.UUID) error
@@ -76,6 +90,34 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 	return q
 }
 
+// readScoped widens scoped for reads only: a member also sees classes they
+// hold any class_staff stint on — ended stints included, so a closed
+// assignment keeps read access to the class's history. Write paths must keep
+// using scoped.
+func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+	q := database.FromContext(ctx, r.db).Where("classes.center_id = ?", sc.CenterID)
+	if !sc.CenterWide() {
+		frag, _ := classscope.ReadExists("classes.id")
+		q = q.Where("(classes.teacher_id = ? OR "+frag+")",
+			sc.TeacherID, sc.TeacherID, sc.CenterID)
+	}
+	return q
+}
+
+// writeScoped is the capability write filter: a member reaches a class only
+// through an ACTIVE class_staff stint whose role is in roles — REPLACING the
+// creator (teacher_id) filter, not OR-ing it, so a teacher whose stint ended
+// (handoff) loses writes even on rows still anchored to them. roles comes from
+// the service's capability-map lookup; this method only binds it.
+func (r *gormRepository) writeScoped(ctx context.Context, sc authctx.Scope, roles []string) *gorm.DB {
+	q := database.FromContext(ctx, r.db).Where("classes.center_id = ?", sc.CenterID)
+	if !sc.CenterWide() {
+		frag, _ := classscope.WriteExists("classes.id")
+		q = q.Where(frag, sc.TeacherID, sc.CenterID, roles)
+	}
+	return q
+}
+
 // scopedSchedules is scoped's counterpart for the class_schedules table.
 func (r *gormRepository) scopedSchedules(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("class_schedules.center_id = ?", sc.CenterID)
@@ -117,8 +159,44 @@ func (r *gormRepository) GetByID(ctx context.Context, sc authctx.Scope, id uuid.
 	return &class, nil
 }
 
+func (r *gormRepository) GetWritableByID(ctx context.Context, sc authctx.Scope, id uuid.UUID, roles []string) (*Class, error) {
+	var class Class
+	err := r.writeScoped(ctx, sc, roles).
+		Preload("Schedules", preloadSchedules).
+		Take(&class, "classes.id = ?", id).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &class, nil
+}
+
+func (r *gormRepository) GetReadableByID(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Class, error) {
+	var class Class
+	err := r.readScoped(ctx, sc).
+		Preload("Schedules", preloadSchedules).
+		Take(&class, "classes.id = ?", id).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &class, nil
+}
+
+func (r *gormRepository) ListReadable(ctx context.Context, sc authctx.Scope, filter ListFilter, p pagination.Params) ([]Class, int64, error) {
+	return r.list(r.readScoped(ctx, sc), filter, p)
+}
+
 func (r *gormRepository) List(ctx context.Context, sc authctx.Scope, filter ListFilter, p pagination.Params) ([]Class, int64, error) {
-	q := r.scoped(ctx, sc).Model(&Class{})
+	return r.list(r.scoped(ctx, sc), filter, p)
+}
+
+func (r *gormRepository) list(q *gorm.DB, filter ListFilter, p pagination.Params) ([]Class, int64, error) {
+	q = q.Model(&Class{})
 	if filter.Status != "" {
 		// The default active-only list matches the idx_classes_teacher
 		// partial-index predicate (deleted_at IS NULL AND status = 'active').

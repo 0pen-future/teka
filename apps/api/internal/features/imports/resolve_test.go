@@ -69,17 +69,17 @@ func TestResolveHappyPath(t *testing.T) {
 	require.Equal(t, date(t, "1/9/2025"), plan.students[0].startedOn)
 	require.Equal(t, date(t, "15/9/2025"), plan.students[1].startedOn)
 
-	// One parent, two teachers, two contacts: uq_contacts_phone is
-	// (teacher_id, phone), so this is two statement links and two balances.
-	require.Equal(t, 3, distinctContacts(plan.students))
+	// One parent under two teachers is still ONE contact: contacts anchor on
+	// the owner and dedupe by phone alone, center-wide.
+	require.Equal(t, 2, distinctContacts(plan.students))
 }
 
-// distinctContacts counts the contacts the plan implies, keyed the way
-// uq_contacts_phone is: (teacher_id, phone).
+// distinctContacts counts the contacts the plan implies, keyed the way the
+// apply stage dedupes them: by phone, center-wide.
 func distinctContacts(sts []resolvedStudent) int {
-	seen := map[contactKey]struct{}{}
+	seen := map[string]struct{}{}
 	for _, st := range sts {
-		seen[contactKey{teacherID: st.teacherID, phone: st.contactPhone}] = struct{}{}
+		seen[st.contactPhone] = struct{}{}
 	}
 	return len(seen)
 }

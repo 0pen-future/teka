@@ -4,11 +4,14 @@ import { API_URL, fail, ok, primaryTeacher } from "@/test/msw/handlers";
 
 import { transitionLessonPlanStatus, type LessonPlanStatus } from "../lib/teaching-store";
 import type {
+  ClassScoreComponent,
   MarkEntryInput,
   MarkResponse,
   PlanResponse,
   PutCurriculumInput,
+  PutSessionScoreEntryInput,
   SavePlanInput,
+  SessionScoreEntry,
 } from "../schemas/teaching-schemas";
 
 /**
@@ -38,6 +41,10 @@ interface Store {
   marks: Map<string, { score: number | null; personal_note: string | null }>;
   /** Sessions the month read can attribute notes/marks to. */
   sessions: Map<string, SessionRef>;
+  /** classId → configured score components; empty/absent means "no grid". */
+  scoreComponents: Map<string, ClassScoreComponent[]>;
+  /** `sessionId#studentId#componentId` → score. */
+  componentScores: Map<string, number>;
 }
 
 let store: Store = {
@@ -46,6 +53,8 @@ let store: Store = {
   notes: new Map(),
   marks: new Map(),
   sessions: new Map(),
+  scoreComponents: new Map(),
+  componentScores: new Map(),
 };
 
 /** Read-only peek for asserting what a flow actually persisted. */
@@ -60,6 +69,8 @@ export function resetTeachingApiStore(): void {
     notes: new Map(),
     marks: new Map(),
     sessions: new Map(),
+    scoreComponents: new Map(),
+    componentScores: new Map(),
   };
 }
 
@@ -111,6 +122,20 @@ export function seedMark(
   });
 }
 
+/** Configure a class's score components; an empty/never-called class has none. */
+export function seedScoreComponents(classId: string, components: ClassScoreComponent[]): void {
+  store.scoreComponents.set(classId, components);
+}
+
+export function seedComponentScore(
+  sessionId: string,
+  studentId: string,
+  componentId: string,
+  score: number,
+): void {
+  store.componentScores.set(`${sessionId}#${studentId}#${componentId}`, score);
+}
+
 // --- Handlers ---
 
 const actionNames: Record<string, "submit" | "approve" | "requestRedo" | "reopen"> = {
@@ -126,6 +151,17 @@ function sessionMarks(sessionId: string): MarkResponse[] {
     const [session_id = "", student_id = ""] = key.split("#");
     if (session_id === sessionId) {
       rows.push({ session_id, student_id, ...fields });
+    }
+  }
+  return rows;
+}
+
+function sessionComponentScores(sessionId: string): SessionScoreEntry[] {
+  const rows: SessionScoreEntry[] = [];
+  for (const [key, score] of store.componentScores) {
+    const [session_id = "", student_id = "", component_id = ""] = key.split("#");
+    if (session_id === sessionId) {
+      rows.push({ student_id, component_id, score });
     }
   }
   return rows;
@@ -292,5 +328,33 @@ export const teachingHandlers = [
       }
     }
     return HttpResponse.json(ok(sessionMarks(sessionId)));
+  }),
+
+  http.get(`${API_URL}/classes/:id/score-components`, ({ params }) => {
+    const classId = params.id as string;
+    return HttpResponse.json(
+      ok({ class_id: classId, components: store.scoreComponents.get(classId) ?? [] }),
+    );
+  }),
+
+  http.get(`${API_URL}/sessions/:id/scores`, ({ params }) => {
+    const sessionId = params.id as string;
+    const session = store.sessions.get(sessionId);
+    const components = session ? (store.scoreComponents.get(session.class_id) ?? []) : [];
+    return HttpResponse.json(ok({ components, scores: sessionComponentScores(sessionId) }));
+  }),
+
+  http.put(`${API_URL}/sessions/:id/scores`, async ({ params, request }) => {
+    const sessionId = params.id as string;
+    const entries = (await request.json()) as PutSessionScoreEntryInput[];
+    for (const entry of entries) {
+      const key = `${sessionId}#${entry.student_id}#${entry.component_id}`;
+      if (entry.score === null) {
+        store.componentScores.delete(key);
+      } else {
+        store.componentScores.set(key, entry.score);
+      }
+    }
+    return HttpResponse.json(ok(sessionComponentScores(sessionId)));
   }),
 ];

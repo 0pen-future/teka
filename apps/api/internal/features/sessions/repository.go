@@ -11,6 +11,7 @@ import (
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/shared/authctx"
+	"teka/apps/api/internal/shared/classscope"
 )
 
 // Row is a session joined with the class name the responses display.
@@ -34,16 +35,28 @@ type Repository interface {
 	Create(ctx context.Context, s *Session) error
 	ListByClassAndRange(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]Row, error)
 	GetByID(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Row, error)
+	// ListByClassAndRangeReadable and GetReadableByID are the read port: own
+	// sessions plus sessions of classes the caller holds a class_staff stint
+	// on, ended stints included.
+	ListByClassAndRangeReadable(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]Row, error)
+	GetReadableByID(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Row, error)
+	// GetWritableByID is the WRITE port: the session is reachable only through
+	// an ACTIVE class_staff stint on its class whose role is in roles (owner
+	// bypasses via CenterWide). The service resolves roles from the capability
+	// map and disambiguates 403 vs 404 through the read port.
+	GetWritableByID(ctx context.Context, sc authctx.Scope, id uuid.UUID, roles []string) (*Row, error)
 	// UpdateStatus transitions a session's status and cancel_reason in one
 	// statement; a nil cancelReason clears the column. Every current caller
 	// supplies the full desired value, so there is no "leave untouched" case.
-	UpdateStatus(ctx context.Context, sc authctx.Scope, id uuid.UUID, status string, cancelReason *string) error
-	SoftDelete(ctx context.Context, sc authctx.Scope, id uuid.UUID) error
+	// Like every write below, it reaches rows through the roles-bound write
+	// scope, never through session ownership.
+	UpdateStatus(ctx context.Context, sc authctx.Scope, roles []string, id uuid.UUID, status string, cancelReason *string) error
+	SoftDelete(ctx context.Context, sc authctx.Scope, roles []string, id uuid.UUID) error
 	// MarkHeldAndConfirmed transitions a session to held and stamps
 	// attendance_confirmed_at in one statement — the transition attendance
 	// confirmation performs implicitly, so confirming attendance never
 	// requires a second button press.
-	MarkHeldAndConfirmed(ctx context.Context, sc authctx.Scope, id uuid.UUID, at time.Time) error
+	MarkHeldAndConfirmed(ctx context.Context, sc authctx.Scope, roles []string, id uuid.UUID, at time.Time) error
 	// ListPending returns sessions strictly before `before` that are still
 	// unconfirmed and planned or held (cancelled sessions never qualify),
 	// optionally bounded by [from, to] (both inclusive), newest first. total
@@ -81,6 +94,35 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 	q := database.FromContext(ctx, r.db).Where("class_sessions.center_id = ?", sc.CenterID)
 	if !sc.CenterWide() {
 		q = q.Where("class_sessions.teacher_id = ?", sc.TeacherID)
+	}
+	return q
+}
+
+// readScoped additionally lets a member read sessions of classes they hold a
+// class_staff stint on, ended stints included. Reads only: lifecycle writes
+// (cancel, hold, delete) go through writeScoped's active-stint capability
+// filter; handoff's ReassignPlanned keeps scoped because it runs under the
+// owner-driven handoff flow.
+func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+	q := database.FromContext(ctx, r.db).Where("class_sessions.center_id = ?", sc.CenterID)
+	if !sc.CenterWide() {
+		frag, _ := classscope.ReadExists("class_sessions.class_id")
+		q = q.Where("(class_sessions.teacher_id = ? OR "+frag+")",
+			sc.TeacherID, sc.TeacherID, sc.CenterID)
+	}
+	return q
+}
+
+// writeScoped is the capability write filter: a member reaches a session only
+// through an ACTIVE stint on its class whose role is in roles — REPLACING the
+// teacher_id filter, not OR-ing it, so an ended-stint teacher keeps history
+// reads but loses every write, even on sessions still anchored to them. roles
+// comes from the service's capability-map lookup; this method only binds it.
+func (r *gormRepository) writeScoped(ctx context.Context, sc authctx.Scope, roles []string) *gorm.DB {
+	q := database.FromContext(ctx, r.db).Where("class_sessions.center_id = ?", sc.CenterID)
+	if !sc.CenterWide() {
+		frag, _ := classscope.WriteExists("class_sessions.class_id")
+		q = q.Where(frag, sc.TeacherID, sc.CenterID, roles)
 	}
 	return q
 }
@@ -143,8 +185,46 @@ func (r *gormRepository) GetByID(ctx context.Context, sc authctx.Scope, id uuid.
 	return &row, nil
 }
 
-func (r *gormRepository) UpdateStatus(ctx context.Context, sc authctx.Scope, id uuid.UUID, status string, cancelReason *string) error {
-	res := r.scoped(ctx, sc).
+func (r *gormRepository) ListByClassAndRangeReadable(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]Row, error) {
+	var rows []Row
+	err := withClassName(r.readScoped(ctx, sc).Model(&Session{})).
+		Where("class_sessions.class_id = ?", classID).
+		Where("class_sessions.session_date BETWEEN ? AND ?", from, to).
+		Order("class_sessions.session_date").
+		Find(&rows).Error
+	return rows, err
+}
+
+func (r *gormRepository) GetReadableByID(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Row, error) {
+	var row Row
+	err := withClassName(r.readScoped(ctx, sc).Model(&Session{})).
+		Where("class_sessions.id = ?", id).
+		Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+func (r *gormRepository) GetWritableByID(ctx context.Context, sc authctx.Scope, id uuid.UUID, roles []string) (*Row, error) {
+	var row Row
+	err := withClassName(r.writeScoped(ctx, sc, roles).Model(&Session{})).
+		Where("class_sessions.id = ?", id).
+		Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+func (r *gormRepository) UpdateStatus(ctx context.Context, sc authctx.Scope, roles []string, id uuid.UUID, status string, cancelReason *string) error {
+	res := r.writeScoped(ctx, sc, roles).
 		Model(&Session{}).
 		Where("class_sessions.id = ?", id).
 		Updates(map[string]any{"status": status, "cancel_reason": cancelReason})
@@ -157,8 +237,8 @@ func (r *gormRepository) UpdateStatus(ctx context.Context, sc authctx.Scope, id 
 	return nil
 }
 
-func (r *gormRepository) SoftDelete(ctx context.Context, sc authctx.Scope, id uuid.UUID) error {
-	res := r.scoped(ctx, sc).Where("class_sessions.id = ?", id).Delete(&Session{})
+func (r *gormRepository) SoftDelete(ctx context.Context, sc authctx.Scope, roles []string, id uuid.UUID) error {
+	res := r.writeScoped(ctx, sc, roles).Where("class_sessions.id = ?", id).Delete(&Session{})
 	if res.Error != nil {
 		return res.Error
 	}
@@ -191,8 +271,8 @@ func (r *gormRepository) ReassignPlanned(ctx context.Context, sc authctx.Scope, 
 	return res.RowsAffected, nil
 }
 
-func (r *gormRepository) MarkHeldAndConfirmed(ctx context.Context, sc authctx.Scope, id uuid.UUID, at time.Time) error {
-	res := r.scoped(ctx, sc).
+func (r *gormRepository) MarkHeldAndConfirmed(ctx context.Context, sc authctx.Scope, roles []string, id uuid.UUID, at time.Time) error {
+	res := r.writeScoped(ctx, sc, roles).
 		Model(&Session{}).
 		Where("class_sessions.id = ?", id).
 		Updates(map[string]any{"status": StatusHeld, "attendance_confirmed_at": at})

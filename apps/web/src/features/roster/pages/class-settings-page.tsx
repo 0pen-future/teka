@@ -8,10 +8,12 @@ import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field
 import { Input } from "@/components/ui/input";
 import { useSessionsList } from "@/features/attendance";
 import { useCenter, type CenterMember } from "@/features/center";
+import { useCenterContext } from "@/features/teaching";
 import { ApiError } from "@/lib/api/errors";
 import { formatMoney } from "@/lib/utils";
 import { useApiFormErrors } from "@/lib/forms/use-api-form-errors";
 
+import { ClassStaffSection } from "../components/class-staff-section";
 import { MoneyInput } from "../components/money-input";
 import { ScheduleSlotsEditor } from "../components/schedule-slots-editor";
 import {
@@ -23,6 +25,7 @@ import {
   useUpdateSchedule,
 } from "../hooks/use-classes";
 import { useEnrollmentsList } from "../hooks/use-enrollments";
+import { canWriteClass } from "../lib/class-permissions";
 import { currentMonth } from "../lib/current-month";
 import {
   deriveScheduleSlots,
@@ -62,6 +65,7 @@ export function ClassSettingsPage() {
   const navigate = useNavigate();
   const { data: klass, isPending } = useClass(id);
   const { data: center } = useCenter();
+  const { isOwner } = useCenterContext();
   const { data: enrollmentsPage } = useEnrollmentsList({ class_id: id, per_page: 100 });
   const month = currentMonth();
   const { data: sessions } = useSessionsList(id, { from: month.from, to: month.to });
@@ -97,6 +101,7 @@ export function ClassSettingsPage() {
     return <p className="text-[13px] text-ink-400">Không tìm thấy lớp.</p>;
   }
 
+  const canWrite = canWriteClass(isOwner, klass);
   const backTo = `/students?class_id=${klass.id}`;
   const activeStudents = (enrollmentsPage?.items ?? []).filter(
     (enrollment) => !enrollment.ended_on,
@@ -244,18 +249,25 @@ export function ClassSettingsPage() {
                 chốt và đã gửi không thay đổi.
               </p>
             ) : null}
+            {!canWrite ? (
+              <p className="text-[13px] text-ink-400">
+                Chỉ giáo viên phụ trách hoặc chủ trung tâm mới sửa được cài đặt lớp.
+              </p>
+            ) : null}
             <FieldError errors={[errors.root]} />
           </FieldGroup>
           <div className="mt-5 flex items-center justify-end gap-2">
             <HvButton type="button" variant="ghost" onClick={() => void navigate(backTo)}>
               Hủy
             </HvButton>
-            <HvButton type="submit" disabled={saving}>
+            <HvButton type="submit" disabled={saving || !canWrite}>
               {saving ? "Đang lưu…" : "Lưu thay đổi"}
             </HvButton>
           </div>
         </form>
       </HvCard>
+
+      <ClassStaffSection classId={klass.id} />
 
       {/* Owner-only: `GET /centers/me` carries `members` only in the owner body,
           so the narrowing doubles as the role gate. The API's own owner check
@@ -303,7 +315,7 @@ function TeacherHandoffCard({ klass, members }: { klass: Class; members: CenterM
   }
 
   return (
-    <HvCard className="max-w-[640px]">
+    <HvCard id="teacher-handoff" className="max-w-[640px]">
       <p className="font-display text-[16px] font-bold text-ink-900">Giáo viên phụ trách</p>
       <p className="mt-0.5 text-[13px] text-ink-400">
         Giáo viên hiện tại:{" "}

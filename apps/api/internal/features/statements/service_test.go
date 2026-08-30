@@ -30,6 +30,24 @@ func (noopTx) WithinTx(ctx context.Context, fn func(ctx context.Context) error) 
 type statementKey struct {
 	contactID uuid.UUID
 	periodID  uuid.UUID
+	// classID is uuid.Nil for a family statement — mirroring how the two
+	// partial unique indexes keep family rows and class copies from ever
+	// conflicting with each other.
+	classID uuid.UUID
+}
+
+// classPeriodKey addresses the class-scoped fixtures (targets, totals,
+// lines) the class copy queries are keyed by.
+type classPeriodKey struct {
+	periodID uuid.UUID
+	classID  uuid.UUID
+}
+
+// classAccessEntry is one class's existence + the caller's stint standing on
+// it, as ClassSendAccess reports them.
+type classAccessEntry struct {
+	sendable bool
+	readable bool
 }
 
 // fakeRepository is an in-memory Repository enforcing the same upsert
@@ -49,6 +67,11 @@ type fakeRepository struct {
 	liveSessions       map[statementKey][]LiveSessionRow
 	adjustments        map[statementKey][]AdjustmentRow
 	viewTouches        int
+
+	classAccess            map[uuid.UUID]classAccessEntry
+	classTargets           map[classPeriodKey][]TargetContact
+	classTotals            map[classPeriodKey]map[uuid.UUID]int64
+	classPeriodInvoiceRows map[classPeriodKey][]InvoiceLineRow
 }
 
 func newFakeRepository() *fakeRepository {
@@ -63,6 +86,11 @@ func newFakeRepository() *fakeRepository {
 		periodInvoiceLines: map[uuid.UUID][]InvoiceLineRow{},
 		liveSessions:       map[statementKey][]LiveSessionRow{},
 		adjustments:        map[statementKey][]AdjustmentRow{},
+
+		classAccess:            map[uuid.UUID]classAccessEntry{},
+		classTargets:           map[classPeriodKey][]TargetContact{},
+		classTotals:            map[classPeriodKey]map[uuid.UUID]int64{},
+		classPeriodInvoiceRows: map[classPeriodKey][]InvoiceLineRow{},
 	}
 }
 
@@ -95,8 +123,32 @@ func (f *fakeRepository) GetPeriodStatusRead(_ context.Context, sc authctx.Scope
 	return info, nil
 }
 
-func (f *fakeRepository) TargetContacts(_ context.Context, _ authctx.Scope, periodID uuid.UUID) ([]TargetContact, error) {
+func (f *fakeRepository) GetPeriodStatusCenter(_ context.Context, _ authctx.Scope, periodID uuid.UUID) (PeriodInfo, error) {
+	info, ok := f.periods[periodID]
+	if !ok {
+		return PeriodInfo{}, ErrPeriodNotFound
+	}
+	return info, nil
+}
+
+func (f *fakeRepository) ClassSendAccess(_ context.Context, _ authctx.Scope, classID uuid.UUID, _ []string) (bool, bool, error) {
+	entry, ok := f.classAccess[classID]
+	if !ok {
+		return false, false, ErrClassNotFound
+	}
+	return entry.sendable, entry.readable, nil
+}
+
+func (f *fakeRepository) TargetContacts(_ context.Context, _, _ authctx.Scope, periodID uuid.UUID) ([]TargetContact, error) {
 	return f.targets[periodID], nil
+}
+
+func (f *fakeRepository) TargetContactsClass(_ context.Context, _, _ authctx.Scope, periodID, classID uuid.UUID) ([]TargetContact, error) {
+	return f.classTargets[classPeriodKey{periodID: periodID, classID: classID}], nil
+}
+
+func (f *fakeRepository) ContactClassTotals(_ context.Context, _ authctx.Scope, periodID, classID uuid.UUID) (map[uuid.UUID]int64, error) {
+	return f.classTotals[classPeriodKey{periodID: periodID, classID: classID}], nil
 }
 
 func (f *fakeRepository) ContactTotals(_ context.Context, _ authctx.Scope, periodID uuid.UUID) (map[uuid.UUID]int64, error) {
@@ -107,6 +159,9 @@ func (f *fakeRepository) UpsertStatement(_ context.Context, sc authctx.Scope, st
 	stmt.TeacherID = sc.TeacherID
 	stmt.CenterID = sc.CenterID
 	key := statementKey{contactID: stmt.ContactID, periodID: stmt.PeriodID}
+	if stmt.ClassID != nil {
+		key.classID = *stmt.ClassID
+	}
 
 	existing, ok := f.byKey[key]
 	if !ok {
@@ -129,7 +184,17 @@ func (f *fakeRepository) UpsertStatement(_ context.Context, sc authctx.Scope, st
 func (f *fakeRepository) ListByPeriod(_ context.Context, sc authctx.Scope, periodID uuid.UUID, _ pagination.Params) ([]Row, int64, error) {
 	var out []Row
 	for _, s := range f.byID {
-		if (sc.IsOwner || s.TeacherID == sc.TeacherID) && s.PeriodID == periodID {
+		if (sc.IsOwner || s.TeacherID == sc.TeacherID) && s.PeriodID == periodID && s.ClassID == nil {
+			out = append(out, Row{Statement: *s})
+		}
+	}
+	return out, int64(len(out)), nil
+}
+
+func (f *fakeRepository) ListByPeriodClass(_ context.Context, _ authctx.Scope, periodID, classID uuid.UUID, _ pagination.Params) ([]Row, int64, error) {
+	var out []Row
+	for _, s := range f.byID {
+		if s.PeriodID == periodID && s.ClassID != nil && *s.ClassID == classID {
 			out = append(out, Row{Statement: *s})
 		}
 	}
@@ -172,6 +237,10 @@ func (f *fakeRepository) InvoicesWithLines(_ context.Context, _ authctx.Scope, c
 
 func (f *fakeRepository) PeriodInvoiceLines(_ context.Context, _ authctx.Scope, periodID uuid.UUID) ([]InvoiceLineRow, error) {
 	return f.periodInvoiceLines[periodID], nil
+}
+
+func (f *fakeRepository) PeriodClassInvoiceLines(_ context.Context, _ authctx.Scope, periodID, classID uuid.UUID) ([]InvoiceLineRow, error) {
+	return f.classPeriodInvoiceRows[classPeriodKey{periodID: periodID, classID: classID}], nil
 }
 
 func (f *fakeRepository) LiveSessions(_ context.Context, _ authctx.Scope, contactID, periodID uuid.UUID) ([]LiveSessionRow, error) {
@@ -403,10 +472,32 @@ func TestToResponseRecomputesURLFromToken(t *testing.T) {
 	svc := NewService(newFakeRepository(), noopTx{}, cfg, testBankConfig(), NewQRBuilder())
 	row := Row{Statement: Statement{ID: id.New(), TotalDue: 500_000}}
 
-	resp := svc.ToResponse(row)
+	resp := svc.ToResponse(authctx.Scope{IsOwner: true}, row)
 
-	want := cfg.PublicBaseURL + "/s/" + deriveToken(cfg.TokenKey, row.ID)
-	if resp.URL != want {
-		t.Fatalf("url = %q, want %q", resp.URL, want)
+	want := cfg.PublicBaseURL + "/s/" + deriveToken(cfg.TokenKey, row.ID, row.ClassID)
+	if resp.URL == nil || *resp.URL != want {
+		t.Fatalf("url = %v, want %q", resp.URL, want)
+	}
+}
+
+func TestToResponseWithholdsURLAndPhoneBelowOversight(t *testing.T) {
+	cfg := testConfig()
+	svc := NewService(newFakeRepository(), noopTx{}, cfg, testBankConfig(), NewQRBuilder())
+	row := Row{Statement: Statement{ID: id.New(), TotalDue: 500_000}, ContactPhone: "+84900000000"}
+
+	resp := svc.ToResponse(authctx.Scope{}, row)
+	if resp.URL != nil {
+		t.Fatalf("a non-oversight caller must never receive the family URL, got %q", *resp.URL)
+	}
+	if resp.Phone != nil {
+		t.Fatalf("a non-oversight caller without a row grant must not see the phone, got %q", *resp.Phone)
+	}
+
+	granted := svc.ToResponse(authctx.Scope{}, Row{Statement: row.Statement, ContactPhone: "+84900000000", PhoneVisible: true})
+	if granted.Phone == nil || *granted.Phone != "+84900000000" {
+		t.Fatalf("a row-granted caller must see the phone, got %v", granted.Phone)
+	}
+	if granted.URL != nil {
+		t.Fatal("a row grant unlocks the phone, never the family URL")
 	}
 }

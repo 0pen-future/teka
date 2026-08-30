@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   classDialogInputSchema,
+  classSchema,
   classSettingsInputSchema,
   toClassCreateInput,
   type ClassDialogInput,
@@ -45,6 +46,34 @@ describe("toClassCreateInput", () => {
     expect(input.schedules).toEqual([
       { weekday: 1, start_time: "18:00", duration_min: 90, effective_from: "2026-08-05" },
     ]);
+  });
+});
+
+describe("classSchema", () => {
+  function classResponse() {
+    return {
+      id: "70000000-0000-4000-8000-000000000001",
+      name: "Toán 6A",
+      teacher_id: "73000000-0000-4000-8000-000000000001",
+      start_date: "2026-01-05",
+      end_date: null,
+      default_unit_price: 150_000,
+      status: "active",
+      schedules: [],
+      created_at: "2026-01-01T08:00:00Z",
+    };
+  }
+
+  it("defaults my_staff_roles to [] when the response omits it", () => {
+    const result = classSchema.safeParse(classResponse());
+    expect(result.success).toBe(true);
+    expect(result.data?.my_staff_roles).toEqual([]);
+  });
+
+  it("keeps the response's my_staff_roles when present", () => {
+    const result = classSchema.safeParse({ ...classResponse(), my_staff_roles: ["giao_vien"] });
+    expect(result.success).toBe(true);
+    expect(result.data?.my_staff_roles).toEqual(["giao_vien"]);
   });
 });
 

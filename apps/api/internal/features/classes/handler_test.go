@@ -38,7 +38,7 @@ func newClassesHTTPTest(t *testing.T) (*gin.Engine, *fakeRepository) {
 	repo := newFakeRepository()
 	r := gin.New()
 	jwtCfg := config.JWTConfig{Secret: handlerTestSecret, AccessTTL: 15 * time.Minute}
-	RegisterRoutes(r.Group("/api/v1"), NewHandler(NewService(repo, noopTx{})),
+	RegisterRoutes(r.Group("/api/v1"), NewHandler(NewService(repo, noopTx{}, noopStaffSeeder{})),
 		middleware.RequireAuth(jwtCfg), middleware.ResolveScope(fakeScopeResolver{}))
 	return r, repo
 }

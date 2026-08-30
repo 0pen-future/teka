@@ -4,6 +4,7 @@ import { Link, useParams, useSearchParams } from "react-router";
 import { HvBadge, HvButton, HvCard, hvToast, type HvBadgeVariant } from "@/components/hv";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { useZaloStatus } from "@/features/profile";
+import { canSendClassReports, useClass } from "@/features/roster";
 import { useCenterContext } from "@/features/teaching";
 import { ApiError } from "@/lib/api/errors";
 import { copyToClipboard, cn, formatDateTime } from "@/lib/utils";
@@ -37,6 +38,21 @@ const generateLabel: Record<Purpose, string> = {
 // wire-level discriminator is the server's fixed message text. Keep the
 // coupled substring in one visible place.
 const EXPIRED_SESSION_409 = "session has expired";
+
+/**
+ * The server's overlap warning (the OTHER statement dimension — family vs
+ * class copy — already sent this period) arrives as fixed English text; the
+ * substring is the only wire discriminator, mirrored from the API messages.
+ */
+function overlapMessage(warning: string | undefined): string | null {
+  if (!warning) {
+    return null;
+  }
+  if (warning.includes("family statements")) {
+    return "Kỳ này đã gửi báo cáo học phí cho cả nhà — phụ huynh lớp này có thể nhận hai bản.";
+  }
+  return "Kỳ này đã có lớp gửi bản báo cáo riêng — một số phụ huynh có thể nhận hai bản.";
+}
 
 const ledgerStatusMeta: Record<
   NotificationRow["status"],
@@ -89,6 +105,11 @@ export function NotificationsPage() {
   const { periodId } = useParams<{ periodId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const purpose = (searchParams.get("purpose") as Purpose | null) ?? "statements";
+  // Class mode: the send switches onto the class dimension — that class's
+  // statement copies instead of the family statements — and the send right
+  // comes from the caller's hoc_vu stint on the class, not the center-wide
+  // send permission. The tab switcher preserves the param.
+  const classId = searchParams.get("class_id") ?? undefined;
 
   const [rows, setRows] = useState<BulkSendRow[] | null>(null);
   const [channel, setChannel] = useState<SendChannel>("zalo_manual");
@@ -96,21 +117,26 @@ export function NotificationsPage() {
   const [manualConfirmOpen, setManualConfirmOpen] = useState(false);
   const [dismissedRunId, setDismissedRunId] = useState<string | null>(null);
 
+  const bulkSend = useBulkSendNotifications(periodId ?? "", classId);
+
   // Reset `rows` when the period or purpose changes, following React's
   // "adjusting state when a prop changes" pattern: comparing during render
   // and calling setState there avoids the extra commit an effect would cost.
-  const scopeKey = `${periodId}:${purpose}`;
+  // The bulk-send mutation resets alongside: its success/error state belongs
+  // to the previous scope's generate, and left alone it would leak that
+  // scope's result banner into the fresh tab.
+  const scopeKey = `${periodId}:${purpose}:${classId ?? ""}`;
   const [rowsScopeKey, setRowsScopeKey] = useState(scopeKey);
   if (scopeKey !== rowsScopeKey) {
     setRowsScopeKey(scopeKey);
     setRows(null);
+    bulkSend.reset();
   }
 
   const { data: ledger, isPending: ledgerPending } = useNotificationsList(periodId, { purpose });
-  const bulkSend = useBulkSendNotifications(periodId ?? "");
   const markSent = useMarkNotificationsSent(periodId ?? "");
-  const run = useNotificationRun(periodId);
-  const resumeRun = useResumeNotificationRun(periodId ?? "");
+  const run = useNotificationRun(periodId, classId);
+  const resumeRun = useResumeNotificationRun(periodId ?? "", classId);
 
   const { data: zalo, isError: zaloStatusError } = useZaloStatus();
   const personalReady = zalo?.linked === true && zalo.status === "linked";
@@ -127,14 +153,24 @@ export function NotificationsPage() {
 
   // Send-affordance gating (D8): only reports oversight (owner or
   // can_send_reports holder) may create sends; a plain member keeps this
-  // page read-only over the ledger. UX-only — the server is the authority.
+  // page read-only over the ledger. In class mode a hoc_vu stint on the
+  // class opens the send instead. UX-only — the server is the authority.
   const { canRunSends, isResolved } = useCenterContext();
+  const classQuery = useClass(classId);
+  const klass = classQuery.data;
+  const canSend = classId
+    ? canSendClassReports(canRunSends, klass ?? { my_staff_roles: [] })
+    : canRunSends;
+  // In class mode the stint check needs the class row, so the read-only
+  // branch must also wait for it — otherwise the send UI flashes away from a
+  // hoc_vu while the class loads.
+  const accessResolved = isResolved && (!classId || !classQuery.isPending);
 
   // The confirm dialog's auto/manual split comes from the server's pre-send
   // preview — the full target set intersected with the caller's live Zalo
   // friend list — fetched only while the dialog is open (each fetch is a live
-  // friend-list call, and the endpoint 403s for plain members).
-  const preview = useSendPreview(periodId, purpose, confirmOpen && canRunSends);
+  // friend-list call, and the endpoint 403s callers without send access).
+  const preview = useSendPreview(periodId, purpose, confirmOpen && canSend, classId);
   const autoCount = preview.data?.auto_send.length ?? 0;
   const notFriendCount = preview.data?.mapped_not_friend.length ?? 0;
   const unmappedCount = preview.data?.unmapped.length ?? 0;
@@ -260,7 +296,9 @@ export function NotificationsPage() {
 
   const header = (
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <h1 className="font-display text-[22px] font-bold text-ink-900">Gửi thông báo</h1>
+      <h1 className="font-display text-[22px] font-bold text-ink-900">
+        {classId ? `Gửi thông báo — lớp ${klass?.name ?? "…"}` : "Gửi thông báo"}
+      </h1>
       <div className="inline-flex rounded-[var(--radius-pill)] border border-line-200 bg-white p-1">
         {purposeOptions.map((option) => (
           <button
@@ -289,9 +327,10 @@ export function NotificationsPage() {
 
   // D8: a plain member keeps this page as a read-only ledger — what was sent
   // for their period, by whom-ever held the send right — with every send
-  // affordance gone. Gated on `isResolved` so the send UI never flashes for a
-  // member while `/centers/me` loads (the server 403s them regardless).
-  if (isResolved && !canRunSends) {
+  // affordance gone. Gated on `accessResolved` so the send UI never flashes
+  // for a member while `/centers/me` (and, in class mode, the class row)
+  // loads (the server 403s them regardless).
+  if (accessResolved && !canSend) {
     return (
       <div className="flex flex-col gap-4">
         {header}
@@ -316,9 +355,17 @@ export function NotificationsPage() {
     );
   }
 
+  const sentOverlap = overlapMessage(bulkSend.data?.overlap_warning);
+
   return (
     <div className="flex flex-col gap-4">
       {header}
+
+      {sentOverlap ? (
+        <HvCard variant="flat" className="text-[13px] font-bold text-coral-600">
+          {sentOverlap}
+        </HvCard>
+      ) : null}
 
       <HvCard variant="flat" className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -463,6 +510,11 @@ export function NotificationsPage() {
               {overRunCap ? (
                 <span className="font-bold text-coral-600">
                   Vượt giới hạn {maxRunSize} tin tự động mỗi lượt — hãy gửi thành các đợt nhỏ hơn.
+                </span>
+              ) : null}
+              {overlapMessage(preview.data?.overlap_warning) ? (
+                <span className="font-bold text-coral-600">
+                  {overlapMessage(preview.data?.overlap_warning)}
                 </span>
               ) : null}
             </span>

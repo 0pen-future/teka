@@ -15,6 +15,8 @@ import (
 	"github.com/google/uuid"
 
 	"teka/apps/api/internal/features/zalo/protocol"
+	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/secrets"
 )
 
@@ -475,6 +477,63 @@ func (s *Service) MatchFriends(ctx context.Context, teacherID uuid.UUID, phones 
 		"teacher_id", teacherID,
 		"phones", len(phones), "looked_up", len(lookup), "chunks", chunks,
 		"found", len(found), "duration", time.Since(start))
+	return rows, nil
+}
+
+// MatchFriendsScoped is MatchFriends behind the phone-privacy gate. Matching
+// sends phones to Zalo, a third party, so it follows the one phone rule:
+// owner/oversight match anything; an active hoc_vu matches only the contacts
+// their stints already make phone-visible — anything else is answered
+// matched=false locally, without the phone ever leaving this system; everyone
+// else is refused outright. Phones are compared in normalizePhone's local 0…
+// form, since contacts store the +84… storage form while requests usually
+// carry the local one.
+func (s *Service) MatchFriendsScoped(ctx context.Context, sc authctx.Scope, phones []string) ([]FriendMatch, error) {
+	if sc.ReportsOversight() {
+		return s.MatchFriends(ctx, sc.TeacherID, phones)
+	}
+	hocVu, err := s.repo.HasActiveHocVu(ctx, sc.TeacherID, sc.CenterID)
+	if err != nil {
+		return nil, err
+	}
+	if !hocVu {
+		return nil, apperror.Forbidden("matching phones requires reports oversight or an active hoc_vu assignment")
+	}
+
+	reachable, err := s.repo.ReachableContactPhones(ctx, sc.TeacherID, sc.CenterID)
+	if err != nil {
+		return nil, err
+	}
+	inReach := make(map[string]struct{}, len(reachable))
+	for _, p := range reachable {
+		inReach[normalizePhone(p)] = struct{}{}
+	}
+
+	// Forward the raw phones (MatchFriends normalizes and echoes them itself)
+	// so merged rows keep the exact request form on every path.
+	forward := make([]string, 0, len(phones))
+	forwarded := make([]bool, len(phones))
+	for i, p := range phones {
+		if _, ok := inReach[normalizePhone(p)]; ok {
+			forwarded[i] = true
+			forward = append(forward, p)
+		}
+	}
+	matched, err := s.MatchFriends(ctx, sc.TeacherID, forward)
+	if err != nil {
+		return nil, err
+	}
+
+	rows := make([]FriendMatch, len(phones))
+	next := 0
+	for i, p := range phones {
+		if forwarded[i] {
+			rows[i] = matched[next]
+			next++
+			continue
+		}
+		rows[i] = FriendMatch{Phone: p}
+	}
 	return rows, nil
 }
 

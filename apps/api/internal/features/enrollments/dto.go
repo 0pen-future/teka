@@ -43,6 +43,14 @@ type EnrollmentResponse struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+// PickerStudent is one row of the enrollable-student picker: deliberately
+// names only. The picker serves teachers who may not see contact data, so the
+// shape itself guarantees no phone or contact id can leak through it.
+type PickerStudent struct {
+	ID       uuid.UUID `json:"id"`
+	FullName string    `json:"full_name"`
+}
+
 // FromRow maps a joined enrollment row onto the response DTO.
 func FromRow(row *Row) EnrollmentResponse {
 	return EnrollmentResponse{

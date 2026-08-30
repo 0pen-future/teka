@@ -1,4 +1,5 @@
-// Public surface of the reports feature. The app router imports ONLY from
-// here to mount the send-reports period list; nothing else in the app needs
-// to depend on this feature.
+// Public surface of the reports feature. The app router mounts the
+// send-reports period list from here, and the roster screen mounts the
+// class-scoped send's period picker.
 export { reportsRoutes } from "./routes";
+export { ClassSendPeriodsDialog } from "./components/class-send-periods-dialog";

@@ -70,9 +70,10 @@ export async function listNotifications(
 export async function getSendPreview(
   periodId: string,
   purpose: "statements" | "reminder",
+  classId?: string,
 ): Promise<SendPreview> {
   const res = await apiClient.get<unknown>(`/billing-periods/${periodId}/notifications/preview`, {
-    params: { purpose },
+    params: { purpose, ...(classId ? { class_id: classId } : {}) },
   });
   return parseData(sendPreviewSchema, res.data);
 }
@@ -87,8 +88,10 @@ export async function markNotificationsSent(input: MarkSentInput): Promise<void>
  * `zalo_personal` run with progress counters. A period without any run
  * answers `active: false`, not a 404.
  */
-export async function getNotificationRun(periodId: string): Promise<RunSnapshot> {
-  const res = await apiClient.get<unknown>(`/billing-periods/${periodId}/notifications/run`);
+export async function getNotificationRun(periodId: string, classId?: string): Promise<RunSnapshot> {
+  const res = await apiClient.get<unknown>(`/billing-periods/${periodId}/notifications/run`, {
+    params: classId ? { class_id: classId } : undefined,
+  });
   return parseData(runSnapshotSchema, res.data);
 }
 
@@ -97,9 +100,14 @@ export async function getNotificationRun(periodId: string): Promise<RunSnapshot>
  * period's interrupted run over its still-queued rows only. 409 when the run
  * is not interrupted, another run is sending, or the Zalo session expired.
  */
-export async function resumeNotificationRun(periodId: string): Promise<RunSnapshot> {
+export async function resumeNotificationRun(
+  periodId: string,
+  classId?: string,
+): Promise<RunSnapshot> {
   const res = await apiClient.post<unknown>(
     `/billing-periods/${periodId}/notifications/run/resume`,
+    undefined,
+    { params: classId ? { class_id: classId } : undefined },
   );
   return parseData(runSnapshotSchema, res.data);
 }

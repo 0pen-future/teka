@@ -103,6 +103,27 @@ func (s *Service) ListPeriods(ctx context.Context, sc authctx.Scope, p paginatio
 	return s.repo.ListPeriodsRead(ctx, sc, p)
 }
 
+// ListPeriodsClass lists the periods carrying the class's invoice lines —
+// how class staff discover WHICH period to send for, since the class's
+// charges may live under another teacher's period after a handoff. Any stint
+// on the class (ended or read-only included) opens the list, matching every
+// other class-data read; oversight passes without a stint; anyone else gets
+// the same neutral 404 a nonexistent class produces. Read-only discovery —
+// sending itself stays behind the statements class-send gate.
+func (s *Service) ListPeriodsClass(ctx context.Context, sc authctx.Scope, classID uuid.UUID, p pagination.Params) ([]PeriodWithTeacher, int64, error) {
+	readable, err := s.repo.ClassReadable(ctx, sc, classID)
+	if errors.Is(err, ErrClassNotFound) {
+		return nil, 0, apperror.NotFound("class")
+	}
+	if err != nil {
+		return nil, 0, apperror.Internal(err)
+	}
+	if !readable && !sc.ReportsOversight() {
+		return nil, 0, apperror.NotFound("class")
+	}
+	return s.repo.ListPeriodsClassRead(ctx, sc, classID, p)
+}
+
 // GetPeriod returns one billing period with its owning teacher, scoped like
 // ListPeriods.
 func (s *Service) GetPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*PeriodWithTeacher, error) {

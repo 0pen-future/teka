@@ -9,6 +9,7 @@ import {
   IdCardIcon,
   LogOutIcon,
   ShieldCheckIcon,
+  SlidersHorizontalIcon,
   type LucideProps,
 } from "lucide-react";
 import { createContext, useContext, useState, type ComponentType } from "react";
@@ -114,6 +115,16 @@ function useNavGroups(): NavGroup[] {
         ...(isResolved && isOwner
           ? [{ label: "Phân quyền vai trò", to: "/center/permissions", Icon: ShieldCheckIcon }]
           : []),
+        // Owner-only: the score-set CRUD and class assignment endpoints are owner-only.
+        ...(isResolved && isOwner
+          ? [
+              {
+                label: "Cấu hình lớp học",
+                to: "/center/class-config",
+                Icon: SlidersHorizontalIcon,
+              },
+            ]
+          : []),
         { label: "Cài đặt trung tâm", to: "/center", Icon: Building2Icon },
       ],
     },
@@ -137,6 +148,7 @@ const OVERFLOW_LABELS = new Set([
   "Nhập từ Excel",
   "Nhật ký hoạt động",
   "Phân quyền vai trò",
+  "Cấu hình lớp học",
   "Cài đặt trung tâm",
 ]);
 

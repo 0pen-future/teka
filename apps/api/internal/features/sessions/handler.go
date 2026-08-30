@@ -159,7 +159,7 @@ func (h *Handler) listRange(c *gin.Context) {
 		return
 	}
 
-	rows, err := h.svc.ListRange(c.Request.Context(), sc, classID, from, to)
+	rows, err := h.svc.ListRangeReadable(c.Request.Context(), sc, classID, from, to)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -229,7 +229,7 @@ func (h *Handler) get(c *gin.Context) {
 	if !ok {
 		return
 	}
-	row, err := h.svc.Get(c.Request.Context(), sc, sessionID)
+	row, err := h.svc.GetReadable(c.Request.Context(), sc, sessionID)
 	if err != nil {
 		response.Err(c, err)
 		return

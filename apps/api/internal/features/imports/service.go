@@ -25,9 +25,12 @@ const maxReportedErrors = 100
 // (consumer-defined interface; implemented by *centers.Service). Resolving a
 // teacher phone through a directory derived from the caller's own scope is
 // what keeps the import inside one center — there is deliberately no
-// by-id or global-phone lookup on this interface.
+// by-id or global-phone lookup on this interface. CenterOwner resolves the
+// caller's center owner, the anchor every imported contact and student is
+// written under regardless of who runs the import.
 type MemberDirectory interface {
 	MemberIDsByPhone(ctx context.Context, scope authctx.Scope) (map[string]uuid.UUID, error)
+	CenterOwner(ctx context.Context, teacherID uuid.UUID) (ownerID uuid.UUID, isOwner bool, err error)
 }
 
 // The four interfaces below are the slices of the roster features this one
@@ -138,7 +141,21 @@ func (s *Service) Import(ctx context.Context, scope authctx.Scope, file []byte, 
 		return nil, err
 	}
 
-	plan, resolveErrs := resolve(wb, dir, scope.TeacherID)
+	// Contacts and students are center data anchored on the owner, so the
+	// import resolves the owner up front and writes them under a server-side
+	// owner scope — a granted member's run produces exactly the rows the
+	// owner's would. IsOwner true is what lets those writes through the
+	// owner-only service gates and widens their dedupe lookups center-wide.
+	ownerID := scope.TeacherID
+	if !scope.IsOwner {
+		ownerID, _, err = s.members.CenterOwner(ctx, scope.TeacherID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	ownerAnchor := authctx.Scope{TeacherID: ownerID, CenterID: scope.CenterID, IsOwner: true}
+
+	plan, resolveErrs := resolve(wb, dir, ownerID)
 	rowErrs = append(rowErrs, resolveErrs...)
 	if len(rowErrs) > 0 {
 		return nil, rowErrorsErr(rowErrs)
@@ -169,7 +186,7 @@ func (s *Service) Import(ctx context.Context, scope authctx.Scope, file []byte, 
 		if err := s.locker.SetStatementTimeout(ctx); err != nil {
 			return err
 		}
-		applyErrs, err := s.apply(ctx, scope, plan, dryRun, rep)
+		applyErrs, err := s.apply(ctx, ownerAnchor, plan, dryRun, rep)
 		if err != nil {
 			return err
 		}

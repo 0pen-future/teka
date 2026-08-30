@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
 import { HvBadge, HvButton, HvCard } from "@/components/hv";
+import { useCenterContext } from "@/features/teaching";
 import { formatMoney, formatPhoneLocal } from "@/lib/utils";
 
 import { AnonymizeStudentDialog } from "../components/anonymize-student-dialog";
@@ -23,6 +24,9 @@ export function StudentDetailPage() {
   const [anonymizeOpen, setAnonymizeOpen] = useState(false);
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [ending, setEnding] = useState<Enrollment | undefined>(undefined);
+  // Student records are owner-managed center data; members may enroll but
+  // never edit or delete the record, so those controls are hidden.
+  const { isOwner } = useCenterContext();
 
   if (isPending) {
     return <p className="text-[13px] text-ink-400">Đang tải…</p>;
@@ -46,22 +50,28 @@ export function StudentDetailPage() {
           >
             {student.contact_name}
           </Link>
-          {" · "}
-          <a
-            href={`tel:${student.contact_phone}`}
-            className="text-[14px] font-bold text-mint-600 underline-offset-4 hover:underline"
-          >
-            {formatPhoneLocal(student.contact_phone)}
-          </a>
+          {student.contact_phone ? (
+            <>
+              {" · "}
+              <a
+                href={`tel:${student.contact_phone}`}
+                className="text-[14px] font-bold text-mint-600 underline-offset-4 hover:underline"
+              >
+                {formatPhoneLocal(student.contact_phone)}
+              </a>
+            </>
+          ) : null}
         </div>
-        <div className="flex gap-2">
-          <HvButton variant="ghost" size="sm" onClick={() => setEditOpen(true)}>
-            Sửa
-          </HvButton>
-          <HvButton variant="danger" size="sm" onClick={() => setAnonymizeOpen(true)}>
-            Xoá
-          </HvButton>
-        </div>
+        {isOwner ? (
+          <div className="flex gap-2">
+            <HvButton variant="ghost" size="sm" onClick={() => setEditOpen(true)}>
+              Sửa
+            </HvButton>
+            <HvButton variant="danger" size="sm" onClick={() => setAnonymizeOpen(true)}>
+              Xoá
+            </HvButton>
+          </div>
+        ) : null}
       </HvCard>
 
       <div className="flex items-center justify-between">

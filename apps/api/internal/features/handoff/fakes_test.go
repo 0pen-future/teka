@@ -68,6 +68,18 @@ func (f *fakeMembers) IsActiveMember(_ context.Context, _ authctx.Scope, teacher
 	return f.active, f.err
 }
 
+// fakeStaff records every giao_vien sync so a test can assert the dual write
+// runs on both the full handoff and the no-op repair path.
+type fakeStaff struct {
+	synced []reassignCall
+	err    error
+}
+
+func (f *fakeStaff) SyncPrimaryTeacher(_ context.Context, classID, _, teacherID uuid.UUID) error {
+	f.synced = append(f.synced, reassignCall{classID, teacherID})
+	return f.err
+}
+
 // fakeLocker answers TryLockCenter with whatever the test set and records the
 // centers it was keyed on.
 type fakeLocker struct {
@@ -102,6 +114,7 @@ type handoffFixture struct {
 	classes    *fakeClasses
 	sessions   *fakeSessions
 	members    *fakeMembers
+	staff      *fakeStaff
 	locker     *fakeLocker
 	scope      authctx.Scope
 	classID    uuid.UUID
@@ -117,13 +130,15 @@ func newHandoffFixture() *handoffFixture {
 	fc := &fakeClasses{class: &classes.Class{ID: classID, TeacherID: oldTeacher, CenterID: centerID}}
 	fs := &fakeSessions{moved: 3}
 	fm := &fakeMembers{active: true}
+	fst := &fakeStaff{}
 	fl := &fakeLocker{locked: true}
-	svc := NewService(fc, fs, fm, fl, rollbackTxManager{})
+	svc := NewService(fc, fs, fm, fst, fl, rollbackTxManager{})
 	return &handoffFixture{
 		svc:        svc,
 		classes:    fc,
 		sessions:   fs,
 		members:    fm,
+		staff:      fst,
 		locker:     fl,
 		scope:      authctx.Scope{TeacherID: oldTeacher, CenterID: centerID, IsOwner: true},
 		classID:    classID,

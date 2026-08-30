@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"teka/apps/api/internal/shared/authctx"
 )
 
 // bulkSendPurposeValues accepts both the singular "statement" spelling and
@@ -27,10 +29,13 @@ func normalizePurpose(raw string) string {
 // BulkSendRequest is the POST .../notifications/bulk body. Purpose accepts
 // both "statement" and "statements" for the plural DB value — see
 // normalizePurpose. Channel is optional; an empty value falls back to
-// cfg.Notifications.DefaultChannel.
+// cfg.Notifications.DefaultChannel. ClassID switches the send onto the
+// class-scoped dimension: class statement copies for one class's active
+// enrollments instead of the period's family statements.
 type BulkSendRequest struct {
-	Purpose string `json:"purpose" binding:"required,oneof=statement statements reminder"`
-	Channel string `json:"channel" binding:"omitempty,oneof=zalo_manual zalo_zns sms zalo_personal"`
+	Purpose string     `json:"purpose" binding:"required,oneof=statement statements reminder"`
+	Channel string     `json:"channel" binding:"omitempty,oneof=zalo_manual zalo_zns sms zalo_personal"`
+	ClassID *uuid.UUID `json:"class_id"`
 }
 
 // BulkSendRow is one contact's queued notification, with everything a
@@ -71,6 +76,11 @@ type BulkSendResponse struct {
 	// zalo_personal run delivers itself are excluded.
 	BulkText string        `json:"bulk_text"`
 	Rows     []BulkSendRow `json:"rows"`
+	// OverlapWarning is set when the other statement dimension already sent
+	// this period — a family send after a class copy went out, or a class send
+	// after a family one. Purely informational: parents may receive both, but
+	// nothing is blocked.
+	OverlapWarning *string `json:"overlap_warning,omitempty"`
 }
 
 // RunSnapshotResponse is the GET .../notifications/run body: the period's
@@ -100,10 +110,13 @@ type NotificationResponse struct {
 	ID          uuid.UUID `json:"id"`
 	ContactID   uuid.UUID `json:"contact_id"`
 	ContactName string    `json:"contact_name"`
-	Phone       string    `json:"phone"`
-	Channel     string    `json:"channel"`
-	Purpose     string    `json:"purpose"`
-	Status      string    `json:"status"`
+	// Phone is null unless the caller may see the contact's phone (owner,
+	// reports oversight, or an active hoc_vu stint over one of the contact's
+	// enrolled students).
+	Phone   *string `json:"phone"`
+	Channel string  `json:"channel"`
+	Purpose string  `json:"purpose"`
+	Status  string  `json:"status"`
 	// ErrorMessage is a failed row's teacher-facing reason — the ledger is
 	// the only place a teacher can learn why a row was not delivered.
 	ErrorMessage *string `json:"error_message,omitempty"`
@@ -137,15 +150,25 @@ type SendPreviewResponse struct {
 	// MaxRunSize is the server's cap on one run's auto-send count, so the
 	// client can warn about an oversized send before submitting it.
 	MaxRunSize int `json:"max_run_size"`
+	// OverlapWarning mirrors BulkSendResponse.OverlapWarning: the other
+	// statement dimension already sent this period, so a send now may reach
+	// parents twice. Informational only.
+	OverlapWarning *string `json:"overlap_warning,omitempty"`
 }
 
-// fromListRow maps a ledger row onto its wire DTO.
-func fromListRow(r ListRow) NotificationResponse {
+// fromListRow maps a ledger row onto its wire DTO, masking the phone by the
+// one phone rule: null unless sc is owner/oversight or the row carries the
+// caller's hoc_vu grant.
+func fromListRow(sc authctx.Scope, r ListRow) NotificationResponse {
+	var phone *string
+	if sc.PhoneVisible(r.PhoneVisible) {
+		phone = &r.Phone
+	}
 	return NotificationResponse{
 		ID:           r.ID,
 		ContactID:    r.ContactID,
 		ContactName:  r.ContactName,
-		Phone:        r.Phone,
+		Phone:        phone,
 		Channel:      r.Channel,
 		Purpose:      r.Purpose,
 		Status:       r.Status,

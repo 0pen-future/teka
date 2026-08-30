@@ -348,10 +348,22 @@ func (r *gormRepository) OpenMembership(ctx context.Context, teacherID, centerID
 	// even outside a caller transaction. The role subquery yields NULL for
 	// the center owner (owner_id check) and for centers without seeded roles
 	// (raw-SQL fixtures) — NULL role_id is defined as "no role permissions".
+	// staff_closed is the same defence-in-depth as cleared: class assignments
+	// belong to the previous stint, so a reopened membership must start with
+	// none active — CloseMembership already ends them, this catches stints a
+	// non-standard close path left behind. Active-ness is the write guard
+	// only: the ended rows persist, and any stint (ended included) still
+	// grants class READS, so a re-invited member resumes reading every class
+	// they were ever assigned to. That is deliberate — removal from a class
+	// keeps history readable — and revoking reads is the owner's explicit
+	// act: voiding the assignment (hard delete) instead of soft-closing it.
 	err := database.FromContext(ctx, r.db).Raw(`
 		WITH cleared AS (
 			DELETE FROM center_member_permissions
 			WHERE teacher_id = @tid AND center_id = @cid
+		), staff_closed AS (
+			UPDATE class_staff SET ended_at = now()
+			WHERE teacher_id = @tid AND center_id = @cid AND ended_at IS NULL
 		)
 		INSERT INTO center_members (teacher_id, center_id, role_id)
 		VALUES (@tid, @cid, (
@@ -376,10 +388,18 @@ func (r *gormRepository) CloseMembership(ctx context.Context, teacherID, centerI
 	// The override delete is unconditional on purpose — orphaned rows of an
 	// already-closed stint are equally dead — and the CTE keeps delete +
 	// close one atomic statement.
+	// Class-staff stints soft-close with the membership: like permissions they
+	// belong to the stint, but unlike permissions the rows stay (ended, so
+	// history reads survive — including across a later re-invite) rather than
+	// being deleted. An owner who means to revoke reads voids the assignment
+	// (hard delete) rather than removing the member.
 	res := database.FromContext(ctx, r.db).Exec(`
 		WITH cleared AS (
 			DELETE FROM center_member_permissions
 			WHERE teacher_id = @tid AND center_id = @cid
+		), staff_closed AS (
+			UPDATE class_staff SET ended_at = now()
+			WHERE teacher_id = @tid AND center_id = @cid AND ended_at IS NULL
 		)
 		UPDATE center_members SET left_at = now(), can_send_reports = FALSE
 		WHERE teacher_id = @tid AND center_id = @cid AND left_at IS NULL`,

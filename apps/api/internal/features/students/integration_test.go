@@ -202,11 +202,11 @@ func TestCrossCenterReadsAreNotFound(t *testing.T) {
 	require.Empty(t, rows)
 }
 
-// An owner sees, updates, and deletes a student created by a teacher who
-// joined their center — center-wide oversight, not per-teacher isolation.
-// Creating is stricter: a student is always stamped as the caller's own, so
-// the owner may only reference their own contacts; a member's contacts are
-// view-only for creation and refused with the same 422 a stranger's would be.
+// An owner sees, updates, and deletes a student still anchored to a member
+// (the pre-migration shape) — center-wide oversight, not per-teacher
+// isolation. Members themselves get an honest 403 on every write: student
+// CRUD is the owner's alone, and the owner creates under any of the center's
+// contacts, a member-anchored one included.
 func TestOwnerHasFullOversightOfMembersStudents(t *testing.T) {
 	t.Parallel()
 	svc, db := newIntegrationService(t)
@@ -221,37 +221,33 @@ func TestOwnerHasFullOversightOfMembersStudents(t *testing.T) {
 	require.Equal(t, ownerScope.CenterID, memberScope.CenterID, "member must have joined the owner's center")
 
 	memberContact := testutil.Contact(t, db, member.ID)
-	row, err := svc.Create(ctx, memberScope, students.CreateRequest{FullName: "Bé An", ContactID: memberContact.ID})
-	require.NoError(t, err)
+	row := testutil.Student(t, db, member.ID, memberContact.ID)
+
+	_, err := svc.Create(ctx, memberScope, students.CreateRequest{FullName: "Bé An", ContactID: memberContact.ID})
+	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code, "member create must be 403")
 
 	got, err := svc.Get(ctx, ownerScope, row.ID)
-	require.NoError(t, err, "owner must read a member's student")
+	require.NoError(t, err, "owner must read a member-anchored student")
 	require.Equal(t, row.ID, got.ID)
 
 	rows, total, err := svc.List(ctx, ownerScope, students.ListFilter{}, listParams(t))
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
-	require.Equal(t, row.ID, rows[0].ID, "owner's list must include the member's student")
+	require.Equal(t, row.ID, rows[0].ID, "owner's list must include the member-anchored student")
 
 	updated, err := svc.Update(ctx, ownerScope, row.ID, students.UpdateRequest{FullName: "Bé An (updated)", ContactID: memberContact.ID})
-	require.NoError(t, err, "owner must update a member's student")
+	require.NoError(t, err, "owner must update a member-anchored student")
 	require.Equal(t, "Bé An (updated)", updated.FullName)
 
-	require.NoError(t, svc.Delete(ctx, ownerScope, row.ID), "owner must delete a member's student")
+	// The owner creates under a member-anchored contact: contacts belong to
+	// the center now, and the row is stamped as the owner's own.
+	ownerRow, err := svc.Create(ctx, ownerScope, students.CreateRequest{FullName: "Bé Bình", ContactID: memberContact.ID})
+	require.NoError(t, err, "owner must create under any center contact")
+	require.Equal(t, owner.ID, ownerRow.TeacherID, "owner-created student must be stamped as the owner's own")
+
+	require.NoError(t, svc.Delete(ctx, ownerScope, row.ID), "owner must delete a member-anchored student")
 	_, err = svc.Get(ctx, ownerScope, row.ID)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
-
-	// Creating against a member's contact is refused: the row would carry the
-	// owner's anchor while the contact stays the member's.
-	_, err = svc.Create(ctx, ownerScope, students.CreateRequest{FullName: "Bé Bình", ContactID: memberContact.ID})
-	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code,
-		"owner must not create a student under a member's contact")
-
-	// An owner still creates rows against their own contacts, as themselves.
-	ownerContact := testutil.Contact(t, db, owner.ID)
-	ownerRow, err := svc.Create(ctx, ownerScope, students.CreateRequest{FullName: "Bé Bình", ContactID: ownerContact.ID})
-	require.NoError(t, err)
-	require.Equal(t, owner.ID, ownerRow.TeacherID, "owner-created student must be stamped as the owner's own")
 }
 
 // Two non-owning teachers in the same center are still isolated from each
@@ -267,14 +263,12 @@ func TestPeersInSameCenterCannotSeeEachOthersStudents(t *testing.T) {
 
 	testutil.JoinCenter(t, db, memberB.ID, ownerCenter)
 	testutil.JoinCenter(t, db, memberC.ID, ownerCenter)
-	scopeB := testutil.ScopeFor(t, db, memberB.ID)
 	scopeC := testutil.ScopeFor(t, db, memberC.ID)
 
 	contactB := testutil.Contact(t, db, memberB.ID)
-	row, err := svc.Create(ctx, scopeB, students.CreateRequest{FullName: "Bé An", ContactID: contactB.ID})
-	require.NoError(t, err)
+	row := testutil.Student(t, db, memberB.ID, contactB.ID)
 
-	_, err = svc.Get(ctx, scopeC, row.ID)
+	_, err := svc.Get(ctx, scopeC, row.ID)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code, "a peer must not read another member's student")
 
 	rows, total, err := svc.List(ctx, scopeC, students.ListFilter{}, listParams(t))
@@ -356,4 +350,80 @@ type sqlCounter struct {
 func (c *sqlCounter) Trace(ctx context.Context, begin time.Time, fc func() (string, int64), err error) {
 	c.n.Add(1)
 	c.Interface.Trace(ctx, begin, fc, err)
+}
+
+// A class handoff moves the class to a new teacher but leaves the student
+// rows with their creator. The new teacher must still read those students —
+// the roster tab lists them and their detail pages resolve — while editing
+// and deleting stay with the creator or the owner, and an unassigned peer
+// keeps seeing nothing.
+func TestHandedOffClassStudentsAreReadableByNewTeacher(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, db)
+	newTeacher, _ := testutil.Teacher(t, db)
+	peer, _ := testutil.Teacher(t, db)
+	ownerCenter := testutil.ScopeFor(t, db, owner.ID).CenterID
+
+	testutil.JoinCenter(t, db, newTeacher.ID, ownerCenter)
+	testutil.JoinCenter(t, db, peer.ID, ownerCenter)
+	ownerScope := testutil.ScopeFor(t, db, owner.ID)
+	newTeacherScope := testutil.ScopeFor(t, db, newTeacher.ID)
+	peerScope := testutil.ScopeFor(t, db, peer.ID)
+
+	// The owner built the class and its roster, then handed the class over.
+	contact := testutil.Contact(t, db, owner.ID)
+	class := testutil.Class(t, db, owner.ID)
+	student, err := svc.Create(ctx, ownerScope, students.CreateRequest{FullName: "Bé An", ContactID: contact.ID})
+	require.NoError(t, err)
+	insertEnrollment(t, db, ownerCenter, owner.ID, student.ID, class.ID)
+	// Simulate the handoff's dual write: classes.teacher_id moves AND the
+	// giao_vien stint follows (the previous one closes, the new teacher opens
+	// theirs) — the invariant assignment-scoped reads key on.
+	require.NoError(t, db.Exec(
+		"UPDATE classes SET teacher_id = ? WHERE id = ?", newTeacher.ID, class.ID).Error)
+	require.NoError(t, db.Exec(
+		"UPDATE class_staff SET ended_at = now() WHERE class_id = ? AND role_key = 'giao_vien' AND ended_at IS NULL",
+		class.ID).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO class_staff (class_id, center_id, teacher_id, role_key) VALUES (?, ?, ?, 'giao_vien')",
+		class.ID, ownerCenter, newTeacher.ID).Error)
+
+	rows, total, err := svc.List(ctx, newTeacherScope, students.ListFilter{ClassID: class.ID}, listParams(t))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total, "the new teacher must see the handed-off class's students")
+	require.Equal(t, student.ID, rows[0].ID)
+	require.Equal(t, contact.FullName, rows[0].ContactName, "rows carry the contact join")
+
+	_, total, err = svc.List(ctx, newTeacherScope, students.ListFilter{}, listParams(t))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total, "the unfiltered list must include the handed-off student")
+
+	got, err := svc.Get(ctx, newTeacherScope, student.ID)
+	require.NoError(t, err, "the new teacher must open the student's detail page")
+	require.Equal(t, student.ID, got.ID)
+
+	// Reads widened, writes not: student CRUD is the owner's alone, and the
+	// member gate answers 403 before any lookup.
+	_, err = svc.Update(ctx, newTeacherScope, student.ID,
+		students.UpdateRequest{FullName: "Bé An (edited)", ContactID: contact.ID})
+	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code,
+		"the new teacher must not edit a student")
+	err = svc.Delete(ctx, newTeacherScope, student.ID)
+	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code,
+		"the new teacher must not delete a student")
+
+	// The widening is keyed on class assignment, not center membership: an
+	// unassigned peer still sees nothing.
+	_, total, err = svc.List(ctx, peerScope, students.ListFilter{ClassID: class.ID}, listParams(t))
+	require.NoError(t, err)
+	require.EqualValues(t, 0, total, "an unassigned peer must not see the students")
+	_, err = svc.Get(ctx, peerScope, student.ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+
+	// The owner keeps full oversight after the handoff.
+	_, total, err = svc.List(ctx, ownerScope, students.ListFilter{ClassID: class.ID}, listParams(t))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
 }

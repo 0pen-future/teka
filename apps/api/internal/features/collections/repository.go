@@ -9,6 +9,7 @@ import (
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/shared/authctx"
+	"teka/apps/api/internal/shared/classscope"
 	"teka/apps/api/internal/shared/pagination"
 )
 
@@ -73,6 +74,7 @@ type contactScanRow struct {
 	ContactID    uuid.UUID
 	FullName     string
 	Phone        string
+	PhoneVisible bool
 	DeletedAt    *time.Time
 	StudentCount int64
 	TotalDue     int64
@@ -131,11 +133,16 @@ func (r *gormRepository) ContactBalances(ctx context.Context, sc authctx.Scope, 
 		return nil, 0, err
 	}
 
+	// The phone_visible derived column rides only the data pass — the count
+	// pass has no business computing it.
+	frag, _ := classscope.PhoneVisibleViaContact("vcb.contact_id")
 	var scanned []contactScanRow
 	err := r.contactBalanceQuery(ctx, sc, periodID, filter).
 		Select(`vcb.contact_id AS contact_id, c.full_name AS full_name, c.phone AS phone,
+			`+frag+` AS phone_visible,
 			c.deleted_at AS deleted_at, vcb.student_count AS student_count,
-			vcb.total_due AS total_due, vcb.total_paid AS total_paid, vcb.outstanding AS outstanding`).
+			vcb.total_due AS total_due, vcb.total_paid AS total_paid, vcb.outstanding AS outstanding`,
+			sc.TeacherID, sc.CenterID).
 		Scopes(p.Scope).
 		Find(&scanned).Error
 	if err != nil {
@@ -157,10 +164,12 @@ func (r *gormRepository) ContactBalances(ctx context.Context, sc authctx.Scope, 
 		if invoices == nil {
 			invoices = []ContactChildInvoiceRow{}
 		}
+		phone := sr.Phone
 		rows[i] = ContactBalanceRow{
 			ContactID:       sr.ContactID,
 			FullName:        sr.FullName,
-			Phone:           sr.Phone,
+			Phone:           &phone,
+			PhoneVisible:    sr.PhoneVisible,
 			ContactArchived: sr.DeletedAt != nil,
 			StudentCount:    sr.StudentCount,
 			TotalDue:        sr.TotalDue,

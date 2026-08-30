@@ -6,6 +6,7 @@ import {
   endEnrollment,
   getEnrollment,
   listEnrollments,
+  searchEnrollableStudents,
   type ListEnrollmentsParams,
 } from "../api/enrollments-api";
 import type { EnrollmentCreateInput } from "../schemas/roster-schemas";
@@ -30,6 +31,21 @@ export function useEnrollment(id: string | undefined) {
     queryKey: enrollmentsKeys.detail(id ?? ""),
     queryFn: () => getEnrollment(id!),
     enabled: Boolean(id),
+  });
+}
+
+/**
+ * The enrollable-student autocomplete. The two-character minimum mirrors the
+ * server (which answers shorter queries with an empty list), so the query
+ * only fires once it can return something; `keepPreviousData` keeps the last
+ * result list on screen between keystrokes.
+ */
+export function useEnrollableStudents(classId: string | undefined, q: string) {
+  return useQuery({
+    queryKey: enrollmentsKeys.enrollable(classId ?? "", q),
+    queryFn: () => searchEnrollableStudents(classId!, q),
+    enabled: Boolean(classId) && q.trim().length >= 2,
+    placeholderData: keepPreviousData,
   });
 }
 

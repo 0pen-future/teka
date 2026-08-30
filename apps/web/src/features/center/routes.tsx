@@ -16,4 +16,10 @@ export const centerRoutes: RouteObject[] = [
       Component: (await import("./pages/center-permissions-page")).CenterPermissionsPage,
     }),
   },
+  {
+    path: "center/class-config",
+    lazy: async () => ({
+      Component: (await import("./pages/class-config-page")).ClassConfigPage,
+    }),
+  },
 ];

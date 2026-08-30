@@ -31,6 +31,9 @@ var domainTables = []string{
 	"center_members", "invitations", "password_reset_tokens",
 	"class_curricula", "lesson_plans", "session_notes", "session_marks",
 	"audit_logs",
+	"score_sets", "score_set_components", "class_score_components",
+	"student_scores",
+	"owner_anchor_backfill",
 }
 
 // centerTables is every business table 000007 re-keyed to the center tenant.
@@ -314,10 +317,10 @@ func TestDownFoldsPersonalChannelIntoManual(t *testing.T) {
 		 VALUES (?, ?, ?, ?, 'zalo_personal')`,
 		notifID, f.teacherID, f.centerID, f.statementID).Error)
 
-	// Roll back through 000005 (zalo_personal_mapping): nine steps now that
-	// the additive 000008-000013 sit on top of the migrations this test
+	// Roll back through 000005 (zalo_personal_mapping): thirteen steps now
+	// that the additive 000008-000017 sit on top of the migrations this test
 	// predates.
-	require.NoError(t, database.MigrateDown(m, 9))
+	require.NoError(t, database.MigrateDown(m, 13))
 
 	var channel string
 	require.NoError(t, db.Raw(
@@ -524,6 +527,131 @@ func TestCenterTenancyBackfill(t *testing.T) {
 	}
 }
 
+// The 000015 backfill gives every live class an active giao_vien stint for its
+// current teacher, skips soft-deleted classes, and is idempotent — re-running
+// the INSERT must not duplicate stints.
+func TestClassStaffBackfill(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	// Stop just below 000015, seed classes in the pre-class_staff shape, then
+	// migrate up so the backfill runs over that data.
+	require.NoError(t, m.Migrate(14))
+
+	db := openDB(t, url)
+	f := seedNotificationParents(t, db, "+84900000601")
+	liveClass := uuid.New()
+	deletedClass := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price)
+		 VALUES (?, ?, ?, 'Lớp sống', '2026-01-05', 100000)`,
+		liveClass, f.teacherID, f.centerID).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price, deleted_at)
+		 VALUES (?, ?, ?, 'Lớp đã xoá', '2026-01-05', 100000, now())`,
+		deletedClass, f.teacherID, f.centerID).Error)
+
+	require.NoError(t, database.MigrateUp(m))
+
+	var rows []struct {
+		ClassID   uuid.UUID
+		TeacherID uuid.UUID
+		RoleKey   string
+	}
+	require.NoError(t, db.Raw(
+		`SELECT class_id, teacher_id, role_key FROM class_staff WHERE ended_at IS NULL`).Scan(&rows).Error)
+	require.Len(t, rows, 1, "only the live class is backfilled")
+	require.Equal(t, liveClass, rows[0].ClassID)
+	require.Equal(t, f.teacherID, rows[0].TeacherID)
+	require.Equal(t, "giao_vien", rows[0].RoleKey)
+
+	// Idempotent: the backfill INSERT conflicts on the active-stint index and
+	// changes nothing on a second run.
+	require.NoError(t, db.Exec(`
+		INSERT INTO class_staff (class_id, center_id, teacher_id, role_key)
+		SELECT c.id, c.center_id, c.teacher_id, 'giao_vien'
+		FROM classes c
+		WHERE c.deleted_at IS NULL
+		ON CONFLICT (class_id, teacher_id) WHERE ended_at IS NULL DO NOTHING`).Error)
+	var n int64
+	require.NoError(t, db.Raw(`SELECT count(*) FROM class_staff`).Scan(&n).Error)
+	require.EqualValues(t, 1, n)
+}
+
+// The two partial unique indexes are the only cross-process protection for the
+// dual-write invariant: one active stint per person per class, and exactly one
+// active giao_vien per class. Two concurrent handoffs must collide here instead
+// of silently producing two primary teachers.
+func TestClassStaffIndexesEnforceInvariants(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+
+	db := openDB(t, url)
+	f := seedNotificationParents(t, db, "+84900000602")
+	memberID := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO user_accounts (id, role, phone) VALUES (?, 'teachers', '+84900000603')`,
+		memberID).Error)
+	// teachers ⇄ center_members reference each other; the membership FK is
+	// DEFERRABLE so the pair goes in as one transaction, like registration.
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(
+			`INSERT INTO teachers (id, full_name, center_id) VALUES (?, 'Thầy Minh', ?)`,
+			memberID, f.centerID).Error; err != nil {
+			return err
+		}
+		return tx.Exec(
+			`INSERT INTO center_members (teacher_id, center_id) VALUES (?, ?)`,
+			memberID, f.centerID).Error
+	}))
+
+	classID := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price)
+		 VALUES (?, ?, ?, 'Lớp bất biến', '2026-01-05', 100000)`,
+		classID, f.teacherID, f.centerID).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO class_staff (class_id, center_id, teacher_id, role_key)
+		 VALUES (?, ?, ?, 'giao_vien')`,
+		classID, f.centerID, f.teacherID).Error)
+
+	err = db.Exec(
+		`INSERT INTO class_staff (class_id, center_id, teacher_id, role_key)
+		 VALUES (?, ?, ?, 'giao_vien')`,
+		classID, f.centerID, memberID).Error
+	require.ErrorContains(t, err, "uq_class_staff_one_gv",
+		"a second active giao_vien for the same class must be rejected")
+
+	err = db.Exec(
+		`INSERT INTO class_staff (class_id, center_id, teacher_id, role_key)
+		 VALUES (?, ?, ?, 'hoc_vu')`,
+		classID, f.centerID, f.teacherID).Error
+	require.ErrorContains(t, err, "uq_class_staff_active",
+		"one person cannot hold two active stints in the same class")
+
+	// The predicates are scoped: another role for another member is fine, and
+	// ending the giao_vien stint frees the class for a new primary teacher.
+	require.NoError(t, db.Exec(
+		`INSERT INTO class_staff (class_id, center_id, teacher_id, role_key)
+		 VALUES (?, ?, ?, 'tro_giang')`,
+		classID, f.centerID, memberID).Error)
+	require.NoError(t, db.Exec(
+		`UPDATE class_staff SET ended_at = now()
+		 WHERE class_id = ? AND role_key IN ('giao_vien', 'tro_giang')`, classID).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO class_staff (class_id, center_id, teacher_id, role_key)
+		 VALUES (?, ?, ?, 'giao_vien')`,
+		classID, f.centerID, memberID).Error)
+}
+
 // The composite FK (teacher_id, center_id) → center_members is the database's
 // own guard that a row can never attribute a teacher who was never a member of
 // its center, and uq_centers_owner keeps one live center per owner.
@@ -639,6 +767,15 @@ func TestTeacherHardDeleteInOneTransaction(t *testing.T) {
 
 	db := openDB(t, url)
 	f := seedNotificationParents(t, db, "+84900000401")
+	classID := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price)
+		 VALUES (?, ?, ?, 'Lớp Toán 9', '2026-01-05', 100000)`,
+		classID, f.teacherID, f.centerID).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO class_staff (class_id, center_id, teacher_id, role_key)
+		 VALUES (?, ?, ?, 'giao_vien')`,
+		classID, f.centerID, f.teacherID).Error)
 
 	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec(`DELETE FROM user_accounts WHERE id = ?`, f.teacherID).Error; err != nil {
@@ -650,7 +787,7 @@ func TestTeacherHardDeleteInOneTransaction(t *testing.T) {
 	var n int64
 	for _, tbl := range []string{
 		"user_accounts", "teachers", "centers", "center_members",
-		"contacts", "billing_periods", "statements",
+		"contacts", "billing_periods", "statements", "class_staff",
 	} {
 		require.NoError(t, db.Raw(fmt.Sprintf(`SELECT count(*) FROM %s`, tbl)).Scan(&n).Error)
 		require.Zerof(t, n, "table %s must be empty after the hard delete", tbl)
@@ -976,4 +1113,423 @@ func TestCenterRBACBackfill(t *testing.T) {
 	require.NoError(t, db.Raw(
 		`SELECT count(*) FROM center_member_permissions`).Scan(&n).Error)
 	require.EqualValues(t, 1, n, "backfill writes nothing but the send-reports parity rows")
+}
+
+// The 000016 anchor migration turns contacts into center-level data: duplicate
+// live contacts per (center, phone) merge into one survivor, the two contact
+// unique indexes re-key from per-teacher to per-center, and contacts plus
+// students anchor to the center owner. The owner_anchor_backfill trail must be
+// rich enough for down to restore anchors, revive merged losers with their
+// zalo mapping intact, and put back de-duplicated zalo mappings.
+func TestOwnerDataAnchorBackfill(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+	// Step back below 000016 and seed the per-teacher shape it migrates.
+	require.NoError(t, m.Migrate(15))
+
+	db := openDB(t, url)
+	owner := seedNotificationParents(t, db, "+84900000701")
+	memberID := rbacMember(t, db, owner.centerID, "+84900000702", false, false)
+
+	// Owner and member each saved the same parent — the supported duplicate
+	// the merge step exists for. The member linked their copy on zalo.
+	const sharedPhone = "+84903000701"
+	ownerContact := uuid.New()
+	memberContact := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO contacts (id, teacher_id, center_id, full_name, phone, created_at)
+		 VALUES (?, ?, ?, 'Chị Hoa', ?, '2026-01-01')`,
+		ownerContact, owner.teacherID, owner.centerID, sharedPhone).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO contacts (id, teacher_id, center_id, full_name, phone, created_at, zalo_user_id, zalo_name)
+		 VALUES (?, ?, ?, 'Chị Hoa (GV)', ?, '2026-02-01', 'zalo-hoa', 'Hoa Zalo')`,
+		memberContact, memberID, owner.centerID, sharedPhone).Error)
+
+	// The member's family data hangs off the losing contact.
+	memberStudent := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO students (id, teacher_id, center_id, contact_id, full_name)
+		 VALUES (?, ?, ?, ?, 'Bé An')`,
+		memberStudent, memberID, owner.centerID, memberContact).Error)
+	memberPeriod := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO billing_periods (id, teacher_id, center_id, year, month, period_start, period_end)
+		 VALUES (?, ?, ?, 2026, 8, '2026-08-01', '2026-08-31')`,
+		memberPeriod, memberID, owner.centerID).Error)
+	memberInvoice := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO invoices (id, teacher_id, center_id, period_id, student_id, contact_id, student_name, contact_name)
+		 VALUES (?, ?, ?, ?, ?, ?, 'Bé An', 'Chị Hoa')`,
+		memberInvoice, memberID, owner.centerID, memberPeriod, memberStudent, memberContact).Error)
+	memberPayment := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO payments (id, teacher_id, center_id, contact_id, amount, received_on)
+		 VALUES (?, ?, ?, ?, 50000, '2026-08-15')`,
+		memberPayment, memberID, owner.centerID, memberContact).Error)
+
+	// Statements for the losing contact: one in the owner's period where the
+	// survivor already holds a live statement (collides after the merge — must
+	// be soft-deleted), one in the member's own period (repoints cleanly,
+	// keeping id and token so an issued parent link stays valid).
+	survivorStmt := uuid.New()
+	collidingStmt := uuid.New()
+	soloStmt := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO statements (id, teacher_id, center_id, contact_id, period_id, token_hash, expires_at, total_due)
+		 VALUES (?, ?, ?, ?, ?, ?, now() + interval '7 days', 100000)`,
+		survivorStmt, owner.teacherID, owner.centerID, ownerContact, owner.periodID, []byte("hash-survivor")).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO statements (id, teacher_id, center_id, contact_id, period_id, token_hash, expires_at, total_due)
+		 VALUES (?, ?, ?, ?, ?, ?, now() + interval '7 days', 100000)`,
+		collidingStmt, memberID, owner.centerID, memberContact, owner.periodID, []byte("hash-collide")).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO statements (id, teacher_id, center_id, contact_id, period_id, token_hash, expires_at, total_due)
+		 VALUES (?, ?, ?, ?, ?, ?, now() + interval '7 days', 100000)`,
+		soloStmt, memberID, owner.centerID, memberContact, memberPeriod, []byte("hash-solo")).Error)
+
+	// Two live contacts with different phones mapped to the same zalo friend —
+	// legal per-teacher, illegal per-center. The earlier one keeps the mapping.
+	contactZ1 := uuid.New()
+	contactZ2 := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO contacts (id, teacher_id, center_id, full_name, phone, created_at, zalo_user_id, zalo_name)
+		 VALUES (?, ?, ?, 'Anh Dũng', '+84903000702', '2026-01-05', 'zalo-dup-1', 'Dũng Zalo')`,
+		contactZ1, owner.teacherID, owner.centerID).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO contacts (id, teacher_id, center_id, full_name, phone, created_at, zalo_user_id, zalo_name)
+		 VALUES (?, ?, ?, 'Anh Dũng (GV)', '+84903000703', '2026-03-01', 'zalo-dup-1', 'Dũng Zalo GV')`,
+		contactZ2, memberID, owner.centerID).Error)
+
+	require.NoError(t, database.MigrateUp(m))
+
+	// Merge: the member's duplicate is soft-deleted, keeps its zalo mapping on
+	// the dead row, and the anchor pass stamps the owner even there.
+	var loser struct {
+		TeacherID  uuid.UUID
+		DeletedAt  *time.Time
+		ZaloUserID *string
+	}
+	require.NoError(t, db.Raw(
+		`SELECT teacher_id, deleted_at, zalo_user_id FROM contacts WHERE id = ?`,
+		memberContact).Scan(&loser).Error)
+	require.NotNil(t, loser.DeletedAt, "the losing duplicate must be soft-deleted")
+	require.NotNil(t, loser.ZaloUserID, "the loser keeps its zalo mapping for revival")
+	require.Equal(t, "zalo-hoa", *loser.ZaloUserID)
+	require.Equal(t, owner.teacherID, loser.TeacherID)
+
+	// Children repointed to the survivor.
+	for _, q := range []struct {
+		table string
+		id    uuid.UUID
+	}{
+		{"students", memberStudent},
+		{"invoices", memberInvoice},
+		{"payments", memberPayment},
+	} {
+		var child struct{ ContactID uuid.UUID }
+		require.NoError(t, db.Raw(fmt.Sprintf(
+			`SELECT contact_id FROM %s WHERE id = ?`, q.table), q.id).Scan(&child).Error)
+		require.Equalf(t, ownerContact, child.ContactID, "%s row must repoint to the surviving contact", q.table)
+	}
+
+	// Statements: the period collision is soft-deleted (the survivor's copy is
+	// canonical), the solo one repoints and stays live.
+	var stmt struct {
+		ContactID uuid.UUID
+		DeletedAt *time.Time
+	}
+	require.NoError(t, db.Raw(
+		`SELECT contact_id, deleted_at FROM statements WHERE id = ?`, collidingStmt).Scan(&stmt).Error)
+	require.Equal(t, ownerContact, stmt.ContactID)
+	require.NotNil(t, stmt.DeletedAt, "the statement colliding with the survivor's period must be soft-deleted")
+	require.NoError(t, db.Raw(
+		`SELECT contact_id, deleted_at FROM statements WHERE id = ?`, soloStmt).Scan(&stmt).Error)
+	require.Equal(t, ownerContact, stmt.ContactID)
+	require.Nil(t, stmt.DeletedAt, "the non-colliding statement must stay live under the survivor")
+
+	// Zalo dedupe: the earlier mapping survives, the later one is removed with
+	// its old values recorded for down.
+	var zalo *string
+	require.NoError(t, db.Raw(
+		`SELECT zalo_user_id FROM contacts WHERE id = ?`, contactZ1).Scan(&zalo).Error)
+	require.NotNil(t, zalo)
+	require.Equal(t, "zalo-dup-1", *zalo)
+	require.NoError(t, db.Raw(
+		`SELECT zalo_user_id FROM contacts WHERE id = ?`, contactZ2).Scan(&zalo).Error)
+	require.Nil(t, zalo, "the later duplicate mapping must be cleared")
+	var trail struct {
+		OldZaloUserID string
+		OldZaloName   string
+	}
+	require.NoError(t, db.Raw(
+		`SELECT old_zalo_user_id, old_zalo_name FROM owner_anchor_backfill
+		 WHERE table_name = 'contacts_zalo' AND row_id = ?`, contactZ2).Scan(&trail).Error)
+	require.Equal(t, "zalo-dup-1", trail.OldZaloUserID)
+	require.Equal(t, "Dũng Zalo GV", trail.OldZaloName)
+
+	// Anchor: no contact or student row may disagree with the center owner.
+	var n int64
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM contacts c JOIN centers ce ON ce.id = c.center_id
+		 WHERE c.teacher_id <> ce.owner_id`).Scan(&n).Error)
+	require.Zero(t, n, "every contact must anchor to the center owner")
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM students s JOIN centers ce ON ce.id = s.center_id
+		 WHERE s.teacher_id <> ce.owner_id`).Scan(&n).Error)
+	require.Zero(t, n, "every student must anchor to the center owner")
+
+	// The deploy-runbook collision counts must both be zero after up.
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM (
+		     SELECT 1 FROM contacts WHERE deleted_at IS NULL
+		     GROUP BY center_id, phone HAVING count(*) > 1) g`).Scan(&n).Error)
+	require.Zero(t, n, "no live (center, phone) duplicates may remain")
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM (
+		     SELECT 1 FROM contacts WHERE deleted_at IS NULL AND zalo_user_id IS NOT NULL
+		     GROUP BY center_id, zalo_user_id HAVING count(*) > 1) g`).Scan(&n).Error)
+	require.Zero(t, n, "no live (center, zalo_user_id) duplicates may remain")
+
+	// Re-keyed uniqueness: the same phone or zalo friend under ANOTHER teacher
+	// of the same center is now rejected — per-teacher it was allowed.
+	err = db.Exec(
+		`INSERT INTO contacts (id, teacher_id, center_id, full_name, phone)
+		 VALUES (?, ?, ?, 'Trùng phone', ?)`,
+		uuid.New(), memberID, owner.centerID, sharedPhone).Error
+	require.Error(t, err, "a live duplicate phone within the center must be rejected")
+	err = db.Exec(
+		`INSERT INTO contacts (id, teacher_id, center_id, full_name, phone, zalo_user_id)
+		 VALUES (?, ?, ?, 'Trùng zalo', '+84903000999', 'zalo-dup-1')`,
+		uuid.New(), memberID, owner.centerID).Error
+	require.Error(t, err, "a live duplicate zalo mapping within the center must be rejected")
+
+	// Down: anchors restored, the merged loser revived with mapping intact,
+	// the de-duplicated zalo mapping put back, children left with the survivor.
+	require.NoError(t, m.Migrate(15))
+
+	require.NoError(t, db.Raw(
+		`SELECT teacher_id, deleted_at, zalo_user_id FROM contacts WHERE id = ?`,
+		memberContact).Scan(&loser).Error)
+	require.Nil(t, loser.DeletedAt, "down must revive the merged loser")
+	require.Equal(t, memberID, loser.TeacherID, "down must restore the loser's original teacher")
+	require.NotNil(t, loser.ZaloUserID)
+	require.Equal(t, "zalo-hoa", *loser.ZaloUserID, "the revived loser keeps its zalo mapping")
+
+	var student struct {
+		TeacherID uuid.UUID
+		ContactID uuid.UUID
+	}
+	require.NoError(t, db.Raw(
+		`SELECT teacher_id, contact_id FROM students WHERE id = ?`, memberStudent).Scan(&student).Error)
+	require.Equal(t, memberID, student.TeacherID, "down must restore the student's original teacher")
+
+	require.NoError(t, db.Raw(
+		`SELECT zalo_user_id FROM contacts WHERE id = ?`, contactZ2).Scan(&zalo).Error)
+	require.NotNil(t, zalo, "down must restore the de-duplicated zalo mapping")
+	require.Equal(t, "zalo-dup-1", *zalo)
+
+	// Documented best-effort: children merged onto the survivor stay there,
+	// and the collided statement stays soft-deleted.
+	require.Equal(t, ownerContact, student.ContactID, "repointed children stay with the survivor after down")
+	require.NoError(t, db.Raw(
+		`SELECT contact_id, deleted_at FROM statements WHERE id = ?`, collidingStmt).Scan(&stmt).Error)
+	require.NotNil(t, stmt.DeletedAt, "the collided statement stays soft-deleted after down")
+
+	require.False(t, tableNames(t, db)["owner_anchor_backfill"],
+		"down must drop the backfill table")
+}
+
+// Three live contacts share one phone and TWO losers each hold a live
+// statement in the same period while the survivor holds none: comparing
+// losers only against the survivor would soft-delete neither, and the repoint
+// would then collide on uq_statements. The dedupe must work per merge group
+// and period — keep the earliest statement, soft-delete the rest — so the
+// migration completes with exactly one live statement per (contact, period).
+func TestOwnerDataAnchorStatementDedupeAcrossLosers(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+	require.NoError(t, m.Migrate(15))
+
+	db := openDB(t, url)
+	owner := seedNotificationParents(t, db, "+84900000801")
+	member1 := rbacMember(t, db, owner.centerID, "+84900000802", false, false)
+	member2 := rbacMember(t, db, owner.centerID, "+84900000803", false, false)
+
+	// Same parent saved three times; the owner's copy is oldest → survivor.
+	const sharedPhone = "+84903000801"
+	survivorContact := uuid.New()
+	loserContactB := uuid.New()
+	loserContactC := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO contacts (id, teacher_id, center_id, full_name, phone, created_at)
+		 VALUES (?, ?, ?, 'Chị Hạnh', ?, '2026-01-01')`,
+		survivorContact, owner.teacherID, owner.centerID, sharedPhone).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO contacts (id, teacher_id, center_id, full_name, phone, created_at)
+		 VALUES (?, ?, ?, 'Chị Hạnh (GV1)', ?, '2026-02-01')`,
+		loserContactB, member1, owner.centerID, sharedPhone).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO contacts (id, teacher_id, center_id, full_name, phone, created_at)
+		 VALUES (?, ?, ?, 'Chị Hạnh (GV2)', ?, '2026-03-01')`,
+		loserContactC, member2, owner.centerID, sharedPhone).Error)
+
+	// Both losers issued a statement for the same period; the survivor issued
+	// none. C's statement is older and must be the surviving canonical copy.
+	stmtB := uuid.New()
+	stmtC := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO statements (id, teacher_id, center_id, contact_id, period_id, token_hash, expires_at, total_due, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, now() + interval '7 days', 100000, '2026-08-02')`,
+		stmtB, member1, owner.centerID, loserContactB, owner.periodID, []byte("hash-loser-b")).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO statements (id, teacher_id, center_id, contact_id, period_id, token_hash, expires_at, total_due, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, now() + interval '7 days', 100000, '2026-08-01')`,
+		stmtC, member2, owner.centerID, loserContactC, owner.periodID, []byte("hash-loser-c")).Error)
+
+	// The migration itself completing is the core assertion: with a
+	// survivor-only comparison both statements would repoint live and trip
+	// uq_statements, leaving the migrator dirty.
+	require.NoError(t, database.MigrateUp(m))
+
+	var stmt struct {
+		ContactID uuid.UUID
+		DeletedAt *time.Time
+	}
+	require.NoError(t, db.Raw(
+		`SELECT contact_id, deleted_at FROM statements WHERE id = ?`, stmtC).Scan(&stmt).Error)
+	require.Equal(t, survivorContact, stmt.ContactID)
+	require.Nil(t, stmt.DeletedAt, "the earliest statement of the merge group must stay live")
+	require.NoError(t, db.Raw(
+		`SELECT contact_id, deleted_at FROM statements WHERE id = ?`, stmtB).Scan(&stmt).Error)
+	require.Equal(t, survivorContact, stmt.ContactID)
+	require.NotNil(t, stmt.DeletedAt, "the later duplicate must be soft-deleted")
+
+	// Exactly one live statement per (contact, period) across the database.
+	var n int64
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM (
+		     SELECT 1 FROM statements WHERE deleted_at IS NULL
+		     GROUP BY contact_id, period_id HAVING count(*) > 1) g`).Scan(&n).Error)
+	require.Zero(t, n, "no live (contact, period) statement duplicates may remain")
+
+	// Both losers merged into the survivor and every contact anchors to the
+	// owner.
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM owner_anchor_backfill
+		 WHERE table_name = 'contacts' AND merged_into = ?`, survivorContact).Scan(&n).Error)
+	require.EqualValues(t, 2, n, "both losers must record their merge target")
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM contacts c JOIN centers ce ON ce.id = c.center_id
+		 WHERE c.teacher_id <> ce.owner_id`).Scan(&n).Error)
+	require.Zero(t, n, "every contact must anchor to the center owner")
+}
+
+// Class-scoped statements and runs coexist with the family/center-wide rows:
+// the family unique keeps deduping only among class_id IS NULL rows, one
+// class copy exists per (contact, period, class), one running run per period
+// center-wide AND per (period, class) — and the down migration folds the
+// schema back by deleting only the class-scoped rows.
+func TestClassScopedStatementsAndRuns(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+
+	db := openDB(t, url)
+	f := seedNotificationParents(t, db, "+84900000017")
+	classA, classB := uuid.New(), uuid.New()
+	for _, id := range []uuid.UUID{classA, classB} {
+		require.NoError(t, db.Exec(
+			`INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price)
+			 VALUES (?, ?, ?, 'Lớp', '2026-01-05', 100000)`,
+			id, f.teacherID, f.centerID).Error)
+	}
+
+	insertStatement := func(classID any, token string) error {
+		return db.Exec(
+			`INSERT INTO statements (id, teacher_id, center_id, contact_id, period_id, class_id, token_hash, expires_at, total_due)
+			 VALUES (?, ?, ?, ?, ?, ?, sha256(?::bytea), now() + interval '7 days', 50000)`,
+			uuid.New(), f.teacherID, f.centerID, f.contactID, f.periodID, classID, token).Error
+	}
+	// The fixture already inserted the family statement for this contact and
+	// period; a second family copy still collides.
+	require.Error(t, insertStatement(nil, "fam-dup"),
+		"the family unique must keep deduping class_id IS NULL rows")
+	require.NoError(t, insertStatement(classA, "a1"),
+		"a class copy must not collide with the family statement")
+	require.NoError(t, insertStatement(classB, "b1"),
+		"one copy per class of the same contact and period")
+	require.Error(t, insertStatement(classA, "a2"),
+		"a duplicate copy for the same class must be rejected")
+	require.Error(t, db.Exec(
+		`INSERT INTO statements (id, teacher_id, center_id, contact_id, period_id, class_id, token_hash, expires_at, total_due)
+		 VALUES (?, ?, ?, ?, ?, ?, sha256('x'::bytea), now() + interval '7 days', 50000)`,
+		uuid.New(), f.teacherID, f.centerID, f.contactID, f.periodID, uuid.New()).Error,
+		"a class_id outside the center must fail the composite FK")
+
+	// Each run needs its own sender: uq_notification_runs_one_active keeps
+	// one running pass per sending device, so parallel class runs come from
+	// different staff members.
+	newMember := func(phone string) uuid.UUID {
+		id := uuid.New()
+		require.NoError(t, db.Exec(
+			`INSERT INTO user_accounts (id, role, phone) VALUES (?, 'teachers', ?)`, id, phone).Error)
+		// The teacher↔membership FKs are deferrable; insert the pair in one
+		// transaction, the same shape the invitation flow uses.
+		require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec(
+				`INSERT INTO teachers (id, full_name, center_id) VALUES (?, 'Học vụ', ?)`, id, f.centerID).Error; err != nil {
+				return err
+			}
+			return tx.Exec(
+				`INSERT INTO center_members (teacher_id, center_id) VALUES (?, ?)`, id, f.centerID).Error
+		}))
+		return id
+	}
+	hocVuA := newMember("+84900000117")
+	hocVuB := newMember("+84900000217")
+	hocVuC := newMember("+84900000317")
+
+	insertRun := func(sender uuid.UUID, classID any) error {
+		return db.Exec(
+			`INSERT INTO notification_runs (id, teacher_id, center_id, billing_period_id, class_id, status)
+			 VALUES (?, ?, ?, ?, ?, 'running')`,
+			uuid.New(), sender, f.centerID, f.periodID, classID).Error
+	}
+	require.NoError(t, insertRun(f.teacherID, nil))
+	require.Error(t, insertRun(hocVuA, nil),
+		"one center-wide running run per period, as before")
+	require.NoError(t, insertRun(hocVuA, classA),
+		"a class run must coexist with the center-wide run of the same period")
+	require.NoError(t, insertRun(hocVuB, classB),
+		"two classes of the same period must run in parallel")
+	require.Error(t, insertRun(hocVuC, classA),
+		"the same class of the same period keeps the one-active-run conflict")
+
+	// Down one step: class-scoped rows are deleted, family rows survive, and
+	// the pre-class shape of both uniques is restored.
+	require.NoError(t, database.MigrateDown(m, 1))
+	var statements, runs int64
+	require.NoError(t, db.Raw(`SELECT count(*) FROM statements`).Scan(&statements).Error)
+	require.EqualValues(t, 1, statements, "only the family statement survives the down")
+	require.NoError(t, db.Raw(`SELECT count(*) FROM notification_runs`).Scan(&runs).Error)
+	require.EqualValues(t, 1, runs, "only the center-wide run survives the down")
+	require.Error(t, db.Exec(
+		`INSERT INTO notification_runs (id, teacher_id, center_id, billing_period_id, status)
+		 VALUES (?, ?, ?, ?, 'running')`,
+		uuid.New(), f.teacherID, f.centerID, f.periodID).Error,
+		"the single-column running unique must be back after the down")
 }

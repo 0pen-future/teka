@@ -101,10 +101,16 @@ type Run struct {
 	TeacherID       uuid.UUID
 	CenterID        uuid.UUID
 	BillingPeriodID uuid.UUID
-	Purpose         string
-	Status          string
-	CreatedAt       time.Time
-	FinishedAt      *time.Time
+	// ClassID is nil on a family run and set on a class-scoped run sending
+	// one class's statement copies. The two dimensions occupy separate
+	// single-running-run partial uniques, so a family run and a class run —
+	// or two different classes' runs — may pace in parallel over the same
+	// period; only an exact same-dimension duplicate conflicts.
+	ClassID    *uuid.UUID
+	Purpose    string
+	Status     string
+	CreatedAt  time.Time
+	FinishedAt *time.Time
 }
 
 // TableName pins the table explicitly so a later model rename cannot

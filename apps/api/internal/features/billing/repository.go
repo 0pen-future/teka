@@ -12,6 +12,7 @@ import (
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/attendance"
 	"teka/apps/api/internal/shared/authctx"
+	"teka/apps/api/internal/shared/classscope"
 	"teka/apps/api/internal/shared/pagination"
 )
 
@@ -47,6 +48,9 @@ var (
 	// ErrStudentNotFound covers both a missing student and another
 	// tenant's for StudentSnapshot.
 	ErrStudentNotFound = errors.New("student not found")
+	// ErrClassNotFound covers both a missing class and another tenant's for
+	// ClassReadable.
+	ErrClassNotFound = errors.New("class not found")
 )
 
 // CarriedDebtStudent is a previous-period debtor considered for the current
@@ -99,6 +103,18 @@ type Repository interface {
 	// close, tally) keep the owner-gated GetPeriod.
 	GetPeriodRead(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*PeriodWithTeacher, error)
 	ListPeriodsRead(ctx context.Context, sc authctx.Scope, p pagination.Params) ([]PeriodWithTeacher, int64, error)
+	// ClassReadable reports whether the caller holds any class_staff stint on
+	// the class — ended stints included, matching every other class-data read.
+	// ErrClassNotFound when the class does not exist in the caller's center
+	// (or is soft-deleted). The oversight bypass lives in the service.
+	ClassReadable(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (bool, error)
+	// ListPeriodsClassRead lists the center's periods carrying at least one
+	// non-void invoice line billed to one of classID's enrollments —
+	// deliberately NOT own-teacher-filtered, because after a handoff the
+	// class's charges live under another teacher's period and it is the
+	// caller's stint on the class (checked by the service via ClassReadable)
+	// that entitles the read.
+	ListPeriodsClassRead(ctx context.Context, sc authctx.Scope, classID uuid.UUID, p pagination.Params) ([]PeriodWithTeacher, int64, error)
 	GetPeriodByYearMonth(ctx context.Context, sc authctx.Scope, year, month int16) (*Period, error)
 	// PreviousClosedPeriod returns the most recently closed period whose
 	// period_end is strictly before `before` — the R3 carry-over source. A
@@ -365,6 +381,55 @@ func (r *gormRepository) ListPeriodsRead(ctx context.Context, sc authctx.Scope, 
 	// periods for the same month (identical period_start). It must run as a
 	// scope after p.Scope: scopes apply at Find time, so a chained Order here
 	// would land before the pagination sort and hijack the primary order.
+	err := q.
+		Select("billing_periods.*, teachers.full_name AS teacher_name").
+		Joins("JOIN teachers ON teachers.id = billing_periods.teacher_id").
+		Scopes(p.Scope, func(db *gorm.DB) *gorm.DB { return db.Order("billing_periods.id") }).
+		Find(&rows).Error
+	if err != nil {
+		return nil, 0, err
+	}
+	return rows, total, nil
+}
+
+func (r *gormRepository) ClassReadable(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (bool, error) {
+	readFrag, _ := classscope.ReadExists("classes.id")
+	var rows []struct{ Readable bool }
+	err := database.FromContext(ctx, r.db).
+		Table("classes").
+		Select(readFrag+" AS readable", sc.TeacherID, sc.CenterID).
+		Where("classes.id = ? AND classes.center_id = ? AND classes.deleted_at IS NULL", classID, sc.CenterID).
+		Find(&rows).Error
+	if err != nil {
+		return false, err
+	}
+	if len(rows) == 0 {
+		return false, ErrClassNotFound
+	}
+	return rows[0].Readable, nil
+}
+
+// classInvoiceLinesExist reaches a period's class charges the same way
+// statements' class totals do: invoice_lines carry no class_id, so the class
+// is resolved through the billed enrollment. Void invoices don't count — a
+// period whose only class charges were voided has nothing left to send.
+const classInvoiceLinesExist = `EXISTS (
+	SELECT 1 FROM invoices i
+	JOIN invoice_lines il ON il.invoice_id = i.id AND il.center_id = i.center_id
+	JOIN enrollments e    ON e.id = il.enrollment_id AND e.center_id = il.center_id
+	WHERE i.period_id = billing_periods.id
+	  AND i.status <> ?
+	  AND e.class_id = ?)`
+
+func (r *gormRepository) ListPeriodsClassRead(ctx context.Context, sc authctx.Scope, classID uuid.UUID, p pagination.Params) ([]PeriodWithTeacher, int64, error) {
+	q := database.FromContext(ctx, r.db).Model(&Period{}).
+		Where("billing_periods.center_id = ?", sc.CenterID).
+		Where(classInvoiceLinesExist, InvoiceVoid, classID)
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var rows []PeriodWithTeacher
 	err := q.
 		Select("billing_periods.*, teachers.full_name AS teacher_name").
 		Joins("JOIN teachers ON teachers.id = billing_periods.teacher_id").

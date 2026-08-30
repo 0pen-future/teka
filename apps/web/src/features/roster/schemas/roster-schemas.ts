@@ -65,7 +65,9 @@ export const studentSchema = z.object({
   display_note: z.string(),
   contact_id: z.string(),
   contact_name: z.string(),
-  contact_phone: z.string(),
+  // Null when the caller may not see the contact's phone (phone privacy:
+  // owner, oversight, and assigned hoc_vu see it; other members do not).
+  contact_phone: z.string().nullable(),
   created_at: z.string(),
 });
 
@@ -164,7 +166,14 @@ const classSlotsField = z
     });
   });
 
-/** `classes.ClassResponse`. `default_unit_price` is integer đồng, never a decimal. */
+/**
+ * `classes.ClassResponse`. `default_unit_price` is integer đồng, never a
+ * decimal. `my_staff_roles` is the caller's own active class-staff role keys
+ * (e.g. `["giao_vien"]` for the class teacher, `[]` for the center owner or
+ * an unassigned caller); dashboard endpoints reuse the same mapper but always
+ * send `[]`, and some cached/older responses omit the field entirely, so it
+ * defaults rather than requires.
+ */
 export const classSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -175,6 +184,7 @@ export const classSchema = z.object({
   status: z.enum(["active", "archived"]),
   schedules: z.array(scheduleSchema),
   created_at: z.string(),
+  my_staff_roles: z.array(z.string()).default([]),
 });
 
 export type Class = z.infer<typeof classSchema>;
@@ -214,6 +224,42 @@ export const reassignTeacherResponseSchema = z.object({
 });
 
 export type ReassignTeacherResponse = z.infer<typeof reassignTeacherResponseSchema>;
+
+/**
+ * `classstaff.StaffResponse` (`apps/api/internal/features/classstaff/dto.go`).
+ * `role_key` mirrors `authctx.StaffRoleGiaoVien/HocVu/TroGiang`. `role_label`
+ * is the API's copy for a live row; the UI falls back to a local Vietnamese
+ * label map only where no row exists yet (missing-role badges, empty-group
+ * copy, add/remove action text) since there is nothing to read a label from.
+ * `ended_at` non-null marks a soft-closed stint that still grants history reads.
+ */
+export const classStaffSchema = z.object({
+  id: z.string(),
+  teacher_id: z.string(),
+  teacher_name: z.string(),
+  role_key: z.string(),
+  role_label: z.string(),
+  started_at: z.string(),
+  ended_at: z.string().nullable(),
+});
+
+export type ClassStaff = z.infer<typeof classStaffSchema>;
+
+/**
+ * Assignable class-staff roles — `giao_vien` is deliberately excluded: the
+ * handoff flow owns it and the API refuses it with 409.
+ */
+export const assignableStaffRoleKeys = ["hoc_vu", "tro_giang"] as const;
+
+export type AssignableStaffRoleKey = (typeof assignableStaffRoleKeys)[number];
+
+/** `classstaff.AssignRequest`. */
+export const classStaffAssignInputSchema = z.object({
+  teacher_id: z.string().min(1, "Bắt buộc chọn thành viên"),
+  role_key: z.enum(assignableStaffRoleKeys),
+});
+
+export type ClassStaffAssignInput = z.infer<typeof classStaffAssignInputSchema>;
 
 /**
  * Form shape for the "Cài đặt lớp" screen (prototype `classCfg`): one name,
@@ -285,6 +331,18 @@ export const enrollmentSchema = z.object({
 });
 
 export type Enrollment = z.infer<typeof enrollmentSchema>;
+
+/**
+ * `enrollments.PickerStudent` — the enrollable-student autocomplete row.
+ * Names only by design: the picker serves teachers who may not see contact
+ * data, so no phone or contact id ever travels through it.
+ */
+export const enrollableStudentSchema = z.object({
+  id: z.string(),
+  full_name: z.string(),
+});
+
+export type EnrollableStudent = z.infer<typeof enrollableStudentSchema>;
 
 /**
  * `enrollments.CreateRequest`. `unit_price` is deliberately absent — the

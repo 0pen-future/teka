@@ -19,10 +19,13 @@ import (
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/attendance"
 	"teka/apps/api/internal/features/billing"
+	"teka/apps/api/internal/features/centers"
 	"teka/apps/api/internal/features/classes"
+	"teka/apps/api/internal/features/classstaff"
 	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/features/sessions"
 	"teka/apps/api/internal/features/teachers"
+	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 )
@@ -197,7 +200,8 @@ func Run(ctx context.Context, db *gorm.DB, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	if _, err := ensureMember(ctx, db, log, seedSecretary, centerID); err != nil {
+	thuID, err := ensureMember(ctx, db, log, seedSecretary, centerID)
+	if err != nil {
 		return err
 	}
 
@@ -207,6 +211,19 @@ func Run(ctx context.Context, db *gorm.DB, log *slog.Logger) error {
 	}
 	minhSc, err := scopeFor(ctx, db, minhID)
 	if err != nil {
+		return err
+	}
+
+	// Contacts and students are center data anchored to the owner (the
+	// roster belongs to the center, not to whichever teacher happens to teach
+	// the child), so every dataset's roster is seeded once under the owner's
+	// scope. Classes, enrollments, and sessions keep their creator anchor.
+	allContacts := append(append([]seedContact{}, ownerData.Contacts...), minhData.Contacts...)
+	allStudents := append(append([]seedStudent{}, ownerData.Students...), minhData.Students...)
+	if err := seedRoster(ctx, db, log, ownerSc, allContacts); err != nil {
+		return err
+	}
+	if err := seedStudentList(ctx, db, log, ownerSc, allStudents); err != nil {
 		return err
 	}
 
@@ -222,12 +239,6 @@ func Run(ctx context.Context, db *gorm.DB, log *slog.Logger) error {
 		{ownerSc, ownerData, pendingAttendanceCount},
 		{minhSc, minhData, 0},
 	} {
-		if err := seedRoster(ctx, db, log, t.sc, t.data.Contacts); err != nil {
-			return err
-		}
-		if err := seedStudentList(ctx, db, log, t.sc, t.data.Students); err != nil {
-			return err
-		}
 		if err := seedClassList(ctx, db, log, t.sc, t.data.Classes); err != nil {
 			return err
 		}
@@ -239,12 +250,59 @@ func Run(ctx context.Context, db *gorm.DB, log *slog.Logger) error {
 		}
 	}
 
+	// One class carries the full staff roster — the secretary as hoc_vu and
+	// the member teacher as tro_giang — so the class-staff UI and the
+	// assignment-scoped read paths have demo material.
+	if err := seedClassStaff(ctx, db, log, ownerSc, seedClasses[0].Name, thuID, minhID); err != nil {
+		return err
+	}
+
 	// Only the member teacher gets a pre-closed period: a delegated sender can
 	// read and send another teacher's period but never create or close it
 	// (EnsurePeriod self-assigns to the caller, close is a write), and sends
 	// only work on a closed period. The owner keeps opening and closing her
 	// own period through the UI.
 	return seedClosedPeriod(ctx, db, log, minhSc)
+}
+
+// seedClassStaff assigns hocVuID and troGiangID to the named class through the
+// real classstaff service. A reseeded database already holds the stints; the
+// service's duplicate 409 marks that case and is skipped, keeping the seed
+// idempotent.
+func seedClassStaff(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authctx.Scope, className string, hocVuID, troGiangID uuid.UUID) error {
+	txMgr := database.NewTxManager(db)
+	staffRepo := classstaff.NewRepository(db)
+	classesSvc := classes.NewService(classes.NewRepository(db), txMgr, staffRepo)
+	staffSvc := classstaff.NewService(staffRepo, centers.NewService(centers.NewRepository(db), txMgr, nil))
+
+	class, found, err := classesSvc.FindActiveByName(ctx, sc, className)
+	if err != nil {
+		return fmt.Errorf("seed: find class %q: %w", className, err)
+	}
+	if !found {
+		return fmt.Errorf("seed: class %q not found for staff seeding", className)
+	}
+
+	for _, a := range []struct {
+		teacherID uuid.UUID
+		roleKey   string
+	}{
+		{hocVuID, authctx.StaffRoleHocVu},
+		{troGiangID, authctx.StaffRoleTroGiang},
+	} {
+		_, err := staffSvc.Assign(ctx, sc, class.ID, classstaff.AssignRequest{
+			TeacherID: a.teacherID, RoleKey: a.roleKey,
+		})
+		if err != nil && apperror.From(err).Code == apperror.CodeConflict {
+			log.Info("seed: class staff already assigned", "class", className, "role", a.roleKey)
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("seed: assign %s on %q: %w", a.roleKey, className, err)
+		}
+		log.Info("seed: class staff assigned", "class", className, "role", a.roleKey)
+	}
+	return nil
 }
 
 // scopeFor resolves the seeded teacher's live center scope the same way the
@@ -410,13 +468,13 @@ func ensureMember(ctx context.Context, db *gorm.DB, log *slog.Logger, s seedTeac
 	return accountID, nil
 }
 
-// seedRoster inserts demo contacts for one teacher. It is all-or-nothing per
-// teacher: any pre-existing contact means the roster was seeded (or the
-// teacher has real data) and the whole block is skipped.
+// seedRoster inserts the demo contacts under the center owner's scope. It is
+// all-or-nothing per center: any pre-existing contact means the roster was
+// seeded (or the center has real data) and the whole block is skipped.
 func seedRoster(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authctx.Scope, contacts []seedContact) error {
 	var count int64
 	err := db.WithContext(ctx).
-		Raw("SELECT count(*) FROM contacts WHERE teacher_id = ? AND deleted_at IS NULL", sc.TeacherID).
+		Raw("SELECT count(*) FROM contacts WHERE center_id = ? AND deleted_at IS NULL", sc.CenterID).
 		Scan(&count).Error
 	if err != nil {
 		return fmt.Errorf("seed: look up contacts: %w", err)
@@ -445,12 +503,13 @@ func seedRoster(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authctx.S
 }
 
 // seedStudentList inserts the demo students against the seeded contacts,
-// skipped wholesale when the teacher already has any student. Contacts are
-// resolved by phone so the block also works against a roster seeded earlier.
+// skipped wholesale when the center already has any student. Contacts are
+// resolved by phone — unique per center — so the block also works against a
+// roster seeded earlier.
 func seedStudentList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authctx.Scope, students []seedStudent) error {
 	var count int64
 	err := db.WithContext(ctx).
-		Raw("SELECT count(*) FROM students WHERE teacher_id = ? AND deleted_at IS NULL", sc.TeacherID).
+		Raw("SELECT count(*) FROM students WHERE center_id = ? AND deleted_at IS NULL", sc.CenterID).
 		Scan(&count).Error
 	if err != nil {
 		return fmt.Errorf("seed: look up students: %w", err)
@@ -464,8 +523,8 @@ func seedStudentList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc auth
 		for _, s := range students {
 			var contactIDs []uuid.UUID
 			if err := tx.Raw(
-				"SELECT id FROM contacts WHERE teacher_id = ? AND phone = ? AND deleted_at IS NULL",
-				sc.TeacherID, s.ContactPhone,
+				"SELECT id FROM contacts WHERE center_id = ? AND phone = ? AND deleted_at IS NULL",
+				sc.CenterID, s.ContactPhone,
 			).Scan(&contactIDs).Error; err != nil {
 				return err
 			}
@@ -516,6 +575,15 @@ func seedClassList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authct
 			).Error; err != nil {
 				return err
 			}
+			// The classes service's create hook opens the giao_vien stint;
+			// this raw insert must mirror it or the seeded teacher could read
+			// their class (via enrollments) yet fail every capability write.
+			if err := tx.Exec(
+				"INSERT INTO class_staff (class_id, center_id, teacher_id, role_key) VALUES (?, ?, ?, 'giao_vien')",
+				classID, sc.CenterID, sc.TeacherID,
+			).Error; err != nil {
+				return err
+			}
 			for _, s := range c.Schedules {
 				if err := tx.Exec(
 					"INSERT INTO class_schedules (id, teacher_id, center_id, class_id, weekday, start_time, duration_min, effective_from) VALUES (?, ?, ?, ?, ?, ?::time, ?, ?::date)",
@@ -554,9 +622,11 @@ func seedEnrollmentList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc a
 	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, e := range enrollmentList {
 			var studentIDs []uuid.UUID
+			// Students anchor to the owner, so the enrolling teacher's own
+			// scope cannot find them by teacher_id — resolve within the center.
 			if err := tx.Raw(
-				"SELECT id FROM students WHERE teacher_id = ? AND full_name = ? AND deleted_at IS NULL",
-				sc.TeacherID, e.StudentName,
+				"SELECT id FROM students WHERE center_id = ? AND full_name = ? AND deleted_at IS NULL",
+				sc.CenterID, e.StudentName,
 			).Scan(&studentIDs).Error; err != nil {
 				return err
 			}
@@ -608,9 +678,9 @@ type seedServices struct {
 
 func newSeedServices(db *gorm.DB) seedServices {
 	txMgr := database.NewTxManager(db)
-	classesSvc := classes.NewService(classes.NewRepository(db), txMgr)
+	classesSvc := classes.NewService(classes.NewRepository(db), txMgr, classstaff.NewRepository(db))
 	teachersSvc := teachers.NewService(teachers.NewRepository(db))
-	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db))
+	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db), nil)
 	sessionsSvc := sessions.NewService(sessions.NewRepository(db), classesSvc, teachersSvc, enrollmentsSvc)
 	attendanceSvc := attendance.NewService(attendance.NewRepository(db), enrollmentsSvc, sessionsSvc, txMgr)
 	billingSvc := billing.NewService(billing.NewRepository(db, attendanceSvc), txMgr, sessionsSvc, enrollmentsSvc)

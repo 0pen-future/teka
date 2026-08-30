@@ -6,9 +6,16 @@ import "github.com/google/uuid"
 // — the by-contact view's wire shape, returned directly by the repository
 // since this reporting package has no separate internal model to map from.
 type ContactBalanceRow struct {
-	ContactID       uuid.UUID                `json:"contact_id"`
-	FullName        string                   `json:"full_name"`
-	Phone           string                   `json:"phone"`
+	ContactID uuid.UUID `json:"contact_id"`
+	FullName  string    `json:"full_name"`
+	// Phone is null unless the caller may see the contact's phone (owner,
+	// reports oversight, or an active hoc_vu stint over one of the contact's
+	// enrolled students). The repository always fills it; the service nils it
+	// by PhoneVisible before the row leaves.
+	Phone *string `json:"phone"`
+	// PhoneVisible is the caller's derived hoc_vu grant for this contact —
+	// service-internal input to the mask, never serialized.
+	PhoneVisible    bool                     `json:"-"`
 	ContactArchived bool                     `json:"contact_archived"`
 	StudentCount    int64                    `json:"student_count"`
 	TotalDue        int64                    `json:"total_due"`

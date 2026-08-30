@@ -19,9 +19,12 @@ export const notificationsKeys = {
   lists: () => [...notificationsKeys.all, "list"] as const,
   list: (periodId: string, params: ListNotificationsParams) =>
     [...notificationsKeys.lists(), periodId, params] as const,
-  run: (periodId: string) => [...notificationsKeys.all, "run", periodId] as const,
-  preview: (periodId: string, purpose: string) =>
-    [...notificationsKeys.all, "preview", periodId, purpose] as const,
+  // The family send and each class's send are separate run dimensions
+  // server-side, so their snapshots must never share a cache entry.
+  run: (periodId: string, classId?: string) =>
+    [...notificationsKeys.all, "run", periodId, classId ?? "family"] as const,
+  preview: (periodId: string, purpose: string, classId?: string) =>
+    [...notificationsKeys.all, "preview", periodId, purpose, classId ?? "family"] as const,
 };
 
 /**
@@ -35,10 +38,11 @@ export function useSendPreview(
   periodId: string | undefined,
   purpose: "statements" | "reminder",
   enabled: boolean,
+  classId?: string,
 ) {
   return useQuery({
-    queryKey: notificationsKeys.preview(periodId ?? "", purpose),
-    queryFn: () => getSendPreview(periodId!, purpose),
+    queryKey: notificationsKeys.preview(periodId ?? "", purpose, classId),
+    queryFn: () => getSendPreview(periodId!, purpose, classId),
     enabled: Boolean(periodId) && enabled,
   });
 }
@@ -67,15 +71,16 @@ export function useNotificationsList(
  * action (initial generate or an explicit "Tạo lại"), never a background
  * refetch or effect that could re-run silently.
  */
-export function useBulkSendNotifications(periodId: string) {
+export function useBulkSendNotifications(periodId: string, classId?: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: BulkSendInput) => bulkSendNotifications(periodId, input),
+    mutationFn: (input: BulkSendInput) =>
+      bulkSendNotifications(periodId, classId ? { ...input, class_id: classId } : input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: notificationsKeys.lists() });
       // A zalo_personal send starts a background run; refetching the snapshot
       // here is what kicks the progress poll off.
-      void queryClient.invalidateQueries({ queryKey: notificationsKeys.run(periodId) });
+      void queryClient.invalidateQueries({ queryKey: notificationsKeys.run(periodId, classId) });
     },
   });
 }
@@ -86,13 +91,15 @@ export function useBulkSendNotifications(periodId: string) {
  * says the run is still sending, so a runless period is read exactly once
  * and a finished run never leaves a timer polling the API.
  */
-export function useNotificationRun(periodId: string | undefined) {
+export function useNotificationRun(periodId: string | undefined, classId?: string) {
   const queryClient = useQueryClient();
   return useQuery({
-    queryKey: notificationsKeys.run(periodId ?? ""),
+    queryKey: notificationsKeys.run(periodId ?? "", classId),
     queryFn: async () => {
-      const previous = queryClient.getQueryData<RunSnapshot>(notificationsKeys.run(periodId ?? ""));
-      const snapshot = await getNotificationRun(periodId!);
+      const previous = queryClient.getQueryData<RunSnapshot>(
+        notificationsKeys.run(periodId ?? "", classId),
+      );
+      const snapshot = await getNotificationRun(periodId!, classId);
       // The run flips ledger rows to delivered/failed server-side; refresh
       // them while it sends — and once more on the poll that sees it finish —
       // so statuses update without a reload.
@@ -109,13 +116,13 @@ export function useNotificationRun(periodId: string | undefined) {
 }
 
 /** "Gửi tiếp" on an interrupted run — the run resumes over its still-queued rows. */
-export function useResumeNotificationRun(periodId: string) {
+export function useResumeNotificationRun(periodId: string, classId?: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => resumeNotificationRun(periodId),
+    mutationFn: () => resumeNotificationRun(periodId, classId),
     onSuccess: (snapshot) => {
       // Seeding the snapshot (now running again) restarts the poll interval.
-      queryClient.setQueryData(notificationsKeys.run(periodId), snapshot);
+      queryClient.setQueryData(notificationsKeys.run(periodId, classId), snapshot);
     },
   });
 }

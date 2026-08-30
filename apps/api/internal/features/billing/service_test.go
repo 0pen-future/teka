@@ -87,6 +87,14 @@ func (f *fakeRepository) ListPeriodsRead(_ context.Context, sc authctx.Scope, _ 
 	return out, int64(len(out)), nil
 }
 
+func (f *fakeRepository) ClassReadable(_ context.Context, _ authctx.Scope, _ uuid.UUID) (bool, error) {
+	return false, ErrClassNotFound
+}
+
+func (f *fakeRepository) ListPeriodsClassRead(_ context.Context, _ authctx.Scope, _ uuid.UUID, _ pagination.Params) ([]PeriodWithTeacher, int64, error) {
+	return nil, 0, nil
+}
+
 func (f *fakeRepository) PreviousClosedPeriod(_ context.Context, sc authctx.Scope, before time.Time) (*Period, error) {
 	var best *Period
 	for _, p := range f.periods {

@@ -39,4 +39,12 @@ export const enrollmentsKeys = {
   list: (params: ListEnrollmentsParams) => [...enrollmentsKeys.lists(), params] as const,
   details: () => [...enrollmentsKeys.all, "detail"] as const,
   detail: (id: string) => [...enrollmentsKeys.details(), id] as const,
+  enrollable: (classId: string, q: string) =>
+    [...enrollmentsKeys.all, "enrollable", classId, q] as const,
+};
+
+export const classStaffKeys = {
+  all: ["roster", "classStaff"] as const,
+  lists: () => [...classStaffKeys.all, "list"] as const,
+  list: (classId: string) => [...classStaffKeys.lists(), classId] as const,
 };

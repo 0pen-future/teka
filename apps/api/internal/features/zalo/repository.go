@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"teka/apps/api/internal/database"
+	"teka/apps/api/internal/shared/classscope"
 )
 
 // ErrAccountNotFound reports that a teacher has no linked Zalo account — the
@@ -45,6 +46,14 @@ type Repository interface {
 	// ListLinked returns the teachers whose account is currently StatusLinked —
 	// the set the health probe sweeps.
 	ListLinked(ctx context.Context) ([]uuid.UUID, error)
+	// HasActiveHocVu reports whether the teacher holds an active hoc_vu stint
+	// on any live class in the center — the gate that opens the scoped
+	// friend-match to non-oversight staff.
+	HasActiveHocVu(ctx context.Context, teacherID, centerID uuid.UUID) (bool, error)
+	// ReachableContactPhones returns the phones of every contact the teacher's
+	// active hoc_vu stints make phone-visible (the classscope contact rule).
+	// These are the only phones a non-oversight caller may send to Zalo.
+	ReachableContactPhones(ctx context.Context, teacherID, centerID uuid.UUID) ([]string, error)
 }
 
 type gormRepository struct {
@@ -138,6 +147,37 @@ func (r *gormRepository) update(ctx context.Context, teacherID uuid.UUID, values
 		return ErrAccountNotFound
 	}
 	return nil
+}
+
+func (r *gormRepository) HasActiveHocVu(ctx context.Context, teacherID, centerID uuid.UUID) (bool, error) {
+	var ok bool
+	err := database.FromContext(ctx, r.db).Raw(`
+		SELECT EXISTS (
+			SELECT 1 FROM class_staff cs
+			JOIN classes c ON c.id = cs.class_id
+			  AND c.center_id = cs.center_id
+			  AND c.deleted_at IS NULL
+			WHERE cs.teacher_id = ?
+			  AND cs.center_id = ?
+			  AND cs.role_key = 'hoc_vu'
+			  AND cs.ended_at IS NULL)`,
+		teacherID, centerID).Scan(&ok).Error
+	return ok, err
+}
+
+func (r *gormRepository) ReachableContactPhones(ctx context.Context, teacherID, centerID uuid.UUID) ([]string, error) {
+	frag, _ := classscope.PhoneVisibleViaContact("contacts.id")
+	var phones []string
+	err := database.FromContext(ctx, r.db).Raw(`
+		SELECT contacts.phone FROM contacts
+		WHERE contacts.center_id = ?
+		  AND contacts.deleted_at IS NULL
+		  AND `+frag,
+		centerID, teacherID, centerID).Scan(&phones).Error
+	if err != nil {
+		return nil, err
+	}
+	return phones, nil
 }
 
 func (r *gormRepository) ListLinked(ctx context.Context) ([]uuid.UUID, error) {

@@ -39,7 +39,7 @@ func newEnrollmentsHTTPTest(t *testing.T) (*gin.Engine, *fakeRepository) {
 	repo := newFakeRepository()
 	r := gin.New()
 	jwtCfg := config.JWTConfig{Secret: handlerTestSecret, AccessTTL: 15 * time.Minute}
-	RegisterRoutes(r.Group("/api/v1"), NewHandler(NewService(repo)),
+	RegisterRoutes(r.Group("/api/v1"), NewHandler(NewService(repo, nil)),
 		middleware.RequireAuth(jwtCfg), middleware.ResolveScope(fakeScopeResolver{}))
 	return r, repo
 }
@@ -372,5 +372,43 @@ func TestListIsTenantScoped(t *testing.T) {
 	}
 	if len(rows) != 0 {
 		t.Fatalf("another teacher's list must be empty, got %+v", rows)
+	}
+}
+
+// The picker response is names only: each row carries exactly id and
+// full_name — no phone, no contact — and a short query yields an empty list
+// rather than an error.
+func TestEnrollableStudentsResponseCarriesNamesOnly(t *testing.T) {
+	r, repo := newEnrollmentsHTTPTest(t)
+	teacherID := uuid.New()
+	token := mintToken(t, teacherID)
+	classID := repo.addClass(teacherID, 150_000)
+	repo.addStudent(teacherID)
+
+	w, env := do(t, r, http.MethodGet,
+		"/api/v1/classes/"+classID.String()+"/enrollable-students?q=an", "", token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d %+v", w.Code, env)
+	}
+	var rows []map[string]json.RawMessage
+	if err := json.Unmarshal(env.Data, &rows); err != nil {
+		t.Fatalf("data is not a list: %v\nbody: %s", err, w.Body.String())
+	}
+	if len(rows) != 1 {
+		t.Fatalf("want the one matching student, got %d rows", len(rows))
+	}
+	for key := range rows[0] {
+		if key != "id" && key != "full_name" {
+			t.Fatalf("picker rows must carry id and full_name only, found %q", key)
+		}
+	}
+
+	w, env = do(t, r, http.MethodGet,
+		"/api/v1/classes/"+classID.String()+"/enrollable-students?q=a", "", token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("short q: want 200 empty, got %d %+v", w.Code, env)
+	}
+	if err := json.Unmarshal(env.Data, &rows); err != nil || len(rows) != 0 {
+		t.Fatalf("short q must yield an empty list, got %s (err %v)", env.Data, err)
 	}
 }

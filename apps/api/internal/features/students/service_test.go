@@ -54,7 +54,19 @@ func (f *fakeRepository) addContactIn(teacherID, centerID uuid.UUID) uuid.UUID {
 
 func (f *fakeRepository) row(s *fakeStudent) Row {
 	c := f.contacts[s.ContactID]
-	return Row{Student: s.Student, ContactName: c.name, ContactPhone: c.phone}
+	phone := c.phone
+	return Row{Student: s.Student, ContactName: c.name, ContactPhone: &phone}
+}
+
+// addStudent seeds a row directly, bypassing the service's owner gate — the
+// shape of pre-migration data still anchored to a member.
+func (f *fakeRepository) addStudent(teacherID, centerID, contactID uuid.UUID, name string) uuid.UUID {
+	sid := id.New()
+	f.rows[sid] = &fakeStudent{Student: Student{
+		ID: sid, TeacherID: teacherID, CenterID: centerID,
+		ContactID: contactID, FullName: name,
+	}}
+	return sid
 }
 
 // visible mirrors the real scoped() predicate: always the center, plus the
@@ -166,7 +178,7 @@ func memberScope() authctx.Scope {
 
 func TestCreateRejectsForeignContact(t *testing.T) {
 	svc, repo, _ := newTestService()
-	sc := memberScope()
+	sc := ownerScope()
 	foreignContact := repo.addContact(id.New())
 
 	_, err := svc.Create(context.Background(), sc, CreateRequest{
@@ -186,7 +198,7 @@ func TestCreateRejectsForeignContact(t *testing.T) {
 
 func TestCreateReturnsContactDetailsAndStampsScope(t *testing.T) {
 	svc, repo, _ := newTestService()
-	sc := memberScope()
+	sc := ownerScope()
 	contactID := repo.addContactIn(sc.TeacherID, sc.CenterID)
 
 	row, err := svc.Create(context.Background(), sc, CreateRequest{
@@ -195,7 +207,7 @@ func TestCreateReturnsContactDetailsAndStampsScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if row.ContactName != "Chị Hoa" || row.ContactPhone != "+84912345678" {
+	if row.ContactName != "Chị Hoa" || row.ContactPhone == nil || *row.ContactPhone != "+84912345678" {
 		t.Fatalf("row must carry the contact's details, got %+v", row)
 	}
 	if row.DisplayNote == nil || *row.DisplayNote != "An lớp 9A" {
@@ -211,7 +223,7 @@ func TestCreateReturnsContactDetailsAndStampsScope(t *testing.T) {
 
 func TestUpdateRechecksContactOnlyWhenChanged(t *testing.T) {
 	svc, repo, _ := newTestService()
-	sc := memberScope()
+	sc := ownerScope()
 	contactID := repo.addContactIn(sc.TeacherID, sc.CenterID)
 	row, err := svc.Create(context.Background(), sc, CreateRequest{FullName: "Bé An", ContactID: contactID})
 	if err != nil {
@@ -238,7 +250,7 @@ func TestUpdateRechecksContactOnlyWhenChanged(t *testing.T) {
 
 func TestDeleteScrubsAndEndsEnrollments(t *testing.T) {
 	svc, repo, ender := newTestService()
-	sc := memberScope()
+	sc := ownerScope()
 	contactID := repo.addContactIn(sc.TeacherID, sc.CenterID)
 	row, err := svc.Create(context.Background(), sc, CreateRequest{
 		FullName: "Bé An", ContactID: contactID, DisplayNote: "An lớp 9A",
@@ -270,7 +282,7 @@ func TestDeleteScrubsAndEndsEnrollments(t *testing.T) {
 
 func TestDeleteAbortsWhenEnrollmentClosureFails(t *testing.T) {
 	svc, repo, ender := newTestService()
-	sc := memberScope()
+	sc := ownerScope()
 	contactID := repo.addContactIn(sc.TeacherID, sc.CenterID)
 	row, err := svc.Create(context.Background(), sc, CreateRequest{FullName: "Bé An", ContactID: contactID})
 	if err != nil {
@@ -289,56 +301,66 @@ func TestDeleteAbortsWhenEnrollmentClosureFails(t *testing.T) {
 
 func TestCrossTenantReadsAsNotFound(t *testing.T) {
 	svc, repo, _ := newTestService()
-	owner := memberScope()
+	owner := ownerScope()
 	contactID := repo.addContactIn(owner.TeacherID, owner.CenterID)
 	row, err := svc.Create(context.Background(), owner, CreateRequest{FullName: "Bé An", ContactID: contactID})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
-	stranger := memberScope()
+	strangerOwner := ownerScope()
 	var appErr *apperror.AppError
-	if _, err := svc.Get(context.Background(), stranger, row.ID); !errors.As(err, &appErr) || appErr.Code != apperror.CodeNotFound {
+	if _, err := svc.Get(context.Background(), strangerOwner, row.ID); !errors.As(err, &appErr) || appErr.Code != apperror.CodeNotFound {
 		t.Fatalf("cross-tenant get must be NOT_FOUND, got %v", err)
 	}
-	if err := svc.Delete(context.Background(), stranger, row.ID); !errors.As(err, &appErr) || appErr.Code != apperror.CodeNotFound {
+	if err := svc.Delete(context.Background(), strangerOwner, row.ID); !errors.As(err, &appErr) || appErr.Code != apperror.CodeNotFound {
 		t.Fatalf("cross-tenant delete must be NOT_FOUND, got %v", err)
 	}
 }
 
-// An owner reads and manages a member's student — center oversight, not
-// per-teacher isolation. Creating is stricter: the row is always stamped as
-// the caller's own, so the owner may only reference their own contacts.
-func TestOwnerScopeSeesAndDeletesMembersStudent(t *testing.T) {
+// Student CRUD is the owner's alone: every member — the row's legacy creator
+// included — gets an honest 403, before any lookup can leak existence.
+func TestMemberWritesForbidden(t *testing.T) {
 	svc, repo, _ := newTestService()
 	center := id.New()
 	member := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
-	owner := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: true}
 	contactID := repo.addContactIn(member.TeacherID, center)
+	sid := repo.addStudent(member.TeacherID, center, contactID, "Bé An")
 
-	row, err := svc.Create(context.Background(), member, CreateRequest{FullName: "Bé An", ContactID: contactID})
-	if err != nil {
-		t.Fatalf("create: %v", err)
+	if _, err := svc.Create(context.Background(), member, CreateRequest{FullName: "Bé Bình", ContactID: contactID}); apperror.From(err).Status != 403 {
+		t.Fatalf("member create must be 403, got %v", err)
 	}
-	if _, err := svc.Get(context.Background(), owner, row.ID); err != nil {
-		t.Fatalf("owner must read a member's student, got %v", err)
+	if _, err := svc.Update(context.Background(), member, sid, UpdateRequest{FullName: "Bé An (sửa)", ContactID: contactID}); apperror.From(err).Status != 403 {
+		t.Fatalf("member update must be 403, got %v", err)
 	}
-	if err := svc.Delete(context.Background(), owner, row.ID); err != nil {
-		t.Fatalf("owner must delete a member's student, got %v", err)
+	if err := svc.Delete(context.Background(), member, sid); apperror.From(err).Status != 403 {
+		t.Fatalf("member delete must be 403, got %v", err)
 	}
+}
 
-	// A member's contact is view-only for creation: the owner gets the same
-	// 422 a foreign contact would produce.
-	if _, err := svc.Create(context.Background(), owner, CreateRequest{FullName: "Bé Bình", ContactID: contactID}); apperror.From(err).Code != apperror.CodeValidation {
-		t.Fatalf("owner creating under a member's contact must be a 422, got %v", err)
+// The owner manages rows still anchored to a member (pre-migration shape) and
+// creates under any of the center's contacts — a member's included, since
+// contacts anchor to the owner going forward.
+func TestOwnerManagesMemberAnchoredData(t *testing.T) {
+	svc, repo, _ := newTestService()
+	center := id.New()
+	memberID := id.New()
+	owner := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: true}
+	contactID := repo.addContactIn(memberID, center)
+	sid := repo.addStudent(memberID, center, contactID, "Bé An")
+
+	if _, err := svc.Get(context.Background(), owner, sid); err != nil {
+		t.Fatalf("owner must read a member-anchored student, got %v", err)
 	}
-	ownContact := repo.addContactIn(owner.TeacherID, center)
-	created, err := svc.Create(context.Background(), owner, CreateRequest{FullName: "Bé Bình", ContactID: ownContact})
+	created, err := svc.Create(context.Background(), owner, CreateRequest{FullName: "Bé Bình", ContactID: contactID})
 	if err != nil {
-		t.Fatalf("owner must still create under their own contact, got %v", err)
+		t.Fatalf("owner must create under any center contact, got %v", err)
 	}
 	if created.TeacherID != owner.TeacherID {
 		t.Fatalf("owner-created student must be stamped as the owner's own, got %s", created.TeacherID)
+	}
+	if err := svc.Delete(context.Background(), owner, sid); err != nil {
+		t.Fatalf("owner must delete a member-anchored student, got %v", err)
 	}
 }
 
@@ -348,15 +370,12 @@ func TestOwnerScopeSeesAndDeletesMembersStudent(t *testing.T) {
 func TestPeerScopeCannotSeeAnotherMembersStudent(t *testing.T) {
 	svc, repo, _ := newTestService()
 	center := id.New()
-	author := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
+	authorID := id.New()
 	peer := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
-	contactID := repo.addContactIn(author.TeacherID, center)
+	contactID := repo.addContactIn(authorID, center)
+	sid := repo.addStudent(authorID, center, contactID, "Bé An")
 
-	row, err := svc.Create(context.Background(), author, CreateRequest{FullName: "Bé An", ContactID: contactID})
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	if _, err := svc.Get(context.Background(), peer, row.ID); apperror.From(err).Code != apperror.CodeNotFound {
+	if _, err := svc.Get(context.Background(), peer, sid); apperror.From(err).Code != apperror.CodeNotFound {
 		t.Fatalf("peer must not read another member's student, got %v", err)
 	}
 }
@@ -393,7 +412,7 @@ func sameNote(a, b *string) bool {
 
 func TestFindIDByNameMatchesAStudentWithNoNote(t *testing.T) {
 	svc, repo, _ := newTestService()
-	sc := memberScope()
+	sc := ownerScope()
 	contactID := repo.addContactIn(sc.TeacherID, sc.CenterID)
 
 	row, err := svc.Create(context.Background(), sc, CreateRequest{FullName: "Bé An", ContactID: contactID})
@@ -417,7 +436,7 @@ func TestFindIDByNameMatchesAStudentWithNoNote(t *testing.T) {
 
 func TestFindIDByNameDistinguishesNamesakesByNote(t *testing.T) {
 	svc, repo, _ := newTestService()
-	sc := memberScope()
+	sc := ownerScope()
 	contactID := repo.addContactIn(sc.TeacherID, sc.CenterID)
 
 	big, err := svc.Create(context.Background(), sc, CreateRequest{
@@ -448,13 +467,10 @@ func TestFindIDByNameDistinguishesNamesakesByNote(t *testing.T) {
 func TestFindIDByNameStaysWithinTheAnchorTeacher(t *testing.T) {
 	svc, repo, _ := newTestService()
 	center := id.New()
-	author := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
+	authorID := id.New()
 	peer := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: false}
-	contactID := repo.addContactIn(author.TeacherID, center)
-
-	if _, err := svc.Create(context.Background(), author, CreateRequest{FullName: "Bé An", ContactID: contactID}); err != nil {
-		t.Fatalf("create: %v", err)
-	}
+	contactID := repo.addContactIn(authorID, center)
+	repo.addStudent(authorID, center, contactID, "Bé An")
 
 	if _, found, err := svc.FindIDByName(context.Background(), peer, contactID, "Bé An", nil); err != nil || found {
 		t.Fatalf("another teacher's student must not be found, got found=%v err=%v", found, err)

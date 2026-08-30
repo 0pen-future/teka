@@ -10,6 +10,7 @@ import (
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/shared/authctx"
+	"teka/apps/api/internal/shared/classscope"
 )
 
 // StudentName is the display shape the attendance sheet needs from the
@@ -73,14 +74,20 @@ func NewRepository(db *gorm.DB) Repository {
 	return &gormRepository{db: db}
 }
 
-// scoped returns a query bound to one center, further narrowed to one
-// teacher's own rows unless the caller is the center's owner. Columns are
-// table-qualified because TallyByEnrollment joins class_sessions, which
-// carries the same center_id/teacher_id column names.
-func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+// readScoped lets a member read their own attendance rows plus rows of
+// sessions whose class they hold a class_staff stint on, ended stints
+// included. Reads only: the write paths settle permission through the
+// session write gate in the service, and their row filters never consult
+// attendance_records.teacher_id (last-writer attribution, not ownership).
+func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("attendance_records.center_id = ?", sc.CenterID)
 	if !sc.CenterWide() {
-		q = q.Where("attendance_records.teacher_id = ?", sc.TeacherID)
+		frag, _ := classscope.ReadExists("s2.class_id")
+		q = q.Where(`(attendance_records.teacher_id = ? OR EXISTS (
+			SELECT 1 FROM class_sessions s2
+			WHERE s2.id = attendance_records.session_id
+			  AND s2.center_id = attendance_records.center_id
+			  AND `+frag+`))`, sc.TeacherID, sc.TeacherID, sc.CenterID)
 	}
 	return q
 }
@@ -96,6 +103,9 @@ func (r *gormRepository) UpsertMany(ctx context.Context, records []Record) error
 	// set to a fresh now() on conflict rather than the excluded value, so a
 	// batch upsert reflects one consistent edit time; recorded_at is
 	// deliberately absent from the SET list so it survives every edit.
+	// teacher_id IS in the SET list: it is last-writer attribution, not a row
+	// filter — an assistant editing a teacher's row takes the credit, and no
+	// read that prices or deletes rows may ever filter on it.
 	return database.FromContext(ctx, r.db).
 		Clauses(clause.OnConflict{
 			Columns:     []clause.Column{{Name: "session_id"}, {Name: "student_id"}},
@@ -105,6 +115,7 @@ func (r *gormRepository) UpsertMany(ctx context.Context, records []Record) error
 				"enrollment_id": gorm.Expr("excluded.enrollment_id"),
 				"billable":      gorm.Expr("excluded.billable"),
 				"note":          gorm.Expr("excluded.note"),
+				"teacher_id":    gorm.Expr("excluded.teacher_id"),
 				"updated_at":    gorm.Expr("now()"),
 			}),
 		}).
@@ -113,14 +124,21 @@ func (r *gormRepository) UpsertMany(ctx context.Context, records []Record) error
 
 func (r *gormRepository) ListBySession(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) ([]Record, error) {
 	var records []Record
-	err := r.scoped(ctx, sc).
+	err := r.readScoped(ctx, sc).
 		Where("attendance_records.session_id = ?", sessionID).
 		Find(&records).Error
 	return records, err
 }
 
 func (r *gormRepository) SoftDeleteMissing(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID, keepStudentIDs []uuid.UUID) error {
-	q := r.scoped(ctx, sc).Where("attendance_records.session_id = ?", sessionID)
+	// Rows are selected by (center, session) alone — never by who recorded
+	// them. The permission to touch this session's sheet was already settled
+	// by the service's session write gate; filtering by recorder here would
+	// leave another writer's off-roster rows behind as orphaned billable
+	// records.
+	q := database.FromContext(ctx, r.db).
+		Where("attendance_records.center_id = ?", sc.CenterID).
+		Where("attendance_records.session_id = ?", sessionID)
 	if len(keepStudentIDs) > 0 {
 		q = q.Where("attendance_records.student_id NOT IN ?", keepStudentIDs)
 	}
@@ -147,7 +165,13 @@ func (r *gormRepository) StudentNames(ctx context.Context, sc authctx.Scope, stu
 		Select("id, full_name, display_note").
 		Where("center_id = ? AND id IN ?", sc.CenterID, studentIDs)
 	if !sc.CenterWide() {
-		q = q.Where("teacher_id = ?", sc.TeacherID)
+		// Own students, plus students enrolled in a class the caller holds a
+		// class_staff stint on (ended included): a handoff moves the class but
+		// not the student rows, and the staff sheet must still show names. The
+		// enrollment may be ended — history stays readable — but never
+		// soft-deleted.
+		frag, _ := classscope.ReadExistsViaEnrollment("students.id")
+		q = q.Where("(teacher_id = ? OR "+frag+")", sc.TeacherID, sc.TeacherID, sc.CenterID)
 	}
 	if err := q.Find(&rows).Error; err != nil {
 		return nil, err
@@ -160,8 +184,14 @@ func (r *gormRepository) StudentNames(ctx context.Context, sc authctx.Scope, stu
 
 func (r *gormRepository) TallyByEnrollment(ctx context.Context, sc authctx.Scope, from, to time.Time) ([]EnrollmentTally, error) {
 	var rows []EnrollmentTally
-	err := r.scoped(ctx, sc).
+	// A member scope means "this teacher's enrollments" — billing passes the
+	// period teacher here — resolved through the enrollment join, NEVER
+	// through attendance_records.teacher_id: that column is last-writer
+	// attribution, and filtering on it would drop assistant-recorded rows
+	// from the teacher's invoice.
+	q := database.FromContext(ctx, r.db).
 		Model(&Record{}).
+		Where("attendance_records.center_id = ?", sc.CenterID).
 		Select(`attendance_records.enrollment_id AS enrollment_id,
 			COUNT(*) FILTER (WHERE attendance_records.billable = true) AS billable_count,
 			COUNT(*) FILTER (WHERE attendance_records.status = 'absent') AS absent_count,
@@ -170,8 +200,12 @@ func (r *gormRepository) TallyByEnrollment(ctx context.Context, sc authctx.Scope
 		Where("class_sessions.deleted_at IS NULL").
 		Where("class_sessions.status = 'held'").
 		Where("class_sessions.attendance_confirmed_at IS NOT NULL").
-		Where("class_sessions.session_date BETWEEN ? AND ?", from, to).
-		Group("attendance_records.enrollment_id").
+		Where("class_sessions.session_date BETWEEN ? AND ?", from, to)
+	if !sc.CenterWide() {
+		q = q.Joins("JOIN enrollments ON enrollments.id = attendance_records.enrollment_id AND enrollments.center_id = attendance_records.center_id").
+			Where("enrollments.teacher_id = ?", sc.TeacherID)
+	}
+	err := q.Group("attendance_records.enrollment_id").
 		Find(&rows).Error
 	return rows, err
 }

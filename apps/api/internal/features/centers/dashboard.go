@@ -27,7 +27,7 @@ type ClassReader interface {
 // materialise sessions on the viewed teacher's behalf.
 type SessionReader interface {
 	ListRangeReadOnly(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]sessions.Row, error)
-	Get(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*sessions.Detail, error)
+	GetReadable(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (*sessions.Detail, error)
 }
 
 // AttendanceReader is the slice of the attendance feature the dashboard
@@ -249,7 +249,7 @@ func (d *Dashboard) Session(ctx context.Context, sc authctx.Scope, sessionID uui
 	if err := requireDashboardView(sc); err != nil {
 		return nil, err
 	}
-	det, err := d.sessions.Get(ctx, sc, sessionID)
+	det, err := d.sessions.GetReadable(ctx, sc, sessionID)
 	if err != nil {
 		return nil, forbiddenOnNotFound(err)
 	}

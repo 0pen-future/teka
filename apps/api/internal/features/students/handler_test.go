@@ -161,7 +161,7 @@ func TestCreateAndGetRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(env.Data, &created); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	if created.ContactName == "" || created.ContactPhone == "" {
+	if created.ContactName == "" || created.ContactPhone == nil || *created.ContactPhone == "" {
 		t.Fatalf("response must carry contact details, got %+v", created)
 	}
 	if created.DisplayNote != "An lớp 9A" {

@@ -45,18 +45,34 @@ func pathID(c *gin.Context, param, resource string) (uuid.UUID, bool) {
 	return parsed, true
 }
 
+// classIDQuery parses the optional class_id query parameter. Absent is nil; a
+// malformed value reads as the class not existing, matching pathID's
+// treatment of malformed ids. The bool reports whether handling may continue.
+func classIDQuery(c *gin.Context) (*uuid.UUID, bool) {
+	raw := c.Query("class_id")
+	if raw == "" {
+		return nil, true
+	}
+	parsed, err := uuid.Parse(raw)
+	if err != nil {
+		response.Err(c, apperror.NotFound("class"))
+		return nil, false
+	}
+	return &parsed, true
+}
+
 // bulkSend queues one notification per eligible contact in a billing period.
 //
 //	@Summary		Bulk-send statement notifications
-//	@Description	Regenerates/refreshes the period's statements, then queues one message per eligible contact: purpose=statement (or "statements") targets every contact with a non-void invoice; purpose=reminder further narrows to contacts with outstanding > 0. One row per contact, never one per child.
+//	@Description	Regenerates/refreshes the period's statements, then queues one message per eligible contact: purpose=statement (or "statements") targets every contact with a non-void invoice; purpose=reminder further narrows to contacts with outstanding > 0. One row per contact, never one per child. With class_id in the body, sends that class's class-scoped statement copies instead — gated by class-send access (active sending-role stint or reports oversight) rather than the send-reports permission.
 //	@Tags			notifications
 //	@Accept			json
 //	@Produce		json
 //	@Param			id		path		string				true	"billing period id"
-//	@Param			request	body		BulkSendRequest	true	"purpose and optional channel"
+//	@Param			request	body		BulkSendRequest	true	"purpose, optional channel, optional class_id"
 //	@Success		200		{object}	response.Envelope{data=BulkSendResponse}
 //	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
-//	@Failure		403		{object}	response.Envelope{error=response.ErrorBody}	"caller lacks the send-reports permission"
+//	@Failure		403		{object}	response.Envelope{error=response.ErrorBody}	"caller lacks the send-reports permission, or their class role does not allow sending"
 //	@Failure		404		{object}	response.Envelope{error=response.ErrorBody}
 //	@Failure		409		{object}	response.Envelope{error=response.ErrorBody}	"period is not closed"
 //	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}	"validation failed"
@@ -90,14 +106,15 @@ func (h *Handler) bulkSend(c *gin.Context) {
 //	@Description	Computes, without writing anything, the exact buckets a zalo_personal bulk send would produce right now: auto_send (mapped + friend of the caller's Zalo account), mapped_not_friend, and unmapped (manual fallback), plus the server's max_run_size cap. purpose=reminder narrows to contacts with outstanding > 0.
 //	@Tags			notifications
 //	@Produce		json
-//	@Param			id		path		string	true	"billing period id"
-//	@Param			purpose	query		string	false	"statements (default) or reminder"
-//	@Success		200		{object}	response.Envelope{data=SendPreviewResponse}
-//	@Failure		400		{object}	response.Envelope{error=response.ErrorBody}	"no linked Zalo account"
-//	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
-//	@Failure		403		{object}	response.Envelope{error=response.ErrorBody}	"caller lacks the send-reports permission"
-//	@Failure		404		{object}	response.Envelope{error=response.ErrorBody}
-//	@Failure		409		{object}	response.Envelope{error=response.ErrorBody}	"cross-teacher period without the permission, or the Zalo session expired"
+//	@Param			id			path		string	true	"billing period id"
+//	@Param			purpose		query		string	false	"statements (default) or reminder"
+//	@Param			class_id	query		string	false	"preview the class-scoped send for this class instead of the family one"
+//	@Success		200			{object}	response.Envelope{data=SendPreviewResponse}
+//	@Failure		400			{object}	response.Envelope{error=response.ErrorBody}	"no linked Zalo account"
+//	@Failure		401			{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403			{object}	response.Envelope{error=response.ErrorBody}	"caller lacks the send-reports permission, or their class role does not allow sending"
+//	@Failure		404			{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		409			{object}	response.Envelope{error=response.ErrorBody}	"cross-teacher period without the permission, or the Zalo session expired"
 //	@Security		BearerAuth
 //	@Router			/billing-periods/{id}/notifications/preview [get]
 func (h *Handler) sendPreview(c *gin.Context) {
@@ -109,7 +126,11 @@ func (h *Handler) sendPreview(c *gin.Context) {
 	if !ok {
 		return
 	}
-	preview, err := h.svc.SendPreview(c.Request.Context(), sc, periodID, c.Query("purpose"))
+	classID, ok := classIDQuery(c)
+	if !ok {
+		return
+	}
+	preview, err := h.svc.SendPreview(c.Request.Context(), sc, periodID, c.Query("purpose"), classID)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -123,10 +144,12 @@ func (h *Handler) sendPreview(c *gin.Context) {
 //	@Description	Returns the period's latest background send run with progress counters derived from its rows. A period that never had a run answers active=false with a null run_id, not a 404 — poll this after a zalo_personal bulk send until active turns false.
 //	@Tags			notifications
 //	@Produce		json
-//	@Param			id	path		string	true	"billing period id"
-//	@Success		200	{object}	response.Envelope{data=RunSnapshotResponse}
-//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
-//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}
+//	@Param			id			path		string	true	"billing period id"
+//	@Param			class_id	query		string	false	"poll the class-scoped run for this class instead of the family one"
+//	@Success		200			{object}	response.Envelope{data=RunSnapshotResponse}
+//	@Failure		401			{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403			{object}	response.Envelope{error=response.ErrorBody}	"class_id set and the caller's class role does not allow sending"
+//	@Failure		404			{object}	response.Envelope{error=response.ErrorBody}
 //	@Security		BearerAuth
 //	@Router			/billing-periods/{id}/notifications/run [get]
 func (h *Handler) runSnapshot(c *gin.Context) {
@@ -138,7 +161,11 @@ func (h *Handler) runSnapshot(c *gin.Context) {
 	if !ok {
 		return
 	}
-	snapshot, err := h.svc.RunSnapshot(c.Request.Context(), sc, periodID)
+	classID, ok := classIDQuery(c)
+	if !ok {
+		return
+	}
+	snapshot, err := h.svc.RunSnapshot(c.Request.Context(), sc, periodID, classID)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -152,13 +179,14 @@ func (h *Handler) runSnapshot(c *gin.Context) {
 //	@Description	Re-renders and re-sends only the run's still-queued rows; rows already sent keep their verdict. Only a run in the interrupted state qualifies. Rows that can no longer be auto-sent (mapping removed, balance since paid) are failed with a reason.
 //	@Tags			notifications
 //	@Produce		json
-//	@Param			id	path		string	true	"billing period id"
-//	@Success		200	{object}	response.Envelope{data=RunSnapshotResponse}
-//	@Failure		400	{object}	response.Envelope{error=response.ErrorBody}	"no linked Zalo account"
-//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
-//	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}	"caller lacks the send-reports permission"
-//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}	"period has no run"
-//	@Failure		409	{object}	response.Envelope{error=response.ErrorBody}	"run is not interrupted, another run is sending, or the Zalo session expired"
+//	@Param			id			path		string	true	"billing period id"
+//	@Param			class_id	query		string	false	"resume the class-scoped run for this class instead of the family one"
+//	@Success		200			{object}	response.Envelope{data=RunSnapshotResponse}
+//	@Failure		400			{object}	response.Envelope{error=response.ErrorBody}	"no linked Zalo account"
+//	@Failure		401			{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403			{object}	response.Envelope{error=response.ErrorBody}	"caller lacks the send-reports permission, or their class role does not allow sending"
+//	@Failure		404			{object}	response.Envelope{error=response.ErrorBody}	"period has no run"
+//	@Failure		409			{object}	response.Envelope{error=response.ErrorBody}	"run is not interrupted, another run is sending, or the Zalo session expired"
 //	@Security		BearerAuth
 //	@Router			/billing-periods/{id}/notifications/run/resume [post]
 func (h *Handler) resumeRun(c *gin.Context) {
@@ -170,7 +198,11 @@ func (h *Handler) resumeRun(c *gin.Context) {
 	if !ok {
 		return
 	}
-	snapshot, err := h.svc.ResumeRun(c.Request.Context(), sc, periodID)
+	classID, ok := classIDQuery(c)
+	if !ok {
+		return
+	}
+	snapshot, err := h.svc.ResumeRun(c.Request.Context(), sc, periodID, classID)
 	if err != nil {
 		response.Err(c, err)
 		return

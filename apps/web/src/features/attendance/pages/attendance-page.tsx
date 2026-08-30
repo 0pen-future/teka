@@ -2,6 +2,8 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { useBlocker, useNavigate, useParams } from "react-router";
 
 import { HvButton, HvModal, hvToast } from "@/components/hv";
+import { canRecordAttendance, canWriteClass, useClass } from "@/features/roster";
+import { useCenterContext } from "@/features/teaching";
 import { formatSessionDate } from "@/lib/utils";
 
 import { AttendanceRow } from "../components/attendance-row";
@@ -79,6 +81,17 @@ export function AttendancePage({ sessionId: sessionIdProp }: AttendancePageProps
   } = useSessionRoster(sessionId);
   const { data: period } = usePeriodForDate(session?.session_date);
   const saveMutation = useSaveAttendance(sessionId ?? "");
+  const { data: klass } = useClass(session?.class_id);
+  const { isOwner } = useCenterContext();
+  // Defaults closed while the class is still loading so hoc_vu/tro_giang
+  // staff never see write controls flash enabled before the role check lands;
+  // accessResolved keeps the denial label from flashing at real writers in
+  // the meantime (the notifications page's accessResolved precedent).
+  const accessResolved = Boolean(klass);
+  const canWrite = klass ? canRecordAttendance(isOwner, klass) : false;
+  // Cancelling a session is a lifecycle write (sessions.write): giao_vien or
+  // owner only — narrower than the attendance confirm the trợ giảng holds.
+  const canCancel = klass ? canWriteClass(isOwner, klass) : false;
 
   const [absentIds, setAbsentIds] = useState<Set<string>>(new Set());
   const [baselineIds, setBaselineIds] = useState<Set<string> | null>(null);
@@ -118,6 +131,12 @@ export function AttendancePage({ sessionId: sessionIdProp }: AttendancePageProps
   }, [roster]);
 
   function toggleAbsent(studentId: string) {
+    // Read-only viewers (hoc_vu, a handed-off teacher) must not accumulate
+    // local edits they can never save — a dirty sheet would trap them in the
+    // unsaved-changes blocker on the way out.
+    if (!canWrite) {
+      return;
+    }
     setAbsentIds((prev) => {
       const next = new Set(prev);
       if (next.has(studentId)) {
@@ -214,16 +233,18 @@ export function AttendancePage({ sessionId: sessionIdProp }: AttendancePageProps
 
       <div className="flex flex-col gap-3 px-3 pt-3">
         {closedPeriod ? <ClosedPeriodWarning /> : null}
-        <div className="flex justify-end">
-          <HvButton
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => setCancelDialogOpen(true)}
-          >
-            Huỷ buổi học
-          </HvButton>
-        </div>
+        {canCancel ? (
+          <div className="flex justify-end">
+            <HvButton
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setCancelDialogOpen(true)}
+            >
+              Huỷ buổi học
+            </HvButton>
+          </div>
+        ) : null}
       </div>
 
       {/* Prototype list viewport, two-pane only: at lg+ rows scroll inside
@@ -247,6 +268,8 @@ export function AttendancePage({ sessionId: sessionIdProp }: AttendancePageProps
         pending={saveMutation.isPending}
         closedPeriod={closedPeriod}
         settled={settled}
+        canWrite={canWrite}
+        accessResolved={accessResolved}
         onConfirm={handleConfirm}
       />
 
