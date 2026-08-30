@@ -495,6 +495,12 @@ const docTemplate = `{
                         "description": "period_start or created_at; - prefix for desc",
                         "name": "sort",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "only periods carrying this class's charges; requires a class_staff stint on the class (or oversight)",
+                        "name": "class_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -524,6 +530,24 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "class not found or not readable",
                         "schema": {
                             "allOf": [
                                 {
@@ -1223,7 +1247,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Regenerates/refreshes the period's statements, then queues one message per eligible contact: purpose=statement (or \"statements\") targets every contact with a non-void invoice; purpose=reminder further narrows to contacts with outstanding \u003e 0. One row per contact, never one per child.",
+                "description": "Regenerates/refreshes the period's statements, then queues one message per eligible contact: purpose=statement (or \"statements\") targets every contact with a non-void invoice; purpose=reminder further narrows to contacts with outstanding \u003e 0. One row per contact, never one per child. With class_id in the body, sends that class's class-scoped statement copies instead — gated by class-send access (active sending-role stint or reports oversight) rather than the send-reports permission.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1243,7 +1267,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "purpose and optional channel",
+                        "description": "purpose, optional channel, optional class_id",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -1290,7 +1314,7 @@ const docTemplate = `{
                         }
                     },
                     "403": {
-                        "description": "caller lacks the send-reports permission",
+                        "description": "caller lacks the send-reports permission, or their class role does not allow sending",
                         "schema": {
                             "allOf": [
                                 {
@@ -1392,6 +1416,12 @@ const docTemplate = `{
                         "description": "statements (default) or reminder",
                         "name": "purpose",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "preview the class-scoped send for this class instead of the family one",
+                        "name": "class_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -1450,7 +1480,7 @@ const docTemplate = `{
                         }
                     },
                     "403": {
-                        "description": "caller lacks the send-reports permission",
+                        "description": "caller lacks the send-reports permission, or their class role does not allow sending",
                         "schema": {
                             "allOf": [
                                 {
@@ -1528,6 +1558,12 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "poll the class-scoped run for this class instead of the family one",
+                        "name": "class_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -1551,6 +1587,24 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "class_id set and the caller's class role does not allow sending",
                         "schema": {
                             "allOf": [
                                 {
@@ -1610,6 +1664,12 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "resume the class-scoped run for this class instead of the family one",
+                        "name": "class_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -1668,7 +1728,7 @@ const docTemplate = `{
                         }
                     },
                     "403": {
-                        "description": "caller lacks the send-reports permission",
+                        "description": "caller lacks the send-reports permission, or their class role does not allow sending",
                         "schema": {
                             "allOf": [
                                 {
@@ -1813,6 +1873,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Without class_id lists the period's family statements. With class_id lists that class's class-scoped copies; requires class-send access to the class (active sending-role stint or reports oversight) — a readable-but-not-sendable role gets 403, no stint a neutral 404.",
                 "produces": [
                     "application/json"
                 ],
@@ -1827,6 +1888,12 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "list one class's class-scoped copies instead of the family statements",
+                        "name": "class_id",
+                        "in": "query"
                     },
                     {
                         "type": "integer",
@@ -1874,6 +1941,24 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "role on the class does not allow sending",
                         "schema": {
                             "allOf": [
                                 {
@@ -4376,6 +4461,121 @@ const docTemplate = `{
                 }
             }
         },
+        "/classes/{id}/enrollable-students": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Autocomplete for enrolling an existing student. Rows carry id and full_name only — never phone or contact. Callable by the owner or the class's active giao_vien; other class staff get 403 and unassigned members 404. Queries under two characters return an empty list; at most 20 rows, sorted by name.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "enrollments"
+                ],
+                "summary": "Search enrollable students",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "class id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "name fragment, minimum two characters",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "max rows, capped at 20",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/enrollments.PickerStudent"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "assigned to the class but not its active teacher",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "class not found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/classes/{id}/lesson-plans": {
             "get": {
                 "security": [
@@ -6124,6 +6324,392 @@ const docTemplate = `{
                     },
                     "422": {
                         "description": "Unprocessable Entity",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/classes/{id}/staff": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Every staff stint of the class (nhân sự lớp) — active and ended — with teacher names and role labels. Visible to the owner and to anyone holding a stint on the class (an ended stint keeps history reads). Anyone else gets 404.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "class-staff"
+                ],
+                "summary": "List class staff",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "class id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/classstaff.StaffResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "class invisible to the caller",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Assigns a live center member a role in the class. Owner only. giao_vien is refused with 409 — the primary teacher changes only through the class handoff flow. A person holds at most one active stint per class (409 otherwise); the role must come from the code-owned registry (422); the target must be a live member (400).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "class-staff"
+                ],
+                "summary": "Assign class staff",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "class id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "member and role",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/classstaff.AssignRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/classstaff.StaffResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "target is not a live member of the center",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "caller reads the class but is not the owner",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "class invisible to the caller",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "409": {
+                        "description": "giao_vien role, or an active stint already exists",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "role outside the registry",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/classes/{id}/staff/{staffId}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Default: soft-closes the stint — the person keeps read access to the class's history. mode=void hard-deletes the row (the revocation path for a mistaken grant, valid on an already-ended stint too). Owner only. An active giao_vien refuses both modes with 409 — hand the class off instead. Soft-closing an already-ended stint is 404.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "class-staff"
+                ],
+                "summary": "Remove class staff",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "class id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "staff assignment id",
+                        "name": "staffId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "void"
+                        ],
+                        "type": "string",
+                        "description": "void to hard-delete the stint",
+                        "name": "mode",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "unknown mode",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "caller reads the class but is not the owner",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "class or stint invisible, or stint already ended",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "409": {
+                        "description": "active giao_vien — use the handoff flow",
                         "schema": {
                             "allOf": [
                                 {
@@ -8418,7 +9004,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Looks up 1–200 phone numbers against Zalo in paced chunks, intersects the hits with the linked account's friend list, and returns one row per phone in request order. Rows echo the phone exactly as sent; unresolved phones come back matched=false. Nothing is persisted — confirming a suggestion goes through PUT /contacts/{id}/zalo-mapping. 404 when no account is linked, 409 when the stored session no longer works.",
+                "description": "Looks up 1–200 phone numbers against Zalo in paced chunks, intersects the hits with the linked account's friend list, and returns one row per phone in request order. Rows echo the phone exactly as sent; unresolved phones come back matched=false. Owner and send-reports holders match any phone; an active hoc_vu matches only phones of contacts their assignments make phone-visible (out-of-reach phones come back matched=false without a lookup); other staff get 403. Nothing is persisted — confirming a suggestion goes through PUT /contacts/{id}/zalo-mapping. 404 when no account is linked, 409 when the stored session no longer works.",
                 "consumes": [
                     "application/json"
                 ],
@@ -8482,6 +9068,24 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "caller has neither oversight nor an active hoc_vu assignment",
                         "schema": {
                             "allOf": [
                                 {
@@ -12846,6 +13450,13 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "my_staff_roles": {
+                    "description": "MyStaffRoles lists the CALLER's active class_staff role keys on this\nclass — per-caller data, so only the readable GET paths fill it (via\nFromModelWithRoles); every other producer, the dashboard included,\nleaves it empty.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "name": {
                     "type": "string"
                 },
@@ -13005,6 +13616,48 @@ const docTemplate = `{
                 }
             }
         },
+        "classstaff.AssignRequest": {
+            "type": "object",
+            "required": [
+                "role_key",
+                "teacher_id"
+            ],
+            "properties": {
+                "role_key": {
+                    "type": "string",
+                    "maxLength": 32
+                },
+                "teacher_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "classstaff.StaffResponse": {
+            "type": "object",
+            "properties": {
+                "ended_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "role_key": {
+                    "type": "string"
+                },
+                "role_label": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "teacher_id": {
+                    "type": "string"
+                },
+                "teacher_name": {
+                    "type": "string"
+                }
+            }
+        },
         "collections.ClassCollectionRow": {
             "type": "object",
             "properties": {
@@ -13077,6 +13730,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "phone": {
+                    "description": "Phone is null unless the caller may see the contact's phone (owner,\nreports oversight, or an active hoc_vu stint over one of the contact's\nenrolled students). The repository always fills it; the service nils it\nby PhoneVisible before the row leaves.",
                     "type": "string"
                 },
                 "student_count": {
@@ -13277,6 +13931,17 @@ const docTemplate = `{
                 },
                 "unit_price": {
                     "type": "integer"
+                }
+            }
+        },
+        "enrollments.PickerStudent": {
+            "type": "object",
+            "properties": {
+                "full_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
                 }
             }
         },
@@ -13576,6 +14241,9 @@ const docTemplate = `{
                         "zalo_personal"
                     ]
                 },
+                "class_id": {
+                    "type": "string"
+                },
                 "purpose": {
                     "type": "string",
                     "enum": [
@@ -13598,6 +14266,10 @@ const docTemplate = `{
                 },
                 "fallback_manual_count": {
                     "type": "integer"
+                },
+                "overlap_warning": {
+                    "description": "OverlapWarning is set when the other statement dimension already sent\nthis period — a family send after a class copy went out, or a class send\nafter a family one. Purely informational: parents may receive both, but\nnothing is blocked.",
+                    "type": "string"
                 },
                 "personal_queued_count": {
                     "description": "PersonalQueuedCount and FallbackManualCount split a zalo_personal\nsend's rows: mapped contacts the run delivers itself vs unmapped\ncontacts left in BulkText for the teacher to copy-paste. Both zero for\nother channels.",
@@ -13694,6 +14366,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "phone": {
+                    "description": "Phone is null unless the caller may see the contact's phone (owner,\nreports oversight, or an active hoc_vu stint over one of the contact's\nenrolled students).",
                     "type": "string"
                 },
                 "purpose": {
@@ -13768,6 +14441,10 @@ const docTemplate = `{
                 "max_run_size": {
                     "description": "MaxRunSize is the server's cap on one run's auto-send count, so the\nclient can warn about an oversized send before submitting it.",
                     "type": "integer"
+                },
+                "overlap_warning": {
+                    "description": "OverlapWarning mirrors BulkSendResponse.OverlapWarning: the other\nstatement dimension already sent this period, so a send now may reach\nparents twice. Informational only.",
+                    "type": "string"
                 },
                 "unmapped": {
                     "description": "Unmapped: no Zalo mapping — these rows would fall back to the manual\ncopy-paste channel.",
@@ -14305,6 +14982,10 @@ const docTemplate = `{
         "statements.StatementResponse": {
             "type": "object",
             "properties": {
+                "class_id": {
+                    "description": "ClassID is null on a family statement and set on a class-scoped copy —\nsee the Statement model.",
+                    "type": "string"
+                },
                 "contact_id": {
                     "type": "string"
                 },

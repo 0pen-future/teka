@@ -607,6 +607,15 @@ definitions:
         type: string
       id:
         type: string
+      my_staff_roles:
+        description: |-
+          MyStaffRoles lists the CALLER's active class_staff role keys on this
+          class — per-caller data, so only the readable GET paths fill it (via
+          FromModelWithRoles); every other producer, the dashboard included,
+          leaves it empty.
+        items:
+          type: string
+        type: array
       name:
         type: string
       schedules:
@@ -719,6 +728,34 @@ definitions:
     - start_time
     - weekday
     type: object
+  classstaff.AssignRequest:
+    properties:
+      role_key:
+        maxLength: 32
+        type: string
+      teacher_id:
+        type: string
+    required:
+    - role_key
+    - teacher_id
+    type: object
+  classstaff.StaffResponse:
+    properties:
+      ended_at:
+        type: string
+      id:
+        type: string
+      role_key:
+        type: string
+      role_label:
+        type: string
+      started_at:
+        type: string
+      teacher_id:
+        type: string
+      teacher_name:
+        type: string
+    type: object
   collections.ClassCollectionRow:
     properties:
       absent_count:
@@ -767,6 +804,11 @@ definitions:
       payment_status:
         type: string
       phone:
+        description: |-
+          Phone is null unless the caller may see the contact's phone (owner,
+          reports oversight, or an active hoc_vu stint over one of the contact's
+          enrolled students). The repository always fills it; the service nils it
+          by PhoneVisible before the row leaves.
         type: string
       student_count:
         type: integer
@@ -904,6 +946,13 @@ definitions:
         type: string
       unit_price:
         type: integer
+    type: object
+  enrollments.PickerStudent:
+    properties:
+      full_name:
+        type: string
+      id:
+        type: string
     type: object
   grading.AssignScoreSetRequest:
     properties:
@@ -1099,6 +1148,8 @@ definitions:
         - sms
         - zalo_personal
         type: string
+      class_id:
+        type: string
       purpose:
         enum:
         - statement
@@ -1121,6 +1172,13 @@ definitions:
         type: integer
       fallback_manual_count:
         type: integer
+      overlap_warning:
+        description: |-
+          OverlapWarning is set when the other statement dimension already sent
+          this period — a family send after a class copy went out, or a class send
+          after a family one. Purely informational: parents may receive both, but
+          nothing is blocked.
+        type: string
       personal_queued_count:
         description: |-
           PersonalQueuedCount and FallbackManualCount split a zalo_personal
@@ -1195,6 +1253,10 @@ definitions:
       id:
         type: string
       phone:
+        description: |-
+          Phone is null unless the caller may see the contact's phone (owner,
+          reports oversight, or an active hoc_vu stint over one of the contact's
+          enrolled students).
         type: string
       purpose:
         type: string
@@ -1253,6 +1315,12 @@ definitions:
           MaxRunSize is the server's cap on one run's auto-send count, so the
           client can warn about an oversized send before submitting it.
         type: integer
+      overlap_warning:
+        description: |-
+          OverlapWarning mirrors BulkSendResponse.OverlapWarning: the other
+          statement dimension already sent this period, so a send now may reach
+          parents twice. Informational only.
+        type: string
       unmapped:
         description: |-
           Unmapped: no Zalo mapping — these rows would fall back to the manual
@@ -1614,6 +1682,11 @@ definitions:
     type: object
   statements.StatementResponse:
     properties:
+      class_id:
+        description: |-
+          ClassID is null on a family statement and set on a class-scoped copy —
+          see the Statement model.
+        type: string
       contact_id:
         type: string
       contact_name:
@@ -2201,6 +2274,11 @@ paths:
         in: query
         name: sort
         type: string
+      - description: only periods carrying this class's charges; requires a class_staff
+          stint on the class (or oversight)
+        in: query
+        name: class_id
+        type: string
       produces:
       - application/json
       responses:
@@ -2219,6 +2297,15 @@ paths:
               type: object
         "401":
           description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: class not found or not readable
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'
@@ -2612,14 +2699,17 @@ paths:
       description: 'Regenerates/refreshes the period''s statements, then queues one
         message per eligible contact: purpose=statement (or "statements") targets
         every contact with a non-void invoice; purpose=reminder further narrows to
-        contacts with outstanding > 0. One row per contact, never one per child.'
+        contacts with outstanding > 0. One row per contact, never one per child. With
+        class_id in the body, sends that class''s class-scoped statement copies instead
+        — gated by class-send access (active sending-role stint or reports oversight)
+        rather than the send-reports permission.'
       parameters:
       - description: billing period id
         in: path
         name: id
         required: true
         type: string
-      - description: purpose and optional channel
+      - description: purpose, optional channel, optional class_id
         in: body
         name: request
         required: true
@@ -2647,7 +2737,8 @@ paths:
                   $ref: '#/definitions/response.ErrorBody'
               type: object
         "403":
-          description: caller lacks the send-reports permission
+          description: caller lacks the send-reports permission, or their class role
+            does not allow sending
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'
@@ -2704,6 +2795,11 @@ paths:
         in: query
         name: purpose
         type: string
+      - description: preview the class-scoped send for this class instead of the family
+          one
+        in: query
+        name: class_id
+        type: string
       produces:
       - application/json
       responses:
@@ -2735,7 +2831,8 @@ paths:
                   $ref: '#/definitions/response.ErrorBody'
               type: object
         "403":
-          description: caller lacks the send-reports permission
+          description: caller lacks the send-reports permission, or their class role
+            does not allow sending
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'
@@ -2779,6 +2876,11 @@ paths:
         name: id
         required: true
         type: string
+      - description: poll the class-scoped run for this class instead of the family
+          one
+        in: query
+        name: class_id
+        type: string
       produces:
       - application/json
       responses:
@@ -2793,6 +2895,15 @@ paths:
               type: object
         "401":
           description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: class_id set and the caller's class role does not allow sending
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'
@@ -2826,6 +2937,11 @@ paths:
         name: id
         required: true
         type: string
+      - description: resume the class-scoped run for this class instead of the family
+          one
+        in: query
+        name: class_id
+        type: string
       produces:
       - application/json
       responses:
@@ -2857,7 +2973,8 @@ paths:
                   $ref: '#/definitions/response.ErrorBody'
               type: object
         "403":
-          description: caller lacks the send-reports permission
+          description: caller lacks the send-reports permission, or their class role
+            does not allow sending
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'
@@ -2937,11 +3054,19 @@ paths:
       - billing
   /billing-periods/{id}/statements:
     get:
+      description: Without class_id lists the period's family statements. With class_id
+        lists that class's class-scoped copies; requires class-send access to the
+        class (active sending-role stint or reports oversight) — a readable-but-not-sendable
+        role gets 403, no stint a neutral 404.
       parameters:
       - description: billing period id
         in: path
         name: id
         required: true
+        type: string
+      - description: list one class's class-scoped copies instead of the family statements
+        in: query
+        name: class_id
         type: string
       - description: page number
         in: query
@@ -2973,6 +3098,15 @@ paths:
               type: object
         "401":
           description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: role on the class does not allow sending
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'
@@ -4352,6 +4486,72 @@ paths:
       summary: Replace class curriculum
       tags:
       - teaching
+  /classes/{id}/enrollable-students:
+    get:
+      description: Autocomplete for enrolling an existing student. Rows carry id and
+        full_name only — never phone or contact. Callable by the owner or the class's
+        active giao_vien; other class staff get 403 and unassigned members 404. Queries
+        under two characters return an empty list; at most 20 rows, sorted by name.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: name fragment, minimum two characters
+        in: query
+        name: q
+        type: string
+      - description: max rows, capped at 20
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/enrollments.PickerStudent'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: assigned to the class but not its active teacher
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: class not found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Search enrollable students
+      tags:
+      - enrollments
   /classes/{id}/lesson-plans:
     get:
       description: Every saved giáo án of the class, ordered by lesson index, submitter
@@ -5338,6 +5538,225 @@ paths:
       summary: Add an ad-hoc session
       tags:
       - sessions
+  /classes/{id}/staff:
+    get:
+      description: Every staff stint of the class (nhân sự lớp) — active and ended
+        — with teacher names and role labels. Visible to the owner and to anyone holding
+        a stint on the class (an ended stint keeps history reads). Anyone else gets
+        404.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/classstaff.StaffResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: class invisible to the caller
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List class staff
+      tags:
+      - class-staff
+    post:
+      consumes:
+      - application/json
+      description: Assigns a live center member a role in the class. Owner only. giao_vien
+        is refused with 409 — the primary teacher changes only through the class handoff
+        flow. A person holds at most one active stint per class (409 otherwise); the
+        role must come from the code-owned registry (422); the target must be a live
+        member (400).
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: member and role
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/classstaff.AssignRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classstaff.StaffResponse'
+              type: object
+        "400":
+          description: target is not a live member of the center
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: caller reads the class but is not the owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: class invisible to the caller
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: giao_vien role, or an active stint already exists
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: role outside the registry
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Assign class staff
+      tags:
+      - class-staff
+  /classes/{id}/staff/{staffId}:
+    delete:
+      description: 'Default: soft-closes the stint — the person keeps read access
+        to the class''s history. mode=void hard-deletes the row (the revocation path
+        for a mistaken grant, valid on an already-ended stint too). Owner only. An
+        active giao_vien refuses both modes with 409 — hand the class off instead.
+        Soft-closing an already-ended stint is 404.'
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: staff assignment id
+        in: path
+        name: staffId
+        required: true
+        type: string
+      - description: void to hard-delete the stint
+        enum:
+        - void
+        in: query
+        name: mode
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: unknown mode
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: caller reads the class but is not the owner
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: class or stint invisible, or stint already ended
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: active giao_vien — use the handoff flow
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Remove class staff
+      tags:
+      - class-staff
   /classes/{id}/teacher:
     put:
       consumes:
@@ -6607,9 +7026,11 @@ paths:
       description: Looks up 1–200 phone numbers against Zalo in paced chunks, intersects
         the hits with the linked account's friend list, and returns one row per phone
         in request order. Rows echo the phone exactly as sent; unresolved phones come
-        back matched=false. Nothing is persisted — confirming a suggestion goes through
-        PUT /contacts/{id}/zalo-mapping. 404 when no account is linked, 409 when the
-        stored session no longer works.
+        back matched=false. Owner and send-reports holders match any phone; an active
+        hoc_vu matches only phones of contacts their assignments make phone-visible
+        (out-of-reach phones come back matched=false without a lookup); other staff
+        get 403. Nothing is persisted — confirming a suggestion goes through PUT /contacts/{id}/zalo-mapping.
+        404 when no account is linked, 409 when the stored session no longer works.
       parameters:
       - description: phones to look up
         in: body
@@ -6642,6 +7063,15 @@ paths:
               type: object
         "401":
           description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: caller has neither oversight nor an active hoc_vu assignment
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'
