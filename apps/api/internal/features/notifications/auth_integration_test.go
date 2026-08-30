@@ -50,7 +50,7 @@ func TestOwnerHasOversightReadAndSendsAsSelfOnMembersPeriod(t *testing.T) {
 
 	// Oversight read: the owner never touched this run, yet can poll it and
 	// list its ledger exactly as the member would.
-	snap, err := d.notifications.RunSnapshot(ctx, ownerScope, periodID)
+	snap, err := d.notifications.RunSnapshot(ctx, ownerScope, periodID, nil)
 	require.NoError(t, err, "an owner must be able to poll a member's run")
 	require.NotNil(t, snap.RunID)
 	require.Equal(t, *memberResp.RunID, *snap.RunID)
@@ -128,7 +128,7 @@ func TestPeerInSameCenterCannotReadOrActOnAnotherMembersNotifications(t *testing
 	require.NoError(t, err)
 	require.Empty(t, rows, "a peer must not see another member's notification ledger")
 
-	snap, err := d.notifications.RunSnapshot(ctx, scopeB, periodID)
+	snap, err := d.notifications.RunSnapshot(ctx, scopeB, periodID, nil)
 	require.NoError(t, err)
 	require.False(t, snap.Active)
 	require.Nil(t, snap.RunID, "a peer must not see another member's run")
@@ -184,12 +184,12 @@ func TestCrossCenterNotificationsAreInvisible(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, rows, "another center's ledger must read as empty, not error")
 
-	snap, err := d.notifications.RunSnapshot(ctx, scopeB, periodID)
+	snap, err := d.notifications.RunSnapshot(ctx, scopeB, periodID, nil)
 	require.NoError(t, err)
 	require.False(t, snap.Active)
 	require.Nil(t, snap.RunID, "another center's run must be invisible")
 
-	_, err = d.notifications.ResumeRun(ctx, scopeB, periodID)
+	_, err = d.notifications.ResumeRun(ctx, scopeB, periodID, nil)
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
 		"another center cannot resume a run it cannot even see")

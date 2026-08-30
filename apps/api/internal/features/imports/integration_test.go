@@ -17,10 +17,12 @@ import (
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/centers"
 	"teka/apps/api/internal/features/classes"
+	"teka/apps/api/internal/features/classstaff"
 	"teka/apps/api/internal/features/contacts"
 	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/features/imports"
 	"teka/apps/api/internal/features/students"
+	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/testutil"
 )
@@ -41,6 +43,7 @@ type roster struct {
 	nam, lan    uuid.UUID
 	otherCenter authctx.Scope
 	classesSvc  *classes.Service
+	centersSvc  *centers.Service
 }
 
 func newRoster(t *testing.T) roster {
@@ -49,9 +52,9 @@ func newRoster(t *testing.T) roster {
 	txMgr := database.NewTxManager(db)
 
 	centersSvc := centers.NewService(centers.NewRepository(db), txMgr, nil)
-	classesSvc := classes.NewService(classes.NewRepository(db), txMgr)
+	classesSvc := classes.NewService(classes.NewRepository(db), txMgr, classstaff.NewRepository(db))
 	contactsSvc := contacts.NewService(contacts.NewRepository(db))
-	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db))
+	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db), nil)
 	studentsSvc := students.NewService(students.NewRepository(db), enrollmentsSvc, txMgr)
 
 	_, ownerTeacher := testutil.Teacher(t, db)
@@ -74,6 +77,7 @@ func newRoster(t *testing.T) roster {
 		lan:         lan.ID,
 		otherCenter: testutil.ScopeFor(t, db, stranger.ID),
 		classesSvc:  classesSvc,
+		centersSvc:  centersSvc,
 	}
 }
 
@@ -152,7 +156,7 @@ func TestImportRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, rep.Committed)
 	require.Equal(t, map[string]int64{
-		"classes": 2, "class_schedules": 3, "contacts": 3, "students": 3, "enrollments": 3,
+		"classes": 2, "class_schedules": 3, "contacts": 2, "students": 3, "enrollments": 3,
 	}, r.counts(t))
 
 	// Every row carries the class teacher's id, never the importing owner's.
@@ -169,14 +173,25 @@ func TestImportRoundTrip(t *testing.T) {
 	require.Equal(t, "Văn 8", anchors[1].Name)
 	require.Equal(t, r.lan, anchors[1].TeacherID)
 
-	// One parent, two teachers, two contact rows: uq_contacts_phone is
-	// (teacher_id, phone), so the parent gets a statement link per teacher.
-	var hung int64
+	// One parent, children under two teachers, ONE contact row: contacts are
+	// center data anchored on the owner, so a phone appears exactly once no
+	// matter how many teachers its children study with.
+	var hung []struct{ TeacherID uuid.UUID }
 	require.NoError(t, r.db.Raw(
-		"SELECT count(DISTINCT teacher_id) FROM contacts WHERE center_id = ? AND phone = '+84901234567'",
+		"SELECT teacher_id FROM contacts WHERE center_id = ? AND phone = '+84901234567'",
 		r.owner.CenterID,
 	).Scan(&hung).Error)
-	require.Equal(t, int64(2), hung)
+	require.Len(t, hung, 1)
+	require.Equal(t, r.owner.TeacherID, hung[0].TeacherID)
+
+	// Students anchor on the owner too — only classes (and their enrollments)
+	// keep the workbook teacher as pedagogical anchor.
+	var studentAnchors []struct{ TeacherID uuid.UUID }
+	require.NoError(t, r.db.Raw(
+		"SELECT DISTINCT teacher_id FROM students WHERE center_id = ?", r.owner.CenterID,
+	).Scan(&studentAnchors).Error)
+	require.Len(t, studentAnchors, 1)
+	require.Equal(t, r.owner.TeacherID, studentAnchors[0].TeacherID)
 
 	// The enrollment inherits the class's unit price; the import never sets one.
 	var prices []int64
@@ -185,6 +200,21 @@ func TestImportRoundTrip(t *testing.T) {
 		JOIN classes c ON c.id = e.class_id
 		WHERE e.center_id = ? AND c.name = 'Toán 9A'`, r.owner.CenterID).Scan(&prices).Error)
 	require.Equal(t, []int64{150000, 150000}, prices)
+
+	// Imported classes go through the same create hook as the API: each class
+	// is born with exactly one active giao_vien stint for its anchor teacher.
+	var stints []struct {
+		Name      string
+		TeacherID uuid.UUID
+	}
+	require.NoError(t, r.db.Raw(`
+		SELECT c.name, cs.teacher_id FROM class_staff cs
+		JOIN classes c ON c.id = cs.class_id
+		WHERE cs.center_id = ? AND cs.role_key = 'giao_vien' AND cs.ended_at IS NULL
+		ORDER BY c.name`, r.owner.CenterID).Scan(&stints).Error)
+	require.Len(t, stints, 2)
+	require.Equal(t, r.nam, stints[0].TeacherID)
+	require.Equal(t, r.lan, stints[1].TeacherID)
 
 	// A blank Ngày nhập học falls back to the class start date, not today.
 	var started time.Time
@@ -307,6 +337,55 @@ func TestClassWithNoTeacherIsAnchoredOnTheOwner(t *testing.T) {
 	).Scan(&row).Error)
 	require.Equal(t, r.owner.TeacherID, row.TeacherID,
 		"a class with nobody assigned belongs to the owner, who is a teacher too")
+}
+
+// TestGrantedMemberImportAnchorsEverythingOnTheOwner runs the import as a
+// member holding the imports.run grant: the run succeeds, yet every contact
+// and student row still anchors on the center OWNER — the anchor comes from
+// ownership resolution, never from the caller. A member without the grant is
+// refused outright, and an owner re-import of the same file finds everything
+// already in place.
+func TestGrantedMemberImportAnchorsEverythingOnTheOwner(t *testing.T) {
+	t.Parallel()
+	r := newRoster(t)
+	ctx := context.Background()
+
+	// nam holds imports.run through a member grant, resolved by the real scope
+	// pipeline — the same rows and query the middleware uses.
+	require.NoError(t, r.db.Exec(
+		"INSERT INTO center_member_permissions (teacher_id, center_id, permission_key, allowed) VALUES (?, ?, ?, TRUE)",
+		r.nam, r.owner.CenterID, authctx.PermImportsRun).Error)
+	scNam, err := r.centersSvc.ResolveScope(ctx, r.nam)
+	require.NoError(t, err)
+	require.False(t, scNam.IsOwner)
+	require.True(t, scNam.Has(authctx.PermImportsRun))
+	scLan, err := r.centersSvc.ResolveScope(ctx, r.lan)
+	require.NoError(t, err)
+
+	_, err = r.svc.Import(ctx, scLan, exampleRoster(t), false)
+	require.Equal(t, 403, apperror.From(err).Status, "no grant, no import")
+	require.Equal(t, int64(0), r.counts(t)["classes"])
+
+	rep, err := r.svc.Import(ctx, scNam, exampleRoster(t), false)
+	require.NoError(t, err)
+	require.True(t, rep.Committed)
+
+	var anchors []struct{ TeacherID uuid.UUID }
+	require.NoError(t, r.db.Raw(`
+		SELECT teacher_id FROM contacts WHERE center_id = ?
+		UNION SELECT teacher_id FROM students WHERE center_id = ?`,
+		r.owner.CenterID, r.owner.CenterID).Scan(&anchors).Error)
+	require.Len(t, anchors, 1, "one anchor for every contact and student row")
+	require.Equal(t, r.owner.TeacherID, anchors[0].TeacherID)
+
+	// The owner re-importing the member's file must reuse, not duplicate —
+	// both runs resolve the same owner anchor.
+	before := r.counts(t)
+	rep, err = r.do(t, exampleRoster(t), false)
+	require.NoError(t, err)
+	require.Equal(t, 0, rep.Contacts.Created)
+	require.Equal(t, 0, rep.Students.Created)
+	require.Equal(t, before, r.counts(t))
 }
 
 func TestAPhoneOutsideTheCenterIsRefusedBeforeAnyWrite(t *testing.T) {

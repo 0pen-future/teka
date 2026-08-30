@@ -23,6 +23,7 @@ import (
 	"teka/apps/api/internal/features/attendance"
 	"teka/apps/api/internal/features/billing"
 	"teka/apps/api/internal/features/classes"
+	"teka/apps/api/internal/features/classstaff"
 	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/features/notifications"
 	"teka/apps/api/internal/features/payments"
@@ -82,9 +83,9 @@ func newDepsWithZalo(t *testing.T, db *gorm.DB, zaloSender notifications.ZaloSen
 func newDepsWithZaloAndRunCap(t *testing.T, db *gorm.DB, zaloSender notifications.ZaloSender, maxRunSize int) *deps {
 	t.Helper()
 	txMgr := database.NewTxManager(db)
-	classesSvc := classes.NewService(classes.NewRepository(db), txMgr)
+	classesSvc := classes.NewService(classes.NewRepository(db), txMgr, classstaff.NewRepository(db))
 	teachersSvc := teachers.NewService(teachers.NewRepository(db))
-	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db))
+	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db), nil)
 	sessionsSvc := sessions.NewService(sessions.NewRepository(db), classesSvc, teachersSvc, enrollmentsSvc)
 	attendanceSvc := attendance.NewService(attendance.NewRepository(db), enrollmentsSvc, sessionsSvc, txMgr)
 	billingSvc := billing.NewService(billing.NewRepository(db, attendanceSvc), txMgr, sessionsSvc, enrollmentsSvc)

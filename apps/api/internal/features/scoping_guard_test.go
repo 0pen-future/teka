@@ -30,7 +30,11 @@ func TestRepositoriesScopeThroughCenterWideOnly(t *testing.T) {
 			t.Fatal(err)
 		}
 		for i, line := range strings.Split(string(src), "\n") {
-			for _, banned := range []string{"sc.IsOwner", "scope.IsOwner", ".Has("} {
+			// StaffRolesFor/StaffRoleCan are banned too: the capability
+			// map is resolved in services, and repositories only bind the
+			// resulting role slice — a repo consulting the map would fork
+			// write authorization away from its one home.
+			for _, banned := range []string{"sc.IsOwner", "scope.IsOwner", ".Has(", "StaffRolesFor", "StaffRoleCan"} {
 				if strings.Contains(line, banned) {
 					t.Errorf("%s:%d: %q is forbidden in repositories — scope data via sc.CenterWide()", path, i+1, banned)
 				}

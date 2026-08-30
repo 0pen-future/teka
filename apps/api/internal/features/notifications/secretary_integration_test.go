@@ -108,7 +108,7 @@ func TestSecretaryDelegatedPersonalSendStampsHerAsSender(t *testing.T) {
 	rows, err := d.notifications.List(ctx, xScope, periodID, notifications.ListFilter{})
 	require.NoError(t, err)
 	require.Len(t, rows, 3, "the period teacher must see rows a secretary sent on their period")
-	snap, err := d.notifications.RunSnapshot(ctx, xScope, periodID)
+	snap, err := d.notifications.RunSnapshot(ctx, xScope, periodID, nil)
 	require.NoError(t, err)
 	require.NotNil(t, snap.RunID)
 	require.Equal(t, *resp.RunID, *snap.RunID, "the period teacher must see the delegated run's progress")
@@ -257,7 +257,7 @@ func TestRevokeMidRunFailsRemainingRowsAndBlocksResume(t *testing.T) {
 	// gate reloads the flag per request.
 	revokedScope := testutil.ScopeFor(t, d.db, secretary)
 	require.False(t, revokedScope.CanSendReports)
-	_, err = d.notifications.ResumeRun(ctx, revokedScope, periodID)
+	_, err = d.notifications.ResumeRun(ctx, revokedScope, periodID, nil)
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code,
 		"a revoked secretary must not resume her interrupted run")
@@ -374,7 +374,7 @@ func TestPlainMemberCannotCreateSendsOnAnyChannelButKeepsMarkSent(t *testing.T) 
 		require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code,
 			"a plain member must get an explicit 403 on channel %q, even on their own period", channel)
 	}
-	_, err := d.notifications.ResumeRun(ctx, memberScope, periodID)
+	_, err := d.notifications.ResumeRun(ctx, memberScope, periodID, nil)
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code)
 	require.EqualValues(t, 0, notificationCount(t, d.db, periodID),
@@ -437,7 +437,7 @@ func TestSendPreviewBucketsHoldPastAHundredContacts(t *testing.T) {
 	}
 
 	secScope := testutil.ScopeFor(t, d.db, secretary)
-	preview, err := d.notifications.SendPreview(ctx, secScope, periodID, "statement")
+	preview, err := d.notifications.SendPreview(ctx, secScope, periodID, "statement", nil)
 	require.NoError(t, err)
 	require.Len(t, preview.AutoSend, mappedFriends)
 	require.Len(t, preview.MappedNotFriend, mappedStrangers)
@@ -455,7 +455,7 @@ func TestSendPreviewBucketsHoldPastAHundredContacts(t *testing.T) {
 
 	// The period's own plain teacher cannot preview — same 403 as sending.
 	xScope := testutil.ScopeFor(t, d.db, teacherX)
-	_, err = d.notifications.SendPreview(ctx, xScope, periodID, "statement")
+	_, err = d.notifications.SendPreview(ctx, xScope, periodID, "statement", nil)
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code)
 }
@@ -484,7 +484,7 @@ func TestSecretaryWithoutLinkedZaloIsRefusedBeforeWriting(t *testing.T) {
 		"an unlinked secretary must be told to link her own account first")
 	require.EqualValues(t, 0, notificationCount(t, d.db, periodID))
 
-	_, err = d.notifications.SendPreview(ctx, secScope, periodID, "statement")
+	_, err = d.notifications.SendPreview(ctx, secScope, periodID, "statement", nil)
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeBadRequest, apperror.From(err).Code)
 }

@@ -12,6 +12,7 @@ import (
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/classes"
+	"teka/apps/api/internal/features/classstaff"
 	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/features/grading"
 	"teka/apps/api/internal/features/sessions"
@@ -27,9 +28,9 @@ func newIntegrationService(t *testing.T) (*grading.Service, *gorm.DB) {
 	t.Helper()
 	db := testutil.StartPostgres(t)
 	txMgr := database.NewTxManager(db)
-	classesSvc := classes.NewService(classes.NewRepository(db), txMgr)
+	classesSvc := classes.NewService(classes.NewRepository(db), txMgr, classstaff.NewRepository(db))
 	teachersSvc := teachers.NewService(teachers.NewRepository(db))
-	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db))
+	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db), nil)
 	sessionsSvc := sessions.NewService(sessions.NewRepository(db), classesSvc, teachersSvc, enrollmentsSvc)
 	svc := grading.NewService(grading.NewRepository(db), classesSvc, sessionsSvc, enrollmentsSvc, txMgr)
 	return svc, db

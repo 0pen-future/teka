@@ -27,6 +27,7 @@ import (
 	"teka/apps/api/internal/features/billing"
 	"teka/apps/api/internal/features/payments"
 	"teka/apps/api/internal/features/statements"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/testutil"
 )
 
@@ -63,10 +64,11 @@ func newPublicRouter(svc *statements.Service) *gin.Engine {
 // side.
 func tokenOf(t *testing.T, svc *statements.Service, row statements.Row) string {
 	t.Helper()
-	resp := svc.ToResponse(row)
+	resp := svc.ToResponse(authctx.Scope{IsOwner: true}, row)
 	const prefix = "https://parent.example.com/s/"
-	require.True(t, strings.HasPrefix(resp.URL, prefix), "unexpected url shape: %s", resp.URL)
-	return resp.URL[len(prefix):]
+	require.NotNil(t, resp.URL)
+	require.True(t, strings.HasPrefix(*resp.URL, prefix), "unexpected url shape: %s", *resp.URL)
+	return (*resp.URL)[len(prefix):]
 }
 
 // unknownToken returns a plausible, well-formed token that was never issued

@@ -13,6 +13,7 @@ import (
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/classes"
+	"teka/apps/api/internal/features/classstaff"
 	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/features/sessions"
 	"teka/apps/api/internal/features/teachers"
@@ -29,9 +30,9 @@ func newIntegrationService(t *testing.T) (*teaching.Service, *gorm.DB) {
 	t.Helper()
 	db := testutil.StartPostgres(t)
 	txMgr := database.NewTxManager(db)
-	classesSvc := classes.NewService(classes.NewRepository(db), txMgr)
+	classesSvc := classes.NewService(classes.NewRepository(db), txMgr, classstaff.NewRepository(db))
 	teachersSvc := teachers.NewService(teachers.NewRepository(db))
-	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db))
+	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db), nil)
 	sessionsSvc := sessions.NewService(sessions.NewRepository(db), classesSvc, teachersSvc, enrollmentsSvc)
 	svc := teaching.NewService(teaching.NewRepository(db), classesSvc, sessionsSvc, enrollmentsSvc, txMgr)
 	return svc, db
@@ -130,9 +131,10 @@ func TestMemberGets403OnOwnerActions(t *testing.T) {
 }
 
 // Peer isolation vs owner oversight: a fellow member cannot even resolve
-// another member's class (404, existence hidden); the owner reads it but may
-// not edit its content (403).
-func TestPeerHiddenOwnerReadsButNeverEdits(t *testing.T) {
+// another member's class (404, existence hidden); the owner reads AND edits
+// it center-wide — the write capability gates staff roles, never the owner —
+// while the content rows keep the class teacher's anchor.
+func TestPeerHiddenOwnerReadsAndEdits(t *testing.T) {
 	t.Parallel()
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
@@ -159,10 +161,16 @@ func TestPeerHiddenOwnerReadsButNeverEdits(t *testing.T) {
 	require.NoError(t, err, "the owner must read a member's curriculum")
 	require.Equal(t, []string{"Bài 1"}, got.Lessons)
 
-	_, err = svc.PutCurriculum(ctx, ownerScope, class.ID, teaching.PutCurriculumRequest{Lessons: []string{"x"}})
-	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code, "the owner must not edit a member's content")
+	edited, err := svc.PutCurriculum(ctx, ownerScope, class.ID, teaching.PutCurriculumRequest{Lessons: []string{"Bài sửa"}})
+	require.NoError(t, err, "the owner edits a member's content center-wide")
+	require.Equal(t, []string{"Bài sửa"}, edited.Lessons)
+	var anchor string
+	require.NoError(t, db.Raw(
+		"SELECT teacher_id::text FROM class_curricula WHERE class_id = ?", class.ID).Scan(&anchor).Error)
+	require.Equal(t, memberB.ID.String(), anchor,
+		"an owner edit keeps the class teacher's row anchor")
 	_, err = svc.SavePlan(ctx, ownerScope, class.ID, 0, teaching.SavePlanRequest{Goal: "g"})
-	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code)
+	require.NoError(t, err, "the owner saves a plan on a member's class")
 }
 
 // The redo round trip: an empty comment is refused as a validation error;
@@ -382,9 +390,10 @@ func TestSessionMarksMergeAndRoster(t *testing.T) {
 }
 
 // Session write authorization against the real membership chain: the owner
-// resolves a member's session but gets 403 on the writes; a fellow member
-// gets 404; the owner's month read of the member's class works.
-func TestSessionWritesAreSessionTeacherOnly(t *testing.T) {
+// writes a member's note and marks center-wide (the remarks capability gates
+// staff roles, never the owner); a fellow member gets 404; the owner's month
+// read of the member's class works.
+func TestSessionWritesFollowRemarksCapability(t *testing.T) {
 	t.Parallel()
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
@@ -407,10 +416,16 @@ func TestSessionWritesAreSessionTeacherOnly(t *testing.T) {
 	_, err := svc.PutNote(ctx, memberScope, session.ID, teaching.PutNoteRequest{Body: "của giáo viên"})
 	require.NoError(t, err)
 
-	_, err = svc.PutNote(ctx, ownerScope, session.ID, teaching.PutNoteRequest{Body: "x"})
-	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code, "the owner must not write a member's note")
+	note, err := svc.PutNote(ctx, ownerScope, session.ID, teaching.PutNoteRequest{Body: "góp ý của chủ trung tâm"})
+	require.NoError(t, err, "the owner writes a member's note center-wide")
+	require.Equal(t, "góp ý của chủ trung tâm", note.Body)
+	var noteAnchor string
+	require.NoError(t, db.Raw(
+		"SELECT teacher_id::text FROM session_notes WHERE session_id = ?", session.ID).Scan(&noteAnchor).Error)
+	require.Equal(t, member.ID.String(), noteAnchor,
+		"an owner edit keeps the session teacher's row anchor")
 	_, err = svc.PutMarks(ctx, ownerScope, session.ID, []teaching.MarkEntryRequest{{StudentID: student.ID, Score: setTo(5.0)}})
-	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code, "the owner must not write a member's marks")
+	require.NoError(t, err, "the owner writes a member's marks center-wide")
 
 	_, err = svc.PutNote(ctx, peerScope, session.ID, teaching.PutNoteRequest{Body: "x"})
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code, "a peer must not even resolve the session")

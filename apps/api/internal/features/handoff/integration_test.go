@@ -4,6 +4,7 @@ package handoff_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/centers"
 	"teka/apps/api/internal/features/classes"
+	"teka/apps/api/internal/features/classstaff"
 	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/features/handoff"
 	"teka/apps/api/internal/features/imports"
@@ -39,8 +41,8 @@ func newFixture(t *testing.T) fixture {
 	txMgr := database.NewTxManager(db)
 
 	centersSvc := centers.NewService(centers.NewRepository(db), txMgr, nil)
-	classesSvc := classes.NewService(classes.NewRepository(db), txMgr)
-	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db))
+	classesSvc := classes.NewService(classes.NewRepository(db), txMgr, classstaff.NewRepository(db))
+	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db), nil)
 	teachersSvc := teachers.NewService(teachers.NewRepository(db))
 	sessionsSvc := sessions.NewService(sessions.NewRepository(db), classesSvc, teachersSvc, enrollmentsSvc)
 
@@ -53,7 +55,7 @@ func newFixture(t *testing.T) fixture {
 	testutil.JoinCenter(t, db, from.ID, owner.CenterID)
 	testutil.JoinCenter(t, db, to.ID, owner.CenterID)
 
-	svc := handoff.NewService(classesSvc, sessionsSvc, centersSvc, imports.NewLocker(db), txMgr)
+	svc := handoff.NewService(classesSvc, sessionsSvc, centersSvc, classstaff.NewRepository(db), imports.NewLocker(db), txMgr)
 	return fixture{svc: svc, db: db, owner: owner, from: from.ID, to: to.ID}
 }
 
@@ -143,6 +145,99 @@ func TestReassignToSameTeacherIsNoOp(t *testing.T) {
 	// Nothing changed.
 	require.Equal(t, f.from, f.teacherOfClass(t, class.ID))
 	require.Equal(t, f.from, f.teacherOfSession(t, future.ID))
+}
+
+// staffStints reads a teacher's class_staff rows for the class as
+// (role_key, ended) pairs.
+func (f fixture) staffStints(t *testing.T, classID, teacherID uuid.UUID) []struct {
+	RoleKey string
+	Ended   bool
+} {
+	t.Helper()
+	var rows []struct {
+		RoleKey string
+		Ended   bool
+	}
+	require.NoError(t, f.db.Raw(`
+		SELECT role_key, (ended_at IS NOT NULL) AS ended FROM class_staff
+		WHERE class_id = ? AND teacher_id = ? ORDER BY started_at`,
+		classID, teacherID).Scan(&rows).Error)
+	return rows
+}
+
+func TestReassignDualWritesClassStaff(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	class := f.seedClass(t)
+
+	_, err := f.svc.Reassign(context.Background(), f.owner, class.ID, f.to)
+	require.NoError(t, err)
+
+	// The new teacher holds the one active giao_vien stint…
+	toStints := f.staffStints(t, class.ID, f.to)
+	require.Len(t, toStints, 1)
+	require.Equal(t, "giao_vien", toStints[0].RoleKey)
+	require.False(t, toStints[0].Ended)
+
+	// …and the old teacher's stint is soft-closed, not deleted: their history
+	// reads survive the handoff.
+	fromStints := f.staffStints(t, class.ID, f.from)
+	require.Len(t, fromStints, 1)
+	require.Equal(t, "giao_vien", fromStints[0].RoleKey)
+	require.True(t, fromStints[0].Ended)
+}
+
+func TestReassignNoOpRepairsStaffDrift(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	class := f.seedClass(t)
+
+	// Drift: the class lost its giao_vien stint (hand-edited data, or a bug).
+	require.NoError(t, f.db.Exec(
+		"DELETE FROM class_staff WHERE class_id = ?", class.ID).Error)
+
+	// Handing the class to its current teacher is the repair command.
+	res, err := f.svc.Reassign(context.Background(), f.owner, class.ID, f.from)
+	require.NoError(t, err)
+	require.Equal(t, f.from, res.TeacherID)
+
+	stints := f.staffStints(t, class.ID, f.from)
+	require.Len(t, stints, 1)
+	require.Equal(t, "giao_vien", stints[0].RoleKey)
+	require.False(t, stints[0].Ended)
+}
+
+// failingStaff makes the staff sync — the transaction's last write — blow up,
+// proving the class move and the stint change commit or roll back as one unit.
+type failingStaff struct{}
+
+func (failingStaff) SyncPrimaryTeacher(context.Context, uuid.UUID, uuid.UUID, uuid.UUID) error {
+	return errors.New("staff sync failed")
+}
+
+func TestReassignRollbackKeepsStaffIntact(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	class := f.seedClass(t)
+
+	txMgr := database.NewTxManager(f.db)
+	centersSvc := centers.NewService(centers.NewRepository(f.db), txMgr, nil)
+	classesSvc := classes.NewService(classes.NewRepository(f.db), txMgr, classstaff.NewRepository(f.db))
+	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(f.db), nil)
+	teachersSvc := teachers.NewService(teachers.NewRepository(f.db))
+	sessionsSvc := sessions.NewService(sessions.NewRepository(f.db), classesSvc, teachersSvc, enrollmentsSvc)
+	broken := handoff.NewService(classesSvc, sessionsSvc, centersSvc, failingStaff{}, imports.NewLocker(f.db), txMgr)
+
+	_, err := broken.Reassign(context.Background(), f.owner, class.ID, f.to)
+	require.Error(t, err)
+
+	// The class move happened before the failing sync, and rolled back with
+	// it: teacher_id and the giao_vien stint still agree on the old teacher.
+	require.Equal(t, f.from, f.teacherOfClass(t, class.ID))
+	stints := f.staffStints(t, class.ID, f.from)
+	require.Len(t, stints, 1)
+	require.False(t, stints[0].Ended)
+	require.Empty(t, f.staffStints(t, class.ID, f.to))
 }
 
 func TestReassignByMemberIsForbidden(t *testing.T) {

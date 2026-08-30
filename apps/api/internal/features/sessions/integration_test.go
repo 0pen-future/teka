@@ -16,6 +16,7 @@ import (
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/classes"
+	"teka/apps/api/internal/features/classstaff"
 	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/features/sessions"
 	"teka/apps/api/internal/features/teachers"
@@ -29,9 +30,9 @@ import (
 func newIntegrationService(t *testing.T) (*sessions.Service, *gorm.DB) {
 	t.Helper()
 	db := testutil.StartPostgres(t)
-	classesSvc := classes.NewService(classes.NewRepository(db), database.NewTxManager(db))
+	classesSvc := classes.NewService(classes.NewRepository(db), database.NewTxManager(db), classstaff.NewRepository(db))
 	teachersSvc := teachers.NewService(teachers.NewRepository(db))
-	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db))
+	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db), nil)
 	svc := sessions.NewService(sessions.NewRepository(db), classesSvc, teachersSvc, enrollmentsSvc)
 	return svc, db
 }
@@ -248,7 +249,7 @@ func TestCrossTenantReadsAreNotFound(t *testing.T) {
 	rows, err := svc.ListRange(ctx, scopeA, class.ID, date("2026-01-01"), date("2026-01-31"))
 	require.NoError(t, err)
 
-	_, err = svc.Get(ctx, scopeB, rows[0].ID)
+	_, err = svc.GetReadableByID(ctx, scopeB, rows[0].ID)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
 
 	_, err = svc.ListRange(ctx, scopeB, class.ID, date("2026-01-01"), date("2026-01-31"))
@@ -510,7 +511,7 @@ func TestOwnerHasFullOversightOfMembersSessions(t *testing.T) {
 		require.Equal(t, ownerCenter, r.CenterID)
 	}
 
-	got, err := svc.Get(ctx, ownerScope, rows[0].ID)
+	got, err := svc.GetReadableByID(ctx, ownerScope, rows[0].ID)
 	require.NoError(t, err, "owner must read a member's session")
 	require.Equal(t, rows[0].ID, got.ID)
 
@@ -553,7 +554,7 @@ func TestPeersInSameCenterCannotSeeEachOthersSessions(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, rows)
 
-	_, err = svc.Get(ctx, scopeC, rows[0].ID)
+	_, err = svc.GetReadableByID(ctx, scopeC, rows[0].ID)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code, "a peer must not read another member's session")
 
 	_, err = svc.ListRange(ctx, scopeC, classB.ID, date("2026-01-01"), date("2026-01-31"))
@@ -576,7 +577,7 @@ func TestCrossCenterSessionsAreNotFound(t *testing.T) {
 	rows, err := svc.ListRange(ctx, scopeA, class.ID, date("2026-01-01"), date("2026-01-31"))
 	require.NoError(t, err)
 
-	_, err = svc.Get(ctx, scopeB, rows[0].ID)
+	_, err = svc.GetReadableByID(ctx, scopeB, rows[0].ID)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
 
 	_, err = svc.ListRange(ctx, scopeB, class.ID, date("2026-01-01"), date("2026-01-31"))
@@ -622,4 +623,117 @@ func TestListPendingIssuesBoundedQueryCount(t *testing.T) {
 	require.EqualValues(t, 3, total)
 	require.Equal(t, 2, counter.count,
 		"ListPending must issue exactly one Count and one Find, never a per-row roster lookup")
+}
+
+// The session write gate answers per role: the owner and the active giáo
+// viên mutate lifecycle state, other staff roles read the class so they get
+// an honest 403, and a member with no stint sees 404. Generation and ad-hoc
+// creation ride the same gate through the class.
+func TestSessionWriteCapabilityGate(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+
+	owner, _ := testutil.Teacher(t, db)
+	ownerSc := testutil.ScopeFor(t, db, owner.ID)
+	_, gv := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, gv.ID, ownerSc.CenterID)
+	gvSc := testutil.ScopeFor(t, db, gv.ID)
+	_, tg := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, tg.ID, ownerSc.CenterID)
+	tgSc := testutil.ScopeFor(t, db, tg.ID)
+	_, hv := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, hv.ID, ownerSc.CenterID)
+	hvSc := testutil.ScopeFor(t, db, hv.ID)
+	_, outsider := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, outsider.ID, ownerSc.CenterID)
+	outsiderSc := testutil.ScopeFor(t, db, outsider.ID)
+
+	class := testutil.Class(t, db, gv.ID, testutil.WithClassStartDate(date("2026-01-01")))
+	testutil.StaffAssignment(t, db, class, tg.ID, "tro_giang")
+	testutil.StaffAssignment(t, db, class, hv.ID, "hoc_vu")
+	s1 := testutil.Session(t, db, gv.ID, class.ID, date("2026-01-06"))
+	s2 := testutil.Session(t, db, gv.ID, class.ID, date("2026-01-13"))
+	s3 := testutil.Session(t, db, gv.ID, class.ID, date("2026-01-20"))
+
+	// Lifecycle writes: GV and owner pass, tro_giang/hoc_vu 403, no stint 404.
+	_, err := svc.Cancel(ctx, gvSc, s1.ID, "nghỉ lễ")
+	require.NoError(t, err, "active giáo viên cancels their class's session")
+	_, err = svc.Cancel(ctx, ownerSc, s2.ID, "nghỉ lễ")
+	require.NoError(t, err, "owner cancels any session center-wide")
+	_, err = svc.Cancel(ctx, tgSc, s3.ID, "x")
+	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code,
+		"tro_giang reads the class, so the sessions denial is an honest 403")
+	_, err = svc.Hold(ctx, hvSc, s3.ID)
+	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code)
+	err = svc.Delete(ctx, hvSc, s3.ID)
+	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code)
+	_, err = svc.Cancel(ctx, outsiderSc, s3.ID, "x")
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
+		"no stint → the session does not exist for the caller")
+
+	// Ad-hoc creation and generation gate at the class with the same rules.
+	_, err = svc.CreateAdHoc(ctx, tgSc, class.ID, sessions.CreateSessionRequest{SessionDate: "2026-02-03"})
+	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code)
+	_, err = svc.CreateAdHoc(ctx, outsiderSc, class.ID, sessions.CreateSessionRequest{SessionDate: "2026-02-03"})
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+	_, err = svc.ListRange(ctx, tgSc, class.ID, date("2026-01-01"), date("2026-01-31"))
+	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code,
+		"generation is a write — a read-only role cannot trigger it")
+	_, err = svc.ListRange(ctx, outsiderSc, class.ID, date("2026-01-01"), date("2026-01-31"))
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+}
+
+// After a handoff the WRITE right follows the active stint, not the rows'
+// teacher anchors: the previous giáo viên keeps history reads but loses every
+// write — future sessions AND the past ones still anchored to them — while
+// the new giáo viên writes the pre-handoff rows they never created.
+func TestHandoffMovesSessionWriteRights(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+
+	owner, _ := testutil.Teacher(t, db)
+	ownerSc := testutil.ScopeFor(t, db, owner.ID)
+	_, oldGV := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, oldGV.ID, ownerSc.CenterID)
+	oldSc := testutil.ScopeFor(t, db, oldGV.ID)
+	_, newGV := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, newGV.ID, ownerSc.CenterID)
+	newSc := testutil.ScopeFor(t, db, newGV.ID)
+
+	class := testutil.Class(t, db, oldGV.ID, testutil.WithClassStartDate(date("2026-01-01")))
+	past := testutil.Session(t, db, oldGV.ID, class.ID, date("2026-01-06"))
+	future := testutil.Session(t, db, oldGV.ID, class.ID, date("2027-01-05"))
+
+	// Handoff mirrors handoff.ReassignTeacher's writes: the class and future
+	// planned sessions move, the past session keeps the old anchor, the old
+	// stint closes, the new one opens.
+	require.NoError(t, db.Exec(
+		"UPDATE classes SET teacher_id = ? WHERE id = ?", newGV.ID, class.ID).Error)
+	require.NoError(t, db.Exec(
+		"UPDATE class_sessions SET teacher_id = ? WHERE id = ?", newGV.ID, future.ID).Error)
+	require.NoError(t, db.Exec(
+		"UPDATE class_staff SET ended_at = now() WHERE class_id = ? AND role_key = 'giao_vien' AND ended_at IS NULL",
+		class.ID).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO class_staff (class_id, center_id, teacher_id, role_key) VALUES (?, ?, ?, 'giao_vien')",
+		class.ID, ownerSc.CenterID, newGV.ID).Error)
+
+	// The old GV still reads history…
+	_, err := svc.GetReadableByID(ctx, oldSc, past.ID)
+	require.NoError(t, err, "ended stint keeps history reads")
+	// …but writes nothing: not the future session that moved, and not the
+	// past one whose teacher_id still names them — own-rows must not creep
+	// back into the write scope as an OR-branch.
+	_, err = svc.Cancel(ctx, oldSc, future.ID, "x")
+	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code,
+		"old GV cannot write a future session after handoff")
+	_, err = svc.Cancel(ctx, oldSc, past.ID, "x")
+	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code,
+		"old GV cannot write the past session either, despite the row anchor")
+
+	// The new GV writes the pre-handoff session they never created.
+	_, err = svc.Cancel(ctx, newSc, past.ID, "dồn lớp")
+	require.NoError(t, err, "new GV writes pre-handoff sessions")
 }

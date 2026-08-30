@@ -17,6 +17,7 @@ import (
 	"teka/apps/api/internal/features/attendance"
 	"teka/apps/api/internal/features/billing"
 	"teka/apps/api/internal/features/classes"
+	"teka/apps/api/internal/features/classstaff"
 	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/features/sessions"
 	"teka/apps/api/internal/features/statements"
@@ -51,9 +52,9 @@ func newIntegrationDeps(t *testing.T) (*statements.Service, *billing.Service, *g
 	t.Helper()
 	db := testutil.StartPostgres(t)
 	txMgr := database.NewTxManager(db)
-	classesSvc := classes.NewService(classes.NewRepository(db), txMgr)
+	classesSvc := classes.NewService(classes.NewRepository(db), txMgr, classstaff.NewRepository(db))
 	teachersSvc := teachers.NewService(teachers.NewRepository(db))
-	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db))
+	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db), nil)
 	sessionsSvc := sessions.NewService(sessions.NewRepository(db), classesSvc, teachersSvc, enrollmentsSvc)
 	attendanceSvc := attendance.NewService(attendance.NewRepository(db), enrollmentsSvc, sessionsSvc, txMgr)
 	billingSvc := billing.NewService(billing.NewRepository(db, attendanceSvc), txMgr, sessionsSvc, enrollmentsSvc)
@@ -161,8 +162,9 @@ func TestGenerateClosedPeriodWritesOneRowPerContactWithDistinctTokens(t *testing
 	// The URL a teacher-authenticated response carries must embed a token
 	// that actually hashes to the row's persisted token_hash — proving
 	// ToResponse's on-the-fly derivation round-trips correctly.
-	resp := statementsSvc.ToResponse(result.Statements[0])
-	token := resp.URL[len("https://parent.example.com/s/"):]
+	resp := statementsSvc.ToResponse(testutil.ScopeFor(t, db, teacher.ID), result.Statements[0])
+	require.NotNil(t, resp.URL)
+	token := (*resp.URL)[len("https://parent.example.com/s/"):]
 	require.Equal(t, result.Statements[0].TokenHash, hashOf(token))
 }
 

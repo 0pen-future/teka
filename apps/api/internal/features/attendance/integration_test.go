@@ -17,6 +17,7 @@ import (
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/attendance"
 	"teka/apps/api/internal/features/classes"
+	"teka/apps/api/internal/features/classstaff"
 	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/features/sessions"
 	"teka/apps/api/internal/features/teachers"
@@ -32,9 +33,9 @@ func newIntegrationService(t *testing.T) (*attendance.Service, *gorm.DB) {
 	t.Helper()
 	db := testutil.StartPostgres(t)
 	txMgr := database.NewTxManager(db)
-	classesSvc := classes.NewService(classes.NewRepository(db), txMgr)
+	classesSvc := classes.NewService(classes.NewRepository(db), txMgr, classstaff.NewRepository(db))
 	teachersSvc := teachers.NewService(teachers.NewRepository(db))
-	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db))
+	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db), nil)
 	sessionsSvc := sessions.NewService(sessions.NewRepository(db), classesSvc, teachersSvc, enrollmentsSvc)
 	svc := attendance.NewService(attendance.NewRepository(db), enrollmentsSvc, sessionsSvc, txMgr)
 	return svc, db
@@ -49,9 +50,11 @@ func date(s string) time.Time {
 }
 
 // An owner reads and confirms a member's session attendance sheet; the
-// created records are stamped with the MEMBER's own teacher and center, never
-// the owner's — the same precedent sessions' generated/ad-hoc rows follow.
-func TestOwnerConfirmsMembersSessionAttendanceRecordsInheritMembersAnchors(t *testing.T) {
+// created records carry the member's center and attribute the owner as the
+// last writer — teacher_id on an attendance record names who saved the
+// sheet, never a row filter, so pricing and read-back still resolve the
+// member's roster in full.
+func TestOwnerConfirmsMembersSessionAttendance(t *testing.T) {
 	t.Parallel()
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
@@ -92,8 +95,8 @@ func TestOwnerConfirmsMembersSessionAttendanceRecordsInheritMembersAnchors(t *te
 	require.NoError(t, db.Table("attendance_records").
 		Where("session_id = ? AND deleted_at IS NULL", session.ID).Find(&rows).Error)
 	require.Len(t, rows, 1)
-	require.Equal(t, member.ID, rows[0].TeacherID,
-		"records must be stamped with the member's own teacher id, not the confirming owner's")
+	require.Equal(t, owner.ID, rows[0].TeacherID,
+		"teacher_id is last-writer attribution: the confirming owner takes the credit")
 	require.Equal(t, ownerCenter, rows[0].CenterID)
 }
 
@@ -502,12 +505,19 @@ func TestHandedOffClassAttendanceSheetWorksForNewTeacher(t *testing.T) {
 	student := testutil.Student(t, db, owner.ID, contact.ID, testutil.WithStudentFullName("Bé Bình"))
 	testutil.Enrollment(t, db, owner.ID, student.ID, class.ID, date("2026-01-01"))
 
-	// …then handed the class over: class and future sessions move, the
-	// enrollment and student rows do not (mirrors handoff's writes).
+	// …then handed the class over: class, future sessions, and the giao_vien
+	// stint move (the previous stint closes, the new teacher opens theirs);
+	// the enrollment and student rows do not (mirrors handoff's writes).
 	require.NoError(t, db.Exec(
 		"UPDATE classes SET teacher_id = ? WHERE id = ?", newTeacher.ID, class.ID).Error)
 	require.NoError(t, db.Exec(
 		"UPDATE class_sessions SET teacher_id = ? WHERE id = ?", newTeacher.ID, session.ID).Error)
+	require.NoError(t, db.Exec(
+		"UPDATE class_staff SET ended_at = now() WHERE class_id = ? AND role_key = 'giao_vien' AND ended_at IS NULL",
+		class.ID).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO class_staff (class_id, center_id, teacher_id, role_key) VALUES (?, ?, ?, 'giao_vien')",
+		class.ID, ownerCenter, newTeacher.ID).Error)
 
 	got, err := svc.Get(ctx, newTeacherScope, session.ID)
 	require.NoError(t, err, "the new teacher must read the handed-off session's sheet")
@@ -588,4 +598,144 @@ func TestUpsertManyTargetsPartialUniqueIndex(t *testing.T) {
 	require.Contains(t, sql, "student_id")
 	require.Contains(t, sql, "where deleted_at is null")
 	require.Contains(t, sql, "do update")
+}
+
+// The attendance write capability admits the trợ giảng alongside the giáo
+// viên: recording who showed up is exactly the assistant's job. Hoc_vu reads
+// the sheet's class but cannot confirm (403); a member with no stint gets 404.
+// Every record row is attributed to whoever actually wrote it, and the billing
+// tally keys on the enrollment — an assistant-recorded session still bills to
+// the roster owner's invoice.
+func TestConfirmCapabilityGateAndAttribution(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+
+	owner, _ := testutil.Teacher(t, db)
+	ownerSc := testutil.ScopeFor(t, db, owner.ID)
+	_, gv := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, gv.ID, ownerSc.CenterID)
+	_, tg := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, tg.ID, ownerSc.CenterID)
+	tgSc := testutil.ScopeFor(t, db, tg.ID)
+	_, hv := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, hv.ID, ownerSc.CenterID)
+	hvSc := testutil.ScopeFor(t, db, hv.ID)
+	_, outsider := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, outsider.ID, ownerSc.CenterID)
+	outsiderSc := testutil.ScopeFor(t, db, outsider.ID)
+
+	contact := testutil.Contact(t, db, owner.ID)
+	class := testutil.Class(t, db, gv.ID, testutil.WithClassStartDate(date("2026-01-01")))
+	testutil.StaffAssignment(t, db, class, tg.ID, "tro_giang")
+	testutil.StaffAssignment(t, db, class, hv.ID, "hoc_vu")
+	session := testutil.Session(t, db, gv.ID, class.ID, date("2026-01-06"))
+	student := testutil.Student(t, db, owner.ID, contact.ID)
+	testutil.Enrollment(t, db, owner.ID, student.ID, class.ID, date("2026-01-01"))
+
+	_, err := svc.Confirm(ctx, hvSc, session.ID, attendance.ConfirmRequest{})
+	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code,
+		"hoc_vu reads the class, so the attendance denial is an honest 403")
+	_, err = svc.Confirm(ctx, outsiderSc, session.ID, attendance.ConfirmRequest{})
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+
+	out, err := svc.Confirm(ctx, tgSc, session.ID, attendance.ConfirmRequest{})
+	require.NoError(t, err, "trợ giảng holds the attendance write capability")
+	require.Len(t, out.Rows, 1)
+
+	// Attribution: the record names the assistant who wrote it, not the
+	// session's or enrollment's teacher.
+	var recordedBy string
+	require.NoError(t, db.Raw(
+		"SELECT teacher_id::text FROM attendance_records WHERE session_id = ? AND deleted_at IS NULL",
+		session.ID).Scan(&recordedBy).Error)
+	require.Equal(t, tg.ID.String(), recordedBy,
+		"attendance_records.teacher_id is last-writer attribution")
+
+	// A re-confirm by the giáo viên re-attributes the surviving row.
+	gvSc := testutil.ScopeFor(t, db, gv.ID)
+	_, err = svc.Confirm(ctx, gvSc, session.ID, attendance.ConfirmRequest{})
+	require.NoError(t, err)
+	require.NoError(t, db.Raw(
+		"SELECT teacher_id::text FROM attendance_records WHERE session_id = ? AND deleted_at IS NULL",
+		session.ID).Scan(&recordedBy).Error)
+	require.Equal(t, gv.ID.String(), recordedBy, "an update re-attributes to the new writer")
+
+	// Billing keys on the enrollment, not the record's writer: the roster
+	// owner's tally counts the assistant/GV-recorded session.
+	tallies, err := svc.TallyByEnrollment(ctx, ownerSc, date("2026-01-01"), date("2026-01-31"))
+	require.NoError(t, err)
+	found := false
+	for _, tl := range tallies {
+		if tl.BillableCount == 1 && tl.PresentCount == 1 {
+			found = true
+		}
+	}
+	require.True(t, found,
+		"staff-recorded attendance must still land on the enrollment owner's billing tally")
+}
+
+// A re-confirm after handoff must hit the SAME billable rows, not add a
+// second set: the partial unique keys on (session_id, student_id) with no
+// teacher column, so the new giáo viên's confirm updates the old teacher's
+// rows in place — one live billable row per student, attributed to the new
+// writer, and one billable count on the tally.
+func TestHandoffReconfirmDoesNotDuplicateBillableRows(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, db)
+	ownerSc := testutil.ScopeFor(t, db, owner.ID)
+	_, oldGV := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, oldGV.ID, ownerSc.CenterID)
+	oldSc := testutil.ScopeFor(t, db, oldGV.ID)
+	_, newGV := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, newGV.ID, ownerSc.CenterID)
+	newSc := testutil.ScopeFor(t, db, newGV.ID)
+
+	contact := testutil.Contact(t, db, owner.ID)
+	class := testutil.Class(t, db, oldGV.ID, testutil.WithClassStartDate(date("2026-01-01")))
+	session := testutil.Session(t, db, oldGV.ID, class.ID, date("2026-01-06"))
+	student := testutil.Student(t, db, owner.ID, contact.ID)
+	testutil.Enrollment(t, db, owner.ID, student.ID, class.ID, date("2026-01-01"))
+
+	_, err := svc.Confirm(ctx, oldSc, session.ID, attendance.ConfirmRequest{})
+	require.NoError(t, err, "pre-handoff confirm by the original teacher")
+
+	require.NoError(t, db.Exec(
+		"UPDATE classes SET teacher_id = ? WHERE id = ?", newGV.ID, class.ID).Error)
+	require.NoError(t, db.Exec(
+		"UPDATE class_sessions SET teacher_id = ? WHERE id = ?", newGV.ID, session.ID).Error)
+	require.NoError(t, db.Exec(
+		"UPDATE class_staff SET ended_at = now() WHERE class_id = ? AND role_key = 'giao_vien' AND ended_at IS NULL",
+		class.ID).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO class_staff (class_id, center_id, teacher_id, role_key) VALUES (?, ?, ?, 'giao_vien')",
+		class.ID, ownerSc.CenterID, newGV.ID).Error)
+
+	_, err = svc.Confirm(ctx, newSc, session.ID, attendance.ConfirmRequest{AbsentStudentIDs: []uuid.UUID{student.ID}})
+	require.NoError(t, err, "post-handoff re-confirm by the new teacher")
+
+	var live int64
+	require.NoError(t, db.Raw(
+		"SELECT count(*) FROM attendance_records WHERE session_id = ? AND deleted_at IS NULL",
+		session.ID).Scan(&live).Error)
+	require.EqualValues(t, 1, live,
+		"the re-confirm must update the existing row, never add a parallel billable one")
+
+	var writer string
+	require.NoError(t, db.Raw(
+		"SELECT teacher_id::text FROM attendance_records WHERE session_id = ? AND deleted_at IS NULL",
+		session.ID).Scan(&writer).Error)
+	require.Equal(t, newGV.ID.String(), writer)
+
+	tallies, err := svc.TallyByEnrollment(ctx, ownerSc, date("2026-01-01"), date("2026-01-31"))
+	require.NoError(t, err)
+	var billable, absent int
+	for _, tl := range tallies {
+		billable += tl.BillableCount
+		absent += tl.AbsentCount
+	}
+	require.Equal(t, 1, billable, "one session, one billable unit — regardless of who recorded it")
+	require.Equal(t, 1, absent, "the re-confirm's absent flag replaced the old present flag")
 }

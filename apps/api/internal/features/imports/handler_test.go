@@ -49,6 +49,13 @@ func (d *countingDirectory) MemberIDsByPhone(_ context.Context, _ authctx.Scope)
 	return d.dir, nil
 }
 
+// CenterOwner is only consulted for a non-owner caller; the unit fixtures run
+// as the owner, so a test that gets here is exercising the member-grant path
+// and any teacher id serves as "the owner".
+func (d *countingDirectory) CenterOwner(_ context.Context, _ uuid.UUID) (uuid.UUID, bool, error) {
+	return uuid.New(), false, nil
+}
+
 func newHTTPTest(t *testing.T) (*gin.Engine, *countingDirectory) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -187,7 +194,8 @@ func TestDryRunReportsCountsWithoutCommitting(t *testing.T) {
 	require.False(t, rep.Committed)
 	require.Equal(t, 2, rep.Classes.Created)
 	require.Equal(t, 3, rep.Schedules.Created)
-	require.Equal(t, 3, rep.Contacts.Created, "one parent under two teachers is two contacts")
+	require.Equal(t, 2, rep.Contacts.Created, "one parent under two teachers is one owner-anchored contact")
+	require.Equal(t, 1, rep.Contacts.Reused)
 	require.Equal(t, 3, rep.Students.Created)
 	require.Equal(t, 3, rep.Enrollments.Created)
 }

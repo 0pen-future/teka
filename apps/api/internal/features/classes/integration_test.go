@@ -15,7 +15,9 @@ import (
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/classes"
+	"teka/apps/api/internal/features/classstaff"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/shared/pagination"
 	"teka/apps/api/internal/testutil"
@@ -24,7 +26,7 @@ import (
 func newIntegrationService(t *testing.T) (*classes.Service, *gorm.DB) {
 	t.Helper()
 	db := testutil.StartPostgres(t)
-	return classes.NewService(classes.NewRepository(db), database.NewTxManager(db)), db
+	return classes.NewService(classes.NewRepository(db), database.NewTxManager(db), classstaff.NewRepository(db)), db
 }
 
 func int16Ptr(v int16) *int16 { return &v }
@@ -392,4 +394,141 @@ func TestPeersInSameCenterCannotSeeEachOthersClasses(t *testing.T) {
 	for _, r := range rows {
 		require.NotEqual(t, created.ID, r.ID, "a peer's list must not include another member's class")
 	}
+}
+
+// Read scoping by assignment: any class_staff stint — active or ended — lets
+// the holder read the class through the readable port, while an unassigned
+// peer keeps getting 404 and the write-gate port (Get/Update) stays own-rows.
+func TestAssignmentHoldersReadThroughReadablePort(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+
+	owner, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, owner.ID)
+	_, clerk := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, clerk.ID, sc.CenterID)
+	_, peer := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, peer.ID, sc.CenterID)
+	clerkSc := testutil.ScopeFor(t, db, clerk.ID)
+	peerSc := testutil.ScopeFor(t, db, peer.ID)
+
+	created, err := svc.Create(ctx, sc, createRequest())
+	require.NoError(t, err)
+	stint := testutil.StaffAssignment(t, db, created, clerk.ID, "hoc_vu")
+
+	// The assignment holder reads detail + list, and sees their roles.
+	got, roles, err := svc.GetReadable(ctx, clerkSc, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, created.ID, got.ID)
+	require.Equal(t, []string{"hoc_vu"}, roles)
+
+	rows, listRoles, total, err := svc.ListReadable(ctx, clerkSc, classes.ListFilter{Status: classes.StatusActive}, listParams(t))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Equal(t, created.ID, rows[0].ID)
+	require.Equal(t, []string{"hoc_vu"}, listRoles[created.ID])
+
+	// An unassigned peer still gets nothing — no existence leak.
+	_, _, err = svc.GetReadable(ctx, peerSc, created.ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+	_, _, peerTotal, err := svc.ListReadable(ctx, peerSc, classes.ListFilter{Status: classes.StatusActive}, listParams(t))
+	require.NoError(t, err)
+	require.Zero(t, peerTotal)
+
+	// Write-freeze: reading is not writing. The stint holder cannot update,
+	// and the write-gate port never widened.
+	_, err = svc.Update(ctx, clerkSc, created.ID, classes.UpdateClassRequest{Name: "Đổi tên"})
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code, "the write gate stays own-rows")
+	_, err = svc.Get(ctx, clerkSc, created.ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code, "classes.Get is the shared write gate and must not widen")
+
+	// An ended stint keeps history reads but drops the role from
+	// my_staff_roles: roles describe what the caller IS, not what they can
+	// still read.
+	require.NoError(t, db.Exec(`UPDATE class_staff SET ended_at = now() WHERE id = ?`, stint).Error)
+	got, roles, err = svc.GetReadable(ctx, clerkSc, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, created.ID, got.ID)
+	require.Empty(t, roles)
+
+	// A soft-deleted class grants nothing even to an assignment holder.
+	require.NoError(t, db.Exec(`UPDATE classes SET deleted_at = now() WHERE id = ?`, created.ID).Error)
+	_, _, err = svc.GetReadable(ctx, clerkSc, created.ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+}
+
+// The owner's readable port matches the old behavior: center-wide, roles
+// empty (the owner reads by ownership, not by stint).
+func TestOwnerReadablePortIsCenterWide(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+
+	owner, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, owner.ID)
+	_, member := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, member.ID, sc.CenterID)
+	memberSc := testutil.ScopeFor(t, db, member.ID)
+
+	created, err := svc.Create(ctx, memberSc, createRequest())
+	require.NoError(t, err)
+
+	got, roles, err := svc.GetReadable(ctx, sc, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, created.ID, got.ID)
+	require.Empty(t, roles)
+}
+
+// The capability write gate: an ACTIVE stint in a writing role passes, a
+// wrong-role or ended stint gets an honest 403 (they can read the class), and
+// a teacher with no relationship gets 404 so class ids stay unprobeable.
+func TestGetWritableCapabilityGate(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+
+	owner, _ := testutil.Teacher(t, db)
+	ownerSc := testutil.ScopeFor(t, db, owner.ID)
+	_, teacher := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, teacher.ID, ownerSc.CenterID)
+	teacherSc := testutil.ScopeFor(t, db, teacher.ID)
+	_, assistant := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, assistant.ID, ownerSc.CenterID)
+	assistantSc := testutil.ScopeFor(t, db, assistant.ID)
+	_, outsider := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, outsider.ID, ownerSc.CenterID)
+	outsiderSc := testutil.ScopeFor(t, db, outsider.ID)
+
+	class := testutil.Class(t, db, teacher.ID)
+	testutil.StaffAssignment(t, db, class, assistant.ID, "tro_giang")
+
+	// Owner bypasses the fragment via CenterWide, whatever the capability.
+	_, err := svc.GetWritable(ctx, ownerSc, class.ID, authctx.CapSessionsWrite)
+	require.NoError(t, err, "center owner writes without a stint")
+
+	// The creator holds the auto-seeded active giao_vien stint.
+	_, err = svc.GetWritable(ctx, teacherSc, class.ID, authctx.CapSessionsWrite)
+	require.NoError(t, err, "active giao_vien stint writes sessions")
+
+	// tro_giang is in the attendance role list but not the sessions one.
+	_, err = svc.GetWritable(ctx, assistantSc, class.ID, authctx.CapAttendanceWrite)
+	require.NoError(t, err, "active tro_giang stint writes attendance")
+	_, err = svc.GetWritable(ctx, assistantSc, class.ID, authctx.CapSessionsWrite)
+	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code,
+		"tro_giang can read the class, so the sessions denial is an honest 403")
+
+	// No stint at all: the class must look nonexistent.
+	_, err = svc.GetWritable(ctx, outsiderSc, class.ID, authctx.CapSessionsWrite)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
+		"no relationship to the class → 404, not 403")
+
+	// Handoff shape: ending the giao_vien stint keeps history reads but must
+	// drop every write, even though classes.teacher_id still names them.
+	require.NoError(t, db.Exec(
+		`UPDATE class_staff SET ended_at = now() WHERE class_id = ? AND teacher_id = ?`,
+		class.ID, teacher.ID).Error)
+	_, err = svc.GetWritable(ctx, teacherSc, class.ID, authctx.CapSessionsWrite)
+	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code,
+		"an ended stint reads history but never writes — creator rows grant nothing")
 }

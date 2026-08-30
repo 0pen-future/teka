@@ -13,18 +13,21 @@ import (
 	"teka/apps/api/internal/testutil"
 )
 
-// The send-reports flag grants billing/statement/debt READS only — contacts
-// stay peer territory. A flag holder gets the same neutral not-found a plain
-// peer gets, on the read and on every mutation.
-func TestSecretaryCannotReadOrMutateMembersContacts(t *testing.T) {
+// The send-reports flag is reports oversight: the secretary sends every
+// statement, so they read every contact in the center — including one still
+// anchored on a member from before the ownership migration — and may fix its
+// zalo mapping. Managing the directory itself stays the owner's: renames and
+// deletes come back as an explicit 403, not a neutral miss, because the row is
+// visibly there.
+func TestSecretaryReadsCenterWideButCannotManageContacts(t *testing.T) {
 	t.Parallel()
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
 	owner, _ := testutil.Teacher(t, db)
 	member, _ := testutil.Teacher(t, db)
-	ownerCenter := testutil.ScopeFor(t, db, owner.ID).CenterID
-	testutil.JoinCenter(t, db, member.ID, ownerCenter)
-	_, secretary := testutil.Secretary(t, db, ownerCenter)
+	ownerScope := testutil.ScopeFor(t, db, owner.ID)
+	testutil.JoinCenter(t, db, member.ID, ownerScope.CenterID)
+	_, secretary := testutil.Secretary(t, db, ownerScope.CenterID)
 	memberScope := testutil.ScopeFor(t, db, member.ID)
 	secScope := testutil.ScopeFor(t, db, secretary.ID)
 	require.True(t, secScope.CanSendReports)
@@ -32,28 +35,38 @@ func TestSecretaryCannotReadOrMutateMembersContacts(t *testing.T) {
 
 	contact := testutil.Contact(t, db, member.ID)
 
-	_, err := svc.Get(ctx, secScope, contact.ID)
-	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
-		"the send-reports flag must not open another member's contact")
+	got, err := svc.Get(ctx, secScope, contact.ID)
+	require.NoError(t, err, "reports oversight reads every phone row in the center")
+	require.Equal(t, contact.FullName, got.FullName)
+	require.Equal(t, contact.Phone, got.Phone, "a contact row IS a phone row — no masking")
 
+	// A member without oversight or an active hoc_vu stint has no contact
+	// reach, not even to a row still anchored on them.
+	_, err = svc.Get(ctx, memberScope, contact.ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
+		"contact reach needs oversight or an active hoc_vu stint")
+
+	// Directory management is the owner's data ownership, not oversight.
 	_, err = svc.Update(ctx, secScope, contact.ID, contacts.UpdateRequest{
 		FullName: "Renamed", Phone: "+84901239876",
 	})
-	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
-		"the send-reports flag must not let anyone edit another member's contact")
-
-	_, err = svc.UpdateZaloMapping(ctx, secScope, contact.ID, contacts.ZaloMappingRequest{
-		ZaloUserID: "zuid-secretary", ZaloName: "Should Not Stick",
-	})
-	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
-		"the send-reports flag must not let anyone remap another member's contact")
+	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code,
+		"only the owner edits the directory")
 
 	err = svc.Delete(ctx, secScope, contact.ID)
-	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
-		"the send-reports flag must not let anyone delete another member's contact")
+	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code,
+		"only the owner deletes from the directory")
 
-	got, err := svc.Get(ctx, memberScope, contact.ID)
+	// The zalo mapping is how reports get delivered, so oversight maps it.
+	mapped, err := svc.UpdateZaloMapping(ctx, secScope, contact.ID, contacts.ZaloMappingRequest{
+		ZaloUserID: "zuid-secretary", ZaloName: "Hoa Zalo",
+	})
+	require.NoError(t, err, "reports oversight manages zalo delivery mappings")
+	require.NotNil(t, mapped.ZaloUserID)
+	require.Equal(t, "zuid-secretary", *mapped.ZaloUserID)
+
+	got, err = svc.Get(ctx, ownerScope, contact.ID)
 	require.NoError(t, err, "the contact must survive every refused mutation")
 	require.Equal(t, contact.FullName, got.FullName)
-	require.Nil(t, got.ZaloUserID, "the refused mapping must not have stuck")
+	require.NotNil(t, got.ZaloUserID, "the secretary's mapping stuck")
 }
