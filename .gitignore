@@ -30,3 +30,6 @@ lefthook-local.yml
 
 # Logs
 *.log
+
+# Merge artifacts
+*.orig
