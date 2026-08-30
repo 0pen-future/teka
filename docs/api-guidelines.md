@@ -107,10 +107,16 @@ an owner-granted permission widens reads without touching every repository.
 so own-rows scoping alone would show the new teacher an empty roster. Roster
 READ paths therefore widen to "own rows OR the row's class is currently
 assigned to the caller": `enrollments` `GetByID`/`List`/`ActiveOn`
-(`readScoped` in `enrollments/repository.go`) and attendance's `StudentNames`.
-Everything else keeps plain member scoping — enrollment writes (end, delete,
-create) stay with the creator or the owner, and the contact list is untouched:
-the class teacher sees student names, not parent contact details.
+(`readScoped` in `enrollments/repository.go`), attendance's `StudentNames`,
+and `students` `GetByID`/`List` (`readScoped` in `students/repository.go`,
+matching students with any enrollment row in a class assigned to the caller).
+Everything else keeps plain member scoping — enrollment and student writes
+(end, delete, create, update) stay with the creator or the owner, and the
+contacts feature itself is untouched. Widened student rows do carry the linked
+contact's name and phone (the roster table shows them), but the class teacher
+cannot browse or manage the creator's contact book. Because
+`students.Service.Update` saves by primary key after a widened `GetByID`, it
+re-checks row ownership in the service before saving.
 
 **Delegated report sending (`can_send_reports`)**: a boolean permission on the
 member's live `center_members` stint, granted and revoked only by the owner
