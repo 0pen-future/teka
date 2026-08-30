@@ -34,6 +34,7 @@ export const classMath: Class = {
   status: "active",
   schedules: [],
   created_at: "2026-01-01T08:00:00Z",
+  my_staff_roles: [],
 };
 
 export const classEnglish: Class = {
@@ -46,6 +47,7 @@ export const classEnglish: Class = {
   status: "active",
   schedules: [],
   created_at: "2026-01-01T08:00:00Z",
+  my_staff_roles: [],
 };
 
 /** No sessions fell in the fixture period — never produces a collections/invoice row. */
@@ -59,6 +61,7 @@ export const classEmpty: Class = {
   status: "active",
   schedules: [],
   created_at: "2026-01-01T08:00:00Z",
+  my_staff_roles: [],
 };
 
 // --- Contacts ---
@@ -707,7 +710,9 @@ export const collectionsHandlers = [
         id: nextId("notification-"),
         contact_id: row.contact_id,
         contact_name: row.full_name,
-        phone: row.phone,
+        // These fixtures model the owner view, where the phone is always
+        // visible; the wire type is nullable only for phone-hidden callers.
+        phone: row.phone ?? "",
         channel,
         purpose: body.purpose,
         status: "queued",

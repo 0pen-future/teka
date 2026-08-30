@@ -32,6 +32,7 @@ export const fixtureClass: Class = {
   status: "active",
   schedules: [],
   created_at: "2026-01-01T08:00:00Z",
+  my_staff_roles: [],
 };
 
 function buildRosterTemplate(): AttendanceRow[] {
@@ -182,6 +183,14 @@ export const attendanceHandlers = [
       (klass) => !status || status === "all" || klass.status === status,
     );
     return HttpResponse.json(ok(items, listMeta(items.length)));
+  }),
+
+  http.get(`${API_URL}/classes/:id`, ({ params }) => {
+    const klass = store.classes.find((item) => item.id === params.id);
+    if (!klass) {
+      return HttpResponse.json(fail("NOT_FOUND", "class not found"), { status: 404 });
+    }
+    return HttpResponse.json(ok(klass));
   }),
 
   http.get(`${API_URL}/classes/:classId/sessions`, ({ params, request }) => {

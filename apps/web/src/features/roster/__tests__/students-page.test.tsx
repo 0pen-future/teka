@@ -103,16 +103,24 @@ describe("StudentsPage v2 layout", () => {
     );
   });
 
-  it("orders the header actions: ⚙ Cài đặt lớp, + Tạo lớp mới, + Thêm học sinh", async () => {
+  it("orders the header actions: ⚙ Cài đặt lớp, + Tạo lớp mới, + Ghi danh học sinh, + Thêm học sinh", async () => {
     renderStudentsPage();
 
     const settings = await screen.findByRole("link", { name: "⚙ Cài đặt lớp" });
     const createClass = screen.getByRole("button", { name: "+ Tạo lớp mới" });
-    const addStudent = screen.getByRole("button", { name: "+ Thêm học sinh" });
-    // All three sit in the same header row, in prototype order — settings
-    // before create, create before add.
+    const enrollExisting = screen.getByRole("button", { name: "+ Ghi danh học sinh" });
+    // Owner-gated: waits for `/centers/me` to resolve, not just `/classes`.
+    const addStudent = await screen.findByRole("button", { name: "+ Thêm học sinh" });
+    // All four sit in the same header row, in prototype order. Enroll sits
+    // right before add-student: picking an existing student is offered before
+    // creating a new record, to steer away from duplicates.
     expect(settings.compareDocumentPosition(createClass)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(createClass.compareDocumentPosition(addStudent)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(createClass.compareDocumentPosition(enrollExisting)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(enrollExisting.compareDocumentPosition(addStudent)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
   });
 
   it("shows enrollment start and this month's non-cancelled session count", async () => {
@@ -218,5 +226,38 @@ describe("StudentsPage class search", () => {
 
     expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Chưa ghi danh"]);
     expect(screen.getByText('Không có lớp nào khớp "hoá 12"')).toBeInTheDocument();
+  });
+});
+
+describe("StudentsPage as a center member", () => {
+  beforeEach(() => {
+    server.use(
+      // Member-shaped `/centers/me`, and phone-masked student rows: the
+      // server nulls `contact_phone` for a caller without phone visibility.
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh" })),
+      ),
+      http.get(`${API_URL}/students`, () => {
+        const items = [{ ...studentSiblingTwo, contact_phone: null }];
+        return HttpResponse.json(ok(items, listMeta(items.length)));
+      }),
+    );
+  });
+
+  it("hides owner-only record controls and renders no phone for masked rows", async () => {
+    renderStudentsPage();
+
+    const table = await screen.findByRole("table");
+    await within(table).findByRole("link", { name: studentSiblingTwo.full_name });
+
+    // A masked phone renders nothing at all — no tap-to-call link.
+    expect(document.querySelector('a[href^="tel:"]')).toBeNull();
+    // Record management belongs to the owner: no add, edit, or delete.
+    expect(screen.queryByRole("button", { name: "+ Thêm học sinh" })).not.toBeInTheDocument();
+    // Enrolling into a class is a class write: a member with no staff role on
+    // the selected class gets no enroll button either.
+    expect(screen.queryByRole("button", { name: "+ Ghi danh học sinh" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sửa" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Xoá" })).not.toBeInTheDocument();
   });
 });

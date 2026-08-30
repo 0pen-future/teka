@@ -22,6 +22,18 @@ const sessionsHandler = http.get(`${API_URL}/classes/:classId/sessions`, () =>
   HttpResponse.json(ok([])),
 );
 
+/** Non-owner center member — `/centers/me`'s member body carries no `members` key. */
+const memberCenterHandler = http.get(`${API_URL}/centers/me`, () =>
+  HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh", permissions: [] })),
+);
+
+/** Overrides `GET /classes/:id` so the fixture class carries the given staff roles. */
+function classWithStaffRoles(roles: string[]) {
+  return http.get(`${API_URL}/classes/:id`, () =>
+    HttpResponse.json(ok({ ...classWithSchedule, my_staff_roles: roles })),
+  );
+}
+
 /** Matches the page's `today()` (UTC ISO date). */
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
@@ -205,5 +217,38 @@ describe("ClassSettingsPage", () => {
     expect(replacement?.weekday).toBe(classSchedule.weekday);
     expect(replacement?.start_time).toBe("19:30");
     expect(replacement?.effective_from).toBe(todayIso());
+  });
+
+  describe("write access by class-staff role", () => {
+    it("shows an enabled save button for the center owner", async () => {
+      renderClassSettings();
+
+      const save = await screen.findByRole("button", { name: "Lưu thay đổi" });
+      expect(save).toBeEnabled();
+      expect(
+        screen.queryByText(/Chỉ giáo viên phụ trách hoặc chủ trung tâm mới sửa được/),
+      ).not.toBeInTheDocument();
+    });
+
+    it("shows an enabled save button for a caller holding the giao_vien role", async () => {
+      server.use(memberCenterHandler, classWithStaffRoles(["giao_vien"]));
+      renderClassSettings();
+
+      const save = await screen.findByRole("button", { name: "Lưu thay đổi" });
+      expect(save).toBeEnabled();
+    });
+
+    it("disables the save button and shows a notice for a hoc_vu-only caller", async () => {
+      server.use(memberCenterHandler, classWithStaffRoles(["hoc_vu"]));
+      renderClassSettings();
+
+      const save = await screen.findByRole("button", { name: "Lưu thay đổi" });
+      expect(save).toBeDisabled();
+      expect(
+        await screen.findByText(
+          "Chỉ giáo viên phụ trách hoặc chủ trung tâm mới sửa được cài đặt lớp.",
+        ),
+      ).toBeInTheDocument();
+    });
   });
 });
