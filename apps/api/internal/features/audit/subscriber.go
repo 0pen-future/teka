@@ -12,6 +12,7 @@ import (
 
 	"teka/apps/api/internal/features/auth"
 	"teka/apps/api/internal/features/centers"
+	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/features/invitations"
 	"teka/apps/api/internal/middleware"
 	"teka/apps/api/internal/shared/events"
@@ -251,6 +252,22 @@ func (s *Subscriber) toRow(e events.Event) (Log, bool) {
 				"before_denies": strings.Join(ev.BeforeDenies, ","),
 				"after_grants":  strings.Join(ev.AfterGrants, ","),
 				"after_denies":  strings.Join(ev.AfterDenies, ","),
+			},
+		}, true
+	case enrollments.StudentEnrolled:
+		// The service event, not the middleware row, carries which class and
+		// student were linked — the request middleware stores no body.
+		return Log{
+			ID:          id.New(),
+			OccurredAt:  ev.OccurredAt,
+			CenterID:    nilIfZero(ev.CenterID),
+			ActorUserID: nilIfZero(ev.ActorID),
+			Action:      "enrollment.create",
+			EntityType:  "enrollment",
+			EntityID:    ev.EnrollmentID.String(),
+			Metadata: Metadata{
+				"class_id":   ev.ClassID.String(),
+				"student_id": ev.StudentID.String(),
 			},
 		}, true
 	case invitations.MemberJoined:

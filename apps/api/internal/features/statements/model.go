@@ -28,6 +28,11 @@ type Statement struct {
 	CenterID  uuid.UUID
 	ContactID uuid.UUID
 	PeriodID  uuid.UUID
+	// ClassID is nil on a family statement (the whole family's bill for the
+	// period — the original unit) and set on a class-scoped statement, which
+	// carries only that class's charges. The class is bound into the token
+	// derivation, so one copy's link can never open the other's content.
+	ClassID   *uuid.UUID
 	TokenHash []byte
 	ExpiresAt time.Time
 	TotalDue  int64

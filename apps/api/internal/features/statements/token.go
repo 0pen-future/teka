@@ -13,9 +13,18 @@ import (
 // ever be reconstructed by someone who holds key, which is exactly what lets
 // a teacher-authenticated response recompute a parent's link on demand
 // without a token column to read it back from.
-func deriveToken(key []byte, statementID uuid.UUID) string {
+//
+// classID is the statement's own class scope: a class-scoped statement's
+// token binds the class into the MAC, so its URL can only ever resolve to
+// that class's content. A nil classID (family statement) contributes nothing
+// to the MAC — every family token minted before class scoping existed keeps
+// resolving byte-identically.
+func deriveToken(key []byte, statementID uuid.UUID, classID *uuid.UUID) string {
 	mac := hmac.New(sha256.New, key)
 	mac.Write(statementID[:])
+	if classID != nil {
+		mac.Write(classID[:])
+	}
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 

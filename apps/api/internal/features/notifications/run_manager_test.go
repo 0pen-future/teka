@@ -33,6 +33,10 @@ type fakeRunStore struct {
 	// always permitted, matching a run whose flag never moves.
 	canSend func(call int) (bool, error)
 	sendChk int // how many times CanSendReports was asked
+	// classAllowed answers the class-scoped per-item probe; nil means always
+	// permitted. classChk counts the asks.
+	classAllowed func(call int) (bool, error)
+	classChk     int
 }
 
 func (s *fakeRunStore) CanSendReports(_ context.Context, _, _ uuid.UUID) (bool, error) {
@@ -40,6 +44,18 @@ func (s *fakeRunStore) CanSendReports(_ context.Context, _, _ uuid.UUID) (bool, 
 	call := s.sendChk
 	s.sendChk++
 	probe := s.canSend
+	s.mu.Unlock()
+	if probe == nil {
+		return true, nil
+	}
+	return probe(call)
+}
+
+func (s *fakeRunStore) ClassSendAllowed(_ context.Context, _, _, _ uuid.UUID) (bool, error) {
+	s.mu.Lock()
+	call := s.classChk
+	s.classChk++
+	probe := s.classAllowed
 	s.mu.Unlock()
 	if probe == nil {
 		return true, nil
@@ -324,7 +340,7 @@ func TestReserveHoldsTheTeacherSlotUntilReleasedOrStarted(t *testing.T) {
 
 	res2, err := m.Reserve(teacherID, uuid.New())
 	require.NoError(t, err, "a released slot is free again")
-	res2.Start(uuid.New(), testItems(1), false)
+	res2.Start(uuid.New(), testItems(1), RunGrant{})
 	res2.Release() // a no-op after Start: it must not kill the running send
 	waitForTerminalStatus(t, store)
 	_, _, statuses := store.snapshot()
@@ -393,13 +409,41 @@ func TestDelegatedRunStopsWhenThePermissionIsRevokedMidRun(t *testing.T) {
 
 	res, err := m.Reserve(uuid.New(), uuid.New())
 	require.NoError(t, err)
-	res.Start(uuid.New(), testItems(3), true)
+	res.Start(uuid.New(), testItems(3), RunGrant{Delegated: true})
 	waitForTerminalStatus(t, store)
 
 	outcomes, failed, statuses := store.snapshot()
 	require.Len(t, outcomes, 1, "only the pre-revocation item was sent")
 	require.Equal(t, StatusSent, outcomes[0].status)
 	require.Len(t, dm.sent(), 1)
+	require.Equal(t, []string{runRevokedFailureMessage}, failed)
+	require.Equal(t, []string{RunStatusInterrupted}, statuses)
+}
+
+func TestClassRunStopsWhenTheClassStandingIsLostMidRun(t *testing.T) {
+	t.Parallel()
+	store := &fakeRunStore{
+		classAllowed: func(call int) (bool, error) {
+			// Standing holds for the first item, gone before the second.
+			return call == 0, nil
+		},
+		canSend: func(int) (bool, error) {
+			t.Error("a class-scoped run must probe the class standing, never can_send_reports")
+			return false, nil
+		},
+	}
+	dm := &fakeDM{send: func(int, string) (string, error) { return "msg-1", nil }}
+	m := newTestRunManager(t, store, dm, time.Second, time.Second)
+	m.sleep = (&recordedSleep{}).hook
+
+	res, err := m.Reserve(uuid.New(), uuid.New())
+	require.NoError(t, err)
+	res.Start(uuid.New(), testItems(3), RunGrant{ClassID: ptr(uuid.New())})
+	waitForTerminalStatus(t, store)
+
+	outcomes, failed, statuses := store.snapshot()
+	require.Len(t, outcomes, 1, "only the pre-revocation item was sent")
+	require.Equal(t, StatusSent, outcomes[0].status)
 	require.Equal(t, []string{runRevokedFailureMessage}, failed)
 	require.Equal(t, []string{RunStatusInterrupted}, statuses)
 }

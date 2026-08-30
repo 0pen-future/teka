@@ -107,6 +107,14 @@ func (f *fakeRepo) ListLinked(_ context.Context) ([]uuid.UUID, error) {
 	return ids, nil
 }
 
+func (f *fakeRepo) HasActiveHocVu(_ context.Context, _, _ uuid.UUID) (bool, error) {
+	return false, nil
+}
+
+func (f *fakeRepo) ReachableContactPhones(_ context.Context, _, _ uuid.UUID) ([]string, error) {
+	return nil, nil
+}
+
 func (f *fakeRepo) counts() (upserts, verified int, statuses []string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

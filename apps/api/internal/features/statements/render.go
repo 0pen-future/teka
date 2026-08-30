@@ -121,6 +121,91 @@ func buildPublicStatement(invoiceRows []InvoiceLineRow, sessionRows []LiveSessio
 	}
 }
 
+// buildClassStatement is buildPublicStatement for a CLASS-scoped copy: from
+// the same family-wide invoiceRows it keeps only lines billed to classID,
+// and every money field follows class-copy semantics — a child's subtotal
+// and the statement total are the class lines' sum; opening balance,
+// adjustments, and the payment breakdown are family-level money and stay
+// zeroed/empty so a class link never reveals more than its own class's
+// charges. Outstanding is all-or-nothing: the full class total while the
+// family still owes anything across the invoices carrying these class lines
+// (payments are recorded per family invoice, never per class, so a partial
+// figure would be an invention), and zero once they've paid up — which is
+// what retires the class link under RenderPublic's shared paid-up rule.
+// Pure, like buildPublicStatement; a family with no class line at all
+// produces zero Children, which the caller turns into a neutral 404.
+func buildClassStatement(invoiceRows []InvoiceLineRow, sessionRows []LiveSessionRow, classID uuid.UUID) PublicStatement {
+	sessionsByEnrollment := make(map[uuid.UUID][]PublicSession, len(sessionRows))
+	for _, r := range sessionRows {
+		sessionsByEnrollment[r.EnrollmentID] = append(sessionsByEnrollment[r.EnrollmentID], PublicSession{
+			Date:    r.SessionDate.Format(dateLayout),
+			Status:  r.AttendanceStatus,
+			Counted: r.Billable,
+		})
+	}
+
+	var contactName, period string
+	var classTotal, familyOutstanding int64
+	children := make([]PublicChild, 0)
+
+	var current *PublicChild
+	var currentInvoiceID uuid.UUID
+	flushChild := func() {
+		if current != nil {
+			children = append(children, *current)
+		}
+		current = nil
+	}
+
+	for _, row := range invoiceRows {
+		if row.LineClassID == nil || *row.LineClassID != classID {
+			continue
+		}
+		if contactName == "" {
+			contactName = row.ContactName
+			period = fmt.Sprintf("%02d/%d", row.PeriodMonth, row.PeriodYear)
+		}
+		if current == nil || row.InvoiceID != currentInvoiceID {
+			flushChild()
+			currentInvoiceID = row.InvoiceID
+			current = &PublicChild{
+				StudentName: row.StudentName,
+				DisplayNote: row.DisplayNote,
+				Classes:     []PublicClass{},
+				Adjustments: []PublicAdjustment{},
+			}
+			familyOutstanding += row.TotalDue - row.PaidAmount
+		}
+		current.Classes = append(current.Classes, PublicClass{
+			ClassName:     *row.ClassName,
+			UnitPrice:     *row.UnitPrice,
+			BillableCount: *row.BillableCount,
+			AbsentCount:   *row.AbsentCount,
+			Amount:        *row.LineAmount,
+			Sessions:      sessionsByEnrollment[*row.EnrollmentID],
+		})
+		current.Subtotal += *row.LineAmount
+		classTotal += *row.LineAmount
+	}
+	flushChild()
+
+	outstanding := classTotal
+	if familyOutstanding <= 0 {
+		outstanding = 0
+	}
+	return PublicStatement{
+		ContactName: contactName,
+		Period:      period,
+		Children:    children,
+		Totals: PublicTotals{
+			CurrentCharge: classTotal,
+			TotalDue:      classTotal,
+			Outstanding:   outstanding,
+		},
+		Payments: PublicPayments{ByInvoice: []PublicInvoicePayment{}},
+	}
+}
+
 // attachQR fills in payload.QR from the teacher's bank configuration and
 // returns the raw VietQR payload string the qr.png route renders — empty
 // when the bank config is absent, in which case payload.QR is left nil

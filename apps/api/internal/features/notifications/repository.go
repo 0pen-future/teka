@@ -3,6 +3,7 @@ package notifications
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -10,6 +11,7 @@ import (
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/shared/authctx"
+	"teka/apps/api/internal/shared/classscope"
 )
 
 // ErrRunNotFound reports that a period has no notification run visible to the
@@ -38,9 +40,14 @@ type ListRow struct {
 	ContactID   uuid.UUID
 	ContactName string
 	Phone       string
-	Channel     string
-	Purpose     string
-	Status      string
+	// PhoneVisible is the phone-privacy derived column: whether the caller
+	// holds an active hoc_vu stint over one of the contact's actively
+	// enrolled students. Owner/oversight bypass happens in the service via
+	// Scope.PhoneVisible.
+	PhoneVisible bool
+	Channel      string
+	Purpose      string
+	Status       string
 	// ErrorMessage carries a failed row's teacher-facing reason; nil on any
 	// row that has not failed.
 	ErrorMessage *string
@@ -90,23 +97,45 @@ type Repository interface {
 	// enforces with a 409. Never owner-bypassed: a run's send slot belongs to
 	// the acting teacher's own Zalo session, not the whole center.
 	HasActiveRun(ctx context.Context, sc authctx.Scope) (bool, error)
-	// LatestRunByPeriod returns the period's most recently created run,
-	// scoped to sc's center and to periods sc's own teacher owns unless sc
-	// holds reports oversight — period ownership, like ListByPeriod, so the
-	// period's teacher can watch a delegated run on their own period. Returns
+	// LatestRunByPeriod returns the period's most recently created run in one
+	// dimension: classID nil resolves the latest FAMILY run (class_id IS
+	// NULL), scoped to sc's center and to periods sc's own teacher owns
+	// unless sc holds reports oversight — period ownership, like
+	// ListByPeriod, so the period's teacher can watch a delegated run on
+	// their own period. classID set resolves the latest run for that class
+	// copy, center-scoped only: the caller has already passed the class-send
+	// gate, and period ownership is irrelevant to a class run (the class's
+	// students can be billed under any teacher's period). Returns
 	// ErrRunNotFound when none is visible.
-	LatestRunByPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*Run, error)
-	// LatestOwnRunByPeriod returns the period's most recently created run
-	// among runs sc's own teacher created, ignoring oversight entirely, or
-	// ErrRunNotFound. ResumeRun resolves through this: a resume re-occupies
-	// the acting teacher's own Zalo session, so it must never resolve a run
-	// someone else is responsible for.
-	LatestOwnRunByPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*Run, error)
+	LatestRunByPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, classID *uuid.UUID) (*Run, error)
+	// LatestOwnRunByPeriod returns the period's most recently created run in
+	// the classID dimension (as in LatestRunByPeriod) among runs sc's own
+	// teacher created, ignoring oversight entirely, or ErrRunNotFound.
+	// ResumeRun resolves through this: a resume re-occupies the acting
+	// teacher's own Zalo session, so it must never resolve a run someone
+	// else is responsible for.
+	LatestOwnRunByPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, classID *uuid.UUID) (*Run, error)
 	// HasActiveRunForPeriod reports whether ANY teacher has a run still in
-	// RunStatusRunning for this period — the one-active-run-per-period guard
-	// (backed by the partial unique index of migration 000012) that keeps a
-	// teacher and a delegated sender from double-DMing the same parents.
-	HasActiveRunForPeriod(ctx context.Context, centerID, periodID uuid.UUID) (bool, error)
+	// RunStatusRunning for this period in the classID dimension — the
+	// single-running-run-per-dimension guard (the partial unique indexes on
+	// notification_runs) that keeps two senders from double-DMing the same
+	// parents. Dimensions are independent by design: a family run never
+	// blocks a class run or vice versa (that overlap is warned, not
+	// blocked), and two different classes' runs never block each other.
+	HasActiveRunForPeriod(ctx context.Context, centerID, periodID uuid.UUID, classID *uuid.UUID) (bool, error)
+	// HasStatementSendForPeriod reports whether the period already has any
+	// non-failed notification in the OTHER dimension: classScoped false
+	// checks family-statement sends, true checks class-copy sends. Backs the
+	// overlap warning a send/preview response carries when a family and a
+	// class send would reach the same parents in one period — a warning
+	// because overlap can be intentional (plan decision), never a block.
+	HasStatementSendForPeriod(ctx context.Context, centerID, periodID uuid.UUID, classScoped bool) (bool, error)
+	// ClassSendAllowed reports whether the teacher may still send for the
+	// class right now: an active sending-role stint on it, the
+	// can_send_reports delegation, or being the center's owner. A deleted
+	// class reads as false. This is the mid-run revocation probe for a
+	// class-scoped run — the class counterpart of CanSendReports.
+	ClassSendAllowed(ctx context.Context, centerID, teacherID, classID uuid.UUID) (bool, error)
 	// PeriodTeacher returns the owning teacher of one billing period in
 	// centerID, or ErrPeriodNotFound. Backs the pre-send preview's
 	// cross-teacher check without a statements refresh.
@@ -149,6 +178,13 @@ type Repository interface {
 	// manual channel. An owner sending a member's period never reaches here
 	// on the personal channel — the cross-teacher 409 fires first.
 	ZaloMappings(ctx context.Context, sc authctx.Scope, contactIDs []uuid.UUID) (map[uuid.UUID]string, error)
+	// ZaloMappingsClass is ZaloMappings for a class-scoped send: instead of
+	// the owner/oversight teacher filter, a contact's mapping resolves when
+	// one of their students holds a STILL-ACTIVE enrollment in classID — the
+	// same liveness rule that targets the class copies. The mapping remains
+	// whichever teacher's consent artifact it is; this read never rewrites
+	// it. The caller must have passed the class-send gate first.
+	ZaloMappingsClass(ctx context.Context, sc authctx.Scope, classID uuid.UUID, contactIDs []uuid.UUID) (map[uuid.UUID]string, error)
 	// MarkInterrupted moves every RunStatusRunning run to
 	// RunStatusInterrupted and returns how many moved. Called once at boot,
 	// with no tenant caller: a run still "running" when no process is sending
@@ -224,7 +260,7 @@ func (r *gormRepository) InsertBatch(ctx context.Context, rows []*Notification) 
 // callers, delegated rows included, and nothing to anyone else.
 const listByPeriodQuery = `
 	SELECT n.id AS id, n.statement_id AS statement_id, s.contact_id AS contact_id,
-	       c.full_name AS contact_name, c.phone AS phone,
+	       c.full_name AS contact_name, c.phone AS phone, %s AS phone_visible,
 	       n.channel AS channel, n.purpose AS purpose, n.status AS status,
 	       n.error_message AS error_message, n.run_id AS run_id,
 	       n.sent_at AS sent_at, n.created_at AS created_at
@@ -238,9 +274,14 @@ const listByPeriodQuery = `
 `
 
 func (r *gormRepository) ListByPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, filter ListFilter) ([]ListRow, error) {
+	// The phone_visible fragment sits in the SELECT clause, so its two bind
+	// args (the CALLER's teacher, then center) come first in the Raw list.
+	frag, _ := classscope.PhoneVisibleViaContact("s.contact_id")
 	var rows []ListRow
 	err := database.FromContext(ctx, r.db).
-		Raw(listByPeriodQuery, sc.CenterID, sc.ReportsOversight(), sc.TeacherID, periodID, filter.Purpose, filter.Purpose, filter.Status, filter.Status).
+		Raw(fmt.Sprintf(listByPeriodQuery, frag),
+			sc.TeacherID, sc.CenterID,
+			sc.CenterID, sc.ReportsOversight(), sc.TeacherID, periodID, filter.Purpose, filter.Purpose, filter.Status, filter.Status).
 		Scan(&rows).Error
 	return rows, err
 }
@@ -272,9 +313,25 @@ func (r *gormRepository) HasActiveRun(ctx context.Context, sc authctx.Scope) (bo
 	return count > 0, err
 }
 
-func (r *gormRepository) LatestRunByPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*Run, error) {
+// runClassDimension narrows a notification_runs query to one run dimension:
+// family (class_id IS NULL) or one class's copies.
+func runClassDimension(q *gorm.DB, classID *uuid.UUID) *gorm.DB {
+	if classID == nil {
+		return q.Where("class_id IS NULL")
+	}
+	return q.Where("class_id = ?", classID)
+}
+
+func (r *gormRepository) LatestRunByPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, classID *uuid.UUID) (*Run, error) {
+	q := r.runsPeriodScoped(ctx, sc)
+	if classID != nil {
+		// Class runs are center-scoped only — the service's class-send gate
+		// already authorized this class, and period ownership carries no
+		// meaning for a class run (see the interface doc comment).
+		q = database.FromContext(ctx, r.db).Where("notification_runs.center_id = ?", sc.CenterID)
+	}
 	var run Run
-	err := r.runsPeriodScoped(ctx, sc).
+	err := runClassDimension(q, classID).
 		Where("billing_period_id = ?", periodID).
 		Order("created_at DESC").
 		First(&run).Error
@@ -287,9 +344,9 @@ func (r *gormRepository) LatestRunByPeriod(ctx context.Context, sc authctx.Scope
 	return &run, nil
 }
 
-func (r *gormRepository) LatestOwnRunByPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*Run, error) {
+func (r *gormRepository) LatestOwnRunByPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, classID *uuid.UUID) (*Run, error) {
 	var run Run
-	err := r.runsOwnScoped(ctx, sc).
+	err := runClassDimension(r.runsOwnScoped(ctx, sc), classID).
 		Where("billing_period_id = ?", periodID).
 		Order("created_at DESC").
 		First(&run).Error
@@ -302,13 +359,52 @@ func (r *gormRepository) LatestOwnRunByPeriod(ctx context.Context, sc authctx.Sc
 	return &run, nil
 }
 
-func (r *gormRepository) HasActiveRunForPeriod(ctx context.Context, centerID, periodID uuid.UUID) (bool, error) {
+func (r *gormRepository) HasActiveRunForPeriod(ctx context.Context, centerID, periodID uuid.UUID, classID *uuid.UUID) (bool, error) {
+	var count int64
+	err := runClassDimension(
+		database.FromContext(ctx, r.db).
+			Model(&Run{}).
+			Where("center_id = ? AND billing_period_id = ? AND status = ?", centerID, periodID, RunStatusRunning),
+		classID,
+	).Count(&count).Error
+	return count > 0, err
+}
+
+func (r *gormRepository) HasStatementSendForPeriod(ctx context.Context, centerID, periodID uuid.UUID, classScoped bool) (bool, error) {
+	dimension := "s.class_id IS NULL"
+	if classScoped {
+		dimension = "s.class_id IS NOT NULL"
+	}
 	var count int64
 	err := database.FromContext(ctx, r.db).
-		Model(&Run{}).
-		Where("center_id = ? AND billing_period_id = ? AND status = ?", centerID, periodID, RunStatusRunning).
+		Table("notifications AS n").
+		Joins("JOIN statements s ON s.id = n.statement_id AND s.center_id = n.center_id").
+		Where("n.center_id = ? AND s.period_id = ? AND "+dimension, centerID, periodID).
+		Where("n.purpose = ? AND n.status IN ? AND n.deleted_at IS NULL",
+			PurposeStatements, []string{StatusQueued, StatusSent, StatusDelivered}).
 		Count(&count).Error
 	return count > 0, err
+}
+
+func (r *gormRepository) ClassSendAllowed(ctx context.Context, centerID, teacherID, classID uuid.UUID) (bool, error) {
+	stintFrag, _ := classscope.WriteExists("classes.id")
+	var rows []struct{ Allowed bool }
+	err := database.FromContext(ctx, r.db).
+		Table("classes").
+		Select(stintFrag+` OR EXISTS (
+			SELECT 1 FROM center_members cm
+			WHERE cm.center_id = classes.center_id AND cm.teacher_id = ? AND cm.can_send_reports)
+		OR EXISTS (
+			SELECT 1 FROM centers ce
+			WHERE ce.id = classes.center_id AND ce.owner_id = ?) AS allowed`,
+			teacherID, centerID, classSendRoles, teacherID, teacherID).
+		Where("classes.id = ? AND classes.center_id = ? AND classes.deleted_at IS NULL", classID, centerID).
+		Find(&rows).Error
+	if err != nil {
+		return false, err
+	}
+	// Zero rows means the class is gone (deleted): nothing left to send for.
+	return len(rows) == 1 && rows[0].Allowed, nil
 }
 
 func (r *gormRepository) PeriodTeacher(ctx context.Context, centerID, periodID uuid.UUID) (uuid.UUID, error) {
@@ -434,6 +530,36 @@ func (r *gormRepository) ZaloMappings(ctx context.Context, sc authctx.Scope, con
 		q = q.Where("teacher_id = ?", sc.TeacherID)
 	}
 	err := q.Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	mappings := make(map[uuid.UUID]string, len(rows))
+	for _, row := range rows {
+		mappings[row.ID] = row.ZaloUserID
+	}
+	return mappings, nil
+}
+
+func (r *gormRepository) ZaloMappingsClass(ctx context.Context, sc authctx.Scope, classID uuid.UUID, contactIDs []uuid.UUID) (map[uuid.UUID]string, error) {
+	if len(contactIDs) == 0 {
+		return map[uuid.UUID]string{}, nil
+	}
+	var rows []struct {
+		ID         uuid.UUID
+		ZaloUserID string
+	}
+	err := database.FromContext(ctx, r.db).
+		Table("contacts").
+		Select("id, zalo_user_id").
+		Where("center_id = ? AND id IN ? AND zalo_user_id IS NOT NULL AND deleted_at IS NULL",
+			sc.CenterID, contactIDs).
+		Where(`EXISTS (
+			SELECT 1 FROM students st
+			JOIN enrollments e ON e.student_id = st.id AND e.center_id = st.center_id
+			WHERE st.contact_id = contacts.id AND st.center_id = contacts.center_id
+			  AND st.deleted_at IS NULL
+			  AND e.class_id = ? AND e.deleted_at IS NULL AND e.ended_on IS NULL)`, classID).
+		Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}

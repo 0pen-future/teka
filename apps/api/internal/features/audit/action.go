@@ -72,9 +72,13 @@ var actions = map[string]ActionSpec{
 	"PUT /api/v1/classes/:id/schedules/:scheduleID":    {Action: "class.schedule.update", EntityType: "schedule", IDParam: "scheduleID"},
 	"DELETE /api/v1/classes/:id/schedules/:scheduleID": {Action: "class.schedule.delete", EntityType: "schedule", IDParam: "scheduleID"},
 	"PUT /api/v1/classes/:id/teacher":                  {Action: "class.teacher.reassign", EntityType: "class", IDParam: "id"},
+	"POST /api/v1/classes/:id/staff":                   {Action: "class.staff.assign", EntityType: "class", IDParam: "id"},
+	"DELETE /api/v1/classes/:id/staff/:staffId":        {Action: "class.staff.remove", EntityType: "class_staff", IDParam: "staffId"},
 
-	// enrollments
-	"POST /api/v1/enrollments":         {Action: "enrollment.create", EntityType: "enrollment"},
+	// enrollments — create is absent on purpose: the middleware skips the
+	// route entirely (serviceAuditedRoutes in internal/middleware) because
+	// the enrollments service publishes StudentEnrolled with the class and
+	// student ids, and the subscriber writes that one richer row instead.
 	"POST /api/v1/enrollments/:id/end": {Action: "enrollment.end", EntityType: "enrollment", IDParam: "id"},
 	"DELETE /api/v1/enrollments/:id":   {Action: "enrollment.delete", EntityType: "enrollment", IDParam: "id"},
 
