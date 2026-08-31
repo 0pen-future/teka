@@ -166,10 +166,13 @@ export function PermissionMatrix() {
   function renderGroupTable(group: CatalogGroup) {
     return (
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[480px] border-collapse text-[13.5px]">
+        {/* Fixed layout so column widths depend on the role set alone, not on
+            the longest label of whichever tab is open — switching tabs must
+            not shift the checkbox columns. */}
+        <table className="w-full min-w-[480px] table-fixed border-collapse text-[13.5px]">
           <thead>
             <tr>
-              <th className="py-2 pr-3 text-left font-bold text-ink-500">Quyền</th>
+              <th className="w-[45%] py-2 pr-3 text-left font-bold text-ink-500">Quyền</th>
               {roles.map((role) => (
                 <th key={role.id} className="px-2 py-2 text-center font-bold text-ink-900">
                   {role.name}
