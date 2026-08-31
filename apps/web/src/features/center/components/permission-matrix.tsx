@@ -1,13 +1,21 @@
 import { useEffect, useState } from "react";
 
 import { HvBadge, HvButton, HvModal, hvToast } from "@/components/hv";
+import { cn } from "@/lib/utils";
 
 import { isStaleConflict } from "../api/permission-api";
 import { useCenterPermissions, useReplaceRolePermissions } from "../hooks/use-center-permissions";
-import { groupCatalog, type PermissionInfo, type Role } from "../schemas/permission-schemas";
+import {
+  buildCatalogTabs,
+  type CatalogGroup,
+  type CatalogTab,
+  type PermissionInfo,
+  type Role,
+} from "../schemas/permission-schemas";
 
 /**
- * Roles × catalog checkbox matrix, one card per catalog resource group. Owns
+ * Roles × catalog checkbox matrix, one underline tab per catalog resource
+ * group (admin stubs share a "Quản trị" tab). Owns
  * its read model (the endpoint is owner-only, so the component must only
  * mount on the owner branch). Edits stay local per role until its "Lưu"
  * button sends the full checked set (the API only has replace semantics)
@@ -27,6 +35,8 @@ export function PermissionMatrix() {
   const mutation = useReplaceRolePermissions();
   // roleId → draft checked set; absent key = no local edits for that role.
   const [drafts, setDrafts] = useState<Record<string, string[]>>({});
+  // null until the owner picks a tab; the first catalog tab renders then.
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [savingRoleId, setSavingRoleId] = useState<string | null>(null);
   // A high-risk save waiting for the owner's explicit go-ahead.
   const [confirming, setConfirming] = useState<{
@@ -55,13 +65,23 @@ export function PermissionMatrix() {
     return drafts[role.id] ?? role.permissions;
   }
 
-  function isDirty(role: Role): boolean {
+  // Keys where the role's draft disagrees with the server, in both
+  // directions; empty when the role has no draft or an equal one.
+  function draftDiff(role: Role): string[] {
     const draft = drafts[role.id];
     if (!draft) {
-      return false;
+      return [];
     }
     const server = new Set(role.permissions);
-    return draft.length !== role.permissions.length || draft.some((key) => !server.has(key));
+    const checked = new Set(draft);
+    return [
+      ...draft.filter((key) => !server.has(key)),
+      ...role.permissions.filter((key) => !checked.has(key)),
+    ];
+  }
+
+  function isDirty(role: Role): boolean {
+    return draftDiff(role).length > 0;
   }
 
   function toggle(role: Role, key: string) {
@@ -129,64 +149,115 @@ export function PermissionMatrix() {
     return <p className="mt-3 text-[13px] text-ink-500">Không tải được phân quyền.</p>;
   }
   const { roles, members } = data;
-  const groups = groupCatalog(data.catalog);
+  const tabs = buildCatalogTabs(data.catalog);
+  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
   const affectedCount = confirming
     ? members.filter((m) => m.role_id === confirming.role.id).length
     : 0;
 
+  // Union of edited keys across every role's draft, so a tab can flag that it
+  // holds changes the save buttons below would commit — drafts survive tab
+  // switches, but an unmarked hidden tab would make them easy to forget.
+  const dirtyKeys = new Set(roles.flatMap(draftDiff));
+  function tabHasDirty(tab: CatalogTab): boolean {
+    return tab.groups.some((group) => group.entries.some((entry) => dirtyKeys.has(entry.key)));
+  }
+
+  function renderGroupTable(group: CatalogGroup) {
+    return (
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[480px] border-collapse text-[13.5px]">
+          <thead>
+            <tr>
+              <th className="py-2 pr-3 text-left font-bold text-ink-500">Quyền</th>
+              {roles.map((role) => (
+                <th key={role.id} className="px-2 py-2 text-center font-bold text-ink-900">
+                  {role.name}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {group.entries.map((permission) => (
+              <tr key={permission.key} className="border-t border-line-200">
+                <td className="py-2 pr-3 text-ink-700" title={permission.description || undefined}>
+                  {permission.label}
+                  {permission.risk === "high" ? (
+                    <HvBadge variant="danger" size="sm" className="ml-2">
+                      Rủi ro cao
+                    </HvBadge>
+                  ) : null}
+                </td>
+                {roles.map((role) => (
+                  <td key={role.id} className="px-2 py-2 text-center">
+                    <input
+                      type="checkbox"
+                      aria-label={`${permission.label} — ${role.name}`}
+                      checked={checkedOf(role).includes(permission.key)}
+                      disabled={mutation.isPending}
+                      onChange={() => toggle(role, permission.key)}
+                      className="size-4 accent-mint-600"
+                    />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-4">
-      {groups.map((group) => (
-        <section
-          key={group.resource}
-          className="rounded-[var(--radius-md)] border border-line-200 p-3"
-        >
-          <h3 className="text-[14px] font-bold text-ink-900">{group.label}</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[480px] border-collapse text-[13.5px]">
-              <thead>
-                <tr>
-                  <th className="py-2 pr-3 text-left font-bold text-ink-500">Quyền</th>
-                  {roles.map((role) => (
-                    <th key={role.id} className="px-2 py-2 text-center font-bold text-ink-900">
-                      {role.name}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {group.entries.map((permission) => (
-                  <tr key={permission.key} className="border-t border-line-200">
-                    <td
-                      className="py-2 pr-3 text-ink-700"
-                      title={permission.description || undefined}
-                    >
-                      {permission.label}
-                      {permission.risk === "high" ? (
-                        <HvBadge variant="danger" size="sm" className="ml-2">
-                          Rủi ro cao
-                        </HvBadge>
-                      ) : null}
-                    </td>
-                    {roles.map((role) => (
-                      <td key={role.id} className="px-2 py-2 text-center">
-                        <input
-                          type="checkbox"
-                          aria-label={`${permission.label} — ${role.name}`}
-                          checked={checkedOf(role).includes(permission.key)}
-                          disabled={mutation.isPending}
-                          onChange={() => toggle(role, permission.key)}
-                          className="size-4 accent-mint-600"
-                        />
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <div
+        className="flex flex-wrap gap-x-[22px] border-b-[1.5px] border-line-200"
+        role="tablist"
+        aria-label="Nhóm quyền"
+      >
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={activeTab?.id === tab.id}
+            onClick={() => setActiveTabId(tab.id)}
+            className={cn(
+              "border-b-[3px] px-0.5 py-2.5 text-[14.5px] font-extrabold focus-visible:ring-4 focus-visible:outline-none",
+              activeTab?.id === tab.id
+                ? "border-mint-400 text-ink-900"
+                : "border-transparent text-ink-400",
+            )}
+          >
+            {tab.label}
+            {tabHasDirty(tab) ? (
+              <>
+                <span
+                  aria-hidden
+                  title="Có thay đổi chưa lưu"
+                  className="ml-1.5 inline-block size-1.5 rounded-full bg-mint-400 align-middle"
+                />
+                <span className="sr-only"> — có thay đổi chưa lưu</span>
+              </>
+            ) : null}
+          </button>
+        ))}
+      </div>
+
+      {activeTab ? (
+        activeTab.groups.length === 1 ? (
+          renderGroupTable(activeTab.groups[0]!)
+        ) : (
+          <div className="flex flex-col gap-4">
+            {activeTab.groups.map((group) => (
+              <section key={group.resource}>
+                <h3 className="text-[14px] font-bold text-ink-900">{group.label}</h3>
+                {renderGroupTable(group)}
+              </section>
+            ))}
           </div>
-        </section>
-      ))}
+        )
+      ) : null}
 
       <div className="flex flex-wrap items-center justify-end gap-4">
         {roles.map((role) => (

@@ -117,3 +117,49 @@ export function groupCatalog(catalog: PermissionInfo[]): CatalogGroup[] {
   }
   return groups;
 }
+
+/**
+ * Center-administration resources whose catalog groups hold only one or two
+ * keys each. `buildCatalogTabs` folds them into a single "Quản trị" tab so
+ * the permission matrix's tab bar stays a manageable set of business
+ * entities instead of trailing seven near-empty stubs.
+ */
+const ADMIN_RESOURCES = new Set([
+  "reports",
+  "members",
+  "center",
+  "invitations",
+  "audit",
+  "imports",
+  "dashboard",
+]);
+
+export interface CatalogTab {
+  id: string;
+  label: string;
+  groups: CatalogGroup[];
+}
+
+/**
+ * One tab per business resource in catalog order; every admin resource folds
+ * into the shared "Quản trị" tab, which lands where the first admin group
+ * appears (the catalog keeps them contiguous at the end). An unknown
+ * resource from a newer API keeps its own tab, matching `groupCatalog`'s
+ * nothing-disappears fallback.
+ */
+export function buildCatalogTabs(catalog: PermissionInfo[]): CatalogTab[] {
+  const tabs: CatalogTab[] = [];
+  let adminTab: CatalogTab | null = null;
+  for (const group of groupCatalog(catalog)) {
+    if (ADMIN_RESOURCES.has(group.resource)) {
+      if (!adminTab) {
+        adminTab = { id: "quan-tri", label: "Quản trị", groups: [] };
+        tabs.push(adminTab);
+      }
+      adminTab.groups.push(group);
+    } else {
+      tabs.push({ id: group.resource, label: group.label, groups: [group] });
+    }
+  }
+  return tabs;
+}

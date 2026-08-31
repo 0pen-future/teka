@@ -68,6 +68,10 @@ describe("PermissionMatrix on the owner permissions page", () => {
       }),
     );
     renderPermissionsPage();
+    const user = userEvent.setup();
+
+    // Both keys live in admin-stub resources, folded into the shared tab.
+    await user.click(await screen.findByRole("tab", { name: "Quản trị" }));
 
     // Labels come from the API catalog, one checkbox per role column.
     const auditCell = await screen.findByRole("checkbox", {
@@ -101,6 +105,7 @@ describe("PermissionMatrix on the owner permissions page", () => {
     renderPermissionsPage();
     const user = userEvent.setup();
 
+    await user.click(await screen.findByRole("tab", { name: "Quản trị" }));
     await user.click(
       await screen.findByRole("checkbox", { name: "Xem nhật ký hoạt động — Học vụ" }),
     );
@@ -125,15 +130,48 @@ describe("PermissionMatrix on the owner permissions page", () => {
     });
   });
 
-  it("groups the catalog by resource with Vietnamese headings", async () => {
+  it("renders one tab per resource with admin stubs folded into Quản trị", async () => {
     mockCenterMe(makeCenterMeOwner({ members: [ownerSelf()] }));
     mockCenterPermissions(makeCenterPermissions());
     renderPermissionsPage();
+    const user = userEvent.setup();
 
-    expect(await screen.findByRole("heading", { name: "Lớp học" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Học phí" })).toBeInTheDocument();
+    // Business resources tab out in catalog order; the first one is active
+    // by default, so only its rows are on screen.
+    const classesTab = await screen.findByRole("tab", { name: "Lớp học" });
+    expect(classesTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("checkbox", { name: "Tạo lớp học — Giáo viên" })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Chốt kỳ học phí — Giáo viên" })).toBeNull();
+
+    await user.click(screen.getByRole("tab", { name: "Học phí" }));
+    expect(
+      screen.getByRole("checkbox", { name: "Chốt kỳ học phí — Giáo viên" }),
+    ).toBeInTheDocument();
     // Scope keys carry the high-risk marker inside their resource group.
     expect(screen.getAllByText("Rủi ro cao").length).toBeGreaterThan(0);
+
+    // Admin stub resources share one tab, each keeping its own heading.
+    await user.click(screen.getByRole("tab", { name: "Quản trị" }));
+    expect(screen.getByRole("heading", { name: "Nhật ký" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
+  });
+
+  it("keeps an unsaved draft when switching tabs and marks its tab dirty", async () => {
+    mockCenterMe(makeCenterMeOwner({ members: [ownerSelf()] }));
+    mockCenterPermissions(makeCenterPermissions());
+    renderPermissionsPage();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("checkbox", { name: "Tạo lớp học — Học vụ" }));
+    await user.click(screen.getByRole("tab", { name: "Học phí" }));
+    // The edited tab flags its pending draft while another tab is open — in
+    // its accessible name, so assistive tech hears it too.
+    const dirtyTab = screen.getByRole("tab", { name: /Lớp học.*có thay đổi chưa lưu/ });
+
+    await user.click(dirtyTab);
+    expect(screen.getByRole("checkbox", { name: "Tạo lớp học — Học vụ" })).toBeChecked();
+    // The dirty role's save button stays live across the round-trip.
+    expect(screen.getAllByRole("button", { name: "Lưu" })[1]).toBeEnabled();
   });
 
   it("asks for confirmation with the affected-member count before a high-risk save", async () => {
@@ -154,6 +192,7 @@ describe("PermissionMatrix on the owner permissions page", () => {
     renderPermissionsPage();
     const user = userEvent.setup();
 
+    await user.click(await screen.findByRole("tab", { name: "Học phí" }));
     await user.click(await screen.findByRole("checkbox", { name: "Chốt kỳ học phí — Học vụ" }));
     const saveButtons = screen.getAllByRole("button", { name: "Lưu" });
     const hocVuSave = saveButtons[1];
@@ -200,6 +239,7 @@ describe("PermissionMatrix on the owner permissions page", () => {
     renderPermissionsPage();
     const user = userEvent.setup();
 
+    await user.click(await screen.findByRole("tab", { name: "Quản trị" }));
     const auditBox = await screen.findByRole("checkbox", {
       name: "Xem nhật ký hoạt động — Học vụ",
     });

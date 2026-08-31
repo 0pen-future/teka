@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
+import { PERMISSION_CATALOG } from "@/test/msw/handlers";
+
 import { centerMeSchema, renameCenterInputSchema } from "../schemas/center-schemas";
-import { centerPermissionsSchema, groupCatalog } from "../schemas/permission-schemas";
+import {
+  buildCatalogTabs,
+  centerPermissionsSchema,
+  groupCatalog,
+} from "../schemas/permission-schemas";
 
 describe("centerMeSchema", () => {
   it("parses the owner-shaped GET /centers/me contract", () => {
@@ -163,5 +169,56 @@ describe("groupCatalog", () => {
     );
     expect(groups.map((g) => g.label)).toEqual(["Lớp học", "Học phí"]);
     expect(groups[0]?.entries.map((e) => e.key)).toEqual(["classes.create", "classes.view_all"]);
+  });
+});
+
+describe("buildCatalogTabs", () => {
+  it("pins one tab per business resource and the exact admin fold", () => {
+    // Against the mirrored full catalog: if the API grows or renames an
+    // admin resource, this fails instead of a stub tab silently appearing.
+    const catalog = centerPermissionsSchema.parse({
+      catalog: PERMISSION_CATALOG,
+      roles: [],
+      members: [],
+      catalog_version: 2,
+    }).catalog;
+    const tabs = buildCatalogTabs(catalog);
+
+    expect(tabs.map((tab) => tab.label)).toEqual([
+      "Lớp học",
+      "Lịch học",
+      "Liên hệ",
+      "Học viên",
+      "Ghi danh",
+      "Buổi học",
+      "Điểm danh",
+      "Điểm số",
+      "Giảng dạy",
+      "Học phí",
+      "Thanh toán",
+      "Sao kê",
+      "Thông báo",
+      "Quản trị",
+    ]);
+    expect(tabs.at(-1)?.groups.map((group) => group.resource)).toEqual([
+      "reports",
+      "members",
+      "center",
+      "invitations",
+      "audit",
+      "imports",
+      "dashboard",
+    ]);
+  });
+
+  it("keeps an unknown resource from a newer API as its own tab", () => {
+    const tabs = buildCatalogTabs([
+      centerPermissionsSchema.parse({
+        catalog: [{ key: "exports.run", label: "Xuất dữ liệu", resource: "exports" }],
+        roles: [],
+        members: [],
+      }).catalog[0]!,
+    ]);
+    expect(tabs.map((tab) => tab.label)).toEqual(["exports"]);
   });
 });
