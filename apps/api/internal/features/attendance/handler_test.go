@@ -196,6 +196,53 @@ func TestConfirmAttendanceRejectsUnknownAbsentee(t *testing.T) {
 	}
 }
 
+func TestConfirmAttendanceWithMarks(t *testing.T) {
+	r, deps := newAttendanceHTTPTest(t)
+	teacherID, sessionID, studentID := setUp(deps)
+	token := mintToken(t, teacherID)
+
+	body := `{"marks":[{"student_id":"` + studentID.String() + `","status":"late","note":"kẹt xe"}]}`
+	w, env := do(t, r, http.MethodPost, "/api/v1/sessions/"+sessionID.String()+"/attendance", body, token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d %+v", w.Code, env)
+	}
+	var out Response
+	if err := json.Unmarshal(env.Data, &out); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if len(out.Rows) != 1 || out.Rows[0].Status == nil || *out.Rows[0].Status != StatusLate {
+		t.Fatalf("want student marked late, got %+v", out.Rows)
+	}
+	if out.Rows[0].Note == nil || *out.Rows[0].Note != "kẹt xe" {
+		t.Fatalf("want per-student note round-tripped, got %+v", out.Rows[0].Note)
+	}
+}
+
+func TestConfirmAttendanceRejectsBothBodies(t *testing.T) {
+	r, deps := newAttendanceHTTPTest(t)
+	teacherID, sessionID, studentID := setUp(deps)
+	token := mintToken(t, teacherID)
+
+	body := `{"marks":[{"student_id":"` + studentID.String() + `","status":"late"}],` +
+		`"absent_student_ids":["` + studentID.String() + `"]}`
+	w, env := do(t, r, http.MethodPost, "/api/v1/sessions/"+sessionID.String()+"/attendance", body, token)
+	if w.Code != http.StatusBadRequest || env.Error == nil || env.Error.Code != apperror.CodeBadRequest {
+		t.Fatalf("marks + absent_student_ids together must be 400, got %d %+v", w.Code, env)
+	}
+}
+
+func TestConfirmAttendanceRejectsUnknownMarkStatus(t *testing.T) {
+	r, deps := newAttendanceHTTPTest(t)
+	teacherID, sessionID, studentID := setUp(deps)
+	token := mintToken(t, teacherID)
+
+	body := `{"marks":[{"student_id":"` + studentID.String() + `","status":"tardy"}]}`
+	w, env := do(t, r, http.MethodPost, "/api/v1/sessions/"+sessionID.String()+"/attendance", body, token)
+	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["marks"] == "" {
+		t.Fatalf("unknown mark status must be 422 naming marks, got %d %+v", w.Code, env)
+	}
+}
+
 func TestConfirmAttendanceCancelledSessionIs409(t *testing.T) {
 	r, deps := newAttendanceHTTPTest(t)
 	teacherID := uuid.New()

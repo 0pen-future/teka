@@ -23,7 +23,10 @@ type StudentName struct {
 // EnrollmentTally is one enrollment's billable/absent/present counts over a
 // date window — plan 04's entire entry point into attendance_records. It is
 // the one place these counting rules live; nothing outside this package
-// re-aggregates the table.
+// re-aggregates the table. The two reporting counts fold the four statuses
+// into attendance semantics: late attended (present), excused is an absence
+// with a reason (absent) — so present + absent covers every recorded row and
+// the statement's "buổi vắng" line accounts for every billable charge.
 type EnrollmentTally struct {
 	EnrollmentID  uuid.UUID
 	BillableCount int
@@ -194,8 +197,8 @@ func (r *gormRepository) TallyByEnrollment(ctx context.Context, sc authctx.Scope
 		Where("attendance_records.center_id = ?", sc.CenterID).
 		Select(`attendance_records.enrollment_id AS enrollment_id,
 			COUNT(*) FILTER (WHERE attendance_records.billable = true) AS billable_count,
-			COUNT(*) FILTER (WHERE attendance_records.status = 'absent') AS absent_count,
-			COUNT(*) FILTER (WHERE attendance_records.status = 'present') AS present_count`).
+			COUNT(*) FILTER (WHERE attendance_records.status IN ('absent', 'excused')) AS absent_count,
+			COUNT(*) FILTER (WHERE attendance_records.status IN ('present', 'late')) AS present_count`).
 		Joins("JOIN class_sessions ON class_sessions.id = attendance_records.session_id AND class_sessions.center_id = attendance_records.center_id").
 		Where("class_sessions.deleted_at IS NULL").
 		Where("class_sessions.status = 'held'").

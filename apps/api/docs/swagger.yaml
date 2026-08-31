@@ -1,10 +1,27 @@
 basePath: /api/v1
 definitions:
+  attendance.ConfirmMark:
+    properties:
+      note:
+        maxLength: 500
+        type: string
+      status:
+        type: string
+      student_id:
+        type: string
+    required:
+    - status
+    - student_id
+    type: object
   attendance.ConfirmRequest:
     properties:
       absent_student_ids:
         items:
           type: string
+        type: array
+      marks:
+        items:
+          $ref: '#/definitions/attendance.ConfirmMark'
         type: array
       note:
         maxLength: 500
@@ -1507,6 +1524,17 @@ definitions:
       total_pages:
         type: integer
     type: object
+  sessions.AttendanceSummary:
+    properties:
+      absent:
+        type: integer
+      excused:
+        type: integer
+      late:
+        type: integer
+      present:
+        type: integer
+    type: object
   sessions.CancelRequest:
     properties:
       reason:
@@ -1536,6 +1564,14 @@ definitions:
     type: object
   sessions.PendingSessionResponse:
     properties:
+      attendance_summary:
+        allOf:
+        - $ref: '#/definitions/sessions.AttendanceSummary'
+        description: |-
+          AttendanceSummary is always null here: the pending predicate is
+          attendance_confirmed_at IS NULL, and confirmation is the only writer of
+          attendance records. The field exists so all three session surfaces
+          (list, detail, pending) share one wire contract for calendar badges.
       class_id:
         type: string
       class_name:
@@ -1560,6 +1596,8 @@ definitions:
     properties:
       attendance_confirmed_at:
         type: string
+      attendance_summary:
+        $ref: '#/definitions/sessions.AttendanceSummary'
       cancel_reason:
         type: string
       class_id:
@@ -5345,7 +5383,10 @@ paths:
       description: 'Generates any session rows missing for [from, to] from the class''s
         effective schedules, then returns every session in the range — including cancelled
         ones. Idempotent: calling it again with an overlapping range never duplicates
-        a row. Range is capped at 400 days.'
+        a row. Range is capped at 400 days — comfortably above the 62-day window a
+        month-calendar view needs. Each session carries attendance_summary (per-status
+        counts over its live attendance records), null until the session''s attendance
+        is confirmed.'
       parameters:
       - description: class id
         in: path
@@ -7946,6 +7987,8 @@ paths:
       tags:
       - sessions
     get:
+      description: Carries attendance_summary (per-status counts over the session's
+        live attendance records), null until attendance is confirmed.
       parameters:
       - description: session id
         in: path
@@ -8035,18 +8078,22 @@ paths:
     post:
       consumes:
       - application/json
-      description: 'One-touch attendance (PRD R2): pass only the ids of absent students
-        — an empty array means everyone was present. Writes one billable record per
-        roster student, drops records for students no longer enrolled, and marks the
-        session held. Refuses (409) a cancelled session; rejects (422) any absent
-        id not on the roster active for the session''s date.'
+      description: 'One-touch attendance (PRD R2): pass only the exceptions in marks
+        (status late, absent, or excused, each with an optional per-student note)
+        — an unlisted roster student is recorded present, so an empty body means everyone
+        was on time. Writes one billable record per roster student, drops records
+        for students no longer enrolled, and marks the session held. The legacy absent_student_ids
+        body (absent ids only) is deprecated but still accepted; sending it together
+        with marks is a 400. Refuses (409) a cancelled session; rejects (422) an unknown
+        mark status or any student not on the roster active for the session''s date.'
       parameters:
       - description: session id
         in: path
         name: id
         required: true
         type: string
-      - description: absent student ids and optional note
+      - description: per-student status marks (or deprecated absent student ids) and
+          optional session note
         in: body
         name: request
         required: true
@@ -8063,6 +8110,16 @@ paths:
             - properties:
                 data:
                   $ref: '#/definitions/attendance.Response'
+              type: object
+        "400":
+          description: marks and absent_student_ids sent together, or a duplicated
+            student in marks
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
               type: object
         "401":
           description: Unauthorized
@@ -8092,7 +8149,7 @@ paths:
                   $ref: '#/definitions/response.ErrorBody'
               type: object
         "422":
-          description: an absent id is not on the roster
+          description: an unknown mark status, or a student not on the roster
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'
@@ -8538,7 +8595,9 @@ paths:
         are still unconfirmed and planned or held — cancelled sessions never appear.
         Ordered newest first. from/to optionally bound the range (both inclusive),
         the same predicate period-closing uses. limit defaults to 50 and is capped
-        at 200; total reflects the unlimited count.
+        at 200; total reflects the unlimited count. attendance_summary is always null
+        here — pending sessions are unconfirmed by definition; the field exists so
+        every session surface shares one shape.
       parameters:
       - description: range start, YYYY-MM-DD
         in: query

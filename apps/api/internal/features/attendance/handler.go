@@ -73,21 +73,23 @@ func (h *Handler) get(c *gin.Context) {
 	response.OK(c, http.StatusOK, out)
 }
 
-// confirm records attendance for a session in one call: the ids of absent
-// students, everyone else present. Also transitions the session to held.
+// confirm records attendance for a session in one call: the exceptions from
+// the all-present default, everyone else present. Also transitions the
+// session to held.
 //
 //	@Summary		Confirm session attendance
-//	@Description	One-touch attendance (PRD R2): pass only the ids of absent students — an empty array means everyone was present. Writes one billable record per roster student, drops records for students no longer enrolled, and marks the session held. Refuses (409) a cancelled session; rejects (422) any absent id not on the roster active for the session's date.
+//	@Description	One-touch attendance (PRD R2): pass only the exceptions in marks (status late, absent, or excused, each with an optional per-student note) — an unlisted roster student is recorded present, so an empty body means everyone was on time. Writes one billable record per roster student, drops records for students no longer enrolled, and marks the session held. The legacy absent_student_ids body (absent ids only) is deprecated but still accepted; sending it together with marks is a 400. Refuses (409) a cancelled session; rejects (422) an unknown mark status or any student not on the roster active for the session's date.
 //	@Tags			attendance
 //	@Accept			json
 //	@Produce		json
 //	@Param			id		path		string			true	"session id"
-//	@Param			request	body		ConfirmRequest	true	"absent student ids and optional note"
+//	@Param			request	body		ConfirmRequest	true	"per-student status marks (or deprecated absent student ids) and optional session note"
 //	@Success		200		{object}	response.Envelope{data=Response}
+//	@Failure		400		{object}	response.Envelope{error=response.ErrorBody}	"marks and absent_student_ids sent together, or a duplicated student in marks"
 //	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
 //	@Failure		404		{object}	response.Envelope{error=response.ErrorBody}
 //	@Failure		409		{object}	response.Envelope{error=response.ErrorBody}	"session is cancelled"
-//	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}	"an absent id is not on the roster"
+//	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}	"an unknown mark status, or a student not on the roster"
 //	@Security		BearerAuth
 //	@Router			/sessions/{id}/attendance [post]
 func (h *Handler) confirm(c *gin.Context) {

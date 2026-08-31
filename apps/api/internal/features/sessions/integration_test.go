@@ -102,6 +102,75 @@ func TestListRangeReadOnlyNeverInserts(t *testing.T) {
 		"an inverted range must fail the same validation as ListRange")
 }
 
+// TestAttendanceSummaryAggregatesLiveRecordsOnly verifies the repository's
+// per-status aggregate against real SQL: one count per status over the
+// session's records, soft-deleted rows excluded, and a session without
+// records reporting zeros that the DTO layer maps to null while unconfirmed.
+// The listing stays a single round-trip for the whole range — the counts ride
+// the same grouped LEFT JOIN, never a per-session query.
+func TestAttendanceSummaryAggregatesLiveRecordsOnly(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
+	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-01-01")))
+	testutil.Schedule(t, db, class, 2, "18:00") // Tuesday
+
+	details, err := svc.ListRange(ctx, sc, class.ID, date("2026-01-01"), date("2026-01-31"))
+	require.NoError(t, err)
+	require.Len(t, details, 4)
+	confirmed := details[0]
+
+	// One record per status, plus a soft-deleted present row (a student
+	// removed from the roster after confirmation) that must not count.
+	statuses := []string{"present", "late", "absent", "excused"}
+	insert := func(status string, deleted bool) {
+		contact := testutil.Contact(t, db, teacher.ID)
+		student := testutil.Student(t, db, teacher.ID, contact.ID)
+		enr := testutil.Enrollment(t, db, teacher.ID, student.ID, class.ID, date("2026-01-01"))
+		var deletedAt any
+		if deleted {
+			deletedAt = time.Now()
+		}
+		require.NoError(t, db.Exec(`
+			INSERT INTO attendance_records
+				(id, teacher_id, center_id, session_id, student_id, enrollment_id,
+				 status, billable, recorded_at, updated_at, deleted_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, true, now(), now(), ?)`,
+			uuid.New(), teacher.ID, sc.CenterID, confirmed.ID, student.ID, enr.ID,
+			status, deletedAt).Error)
+	}
+	for _, st := range statuses {
+		insert(st, false)
+	}
+	insert("present", true)
+
+	now := time.Now()
+	require.NoError(t, db.Table("class_sessions").Where("id = ?", confirmed.ID).
+		Updates(map[string]any{"status": "held", "attendance_confirmed_at": now}).Error)
+
+	got, err := svc.GetReadable(ctx, sc, confirmed.ID)
+	require.NoError(t, err)
+	require.Equal(t, 1, got.PresentCount, "the soft-deleted present row must not count")
+	require.Equal(t, 1, got.LateCount)
+	require.Equal(t, 1, got.AbsentCount)
+	require.Equal(t, 1, got.ExcusedCount)
+
+	resp := sessions.FromDetail(got)
+	require.NotNil(t, resp.AttendanceSummary)
+	require.Equal(t, sessions.AttendanceSummary{Present: 1, Late: 1, Absent: 1, Excused: 1},
+		*resp.AttendanceSummary)
+
+	relisted, err := svc.ListRange(ctx, sc, class.ID, date("2026-01-01"), date("2026-01-31"))
+	require.NoError(t, err)
+	require.Len(t, relisted, 4)
+	require.Equal(t, 1, relisted[0].LateCount, "list must carry the same aggregate")
+	unconfirmed := sessions.FromDetail(&relisted[1])
+	require.Nil(t, unconfirmed.AttendanceSummary,
+		"a session never confirmed must map to a null summary")
+}
+
 // TestConcurrentGenerationInsertsExactlyOneRowPerDate empirically verifies
 // that clause.OnConflict{TargetWhere: "deleted_at IS NULL"} targets the
 // partial unique index uq_class_sessions_per_day: two goroutines racing to

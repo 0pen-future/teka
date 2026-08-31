@@ -330,9 +330,12 @@ CREATE TABLE attendance_records (
     session_id      UUID        NOT NULL,
     student_id      UUID        NOT NULL,
     enrollment_id   UUID        NOT NULL,
+    -- present = đúng giờ, late = muộn (vẫn có mặt), absent = vắng,
+    -- excused = vắng có lý do ('late' thêm bởi migration 000021).
     status          VARCHAR(20) NOT NULL
-                        CHECK (status IN ('present', 'absent', 'excused')),
-    -- V1: present và absent đều tính tiền; 'excused' (nghỉ phép) dành cho P1.
+                        CHECK (status IN ('present', 'late', 'absent', 'excused')),
+    -- V1: cả bốn trạng thái đều tính tiền — trạng thái mô tả chuyên cần,
+    -- không đổi hành vi billing.
     billable        BOOLEAN     NOT NULL DEFAULT true,
     note            TEXT,
     recorded_at     TIMESTAMPTZ NOT NULL DEFAULT now(),

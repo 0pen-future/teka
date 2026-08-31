@@ -428,6 +428,80 @@ func TestConfirmRejectsAbsentIDOutsideRosterAndEmptyMeansPresent(t *testing.T) {
 	require.Equal(t, attendance.StatusPresent, *out.Rows[0].Status)
 }
 
+// The four-status confirm persists against the real schema (the CHECK now
+// admits 'late'), round-trips per-student notes, and — the money invariant —
+// leaves the billable tally billing prices from identical to an all-present
+// confirm: late and excused are billable exceptions, not discounts.
+func TestFourStatusConfirmPersistsAndKeepsBillableTally(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
+	contact := testutil.Contact(t, db, teacher.ID)
+	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-01-01")))
+	allPresent := testutil.Session(t, db, teacher.ID, class.ID, date("2026-01-06"))
+	mixed := testutil.Session(t, db, teacher.ID, class.ID, date("2026-01-13"))
+
+	var enrollmentIDs []uuid.UUID
+	var studentIDs []uuid.UUID
+	for i := 0; i < 3; i++ {
+		s := testutil.Student(t, db, teacher.ID, contact.ID)
+		e := testutil.Enrollment(t, db, teacher.ID, s.ID, class.ID, date("2026-01-01"))
+		studentIDs = append(studentIDs, s.ID)
+		enrollmentIDs = append(enrollmentIDs, e.ID)
+	}
+
+	_, err := svc.Confirm(ctx, sc, allPresent.ID, attendance.ConfirmRequest{})
+	require.NoError(t, err)
+	out, err := svc.Confirm(ctx, sc, mixed.ID, attendance.ConfirmRequest{
+		Marks: []attendance.ConfirmMark{
+			{StudentID: studentIDs[0], Status: attendance.StatusLate},
+			{StudentID: studentIDs[1], Status: attendance.StatusExcused, Note: "mẹ báo ốm"},
+		},
+	})
+	require.NoError(t, err)
+
+	byStudent := map[uuid.UUID]attendance.RowResponse{}
+	for _, row := range out.Rows {
+		byStudent[row.StudentID] = row
+	}
+	require.Equal(t, attendance.StatusLate, *byStudent[studentIDs[0]].Status)
+	require.Equal(t, attendance.StatusExcused, *byStudent[studentIDs[1]].Status)
+	require.Equal(t, "mẹ báo ốm", *byStudent[studentIDs[1]].Note)
+	require.Equal(t, attendance.StatusPresent, *byStudent[studentIDs[2]].Status)
+
+	var billableStatuses []string
+	require.NoError(t, db.Table("attendance_records").
+		Where("session_id = ? AND deleted_at IS NULL AND billable = true", mixed.ID).
+		Order("status").Pluck("status", &billableStatuses).Error)
+	require.Equal(t, []string{"excused", "late", "present"}, billableStatuses,
+		"every status must persist as a billable row")
+
+	tallies, err := svc.TallyByEnrollment(ctx, sc, date("2026-01-01"), date("2026-01-31"))
+	require.NoError(t, err)
+	require.Len(t, tallies, 3)
+	// Attendance semantics on the reporting counts: late is present (the
+	// student attended), excused is an absence with a reason — so present +
+	// absent covers every recorded session and the parent-facing "buổi vắng"
+	// line explains what the billable row charges for.
+	type counts struct{ present, absent int }
+	want := map[uuid.UUID]counts{
+		enrollmentIDs[0]: {present: 2, absent: 0}, // present + late
+		enrollmentIDs[1]: {present: 1, absent: 1}, // present + excused
+		enrollmentIDs[2]: {present: 2, absent: 0}, // present + present
+	}
+	for _, tally := range tallies {
+		require.Equalf(t, 2, tally.BillableCount,
+			"enrollment %s: late/excused must bill exactly like present", tally.EnrollmentID)
+		w := want[tally.EnrollmentID]
+		require.Equalf(t, w.present, tally.PresentCount,
+			"enrollment %s: late must count as present", tally.EnrollmentID)
+		require.Equalf(t, w.absent, tally.AbsentCount,
+			"enrollment %s: excused must count as an absence", tally.EnrollmentID)
+	}
+}
+
 func TestCrossTenantAttendanceIsNotFound(t *testing.T) {
 	t.Parallel()
 	svc, db := newIntegrationService(t)

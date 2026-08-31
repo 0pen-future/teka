@@ -10,17 +10,31 @@ import (
 // dateLayout is the wire form of session_date.
 const dateLayout = "2006-01-02"
 
-// ConfirmRequest carries the interaction budget PRD R2 sets: only the ids of
-// absent students. The server resolves the rest of the roster and writes
-// present for everyone else.
+// ConfirmMark is one student's exception from the all-present default:
+// late, absent, or excused, optionally with a per-student note ("mẹ báo ốm").
+// present is never sent — an unlisted roster student defaults to it — which
+// preserves PRD R2's interaction budget: a normal session is still one tap.
+type ConfirmMark struct {
+	StudentID uuid.UUID `json:"student_id" binding:"required"`
+	Status    string    `json:"status" binding:"required"`
+	Note      string    `json:"note" binding:"omitempty,max=500"`
+}
+
+// ConfirmRequest carries the exceptions from the all-present default. The
+// server resolves the roster and writes present for every unlisted student.
 //
-// AbsentStudentIDs deliberately has no `required` tag: an empty array is a
-// legitimate, common request meaning "everyone was present" and must bind
-// the same as an explicit [] the client sent — not be confused with a
-// missing field.
+// Marks and AbsentStudentIDs are mutually exclusive; sending both is a 400.
+// Neither has a `required` tag: an empty body is a legitimate, common request
+// meaning "everyone was present" and must bind the same as an explicit []
+// the client sent — not be confused with a missing field.
+//
+// Deprecated contract: AbsentStudentIDs is the pre-4-status body (absent ids
+// only) kept for one release while the web client migrates to Marks; it maps
+// onto Marks with status=absent.
 type ConfirmRequest struct {
-	AbsentStudentIDs []uuid.UUID `json:"absent_student_ids"`
-	Note             string      `json:"note" binding:"omitempty,max=500"`
+	Marks            []ConfirmMark `json:"marks"`
+	AbsentStudentIDs []uuid.UUID   `json:"absent_student_ids"`
+	Note             string        `json:"note" binding:"omitempty,max=500"`
 }
 
 // RowResponse is one roster row: a student's current attendance status for

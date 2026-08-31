@@ -41,6 +41,11 @@ type PendingSessionResponse struct {
 	// DaysOverdue is computed from the teacher-timezone cutoff Service.ListPending
 	// resolved, not stored — it is what makes the warning actionable.
 	DaysOverdue int `json:"days_overdue"`
+	// AttendanceSummary is always null here: the pending predicate is
+	// attendance_confirmed_at IS NULL, and confirmation is the only writer of
+	// attendance records. The field exists so all three session surfaces
+	// (list, detail, pending) share one wire contract for calendar badges.
+	AttendanceSummary *AttendanceSummary `json:"attendance_summary"`
 }
 
 // PendingResponse is the wire body of GET /sessions/pending: total is the

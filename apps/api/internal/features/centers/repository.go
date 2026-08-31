@@ -700,7 +700,7 @@ func (r *gormRepository) OverviewClassStats(ctx context.Context, centerID uuid.U
 		CROSS JOIN LATERAL (
 			SELECT COUNT(DISTINCT s.id) AS held_sessions,
 				COUNT(ar.id) AS attendance_total,
-				COUNT(ar.id) FILTER (WHERE ar.status = 'present') AS present_count,
+				COUNT(ar.id) FILTER (WHERE ar.status IN ('present', 'late')) AS present_count,
 				COALESCE(SUM(e.unit_price) FILTER (
 					WHERE ar.billable AND s.attendance_confirmed_at IS NOT NULL), 0) AS estimated_revenue
 			FROM class_sessions s
@@ -799,7 +799,7 @@ func (r *gormRepository) SessionStats(ctx context.Context, centerID uuid.UUID, s
 	err := database.FromContext(ctx, r.db).Raw(`
 		SELECT s.id AS session_id,
 			COUNT(ar.id) AS total,
-			COUNT(ar.id) FILTER (WHERE ar.status = 'present') AS present,
+			COUNT(ar.id) FILTER (WHERE ar.status IN ('present', 'late')) AS present,
 			COALESCE(SUM(e.unit_price) FILTER (
 				WHERE ar.billable AND s.attendance_confirmed_at IS NOT NULL), 0) AS estimated
 		FROM class_sessions s

@@ -5936,7 +5936,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Generates any session rows missing for [from, to] from the class's effective schedules, then returns every session in the range — including cancelled ones. Idempotent: calling it again with an overlapping range never duplicates a row. Range is capped at 400 days.",
+                "description": "Generates any session rows missing for [from, to] from the class's effective schedules, then returns every session in the range — including cancelled ones. Idempotent: calling it again with an overlapping range never duplicates a row. Range is capped at 400 days — comfortably above the 62-day window a month-calendar view needs. Each session carries attendance_summary (per-status counts over its live attendance records), null until the session's attendance is confirmed.",
                 "produces": [
                     "application/json"
                 ],
@@ -10504,7 +10504,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Sessions in the past (evaluated in the teacher's timezone) that are still unconfirmed and planned or held — cancelled sessions never appear. Ordered newest first. from/to optionally bound the range (both inclusive), the same predicate period-closing uses. limit defaults to 50 and is capped at 200; total reflects the unlimited count.",
+                "description": "Sessions in the past (evaluated in the teacher's timezone) that are still unconfirmed and planned or held — cancelled sessions never appear. Ordered newest first. from/to optionally bound the range (both inclusive), the same predicate period-closing uses. limit defaults to 50 and is capped at 200; total reflects the unlimited count. attendance_summary is always null here — pending sessions are unconfirmed by definition; the field exists so every session surface shares one shape.",
                 "produces": [
                     "application/json"
                 ],
@@ -10597,6 +10597,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Carries attendance_summary (per-status counts over the session's live attendance records), null until attendance is confirmed.",
                 "produces": [
                     "application/json"
                 ],
@@ -10838,7 +10839,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "One-touch attendance (PRD R2): pass only the ids of absent students — an empty array means everyone was present. Writes one billable record per roster student, drops records for students no longer enrolled, and marks the session held. Refuses (409) a cancelled session; rejects (422) any absent id not on the roster active for the session's date.",
+                "description": "One-touch attendance (PRD R2): pass only the exceptions in marks (status late, absent, or excused, each with an optional per-student note) — an unlisted roster student is recorded present, so an empty body means everyone was on time. Writes one billable record per roster student, drops records for students no longer enrolled, and marks the session held. The legacy absent_student_ids body (absent ids only) is deprecated but still accepted; sending it together with marks is a 400. Refuses (409) a cancelled session; rejects (422) an unknown mark status or any student not on the roster active for the session's date.",
                 "consumes": [
                     "application/json"
                 ],
@@ -10858,7 +10859,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "absent student ids and optional note",
+                        "description": "per-student status marks (or deprecated absent student ids) and optional session note",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -10880,6 +10881,24 @@ const docTemplate = `{
                                     "properties": {
                                         "data": {
                                             "$ref": "#/definitions/attendance.Response"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "marks and absent_student_ids sent together, or a duplicated student in marks",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
                                         }
                                     }
                                 }
@@ -10941,7 +10960,7 @@ const docTemplate = `{
                         }
                     },
                     "422": {
-                        "description": "an absent id is not on the roster",
+                        "description": "an unknown mark status, or a student not on the roster",
                         "schema": {
                             "allOf": [
                                 {
@@ -12407,6 +12426,25 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "attendance.ConfirmMark": {
+            "type": "object",
+            "required": [
+                "status",
+                "student_id"
+            ],
+            "properties": {
+                "note": {
+                    "type": "string",
+                    "maxLength": 500
+                },
+                "status": {
+                    "type": "string"
+                },
+                "student_id": {
+                    "type": "string"
+                }
+            }
+        },
         "attendance.ConfirmRequest": {
             "type": "object",
             "properties": {
@@ -12414,6 +12452,12 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "type": "string"
+                    }
+                },
+                "marks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/attendance.ConfirmMark"
                     }
                 },
                 "note": {
@@ -14532,6 +14576,23 @@ const docTemplate = `{
                 }
             }
         },
+        "sessions.AttendanceSummary": {
+            "type": "object",
+            "properties": {
+                "absent": {
+                    "type": "integer"
+                },
+                "excused": {
+                    "type": "integer"
+                },
+                "late": {
+                    "type": "integer"
+                },
+                "present": {
+                    "type": "integer"
+                }
+            }
+        },
         "sessions.CancelRequest": {
             "type": "object",
             "required": [
@@ -14576,6 +14637,14 @@ const docTemplate = `{
         "sessions.PendingSessionResponse": {
             "type": "object",
             "properties": {
+                "attendance_summary": {
+                    "description": "AttendanceSummary is always null here: the pending predicate is\nattendance_confirmed_at IS NULL, and confirmation is the only writer of\nattendance records. The field exists so all three session surfaces\n(list, detail, pending) share one wire contract for calendar badges.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/sessions.AttendanceSummary"
+                        }
+                    ]
+                },
                 "class_id": {
                     "type": "string"
                 },
@@ -14608,6 +14677,9 @@ const docTemplate = `{
             "properties": {
                 "attendance_confirmed_at": {
                     "type": "string"
+                },
+                "attendance_summary": {
+                    "$ref": "#/definitions/sessions.AttendanceSummary"
                 },
                 "cancel_reason": {
                     "type": "string"
