@@ -158,6 +158,37 @@ func TestDeleteAnonymisesButPreservesFinancialRecords(t *testing.T) {
 	require.Error(t, err, "hard delete of a billed student must be refused by the database")
 }
 
+// Which contacts a member may anchor a student to follows CONTACT
+// visibility: contacts.view_all unlocks the whole directory, while
+// students.view_all — the wrong resource — leaves the pre-check narrowed to
+// the member's own contacts.
+func TestCreateOnForeignContactFollowsContactVisibility(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+
+	_, owner := testutil.Teacher(t, db)
+	scOwner := testutil.ScopeFor(t, db, owner.ID)
+	_, member := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, member.ID, scOwner.CenterID)
+	contact := testutil.Contact(t, db, owner.ID)
+
+	scMember := testutil.ScopeFor(t, db, member.ID)
+	scMember.Perms = authctx.BuildPermSet(nil, []string{authctx.PermStudentsViewAll}, nil)
+	_, err := svc.Create(ctx, scMember, students.CreateRequest{
+		FullName: "Bé An", ContactID: contact.ID,
+	})
+	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code,
+		"students.view_all must not unlock another teacher's contact")
+
+	scMember.Perms = authctx.BuildPermSet(nil, []string{authctx.PermContactsViewAll}, nil)
+	created, err := svc.Create(ctx, scMember, students.CreateRequest{
+		FullName: "Bé An", ContactID: contact.ID,
+	})
+	require.NoError(t, err, "contacts.view_all must let the member anchor to a visible contact")
+	require.Equal(t, member.ID, created.TeacherID, "the student still belongs to its creator")
+}
+
 func TestCreateRejectsForeignContact(t *testing.T) {
 	t.Parallel()
 	svc, db := newIntegrationService(t)

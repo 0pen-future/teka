@@ -17,6 +17,7 @@ import (
 
 	"teka/apps/api/internal/features/contacts"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/shared/pagination"
 	"teka/apps/api/internal/testutil"
@@ -195,6 +196,49 @@ func TestPeersInSameCenterCannotSeeEachOthersContacts(t *testing.T) {
 	for _, r := range rows {
 		require.NotEqual(t, row.ID, r.ID, "a peer's list must not include another member's contact")
 	}
+}
+
+// contacts.view_all widens reads to the whole center — phone included, since
+// a contact row IS its phone — while every write stays owner-only: the
+// service gates fire before the widened fetch can matter.
+func TestContactsViewAllWidensReadsNotWrites(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, db)
+	member, _ := testutil.Teacher(t, db)
+	ownerCenter := testutil.ScopeFor(t, db, owner.ID).CenterID
+	testutil.JoinCenter(t, db, member.ID, ownerCenter)
+
+	row := testutil.Contact(t, db, owner.ID,
+		testutil.WithContactFullName("Chị Hoa"), testutil.WithContactPhone("+84912345678"))
+
+	// Without the key: no stint, no oversight, no reach.
+	scMember := testutil.ScopeFor(t, db, member.ID)
+	_, err := svc.Get(ctx, scMember, row.ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+
+	// The permission set a granted member arrives with after ResolveScope —
+	// the HTTP resolution itself is pinned by the server policy suites.
+	scMember.Perms = authctx.BuildPermSet(nil, []string{authctx.PermContactsViewAll}, nil)
+	got, err := svc.Get(ctx, scMember, row.ID)
+	require.NoError(t, err, "contacts.view_all must widen contact reads")
+	require.Equal(t, row.ID, got.ID)
+	require.Equal(t, "+84912345678", got.Phone,
+		"reach and phone visibility are one predicate — a reachable contact keeps its phone")
+
+	rows, total, err := svc.List(ctx, scMember, contacts.ListFilter{}, listParams(t, ""))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Equal(t, row.ID, rows[0].ID)
+
+	// Writes are unmoved by the visibility key.
+	_, err = svc.Update(ctx, scMember, row.ID,
+		contacts.UpdateRequest{FullName: "Chị Hoa Sửa", Phone: "0912345678"})
+	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code,
+		"a visibility key must not widen contact edits")
+	require.Equal(t, apperror.CodeForbidden, apperror.From(svc.Delete(ctx, scMember, row.ID)).Code,
+		"a visibility key must not widen contact deletion")
 }
 
 func TestUpdateRenormalisesPhoneAndDetectsCollision(t *testing.T) {

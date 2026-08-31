@@ -63,15 +63,18 @@ func (s Scope) ReportsOversight() bool {
 }
 
 // PhoneVisible is the single phone-privacy rule for every surface that could
-// carry a contact's phone: the owner and reports oversight always see it;
-// anyone else only when the row itself grants it (rowVisible — a repo-derived
-// phone_visible column, true when the caller holds an ACTIVE hoc_vu stint on
-// a class where one of the contact's students is actively enrolled). Services
-// null the phone field when this returns false; there is deliberately no
-// per-surface variation, so the same contact can never show a phone in one
-// list and hide it in another.
+// carry a contact's phone: the owner, reports oversight, and the explicit
+// contacts.view_all grant always see it; anyone else only when the row itself
+// grants it (rowVisible — a repo-derived phone_visible column, true when the
+// caller holds an ACTIVE hoc_vu stint on a class where one of the contact's
+// students is actively enrolled). contacts.view_all sits here rather than in
+// per-surface checks because a contact row IS its phone — granting "Xem mọi
+// liên hệ" without the phones would be an empty grant. Services null the phone
+// field when this returns false; there is deliberately no per-surface
+// variation, so the same contact can never show a phone in one list and hide
+// it in another.
 func (s Scope) PhoneVisible(rowVisible bool) bool {
-	return s.ReportsOversight() || rowVisible
+	return s.ReportsOversight() || s.Perms.HasKey(PermContactsViewAll) || rowVisible
 }
 
 const (

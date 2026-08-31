@@ -574,10 +574,8 @@ func (r *gormRepository) SetMemberRole(ctx context.Context, centerID, teacherID,
 func (r *gormRepository) ReplaceMemberOverrides(ctx context.Context, centerID, teacherID uuid.UUID, grants, denies []string, expectedVersion int64) error {
 	db := database.FromContext(ctx, r.db)
 	// CAS bump first, before the row swap, so the version row lock serializes
-	// concurrent replacements. The caller verified the live stint via
-	// GetMemberRBAC in this transaction, so zero rows means the version went
-	// stale, not that the member vanished. expectedVersion 0 is a pre-CAS
-	// client: bump without checking.
+	// concurrent replacements. expectedVersion 0 is a pre-CAS client: bump
+	// without checking.
 	bump := db.Exec(`
 		UPDATE center_members
 		SET assignment_version = assignment_version + 1
@@ -588,6 +586,24 @@ func (r *gormRepository) ReplaceMemberOverrides(ctx context.Context, centerID, t
 		return bump.Error
 	}
 	if bump.RowsAffected == 0 {
+		// Zero rows is ambiguous under READ COMMITTED: the caller's
+		// GetMemberRBAC read ran before this statement, so a concurrent
+		// departure can close the stint (left_at set) between the read and
+		// the bump. Re-probe the stint to answer honestly: gone is 404, a
+		// live stint at another version is a 409 the client can refetch and
+		// retry — sending the departed-member case as 409 would loop that
+		// retry forever.
+		var live bool
+		if err := db.Raw(`
+			SELECT EXISTS (
+				SELECT 1 FROM center_members
+				WHERE teacher_id = ? AND center_id = ? AND left_at IS NULL
+			)`, teacherID, centerID).Scan(&live).Error; err != nil {
+			return err
+		}
+		if !live {
+			return ErrNotFound
+		}
 		return ErrStaleVersion
 	}
 	if err := db.Exec(`

@@ -346,6 +346,42 @@ describe("teaching v2 nav", () => {
     expect(screen.queryByRole("link", { name: "Duyệt giáo án" })).not.toBeInTheDocument();
   });
 
+  it("shows main entries only for the member's effective keys", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(
+          ok({
+            center_name: "Trung Tâm Bình Minh",
+            permissions: ["sessions.list", "students.list"],
+          }),
+        ),
+      ),
+    );
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+
+    expect(await within(sidebarNav).findByRole("link", { name: "Điểm danh" })).toHaveAttribute(
+      "href",
+      "/sessions",
+    );
+    expect(within(sidebarNav).getByRole("link", { name: "Lớp & học sinh" })).toHaveAttribute(
+      "href",
+      "/students",
+    );
+    // Both students entries ride the same key.
+    expect(within(sidebarNav).getByRole("link", { name: "Hồ sơ học sinh" })).toBeInTheDocument();
+    // Entries whose route key the member lacks disappear entirely — no
+    // disabled placeholder that would only 403 on click.
+    expect(within(sidebarNav).queryByText("Quản lý lớp học")).not.toBeInTheDocument();
+    expect(within(sidebarNav).queryByText("Phụ huynh")).not.toBeInTheDocument();
+    expect(within(sidebarNav).queryByText("Chốt sổ")).not.toBeInTheDocument();
+    expect(within(sidebarNav).queryByText("Thu tiền")).not.toBeInTheDocument();
+    expect(within(sidebarNav).queryByText("Gửi thông báo")).not.toBeInTheDocument();
+    // Ungated entries stay for every member.
+    expect(within(sidebarNav).getByRole("link", { name: "Tổng quan" })).toBeInTheDocument();
+    expect(within(sidebarNav).getByRole("link", { name: "Cài đặt trung tâm" })).toBeInTheDocument();
+  });
+
   it("shows Nhập từ Excel to owners and hides it from members", async () => {
     renderLayout();
     const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;

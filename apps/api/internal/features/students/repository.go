@@ -206,7 +206,10 @@ func (r *gormRepository) ContactExists(ctx context.Context, sc authctx.Scope, co
 	q := database.FromContext(ctx, r.db).
 		Table("contacts").
 		Where("id = ? AND center_id = ? AND deleted_at IS NULL", contactID, sc.CenterID)
-	if !sc.CenterWideFor(authctx.PermStudentsViewAll) {
+	// Keys on contacts.view_all, not students.view_all: this probes which
+	// CONTACTS the caller may anchor a student to, so it follows contact
+	// visibility, not student visibility.
+	if !sc.CenterWideFor(authctx.PermContactsViewAll) {
 		q = q.Where("teacher_id = ?", sc.TeacherID)
 	}
 	err := q.Count(&n).Error

@@ -564,6 +564,33 @@ func TestAssignmentVersionCAS(t *testing.T) {
 	require.Empty(t, resp.Members[0].Denies)
 }
 
+// A concurrent departure between the caller's stint read and the CAS bump
+// leaves the bump matching zero rows. The repository re-probes the stint so a
+// departed member reports not-found while a live stint at another version
+// stays a stale-version conflict — answering the departed case with a
+// conflict would send the client into an endless refetch-and-retry loop for
+// a member who no longer exists.
+func TestReplaceOverridesRacedDepartureIsNotFoundNotStale(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, e.db)
+	member, _ := testutil.Teacher(t, e.db)
+	e.join(t, member.ID, owner.ID)
+	centerID := e.scope(t, owner.ID).CenterID
+	repo := centers.NewRepository(e.db)
+
+	// Live stint, wrong version: a genuine CAS miss.
+	err := repo.ReplaceMemberOverrides(ctx, centerID, member.ID, nil, nil, 99)
+	require.ErrorIs(t, err, centers.ErrStaleVersion)
+
+	// Stint closed after the caller's read: the same zero-row bump must now
+	// report the member gone, not a retryable conflict.
+	require.NoError(t, repo.CloseMembership(ctx, member.ID, centerID))
+	err = repo.ReplaceMemberOverrides(ctx, centerID, member.ID, nil, nil, 1)
+	require.ErrorIs(t, err, centers.ErrNotFound)
+}
+
 // TestRetiredScopeKeyRoundTripStaysSavable pins the unknown-key contract on
 // the assignment read models. A stray data.view_center_wide row (a code
 // rollback re-writing one after migration 000020) must never be emitted by

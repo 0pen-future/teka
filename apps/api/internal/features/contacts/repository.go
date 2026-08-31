@@ -61,12 +61,13 @@ func NewRepository(db *gorm.DB) Repository {
 }
 
 // scoped returns a query bound to one center. It backs the write paths, whose
-// services all gate on ownership first, plus FindIDByPhone; the teacher filter
-// only still bites for a non-owner scope that survived the gates, which the
-// legacy-scoping cleanup will retire.
+// services all gate on ownership first, plus FindIDByPhone. Writes never widen
+// via scope keys — contacts.view_all is a visibility grant, so letting it
+// reach delete or identity-lookup would be an escalation; a non-owner scope
+// that survived the service gates still narrows to its own rows.
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("contacts.center_id = ?", sc.CenterID)
-	if !sc.CenterWideFor(authctx.PermContactsViewAll) {
+	if !sc.WriteWide() {
 		q = q.Where("contacts.teacher_id = ?", sc.TeacherID)
 	}
 	return q
@@ -74,15 +75,17 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 
 // scopedRead bounds every contact read — and the zalo-mapping write, which
 // exists so hoc_vu can wire up the parents they can already see. Reports
-// oversight (owner or reports.send) reads the whole center; anyone else
-// reaches exactly what the one phone rule shows them: contacts with a student
+// oversight (owner or reports.send) and the contacts.view_all grant read the
+// whole center — the widening mirrors Scope.PhoneVisible exactly, because a
+// contact row IS its phone: reach and phone visibility must stay one
+// predicate, so this surface needs no per-row masking. Anyone else reaches
+// exactly what the one phone rule shows them: contacts with a student
 // actively enrolled in a live class the caller holds an ACTIVE hoc_vu stint
-// on. A contact row IS its phone, so reach and phone visibility are one
-// predicate and this surface needs no per-row masking. The row's teacher_id
-// deliberately plays no part: contacts are center data, whoever anchored them.
+// on. The row's teacher_id deliberately plays no part: contacts are center
+// data, whoever anchored them.
 func (r *gormRepository) scopedRead(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("contacts.center_id = ?", sc.CenterID)
-	if !sc.ReportsOversight() {
+	if !sc.ReportsOversight() && !sc.CenterWideFor(authctx.PermContactsViewAll) {
 		frag, _ := classscope.PhoneVisibleViaContact("contacts.id")
 		q = q.Where(frag, sc.TeacherID, sc.CenterID)
 	}
@@ -157,27 +160,26 @@ func (r *gormRepository) SoftDelete(ctx context.Context, sc authctx.Scope, id uu
 	return nil
 }
 
+// CountActiveStudents is deliberately center-wide, like withStudentCount: it
+// answers "how many live students reference this contact", which guards the
+// delete path against dangling references and does not depend on who is
+// asking. Narrowing it to the caller's rows would let a delete slip past
+// students anchored by someone else.
 func (r *gormRepository) CountActiveStudents(ctx context.Context, sc authctx.Scope, contactID uuid.UUID) (int64, error) {
 	var n int64
-	q := database.FromContext(ctx, r.db).
+	err := database.FromContext(ctx, r.db).
 		Table("students").
-		Where("center_id = ? AND contact_id = ? AND deleted_at IS NULL", sc.CenterID, contactID)
-	if !sc.CenterWideFor(authctx.PermContactsViewAll) {
-		q = q.Where("teacher_id = ?", sc.TeacherID)
-	}
-	err := q.Count(&n).Error
+		Where("center_id = ? AND contact_id = ? AND deleted_at IS NULL", sc.CenterID, contactID).
+		Count(&n).Error
 	return n, err
 }
 
 func (r *gormRepository) ListStudentNames(ctx context.Context, sc authctx.Scope, contactID uuid.UUID, limit int) ([]string, error) {
 	var names []string
-	q := database.FromContext(ctx, r.db).
+	err := database.FromContext(ctx, r.db).
 		Table("students").
-		Where("center_id = ? AND contact_id = ? AND deleted_at IS NULL", sc.CenterID, contactID)
-	if !sc.CenterWideFor(authctx.PermContactsViewAll) {
-		q = q.Where("teacher_id = ?", sc.TeacherID)
-	}
-	err := q.Order("full_name").Limit(limit).Pluck("full_name", &names).Error
+		Where("center_id = ? AND contact_id = ? AND deleted_at IS NULL", sc.CenterID, contactID).
+		Order("full_name").Limit(limit).Pluck("full_name", &names).Error
 	return names, err
 }
 

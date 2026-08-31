@@ -244,15 +244,16 @@ func (r *gormRepository) SoftDelete(ctx context.Context, sc authctx.Scope, id uu
 	return nil
 }
 
+// CountOpenEnrollments is deliberately center-wide: it guards class deletion
+// against open enrollments, an integrity fact about the class that does not
+// depend on who is asking. Narrowing it to the caller's rows would let a
+// delete slip past enrollments anchored by someone else.
 func (r *gormRepository) CountOpenEnrollments(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (int64, error) {
 	var n int64
-	q := database.FromContext(ctx, r.db).
+	err := database.FromContext(ctx, r.db).
 		Table("enrollments").
-		Where("center_id = ? AND class_id = ? AND ended_on IS NULL AND deleted_at IS NULL", sc.CenterID, classID)
-	if !sc.CenterWideFor(authctx.PermClassesViewAll) {
-		q = q.Where("teacher_id = ?", sc.TeacherID)
-	}
-	err := q.Count(&n).Error
+		Where("center_id = ? AND class_id = ? AND ended_on IS NULL AND deleted_at IS NULL", sc.CenterID, classID).
+		Count(&n).Error
 	return n, err
 }
 
