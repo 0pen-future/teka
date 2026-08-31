@@ -251,6 +251,9 @@ that ability only after the owner grants them the flag.
 authorization checks branch on a permission catalog, not on `IsOwner` (the
 sole exceptions are listed below). Rules:
 
+Developer workflow for adding or reusing a permission on a new endpoint:
+[`adding-permissions.md`](./adding-permissions.md).
+
 - The catalog is **code-owned and structured**: `PermDef` entries (key,
   resource, action, kind `crud|scope|special`, Vietnamese label/description,
   risk, grantable, deprecated, order) live in
