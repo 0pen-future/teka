@@ -13,7 +13,7 @@ import (
 	"teka/apps/api/internal/testutil"
 )
 
-// The send-reports flag grants billing/statement/debt READS only — it never
+// The reports.send permission grants billing/statement/debt READS only — it never
 // opens attendance. A flag holder touching another member's session gets the
 // same neutral not-found a plain peer gets, on the read and on the confirm.
 func TestSecretaryCannotReadOrConfirmMembersAttendance(t *testing.T) {
@@ -37,11 +37,11 @@ func TestSecretaryCannotReadOrConfirmMembersAttendance(t *testing.T) {
 
 	_, err := svc.Get(ctx, secScope, session.ID)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
-		"the send-reports flag must not open another member's attendance sheet")
+		"the reports.send permission must not open another member's attendance sheet")
 
 	_, err = svc.Confirm(ctx, secScope, session.ID, attendance.ConfirmRequest{})
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
-		"the send-reports flag must not let anyone confirm another member's attendance")
+		"the reports.send permission must not let anyone confirm another member's attendance")
 
 	var recordCount int64
 	require.NoError(t, db.Table("attendance_records").

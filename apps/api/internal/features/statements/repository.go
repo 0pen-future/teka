@@ -64,7 +64,7 @@ type Repository interface {
 	// precondition and authorization check.
 	GetPeriodStatus(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (PeriodInfo, error)
 	// GetPeriodStatusRead is GetPeriodStatus with reports oversight instead
-	// of owner oversight: a can_send_reports holder resolves any center
+	// of owner oversight: a reports.send holder resolves any center
 	// period, like the owner. Backs read paths (List, PeriodFigures) and the
 	// delegated send's GenerateForSend — never the standalone generate route.
 	GetPeriodStatusRead(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (PeriodInfo, error)
@@ -123,7 +123,7 @@ type Repository interface {
 	UpsertStatement(ctx context.Context, sc authctx.Scope, stmt *Statement) (created, skippedRevoked bool, err error)
 	// ListByPeriod returns a page of one period's FAMILY statements
 	// (class_id IS NULL) with contact display fields, center-scoped by sc
-	// with reports oversight (owner or can_send_reports holder). Class
+	// with reports oversight (owner or reports.send holder). Class
 	// copies live under ListByPeriodClass so the family list never doubles
 	// up after a class send.
 	ListByPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, p pagination.Params) ([]Row, int64, error)
@@ -273,7 +273,7 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 }
 
 // scopedRead is scoped()'s read-only sibling: the teacher filter is lifted
-// for anyone with reports oversight (owner or can_send_reports holder), not
+// for anyone with reports oversight (owner or reports.send holder), not
 // just the owner. A caller without oversight additionally sees a CLASS copy
 // (class_id set) when they hold an active sending-role stint on that class —
 // the copy exists exactly so class staff can work a period they don't own,

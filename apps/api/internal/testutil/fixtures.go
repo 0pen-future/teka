@@ -162,13 +162,25 @@ func centerOf(t *testing.T, db *gorm.DB, teacherID uuid.UUID) uuid.UUID {
 func ScopeFor(t *testing.T, db *gorm.DB, teacherID uuid.UUID) authctx.Scope {
 	t.Helper()
 	var row struct {
-		CenterID       uuid.UUID
-		IsOwner        bool
-		CanSendReports bool
+		CenterID  uuid.UUID
+		IsOwner   bool
+		RolePerms string
+		Grants    string
+		Denies    string
 	}
 	err := db.Raw(`
 		SELECT t.center_id, (c.owner_id = t.id) AS is_owner,
-			COALESCE(cm.can_send_reports, FALSE) AS can_send_reports
+			COALESCE((SELECT string_agg(rp.permission_key, ',')
+				FROM center_role_permissions rp
+				WHERE rp.role_id = cm.role_id), '') AS role_perms,
+			COALESCE((SELECT string_agg(mp.permission_key, ',')
+				FROM center_member_permissions mp
+				WHERE mp.teacher_id = cm.teacher_id AND mp.center_id = cm.center_id
+					AND mp.allowed), '') AS grants,
+			COALESCE((SELECT string_agg(mp.permission_key, ',')
+				FROM center_member_permissions mp
+				WHERE mp.teacher_id = cm.teacher_id AND mp.center_id = cm.center_id
+					AND NOT mp.allowed), '') AS denies
 		FROM teachers t
 		JOIN centers c ON c.id = t.center_id
 		LEFT JOIN center_members cm ON cm.teacher_id = t.id
@@ -180,12 +192,25 @@ func ScopeFor(t *testing.T, db *gorm.DB, teacherID uuid.UUID) authctx.Scope {
 	if row.CenterID == uuid.Nil {
 		t.Fatalf("fixture teacher %s has no center row", teacherID)
 	}
+	perms := authctx.BuildPermSet(splitAggKeys(row.RolePerms), splitAggKeys(row.Grants), splitAggKeys(row.Denies))
 	return authctx.Scope{
-		TeacherID:      teacherID,
-		CenterID:       row.CenterID,
-		IsOwner:        row.IsOwner,
-		CanSendReports: row.CanSendReports,
+		TeacherID: teacherID,
+		CenterID:  row.CenterID,
+		IsOwner:   row.IsOwner,
+		// HasKey, not Has: the field mirrors the member's effective
+		// reports.send only — the owner's authority flows through
+		// ReportsOversight's IsOwner arm, never through this flag.
+		CanSendReports: perms.HasKey(authctx.PermReportsSend),
+		Perms:          perms,
 	}
+}
+
+// splitAggKeys undoes the query's string_agg(',') packing; empty means no keys.
+func splitAggKeys(joined string) []string {
+	if joined == "" {
+		return nil
+	}
+	return strings.Split(joined, ",")
 }
 
 // JoinCenter moves the teacher into the target center directly (bypassing the
@@ -226,24 +251,41 @@ func JoinCenter(t *testing.T, db *gorm.DB, teacherID, centerID uuid.UUID) {
 	}
 }
 
-// GrantSendReports sets the teacher's can_send_reports flag on their live
-// membership directly (bypassing the owner grant flow), so authorization
-// tests can make — or revoke — a delegated report sender in one call.
+// GrantSendReports grants — or revokes — the teacher's reports.send member
+// override on their live membership directly (bypassing the owner grant
+// flow), so authorization tests can make or unmake a delegated report sender
+// in one call.
 func GrantSendReports(t *testing.T, db *gorm.DB, teacherID uuid.UUID, granted bool) {
 	t.Helper()
-	res := db.Exec(
-		"UPDATE center_members SET can_send_reports = ? WHERE teacher_id = ? AND left_at IS NULL",
-		granted, teacherID)
-	if res.Error != nil {
-		t.Fatalf("set can_send_reports=%v for fixture teacher %s: %v", granted, teacherID, res.Error)
+	var row struct{ CenterID uuid.UUID }
+	err := db.Raw(
+		"SELECT center_id FROM center_members WHERE teacher_id = ? AND left_at IS NULL",
+		teacherID).Scan(&row).Error
+	if err != nil {
+		t.Fatalf("resolve live membership for fixture teacher %s: %v", teacherID, err)
 	}
-	if res.RowsAffected == 0 {
+	if row.CenterID == uuid.Nil {
 		t.Fatalf("fixture teacher %s has no live membership to flag", teacherID)
+	}
+	if granted {
+		err = db.Exec(`
+			INSERT INTO center_member_permissions (teacher_id, center_id, permission_key, allowed)
+			VALUES (?, ?, ?, TRUE)
+			ON CONFLICT (teacher_id, center_id, permission_key) DO UPDATE SET allowed = TRUE`,
+			teacherID, row.CenterID, authctx.PermReportsSend).Error
+	} else {
+		err = db.Exec(`
+			DELETE FROM center_member_permissions
+			WHERE teacher_id = ? AND center_id = ? AND permission_key = ?`,
+			teacherID, row.CenterID, authctx.PermReportsSend).Error
+	}
+	if err != nil {
+		t.Fatalf("set reports.send=%v for fixture teacher %s: %v", granted, teacherID, err)
 	}
 }
 
-// Secretary creates a member teacher in centerID already holding
-// can_send_reports — the delegated report sender the authorization matrix
+// Secretary creates a member teacher in centerID already holding an effective
+// reports.send grant — the delegated report sender the authorization matrix
 // revolves around.
 func Secretary(t *testing.T, db *gorm.DB, centerID uuid.UUID) (*teachers.Account, *teachers.Teacher) {
 	account, teacher := Teacher(t, db)

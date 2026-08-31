@@ -37,7 +37,7 @@ func TestOwnerHasOversightReadAndSendsAsSelfOnMembersPeriod(t *testing.T) {
 	periodID, contacts := closedPeriodWithContacts(t, d, member.ID, 1)
 	mapContact(t, d.db, contacts[0], "uid-member-own")
 
-	// The member holds can_send_reports (creating sends requires it for any
+	// The member holds reports.send (creating sends requires it for any
 	// non-owner) and sends their own zalo_personal run under their own Zalo
 	// session.
 	memberResp, err := d.notifications.BulkSend(ctx, memberScope, periodID, notifications.BulkSendRequest{
@@ -133,7 +133,7 @@ func TestPeerInSameCenterCannotReadOrActOnAnotherMembersNotifications(t *testing
 	require.False(t, snap.Active)
 	require.Nil(t, snap.RunID, "a peer must not see another member's run")
 
-	// A peer without can_send_reports cannot create sends at all — the
+	// A peer without reports.send cannot create sends at all — the
 	// permission gate refuses honestly with a 403 before any period lookup.
 	_, err = d.notifications.BulkSend(ctx, scopeB, periodID, notifications.BulkSendRequest{Purpose: "reminder"})
 	require.Error(t, err)

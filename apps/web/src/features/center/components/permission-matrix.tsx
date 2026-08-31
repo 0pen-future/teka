@@ -4,12 +4,7 @@ import { HvBadge, HvButton, HvModal, hvToast } from "@/components/hv";
 
 import { isStaleConflict } from "../api/permission-api";
 import { useCenterPermissions, useReplaceRolePermissions } from "../hooks/use-center-permissions";
-import {
-  groupCatalog,
-  REPORTS_SEND_KEY,
-  type PermissionInfo,
-  type Role,
-} from "../schemas/permission-schemas";
+import { groupCatalog, type PermissionInfo, type Role } from "../schemas/permission-schemas";
 
 /**
  * Roles × catalog checkbox matrix, one card per catalog resource group. Owns
@@ -26,10 +21,6 @@ import {
  * same read model the save will send versions from, so the count can never
  * describe a different state than the commit. Narrowing needs no
  * confirmation: it only removes access.
- *
- * The `reports.send` row is disabled on every role: while the legacy
- * `can_send_reports` column is authoritative, that permission is assignable
- * only per member and the API 422s it on role sets.
  */
 export function PermissionMatrix() {
   const { data, isPending, isError } = useCenterPermissions();
@@ -79,20 +70,12 @@ export function PermissionMatrix() {
     setDrafts((prev) => ({ ...prev, [role.id]: next }));
   }
 
-  /** The payload a save would send: the draft minus the restricted key. */
-  function payloadOf(role: Role): string[] {
-    // The restricted key never travels on role sets — the API 422s it during
-    // dual-life, and its cell is disabled, so a stray server-side occurrence
-    // must not poison an otherwise valid save.
-    return checkedOf(role).filter((key) => key !== REPORTS_SEND_KEY);
-  }
-
   function requestSave(role: Role) {
     if (!data) {
       return;
     }
     const server = new Set(role.permissions);
-    const added = new Set(payloadOf(role).filter((key) => !server.has(key)));
+    const added = new Set(checkedOf(role).filter((key) => !server.has(key)));
     const highRisk = data.catalog.filter((p) => added.has(p.key) && p.risk === "high");
     if (highRisk.length > 0) {
       setConfirming({ role, highRisk });
@@ -110,7 +93,7 @@ export function PermissionMatrix() {
     mutation.mutate(
       {
         roleId: role.id,
-        permissions: payloadOf(role),
+        permissions: checkedOf(role),
         catalogVersion: data.catalog_version,
         assignmentVersion: role.assignment_version,
       },
@@ -172,40 +155,33 @@ export function PermissionMatrix() {
                 </tr>
               </thead>
               <tbody>
-                {group.entries.map((permission) => {
-                  const restricted = permission.key === REPORTS_SEND_KEY;
-                  return (
-                    <tr key={permission.key} className="border-t border-line-200">
-                      <td
-                        className="py-2 pr-3 text-ink-700"
-                        title={permission.description || undefined}
-                      >
-                        {permission.label}
-                        {permission.risk === "high" ? (
-                          <HvBadge variant="danger" size="sm" className="ml-2">
-                            Rủi ro cao
-                          </HvBadge>
-                        ) : null}
+                {group.entries.map((permission) => (
+                  <tr key={permission.key} className="border-t border-line-200">
+                    <td
+                      className="py-2 pr-3 text-ink-700"
+                      title={permission.description || undefined}
+                    >
+                      {permission.label}
+                      {permission.risk === "high" ? (
+                        <HvBadge variant="danger" size="sm" className="ml-2">
+                          Rủi ro cao
+                        </HvBadge>
+                      ) : null}
+                    </td>
+                    {roles.map((role) => (
+                      <td key={role.id} className="px-2 py-2 text-center">
+                        <input
+                          type="checkbox"
+                          aria-label={`${permission.label} — ${role.name}`}
+                          checked={checkedOf(role).includes(permission.key)}
+                          disabled={mutation.isPending}
+                          onChange={() => toggle(role, permission.key)}
+                          className="size-4 accent-mint-600"
+                        />
                       </td>
-                      {roles.map((role) => (
-                        <td
-                          key={role.id}
-                          className="px-2 py-2 text-center"
-                          title={restricted ? "Cấp theo từng thành viên" : undefined}
-                        >
-                          <input
-                            type="checkbox"
-                            aria-label={`${permission.label} — ${role.name}`}
-                            checked={checkedOf(role).includes(permission.key)}
-                            disabled={restricted || mutation.isPending}
-                            onChange={() => toggle(role, permission.key)}
-                            className="size-4 accent-mint-600"
-                          />
-                        </td>
-                      ))}
-                    </tr>
-                  );
-                })}
+                    ))}
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

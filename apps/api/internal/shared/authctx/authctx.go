@@ -40,10 +40,12 @@ type Scope struct {
 	TeacherID uuid.UUID
 	CenterID  uuid.UUID
 	IsOwner   bool
-	// CanSendReports is the delegated report-sender permission on the
-	// caller's live membership stint. Member-only: the owner never holds it
-	// (grant refuses the owner as target), so IsOwner and CanSendReports are
-	// mutually exclusive in practice.
+	// CanSendReports mirrors the caller's effective reports.send permission
+	// (role grant or member override, minus denies). It exists as a resolved
+	// field — not a Has() call at the check site — because the notifications
+	// run manager snapshots it at send creation and re-probes it per item.
+	// The owner never carries it (they sit outside the role tables); their
+	// authority flows through ReportsOversight's IsOwner arm.
 	CanSendReports bool
 	// Perms is the caller's effective permission set, resolved fresh from
 	// the database alongside the rest of the scope. Read-only after

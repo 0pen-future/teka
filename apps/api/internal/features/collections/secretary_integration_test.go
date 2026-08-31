@@ -13,7 +13,7 @@ import (
 	"teka/apps/api/internal/testutil"
 )
 
-// A can_send_reports member reads the collections debt center wide — another
+// A reports.send-holding member reads the collections debt center wide — another
 // member's contact rows and period summary with real figures — exactly the
 // oversight view the delegated reminder flow depends on.
 func TestSecretarySeesMembersCollectionsWithFullContent(t *testing.T) {

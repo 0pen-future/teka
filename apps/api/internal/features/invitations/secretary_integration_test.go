@@ -13,7 +13,7 @@ import (
 	"teka/apps/api/internal/testutil"
 )
 
-// The send-reports flag never touches membership management: inviting a new
+// The reports.send permission never touches membership management: inviting a new
 // teacher stays owner-only, and a flag holder is refused exactly like a plain
 // member — an explicit forbidden from the invitation write guard.
 func TestSecretaryCannotCreateInvitations(t *testing.T) {
@@ -30,7 +30,7 @@ func TestSecretaryCannotCreateInvitations(t *testing.T) {
 
 	_, err := e.invitationsSvc.Create(ctx, secScope, invitations.CreateRequest{Phone: "+84901234567"})
 	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code,
-		"the send-reports flag must not let a member invite teachers")
+		"the reports.send permission must not let a member invite teachers")
 
 	var pending int64
 	require.NoError(t, e.db.Table("invitations").

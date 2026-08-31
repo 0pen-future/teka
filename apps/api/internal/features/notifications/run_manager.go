@@ -29,8 +29,8 @@ const (
 	// mid-run.
 	runExpiredFailureMessage = "Phiên Zalo đã hết hạn"
 	// runRevokedFailureMessage marks the rows swept when a run's sender lost
-	// its granted permission mid-run — the can_send_reports flag for a
-	// delegated run, the class standing for a class-scoped one.
+	// its granted permission mid-run — the effective reports.send permission
+	// for a delegated run, the class standing for a class-scoped one.
 	runRevokedFailureMessage = "Quyền gửi báo cáo đã bị thu hồi"
 )
 
@@ -66,14 +66,14 @@ type RunStore interface {
 	FailQueuedInRun(ctx context.Context, sc authctx.Scope, runID uuid.UUID, reason string) error
 	UpdateRunStatus(ctx context.Context, sc authctx.Scope, runID uuid.UUID, status string) error
 	// CanSendReports is the delegated run's per-item permission probe:
-	// revoking the flag cannot reach into a goroutine holding its items in
-	// memory, so the loop asks before every send instead.
+	// revoking the reports.send permission cannot reach into a goroutine
+	// holding its items in memory, so the loop asks before every send instead.
 	CanSendReports(ctx context.Context, centerID, teacherID uuid.UUID) (bool, error)
 	// ClassSendAllowed is the class-scoped run's per-item probe — the same
 	// mid-run revocation idea, but keyed on the sender's standing toward the
 	// class (active stint, delegation, or ownership) rather than the
-	// can_send_reports flag alone. A class sender need not hold that flag,
-	// so probing CanSendReports for such a run would revoke it instantly.
+	// reports.send permission alone. A class sender need not hold it, so
+	// probing CanSendReports for such a run would revoke it instantly.
 	ClassSendAllowed(ctx context.Context, centerID, teacherID, classID uuid.UUID) (bool, error)
 }
 
@@ -82,7 +82,7 @@ type RunStore interface {
 // sending their own period's family statements — nothing to re-check.
 type RunGrant struct {
 	// Delegated marks a run sending another teacher's period under the
-	// can_send_reports flag.
+	// delegated reports.send permission.
 	Delegated bool
 	// ClassID marks a run sending one class's statement copies under a class
 	// stint (nil for oversight senders, whose runs re-check nothing on the
@@ -360,7 +360,7 @@ func (m *RunManager) markOutcome(ctx context.Context, job *runJob, id uuid.UUID,
 }
 
 // stillPermitted asks whether the run's granted authority still stands — the
-// class standing for a class-scoped run, can_send_reports for a delegated one.
+// class standing for a class-scoped run, reports.send for a delegated one.
 // A lookup error deliberately reads as "still permitted": the check runs again
 // before the very next send, so a transient database blip pauses enforcement
 // by one item instead of killing a healthy run.

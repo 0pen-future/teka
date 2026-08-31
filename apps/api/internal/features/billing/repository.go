@@ -98,7 +98,7 @@ type Repository interface {
 	CreatePeriod(ctx context.Context, p *Period) error
 	GetPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*Period, error)
 	// GetPeriodRead / ListPeriodsRead back the period read ENDPOINTS only:
-	// center-scoped with reports oversight (owner or can_send_reports
+	// center-scoped with reports oversight (owner or reports.send
 	// holder), joined with the owning teacher's name. Write paths (draft,
 	// close, tally) keep the owner-gated GetPeriod.
 	GetPeriodRead(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*PeriodWithTeacher, error)
@@ -300,7 +300,7 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 }
 
 // scopedRead is scoped()'s read-only sibling: the teacher filter is lifted
-// for anyone with reports oversight (owner or can_send_reports holder), not
+// for anyone with reports oversight (owner or reports.send holder), not
 // just the owner. It backs ONLY the period read endpoints (GetPeriodRead,
 // ListPeriodsRead) — every write keeps scoped(), so the delegated permission
 // never reaches draft/close/void/adjustment paths.

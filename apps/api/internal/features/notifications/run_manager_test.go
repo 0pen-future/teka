@@ -428,7 +428,7 @@ func TestClassRunStopsWhenTheClassStandingIsLostMidRun(t *testing.T) {
 			return call == 0, nil
 		},
 		canSend: func(int) (bool, error) {
-			t.Error("a class-scoped run must probe the class standing, never can_send_reports")
+			t.Error("a class-scoped run must probe the class standing, never reports.send")
 			return false, nil
 		},
 	}
@@ -451,7 +451,7 @@ func TestClassRunStopsWhenTheClassStandingIsLostMidRun(t *testing.T) {
 func TestOwnRunNeverProbesTheSendPermission(t *testing.T) {
 	t.Parallel()
 	store := &fakeRunStore{canSend: func(int) (bool, error) {
-		t.Error("a non-delegated run must not ask about can_send_reports")
+		t.Error("a non-delegated run must not ask about reports.send")
 		return false, nil
 	}}
 	dm := &fakeDM{send: func(int, string) (string, error) { return "msg-1", nil }}

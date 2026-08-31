@@ -63,13 +63,6 @@ export const centerPermissionsSchema = z.object({
 export type CenterPermissions = z.infer<typeof centerPermissionsSchema>;
 
 /**
- * The dual-life restriction (API phase 2): `reports.send` is assignable only
- * per member while the legacy `can_send_reports` column is authoritative, so
- * the role matrix disables that cell. Lifted when the column drops.
- */
-export const REPORTS_SEND_KEY = "reports.send";
-
-/**
  * Vietnamese group headings per catalog resource — display-only grouping aid
  * (per-key labels still come from the API). An unmapped resource falls back
  * to its raw key so a newer API's new resource still renders.

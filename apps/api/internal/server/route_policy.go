@@ -75,15 +75,12 @@ var routePolicies = []RoutePolicy{
 	classified("GET", "/api/v1/me/zalo/link/status", PolicySelf),
 	classified("GET", "/api/v1/centers/me", PolicySelf),
 
-	// Owner-only hard gates: permission administration, the legacy
-	// send-reports toggle, staffing/handoff, sensitive review writes, and
-	// score-set configuration.
+	// Owner-only hard gates: permission administration, staffing/handoff,
+	// sensitive review writes, and score-set configuration.
 	classified("GET", "/api/v1/centers/me/permissions", PolicyOwnerOnly),
 	classified("PUT", "/api/v1/centers/me/roles/:roleId/permissions", PolicyOwnerOnly),
 	classified("PUT", "/api/v1/centers/me/members/:teacherId/role", PolicyOwnerOnly),
 	classified("PUT", "/api/v1/centers/me/members/:teacherId/overrides", PolicyOwnerOnly),
-	classified("POST", "/api/v1/centers/me/members/:teacherId/send-reports", PolicyOwnerOnly),
-	classified("DELETE", "/api/v1/centers/me/members/:teacherId/send-reports", PolicyOwnerOnly),
 	classified("POST", "/api/v1/classes/:id/staff", PolicyOwnerOnly),
 	classified("DELETE", "/api/v1/classes/:id/staff/:staffId", PolicyOwnerOnly),
 	classified("PUT", "/api/v1/classes/:id/teacher", PolicyOwnerOnly),

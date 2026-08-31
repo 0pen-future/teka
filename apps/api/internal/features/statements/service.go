@@ -87,7 +87,7 @@ func (s *Service) Generate(ctx context.Context, sc authctx.Scope, periodID uuid.
 }
 
 // GenerateForSend is Generate for the delegated send path only: the period is
-// resolved with reports oversight, so a can_send_reports holder can (re)issue
+// resolved with reports oversight, so a reports.send holder can (re)issue
 // statements as part of a bulk send on another teacher's period. The
 // standalone generate endpoint keeps calling Generate — delegation includes
 // no standalone generate right (plan decision D4).
@@ -97,7 +97,7 @@ func (s *Service) GenerateForSend(ctx context.Context, sc authctx.Scope, periodI
 
 // AuthorizeClassSend is the one authorization gate every class-scoped
 // statement path (and notifications' class-scoped send) runs: reports
-// oversight (owner or can_send_reports holder) passes outright, as does an
+// oversight (owner or reports.send holder) passes outright, as does an
 // active sending-role stint on the class. A caller who can read the class
 // (any stint, ended included) but may not send gets an honest 403; anyone
 // else — including a caller probing a class that exists but was never theirs
@@ -265,7 +265,7 @@ func (s *Service) generate(ctx context.Context, sc authctx.Scope, periodID uuid.
 }
 
 // List returns a page of one period's statements, center-scoped by sc with
-// reports oversight (owner or can_send_reports holder). periodID must be
+// reports oversight (owner or reports.send holder). periodID must be
 // visible to sc; an unknown or out-of-tenancy id is reported as if the
 // period does not exist.
 func (s *Service) List(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, p pagination.Params) ([]Row, int64, error) {
@@ -517,7 +517,7 @@ type ContactFigures struct {
 // a bulk-sent message's total can never disagree with the number a parent
 // sees at their own statement link.
 //
-// sc authorizes the call with reports oversight (owner or can_send_reports
+// sc authorizes the call with reports oversight (owner or reports.send
 // holder may act on any teacher's period in the center; a plain member only
 // on their own), then the read is derived from periodScope — the period's
 // own owning teacher — so an oversight caller's bulk send over a member's

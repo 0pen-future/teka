@@ -74,7 +74,7 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 
 // scopedRead bounds every contact read — and the zalo-mapping write, which
 // exists so hoc_vu can wire up the parents they can already see. Reports
-// oversight (owner or can_send_reports) reads the whole center; anyone else
+// oversight (owner or reports.send) reads the whole center; anyone else
 // reaches exactly what the one phone rule shows them: contacts with a student
 // actively enrolled in a live class the caller holds an ACTIVE hoc_vu stint
 // on. A contact row IS its phone, so reach and phone visibility are one

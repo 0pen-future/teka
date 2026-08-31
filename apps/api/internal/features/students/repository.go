@@ -86,7 +86,7 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 // write.
 func (r *gormRepository) writeScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("students.center_id = ?", sc.CenterID)
-	if !sc.IsOwner {
+	if !sc.WriteWide() {
 		q = q.Where("students.teacher_id = ?", sc.TeacherID)
 	}
 	return q

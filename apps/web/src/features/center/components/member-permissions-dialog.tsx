@@ -8,11 +8,7 @@ import {
   useCenterPermissions,
   useReplaceMemberOverrides,
 } from "../hooks/use-center-permissions";
-import {
-  groupCatalog,
-  REPORTS_SEND_KEY,
-  type MemberPermissions,
-} from "../schemas/permission-schemas";
+import { groupCatalog, type MemberPermissions } from "../schemas/permission-schemas";
 
 export interface MemberPermissionsDialogProps {
   open: boolean;
@@ -37,10 +33,9 @@ function initialModes(member: MemberPermissions): Record<string, OverrideMode> {
  * Per-member RBAC editor: a role select that applies immediately, and an
  * override editor (per catalog key: theo vai trò / cấp riêng / chặn riêng)
  * saved as one full replace. The old send-reports toggle folds in here as a
- * `reports.send` grant — while the legacy column is authoritative the API
- * dual-writes it from that override, so no separate toggle remains. Only
- * mounted for non-owner rows; the owner is an implicit superuser the API
- * refuses to target (404).
+ * `reports.send` grant — the override rows are the single source of truth,
+ * so no separate toggle remains. Only mounted for non-owner rows; the owner
+ * is an implicit superuser the API refuses to target (404).
  */
 export function MemberPermissionsDialog({
   open,
@@ -219,11 +214,6 @@ export function MemberPermissionsDialog({
                       setModes({ ...draft, [permission.key]: next });
                     }}
                     className="min-h-11 rounded-[var(--radius-md)] border border-line-200 bg-white px-2 text-[13px] text-ink-900"
-                    title={
-                      permission.key === REPORTS_SEND_KEY
-                        ? "Quyền gửi báo cáo chỉ cấp theo từng thành viên"
-                        : undefined
-                    }
                   >
                     <option value="inherit">Theo vai trò</option>
                     <option value="grant">Cấp riêng</option>

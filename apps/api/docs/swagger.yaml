@@ -417,8 +417,9 @@ definitions:
     properties:
       can_send_reports:
         description: |-
-          CanSendReports is the delegated report-sender permission; always false
-          for the owner (member-only flag).
+          CanSendReports mirrors the member's effective reports.send permission
+          (computed, not stored); always false for the owner (member-only —
+          the owner's authority is implicit).
         type: boolean
       full_name:
         type: string
@@ -3787,8 +3788,7 @@ paths:
     put:
       consumes:
       - application/json
-      description: PUT-replace semantics over both lists. A reports.send grant dual-writes
-        the legacy can_send_reports flag in the same transaction.
+      description: PUT-replace semantics over both lists.
       parameters:
       - description: teacher id
         format: uuid
@@ -3913,100 +3913,6 @@ paths:
       summary: Assign a member's role (owner-only)
       tags:
       - centers
-  /centers/me/members/{teacherId}/send-reports:
-    delete:
-      parameters:
-      - description: teacher id
-        format: uuid
-        in: path
-        name: teacherId
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "204":
-          description: No Content
-        "401":
-          description: Unauthorized
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-        "403":
-          description: not the owner
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-        "404":
-          description: not an active non-owner member of this center
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-      security:
-      - BearerAuth: []
-      summary: Revoke the send-reports permission (owner-only)
-      tags:
-      - centers
-    post:
-      description: 'Lets the member read billing periods/statements/debt center-wide
-        and run report sends from their own Zalo. Member-only: the owner cannot be
-        the target.'
-      parameters:
-      - description: teacher id
-        format: uuid
-        in: path
-        name: teacherId
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "204":
-          description: No Content
-        "401":
-          description: Unauthorized
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-        "403":
-          description: not the owner
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-        "404":
-          description: not an active non-owner member of this center
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-      security:
-      - BearerAuth: []
-      summary: Grant the send-reports permission (owner-only)
-      tags:
-      - centers
   /centers/me/permissions:
     get:
       description: Code-owned catalog (keys + Vietnamese labels), the center's roles
@@ -4051,8 +3957,7 @@ paths:
       consumes:
       - application/json
       description: PUT-replace semantics; keys are validated against the code-owned
-        catalog. reports.send is rejected here — it stays a per-member grant while
-        the legacy can_send_reports column lives.
+        catalog.
       parameters:
       - description: role id
         format: uuid
@@ -4099,7 +4004,7 @@ paths:
                   $ref: '#/definitions/response.ErrorBody'
               type: object
         "422":
-          description: unknown key, or reports.send on a role
+          description: unknown or non-assignable key
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'

@@ -3140,7 +3140,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "PUT-replace semantics over both lists. A reports.send grant dual-writes the legacy can_send_reports flag in the same transaction.",
+                "description": "PUT-replace semantics over both lists.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3365,175 +3365,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/centers/me/members/{teacherId}/send-reports": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Lets the member read billing periods/statements/debt center-wide and run report sends from their own Zalo. Member-only: the owner cannot be the target.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "centers"
-                ],
-                "summary": "Grant the send-reports permission (owner-only)",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "format": "uuid",
-                        "description": "teacher id",
-                        "name": "teacherId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "403": {
-                        "description": "not the owner",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "404": {
-                        "description": "not an active non-owner member of this center",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "centers"
-                ],
-                "summary": "Revoke the send-reports permission (owner-only)",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "format": "uuid",
-                        "description": "teacher id",
-                        "name": "teacherId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "403": {
-                        "description": "not the owner",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "404": {
-                        "description": "not an active non-owner member of this center",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    }
-                }
-            }
-        },
         "/centers/me/permissions": {
             "get": {
                 "security": [
@@ -3614,7 +3445,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "PUT-replace semantics; keys are validated against the code-owned catalog. reports.send is rejected here — it stays a per-member grant while the legacy can_send_reports column lives.",
+                "description": "PUT-replace semantics; keys are validated against the code-owned catalog.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3703,7 +3534,7 @@ const docTemplate = `{
                         }
                     },
                     "422": {
-                        "description": "unknown key, or reports.send on a role",
+                        "description": "unknown or non-assignable key",
                         "schema": {
                             "allOf": [
                                 {
@@ -13179,7 +13010,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "can_send_reports": {
-                    "description": "CanSendReports is the delegated report-sender permission; always false\nfor the owner (member-only flag).",
+                    "description": "CanSendReports mirrors the member's effective reports.send permission\n(computed, not stored); always false for the owner (member-only —\nthe owner's authority is implicit).",
                     "type": "boolean"
                 },
                 "full_name": {

@@ -117,8 +117,9 @@ func TestPermissionsReadModel(t *testing.T) {
 }
 
 // The role matrix round-trip: replace, read back, and the very next resolved
-// member scope carries the role's set. reports.send stays rejected while the
-// legacy column is authoritative, and unknown keys never reach the table.
+// member scope carries the role's set — reports.send included, now that the
+// role-matrix restriction retired with the legacy column. Unknown keys never
+// reach the table.
 func TestReplaceRolePermissions(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -134,10 +135,14 @@ func TestReplaceRolePermissions(t *testing.T) {
 		centers.RolePermissionsRequest{Permissions: []string{"audit.read", "ghost.key"}})
 	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code, "unknown key must 422")
 
-	err = e.centersSvc.ReplaceRolePermissions(ctx, ownerScope, hocVu,
-		centers.RolePermissionsRequest{Permissions: []string{authctx.PermReportsSend}})
-	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code,
-		"reports.send is per-member only while the column is authoritative")
+	// A role may carry reports.send now that the override rows are the only
+	// source: a member holding the role sends without a per-member grant.
+	require.NoError(t, e.centersSvc.ReplaceRolePermissions(ctx, ownerScope, hocVu,
+		centers.RolePermissionsRequest{Permissions: []string{authctx.PermReportsSend}}))
+	require.NoError(t, e.centersSvc.AssignMemberRole(ctx, ownerScope, member.ID,
+		centers.MemberRoleRequest{RoleID: hocVu}))
+	require.True(t, e.scope(t, member.ID).CanSendReports,
+		"role-granted reports.send must resolve into the member's scope")
 
 	require.NoError(t, e.centersSvc.ReplaceRolePermissions(ctx, ownerScope, hocVu,
 		centers.RolePermissionsRequest{Permissions: []string{
@@ -232,7 +237,7 @@ func TestLegacyScopeRowExpandsOnResolve(t *testing.T) {
 }
 
 // Member-targeted endpoints collapse the owner, strangers, and other
-// centers' members into the same 404 — the SetSendReports precedent.
+// centers' members into the same 404 — no target-existence leak.
 func TestMemberTargetTenancy(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -261,8 +266,8 @@ func TestMemberTargetTenancy(t *testing.T) {
 }
 
 // Overrides round-trip: validation (unknown key, grant∩deny), the
-// reports.send dual-write parity with the legacy column in both directions,
-// and the read model reflecting the stored lists.
+// reports.send grant resolving into scope in both directions, and the read
+// model reflecting the stored lists.
 func TestReplaceMemberOverrides(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -281,13 +286,11 @@ func TestReplaceMemberOverrides(t *testing.T) {
 			Grants: []string{authctx.PermAuditRead}, Denies: []string{authctx.PermAuditRead}})
 	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code, "grant∩deny must 422")
 
-	// Granting reports.send dual-writes the authoritative column…
+	// Granting reports.send resolves into the member's next scope…
 	require.NoError(t, e.centersSvc.ReplaceMemberOverrides(ctx, ownerScope, member.ID,
 		centers.MemberOverridesRequest{
 			Grants: []string{authctx.PermReportsSend, authctx.PermAuditRead},
 			Denies: []string{authctx.PermDashboardView}}))
-	require.True(t, e.liveMembership(t, member.ID).CanSendReports,
-		"reports.send grant must set the legacy column in the same tx")
 	sc := e.scope(t, member.ID)
 	require.True(t, sc.CanSendReports)
 	require.True(t, sc.Has(authctx.PermAuditRead))
@@ -299,11 +302,9 @@ func TestReplaceMemberOverrides(t *testing.T) {
 		resp.Members[0].Grants, "grants come back in registry order")
 	require.Equal(t, []string{authctx.PermDashboardView}, resp.Members[0].Denies)
 
-	// …and a replacement without it clears the column again.
+	// …and a replacement without it revokes on the very next resolve.
 	require.NoError(t, e.centersSvc.ReplaceMemberOverrides(ctx, ownerScope, member.ID,
 		centers.MemberOverridesRequest{Grants: []string{authctx.PermAuditRead}}))
-	require.False(t, e.liveMembership(t, member.ID).CanSendReports,
-		"dropping the reports.send grant must clear the legacy column")
 	require.Equal(t, []string{"audit.read"}, e.overrideKeys(t, member.ID, ownerScope.CenterID))
 	sc = e.scope(t, member.ID)
 	require.False(t, sc.CanSendReports)

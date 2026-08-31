@@ -379,6 +379,16 @@ func (s Scope) CenterWideFor(key string) bool {
 	return s.IsOwner || s.Perms.HasKey(key)
 }
 
+// WriteWide reports whether the caller's mutations reach the whole center's
+// rows. Only the owner passes: scope keys (<resource>.view_all) widen
+// visibility, never writes — member writes were own-rows-only before the
+// catalog existed, so a key widening writes would be an escalation.
+// Repositories whose write path has no capability filter branch on this
+// instead of IsOwner, keeping the write-scope policy in one home.
+func (s Scope) WriteWide() bool {
+	return s.IsOwner
+}
+
 // Require is the service-boundary authorization check for callers that do not
 // pass through HTTP middleware. Same semantics as Scope.Has, as a typed
 // apperror the response layer already knows how to render.

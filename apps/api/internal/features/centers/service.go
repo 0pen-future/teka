@@ -75,11 +75,10 @@ func (s *Service) ResolveScope(ctx context.Context, teacherID uuid.UUID) (authct
 		TeacherID: teacherID,
 		CenterID:  row.CenterID,
 		IsOwner:   row.IsOwner,
-		// Dual life: the column stays authoritative while grant/revoke
-		// mirrors into reports.send override rows; the OR only widens, and
-		// membership close/reopen resets both sides atomically so a revoked
-		// permission cannot resurrect through either source.
-		CanSendReports: row.CanSendReports || perms.HasKey(authctx.PermReportsSend),
+		// HasKey, not Has: the field mirrors the member's effective
+		// reports.send only — the owner's authority flows through
+		// ReportsOversight's IsOwner arm, never through this flag.
+		CanSendReports: perms.HasKey(authctx.PermReportsSend),
 		Perms:          perms,
 	}, nil
 }
@@ -242,26 +241,6 @@ func (s *Service) Rename(ctx context.Context, scope authctx.Scope, req RenameReq
 	err := s.repo.Rename(ctx, scope.CenterID, req.Name)
 	if errors.Is(err, ErrNotFound) {
 		return apperror.NotFound("center")
-	}
-	if err != nil {
-		return apperror.Internal(err)
-	}
-	return nil
-}
-
-// SetSendReports grants or revokes the delegated send-reports permission on
-// a member's live stint; owner-only. The owner can never be the target — the
-// permission is member-only by product decision, which also keeps the owner's
-// send behavior (incl. the cross-teacher 409) frozen. An owner target, a left
-// member, or a stranger all collapse into the same not-found per the tenancy
-// convention.
-func (s *Service) SetSendReports(ctx context.Context, scope authctx.Scope, targetID uuid.UUID, enabled bool) error {
-	if !scope.IsOwner {
-		return apperror.Forbidden("only the owner can manage the send-reports permission")
-	}
-	err := s.repo.SetSendReports(ctx, scope.CenterID, targetID, enabled)
-	if errors.Is(err, ErrNotFound) {
-		return apperror.NotFound("member")
 	}
 	if err != nil {
 		return apperror.Internal(err)
@@ -464,15 +443,6 @@ func (s *Service) ReplaceRolePermissions(ctx context.Context, scope authctx.Scop
 	if err != nil {
 		return err
 	}
-	// Dual life: while the legacy can_send_reports column is authoritative,
-	// reports.send is assignable per member only — a role-held grant has no
-	// column to mirror into and would break the phase-4 parity check.
-	for _, key := range keys {
-		if key == authctx.PermReportsSend {
-			return apperror.Invalid("validation failed", map[string]string{
-				"permissions": "reports.send can only be granted per member"})
-		}
-	}
 	var ev RolePermissionsChanged
 	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
 		role, err := s.repo.GetRole(ctx, scope.CenterID, roleID)
@@ -505,7 +475,7 @@ func (s *Service) ReplaceRolePermissions(ctx context.Context, scope authctx.Scop
 
 // AssignMemberRole assigns a member's role; owner-only. Role and member must
 // both resolve inside the caller's center; the owner can never be the target
-// (they sit outside the role system, same refusal as SetSendReports).
+// (they sit outside the role system).
 func (s *Service) AssignMemberRole(ctx context.Context, scope authctx.Scope, targetID uuid.UUID, req MemberRoleRequest) error {
 	if err := requirePermissionAdmin(scope); err != nil {
 		return err
@@ -547,9 +517,7 @@ func (s *Service) AssignMemberRole(ctx context.Context, scope authctx.Scope, tar
 }
 
 // ReplaceMemberOverrides swaps a member's grant/deny override lists;
-// owner-only. Adding or removing a reports.send grant dual-writes the legacy
-// can_send_reports column in the same transaction — the column stays
-// authoritative until phase 4 drops it.
+// owner-only.
 func (s *Service) ReplaceMemberOverrides(ctx context.Context, scope authctx.Scope, targetID uuid.UUID, req MemberOverridesRequest) error {
 	if err := requirePermissionAdmin(scope); err != nil {
 		return err
@@ -573,12 +541,6 @@ func (s *Service) ReplaceMemberOverrides(ctx context.Context, scope authctx.Scop
 			}
 		}
 	}
-	canSend := false
-	for _, key := range grants {
-		if key == authctx.PermReportsSend {
-			canSend = true
-		}
-	}
 	var ev MemberOverridesChanged
 	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
 		member, err := s.repo.GetMemberRBAC(ctx, scope.CenterID, targetID)
@@ -595,7 +557,7 @@ func (s *Service) ReplaceMemberOverrides(ctx context.Context, scope authctx.Scop
 			AfterGrants:  grants,
 			AfterDenies:  denies,
 		}
-		return s.repo.ReplaceMemberOverrides(ctx, scope.CenterID, targetID, grants, denies, canSend, req.AssignmentVersion)
+		return s.repo.ReplaceMemberOverrides(ctx, scope.CenterID, targetID, grants, denies, req.AssignmentVersion)
 	})
 	if errors.Is(err, ErrNotFound) {
 		return apperror.NotFound("member")

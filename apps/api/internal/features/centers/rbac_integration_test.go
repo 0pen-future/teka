@@ -68,26 +68,24 @@ func TestCreateCenterSeedsSystemRoles(t *testing.T) {
 	}
 }
 
-// Grant/revoke keeps the legacy column and the reports.send override row in
-// parity, and the next resolved scope reflects the change immediately.
-func TestSendReportsDualWriteParity(t *testing.T) {
+// Granting and revoking the reports.send override lands in the very next
+// resolved scope — the single-source-of-truth invariant that replaced the
+// retired can_send_reports column's dual-write.
+func TestSendReportsOverrideResolvesToScope(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	_, owner := testutil.Teacher(t, e.db)
 	_, member := testutil.Teacher(t, e.db)
 	e.join(t, member.ID, owner.ID)
 	ownerScope := e.scope(t, owner.ID)
-	ctx := context.Background()
 
-	require.NoError(t, e.centersSvc.SetSendReports(ctx, ownerScope, member.ID, true))
-	require.True(t, e.liveMembership(t, member.ID).CanSendReports)
+	grantReportsSend(t, e, owner.ID, member.ID, true)
 	require.Equal(t, []string{"reports.send"}, e.overrideKeys(t, member.ID, ownerScope.CenterID))
 	memberScope := e.scope(t, member.ID)
 	require.True(t, memberScope.CanSendReports)
 	require.True(t, memberScope.Has(authctx.PermReportsSend))
 
-	require.NoError(t, e.centersSvc.SetSendReports(ctx, ownerScope, member.ID, false))
-	require.False(t, e.liveMembership(t, member.ID).CanSendReports)
+	grantReportsSend(t, e, owner.ID, member.ID, false)
 	require.Empty(t, e.overrideKeys(t, member.ID, ownerScope.CenterID))
 	memberScope = e.scope(t, member.ID)
 	require.False(t, memberScope.CanSendReports)
@@ -132,8 +130,8 @@ func TestResolveScopeEffectivePermissions(t *testing.T) {
 }
 
 // Closing and reopening a membership resets the stint's permission state
-// through the real repository statements: overrides are wiped, the flag
-// drops, and the role returns to the default giao_vien.
+// through the real repository statements: overrides are wiped and the role
+// returns to the default giao_vien.
 func TestMembershipReopenResetsRoleAndOverrides(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -145,9 +143,9 @@ func TestMembershipReopenResetsRoleAndOverrides(t *testing.T) {
 	ctx := context.Background()
 	repo := centers.NewRepository(e.db)
 
-	// Build up stint-scoped state: send-reports grant (column + override
-	// row), an elevated role, and an extra deny row.
-	require.NoError(t, e.centersSvc.SetSendReports(ctx, ownerScope, member.ID, true))
+	// Build up stint-scoped state: a reports.send override grant, an
+	// elevated role, and an extra deny row.
+	grantReportsSend(t, e, owner.ID, member.ID, true)
 	hocVu := e.roleID(t, centerID, "hoc_vu")
 	require.NoError(t, e.db.Exec(
 		"UPDATE center_members SET role_id = ? WHERE teacher_id = ? AND left_at IS NULL",
@@ -162,7 +160,6 @@ func TestMembershipReopenResetsRoleAndOverrides(t *testing.T) {
 	_, err := repo.OpenMembership(ctx, member.ID, centerID)
 	require.NoError(t, err)
 	m := e.liveMembership(t, member.ID)
-	require.False(t, m.CanSendReports)
 	require.NotNil(t, m.RoleID, "reopened member stint gets the default role")
 	require.Equal(t, e.roleID(t, centerID, "giao_vien"), *m.RoleID)
 	require.Empty(t, e.overrideKeys(t, member.ID, centerID))

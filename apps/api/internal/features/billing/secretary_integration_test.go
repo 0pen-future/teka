@@ -14,7 +14,7 @@ import (
 	"teka/apps/api/internal/testutil"
 )
 
-// A can_send_reports member reads billing center-wide — any member's period,
+// A reports.send-holding member reads billing center-wide — any member's period,
 // with the owning teacher's identity attached so the client can group by
 // teacher — but the flag never relaxes a single billing WRITE: close, void,
 // and adjustment on another member's data still answer the same neutral 404

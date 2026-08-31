@@ -25,8 +25,9 @@ type MemberResponse struct {
 	FullName string    `json:"full_name"`
 	Phone    string    `json:"phone"`
 	IsOwner  bool      `json:"is_owner"`
-	// CanSendReports is the delegated report-sender permission; always false
-	// for the owner (member-only flag).
+	// CanSendReports mirrors the member's effective reports.send permission
+	// (computed, not stored); always false for the owner (member-only —
+	// the owner's authority is implicit).
 	CanSendReports bool `json:"can_send_reports"`
 }
 
@@ -42,7 +43,7 @@ type MeResponse struct {
 
 // MemberMeResponse is the body of GET /centers/me for a non-owner member —
 // the roster is owner-only data, so a member sees only the center's name
-// plus their own delegated-send permission.
+// plus their own effective reports.send permission.
 type MemberMeResponse struct {
 	CenterName     string `json:"center_name"`
 	CanSendReports bool   `json:"can_send_reports"`

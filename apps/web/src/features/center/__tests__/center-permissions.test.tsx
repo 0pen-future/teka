@@ -51,7 +51,7 @@ afterEach(() => {
 });
 
 describe("PermissionMatrix on the owner permissions page", () => {
-  it("renders API labels per role and keeps the reports.send row disabled", async () => {
+  it("renders API labels per role with every row assignable", async () => {
     mockCenterMe(makeCenterMeOwner({ members: [ownerSelf()] }));
     mockCenterPermissions(
       makeCenterPermissions({
@@ -73,11 +73,10 @@ describe("PermissionMatrix on the owner permissions page", () => {
       screen.getByRole("checkbox", { name: "Xem nhật ký hoạt động — Học vụ" }),
     ).not.toBeChecked();
 
-    // The dual-life restriction: reports.send is per-member only for now.
+    // The dual-life restriction retired with the can_send_reports column:
+    // reports.send is a plain grantable key on role sets too.
     for (const role of ["Giáo viên", "Học vụ", "Trợ giảng"]) {
-      expect(
-        screen.getByRole("checkbox", { name: `Gửi báo cáo học phí — ${role}` }),
-      ).toBeDisabled();
+      expect(screen.getByRole("checkbox", { name: `Gửi báo cáo học phí — ${role}` })).toBeEnabled();
     }
   });
 
