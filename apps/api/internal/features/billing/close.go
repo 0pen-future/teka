@@ -101,7 +101,10 @@ func blockingSessions(ctx context.Context, pending PendingSource, periodScope au
 func futureUnconfirmedSessions(ctx context.Context, pending PendingSource, periodScope authctx.Scope, period *Period, today time.Time) ([]UnconfirmedSession, error) {
 	from := today.AddDate(0, 0, 1)
 	if from.After(period.PeriodEnd) {
-		return nil, nil
+		// Non-nil so the JSON stays [] — clients parse the documented array,
+		// and this branch (closing on the period's last day) must not be the
+		// one path that marshals null.
+		return []UnconfirmedSession{}, nil
 	}
 	to := period.PeriodEnd
 	before := period.PeriodEnd.AddDate(0, 0, 1)

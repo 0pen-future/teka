@@ -259,6 +259,33 @@ func TestCloseSucceedsWithFutureUnconfirmedSessionAsWarningOnly(t *testing.T) {
 	}
 }
 
+func TestCloseOnPeriodLastDayReturnsEmptyWarningsNotNil(t *testing.T) {
+	ctx := context.Background()
+	teacherID := id.New()
+	// Closing on the period's last day: tomorrow falls outside the period, so
+	// the future-warnings scan is skipped entirely. The response must still
+	// carry a non-nil slice — a nil one marshals as JSON null and breaks
+	// clients parsing the documented array.
+	today := time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC)
+
+	svc, repo := newCloseTestService(&fakePendingSource{}, today)
+	repo.setTimezone(teacherID, "UTC")
+	period := openPeriod(repo.previewFakeRepository, teacherID,
+		time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC), PeriodOpen)
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: period.CenterID}
+
+	resp, err := svc.Close(ctx, sc, period.ID)
+	if err != nil {
+		t.Fatalf("close on the period's last day must succeed, got: %v", err)
+	}
+	if resp.Warnings.FutureUnconfirmedSessions == nil {
+		t.Fatal("warnings.future_unconfirmed_sessions must be an empty slice, not nil")
+	}
+	if len(resp.Warnings.FutureUnconfirmedSessions) != 0 {
+		t.Fatalf("want no future warnings, got %d", len(resp.Warnings.FutureUnconfirmedSessions))
+	}
+}
+
 func TestCloseOnClosedPeriodIsConflict(t *testing.T) {
 	ctx := context.Background()
 	svc, repo := newCloseTestService(&fakePendingSource{}, time.Now())
