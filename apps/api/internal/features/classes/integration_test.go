@@ -418,7 +418,7 @@ func TestAssignmentHoldersReadThroughReadablePort(t *testing.T) {
 	stint := testutil.StaffAssignment(t, db, created, clerk.ID, "hoc_vu")
 
 	// The assignment holder reads detail + list, and sees their roles.
-	got, roles, err := svc.GetReadable(ctx, clerkSc, created.ID)
+	got, roles, err := svc.GetReadableWithRoles(ctx, clerkSc, created.ID)
 	require.NoError(t, err)
 	require.Equal(t, created.ID, got.ID)
 	require.Equal(t, []string{"hoc_vu"}, roles)
@@ -429,8 +429,11 @@ func TestAssignmentHoldersReadThroughReadablePort(t *testing.T) {
 	require.Equal(t, created.ID, rows[0].ID)
 	require.Equal(t, []string{"hoc_vu"}, listRoles[created.ID])
 
-	// An unassigned peer still gets nothing — no existence leak.
-	_, _, err = svc.GetReadable(ctx, peerSc, created.ID)
+	// An unassigned peer still gets nothing — no existence leak, on both
+	// read-port variants.
+	_, err = svc.GetReadable(ctx, peerSc, created.ID)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+	_, _, err = svc.GetReadableWithRoles(ctx, peerSc, created.ID)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
 	_, _, peerTotal, err := svc.ListReadable(ctx, peerSc, classes.ListFilter{Status: classes.StatusActive}, listParams(t))
 	require.NoError(t, err)
@@ -447,14 +450,14 @@ func TestAssignmentHoldersReadThroughReadablePort(t *testing.T) {
 	// my_staff_roles: roles describe what the caller IS, not what they can
 	// still read.
 	require.NoError(t, db.Exec(`UPDATE class_staff SET ended_at = now() WHERE id = ?`, stint).Error)
-	got, roles, err = svc.GetReadable(ctx, clerkSc, created.ID)
+	got, roles, err = svc.GetReadableWithRoles(ctx, clerkSc, created.ID)
 	require.NoError(t, err)
 	require.Equal(t, created.ID, got.ID)
 	require.Empty(t, roles)
 
 	// A soft-deleted class grants nothing even to an assignment holder.
 	require.NoError(t, db.Exec(`UPDATE classes SET deleted_at = now() WHERE id = ?`, created.ID).Error)
-	_, _, err = svc.GetReadable(ctx, clerkSc, created.ID)
+	_, err = svc.GetReadable(ctx, clerkSc, created.ID)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
 }
 
@@ -474,7 +477,7 @@ func TestOwnerReadablePortIsCenterWide(t *testing.T) {
 	created, err := svc.Create(ctx, memberSc, createRequest())
 	require.NoError(t, err)
 
-	got, roles, err := svc.GetReadable(ctx, sc, created.ID)
+	got, roles, err := svc.GetReadableWithRoles(ctx, sc, created.ID)
 	require.NoError(t, err)
 	require.Equal(t, created.ID, got.ID)
 	require.Empty(t, roles)

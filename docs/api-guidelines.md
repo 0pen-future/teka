@@ -111,20 +111,26 @@ window and has no production callers.
   behalf of any teacher in their center. Contacts and students are the
   exception: they anchor to the owner (see contact-book ownership below).
 
-**Class-staff reads**: `class_staff` stints (giao_vien / hoc_vu / tro_giang)
-are the read-granting relationship for class-anchored data. A class handoff
-moves `classes.teacher_id` (plus schedules, future sessions, and the giao_vien
-stint — a dual write) but never the enrollment or student rows, and hoc_vu /
-tro_giang members own no rows at all, so own-rows scoping alone would show
-them nothing. READ paths therefore widen to "own rows OR the row's class
-carries a class_staff stint for the caller — ended stints included, so
-history stays readable after a soft-close". The shared SQL fragments live in
+**Class-staff reads**: `class_staff` is the **sole** source of class
+permissions; `teacher_id` columns are creator/last-writer attribution, never a
+permission grant. `classes.teacher_id` survives only as the denormalized
+primary-teacher pointer — class creation opens a giao_vien stint and a handoff
+moves the pointer (plus schedules and future sessions) together with the stint
+in one dual write, so the current primary teacher always holds an ACTIVE
+giao_vien stint. That invariant is why the classes read filter is stint-only:
+"the class carries a class_staff stint for the caller — ended stints included,
+so history stays readable after a soft-close", with no creator arm to fall
+back on. Tables whose rows members genuinely own (students, attendance
+records) keep "own rows OR stint" instead. The shared SQL fragments live in
 `internal/shared/classscope` (`ReadExists` for class-keyed rows,
 `ReadExistsViaEnrollment` for student rows); each repository composes them in
 a `readScoped` helper next to its own-rows `scoped`, and services expose the
 widened queries as separate read ports (`GetReadable*`, `ListReadable`,
 `ListRangeReadable`) so every write keeps resolving through the own-rows
-gates. A soft-deleted class grants nothing. Widened today: classes,
+gates. `GetReadable` resolves the class alone; `GetReadableWithRoles` adds the
+caller's ACTIVE role keys and exists only for consumers that branch on them
+(the class detail's `my_staff_roles`, the classbook's generation gate) — plain
+readable-resolution never pays the roles query. A soft-deleted class grants nothing. Widened today: classes,
 enrollments, students, sessions, attendance sheets, grading reads, teaching
 reads, and the class staff list itself. Everything else keeps plain member
 scoping — writes resolve through the capability map below, never through a

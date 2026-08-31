@@ -29,9 +29,9 @@ type ClassSource interface {
 	// capability. Every curriculum/plan write resolves through it. Readable
 	// but not writable resolves to 403, unreadable to 404.
 	GetWritable(ctx context.Context, sc authctx.Scope, classID uuid.UUID, capability authctx.ClassCapability) (*classes.Class, error)
-	// GetReadable is the read port: own classes OR classes the caller holds a
-	// class_staff stint on (ended included). The roles slice is unused here.
-	GetReadable(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, []string, error)
+	// GetReadable is the read port: classes the caller holds a class_staff
+	// stint on (ended included) or sees center-wide.
+	GetReadable(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, error)
 }
 
 // SessionSource is the slice of the sessions feature teaching needs:
@@ -556,8 +556,7 @@ func (s *Service) resolveClass(ctx context.Context, sc authctx.Scope, classID uu
 // (active or ended) also resolves. GETs only — every curriculum/plan write
 // keeps resolveClass as its gate.
 func (s *Service) resolveReadableClass(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, error) {
-	class, _, err := s.classes.GetReadable(ctx, sc, classID)
-	return normalizeClassErr(class, err)
+	return normalizeClassErr(s.classes.GetReadable(ctx, sc, classID))
 }
 
 func normalizeClassErr(class *classes.Class, err error) (*classes.Class, error) {
