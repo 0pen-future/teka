@@ -121,7 +121,7 @@ giao_vien stint. That invariant is why the classes read filter is stint-only:
 "the class carries a class_staff stint for the caller — ended stints included,
 so history stays readable after a soft-close", with no creator arm to fall
 back on. Tables whose rows members genuinely own (students, attendance
-records) keep "own rows OR stint" instead. The shared SQL fragments live in
+records, individual sessions) keep "own rows OR stint" instead. The shared SQL fragments live in
 `internal/shared/classscope` (`ReadExists` for class-keyed rows,
 `ReadExistsViaEnrollment` for student rows); each repository composes them in
 a `readScoped` helper next to its own-rows `scoped`, and services expose the
@@ -130,9 +130,9 @@ widened queries as separate read ports (`GetReadable*`, `ListReadable`,
 gates. `GetReadable` resolves the class alone; `GetReadableWithRoles` adds the
 caller's ACTIVE role keys and exists only for consumers that branch on them
 (the class detail's `my_staff_roles`, the classbook's generation gate) — plain
-readable-resolution never pays the roles query. A soft-deleted class grants nothing. Widened today: classes,
-enrollments, students, sessions, attendance sheets, grading reads, teaching
-reads, and the class staff list itself. Everything else keeps plain member
+readable-resolution never pays the roles query. A soft-deleted class grants
+nothing. Widened today: classes, enrollments, students, sessions, attendance
+sheets, grading reads, teaching reads, and the class staff list itself. Everything else keeps plain member
 scoping — writes resolve through the capability map below, never through a
 read stint. Widened student rows carry the linked contact's name, but the phone
 follows the phone-privacy rule below, and staff cannot browse or manage the

@@ -208,7 +208,10 @@ func (r *gormRepository) ContactExists(ctx context.Context, sc authctx.Scope, co
 		Where("id = ? AND center_id = ? AND deleted_at IS NULL", contactID, sc.CenterID)
 	// Keys on contacts.view_all, not students.view_all: this probes which
 	// CONTACTS the caller may anchor a student to, so it follows contact
-	// visibility, not student visibility.
+	// visibility, not student visibility. Deliberately narrower than the
+	// contacts read predicate: no oversight or hoc_vu-stint arm, and the
+	// teacher_id arm is dead for non-owners (contacts anchor to the owner) —
+	// anchoring students to foreign contacts stays an explicit-grant action.
 	if !sc.CenterWideFor(authctx.PermContactsViewAll) {
 		q = q.Where("teacher_id = ?", sc.TeacherID)
 	}

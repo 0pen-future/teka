@@ -239,6 +239,17 @@ func TestContactsViewAllWidensReadsNotWrites(t *testing.T) {
 		"a visibility key must not widen contact edits")
 	require.Equal(t, apperror.CodeForbidden, apperror.From(svc.Delete(ctx, scMember, row.ID)).Code,
 		"a visibility key must not widen contact deletion")
+
+	// The zalo-mapping write has its own predicate (oversight or hoc_vu
+	// stint) and answers a neutral 404 out of reach — rewiring a family's
+	// mapping redirects their statement messages, so the read key must not
+	// unlock it.
+	_, err = svc.UpdateZaloMapping(ctx, scMember, row.ID,
+		contacts.ZaloMappingRequest{ZaloUserID: "zl-attacker", ZaloName: "Kẻ Lạ"})
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
+		"a visibility key must not widen the zalo-mapping write")
+	require.Equal(t, apperror.CodeNotFound, apperror.From(svc.ClearZaloMapping(ctx, scMember, row.ID)).Code,
+		"a visibility key must not widen the zalo-mapping clear")
 }
 
 func TestUpdateRenormalisesPhoneAndDetectsCollision(t *testing.T) {

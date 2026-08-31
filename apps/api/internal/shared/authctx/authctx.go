@@ -74,7 +74,7 @@ func (s Scope) ReportsOversight() bool {
 // variation, so the same contact can never show a phone in one list and hide
 // it in another.
 func (s Scope) PhoneVisible(rowVisible bool) bool {
-	return s.ReportsOversight() || s.Perms.HasKey(PermContactsViewAll) || rowVisible
+	return s.ReportsOversight() || s.CenterWideFor(PermContactsViewAll) || rowVisible
 }
 
 const (

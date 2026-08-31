@@ -93,10 +93,12 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 // readScoped is the stint read filter: a member sees exactly the classes they
 // hold any class_staff stint on — ended stints included, so a closed
 // assignment keeps read access to the class's history. There is no creator
-// (teacher_id) arm: every class's current teacher holds an ACTIVE giao_vien
-// stint (the create-hook and handoff dual-write keep that invariant), so the
-// pointer can never reach a row the stint filter misses. Write paths must
-// keep using scoped.
+// (teacher_id) arm: every class's current teacher holds a giao_vien stint —
+// ACTIVE via the create-hook and handoff dual-write, or soft-closed when the
+// holder left the center — so the pointer can never reach a row the stint
+// filter misses. That is also why ReadExists deliberately ignores ended_at:
+// filtering to ACTIVE would strand departed-and-returned teachers off their
+// own classes. Write paths must keep using scoped.
 func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("classes.center_id = ?", sc.CenterID)
 	if !sc.CenterWideFor(authctx.PermClassesViewAll) {
