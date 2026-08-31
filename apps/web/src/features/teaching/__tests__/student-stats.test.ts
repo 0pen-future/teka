@@ -38,6 +38,7 @@ function makeSession(id: string, status: Session["status"], day: string): Sessio
     cancel_reason: null,
     attendance_confirmed_at: null,
     student_count: 2,
+    attendance_summary: null,
     created_at: "2026-08-01T08:00:00Z",
   };
 }

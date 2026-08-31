@@ -155,6 +155,7 @@ function makeSession(day: number, status: Session["status"]): Session {
     cancel_reason: status === "cancelled" ? "Nghỉ lễ" : null,
     attendance_confirmed_at: null,
     student_count: 1,
+    attendance_summary: null,
     created_at: "2026-01-01T08:00:00Z",
   };
 }

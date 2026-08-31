@@ -485,6 +485,7 @@ export function makeClassSession(overrides: Record<string, unknown> = {}) {
     cancel_reason: null,
     attendance_confirmed_at: "2026-08-03T21:00:00Z",
     student_count: 10,
+    attendance_summary: null,
     created_at: "2026-08-01T10:00:00Z",
     ...overrides,
   };

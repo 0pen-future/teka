@@ -3,7 +3,12 @@ import { http, HttpResponse } from "msw";
 import type { Class } from "@/features/roster";
 import { API_URL, fail, listMeta, ok } from "@/test/msw/handlers";
 
-import type { AttendanceRow, ConfirmAttendanceInput, Session } from "../schemas/attendance-schemas";
+import type {
+  AttendanceRow,
+  AttendanceSummary,
+  ConfirmAttendanceInput,
+  Session,
+} from "../schemas/attendance-schemas";
 
 /**
  * Fixture dates are relative to the run's current date, not a fixed calendar
@@ -82,10 +87,25 @@ export const sessionUnconfirmedPast: Session = {
   cancel_reason: null,
   attendance_confirmed_at: null,
   student_count: fixtureRosterTemplate.length,
+  attendance_summary: null,
   created_at: "2026-01-01T08:00:00Z",
 };
 
-/** Already confirmed with two pre-existing absentees, for the reopen-and-edit case. */
+/**
+ * Pre-existing marks on the confirmed session — one of each exception status,
+ * so the reopen-and-edit case exercises the full 4-status reload. Everyone
+ * stays billable: attendance status never changes what a family owes.
+ */
+export const confirmedMarks: ReadonlyMap<
+  string,
+  { status: AttendanceRow["status"]; note: string | null }
+> = new Map([
+  ["student-001", { status: "absent", note: null }],
+  ["student-002", { status: "late", note: null }],
+  ["student-003", { status: "excused", note: "mẹ báo ốm" }],
+]);
+
+/** Already confirmed with one absent, one late, one excused — for the reopen-and-edit case. */
 export const sessionConfirmed: Session = {
   id: "91000000-0000-4000-8000-000000000002",
   class_id: fixtureClass.id,
@@ -96,10 +116,9 @@ export const sessionConfirmed: Session = {
   cancel_reason: null,
   attendance_confirmed_at: "2026-01-01T19:00:00Z",
   student_count: fixtureRosterTemplate.length,
+  attendance_summary: { present: 27, late: 1, absent: 1, excused: 1 },
   created_at: "2026-01-01T08:00:00Z",
 };
-
-const confirmedAbsentIds = new Set(["student-001", "student-002"]);
 
 /** Dated inside `closedPeriodMonths`, for the closed-period-warning case. */
 export const sessionInClosedPeriod: Session = {
@@ -112,6 +131,25 @@ export const sessionInClosedPeriod: Session = {
   cancel_reason: null,
   attendance_confirmed_at: null,
   student_count: fixtureRosterTemplate.length,
+  attendance_summary: null,
+  created_at: "2026-01-01T08:00:00Z",
+};
+
+/**
+ * Materialized future session — the trio picker's "KẾ TIẾP"/default anchor
+ * when today has no session. Two days out so it stays inside every window.
+ */
+export const sessionUpcoming: Session = {
+  id: "91000000-0000-4000-8000-000000000005",
+  class_id: fixtureClass.id,
+  class_name: fixtureClass.name,
+  session_date: daysAgo(-2),
+  start_time: "18:00",
+  status: "planned",
+  cancel_reason: null,
+  attendance_confirmed_at: null,
+  student_count: fixtureRosterTemplate.length,
+  attendance_summary: null,
   created_at: "2026-01-01T08:00:00Z",
 };
 
@@ -126,6 +164,7 @@ export const sessionCancelled: Session = {
   cancel_reason: "Nghỉ lễ",
   attendance_confirmed_at: null,
   student_count: fixtureRosterTemplate.length,
+  attendance_summary: null,
   created_at: "2026-01-01T08:00:00Z",
 };
 
@@ -141,11 +180,15 @@ interface Store {
 }
 
 function seedAttendanceStore(): Store {
-  const confirmedRows = fixtureRosterTemplate.map((row) => ({
-    ...row,
-    status: confirmedAbsentIds.has(row.student_id) ? ("absent" as const) : ("present" as const),
-    billable: !confirmedAbsentIds.has(row.student_id),
-  }));
+  const confirmedRows = fixtureRosterTemplate.map((row) => {
+    const mark = confirmedMarks.get(row.student_id);
+    return {
+      ...row,
+      status: mark?.status ?? ("present" as const),
+      note: mark?.note ?? null,
+      billable: true,
+    };
+  });
   return {
     classes: [{ ...fixtureClass, schedules: [] }],
     sessions: [
@@ -153,12 +196,14 @@ function seedAttendanceStore(): Store {
       { ...sessionConfirmed },
       { ...sessionInClosedPeriod },
       { ...sessionCancelled },
+      { ...sessionUpcoming },
     ],
     rosters: new Map([
       [sessionUnconfirmedPast.id, fixtureRosterTemplate.map((row) => ({ ...row }))],
       [sessionConfirmed.id, confirmedRows],
       [sessionInClosedPeriod.id, fixtureRosterTemplate.map((row) => ({ ...row }))],
       [sessionCancelled.id, fixtureRosterTemplate.map((row) => ({ ...row }))],
+      [sessionUpcoming.id, fixtureRosterTemplate.map((row) => ({ ...row }))],
     ]),
   };
 }
@@ -241,15 +286,25 @@ export const attendanceHandlers = [
       return HttpResponse.json(fail("NOT_FOUND", "session not found"), { status: 404 });
     }
     const body = (await request.json()) as ConfirmAttendanceInput;
-    const absentIds = new Set(body.absent_student_ids);
-    const nextRows: AttendanceRow[] = rows.map((row) => ({
-      ...row,
-      status: absentIds.has(row.student_id) ? "absent" : "present",
-      billable: !absentIds.has(row.student_id),
-    }));
+    const markByStudent = new Map(body.marks.map((mark) => [mark.student_id, mark]));
+    const nextRows: AttendanceRow[] = rows.map((row) => {
+      const mark = markByStudent.get(row.student_id);
+      return {
+        ...row,
+        status: mark?.status ?? "present",
+        note: mark?.note ?? null,
+        // Billing invariant: every status — vắng and muộn included — stays billable.
+        billable: true,
+      };
+    });
     store.rosters.set(sessionId, nextRows);
     session.status = "held";
     session.attendance_confirmed_at = new Date().toISOString();
+    const summary: AttendanceSummary = { present: 0, late: 0, absent: 0, excused: 0 };
+    for (const row of nextRows) {
+      summary[row.status ?? "present"] += 1;
+    }
+    session.attendance_summary = summary;
 
     const closed = closedPeriodMonths.has(session.session_date.slice(0, 7));
     return HttpResponse.json(

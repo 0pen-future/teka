@@ -53,7 +53,9 @@ test("blocks close on a pending session, then closes once attendance is confirme
     await blockedPanel.locator("..").getByRole("link", { name: "Điểm danh" }).first().click();
     await expect(page).toHaveURL(/\/sessions\/.+\/attendance$/);
 
-    await page.getByRole("button", { name: /vắng/ }).click();
+    // Everyone defaults to Đúng giờ — the plain XÁC NHẬN (no exception
+    // suffix) confirms the whole roster in one tap.
+    await page.getByRole("button", { name: /^XÁC NHẬN$/ }).click();
     await expect(page).toHaveURL(/\/sessions$/);
 
     pendingCount = await openBillingPendingCount(page);

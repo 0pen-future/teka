@@ -61,17 +61,17 @@ async function assertStaffReadJourney(page: Page) {
 async function openStaffAttendanceSheet(page: Page) {
   await page.goto("/sessions");
   await page.getByRole("tab", { name: STAFF_CLASS }).click();
-  const from = new Date();
-  from.setDate(from.getDate() - 90);
-  await page.getByLabel("Từ").fill(from.toISOString().slice(0, 10));
+  // The trio picker (and the "Cần điểm danh" shortcut) reach past sessions
+  // without any date filtering — a past card's status mentions "điểm danh"
+  // (confirmed or not), while upcoming reads "Sắp tới" and cancelled "Đã huỷ".
   const sessionRow = page
-    .getByRole("link", { name: /Toán 8/ })
+    .getByRole("link")
     .filter({ hasText: /điểm danh/ })
     .first();
   await expect(sessionRow).toBeVisible();
   await sessionRow.click();
   await expect(page).toHaveURL(/\/sessions\/.+\/attendance$/);
-  await expect(page.locator("button[aria-pressed]").first()).toBeVisible();
+  await expect(page.getByRole("radiogroup").first()).toBeVisible();
 }
 
 test("hoc_vu reads the assigned class everywhere but cannot write", async ({ page }) => {
@@ -104,8 +104,10 @@ test("tro_giang reads the assigned class and holds a live attendance confirm", a
       name: "CHỈ GIÁO VIÊN, TRỢ GIẢNG LỚP HOẶC CHỦ TRUNG TÂM MỚI XÁC NHẬN ĐƯỢC",
     }),
   ).toHaveCount(0);
+  // Anchored so the disabled role-gate label (which also contains the words
+  // "XÁC NHẬN") can never satisfy this locator.
   const confirmButton = page.getByRole("button", {
-    name: /XÁC NHẬN BUỔI HỌC|ĐÃ XÁC NHẬN|LƯU VÀ TẠO ĐIỀU CHỈNH/,
+    name: /^(XÁC NHẬN|ĐÃ XÁC NHẬN ✓|LƯU VÀ TẠO ĐIỀU CHỈNH)( · .+)?$/,
   });
   await expect(confirmButton).toBeVisible();
   await expect(confirmButton).toBeEnabled();

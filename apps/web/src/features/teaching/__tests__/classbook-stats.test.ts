@@ -24,6 +24,7 @@ function makeSession(overrides: Partial<Session> & Pick<Session, "id" | "status"
     cancel_reason: null,
     attendance_confirmed_at: null,
     student_count: 2,
+    attendance_summary: null,
     created_at: "2026-08-01T08:00:00Z",
     ...overrides,
   };

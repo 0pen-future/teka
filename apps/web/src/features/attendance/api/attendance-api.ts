@@ -44,9 +44,10 @@ export async function getSessionRoster(sessionId: string): Promise<AttendanceRes
 
 /**
  * `POST /sessions/:id/attendance` (`attendance.confirm`) — NOT `PUT`, despite
- * the idempotent-replace semantics: send the full absent-id list every time,
- * first confirm or a later edit alike, so the server can write present rows
- * for everyone else and transition the session to held in one call.
+ * the idempotent-replace semantics: send the full exception list (`marks`)
+ * every time, first confirm or a later edit alike, so the server can write
+ * present rows for every unlisted student and transition the session to held
+ * in one call.
  */
 export async function confirmAttendance(
   sessionId: string,

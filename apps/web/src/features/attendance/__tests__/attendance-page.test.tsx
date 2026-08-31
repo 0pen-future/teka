@@ -16,10 +16,29 @@ import {
   sessionUnconfirmedPast,
 } from "./attendance-handlers";
 
-const capturedRequests: { method: string; url: string }[] = [];
+interface CapturedRequest {
+  method: string;
+  url: string;
+  body?: unknown;
+}
+
+const capturedRequests: CapturedRequest[] = [];
 server.events.on("request:start", ({ request }) => {
-  capturedRequests.push({ method: request.method, url: request.url });
+  const entry: CapturedRequest = { method: request.method, url: request.url };
+  capturedRequests.push(entry);
+  if (request.method === "POST") {
+    void request
+      .clone()
+      .json()
+      .then((body) => {
+        entry.body = body;
+      })
+      .catch(() => undefined);
+  }
 });
+
+const attendanceWrites = () =>
+  capturedRequests.filter((r) => r.method === "POST" && /\/sessions\/.+\/attendance$/.test(r.url));
 
 function renderAttendancePage(sessionId: string) {
   signInAs(testPrimaryTeacher);
@@ -27,6 +46,10 @@ function renderAttendancePage(sessionId: string) {
     route: `/sessions/${sessionId}/attendance`,
     path: "/sessions/:id/attendance",
   });
+}
+
+function studentRow(name: string | RegExp) {
+  return screen.getByRole("radiogroup", { name });
 }
 
 beforeEach(() => {
@@ -40,64 +63,119 @@ afterEach(() => {
 });
 
 describe("AttendancePage", () => {
-  it("confirms a 30-student session with two absentees in three interactions total", async () => {
+  it("defaults the whole class to Đúng giờ and confirms in a single tap with no marks", async () => {
     const user = userEvent.setup();
     renderAttendancePage(sessionUnconfirmedPast.id);
 
-    // The only POST so far is the closed-period pre-check, not a per-row write.
-    const attendanceWrites = () =>
-      capturedRequests.filter(
-        (r) => r.method === "POST" && /\/sessions\/.+\/attendance$/.test(r.url),
-      );
-
-    // Everyone renders present by default — no per-row network call yet.
-    const rows = await screen.findAllByRole("button", { name: /Học sinh|Nguyễn Văn An/ });
+    // Every student renders as a radiogroup with Đúng giờ pre-checked —
+    // purely local state, no per-row network call.
+    const rows = await screen.findAllByRole("radiogroup");
     expect(rows).toHaveLength(30);
-    for (const row of rows) {
-      expect(row).toHaveAttribute("aria-pressed", "false");
-    }
+    expect(within(rows[0]!).getByRole("radio", { name: "Đúng giờ" })).toBeChecked();
+    expect(within(rows[0]!).getByRole("radio", { name: "Muộn" })).not.toBeChecked();
     expect(attendanceWrites()).toHaveLength(0);
 
-    // Interaction 1 and 2: tap the two absentees.
-    const firstAbsentRow = screen.getByRole("button", { name: /Học sinh 1$/ });
-    const secondAbsentRow = screen.getByRole("button", { name: /Học sinh 2$/ });
-    await user.click(firstAbsentRow);
-    await user.click(secondAbsentRow);
-    expect(firstAbsentRow).toHaveAttribute("aria-pressed", "true");
-    expect(secondAbsentRow).toHaveAttribute("aria-pressed", "true");
-    // Still purely local state — no network yet from the two taps.
-    expect(attendanceWrites()).toHaveLength(0);
+    // The count chip reflects the all-on-time default; zero-count chips
+    // (Muộn/Vắng/Có lý do) stay hidden.
+    expect(screen.getByText("Đúng giờ 30")).toBeInTheDocument();
+    expect(screen.queryByText(/^Vắng \d/)).not.toBeInTheDocument();
 
-    // Interaction 3: the single confirm tap.
-    const confirmButton = screen.getByRole("button", { name: /vắng/ });
-    expect(confirmButton).toHaveTextContent("2 vắng");
+    // One tap: the confirm bar carries no exception suffix. (findBy: the
+    // label stays "Đang tải…" until the class's role check resolves.)
+    const confirmButton = await screen.findByRole("button", { name: /^XÁC NHẬN$/ });
     await user.click(confirmButton);
 
-    // Exactly three user interactions (two taps, one confirm) produced exactly one write.
     await waitFor(() => {
       expect(attendanceWrites()).toHaveLength(1);
     });
+    expect(attendanceWrites()[0]!.body).toMatchObject({ marks: [] });
   });
 
-  it("pre-marks the previous absentees when reopening a confirmed session", async () => {
+  it("marks late, absent, and excused locally and sends only the exceptions", async () => {
+    const user = userEvent.setup();
+    renderAttendancePage(sessionUnconfirmedPast.id);
+
+    await screen.findAllByRole("radiogroup");
+    await user.click(within(studentRow(/Học sinh 1$/)).getByRole("radio", { name: "Vắng" }));
+    await user.click(within(studentRow(/Học sinh 2$/)).getByRole("radio", { name: "Muộn" }));
+    await user.click(within(studentRow(/Học sinh 3$/)).getByRole("radio", { name: "Có lý do" }));
+
+    expect(within(studentRow(/Học sinh 1$/)).getByRole("radio", { name: "Vắng" })).toBeChecked();
+    expect(within(studentRow(/Học sinh 2$/)).getByRole("radio", { name: "Muộn" })).toBeChecked();
+    expect(
+      within(studentRow(/Học sinh 3$/)).getByRole("radio", { name: "Có lý do" }),
+    ).toBeChecked();
+
+    // Picking Có lý do opens the quick note input; the note becomes the
+    // "Vắng có phép" subtitle under the student's name.
+    const noteInput = screen.getByRole("textbox", { name: "Lý do của Học sinh 3" });
+    await user.type(noteInput, "mẹ báo ốm");
+    expect(screen.getByText(/Vắng có phép — mẹ báo ốm/)).toBeInTheDocument();
+
+    // Chips show the live split, hiding nothing that is non-zero.
+    expect(screen.getByText("Đúng giờ 27")).toBeInTheDocument();
+    expect(screen.getByText("Muộn 1")).toBeInTheDocument();
+    expect(screen.getByText("Vắng 1")).toBeInTheDocument();
+    expect(screen.getByText("Có lý do 1")).toBeInTheDocument();
+
+    // Still zero writes: the whole sheet is local until the single confirm.
+    expect(attendanceWrites()).toHaveLength(0);
+
+    const confirmButton = screen.getByRole("button", { name: /XÁC NHẬN · 1 VẮNG · 1 MUỘN/ });
+    await user.click(confirmButton);
+
+    await waitFor(() => {
+      expect(attendanceWrites()).toHaveLength(1);
+    });
+    const body = attendanceWrites()[0]!.body as { marks: unknown[] };
+    expect(body.marks).toHaveLength(3);
+    expect(body.marks).toEqual(
+      expect.arrayContaining([
+        { student_id: "student-001", status: "absent" },
+        { student_id: "student-002", status: "late" },
+        { student_id: "student-003", status: "excused", note: "mẹ báo ốm" },
+      ]),
+    );
+  });
+
+  it("returns a student to Đúng giờ when their selected status is tapped again", async () => {
+    const user = userEvent.setup();
+    renderAttendancePage(sessionUnconfirmedPast.id);
+
+    await screen.findAllByRole("radiogroup");
+    const absentRadio = within(studentRow(/Học sinh 1$/)).getByRole("radio", { name: "Vắng" });
+    await user.click(absentRadio);
+    expect(absentRadio).toBeChecked();
+
+    await user.click(absentRadio);
+    expect(absentRadio).not.toBeChecked();
+    expect(
+      within(studentRow(/Học sinh 1$/)).getByRole("radio", { name: "Đúng giờ" }),
+    ).toBeChecked();
+  });
+
+  it("reloads a confirmed session's four statuses into the sheet", async () => {
     renderAttendancePage(sessionConfirmed.id);
 
-    const previouslyAbsentRow = await screen.findByRole("button", { name: /Học sinh 1$/ });
-    const previouslyPresentRow = await screen.findByRole("button", { name: /Học sinh 3$/ });
+    await screen.findAllByRole("radiogroup");
     await waitFor(() => {
-      expect(previouslyAbsentRow).toHaveAttribute("aria-pressed", "true");
+      expect(within(studentRow(/Học sinh 1$/)).getByRole("radio", { name: "Vắng" })).toBeChecked();
     });
-    expect(previouslyPresentRow).toHaveAttribute("aria-pressed", "false");
+    expect(within(studentRow(/Học sinh 2$/)).getByRole("radio", { name: "Muộn" })).toBeChecked();
+    expect(
+      within(studentRow(/Học sinh 3$/)).getByRole("radio", { name: "Có lý do" }),
+    ).toBeChecked();
+    expect(
+      within(studentRow(/Học sinh 4$/)).getByRole("radio", { name: "Đúng giờ" }),
+    ).toBeChecked();
+
+    // The stored excused note comes back as the subtitle.
+    expect(screen.getByText(/Vắng có phép — mẹ báo ốm/)).toBeInTheDocument();
   });
 
   it("shows the confirmed state on the button and only saves again after an edit", async () => {
     const user = userEvent.setup();
     renderAttendancePage(sessionConfirmed.id);
-
-    const attendanceWrites = () =>
-      capturedRequests.filter(
-        (r) => r.method === "POST" && /\/sessions\/.+\/attendance$/.test(r.url),
-      );
 
     // No local edits yet — the button reports state; a tap only explains
     // itself in a toast, it writes nothing.
@@ -106,49 +184,31 @@ describe("AttendancePage", () => {
     expect(await screen.findByText("Buổi này đã xác nhận rồi")).toBeInTheDocument();
     expect(attendanceWrites()).toHaveLength(0);
 
-    // Toggling any row reopens the save action with the live absent count.
-    const editedRow = await screen.findByRole("button", { name: /Học sinh 3$/ });
-    await user.click(editedRow);
-    const saveButton = screen.getByRole("button", { name: /XÁC NHẬN BUỔI HỌC/ });
-    // Two pre-existing absentees plus the fresh toggle.
-    expect(saveButton).toHaveTextContent("3 vắng");
+    // Marking one more student absent reopens the save with the live split:
+    // the pre-existing absentee plus the fresh one, and the pre-existing late.
+    await user.click(within(studentRow(/Học sinh 4$/)).getByRole("radio", { name: "Vắng" }));
+    const saveButton = screen.getByRole("button", { name: /XÁC NHẬN · 2 VẮNG · 1 MUỘN/ });
     await user.click(saveButton);
     await waitFor(() => {
       expect(attendanceWrites()).toHaveLength(1);
     });
-  });
-
-  it("still saves an unconfirmed session with zero absentees (no edits needed)", async () => {
-    const user = userEvent.setup();
-    renderAttendancePage(sessionUnconfirmedPast.id);
-
-    const attendanceWrites = () =>
-      capturedRequests.filter(
-        (r) => r.method === "POST" && /\/sessions\/.+\/attendance$/.test(r.url),
-      );
-
-    // The main flow: everyone present, nothing toggled — the untouched
-    // (non-dirty) state must not be mistaken for an already-settled session.
-    const confirmButton = await screen.findByRole("button", { name: /XÁC NHẬN BUỔI HỌC/ });
-    expect(confirmButton).toHaveTextContent("0 vắng");
-    await user.click(confirmButton);
-    await waitFor(() => {
-      expect(attendanceWrites()).toHaveLength(1);
-    });
+    const body = attendanceWrites()[0]!.body as { marks: { student_id: string }[] };
+    expect(body.marks).toHaveLength(4);
   });
 
   it("shows the closed-period warning and the adjustment button copy", async () => {
     renderAttendancePage(sessionInClosedPeriod.id);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("đã chốt sổ");
-    const confirmButton = await screen.findByRole("button", { name: /vắng/ });
-    expect(confirmButton).toHaveTextContent("LƯU VÀ TẠO ĐIỀU CHỈNH");
+    expect(
+      await screen.findByRole("button", { name: /LƯU VÀ TẠO ĐIỀU CHỈNH/ }),
+    ).toBeInTheDocument();
   });
 
   it("renders a badge, not a muted suffix, for same-name siblings", async () => {
     renderAttendancePage(sessionUnconfirmedPast.id);
 
-    const [firstSiblingRow, secondSiblingRow] = await screen.findAllByRole("button", {
+    const [firstSiblingRow, secondSiblingRow] = await screen.findAllByRole("radiogroup", {
       name: /Nguyễn Văn An/,
     });
     // A duplicate name promotes `display_note` to a badge (`rounded-full`
@@ -163,6 +223,7 @@ describe("AttendancePage", () => {
     expect(await screen.findByText("Buổi học đã huỷ")).toBeInTheDocument();
     expect(screen.getByText(sessionCancelled.cancel_reason!)).toBeInTheDocument();
     expect(screen.getByText(/Không tính tiền cho học sinh nào/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /vắng/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /XÁC NHẬN/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("radiogroup")).not.toBeInTheDocument();
   });
 });
