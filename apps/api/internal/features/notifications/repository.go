@@ -73,7 +73,7 @@ type Repository interface {
 	InsertBatch(ctx context.Context, rows []*Notification) error
 	// ListByPeriod returns one billing period's notification ledger, scoped
 	// to sc's center and to periods sc's own teacher owns unless sc holds
-	// reports oversight (owner or can_send_reports). Period ownership, not
+	// reports oversight (owner or reports.send). Period ownership, not
 	// row ownership, is what gates visibility: after a delegated send the
 	// period's own teacher must see the secretary's rows in their ledger, or
 	// they would resend and double-DM every parent. Joined with contact
@@ -131,18 +131,20 @@ type Repository interface {
 	// because overlap can be intentional (plan decision), never a block.
 	HasStatementSendForPeriod(ctx context.Context, centerID, periodID uuid.UUID, classScoped bool) (bool, error)
 	// ClassSendAllowed reports whether the teacher may still send for the
-	// class right now: an active sending-role stint on it, the
-	// can_send_reports delegation, or being the center's owner. A deleted
-	// class reads as false. This is the mid-run revocation probe for a
-	// class-scoped run — the class counterpart of CanSendReports.
+	// class right now: an active sending-role stint on it, an effective
+	// reports.send permission on their live membership, or being the
+	// center's owner. A deleted class reads as false. This is the mid-run
+	// revocation probe for a class-scoped run — the class counterpart of
+	// CanSendReports.
 	ClassSendAllowed(ctx context.Context, centerID, teacherID, classID uuid.UUID) (bool, error)
 	// PeriodTeacher returns the owning teacher of one billing period in
 	// centerID, or ErrPeriodNotFound. Backs the pre-send preview's
 	// cross-teacher check without a statements refresh.
 	PeriodTeacher(ctx context.Context, centerID, periodID uuid.UUID) (uuid.UUID, error)
-	// CanSendReports reports whether the teacher currently holds the
-	// can_send_reports membership flag in centerID. A missing membership row
-	// (member removed) reads as false — removal revokes like the flag does.
+	// CanSendReports reports whether the teacher currently holds an
+	// effective reports.send permission on a live membership in centerID. A
+	// missing or closed membership reads as false — removal revokes like an
+	// explicit deny does.
 	CanSendReports(ctx context.Context, centerID, teacherID uuid.UUID) (bool, error)
 	// UpdateRunStatus moves a run to status. A terminal status stamps
 	// finished_at; moving back to RunStatusRunning (manual resume) clears it,
@@ -207,7 +209,7 @@ func NewRepository(db *gorm.DB) Repository {
 // owner-oversight template for the plain reads (List, MarkSent).
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("notifications.center_id = ?", sc.CenterID)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermNotificationsViewAll) {
 		q = q.Where("notifications.teacher_id = ?", sc.TeacherID)
 	}
 	return q
@@ -389,11 +391,21 @@ func (r *gormRepository) HasStatementSendForPeriod(ctx context.Context, centerID
 func (r *gormRepository) ClassSendAllowed(ctx context.Context, centerID, teacherID, classID uuid.UUID) (bool, error) {
 	stintFrag, _ := classscope.WriteExists("classes.id")
 	var rows []struct{ Allowed bool }
+	// The delegation arm mirrors CanSendReports: effective reports.send on
+	// the live stint (grant or role minus deny), never a closed one.
 	err := database.FromContext(ctx, r.db).
 		Table("classes").
 		Select(stintFrag+` OR EXISTS (
 			SELECT 1 FROM center_members cm
-			WHERE cm.center_id = classes.center_id AND cm.teacher_id = ? AND cm.can_send_reports)
+			WHERE cm.center_id = classes.center_id AND cm.teacher_id = ? AND cm.left_at IS NULL
+				AND (EXISTS (SELECT 1 FROM center_member_permissions mp
+						WHERE mp.teacher_id = cm.teacher_id AND mp.center_id = cm.center_id
+							AND mp.permission_key = 'reports.send' AND mp.allowed)
+					OR EXISTS (SELECT 1 FROM center_role_permissions rp
+						WHERE rp.role_id = cm.role_id AND rp.permission_key = 'reports.send'))
+				AND NOT EXISTS (SELECT 1 FROM center_member_permissions mp
+					WHERE mp.teacher_id = cm.teacher_id AND mp.center_id = cm.center_id
+						AND mp.permission_key = 'reports.send' AND NOT mp.allowed))
 		OR EXISTS (
 			SELECT 1 FROM centers ce
 			WHERE ce.id = classes.center_id AND ce.owner_id = ?) AS allowed`,
@@ -422,11 +434,26 @@ func (r *gormRepository) PeriodTeacher(ctx context.Context, centerID, periodID u
 }
 
 func (r *gormRepository) CanSendReports(ctx context.Context, centerID, teacherID uuid.UUID) (bool, error) {
-	// Scan on zero rows leaves the bool false without erroring, which is the
-	// verdict a removed membership must produce anyway.
+	// Effective reports.send on the LIVE stint only: a member override grant
+	// or a role-held grant, minus a deny override — the same algebra
+	// BuildPermSet applies at scope resolution. left_at IS NULL is
+	// load-bearing: closing a membership deletes the stint's override rows
+	// but keeps role_id on the closed row, so without it a role-granted
+	// reports.send would survive removal.
 	var can bool
 	err := database.FromContext(ctx, r.db).
-		Raw(`SELECT can_send_reports FROM center_members WHERE center_id = ? AND teacher_id = ?`, centerID, teacherID).
+		Raw(`SELECT EXISTS (
+			SELECT 1 FROM center_members cm
+			WHERE cm.center_id = @cid AND cm.teacher_id = @tid AND cm.left_at IS NULL
+				AND (EXISTS (SELECT 1 FROM center_member_permissions mp
+						WHERE mp.teacher_id = cm.teacher_id AND mp.center_id = cm.center_id
+							AND mp.permission_key = @perm AND mp.allowed)
+					OR EXISTS (SELECT 1 FROM center_role_permissions rp
+						WHERE rp.role_id = cm.role_id AND rp.permission_key = @perm))
+				AND NOT EXISTS (SELECT 1 FROM center_member_permissions mp
+					WHERE mp.teacher_id = cm.teacher_id AND mp.center_id = cm.center_id
+						AND mp.permission_key = @perm AND NOT mp.allowed))`,
+			map[string]any{"cid": centerID, "tid": teacherID, "perm": authctx.PermReportsSend}).
 		Scan(&can).Error
 	return can, err
 }

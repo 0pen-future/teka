@@ -12,7 +12,7 @@ import (
 	"teka/apps/api/internal/testutil"
 )
 
-// The send-reports flag never touches membership management: a flag holder is
+// The reports.send permission never touches membership management: a flag holder is
 // still a plain member to the offboarding guard and is refused exactly like
 // one — an explicit forbidden, since membership visibility is not a secret
 // inside one's own center.
@@ -31,7 +31,7 @@ func TestSecretaryCannotRemoveMembers(t *testing.T) {
 
 	err := e.centersSvc.RemoveMember(ctx, secScope, member.ID)
 	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code,
-		"the send-reports flag must not let a member offboard anyone")
+		"the reports.send permission must not let a member offboard anyone")
 
 	m := e.liveMembership(t, member.ID)
 	require.Nil(t, m.LeftAt, "the refused removal must not have closed the membership")

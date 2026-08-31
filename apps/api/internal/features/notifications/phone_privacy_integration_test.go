@@ -15,7 +15,7 @@ import (
 )
 
 // The one phone rule on the notification ledger, plus the send gate: bulk
-// sending is reports-oversight work (owner or can_send_reports holder) — a
+// sending is reports-oversight work (owner or reports.send holder) — a
 // plain class teacher may read their own period's ledger but never trigger a
 // send. Ledger rows carry the contact's phone only to owner/oversight or a
 // caller holding an ACTIVE hoc_vu stint over one of the contact's actively

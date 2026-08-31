@@ -75,11 +75,10 @@ func (s *Service) ResolveScope(ctx context.Context, teacherID uuid.UUID) (authct
 		TeacherID: teacherID,
 		CenterID:  row.CenterID,
 		IsOwner:   row.IsOwner,
-		// Dual life: the column stays authoritative while grant/revoke
-		// mirrors into reports.send override rows; the OR only widens, and
-		// membership close/reopen resets both sides atomically so a revoked
-		// permission cannot resurrect through either source.
-		CanSendReports: row.CanSendReports || perms.HasKey(authctx.PermReportsSend),
+		// HasKey, not Has: the field mirrors the member's effective
+		// reports.send only — the owner's authority flows through
+		// ReportsOversight's IsOwner arm, never through this flag.
+		CanSendReports: perms.HasKey(authctx.PermReportsSend),
 		Perms:          perms,
 	}, nil
 }
@@ -249,26 +248,6 @@ func (s *Service) Rename(ctx context.Context, scope authctx.Scope, req RenameReq
 	return nil
 }
 
-// SetSendReports grants or revokes the delegated send-reports permission on
-// a member's live stint; owner-only. The owner can never be the target — the
-// permission is member-only by product decision, which also keeps the owner's
-// send behavior (incl. the cross-teacher 409) frozen. An owner target, a left
-// member, or a stranger all collapse into the same not-found per the tenancy
-// convention.
-func (s *Service) SetSendReports(ctx context.Context, scope authctx.Scope, targetID uuid.UUID, enabled bool) error {
-	if !scope.IsOwner {
-		return apperror.Forbidden("only the owner can manage the send-reports permission")
-	}
-	err := s.repo.SetSendReports(ctx, scope.CenterID, targetID, enabled)
-	if errors.Is(err, ErrNotFound) {
-		return apperror.NotFound("member")
-	}
-	if err != nil {
-		return apperror.Internal(err)
-	}
-	return nil
-}
-
 // RemoveMember offboards a member: takes members.manage. The membership stint closes
 // and the account is disabled — status flips to disabled and every refresh
 // token it holds is revoked, via AccountDisabler (*auth.Service.Disable) — no
@@ -325,13 +304,20 @@ func requirePermissionAdmin(scope authctx.Scope) error {
 	return nil
 }
 
-// normalizeKeys validates keys against the registry and returns them deduped
-// in stable registry order; an unknown key is a 422 on the given field.
+// normalizeKeys validates keys against the catalog and returns them deduped
+// in stable registry order. An unknown key is a 422 on the given field, and
+// so is a deprecated or otherwise non-grantable key — existing rows for those
+// stay effective, but new assignment writes must use the canonical keys.
 func normalizeKeys(field string, keys []string) ([]string, error) {
 	for _, key := range keys {
-		if !authctx.KnownPerm(key) {
+		d, ok := authctx.PermDefOf(key)
+		if !ok {
 			return nil, apperror.Invalid("validation failed",
 				map[string]string{field: fmt.Sprintf("unknown permission key %q", key)})
+		}
+		if !d.Grantable {
+			return nil, apperror.Invalid("validation failed",
+				map[string]string{field: fmt.Sprintf("permission key %q is not assignable", key)})
 		}
 	}
 	seen := make(map[string]struct{}, len(keys))
@@ -349,11 +335,17 @@ func normalizeKeys(field string, keys []string) ([]string, error) {
 
 // knownKeysOf filters a comma-joined DB list through the registry into stable
 // order — assignments for keys a code rollback no longer defines stay in the
-// database but never surface in responses or events.
+// database but never surface in responses or events. Deprecated keys are
+// filtered too: their rows stay effective through alias expansion, but the
+// PUT endpoints accept only grantable keys, so emitting one would make every
+// read-modify-write save of that role or member fail 422. The backfill
+// materialized each deprecated row's canonical equivalents, so a save built
+// from this list preserves effective access while converging storage onto
+// canonical keys.
 func knownKeysOf(joined string) []string {
 	set := make(map[string]struct{})
 	for _, key := range splitKeys(joined) {
-		if authctx.KnownPerm(key) {
+		if d, ok := authctx.PermDefOf(key); ok && !d.Deprecated {
 			set[key] = struct{}{}
 		}
 	}
@@ -381,30 +373,60 @@ func (s *Service) Permissions(ctx context.Context, scope authctx.Scope) (*Permis
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
+	defs := authctx.PermDefs()
 	resp := &PermissionsResponse{
-		Catalog: make([]PermissionInfo, 0, len(authctx.PermKeys())),
-		Roles:   make([]RoleResponse, 0, len(roles)),
-		Members: make([]MemberPermissionsResponse, 0, len(members)),
+		Catalog:        make([]PermissionInfo, 0, len(defs)),
+		Roles:          make([]RoleResponse, 0, len(roles)),
+		Members:        make([]MemberPermissionsResponse, 0, len(members)),
+		CatalogVersion: authctx.CatalogVersion,
 	}
-	for _, key := range authctx.PermKeys() {
-		resp.Catalog = append(resp.Catalog, PermissionInfo{Key: key, Label: authctx.PermLabel(key)})
+	// Deprecated keys stay out of the assignment catalog: they are not
+	// grantable, and the UI must steer owners to the canonical keys.
+	for _, d := range defs {
+		if d.Deprecated {
+			continue
+		}
+		resp.Catalog = append(resp.Catalog, PermissionInfo{
+			Key: d.Key, Label: d.Label,
+			Resource: d.Resource, Action: d.Action,
+			Kind: string(d.Kind), Risk: string(d.Risk),
+			Description: d.Description,
+		})
 	}
 	for _, r := range roles {
 		resp.Roles = append(resp.Roles, RoleResponse{
 			ID: r.ID, Key: r.Key, Name: r.Name, Permissions: knownKeysOf(r.Perms),
+			AssignmentVersion: r.AssignmentVersion,
 		})
 	}
 	for _, m := range members {
 		resp.Members = append(resp.Members, MemberPermissionsResponse{
-			TeacherID: m.TeacherID,
-			FullName:  m.FullName,
-			RoleID:    m.RoleID,
-			RoleKey:   m.RoleKey,
-			Grants:    knownKeysOf(m.Grants),
-			Denies:    knownKeysOf(m.Denies),
+			TeacherID:         m.TeacherID,
+			FullName:          m.FullName,
+			RoleID:            m.RoleID,
+			RoleKey:           m.RoleKey,
+			Grants:            knownKeysOf(m.Grants),
+			Denies:            knownKeysOf(m.Denies),
+			AssignmentVersion: m.AssignmentVersion,
 		})
 	}
 	return resp, nil
+}
+
+// staleAssignmentConflict is the 409 both replacement writes return on a CAS
+// miss: the client's read model is behind, reloading is the only cure.
+func staleAssignmentConflict() error {
+	return apperror.Conflict("Cấu hình quyền đã thay đổi từ lần tải trước, hãy tải lại rồi lưu lại")
+}
+
+// checkCatalogVersion rejects writes composed against a different catalog
+// generation than the server's. Zero means a pre-CAS client — allowed until
+// the UI cutover completes.
+func checkCatalogVersion(v int) error {
+	if v != 0 && v != authctx.CatalogVersion {
+		return staleAssignmentConflict()
+	}
+	return nil
 }
 
 // ReplaceRolePermissions swaps a role's permission set; owner-only. The role
@@ -414,18 +436,12 @@ func (s *Service) ReplaceRolePermissions(ctx context.Context, scope authctx.Scop
 	if err := requirePermissionAdmin(scope); err != nil {
 		return err
 	}
+	if err := checkCatalogVersion(req.CatalogVersion); err != nil {
+		return err
+	}
 	keys, err := normalizeKeys("permissions", req.Permissions)
 	if err != nil {
 		return err
-	}
-	// Dual life: while the legacy can_send_reports column is authoritative,
-	// reports.send is assignable per member only — a role-held grant has no
-	// column to mirror into and would break the phase-4 parity check.
-	for _, key := range keys {
-		if key == authctx.PermReportsSend {
-			return apperror.Invalid("validation failed", map[string]string{
-				"permissions": "reports.send can only be granted per member"})
-		}
 	}
 	var ev RolePermissionsChanged
 	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
@@ -442,10 +458,13 @@ func (s *Service) ReplaceRolePermissions(ctx context.Context, scope authctx.Scop
 			Before:     knownKeysOf(role.Perms),
 			After:      keys,
 		}
-		return s.repo.ReplaceRolePermissions(ctx, roleID, keys)
+		return s.repo.ReplaceRolePermissions(ctx, roleID, keys, req.AssignmentVersion)
 	})
 	if errors.Is(err, ErrNotFound) {
 		return apperror.NotFound("role")
+	}
+	if errors.Is(err, ErrStaleVersion) {
+		return staleAssignmentConflict()
 	}
 	if err != nil {
 		return apperror.From(err)
@@ -456,7 +475,7 @@ func (s *Service) ReplaceRolePermissions(ctx context.Context, scope authctx.Scop
 
 // AssignMemberRole assigns a member's role; owner-only. Role and member must
 // both resolve inside the caller's center; the owner can never be the target
-// (they sit outside the role system, same refusal as SetSendReports).
+// (they sit outside the role system).
 func (s *Service) AssignMemberRole(ctx context.Context, scope authctx.Scope, targetID uuid.UUID, req MemberRoleRequest) error {
 	if err := requirePermissionAdmin(scope); err != nil {
 		return err
@@ -498,11 +517,12 @@ func (s *Service) AssignMemberRole(ctx context.Context, scope authctx.Scope, tar
 }
 
 // ReplaceMemberOverrides swaps a member's grant/deny override lists;
-// owner-only. Adding or removing a reports.send grant dual-writes the legacy
-// can_send_reports column in the same transaction — the column stays
-// authoritative until phase 4 drops it.
+// owner-only.
 func (s *Service) ReplaceMemberOverrides(ctx context.Context, scope authctx.Scope, targetID uuid.UUID, req MemberOverridesRequest) error {
 	if err := requirePermissionAdmin(scope); err != nil {
+		return err
+	}
+	if err := checkCatalogVersion(req.CatalogVersion); err != nil {
 		return err
 	}
 	grants, err := normalizeKeys("grants", req.Grants)
@@ -521,12 +541,6 @@ func (s *Service) ReplaceMemberOverrides(ctx context.Context, scope authctx.Scop
 			}
 		}
 	}
-	canSend := false
-	for _, key := range grants {
-		if key == authctx.PermReportsSend {
-			canSend = true
-		}
-	}
 	var ev MemberOverridesChanged
 	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
 		member, err := s.repo.GetMemberRBAC(ctx, scope.CenterID, targetID)
@@ -543,10 +557,13 @@ func (s *Service) ReplaceMemberOverrides(ctx context.Context, scope authctx.Scop
 			AfterGrants:  grants,
 			AfterDenies:  denies,
 		}
-		return s.repo.ReplaceMemberOverrides(ctx, scope.CenterID, targetID, grants, denies, canSend)
+		return s.repo.ReplaceMemberOverrides(ctx, scope.CenterID, targetID, grants, denies, req.AssignmentVersion)
 	})
 	if errors.Is(err, ErrNotFound) {
 		return apperror.NotFound("member")
+	}
+	if errors.Is(err, ErrStaleVersion) {
+		return staleAssignmentConflict()
 	}
 	if err != nil {
 		return apperror.From(err)

@@ -13,6 +13,7 @@ import (
 	"teka/apps/api/internal/features/centers"
 	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/shared/authctx"
+	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/testutil"
 )
 
@@ -33,7 +34,7 @@ func TestPermissionManagementIsOwnerOnly(t *testing.T) {
 
 	// Give the member every grantable key — the gate must still refuse.
 	require.NoError(t, e.centersSvc.ReplaceMemberOverrides(ctx, ownerScope, member.ID,
-		centers.MemberOverridesRequest{Grants: authctx.PermKeys()}))
+		centers.MemberOverridesRequest{Grants: authctx.GrantableKeys()}))
 	memberScope := e.scope(t, member.ID)
 
 	_, err := e.centersSvc.Permissions(ctx, memberScope)
@@ -61,18 +62,35 @@ func TestPermissionsReadModel(t *testing.T) {
 	resp, err := e.centersSvc.Permissions(ctx, ownerScope)
 	require.NoError(t, err)
 
-	require.Len(t, resp.Catalog, len(authctx.PermKeys()))
-	for i, key := range authctx.PermKeys() {
-		require.Equal(t, key, resp.Catalog[i].Key)
+	// The assignment catalog lists every non-deprecated definition in catalog
+	// order, with the structured fields the permission UI groups and warns on.
+	var active []authctx.PermDef
+	for _, d := range authctx.PermDefs() {
+		if !d.Deprecated {
+			active = append(active, d)
+		}
+	}
+	require.Len(t, resp.Catalog, len(active))
+	for i, d := range active {
+		require.Equal(t, d.Key, resp.Catalog[i].Key)
 		require.NotEmpty(t, resp.Catalog[i].Label, "every catalog key ships a vi label")
+		require.Equal(t, d.Resource, resp.Catalog[i].Resource)
+		require.Equal(t, d.Action, resp.Catalog[i].Action)
+		require.Equal(t, string(d.Kind), resp.Catalog[i].Kind)
+		require.Equal(t, string(d.Risk), resp.Catalog[i].Risk)
+		require.NotEmpty(t, resp.Catalog[i].Description)
 	}
 
 	require.Len(t, resp.Roles, 3)
 	require.Equal(t, "giao_vien", resp.Roles[0].Key)
 	require.Equal(t, "hoc_vu", resp.Roles[1].Key)
 	require.Equal(t, "tro_giang", resp.Roles[2].Key)
+	// System roles are born with the operational default baseline — the same
+	// set the compatibility backfill grants pre-catalog centers. The read
+	// model serializes in catalog order.
 	for _, r := range resp.Roles {
-		require.Empty(t, r.Permissions, "system roles are born with empty sets (v1 parity)")
+		require.Equal(t, authctx.DefaultRoleKeys(), r.Permissions,
+			"system roles are born with the default operational baseline")
 	}
 
 	// The owner never appears as a manageable member.
@@ -99,8 +117,9 @@ func TestPermissionsReadModel(t *testing.T) {
 }
 
 // The role matrix round-trip: replace, read back, and the very next resolved
-// member scope carries the role's set. reports.send stays rejected while the
-// legacy column is authoritative, and unknown keys never reach the table.
+// member scope carries the role's set — reports.send included, now that the
+// role-matrix restriction retired with the legacy column. Unknown keys never
+// reach the table.
 func TestReplaceRolePermissions(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -116,10 +135,14 @@ func TestReplaceRolePermissions(t *testing.T) {
 		centers.RolePermissionsRequest{Permissions: []string{"audit.read", "ghost.key"}})
 	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code, "unknown key must 422")
 
-	err = e.centersSvc.ReplaceRolePermissions(ctx, ownerScope, hocVu,
-		centers.RolePermissionsRequest{Permissions: []string{authctx.PermReportsSend}})
-	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code,
-		"reports.send is per-member only while the column is authoritative")
+	// A role may carry reports.send now that the override rows are the only
+	// source: a member holding the role sends without a per-member grant.
+	require.NoError(t, e.centersSvc.ReplaceRolePermissions(ctx, ownerScope, hocVu,
+		centers.RolePermissionsRequest{Permissions: []string{authctx.PermReportsSend}}))
+	require.NoError(t, e.centersSvc.AssignMemberRole(ctx, ownerScope, member.ID,
+		centers.MemberRoleRequest{RoleID: hocVu}))
+	require.True(t, e.scope(t, member.ID).CanSendReports,
+		"role-granted reports.send must resolve into the member's scope")
 
 	require.NoError(t, e.centersSvc.ReplaceRolePermissions(ctx, ownerScope, hocVu,
 		centers.RolePermissionsRequest{Permissions: []string{
@@ -152,8 +175,78 @@ func TestReplaceRolePermissions(t *testing.T) {
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
 }
 
+// Assignment writes accept only grantable catalog keys: the retired
+// data.view_center_wide is unknown to catalog v3 and rejected with a field
+// error — writes must use the per-resource view_all keys.
+func TestRetiredKeyRejectedOnWrite(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := context.Background()
+
+	owner, _ := testutil.Teacher(t, e.db)
+	member, _ := testutil.Teacher(t, e.db)
+	e.join(t, member.ID, owner.ID)
+	ownerScope := e.scope(t, owner.ID)
+	hocVu := e.roleID(t, ownerScope.CenterID, "hoc_vu")
+
+	err := e.centersSvc.ReplaceRolePermissions(ctx, ownerScope, hocVu,
+		centers.RolePermissionsRequest{Permissions: []string{"data.view_center_wide"}})
+	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code)
+
+	err = e.centersSvc.ReplaceMemberOverrides(ctx, ownerScope, member.ID,
+		centers.MemberOverridesRequest{Grants: []string{"data.view_center_wide"}})
+	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code)
+
+	err = e.centersSvc.ReplaceMemberOverrides(ctx, ownerScope, member.ID,
+		centers.MemberOverridesRequest{Denies: []string{"data.view_center_wide"}})
+	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code)
+}
+
+// A stray data.view_center_wide row — a code rollback re-writing one after
+// migration 000020 deleted them — is unknown to catalog v3 and must drop out
+// of scope resolution without widening anything. Canonical view_all rows keep
+// working, and a canonical deny narrows exactly its resource.
+func TestRetiredScopeRowDropsOnResolve(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+
+	owner, _ := testutil.Teacher(t, e.db)
+	member, _ := testutil.Teacher(t, e.db)
+	e.join(t, member.ID, owner.ID)
+	ownerScope := e.scope(t, owner.ID)
+
+	require.NoError(t, e.db.Exec(
+		`INSERT INTO center_member_permissions (teacher_id, center_id, permission_key, allowed)
+		 VALUES (?, ?, 'data.view_center_wide', TRUE)`, member.ID, ownerScope.CenterID).Error)
+
+	sc := e.scope(t, member.ID)
+	require.False(t, sc.CenterWideFor(authctx.PermStudentsViewAll),
+		"a retired key must not widen any resource")
+	require.False(t, sc.CenterWideFor(authctx.PermBillingViewAll))
+
+	require.NoError(t, e.db.Exec(
+		`INSERT INTO center_member_permissions (teacher_id, center_id, permission_key, allowed)
+		 VALUES (?, ?, 'students.view_all', TRUE), (?, ?, 'classes.view_all', TRUE)`,
+		member.ID, ownerScope.CenterID, member.ID, ownerScope.CenterID).Error)
+
+	sc = e.scope(t, member.ID)
+	require.True(t, sc.CenterWideFor(authctx.PermStudentsViewAll))
+	require.True(t, sc.CenterWideFor(authctx.PermClassesViewAll))
+
+	require.NoError(t, e.db.Exec(
+		`UPDATE center_member_permissions SET allowed = FALSE
+		 WHERE teacher_id = ? AND center_id = ? AND permission_key = 'students.view_all'`,
+		member.ID, ownerScope.CenterID).Error)
+
+	sc = e.scope(t, member.ID)
+	require.False(t, sc.CenterWideFor(authctx.PermStudentsViewAll),
+		"canonical deny narrows its resource")
+	require.True(t, sc.CenterWideFor(authctx.PermClassesViewAll),
+		"a single-canonical deny must not propagate to the other resources")
+}
+
 // Member-targeted endpoints collapse the owner, strangers, and other
-// centers' members into the same 404 — the SetSendReports precedent.
+// centers' members into the same 404 — no target-existence leak.
 func TestMemberTargetTenancy(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -182,8 +275,8 @@ func TestMemberTargetTenancy(t *testing.T) {
 }
 
 // Overrides round-trip: validation (unknown key, grant∩deny), the
-// reports.send dual-write parity with the legacy column in both directions,
-// and the read model reflecting the stored lists.
+// reports.send grant resolving into scope in both directions, and the read
+// model reflecting the stored lists.
 func TestReplaceMemberOverrides(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -202,13 +295,11 @@ func TestReplaceMemberOverrides(t *testing.T) {
 			Grants: []string{authctx.PermAuditRead}, Denies: []string{authctx.PermAuditRead}})
 	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code, "grant∩deny must 422")
 
-	// Granting reports.send dual-writes the authoritative column…
+	// Granting reports.send resolves into the member's next scope…
 	require.NoError(t, e.centersSvc.ReplaceMemberOverrides(ctx, ownerScope, member.ID,
 		centers.MemberOverridesRequest{
 			Grants: []string{authctx.PermReportsSend, authctx.PermAuditRead},
 			Denies: []string{authctx.PermDashboardView}}))
-	require.True(t, e.liveMembership(t, member.ID).CanSendReports,
-		"reports.send grant must set the legacy column in the same tx")
 	sc := e.scope(t, member.ID)
 	require.True(t, sc.CanSendReports)
 	require.True(t, sc.Has(authctx.PermAuditRead))
@@ -220,11 +311,9 @@ func TestReplaceMemberOverrides(t *testing.T) {
 		resp.Members[0].Grants, "grants come back in registry order")
 	require.Equal(t, []string{authctx.PermDashboardView}, resp.Members[0].Denies)
 
-	// …and a replacement without it clears the column again.
+	// …and a replacement without it revokes on the very next resolve.
 	require.NoError(t, e.centersSvc.ReplaceMemberOverrides(ctx, ownerScope, member.ID,
 		centers.MemberOverridesRequest{Grants: []string{authctx.PermAuditRead}}))
-	require.False(t, e.liveMembership(t, member.ID).CanSendReports,
-		"dropping the reports.send grant must clear the legacy column")
 	require.Equal(t, []string{"audit.read"}, e.overrideKeys(t, member.ID, ownerScope.CenterID))
 	sc = e.scope(t, member.ID)
 	require.False(t, sc.CanSendReports)
@@ -335,4 +424,211 @@ func TestMeReturnsEffectivePermissions(t *testing.T) {
 	require.Equal(t, []string{authctx.PermAuditRead, authctx.PermDashboardView},
 		memberMe.(*centers.MemberMeResponse).Permissions,
 		"effective permissions come back in registry order")
+}
+
+// Every center-creation path seeds the system roles with the centralized
+// default baseline: membership alone granted all operational access before
+// the catalog, so a role born empty would silently revoke it at cutover.
+func TestNewCenterRolesCarryDefaultBaseline(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := context.Background()
+
+	owner, _ := testutil.Teacher(t, e.db)
+	ownerScope := e.scope(t, owner.ID)
+
+	// The read model serializes permissions in catalog order — exactly what
+	// DefaultRoleKeys returns.
+	want := authctx.DefaultRoleKeys()
+	resp, err := e.centersSvc.Permissions(ctx, ownerScope)
+	require.NoError(t, err)
+	require.Len(t, resp.Roles, 3)
+	for _, r := range resp.Roles {
+		require.Equalf(t, want, r.Permissions,
+			"role %s must be born with the default baseline", r.Key)
+	}
+
+	// The repository creation path (registration flow) seeds identically.
+	repo := centers.NewRepository(e.db)
+	fresh := &centers.Center{ID: id.New(), Name: "Trung tâm mới", OwnerID: owner.ID}
+	// A second live center per owner is rejected by uq_centers_owner, so
+	// retire the fixture center first.
+	require.NoError(t, e.db.Exec(
+		`UPDATE centers SET deleted_at = now() WHERE id = ?`, ownerScope.CenterID).Error)
+	require.NoError(t, repo.CreateCenter(ctx, fresh))
+	var n int64
+	require.NoError(t, e.db.Raw(
+		`SELECT count(*) FROM center_role_permissions rp
+		 JOIN center_roles cr ON cr.id = rp.role_id
+		 WHERE cr.center_id = ?`, fresh.ID).Scan(&n).Error)
+	require.EqualValues(t, 3*len(authctx.DefaultRoleKeys()), n)
+}
+
+// Assignment writes are CAS-guarded: reads return the catalog version and a
+// per-role / per-member assignment version, replacement writes echo them, a
+// mismatch is a 409 that mutates nothing, and a client omitting the fields
+// (version zero — pre-CAS clients) keeps last-write-wins.
+func TestAssignmentVersionCAS(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := context.Background()
+
+	owner, _ := testutil.Teacher(t, e.db)
+	member, _ := testutil.Teacher(t, e.db)
+	e.join(t, member.ID, owner.ID)
+	ownerScope := e.scope(t, owner.ID)
+	roleID := e.roleID(t, ownerScope.CenterID, "hoc_vu")
+
+	resp, err := e.centersSvc.Permissions(ctx, ownerScope)
+	require.NoError(t, err)
+	require.Equal(t, authctx.CatalogVersion, resp.CatalogVersion)
+	for _, r := range resp.Roles {
+		require.EqualValues(t, 1, r.AssignmentVersion, "roles start at version 1")
+	}
+	require.Len(t, resp.Members, 1)
+	require.EqualValues(t, 1, resp.Members[0].AssignmentVersion)
+
+	// A correct-version write lands and bumps the version.
+	require.NoError(t, e.centersSvc.ReplaceRolePermissions(ctx, ownerScope, roleID,
+		centers.RolePermissionsRequest{
+			Permissions:       []string{authctx.PermClassesRead},
+			CatalogVersion:    authctx.CatalogVersion,
+			AssignmentVersion: 1,
+		}))
+	resp, err = e.centersSvc.Permissions(ctx, ownerScope)
+	require.NoError(t, err)
+	var hocVu *centers.RoleResponse
+	for i := range resp.Roles {
+		if resp.Roles[i].ID == roleID {
+			hocVu = &resp.Roles[i]
+		}
+	}
+	require.NotNil(t, hocVu)
+	require.EqualValues(t, 2, hocVu.AssignmentVersion)
+	require.Equal(t, []string{authctx.PermClassesRead}, hocVu.Permissions)
+
+	// Replaying the stale version is a conflict and mutates nothing.
+	err = e.centersSvc.ReplaceRolePermissions(ctx, ownerScope, roleID,
+		centers.RolePermissionsRequest{
+			Permissions:       []string{authctx.PermClassesEdit},
+			CatalogVersion:    authctx.CatalogVersion,
+			AssignmentVersion: 1,
+		})
+	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
+	resp, err = e.centersSvc.Permissions(ctx, ownerScope)
+	require.NoError(t, err)
+	for _, r := range resp.Roles {
+		if r.ID == roleID {
+			require.Equal(t, []string{authctx.PermClassesRead}, r.Permissions,
+				"a stale write must not mutate the role")
+			require.EqualValues(t, 2, r.AssignmentVersion)
+		}
+	}
+
+	// A stale catalog generation is refused before touching anything.
+	err = e.centersSvc.ReplaceRolePermissions(ctx, ownerScope, roleID,
+		centers.RolePermissionsRequest{
+			Permissions:       []string{authctx.PermClassesEdit},
+			CatalogVersion:    authctx.CatalogVersion - 1,
+			AssignmentVersion: 2,
+		})
+	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
+
+	// A pre-CAS client that sends no versions keeps last-write-wins.
+	require.NoError(t, e.centersSvc.ReplaceRolePermissions(ctx, ownerScope, roleID,
+		centers.RolePermissionsRequest{Permissions: []string{}}))
+
+	// The same contract guards member overrides.
+	require.NoError(t, e.centersSvc.ReplaceMemberOverrides(ctx, ownerScope, member.ID,
+		centers.MemberOverridesRequest{
+			Grants:            []string{authctx.PermAuditRead},
+			CatalogVersion:    authctx.CatalogVersion,
+			AssignmentVersion: 1,
+		}))
+	resp, err = e.centersSvc.Permissions(ctx, ownerScope)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, resp.Members[0].AssignmentVersion)
+	require.Equal(t, []string{authctx.PermAuditRead}, resp.Members[0].Grants)
+
+	err = e.centersSvc.ReplaceMemberOverrides(ctx, ownerScope, member.ID,
+		centers.MemberOverridesRequest{
+			Denies:            []string{authctx.PermAuditRead},
+			CatalogVersion:    authctx.CatalogVersion,
+			AssignmentVersion: 1,
+		})
+	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
+	resp, err = e.centersSvc.Permissions(ctx, ownerScope)
+	require.NoError(t, err)
+	require.Equal(t, []string{authctx.PermAuditRead}, resp.Members[0].Grants,
+		"a stale member write must not mutate the overrides")
+	require.Empty(t, resp.Members[0].Denies)
+}
+
+// A concurrent departure between the caller's stint read and the CAS bump
+// leaves the bump matching zero rows. The repository re-probes the stint so a
+// departed member reports not-found while a live stint at another version
+// stays a stale-version conflict — answering the departed case with a
+// conflict would send the client into an endless refetch-and-retry loop for
+// a member who no longer exists.
+func TestReplaceOverridesRacedDepartureIsNotFoundNotStale(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, e.db)
+	member, _ := testutil.Teacher(t, e.db)
+	e.join(t, member.ID, owner.ID)
+	centerID := e.scope(t, owner.ID).CenterID
+	repo := centers.NewRepository(e.db)
+
+	// Live stint, wrong version: a genuine CAS miss.
+	err := repo.ReplaceMemberOverrides(ctx, centerID, member.ID, nil, nil, 99)
+	require.ErrorIs(t, err, centers.ErrStaleVersion)
+
+	// Stint closed after the caller's read: the same zero-row bump must now
+	// report the member gone, not a retryable conflict.
+	require.NoError(t, repo.CloseMembership(ctx, member.ID, centerID))
+	err = repo.ReplaceMemberOverrides(ctx, centerID, member.ID, nil, nil, 1)
+	require.ErrorIs(t, err, centers.ErrNotFound)
+}
+
+// TestRetiredScopeKeyRoundTripStaysSavable pins the unknown-key contract on
+// the assignment read models. A stray data.view_center_wide row (a code
+// rollback re-writing one after migration 000020) must never be emitted by
+// the read model: the PUT endpoints reject non-catalog keys, so an emitted
+// retired key would make every save of such a role or member fail 422.
+func TestRetiredScopeKeyRoundTripStaysSavable(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := context.Background()
+
+	owner, _ := testutil.Teacher(t, e.db)
+	member, _ := testutil.Teacher(t, e.db)
+	e.join(t, member.ID, owner.ID)
+	ownerScope := e.scope(t, owner.ID)
+	hocVu := e.roleID(t, ownerScope.CenterID, "hoc_vu")
+
+	// A rollback-touched center: role and member hold a stray retired row.
+	require.NoError(t, e.db.Exec(
+		`INSERT INTO center_role_permissions (role_id, permission_key)
+		 VALUES (?, 'data.view_center_wide')`, hocVu).Error)
+	require.NoError(t, e.db.Exec(
+		`INSERT INTO center_member_permissions (teacher_id, center_id, permission_key, allowed)
+		 VALUES (?, ?, 'data.view_center_wide', TRUE)`,
+		member.ID, ownerScope.CenterID).Error)
+
+	resp, err := e.centersSvc.Permissions(ctx, ownerScope)
+	require.NoError(t, err)
+	require.NotContains(t, resp.Roles[1].Permissions, "data.view_center_wide",
+		"retired keys stay out of the role read model")
+	require.NotContains(t, resp.Members[0].Grants, "data.view_center_wide",
+		"retired keys stay out of the override read model")
+
+	// The UI saves exactly what it read back; neither write may 422.
+	require.NoError(t, e.centersSvc.ReplaceRolePermissions(ctx, ownerScope, hocVu,
+		centers.RolePermissionsRequest{Permissions: resp.Roles[1].Permissions}))
+	require.NoError(t, e.centersSvc.ReplaceMemberOverrides(ctx, ownerScope, member.ID,
+		centers.MemberOverridesRequest{
+			Grants: resp.Members[0].Grants,
+			Denies: resp.Members[0].Denies,
+		}))
 }

@@ -62,12 +62,8 @@ type fakeSessionSource struct {
 // GetReadable mirrors GetWritable: the unit fakes carry no class_staff table,
 // so the readable port collapses onto the own-rows one; the widened behavior
 // is covered by integration tests.
-func (f *fakeClassSource) GetReadable(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, []string, error) {
-	class, err := f.GetWritable(ctx, sc, classID, authctx.CapLessonPlanWrite)
-	if err != nil {
-		return nil, nil, err
-	}
-	return class, nil, nil
+func (f *fakeClassSource) GetReadable(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, error) {
+	return f.GetWritable(ctx, sc, classID, authctx.CapLessonPlanWrite)
 }
 
 func newFakeSessionSource() *fakeSessionSource {

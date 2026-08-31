@@ -4,13 +4,11 @@ import "github.com/gin-gonic/gin"
 
 // RegisterRoutes mounts the center endpoints under /centers, all behind
 // authentication plus per-request scope resolution.
-func RegisterRoutes(rg *gin.RouterGroup, h *Handler, requireAuth, resolveScope gin.HandlerFunc) {
-	g := rg.Group("/centers", requireAuth, resolveScope)
+func RegisterRoutes(rg *gin.RouterGroup, h *Handler, auth ...gin.HandlerFunc) {
+	g := rg.Group("/centers", auth...)
 	g.GET("/me", h.me)
 	g.PATCH("/me", h.rename)
 	g.DELETE("/me/members/:teacherId", h.removeMember)
-	g.POST("/me/members/:teacherId/send-reports", h.grantSendReports)
-	g.DELETE("/me/members/:teacherId/send-reports", h.revokeSendReports)
 	g.GET("/me/permissions", h.permissions)
 	g.PUT("/me/roles/:roleId/permissions", h.replaceRolePermissions)
 	g.PUT("/me/members/:teacherId/role", h.assignMemberRole)
@@ -20,8 +18,8 @@ func RegisterRoutes(rg *gin.RouterGroup, h *Handler, requireAuth, resolveScope g
 // RegisterDashboardRoutes mounts the owner dashboard separately from
 // RegisterRoutes: the dashboard consumes classes, sessions, and attendance,
 // which are constructed after the membership endpoints are registered.
-func RegisterDashboardRoutes(rg *gin.RouterGroup, h *DashboardHandler, requireAuth, resolveScope gin.HandlerFunc) {
-	g := rg.Group("/centers/dashboard", requireAuth, resolveScope)
+func RegisterDashboardRoutes(rg *gin.RouterGroup, h *DashboardHandler, auth ...gin.HandlerFunc) {
+	g := rg.Group("/centers/dashboard", auth...)
 	g.GET("/teachers", h.teachers)
 	g.GET("/overview", h.overview)
 	g.GET("/teachers/:teacherId/classes", h.teacherClasses)

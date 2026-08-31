@@ -4,12 +4,12 @@ import "github.com/gin-gonic/gin"
 
 // RegisterRoutes mounts the statement endpoints under /billing-periods and
 // /statements, all behind authentication and center-scope resolution.
-func RegisterRoutes(rg *gin.RouterGroup, h *Handler, requireAuth, resolveScope gin.HandlerFunc) {
-	periods := rg.Group("/billing-periods", requireAuth, resolveScope)
+func RegisterRoutes(rg *gin.RouterGroup, h *Handler, auth ...gin.HandlerFunc) {
+	periods := rg.Group("/billing-periods", auth...)
 	periods.POST("/:id/statements/generate", h.generate)
 	periods.GET("/:id/statements", h.list)
 
-	g := rg.Group("/statements", requireAuth, resolveScope)
+	g := rg.Group("/statements", auth...)
 	g.GET("/:id", h.get)
 	g.POST("/:id/revoke", h.revoke)
 }

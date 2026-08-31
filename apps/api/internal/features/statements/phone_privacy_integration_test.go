@@ -113,7 +113,7 @@ func TestStatementPhoneAndURLFollowTheOnePhoneRule(t *testing.T) {
 	require.Nil(t, viaHocVu.URL, "hoc_vu never receives the family URL — only owner/oversight do")
 }
 
-// A member granted data.view_center_wide (no reports oversight, no hoc_vu
+// A member granted statements.view_all (no reports oversight, no hoc_vu
 // stint) can reach Generate on another teacher's period through the
 // center-wide period lookup. The phone mask must be derived for THAT caller —
 // deriving it for the period's own teacher would hand the wide reader a phone
@@ -164,8 +164,8 @@ func TestGenerateMasksPhoneForCenterWideReader(t *testing.T) {
 	require.NotNil(t, teacherResp.Phone, "the period teacher's stint unlocks their own view")
 
 	wideScope := testutil.ScopeFor(t, db, wideReader.ID)
-	wideScope.Perms = authctx.BuildPermSet(nil, []string{authctx.PermDataViewCenterWide}, nil)
-	require.True(t, wideScope.CenterWide())
+	wideScope.Perms = authctx.BuildPermSet(nil, []string{authctx.PermStatementsViewAll}, nil)
+	require.True(t, wideScope.CenterWideFor(authctx.PermStatementsViewAll))
 	require.False(t, wideScope.ReportsOversight())
 
 	genWide, err := statementsSvc.Generate(ctx, wideScope, period.ID)

@@ -13,22 +13,305 @@ export const API_URL = "http://localhost:8080/api/v1";
  */
 export const PUBLIC_API_URL = API_URL.replace(/\/api\/v1\/?$/, "");
 
+/** Version stamp of the mirrored catalog below (`authctx.CatalogVersion`). */
+export const CATALOG_VERSION = 3;
+
+function perm(
+  key: string,
+  label: string,
+  kind: "crud" | "scope" | "special",
+  risk: "low" | "medium" | "high",
+  description: string,
+) {
+  const [resource = "", action = ""] = key.split(".");
+  return { key, label, resource, action, kind, risk, description };
+}
+
+const SCOPE_DESC = "Mở rộng phạm vi dữ liệu từ phần mình phụ trách sang toàn trung tâm.";
+
 /**
- * The full permission catalog, mirroring `authctx/permissions.go` (keys and
- * Vietnamese labels) in registry order. The owner's `/centers/me` body
- * carries every key — the server folds the owner bypass into the effective
- * array.
+ * The full assignment catalog, mirroring `authctx/catalog.go` (keys,
+ * Vietnamese labels, structured fields) in registry order — deprecated keys
+ * stay out, exactly as `GET /centers/me/permissions` serializes it. The
+ * owner's `/centers/me` body carries every key — the server folds the owner
+ * bypass into the effective array.
  */
 export const PERMISSION_CATALOG = [
-  { key: "data.view_center_wide", label: "Xem dữ liệu toàn trung tâm" },
-  { key: "reports.send", label: "Gửi báo cáo học phí" },
-  { key: "members.manage", label: "Quản lý thành viên" },
-  { key: "center.manage", label: "Quản lý trung tâm" },
-  { key: "invitations.manage", label: "Quản lý lời mời" },
-  { key: "audit.read", label: "Xem nhật ký hoạt động" },
-  { key: "imports.run", label: "Import dữ liệu" },
-  { key: "dashboard.view", label: "Xem dashboard trung tâm" },
-  { key: "teaching.review_queue", label: "Xem hàng chờ duyệt giáo án" },
+  perm("classes.create", "Tạo lớp học", "crud", "low", "Tạo lớp học mới trong trung tâm."),
+  perm(
+    "classes.list",
+    "Xem danh sách lớp học",
+    "crud",
+    "low",
+    "Xem danh sách lớp học trong phạm vi được thấy.",
+  ),
+  perm(
+    "classes.read",
+    "Xem chi tiết lớp học",
+    "crud",
+    "low",
+    "Xem chi tiết lớp học và danh sách nhân sự của lớp.",
+  ),
+  perm("classes.edit", "Sửa lớp học", "crud", "low", "Cập nhật thông tin lớp học."),
+  perm("classes.delete", "Xóa lớp học", "crud", "medium", "Xóa lớp học khỏi trung tâm."),
+  perm(
+    "classes.archive",
+    "Lưu trữ lớp học",
+    "special",
+    "medium",
+    "Chuyển lớp học sang trạng thái lưu trữ.",
+  ),
+  perm("classes.view_all", "Xem mọi lớp học", "scope", "high", SCOPE_DESC),
+  perm("schedules.create", "Tạo lịch học", "crud", "low", "Thêm lịch học định kỳ cho lớp."),
+  perm("schedules.edit", "Sửa lịch học", "crud", "low", "Cập nhật lịch học định kỳ của lớp."),
+  perm("schedules.delete", "Xóa lịch học", "crud", "low", "Xóa lịch học định kỳ của lớp."),
+  perm("contacts.create", "Tạo liên hệ", "crud", "low", "Tạo liên hệ phụ huynh/học viên mới."),
+  perm(
+    "contacts.list",
+    "Xem danh sách liên hệ",
+    "crud",
+    "low",
+    "Xem danh sách liên hệ trong phạm vi được thấy.",
+  ),
+  perm("contacts.read", "Xem chi tiết liên hệ", "crud", "low", "Xem chi tiết một liên hệ."),
+  perm("contacts.edit", "Sửa liên hệ", "crud", "low", "Cập nhật thông tin liên hệ."),
+  perm("contacts.delete", "Xóa liên hệ", "crud", "medium", "Xóa liên hệ khỏi trung tâm."),
+  perm(
+    "contacts.link_zalo",
+    "Liên kết Zalo",
+    "special",
+    "low",
+    "Gán hoặc gỡ liên kết Zalo của một liên hệ.",
+  ),
+  perm("contacts.view_all", "Xem mọi liên hệ", "scope", "high", SCOPE_DESC),
+  perm("students.create", "Tạo học viên", "crud", "low", "Tạo hồ sơ học viên mới."),
+  perm(
+    "students.list",
+    "Xem danh sách học viên",
+    "crud",
+    "low",
+    "Xem danh sách học viên trong phạm vi được thấy.",
+  ),
+  perm("students.read", "Xem chi tiết học viên", "crud", "low", "Xem chi tiết hồ sơ học viên."),
+  perm("students.edit", "Sửa học viên", "crud", "low", "Cập nhật hồ sơ học viên."),
+  perm(
+    "students.delete",
+    "Xóa học viên",
+    "crud",
+    "high",
+    "Ẩn danh hóa và xóa hồ sơ học viên — không khôi phục được.",
+  ),
+  perm("students.view_all", "Xem mọi học viên", "scope", "high", SCOPE_DESC),
+  perm(
+    "enrollments.create",
+    "Ghi danh học viên",
+    "crud",
+    "low",
+    "Ghi danh học viên vào lớp, gồm cả danh sách chọn học viên.",
+  ),
+  perm(
+    "enrollments.list",
+    "Xem danh sách ghi danh",
+    "crud",
+    "low",
+    "Xem danh sách ghi danh trong phạm vi được thấy.",
+  ),
+  perm(
+    "enrollments.read",
+    "Xem chi tiết ghi danh",
+    "crud",
+    "low",
+    "Xem chi tiết một lượt ghi danh.",
+  ),
+  perm("enrollments.delete", "Xóa ghi danh", "crud", "medium", "Xóa một lượt ghi danh."),
+  perm(
+    "enrollments.end",
+    "Kết thúc ghi danh",
+    "special",
+    "medium",
+    "Kết thúc lượt ghi danh của học viên trong lớp.",
+  ),
+  perm("enrollments.view_all", "Xem mọi ghi danh", "scope", "high", SCOPE_DESC),
+  perm("sessions.create", "Tạo buổi học", "crud", "low", "Tạo buổi học cho lớp."),
+  perm(
+    "sessions.list",
+    "Xem danh sách buổi học",
+    "crud",
+    "low",
+    "Xem danh sách buổi học, gồm cả danh sách buổi chờ xử lý.",
+  ),
+  perm("sessions.read", "Xem chi tiết buổi học", "crud", "low", "Xem chi tiết một buổi học."),
+  perm("sessions.delete", "Xóa buổi học", "crud", "medium", "Xóa một buổi học."),
+  perm(
+    "sessions.lifecycle",
+    "Đổi trạng thái buổi học",
+    "special",
+    "medium",
+    "Hủy, bỏ hủy hoặc tạm hoãn một buổi học.",
+  ),
+  perm("sessions.view_all", "Xem mọi buổi học", "scope", "high", SCOPE_DESC),
+  perm("attendance.read", "Xem điểm danh", "crud", "low", "Xem điểm danh của buổi học."),
+  perm(
+    "attendance.confirm",
+    "Xác nhận điểm danh",
+    "special",
+    "medium",
+    "Ghi nhận và xác nhận điểm danh của buổi học.",
+  ),
+  perm("attendance.view_all", "Xem mọi điểm danh", "scope", "high", SCOPE_DESC),
+  perm("scores.read", "Xem điểm số", "crud", "low", "Xem điểm số và cấu phần điểm của lớp."),
+  perm("scores.edit", "Sửa điểm số", "crud", "medium", "Nhập và cập nhật điểm số của buổi học."),
+  perm(
+    "teaching.read",
+    "Xem giảng dạy",
+    "crud",
+    "low",
+    "Xem giáo trình, giáo án và nhận xét của lớp.",
+  ),
+  perm(
+    "teaching.edit",
+    "Sửa giảng dạy",
+    "crud",
+    "low",
+    "Cập nhật giáo trình, giáo án, ghi chú và nhận xét buổi học.",
+  ),
+  perm(
+    "teaching.review_queue",
+    "Xem hàng chờ duyệt giáo án",
+    "special",
+    "low",
+    "Xem hàng chờ duyệt giáo án của trung tâm.",
+  ),
+  perm("billing.create", "Tạo kỳ học phí", "crud", "low", "Khởi tạo kỳ học phí theo tháng."),
+  perm("billing.list", "Xem danh sách kỳ học phí", "crud", "low", "Xem danh sách kỳ học phí."),
+  perm(
+    "billing.read",
+    "Xem chi tiết học phí",
+    "crud",
+    "low",
+    "Xem chi tiết kỳ học phí, hóa đơn, điều chỉnh và tình hình thu.",
+  ),
+  perm(
+    "billing.draft",
+    "Tạo nháp học phí",
+    "special",
+    "medium",
+    "Tính toán lại hóa đơn nháp của kỳ học phí.",
+  ),
+  perm(
+    "billing.close",
+    "Chốt kỳ học phí",
+    "special",
+    "high",
+    "Chốt kỳ học phí — khóa hóa đơn của kỳ.",
+  ),
+  perm(
+    "billing.void_invoice",
+    "Hủy hóa đơn",
+    "special",
+    "high",
+    "Hủy hiệu lực một hóa đơn đã phát hành.",
+  ),
+  perm(
+    "billing.adjust_invoice",
+    "Điều chỉnh hóa đơn",
+    "special",
+    "high",
+    "Thêm khoản điều chỉnh vào hóa đơn.",
+  ),
+  perm("billing.view_all", "Xem mọi dữ liệu học phí", "scope", "high", SCOPE_DESC),
+  perm("payments.create", "Ghi nhận thanh toán", "crud", "low", "Ghi nhận một khoản thanh toán."),
+  perm("payments.list", "Xem danh sách thanh toán", "crud", "low", "Xem danh sách thanh toán."),
+  perm(
+    "payments.read",
+    "Xem chi tiết thanh toán",
+    "crud",
+    "low",
+    "Xem chi tiết một khoản thanh toán.",
+  ),
+  perm(
+    "payments.allocate",
+    "Phân bổ thanh toán",
+    "special",
+    "medium",
+    "Phân bổ khoản thanh toán vào hóa đơn.",
+  ),
+  perm(
+    "payments.reverse",
+    "Hoàn tác thanh toán",
+    "special",
+    "high",
+    "Hoàn tác một khoản thanh toán đã ghi nhận.",
+  ),
+  perm("payments.view_all", "Xem mọi thanh toán", "scope", "high", SCOPE_DESC),
+  perm(
+    "statements.list",
+    "Xem danh sách sao kê",
+    "crud",
+    "low",
+    "Xem danh sách sao kê học phí của kỳ.",
+  ),
+  perm("statements.read", "Xem chi tiết sao kê", "crud", "low", "Xem chi tiết một sao kê học phí."),
+  perm(
+    "statements.generate",
+    "Phát hành sao kê",
+    "special",
+    "high",
+    "Phát hành sao kê học phí cho kỳ.",
+  ),
+  perm(
+    "statements.revoke",
+    "Thu hồi sao kê",
+    "special",
+    "high",
+    "Thu hồi một sao kê đã phát hành.",
+  ),
+  perm("statements.view_all", "Xem mọi sao kê", "scope", "high", SCOPE_DESC),
+  perm(
+    "notifications.mark_sent",
+    "Đánh dấu đã gửi thông báo",
+    "special",
+    "low",
+    "Đánh dấu thông báo học phí đã được gửi tay.",
+  ),
+  perm("notifications.view_all", "Xem mọi thông báo", "scope", "high", SCOPE_DESC),
+  perm(
+    "reports.send",
+    "Gửi báo cáo học phí",
+    "special",
+    "high",
+    "Gửi thông báo học phí hàng loạt và theo dõi lượt gửi.",
+  ),
+  perm("members.manage", "Quản lý thành viên", "special", "high", "Gỡ thành viên khỏi trung tâm."),
+  perm("center.manage", "Quản lý trung tâm", "special", "medium", "Cập nhật thông tin trung tâm."),
+  perm(
+    "invitations.manage",
+    "Quản lý lời mời",
+    "special",
+    "medium",
+    "Tạo, xem và thu hồi lời mời tham gia trung tâm.",
+  ),
+  perm(
+    "audit.read",
+    "Xem nhật ký hoạt động",
+    "crud",
+    "medium",
+    "Xem nhật ký hoạt động của trung tâm.",
+  ),
+  perm(
+    "imports.run",
+    "Import dữ liệu",
+    "special",
+    "high",
+    "Import danh sách lớp, học viên và liên hệ từ file.",
+  ),
+  perm(
+    "dashboard.view",
+    "Xem dashboard trung tâm",
+    "special",
+    "medium",
+    "Xem dashboard tổng hợp tài chính và vận hành của trung tâm.",
+  ),
 ];
 
 export const ALL_PERMISSION_KEYS = PERMISSION_CATALOG.map((p) => p.key);
@@ -44,18 +327,21 @@ export const DEFAULT_ROLES = {
     key: "giao_vien",
     name: "Giáo viên",
     permissions: [] as string[],
+    assignment_version: 1,
   },
   hocVu: {
     id: "50000000-0000-4000-8000-000000000002",
     key: "hoc_vu",
     name: "Học vụ",
     permissions: [] as string[],
+    assignment_version: 1,
   },
   troGiang: {
     id: "50000000-0000-4000-8000-000000000003",
     key: "tro_giang",
     name: "Trợ giảng",
     permissions: [] as string[],
+    assignment_version: 1,
   },
 };
 
@@ -63,6 +349,7 @@ export const DEFAULT_CENTER_PERMISSIONS = {
   catalog: PERMISSION_CATALOG,
   roles: [DEFAULT_ROLES.giaoVien, DEFAULT_ROLES.hocVu, DEFAULT_ROLES.troGiang],
   members: [],
+  catalog_version: CATALOG_VERSION,
 };
 
 // --- Envelope builders (mirror the Go API's response shape exactly) ---

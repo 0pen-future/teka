@@ -7,7 +7,6 @@ import "testing"
 // dropped from every resolved scope.
 func TestPermRegistryCompleteAndUnique(t *testing.T) {
 	constants := []string{
-		PermDataViewCenterWide,
 		PermReportsSend,
 		PermMembersManage,
 		PermCenterManage,
@@ -17,8 +16,8 @@ func TestPermRegistryCompleteAndUnique(t *testing.T) {
 		PermDashboardView,
 		PermTeachingReviewQueue,
 	}
-	if len(permRegistry) != len(constants) {
-		t.Fatalf("registry has %d keys, %d constants declared", len(permRegistry), len(constants))
+	if len(permRegistry) != len(permCatalog) {
+		t.Fatalf("registry has %d keys, catalog defines %d", len(permRegistry), len(permCatalog))
 	}
 	seen := map[string]bool{}
 	for _, key := range permRegistry {
@@ -54,9 +53,9 @@ func TestBuildPermSet(t *testing.T) {
 	}
 }
 
-func TestHasAndCenterWide(t *testing.T) {
+func TestHasAndCenterWideFor(t *testing.T) {
 	owner := Scope{IsOwner: true}
-	if !owner.Has("anything.at.all") || !owner.CenterWide() {
+	if !owner.Has("anything.at.all") || !owner.CenterWideFor(PermClassesViewAll) || !owner.WriteWide() {
 		t.Error("owner bypass must hold unconditionally")
 	}
 
@@ -64,17 +63,20 @@ func TestHasAndCenterWide(t *testing.T) {
 	if !member.Has(PermAuditRead) {
 		t.Error("member must hold granted key")
 	}
-	if member.Has(PermImportsRun) || member.CenterWide() {
+	if member.Has(PermImportsRun) || member.CenterWideFor(PermClassesViewAll) {
 		t.Error("member must not hold ungranted keys")
 	}
 
-	wide := Scope{Perms: BuildPermSet(nil, []string{PermDataViewCenterWide}, nil)}
-	if !wide.CenterWide() {
-		t.Error("data.view_center_wide must widen scoping")
+	wide := Scope{Perms: BuildPermSet(nil, []string{PermClassesViewAll}, nil)}
+	if !wide.CenterWideFor(PermClassesViewAll) {
+		t.Error("a granted view_all key must widen its resource")
+	}
+	if wide.WriteWide() {
+		t.Error("scope keys widen visibility, never writes")
 	}
 
 	var empty Scope
-	if empty.Has(PermAuditRead) || empty.CenterWide() {
+	if empty.Has(PermAuditRead) || empty.CenterWideFor(PermClassesViewAll) {
 		t.Error("nil Perms must behave as empty set")
 	}
 }

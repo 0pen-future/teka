@@ -84,22 +84,26 @@ func NewRepository(db *gorm.DB) Repository {
 // reads.
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("classes.center_id = ?", sc.CenterID)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermClassesViewAll) {
 		q = q.Where("classes.teacher_id = ?", sc.TeacherID)
 	}
 	return q
 }
 
-// readScoped widens scoped for reads only: a member also sees classes they
+// readScoped is the stint read filter: a member sees exactly the classes they
 // hold any class_staff stint on — ended stints included, so a closed
-// assignment keeps read access to the class's history. Write paths must keep
-// using scoped.
+// assignment keeps read access to the class's history. There is no creator
+// (teacher_id) arm: every class's current teacher holds a giao_vien stint —
+// ACTIVE via the create-hook and handoff dual-write, or soft-closed when the
+// holder left the center — so the pointer can never reach a row the stint
+// filter misses. That is also why ReadExists deliberately ignores ended_at:
+// filtering to ACTIVE would strand departed-and-returned teachers off their
+// own classes. Write paths must keep using scoped.
 func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("classes.center_id = ?", sc.CenterID)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermClassesViewAll) {
 		frag, _ := classscope.ReadExists("classes.id")
-		q = q.Where("(classes.teacher_id = ? OR "+frag+")",
-			sc.TeacherID, sc.TeacherID, sc.CenterID)
+		q = q.Where(frag, sc.TeacherID, sc.CenterID)
 	}
 	return q
 }
@@ -111,7 +115,7 @@ func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm
 // the service's capability-map lookup; this method only binds it.
 func (r *gormRepository) writeScoped(ctx context.Context, sc authctx.Scope, roles []string) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("classes.center_id = ?", sc.CenterID)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermClassesViewAll) {
 		frag, _ := classscope.WriteExists("classes.id")
 		q = q.Where(frag, sc.TeacherID, sc.CenterID, roles)
 	}
@@ -121,7 +125,7 @@ func (r *gormRepository) writeScoped(ctx context.Context, sc authctx.Scope, role
 // scopedSchedules is scoped's counterpart for the class_schedules table.
 func (r *gormRepository) scopedSchedules(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("class_schedules.center_id = ?", sc.CenterID)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermClassesViewAll) {
 		q = q.Where("class_schedules.teacher_id = ?", sc.TeacherID)
 	}
 	return q
@@ -244,15 +248,16 @@ func (r *gormRepository) SoftDelete(ctx context.Context, sc authctx.Scope, id uu
 	return nil
 }
 
+// CountOpenEnrollments is deliberately center-wide: it guards class deletion
+// against open enrollments, an integrity fact about the class that does not
+// depend on who is asking. Narrowing it to the caller's rows would let a
+// delete slip past enrollments anchored by someone else.
 func (r *gormRepository) CountOpenEnrollments(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (int64, error) {
 	var n int64
-	q := database.FromContext(ctx, r.db).
+	err := database.FromContext(ctx, r.db).
 		Table("enrollments").
-		Where("center_id = ? AND class_id = ? AND ended_on IS NULL AND deleted_at IS NULL", sc.CenterID, classID)
-	if !sc.CenterWide() {
-		q = q.Where("teacher_id = ?", sc.TeacherID)
-	}
-	err := q.Count(&n).Error
+		Where("center_id = ? AND class_id = ? AND ended_on IS NULL AND deleted_at IS NULL", sc.CenterID, classID).
+		Count(&n).Error
 	return n, err
 }
 

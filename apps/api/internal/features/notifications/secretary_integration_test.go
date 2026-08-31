@@ -27,7 +27,7 @@ const (
 
 // seedSecretaryCenter builds the delegation cast on the deps' database: an
 // owner's center holding teacherX (a plain member with no flag) and a
-// secretary member holding can_send_reports. Returns the three teacher ids.
+// secretary member holding reports.send. Returns the three teacher ids.
 func seedSecretaryCenter(t *testing.T, d *deps) (owner, teacherX, secretary uuid.UUID) {
 	t.Helper()
 	ownerAcc, _ := testutil.Teacher(t, d.db)
@@ -64,7 +64,7 @@ func TestSecretaryDelegatedPersonalSendStampsHerAsSender(t *testing.T) {
 		Purpose: "statement",
 		Channel: notifications.ChannelZaloPersonal,
 	})
-	require.NoError(t, err, "a can_send_reports member must be able to run a personal send on another teacher's period")
+	require.NoError(t, err, "a reports.send-holding member must be able to run a personal send on another teacher's period")
 	require.NotNil(t, resp.RunID)
 	require.Equal(t, 2, resp.PersonalQueuedCount)
 	require.Equal(t, 1, resp.FallbackManualCount, "the unmapped contact must fall back to manual, delegated or not")
@@ -342,7 +342,7 @@ func TestNewSendFailsOutAnAbandonedDelegatedRunsQueuedRows(t *testing.T) {
 }
 
 // TestPlainMemberCannotCreateSendsOnAnyChannelButKeepsMarkSent pins the D8
-// breaking change: a member without can_send_reports is refused with an
+// breaking change: a member without reports.send is refused with an
 // explicit 403 on every send channel — their OWN period included — and on
 // resume, while marking an already-existing row of theirs sent keeps working.
 func TestPlainMemberCannotCreateSendsOnAnyChannelButKeepsMarkSent(t *testing.T) {

@@ -48,12 +48,14 @@ func TestStaffAssignmentWidensStudentReads(t *testing.T) {
 	require.EqualValues(t, 1, total)
 	require.Equal(t, student.ID, rows[0].ID)
 
-	// Write-freeze: student CRUD is the owner's alone — every member write is
-	// an honest 403, stint or no stint.
+	// Reads widened, writes not: the route policy decides who may call the
+	// write endpoints, and the service keeps writes inside the caller's own
+	// rows — a stint-readable student outside them is masked as not-found so
+	// the widened read can never leak writability.
 	_, err = svc.Update(ctx, scStaff, student.ID,
 		students.UpdateRequest{FullName: "Bé An (edited)", ContactID: contact.ID})
-	require.Equal(t, 403, apperror.From(err).Status)
-	require.Equal(t, 403, apperror.From(svc.Delete(ctx, scStaff, student.ID)).Status)
+	require.Equal(t, 404, apperror.From(err).Status)
+	require.Equal(t, 404, apperror.From(svc.Delete(ctx, scStaff, student.ID)).Status)
 
 	// An ended stint keeps history readable.
 	require.NoError(t, db.Exec(

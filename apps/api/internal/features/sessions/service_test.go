@@ -76,15 +76,16 @@ func (f *fakeClassSource) GetWritable(_ context.Context, sc authctx.Scope, class
 	return c.class, nil
 }
 
-// GetReadable mirrors GetWritable: the unit fakes carry no class_staff table,
-// so the readable port collapses onto the own-rows one; the widened behavior
-// is covered by integration tests.
-func (f *fakeClassSource) GetReadable(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, []string, error) {
+// GetReadableWithRoles mirrors GetWritable: the unit fakes carry no
+// class_staff table, so the readable port collapses onto the own-rows one and
+// returns the giao_vien role for it; the widened behavior is covered by
+// integration tests.
+func (f *fakeClassSource) GetReadableWithRoles(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, []string, error) {
 	class, err := f.GetWritable(ctx, sc, classID, authctx.CapSessionsWrite)
 	if err != nil {
 		return nil, nil, err
 	}
-	return class, nil, nil
+	return class, []string{authctx.StaffRoleGiaoVien}, nil
 }
 
 func (f *fakeClassSource) ListEffectiveSchedules(_ context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]classes.Schedule, error) {

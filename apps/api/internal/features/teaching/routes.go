@@ -7,8 +7,8 @@ import "github.com/gin-gonic/gin"
 // /classes/:id group, the session note/marks writes join
 // sessions.RegisterRoutes's /sessions/:id group, and the owner review queue
 // gets its own /teaching prefix (it is center-wide, not class-scoped).
-func RegisterRoutes(rg *gin.RouterGroup, h *Handler, requireAuth, resolveScope gin.HandlerFunc) {
-	classGroup := rg.Group("/classes", requireAuth, resolveScope)
+func RegisterRoutes(rg *gin.RouterGroup, h *Handler, auth ...gin.HandlerFunc) {
+	classGroup := rg.Group("/classes", auth...)
 	classGroup.GET("/:id/curriculum", h.getCurriculum)
 	classGroup.PUT("/:id/curriculum", h.putCurriculum)
 	classGroup.GET("/:id/lesson-plans", h.listPlans)
@@ -19,10 +19,10 @@ func RegisterRoutes(rg *gin.RouterGroup, h *Handler, requireAuth, resolveScope g
 	classGroup.POST("/:id/lesson-plans/:index/reopen", h.reopenPlan)
 	classGroup.GET("/:id/marks", h.getMonthMarks)
 
-	sessionGroup := rg.Group("/sessions", requireAuth, resolveScope)
+	sessionGroup := rg.Group("/sessions", auth...)
 	sessionGroup.PUT("/:id/note", h.putNote)
 	sessionGroup.PUT("/:id/marks", h.putMarks)
 
-	teachingGroup := rg.Group("/teaching", requireAuth, resolveScope)
+	teachingGroup := rg.Group("/teaching", auth...)
 	teachingGroup.GET("/review-queue", h.reviewQueue)
 }

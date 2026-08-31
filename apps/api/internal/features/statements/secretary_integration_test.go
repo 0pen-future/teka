@@ -14,7 +14,7 @@ import (
 	"teka/apps/api/internal/testutil"
 )
 
-// A can_send_reports member reads statements center-wide — list, get, and the
+// A reports.send-holding member reads statements center-wide — list, get, and the
 // period figures the send flow consumes — but the flag never widens a
 // statement WRITE: the standalone generate endpoint and revoke on another
 // member's data still answer the same neutral 404 a peer gets.
@@ -44,7 +44,7 @@ func TestSecretaryReadsStatementsCenterWideButCannotGenerateOrRevoke(t *testing.
 	_, err = statementsSvc.Generate(ctx, secScope, period.ID)
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
-		"the send-reports flag must not unlock the standalone generate endpoint")
+		"the reports.send permission must not unlock the standalone generate endpoint")
 
 	result, err := statementsSvc.Generate(ctx, memberScope, period.ID)
 	require.NoError(t, err)
@@ -71,7 +71,7 @@ func TestSecretaryReadsStatementsCenterWideButCannotGenerateOrRevoke(t *testing.
 	err = statementsSvc.Revoke(ctx, secScope, statementID)
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
-		"the send-reports flag must not unlock statement revocation")
+		"the reports.send permission must not unlock statement revocation")
 	var stmtRow struct {
 		RevokedAt *time.Time
 	}

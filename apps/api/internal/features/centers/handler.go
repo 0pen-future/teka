@@ -128,59 +128,6 @@ func (h *Handler) removeMember(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// grantSendReports grants the delegated send-reports permission to an active
-// non-owner member; owner-only. Grant and revoke are two verb routes rather
-// than one PATCH-with-body so the audit middleware — which stores no request
-// body — records two distinguishable actions.
-//
-//	@Summary		Grant the send-reports permission (owner-only)
-//	@Description	Lets the member read billing periods/statements/debt center-wide and run report sends from their own Zalo. Member-only: the owner cannot be the target.
-//	@Tags			centers
-//	@Produce		json
-//	@Param			teacherId	path	string	true	"teacher id"	format(uuid)
-//	@Success		204
-//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
-//	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}	"not the owner"
-//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}	"not an active non-owner member of this center"
-//	@Security		BearerAuth
-//	@Router			/centers/me/members/{teacherId}/send-reports [post]
-func (h *Handler) grantSendReports(c *gin.Context) {
-	h.setSendReports(c, true)
-}
-
-// revokeSendReports revokes the delegated send-reports permission; owner-only.
-//
-//	@Summary		Revoke the send-reports permission (owner-only)
-//	@Tags			centers
-//	@Produce		json
-//	@Param			teacherId	path	string	true	"teacher id"	format(uuid)
-//	@Success		204
-//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
-//	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}	"not the owner"
-//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}	"not an active non-owner member of this center"
-//	@Security		BearerAuth
-//	@Router			/centers/me/members/{teacherId}/send-reports [delete]
-func (h *Handler) revokeSendReports(c *gin.Context) {
-	h.setSendReports(c, false)
-}
-
-func (h *Handler) setSendReports(c *gin.Context, enabled bool) {
-	scope, ok := h.scope(c)
-	if !ok {
-		return
-	}
-	targetID, err := uuid.Parse(c.Param("teacherId"))
-	if err != nil {
-		response.Err(c, apperror.NotFound("member"))
-		return
-	}
-	if err := h.svc.SetSendReports(c.Request.Context(), scope, targetID, enabled); err != nil {
-		response.Err(c, err)
-		return
-	}
-	c.Status(http.StatusNoContent)
-}
-
 // permissions returns the permission-management read model; owner-only.
 //
 //	@Summary		Get the permission-management read model (owner-only)
@@ -208,7 +155,7 @@ func (h *Handler) permissions(c *gin.Context) {
 // replaceRolePermissions replaces a role's permission set; owner-only.
 //
 //	@Summary		Replace a role's permission set (owner-only)
-//	@Description	PUT-replace semantics; keys are validated against the code-owned catalog. reports.send is rejected here — it stays a per-member grant while the legacy can_send_reports column lives.
+//	@Description	PUT-replace semantics; keys are validated against the code-owned catalog.
 //	@Tags			centers
 //	@Accept			json
 //	@Produce		json
@@ -218,7 +165,7 @@ func (h *Handler) permissions(c *gin.Context) {
 //	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
 //	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}	"not the owner"
 //	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}	"role not in this center"
-//	@Failure		422	{object}	response.Envelope{error=response.ErrorBody}	"unknown key, or reports.send on a role"
+//	@Failure		422	{object}	response.Envelope{error=response.ErrorBody}	"unknown or non-assignable key"
 //	@Security		BearerAuth
 //	@Router			/centers/me/roles/{roleId}/permissions [put]
 func (h *Handler) replaceRolePermissions(c *gin.Context) {
@@ -284,7 +231,7 @@ func (h *Handler) assignMemberRole(c *gin.Context) {
 // replaceMemberOverrides replaces a member's override lists; owner-only.
 //
 //	@Summary		Replace a member's grant/deny overrides (owner-only)
-//	@Description	PUT-replace semantics over both lists. A reports.send grant dual-writes the legacy can_send_reports flag in the same transaction.
+//	@Description	PUT-replace semantics over both lists.
 //	@Tags			centers
 //	@Accept			json
 //	@Produce		json

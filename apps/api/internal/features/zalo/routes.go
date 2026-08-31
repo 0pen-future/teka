@@ -10,8 +10,8 @@ import (
 // runs too — not for center filtering (a Zalo account is personal), but so a
 // teacher kicked from their center loses access here the same request it
 // bites everywhere else.
-func RegisterRoutes(rg *gin.RouterGroup, h *Handler, requireAuth, resolveScope gin.HandlerFunc) {
-	g := rg.Group("/me/zalo", requireAuth, resolveScope)
+func RegisterRoutes(rg *gin.RouterGroup, h *Handler, auth ...gin.HandlerFunc) {
+	g := rg.Group("/me/zalo", auth...)
 	g.GET("", h.status)
 	g.DELETE("", h.unlink)
 	g.GET("/friends", h.friends)

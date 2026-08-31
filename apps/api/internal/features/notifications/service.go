@@ -112,7 +112,7 @@ func (s *Service) Close() {
 // as if the manual channel had been chosen for them. BulkText then carries
 // only the fallback rows — the auto-sent messages have nothing to copy.
 // Sending is exclusive to reports oversight (decision D8): the owner or a
-// can_send_reports holder — a plain member is refused with an explicit 403 on
+// reports.send holder — a plain member is refused with an explicit 403 on
 // every channel, own periods included. A capability holder may send another
 // teacher's period from her own Zalo (delegated send); an owner still cannot
 // — zalo_personal refuses the owner's cross-teacher combination with a 409,
@@ -122,7 +122,7 @@ func (s *Service) BulkSend(ctx context.Context, sc authctx.Scope, periodID uuid.
 	if classID != nil {
 		// The class dimension has its own gate: an active sending-role stint on
 		// the class (or oversight) sends that class's copies — no
-		// can_send_reports flag involved.
+		// reports.send permission involved.
 		if err := s.statements.AuthorizeClassSend(ctx, sc, *classID); err != nil {
 			return nil, err
 		}
@@ -200,11 +200,11 @@ func (s *Service) BulkSend(ctx context.Context, sc authctx.Scope, periodID uuid.
 		crossTeacher = len(genResult.Statements) > 0 && genResult.Statements[0].TeacherID != sc.TeacherID
 
 		// A Zalo account is personal: DMs go out from the caller's own linked
-		// session. A can_send_reports holder is exactly the person trusted to
+		// session. A reports.send holder is exactly the person trusted to
 		// do that for other teachers' periods (delegated send); the owner
-		// never holds the flag (member-only, decision D2), so for the owner
-		// this refusal is unchanged — an owner opening a member's period here
-		// would find the member's mappings but no basis to DM those parents.
+		// never holds the permission (member-only, decision D2), so for the
+		// owner this refusal is unchanged — an owner opening a member's period
+		// here would find the member's mappings but no basis to DM those parents.
 		// The rollback also undoes the statement refresh, so nothing is
 		// written. A class send is exempt: the class stint itself is the basis
 		// to DM that class's parents, whoever owns the period (handoffs).
@@ -391,9 +391,9 @@ func (s *Service) BulkSend(ctx context.Context, sc authctx.Scope, periodID uuid.
 
 // runGrant names the authority a run sends under. A class run held by a
 // class-role sender (not oversight) is probed against the class standing; a
-// cross-teacher family run held under can_send_reports is probed against that
-// flag; everything else — own period, or oversight whose standing does not
-// expire mid-run — needs no per-item re-check.
+// cross-teacher family run held under reports.send is probed against that
+// permission; everything else — own period, or oversight whose standing does
+// not expire mid-run — needs no per-item re-check.
 func runGrant(sc authctx.Scope, crossTeacher bool, classID *uuid.UUID) RunGrant {
 	grant := RunGrant{Delegated: crossTeacher && classID == nil && sc.CanSendReports}
 	if classID != nil && !sc.ReportsOversight() {
@@ -580,7 +580,7 @@ func (s *Service) SendPreview(ctx context.Context, sc authctx.Scope, periodID uu
 }
 
 // List returns one billing period's notification ledger, optionally narrowed
-// by filter. A reports-oversight caller (owner or can_send_reports holder)
+// by filter. A reports-oversight caller (owner or reports.send holder)
 // sees any period's ledger in the center; a plain member sees the ledgers of
 // their own periods — delegated rows a secretary sent on them included.
 func (s *Service) List(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, filter ListFilter) ([]NotificationResponse, error) {

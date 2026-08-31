@@ -34,7 +34,7 @@ func NewService(repo Repository, members MemberChecker) *Service {
 // readAccess decides whether the caller may see the class at all. A caller
 // with no relationship to the class gets 404 for every verb — the class's
 // existence is not leaked through a 403. Center-wide readers (the owner, or a
-// member granted data.view_center_wide) see every class of their center — the
+// member granted classes.view_all) see every class of their center — the
 // same rule the classes read port applies, so a caller who can GET the class
 // never 404s on its staff list; anyone else needs a stint on the class (ended
 // included: history stays readable after a soft-close).
@@ -46,7 +46,7 @@ func (s *Service) readAccess(ctx context.Context, sc authctx.Scope, classID uuid
 	if !exists {
 		return apperror.NotFound("class")
 	}
-	if sc.CenterWide() {
+	if sc.CenterWideFor(authctx.PermClassesViewAll) {
 		return nil
 	}
 	assigned, err := s.repo.CallerHasAssignment(ctx, sc, classID)

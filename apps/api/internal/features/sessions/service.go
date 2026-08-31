@@ -46,9 +46,11 @@ type ClassSource interface {
 	// ad-hoc create) resolves through it, and it answers 403 (readable but
 	// wrong role) vs 404 (no relationship) itself.
 	GetWritable(ctx context.Context, sc authctx.Scope, classID uuid.UUID, capability authctx.ClassCapability) (*classes.Class, error)
-	// GetReadable is the read port: own classes OR classes the caller holds a
-	// class_staff stint on (ended included). The roles slice is unused here.
-	GetReadable(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, []string, error)
+	// GetReadableWithRoles is the read port: classes the caller holds a
+	// class_staff stint on (ended included) or sees center-wide, plus the
+	// caller's ACTIVE role keys — the classbook branches on them to decide
+	// whether a read may trigger session generation.
+	GetReadableWithRoles(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, []string, error)
 	ListEffectiveSchedules(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]classes.Schedule, error)
 }
 
@@ -180,11 +182,11 @@ func (s *Service) ListRange(ctx context.Context, sc authctx.Scope, classID uuid.
 // holds any other stint — a different role, or an ended one — gets the
 // already-materialised sessions read-only: staff reads must never insert rows.
 func (s *Service) ListRangeReadable(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]Detail, error) {
-	_, roles, err := s.classes.GetReadable(ctx, sc, classID)
+	_, roles, err := s.classes.GetReadableWithRoles(ctx, sc, classID)
 	if err != nil {
 		return nil, err
 	}
-	canGenerate := sc.CenterWide()
+	canGenerate := sc.CenterWideFor(authctx.PermSessionsViewAll)
 	for _, role := range roles {
 		if authctx.StaffRoleCan(role, authctx.CapSessionsWrite) {
 			canGenerate = true

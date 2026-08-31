@@ -79,6 +79,7 @@ export function makeMemberPermissions(
     role_key: "",
     grants: [],
     denies: [],
+    assignment_version: 1,
     ...overrides,
   };
 }

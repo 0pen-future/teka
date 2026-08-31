@@ -25,8 +25,9 @@ type MemberResponse struct {
 	FullName string    `json:"full_name"`
 	Phone    string    `json:"phone"`
 	IsOwner  bool      `json:"is_owner"`
-	// CanSendReports is the delegated report-sender permission; always false
-	// for the owner (member-only flag).
+	// CanSendReports mirrors the member's effective reports.send permission
+	// (computed, not stored); always false for the owner (member-only —
+	// the owner's authority is implicit).
 	CanSendReports bool `json:"can_send_reports"`
 }
 
@@ -42,7 +43,7 @@ type MeResponse struct {
 
 // MemberMeResponse is the body of GET /centers/me for a non-owner member —
 // the roster is owner-only data, so a member sees only the center's name
-// plus their own delegated-send permission.
+// plus their own effective reports.send permission.
 type MemberMeResponse struct {
 	CenterName     string `json:"center_name"`
 	CanSendReports bool   `json:"can_send_reports"`
@@ -52,11 +53,18 @@ type MemberMeResponse struct {
 }
 
 // PermissionInfo is one catalog entry: a stable key plus its Vietnamese
-// display label. The catalog is code-owned; clients render labels from here
-// and keep no copy.
+// display label and the structured fields the permission UI groups, sorts,
+// and warns on. The catalog is code-owned; clients render what they receive
+// and keep no copy. Older clients that only read key/label keep parsing —
+// the structured fields are additive.
 type PermissionInfo struct {
-	Key   string `json:"key"`
-	Label string `json:"label"`
+	Key         string `json:"key"`
+	Label       string `json:"label"`
+	Resource    string `json:"resource"`
+	Action      string `json:"action"`
+	Kind        string `json:"kind"`
+	Risk        string `json:"risk"`
+	Description string `json:"description"`
 }
 
 // RoleResponse is one center role with its current permission set.
@@ -65,6 +73,10 @@ type RoleResponse struct {
 	Key         string    `json:"key"`
 	Name        string    `json:"name"`
 	Permissions []string  `json:"permissions"`
+	// AssignmentVersion is the CAS token for this role's permission set:
+	// echo it back on a replacement write; a mismatch means someone else
+	// saved in between and the write returns 409 without mutating.
+	AssignmentVersion int64 `json:"assignment_version"`
 }
 
 // MemberPermissionsResponse is one non-owner member's RBAC state: assigned
@@ -76,6 +88,9 @@ type MemberPermissionsResponse struct {
 	RoleKey   string     `json:"role_key"`
 	Grants    []string   `json:"grants"`
 	Denies    []string   `json:"denies"`
+	// AssignmentVersion is the CAS token for this member's override set —
+	// same contract as RoleResponse.AssignmentVersion.
+	AssignmentVersion int64 `json:"assignment_version"`
 }
 
 // PermissionsResponse is the body of GET /centers/me/permissions — the
@@ -84,12 +99,20 @@ type PermissionsResponse struct {
 	Catalog []PermissionInfo            `json:"catalog"`
 	Roles   []RoleResponse              `json:"roles"`
 	Members []MemberPermissionsResponse `json:"members"`
+	// CatalogVersion identifies the catalog generation this read model was
+	// rendered under; writes echo it so a client holding a stale catalog
+	// gets 409 instead of silently assigning keys it never displayed.
+	CatalogVersion int `json:"catalog_version"`
 }
 
 // RolePermissionsRequest replaces a role's permission set. An empty list is
-// valid — it strips the role of every permission.
+// valid — it strips the role of every permission. CatalogVersion and
+// AssignmentVersion echo the read model for compare-and-set; zero (or
+// omitted) means a pre-CAS client and skips the check.
 type RolePermissionsRequest struct {
-	Permissions []string `json:"permissions"`
+	Permissions       []string `json:"permissions"`
+	CatalogVersion    int      `json:"catalog_version"`
+	AssignmentVersion int64    `json:"assignment_version"`
 }
 
 // MemberRoleRequest assigns a member's role.
@@ -98,9 +121,13 @@ type MemberRoleRequest struct {
 }
 
 // MemberOverridesRequest replaces a member's grant/deny override lists.
+// CatalogVersion and AssignmentVersion follow the same CAS contract as
+// RolePermissionsRequest.
 type MemberOverridesRequest struct {
-	Grants []string `json:"grants"`
-	Denies []string `json:"denies"`
+	Grants            []string `json:"grants"`
+	Denies            []string `json:"denies"`
+	CatalogVersion    int      `json:"catalog_version"`
+	AssignmentVersion int64    `json:"assignment_version"`
 }
 
 // TeacherStatsResponse is one roster row of GET /centers/dashboard/teachers:

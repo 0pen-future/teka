@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -53,9 +54,9 @@ var seedTeachers = []seedTeacher{
 }
 
 // The secretary is a member with no teaching data of her own: delegated
-// sending (can_send_reports) is only observable on someone whose center-wide
-// reach comes entirely from the flag. The seed never sets the flag — the
-// grant happens through the owner's UI, so the database stays neutral for
+// sending (the reports.send permission) is only observable on someone whose
+// center-wide reach comes entirely from that grant. The seed never grants it —
+// that happens through the owner's UI, so the database stays neutral for
 // specs that expect a plain member.
 var seedSecretary = seedTeacher{Phone: "+84901000003", Password: "thu-password", FullName: "Cô Thu"}
 
@@ -312,13 +313,25 @@ func scopeFor(ctx context.Context, db *gorm.DB, teacherID uuid.UUID) (authctx.Sc
 	// Scanning straight into a bare uuid.UUID skips its sql.Scanner and hits
 	// GORM's element-wise array path instead; wrap it in a struct field.
 	var row struct {
-		CenterID       uuid.UUID
-		IsOwner        bool
-		CanSendReports bool
+		CenterID  uuid.UUID
+		IsOwner   bool
+		RolePerms string
+		Grants    string
+		Denies    string
 	}
 	err := db.WithContext(ctx).Raw(`
 		SELECT t.center_id, (c.owner_id = t.id) AS is_owner,
-			COALESCE(cm.can_send_reports, FALSE) AS can_send_reports
+			COALESCE((SELECT string_agg(rp.permission_key, ',')
+				FROM center_role_permissions rp
+				WHERE rp.role_id = cm.role_id), '') AS role_perms,
+			COALESCE((SELECT string_agg(mp.permission_key, ',')
+				FROM center_member_permissions mp
+				WHERE mp.teacher_id = cm.teacher_id AND mp.center_id = cm.center_id
+					AND mp.allowed), '') AS grants,
+			COALESCE((SELECT string_agg(mp.permission_key, ',')
+				FROM center_member_permissions mp
+				WHERE mp.teacher_id = cm.teacher_id AND mp.center_id = cm.center_id
+					AND NOT mp.allowed), '') AS denies
 		FROM teachers t
 		JOIN centers c ON c.id = t.center_id
 		LEFT JOIN center_members cm ON cm.teacher_id = t.id
@@ -330,12 +343,25 @@ func scopeFor(ctx context.Context, db *gorm.DB, teacherID uuid.UUID) (authctx.Sc
 	if row.CenterID == uuid.Nil {
 		return authctx.Scope{}, fmt.Errorf("seed: teacher %s has no center", teacherID)
 	}
+	perms := authctx.BuildPermSet(splitAgg(row.RolePerms), splitAgg(row.Grants), splitAgg(row.Denies))
 	return authctx.Scope{
-		TeacherID:      teacherID,
-		CenterID:       row.CenterID,
-		IsOwner:        row.IsOwner,
-		CanSendReports: row.CanSendReports,
+		TeacherID: teacherID,
+		CenterID:  row.CenterID,
+		IsOwner:   row.IsOwner,
+		// HasKey, not Has: the field mirrors the member's effective
+		// reports.send only — the owner's authority flows through
+		// ReportsOversight's IsOwner arm.
+		CanSendReports: perms.HasKey(authctx.PermReportsSend),
+		Perms:          perms,
 	}, nil
+}
+
+// splitAgg undoes the query's string_agg(',') packing; empty means no keys.
+func splitAgg(joined string) []string {
+	if joined == "" {
+		return nil
+	}
+	return strings.Split(joined, ",")
 }
 
 // accountExists looks up an account by phone, so both ensureOwner and
@@ -399,6 +425,18 @@ func ensureOwner(ctx context.Context, db *gorm.DB, log *slog.Logger, s seedTeach
 				(gen_random_uuid(), @cid, 'hoc_vu', 'Học vụ'),
 				(gen_random_uuid(), @cid, 'tro_giang', 'Trợ giảng')`,
 			map[string]any{"cid": centerID},
+		).Error; err != nil {
+			return err
+		}
+		// Roles start from the operational default baseline, the same
+		// invariant repository CreateCenter enforces.
+		if err := tx.Exec(`
+			INSERT INTO center_role_permissions (role_id, permission_key)
+			SELECT cr.id, k
+			FROM center_roles cr
+			CROSS JOIN unnest(string_to_array(?, ',')) AS k
+			WHERE cr.center_id = ?`,
+			strings.Join(authctx.DefaultRoleKeys(), ","), centerID,
 		).Error; err != nil {
 			return err
 		}

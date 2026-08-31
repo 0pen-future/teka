@@ -102,7 +102,7 @@ func NewRepository(db *gorm.DB) Repository {
 // join students and classes, which carry the same column name.
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("enrollments.center_id = ?", sc.CenterID)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermEnrollmentsViewAll) {
 		q = q.Where("enrollments.teacher_id = ?", sc.TeacherID)
 	}
 	return q
@@ -114,7 +114,7 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 // managing an enrollment (end, delete) resolves through writeScoped.
 func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("enrollments.center_id = ?", sc.CenterID)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermEnrollmentsViewAll) {
 		frag, _ := classscope.ReadExists("enrollments.class_id")
 		q = q.Where("(enrollments.teacher_id = ? OR "+frag+")",
 			sc.TeacherID, sc.TeacherID, sc.CenterID)
@@ -129,7 +129,7 @@ func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm
 // the roster, the creator does not.
 func (r *gormRepository) writeScoped(ctx context.Context, sc authctx.Scope, roles []string) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("enrollments.center_id = ?", sc.CenterID)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermEnrollmentsViewAll) {
 		frag, _ := classscope.WriteExists("enrollments.class_id")
 		q = q.Where(frag, sc.TeacherID, sc.CenterID, roles)
 	}
@@ -274,7 +274,7 @@ func (r *gormRepository) ClassDefaultPrice(ctx context.Context, sc authctx.Scope
 	q := database.FromContext(ctx, r.db).
 		Table("classes").
 		Where("id = ? AND center_id = ? AND deleted_at IS NULL", classID, sc.CenterID)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermEnrollmentsViewAll) {
 		// The class anchor and the active giao_vien stint name the same
 		// teacher whenever handoff has run cleanly; checking both states the
 		// actual rule — the class's current teacher enrolls — and keeps the

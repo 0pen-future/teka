@@ -13,7 +13,7 @@ import (
 	"teka/apps/api/internal/testutil"
 )
 
-// The send-reports flag is reports oversight: the secretary sends every
+// The reports.send permission is reports oversight: the secretary sends every
 // statement, so they read every contact in the center — including one still
 // anchored on a member from before the ownership migration — and may fix its
 // zalo mapping. Managing the directory itself stays the owner's: renames and

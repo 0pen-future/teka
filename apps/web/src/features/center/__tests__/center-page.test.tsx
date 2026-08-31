@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
 import { mockInvites } from "@/features/invitation/__tests__/invitation-handlers";
-import { API_URL, fail, ok } from "@/test/msw/handlers";
+import { API_URL, CATALOG_VERSION, fail, ok } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
 
@@ -241,7 +241,12 @@ describe("CenterPage — owner", () => {
 
     expect(await screen.findByText("Đã lưu phân quyền")).toBeInTheDocument();
     expect(targetId).toBe(memberA.id);
-    expect(received).toEqual({ grants: ["reports.send"], denies: [] });
+    expect(received).toEqual({
+      grants: ["reports.send"],
+      denies: [],
+      catalog_version: CATALOG_VERSION,
+      assignment_version: 1,
+    });
     expect(await screen.findByText("Thư ký gửi báo cáo")).toBeInTheDocument();
   });
 
@@ -279,7 +284,12 @@ describe("CenterPage — owner", () => {
     await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
 
     expect(await screen.findByText("Đã lưu phân quyền")).toBeInTheDocument();
-    expect(received).toEqual({ grants: [], denies: [] });
+    expect(received).toEqual({
+      grants: [],
+      denies: [],
+      catalog_version: CATALOG_VERSION,
+      assignment_version: 1,
+    });
     await waitFor(() => expect(screen.queryByText("Thư ký gửi báo cáo")).not.toBeInTheDocument());
   });
 

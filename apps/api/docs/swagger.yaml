@@ -376,6 +376,10 @@ definitions:
     type: object
   centers.MemberOverridesRequest:
     properties:
+      assignment_version:
+        type: integer
+      catalog_version:
+        type: integer
       denies:
         items:
           type: string
@@ -387,6 +391,11 @@ definitions:
     type: object
   centers.MemberPermissionsResponse:
     properties:
+      assignment_version:
+        description: |-
+          AssignmentVersion is the CAS token for this member's override set —
+          same contract as RoleResponse.AssignmentVersion.
+        type: integer
       denies:
         items:
           type: string
@@ -408,8 +417,9 @@ definitions:
     properties:
       can_send_reports:
         description: |-
-          CanSendReports is the delegated report-sender permission; always false
-          for the owner (member-only flag).
+          CanSendReports mirrors the member's effective reports.send permission
+          (computed, not stored); always false for the owner (member-only —
+          the owner's authority is implicit).
         type: boolean
       full_name:
         type: string
@@ -472,9 +482,19 @@ definitions:
     type: object
   centers.PermissionInfo:
     properties:
+      action:
+        type: string
+      description:
+        type: string
       key:
         type: string
+      kind:
+        type: string
       label:
+        type: string
+      resource:
+        type: string
+      risk:
         type: string
     type: object
   centers.PermissionsResponse:
@@ -483,6 +503,12 @@ definitions:
         items:
           $ref: '#/definitions/centers.PermissionInfo'
         type: array
+      catalog_version:
+        description: |-
+          CatalogVersion identifies the catalog generation this read model was
+          rendered under; writes echo it so a client holding a stale catalog
+          gets 409 instead of silently assigning keys it never displayed.
+        type: integer
       members:
         items:
           $ref: '#/definitions/centers.MemberPermissionsResponse'
@@ -503,6 +529,10 @@ definitions:
     type: object
   centers.RolePermissionsRequest:
     properties:
+      assignment_version:
+        type: integer
+      catalog_version:
+        type: integer
       permissions:
         items:
           type: string
@@ -510,6 +540,12 @@ definitions:
     type: object
   centers.RoleResponse:
     properties:
+      assignment_version:
+        description: |-
+          AssignmentVersion is the CAS token for this role's permission set:
+          echo it back on a replacement write; a mismatch means someone else
+          saved in between and the write returns 409 without mutating.
+        type: integer
       id:
         type: string
       key:
@@ -3752,8 +3788,7 @@ paths:
     put:
       consumes:
       - application/json
-      description: PUT-replace semantics over both lists. A reports.send grant dual-writes
-        the legacy can_send_reports flag in the same transaction.
+      description: PUT-replace semantics over both lists.
       parameters:
       - description: teacher id
         format: uuid
@@ -3878,100 +3913,6 @@ paths:
       summary: Assign a member's role (owner-only)
       tags:
       - centers
-  /centers/me/members/{teacherId}/send-reports:
-    delete:
-      parameters:
-      - description: teacher id
-        format: uuid
-        in: path
-        name: teacherId
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "204":
-          description: No Content
-        "401":
-          description: Unauthorized
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-        "403":
-          description: not the owner
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-        "404":
-          description: not an active non-owner member of this center
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-      security:
-      - BearerAuth: []
-      summary: Revoke the send-reports permission (owner-only)
-      tags:
-      - centers
-    post:
-      description: 'Lets the member read billing periods/statements/debt center-wide
-        and run report sends from their own Zalo. Member-only: the owner cannot be
-        the target.'
-      parameters:
-      - description: teacher id
-        format: uuid
-        in: path
-        name: teacherId
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "204":
-          description: No Content
-        "401":
-          description: Unauthorized
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-        "403":
-          description: not the owner
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-        "404":
-          description: not an active non-owner member of this center
-          schema:
-            allOf:
-            - $ref: '#/definitions/response.Envelope'
-            - properties:
-                error:
-                  $ref: '#/definitions/response.ErrorBody'
-              type: object
-      security:
-      - BearerAuth: []
-      summary: Grant the send-reports permission (owner-only)
-      tags:
-      - centers
   /centers/me/permissions:
     get:
       description: Code-owned catalog (keys + Vietnamese labels), the center's roles
@@ -4016,8 +3957,7 @@ paths:
       consumes:
       - application/json
       description: PUT-replace semantics; keys are validated against the code-owned
-        catalog. reports.send is rejected here — it stays a per-member grant while
-        the legacy can_send_reports column lives.
+        catalog.
       parameters:
       - description: role id
         format: uuid
@@ -4064,7 +4004,7 @@ paths:
                   $ref: '#/definitions/response.ErrorBody'
               type: object
         "422":
-          description: unknown key, or reports.send on a role
+          description: unknown or non-assignable key
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'

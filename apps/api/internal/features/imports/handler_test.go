@@ -64,9 +64,9 @@ func newHTTPTest(t *testing.T) (*gin.Engine, *countingDirectory) {
 	r := gin.New()
 	jwtCfg := config.JWTConfig{Secret: handlerTestSecret, AccessTTL: 15 * time.Minute}
 	RegisterRoutes(r.Group("/api/v1"), NewHandler(svc),
-		middleware.RequireAuth(jwtCfg), middleware.ResolveScope(fakeScopeResolver{}),
 		// A permissive limiter: these tests exercise the routes, not the limit.
-		middleware.RateLimit(middleware.TeacherKey(), 1000, time.Minute))
+		middleware.RateLimit(middleware.TeacherKey(), 1000, time.Minute),
+		middleware.RequireAuth(jwtCfg), middleware.ResolveScope(fakeScopeResolver{}))
 	return r, dir
 }
 
@@ -296,8 +296,8 @@ func TestRateLimitAppliesPerTeacher(t *testing.T) {
 	r := gin.New()
 	jwtCfg := config.JWTConfig{Secret: handlerTestSecret, AccessTTL: 15 * time.Minute}
 	RegisterRoutes(r.Group("/api/v1"), NewHandler(svc),
-		middleware.RequireAuth(jwtCfg), middleware.ResolveScope(fakeScopeResolver{}),
-		middleware.RateLimit(middleware.TeacherKey(), 1, time.Minute))
+		middleware.RateLimit(middleware.TeacherKey(), 1, time.Minute),
+		middleware.RequireAuth(jwtCfg), middleware.ResolveScope(fakeScopeResolver{}))
 
 	token := mintToken(t, ownerID)
 	rec, _ := upload(t, r, token, validWorkbook(t), "true")

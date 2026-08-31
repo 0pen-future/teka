@@ -137,15 +137,27 @@ func (s *Service) List(ctx context.Context, sc authctx.Scope, filter ListFilter,
 	return s.repo.List(ctx, sc, filter, p)
 }
 
-// GetReadable is Get's READ-port counterpart: own rows plus any class the
-// caller holds a class_staff stint on (ended included — history reads). It
-// also returns the caller's ACTIVE role keys on the class, for the response's
-// my_staff_roles. Only the GET handlers use it; every write path keeps
-// resolving through Get, the shared write gate.
-func (s *Service) GetReadable(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*Class, []string, error) {
+// GetReadable is Get's READ-port counterpart: any class the caller holds a
+// class_staff stint on (ended included — history reads) or can see center-wide.
+// Read-only consumers that never branch on the caller's roles use this variant
+// so a plain readable-resolution costs one query; every write path keeps
+// resolving through Get or GetWritable, the shared write gates.
+func (s *Service) GetReadable(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*Class, error) {
 	class, err := s.repo.GetReadableByID(ctx, sc, classID)
 	if err != nil {
-		return nil, nil, translate(err)
+		return nil, translate(err)
+	}
+	return class, nil
+}
+
+// GetReadableWithRoles is GetReadable plus the caller's ACTIVE role keys on
+// the class, for consumers that branch on them: the class detail response's
+// my_staff_roles and the classbook's write-capability probe. Kept separate so
+// consumers that discard the roles never pay the extra query.
+func (s *Service) GetReadableWithRoles(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*Class, []string, error) {
+	class, err := s.GetReadable(ctx, sc, classID)
+	if err != nil {
+		return nil, nil, err
 	}
 	roles, err := s.staff.RolesByClass(ctx, sc.TeacherID, sc.CenterID, []uuid.UUID{classID})
 	if err != nil {

@@ -16,6 +16,7 @@ import (
 
 	"teka/apps/api/internal/config"
 	"teka/apps/api/internal/database"
+	"teka/apps/api/internal/shared/authctx"
 )
 
 // domainTables is every table docs/schema_design.sql creates, plus the
@@ -34,6 +35,7 @@ var domainTables = []string{
 	"score_sets", "score_set_components", "class_score_components",
 	"student_scores",
 	"owner_anchor_backfill",
+	"rbac_backfill_rows", "rbac_backfill_ledger",
 }
 
 // centerTables is every business table 000007 re-keyed to the center tenant.
@@ -317,10 +319,10 @@ func TestDownFoldsPersonalChannelIntoManual(t *testing.T) {
 		 VALUES (?, ?, ?, ?, 'zalo_personal')`,
 		notifID, f.teacherID, f.centerID, f.statementID).Error)
 
-	// Roll back through 000005 (zalo_personal_mapping): thirteen steps now
-	// that the additive 000008-000017 sit on top of the migrations this test
+	// Roll back through 000005 (zalo_personal_mapping): sixteen steps now
+	// that the additive 000008-000020 sit on top of the migrations this test
 	// predates.
-	require.NoError(t, database.MigrateDown(m, 13))
+	require.NoError(t, database.MigrateDown(m, 16))
 
 	var channel string
 	require.NoError(t, db.Raw(
@@ -1115,6 +1117,69 @@ func TestCenterRBACBackfill(t *testing.T) {
 	require.EqualValues(t, 1, n, "backfill writes nothing but the send-reports parity rows")
 }
 
+// Rolling the send-reports column back must rebuild it from the full
+// effective verdict — (role grant ∪ member grant) − member deny — because
+// role-level reports.send grants exist once the catalog stops blocking them;
+// a member-rows-only rebuild would silently strip every role-granted sender.
+func TestDownRestoresRoleGrantedSendReports(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+
+	db := openDB(t, url)
+	live := seedNotificationParents(t, db, "+84900000901")
+	senderRole := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO center_roles (id, center_id, key, name) VALUES (?, ?, 'hoc_vu', 'Học vụ')`,
+		senderRole, live.centerID).Error)
+	member := func(phone string, roleID *uuid.UUID) uuid.UUID {
+		teacherID := uuid.New()
+		require.NoError(t, db.Exec(
+			`INSERT INTO user_accounts (id, role, phone) VALUES (?, 'teachers', ?)`,
+			teacherID, phone).Error)
+		require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec(
+				`INSERT INTO teachers (id, full_name, center_id) VALUES (?, 'Giáo Viên', ?)`,
+				teacherID, live.centerID).Error; err != nil {
+				return err
+			}
+			return tx.Exec(
+				`INSERT INTO center_members (teacher_id, center_id, role_id) VALUES (?, ?, ?)`,
+				teacherID, live.centerID, roleID).Error
+		}))
+		return teacherID
+	}
+	roleGranted := member("+84900000902", &senderRole)
+	memberGranted := member("+84900000903", nil)
+	roleDenied := member("+84900000904", &senderRole)
+
+	require.NoError(t, db.Exec(
+		`INSERT INTO center_role_permissions (role_id, permission_key) VALUES (?, 'reports.send')`,
+		senderRole).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO center_member_permissions (teacher_id, center_id, permission_key, allowed)
+		 VALUES (?, ?, 'reports.send', TRUE), (?, ?, 'reports.send', FALSE)`,
+		memberGranted, live.centerID, roleDenied, live.centerID).Error)
+
+	// Step below 000019: the column comes back rebuilt from the verdict.
+	require.NoError(t, m.Migrate(18))
+
+	canSend := func(teacherID uuid.UUID) bool {
+		var v bool
+		require.NoError(t, db.Raw(
+			`SELECT can_send_reports FROM center_members WHERE teacher_id = ? AND center_id = ?`,
+			teacherID, live.centerID).Scan(&v).Error)
+		return v
+	}
+	require.True(t, canSend(roleGranted), "a role-granted sender must survive rollback")
+	require.True(t, canSend(memberGranted), "a member-granted sender must survive rollback")
+	require.False(t, canSend(roleDenied), "a member deny must beat the role grant")
+}
+
 // The 000016 anchor migration turns contacts into center-level data: duplicate
 // live contacts per (center, phone) merge into one survivor, the two contact
 // unique indexes re-key from per-teacher to per-center, and contacts plus
@@ -1519,9 +1584,9 @@ func TestClassScopedStatementsAndRuns(t *testing.T) {
 	require.Error(t, insertRun(hocVuC, classA),
 		"the same class of the same period keeps the one-active-run conflict")
 
-	// Down one step: class-scoped rows are deleted, family rows survive, and
-	// the pre-class shape of both uniques is restored.
-	require.NoError(t, database.MigrateDown(m, 1))
+	// Down below 000017: class-scoped rows are deleted, family rows survive,
+	// and the pre-class shape of both uniques is restored.
+	require.NoError(t, m.Migrate(16))
 	var statements, runs int64
 	require.NoError(t, db.Raw(`SELECT count(*) FROM statements`).Scan(&statements).Error)
 	require.EqualValues(t, 1, statements, "only the family statement survives the down")
@@ -1532,4 +1597,210 @@ func TestClassScopedStatementsAndRuns(t *testing.T) {
 		 VALUES (?, ?, ?, ?, 'running')`,
 		uuid.New(), f.teacherID, f.centerID, f.periodID).Error,
 		"the single-column running unique must be back after the down")
+}
+
+// The 000018 backfill preserves pre-catalog behavior over real legacy data:
+// system roles and role-less live stints receive the operational baseline,
+// legacy data.view_center_wide rows expand symmetrically into the twelve
+// per-resource view_all keys, existing owner-written rows are never
+// overwritten, and down removes exactly the recorded backfill rows — nothing
+// the owner wrote or later changed.
+func TestResourceActionCatalogBackfill(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+	// Step back below 000018 and seed the pre-backfill shape.
+	require.NoError(t, m.Migrate(17))
+
+	db := openDB(t, url)
+	live := seedNotificationParents(t, db, "+84900000801")
+	roled := rbacMember(t, db, live.centerID, "+84900000802", false, false)
+	roleless := rbacMember(t, db, live.centerID, "+84900000803", false, false)
+	former := rbacMember(t, db, live.centerID, "+84900000804", false, true)
+
+	// The raw center fixture bypasses the repository, so the system roles the
+	// production path seeds must be inserted by hand.
+	seedRoles := func(centerID uuid.UUID) {
+		require.NoError(t, db.Exec(`
+			INSERT INTO center_roles (id, center_id, key, name)
+			VALUES (gen_random_uuid(), @cid, 'giao_vien', 'Giáo viên'),
+				(gen_random_uuid(), @cid, 'hoc_vu', 'Học vụ'),
+				(gen_random_uuid(), @cid, 'tro_giang', 'Trợ giảng')`,
+			map[string]any{"cid": centerID}).Error)
+	}
+	seedRoles(live.centerID)
+	roleID := func(centerID uuid.UUID, key string) uuid.UUID {
+		var raw string
+		require.NoError(t, db.Raw(
+			`SELECT id FROM center_roles WHERE center_id = ? AND key = ?`,
+			centerID, key).Scan(&raw).Error)
+		id, err := uuid.Parse(raw)
+		require.NoError(t, err)
+		return id
+	}
+	gvRole := roleID(live.centerID, "giao_vien")
+	hvRole := roleID(live.centerID, "hoc_vu")
+	require.NoError(t, db.Exec(
+		`UPDATE center_members SET role_id = ? WHERE teacher_id = ? AND center_id = ?`,
+		gvRole, roled, live.centerID).Error)
+
+	// Pre-existing assignments the backfill must respect: a manual role grant
+	// that collides with a default, a legacy center-wide grant on a role and
+	// on a member, a member's canonical deny, and a role-less member's legacy
+	// deny.
+	require.NoError(t, db.Exec(
+		`INSERT INTO center_role_permissions (role_id, permission_key) VALUES (?, 'classes.create')`,
+		gvRole).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO center_role_permissions (role_id, permission_key) VALUES (?, 'data.view_center_wide')`,
+		hvRole).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO center_member_permissions (teacher_id, center_id, permission_key, allowed)
+		 VALUES (?, ?, 'data.view_center_wide', TRUE), (?, ?, 'students.view_all', FALSE)`,
+		roled, live.centerID, roled, live.centerID).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO center_member_permissions (teacher_id, center_id, permission_key, allowed)
+		 VALUES (?, ?, 'data.view_center_wide', FALSE)`,
+		roleless, live.centerID).Error)
+
+	// A retired center's roles must be skipped entirely.
+	retired := seedNotificationParents(t, db, "+84900000805")
+	seedRoles(retired.centerID)
+	require.NoError(t, db.Exec(
+		`UPDATE centers SET deleted_at = now() WHERE id = ?`, retired.centerID).Error)
+
+	require.NoError(t, database.MigrateUp(m))
+
+	defaults := authctx.DefaultRoleKeys()
+	var n int64
+	// Every live-center system role holds the full baseline; the colliding
+	// manual grant is not duplicated.
+	rolePermCount := func(id uuid.UUID) int64 {
+		var c int64
+		require.NoError(t, db.Raw(
+			`SELECT count(*) FROM center_role_permissions WHERE role_id = ?`, id).Scan(&c).Error)
+		return c
+	}
+	require.EqualValues(t, len(defaults), rolePermCount(gvRole),
+		"giao_vien holds exactly the baseline — the manual classes.create must not duplicate")
+	require.EqualValues(t, len(defaults)+10, rolePermCount(hvRole),
+		"hoc_vu holds baseline + ten enforced view_all expansions — the alias and the never-enforced scope keys are retired")
+	require.EqualValues(t, len(defaults), rolePermCount(roleID(live.centerID, "tro_giang")))
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM center_role_permissions rp
+		 JOIN center_roles cr ON cr.id = rp.role_id
+		 WHERE cr.center_id = ?`, retired.centerID).Scan(&n).Error)
+	require.Zero(t, n, "a retired center's roles receive nothing")
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM center_role_permissions
+		 WHERE role_id = ? AND permission_key IN ('members.manage', 'dashboard.view', 'reports.send')`,
+		gvRole).Scan(&n).Error)
+	require.Zero(t, n, "legacy identity keys must never be granted by default")
+
+	// The roled member gets no member-level defaults; their legacy grant
+	// expands to eleven TRUE view_all rows while the pre-existing canonical
+	// deny survives untouched.
+	memberRows := func(teacherID uuid.UUID) map[string]bool {
+		var rows []struct {
+			PermissionKey string
+			Allowed       bool
+		}
+		require.NoError(t, db.Raw(
+			`SELECT permission_key, allowed FROM center_member_permissions
+			 WHERE teacher_id = ? AND center_id = ?`, teacherID, live.centerID).Scan(&rows).Error)
+		out := map[string]bool{}
+		for _, r := range rows {
+			out[r.PermissionKey] = r.Allowed
+		}
+		return out
+	}
+	roledRows := memberRows(roled)
+	require.Len(t, roledRows, 10, "ten enforced view_all expansions, no defaults for a roled member")
+	require.NotContains(t, roledRows, "data.view_center_wide",
+		"the alias row is retired — its expansion already materialized the canonical keys")
+	require.True(t, roledRows["classes.view_all"])
+	require.False(t, roledRows["students.view_all"], "the owner's canonical deny must survive the expansion")
+
+	// The role-less live member gets the baseline as grants plus the
+	// symmetric deny expansion of their legacy deny.
+	rolelessRows := memberRows(roleless)
+	require.Len(t, rolelessRows, len(defaults)+10)
+	for _, key := range defaults {
+		require.Truef(t, rolelessRows[key], "role-less member must hold default %s", key)
+	}
+	require.NotContains(t, rolelessRows, "data.view_center_wide", "the alias deny row is retired")
+	require.False(t, rolelessRows["students.view_all"], "a legacy deny expands into per-resource denies")
+
+	// Closed stints and the owner stay untouched.
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM center_member_permissions WHERE teacher_id IN (?, ?)`,
+		former, live.teacherID).Scan(&n).Error)
+	require.Zero(t, n)
+
+	// Effective-access parity through the real resolver algebra: the roled
+	// member sees center-wide classes but keeps the denied students scope.
+	perms := authctx.BuildPermSet(
+		nil,
+		[]string{"data.view_center_wide", "classes.view_all"},
+		[]string{"students.view_all"})
+	require.True(t, perms.HasKey("classes.view_all"))
+	require.False(t, perms.HasKey("students.view_all"))
+
+	// CAS anchor columns arrive at version 1.
+	var v int64
+	require.NoError(t, db.Raw(
+		`SELECT assignment_version FROM center_roles WHERE id = ?`, gvRole).Scan(&v).Error)
+	require.EqualValues(t, 1, v)
+	require.NoError(t, db.Raw(
+		`SELECT assignment_version FROM center_members WHERE teacher_id = ? AND center_id = ?`,
+		roled, live.centerID).Scan(&v).Error)
+	require.EqualValues(t, 1, v)
+
+	// The ledger records the mapping checksum and exact per-step counts.
+	var ledger struct {
+		MappingChecksum   string
+		RoleDefaultRows   int
+		MemberDefaultRows int
+		ScopeRoleRows     int
+		ScopeMemberRows   int
+	}
+	require.NoError(t, db.Raw(`SELECT * FROM rbac_backfill_ledger`).Scan(&ledger).Error)
+	require.Regexp(t, `^sha256:[0-9a-f]{64}$`, ledger.MappingChecksum)
+	require.Equal(t, 3*len(defaults)-1, ledger.RoleDefaultRows,
+		"three system roles minus the one colliding manual grant")
+	require.Equal(t, len(defaults), ledger.MemberDefaultRows)
+	require.Equal(t, 12, ledger.ScopeRoleRows)
+	require.Equal(t, 11+12, ledger.ScopeMemberRows,
+		"eleven for the roled member (deny collision) plus twelve for the role-less deny")
+
+	// Owner decisions made after the backfill must survive down: flip one
+	// expanded deny to a grant. Down then removes only recorded, still-matching
+	// rows — pre-existing assignments and the flipped row stay.
+	require.NoError(t, db.Exec(
+		`UPDATE center_member_permissions SET allowed = TRUE
+		 WHERE teacher_id = ? AND center_id = ? AND permission_key = 'students.view_all'`,
+		roleless, live.centerID).Error)
+	require.NoError(t, m.Migrate(17))
+
+	require.EqualValues(t, 1, rolePermCount(gvRole), "only the manual classes.create survives down")
+	require.Zero(t, rolePermCount(hvRole),
+		"nothing survives down: the backfill rows are removed and the retired alias row is deliberately not rebuilt")
+	roledRows = memberRows(roled)
+	require.Len(t, roledRows, 1, "only the pre-existing canonical deny survives down")
+	require.False(t, roledRows["students.view_all"])
+	rolelessRows = memberRows(roleless)
+	require.Len(t, rolelessRows, 1)
+	require.True(t, rolelessRows["students.view_all"], "the owner-flipped row must not be deleted by down")
+
+	tables := tableNames(t, db)
+	require.False(t, tables["rbac_backfill_rows"])
+	require.False(t, tables["rbac_backfill_ledger"])
+	cols := nameSet(t, db,
+		`SELECT column_name FROM information_schema.columns
+		 WHERE table_schema = 'public' AND table_name = 'center_roles'`)
+	require.False(t, cols["assignment_version"], "down must drop the CAS column")
 }

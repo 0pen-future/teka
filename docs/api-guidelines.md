@@ -84,20 +84,26 @@ without exception:
   `apps/api/internal/features/students/repository.go`):
 
 ```go
-// scoped returns a query bound to one center. A center-wide caller sees every
-// student in the center; anyone else sees only the rows they created.
+// scoped returns a query bound to one center. An owner sees every student in
+// their center; a member sees only the rows they created themselves.
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
     q := database.FromContext(ctx, r.db).Where("students.center_id = ?", sc.CenterID)
-    if !sc.CenterWide() {
+    if !sc.CenterWideFor(authctx.PermStudentsViewAll) {
         q = q.Where("students.teacher_id = ?", sc.TeacherID)
     }
     return q
 }
 ```
 
-`Scope.CenterWide()` (`IsOwner || Has(data.view_center_wide)`) is the **only**
-data-scoping switch repositories may branch on — never `IsOwner` directly, so
-an owner-granted permission widens reads without touching every repository.
+`Scope.CenterWideFor(<resource>.view_all key)` (`IsOwner || HasKey(key)`) is
+the **only** data-scoping switch repositories may branch on — never `IsOwner`
+directly, and each repository passes its own resource's `view_all` scope key
+(`authctx.PermStudentsViewAll`, `PermContactsViewAll`, …), so center-wide
+visibility is granted per resource. The legacy single-axis
+`data.view_center_wide` participates only through alias expansion at
+permission-set build time (a legacy grant/deny expands to every per-resource
+`view_all` key); `Scope.CenterWide()` survives solely for that compatibility
+window and has no production callers.
 
 - Writes on class-anchored artifacts resolve through the class-staff
   capability map (see class-staff writes below); the written rows still stamp
@@ -105,22 +111,28 @@ an owner-granted permission widens reads without touching every repository.
   behalf of any teacher in their center. Contacts and students are the
   exception: they anchor to the owner (see contact-book ownership below).
 
-**Class-staff reads**: `class_staff` stints (giao_vien / hoc_vu / tro_giang)
-are the read-granting relationship for class-anchored data. A class handoff
-moves `classes.teacher_id` (plus schedules, future sessions, and the giao_vien
-stint — a dual write) but never the enrollment or student rows, and hoc_vu /
-tro_giang members own no rows at all, so own-rows scoping alone would show
-them nothing. READ paths therefore widen to "own rows OR the row's class
-carries a class_staff stint for the caller — ended stints included, so
-history stays readable after a soft-close". The shared SQL fragments live in
+**Class-staff reads**: `class_staff` is the **sole** source of class
+permissions; `teacher_id` columns are creator/last-writer attribution, never a
+permission grant. `classes.teacher_id` survives only as the denormalized
+primary-teacher pointer — class creation opens a giao_vien stint and a handoff
+moves the pointer (plus schedules and future sessions) together with the stint
+in one dual write, so the current primary teacher always holds an ACTIVE
+giao_vien stint. That invariant is why the classes read filter is stint-only:
+"the class carries a class_staff stint for the caller — ended stints included,
+so history stays readable after a soft-close", with no creator arm to fall
+back on. Tables whose rows members genuinely own (students, attendance
+records, individual sessions) keep "own rows OR stint" instead. The shared SQL fragments live in
 `internal/shared/classscope` (`ReadExists` for class-keyed rows,
 `ReadExistsViaEnrollment` for student rows); each repository composes them in
 a `readScoped` helper next to its own-rows `scoped`, and services expose the
 widened queries as separate read ports (`GetReadable*`, `ListReadable`,
 `ListRangeReadable`) so every write keeps resolving through the own-rows
-gates. A soft-deleted class grants nothing. Widened today: classes,
-enrollments, students, sessions, attendance sheets, grading reads, teaching
-reads, and the class staff list itself. Everything else keeps plain member
+gates. `GetReadable` resolves the class alone; `GetReadableWithRoles` adds the
+caller's ACTIVE role keys and exists only for consumers that branch on them
+(the class detail's `my_staff_roles`, the classbook's generation gate) — plain
+readable-resolution never pays the roles query. A soft-deleted class grants
+nothing. Widened today: classes, enrollments, students, sessions, attendance
+sheets, grading reads, teaching reads, and the class staff list itself. Everything else keeps plain member
 scoping — writes resolve through the capability map below, never through a
 read stint. Widened student rows carry the linked contact's name, but the phone
 follows the phone-privacy rule below, and staff cannot browse or manage the
@@ -235,24 +247,47 @@ teacher could generate and send statements for their own periods. Now sending
 is exclusive to the owner and `can_send_reports` holders — a teacher keeps
 that ability only after the owner grants them the flag.
 
-**Configurable permissions (RBAC, migration 000013)**: authorization checks
-branch on a permission catalog, not on `IsOwner` (the sole exceptions are
-listed below). Rules:
+**Configurable permissions (resource-action RBAC, migrations 000013/000018)**:
+authorization checks branch on a permission catalog, not on `IsOwner` (the
+sole exceptions are listed below). Rules:
 
-- The catalog is **code-owned**: keys, registry order, and Vietnamese labels
-  live in `apps/api/internal/shared/authctx/permissions.go`. The database
-  stores keys only; a key unknown to the running binary is ignored on read, so
-  rolling the code back never grants or crashes anything.
+- The catalog is **code-owned and structured**: `PermDef` entries (key,
+  resource, action, kind `crud|scope|special`, Vietnamese label/description,
+  risk, grantable, deprecated, order) live in
+  `apps/api/internal/shared/authctx/catalog.go` under the pinned
+  `authctx.CatalogVersion`. Keys are `<resource>.<action>` with canonical CRUD
+  verbs, `<resource>.view_all` scope keys, and named specials; a registry
+  guard test forbids any catalog key equal to a class-staff capability
+  string. The database stores keys only; a key unknown to the running binary
+  is dropped on read, so rolling the code back never grants or crashes
+  anything, and unknown/deprecated/non-grantable keys are rejected (422) on
+  write.
+- **Every route is classified** in the route-policy registry
+  (`apps/api/internal/server/route_policy.go`) as public, authenticated-self,
+  owner-only, or permission-gated with its exact catalog key; a registry
+  coverage test fails the build on any unclassified route, so enforcement
+  fails closed. HTTP-level gating lives there — services use
+  `authctx.Require` only for boundaries that bypass HTTP middleware.
 - Effective set = (role permissions ∪ per-member grants) − per-member denies.
   Roles are per-center rows (`center_roles`, three system roles `giao_vien`,
-  `hoc_vu`, `tro_giang`, born with empty sets); overrides are per-stint rows in
+  `hoc_vu`, `tro_giang`); overrides are per-stint rows in
   `center_member_permissions`. Both are wiped when a membership closes and
   reset to defaults on reopen — permission state never survives a stint.
+  Legacy `data.*` keys remain accepted as **explicit aliases** through the
+  soak window: a legacy grant expands to all its canonical keys, a legacy
+  deny to all canonical denies, and a single-canonical deny never propagates
+  back through the legacy key.
+- Assignment writes are **versioned (compare-and-set)**: `GET
+  /centers/me/permissions` returns the structured catalog with
+  `catalog_version` plus a per-role/per-member `assignment_version`; the
+  `PUT` writes require both and reject stale versions with 409 so a stale
+  client can never erase permissions it has not seen (`0` skips the check
+  for legacy clients).
 - The **owner is an implicit superuser outside the role tables**: their stint
   holds no role row, `Scope.Has(key)` is unconditionally true for them, and
   member-targeted permission endpoints refuse the owner as target (404, the
-  `SetSendReports` precedent). Handlers gate with `scope.Has(authctx.Perm…)`;
-  repositories branch only on `Scope.CenterWide()` as above.
+  `SetSendReports` precedent). Repositories branch only on
+  `Scope.CenterWideFor(<resource>.view_all)` as above.
 - **Owner-only by design, not by catalog key**: the permission-management
   endpoints themselves (`GET /centers/me/permissions`, `PUT
   /centers/me/roles/:roleId/permissions`, `PUT

@@ -36,6 +36,12 @@ interface NavEntry {
   to: string | null;
   Icon: ComponentType<LucideProps>;
   pending?: boolean;
+  /**
+   * Effective permission key gating the entry — the same key the route's API
+   * enforces, so a narrowed role never sees an entry that only 403s. Unset
+   * means visible to every member (e.g. Tổng quan, Cài đặt trung tâm).
+   */
+  perm?: string;
 }
 
 interface NavGroup {
@@ -46,10 +52,11 @@ interface NavGroup {
 
 /**
  * The prototype sidebar's grouped nav: Tổng quan ungrouped, then Dạy học /
- * Học phí / Trung tâm sections. Every group shows for every role — billing is
- * teacher-scoped server-side, so members keep their own Học phí entries. The
- * three period-scoped routes (Chốt sổ, Gửi thông báo, Thu tiền) build their
- * link once `useCurrentPeriod` resolves rather than routing through a
+ * Học phí / Trung tâm sections. Entries carrying a `perm` render only after
+ * `/centers/me` resolves with that key in the caller's effective set —
+ * rendering optimistically would flash entries a narrowed role then loses.
+ * The three period-scoped routes (Chốt sổ, Gửi thông báo, Thu tiền) build
+ * their link once `useCurrentPeriod` resolves rather than routing through a
  * redirect page, since phase 1 owns no `/billing/current`-style route.
  */
 function useNavGroups(): NavGroup[] {
@@ -60,52 +67,66 @@ function useNavGroups(): NavGroup[] {
   const periodId = period?.id ?? null;
   const hasPending = (pendingSessionsResponse?.total ?? 0) > 0;
 
-  return [
+  const groups: NavGroup[] = [
     { header: null, entries: [{ label: "Tổng quan", to: "/", Icon: HvHomeIcon }] },
     {
       header: "Dạy học",
       entries: [
-        { label: "Điểm danh", to: "/sessions", Icon: HvCheckIcon, pending: hasPending },
-        { label: "Quản lý lớp học", to: "/classbook", Icon: BookOpenIcon },
-        { label: "Hồ sơ học sinh", to: "/records", Icon: IdCardIcon },
-        { label: "Lớp & học sinh", to: "/students", Icon: HvUsersIcon },
-        { label: "Phụ huynh", to: "/contacts", Icon: BookUserIcon },
+        {
+          label: "Điểm danh",
+          to: "/sessions",
+          Icon: HvCheckIcon,
+          pending: hasPending,
+          perm: "sessions.list",
+        },
+        { label: "Quản lý lớp học", to: "/classbook", Icon: BookOpenIcon, perm: "classes.list" },
+        { label: "Hồ sơ học sinh", to: "/records", Icon: IdCardIcon, perm: "students.list" },
+        { label: "Lớp & học sinh", to: "/students", Icon: HvUsersIcon, perm: "students.list" },
+        { label: "Phụ huynh", to: "/contacts", Icon: BookUserIcon, perm: "contacts.list" },
       ],
     },
     {
       header: "Học phí",
       entries: [
-        { label: "Chốt sổ", to: periodId ? `/billing/${periodId}` : null, Icon: HvFileIcon },
+        {
+          label: "Chốt sổ",
+          to: periodId ? `/billing/${periodId}` : null,
+          Icon: HvFileIcon,
+          perm: "billing.read",
+        },
+        // The whole notifications surface enforces reports.send, so members
+        // without the delegated key never see the entry.
         {
           label: "Gửi thông báo",
           to: periodId ? `/notifications/${periodId}` : null,
           Icon: HvSendIcon,
+          perm: "reports.send",
         },
-        { label: "Thu tiền", to: periodId ? `/collections/${periodId}` : null, Icon: HvWalletIcon },
+        {
+          label: "Thu tiền",
+          to: periodId ? `/collections/${periodId}` : null,
+          Icon: HvWalletIcon,
+          perm: "billing.read",
+        },
       ],
     },
     {
       header: "Trung tâm",
       entries: [
-        // Permission-gated (the owner's effective set is the full catalog),
-        // and only after /centers/me resolves — rendering optimistically
-        // would flash the entries for members on load.
-        ...(isResolved && has("teaching.review_queue")
-          ? [
-              {
-                label: "Duyệt giáo án",
-                to: "/lesson-plans",
-                Icon: ClipboardCheckIcon,
-                pending: pendingPlanCount > 0,
-              },
-            ]
-          : []),
-        ...(isResolved && has("imports.run")
-          ? [{ label: "Nhập từ Excel", to: "/students/import", Icon: FileSpreadsheetIcon }]
-          : []),
-        ...(isResolved && has("audit.read")
-          ? [{ label: "Nhật ký hoạt động", to: "/audit", Icon: HistoryIcon }]
-          : []),
+        {
+          label: "Duyệt giáo án",
+          to: "/lesson-plans",
+          Icon: ClipboardCheckIcon,
+          pending: pendingPlanCount > 0,
+          perm: "teaching.review_queue",
+        },
+        {
+          label: "Nhập từ Excel",
+          to: "/students/import",
+          Icon: FileSpreadsheetIcon,
+          perm: "imports.run",
+        },
+        { label: "Nhật ký hoạt động", to: "/audit", Icon: HistoryIcon, perm: "audit.read" },
         // Secretary-only (owner reaches every period through Học phí already;
         // the flag itself is member-only, so owner never matches).
         ...(isResolved && !isOwner && canSendReports
@@ -129,6 +150,11 @@ function useNavGroups(): NavGroup[] {
       ],
     },
   ];
+
+  return groups.map((group) => ({
+    ...group,
+    entries: group.entries.filter((entry) => !entry.perm || (isResolved && has(entry.perm))),
+  }));
 }
 
 /**

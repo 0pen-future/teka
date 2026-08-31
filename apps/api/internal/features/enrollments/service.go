@@ -111,7 +111,7 @@ func (s *Service) EnrollableStudents(ctx context.Context, sc authctx.Scope, clas
 	if !inCenter {
 		return nil, apperror.NotFound("class")
 	}
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermEnrollmentsViewAll) {
 		assigned, teaching, err := s.repo.CallerClassStanding(ctx, sc, classID)
 		if err != nil {
 			return nil, err

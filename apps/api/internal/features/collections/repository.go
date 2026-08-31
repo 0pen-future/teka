@@ -26,7 +26,7 @@ type Filter struct {
 // Repository is the read-only data access surface behind the collection
 // board. No method mutates a row: every query here scopes strictly by center,
 // further narrowed to one teacher's own rows unless the caller has reports
-// oversight (center owner or can_send_reports holder), and never opens a
+// oversight (center owner or reports.send holder), and never opens a
 // transaction.
 type Repository interface {
 	PeriodExists(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (bool, error)
@@ -47,7 +47,7 @@ func NewRepository(db *gorm.DB) Repository {
 // PeriodExists reports whether periodID belongs to sc's center — and, unless
 // sc has reports oversight, to sc's own teacher — the sole tenant check every
 // handler in this package runs before touching any reporting query. An owner
-// or can_send_reports holder matches any teacher's period in the center
+// or reports.send holder matches any teacher's period in the center
 // (this feature is read-only end to end — Goal 2's "read debt" lives here),
 // mirroring the oversight rule every other scoped query in this package
 // applies.

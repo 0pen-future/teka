@@ -81,7 +81,7 @@ func NewRepository(db *gorm.DB) Repository {
 // attendance_records.teacher_id (last-writer attribution, not ownership).
 func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("attendance_records.center_id = ?", sc.CenterID)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermAttendanceViewAll) {
 		frag, _ := classscope.ReadExists("s2.class_id")
 		q = q.Where(`(attendance_records.teacher_id = ? OR EXISTS (
 			SELECT 1 FROM class_sessions s2
@@ -164,7 +164,7 @@ func (r *gormRepository) StudentNames(ctx context.Context, sc authctx.Scope, stu
 		Table("students").
 		Select("id, full_name, display_note").
 		Where("center_id = ? AND id IN ?", sc.CenterID, studentIDs)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermAttendanceViewAll) {
 		// Own students, plus students enrolled in a class the caller holds a
 		// class_staff stint on (ended included): a handoff moves the class but
 		// not the student rows, and the staff sheet must still show names. The
@@ -201,7 +201,7 @@ func (r *gormRepository) TallyByEnrollment(ctx context.Context, sc authctx.Scope
 		Where("class_sessions.status = 'held'").
 		Where("class_sessions.attendance_confirmed_at IS NOT NULL").
 		Where("class_sessions.session_date BETWEEN ? AND ?", from, to)
-	if !sc.CenterWide() {
+	if !sc.CenterWideFor(authctx.PermAttendanceViewAll) {
 		q = q.Joins("JOIN enrollments ON enrollments.id = attendance_records.enrollment_id AND enrollments.center_id = attendance_records.center_id").
 			Where("enrollments.teacher_id = ?", sc.TeacherID)
 	}

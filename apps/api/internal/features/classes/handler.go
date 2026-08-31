@@ -149,7 +149,7 @@ func (h *Handler) get(c *gin.Context) {
 	if !ok {
 		return
 	}
-	class, roles, err := h.svc.GetReadable(c.Request.Context(), sc, classID)
+	class, roles, err := h.svc.GetReadableWithRoles(c.Request.Context(), sc, classID)
 	if err != nil {
 		response.Err(c, err)
 		return

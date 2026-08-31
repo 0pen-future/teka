@@ -208,10 +208,10 @@ func TestAccessMatrix(t *testing.T) {
 	requireStatus(t, err, 404)
 }
 
-// A member granted data.view_center_wide reads any class's staff list — the
-// gate follows Scope.CenterWide(), the same rule the classes read port
-// applies, so whoever can GET the class never 404s on its staff. Writes stay
-// owner-only regardless.
+// A member granted classes.view_all reads any class's staff list — the gate
+// follows CenterWideFor(classes.view_all), the same rule the classes read
+// port applies, so whoever can GET the class never 404s on its staff. Writes
+// stay owner-only regardless.
 func TestCenterWideMemberReadsStaffList(t *testing.T) {
 	t.Parallel()
 	svc, classesSvc, db := newIntegrationService(t)
@@ -228,7 +228,7 @@ func TestCenterWideMemberReadsStaffList(t *testing.T) {
 	_, err := svc.List(ctx, wideScope, class.ID)
 	requireStatus(t, err, 404)
 
-	wideScope.Perms = authctx.BuildPermSet(nil, []string{authctx.PermDataViewCenterWide}, nil)
+	wideScope.Perms = authctx.BuildPermSet(nil, []string{authctx.PermClassesViewAll}, nil)
 	staff, err := svc.List(ctx, wideScope, class.ID)
 	require.NoError(t, err, "a center-wide reader lists staff of an unassigned class")
 	require.Len(t, staff, 1)

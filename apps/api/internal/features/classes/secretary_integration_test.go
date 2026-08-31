@@ -13,7 +13,7 @@ import (
 	"teka/apps/api/internal/testutil"
 )
 
-// The send-reports flag grants billing/statement/debt READS only — classes
+// The reports.send permission grants billing/statement/debt READS only — classes
 // stay peer territory. A flag holder gets the same neutral not-found a plain
 // peer gets, on the read and on every mutation.
 func TestSecretaryCannotReadOrMutateMembersClasses(t *testing.T) {
@@ -35,21 +35,21 @@ func TestSecretaryCannotReadOrMutateMembersClasses(t *testing.T) {
 
 	_, err = svc.Get(ctx, secScope, created.ID)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
-		"the send-reports flag must not open another member's class")
+		"the reports.send permission must not open another member's class")
 
 	_, err = svc.Update(ctx, secScope, created.ID, classes.UpdateClassRequest{
 		Name: "Renamed", StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000),
 	})
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
-		"the send-reports flag must not let anyone edit another member's class")
+		"the reports.send permission must not let anyone edit another member's class")
 
 	_, err = svc.Archive(ctx, secScope, created.ID)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
-		"the send-reports flag must not let anyone archive another member's class")
+		"the reports.send permission must not let anyone archive another member's class")
 
 	err = svc.Delete(ctx, secScope, created.ID)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
-		"the send-reports flag must not let anyone delete another member's class")
+		"the reports.send permission must not let anyone delete another member's class")
 
 	got, err := svc.Get(ctx, memberScope, created.ID)
 	require.NoError(t, err, "the class must survive every refused mutation")
