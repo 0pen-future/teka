@@ -15,16 +15,29 @@ Traefik, the Docker network, or PostgreSQL.
 
 ## Images
 
-CI publishes two images to GHCR on every merge to `main` (see
-`.github/workflows/api-ci.yml` and `web-ci.yml`):
+A `vX.Y.Z` tag push publishes both images to GHCR (see
+`.github/workflows/api-release.yml` and `web-release.yml`):
 
 | Image | Base | Contents |
 |-------|------|----------|
 | `ghcr.io/OWNER/REPO/api` | `gcr.io/distroless/static-debian12:nonroot` | Single static Go binary; serves on 8080 |
 | `ghcr.io/OWNER/REPO/web` | `nginxinc/nginx-unprivileged:1.30-alpine` | Static Vite bundle behind nginx; listens on 8080 |
 
-Both run as non-root. Tags: `sha-<commit>` for every main build plus a moving
-`latest`. Deploy by SHA tag — `latest` is for convenience, not for pinning.
+Both run as non-root. Tags: the semver version (`X.Y.Z`) plus `sha-<commit>`
+and a moving `latest`. Deploy by version tag — `latest` is for convenience,
+not for pinning.
+
+To cut a release, tag a master commit that API CI and Web CI have already
+passed and push the tag:
+
+```bash
+git tag v1.2.3 && git push origin v1.2.3
+```
+
+Each release workflow re-runs its CI lint and test jobs and only builds when
+they pass; e2e and swagger drift are not re-run, so still tag only green
+master commits. One tag releases both images together. Prerelease tags
+(`v1.2.3-rc1`) do not match the trigger filter and never build.
 
 Build the same images locally:
 
@@ -66,7 +79,7 @@ docker run --rm \
   -e API_DATABASE_URL="$API_DATABASE_URL" \
   -e API_JWT_SECRET="$API_JWT_SECRET" \
   -e API_ZALO_CRED_KEY="$API_ZALO_CRED_KEY" \
-  ghcr.io/OWNER/REPO/api:sha-<commit> migrate up
+  ghcr.io/OWNER/REPO/api:X.Y.Z migrate up
 ```
 
 Run this as a pre-deploy step (compose `migrate` service, Kubernetes Job or
@@ -95,8 +108,8 @@ operation; `migrate down` exists for local development and emergencies.
 database) with a one-shot `migrate` service gating the API start:
 
 ```bash
-API_IMAGE=ghcr.io/OWNER/REPO/api:sha-<commit> \
-WEB_IMAGE=ghcr.io/OWNER/REPO/web:sha-<commit> \
+API_IMAGE=ghcr.io/OWNER/REPO/api:X.Y.Z \
+WEB_IMAGE=ghcr.io/OWNER/REPO/web:X.Y.Z \
 API_DATABASE_URL=postgres://... \
 API_JWT_SECRET=... \
 docker compose -f docker-compose.prod.yml up -d
@@ -215,7 +228,7 @@ Operational notes:
 
 ### Prepare images and environment
 
-Pin both images to immutable `sha-<commit>` tags. The web API URL is a Vite
+Pin both images to immutable version (`X.Y.Z`) tags. The web API URL is a Vite
 build argument, not a runtime setting, so build or publish the web image with
 the production API origin:
 
@@ -226,16 +239,16 @@ make build-image-web \
 ```
 
 Those commands create local `teka-api:local` and `teka-web:local` images. Tag
-and push them to your registry using the immutable commit SHA, then put those
+and push them to your registry using the release version, then put those
 exact references in `.env.production`. If CI publishes the images instead, set
 the repository's `VITE_API_URL` variable to the production API URL before the
-SHA-tagged web image is built:
+`vX.Y.Z` release tag is pushed:
 
 ```bash
-docker tag teka-api:local ghcr.io/OWNER/REPO/api:sha-COMMIT
-docker tag teka-web:local ghcr.io/OWNER/REPO/web:sha-COMMIT
-docker push ghcr.io/OWNER/REPO/api:sha-COMMIT
-docker push ghcr.io/OWNER/REPO/web:sha-COMMIT
+docker tag teka-api:local ghcr.io/OWNER/REPO/api:X.Y.Z
+docker tag teka-web:local ghcr.io/OWNER/REPO/web:X.Y.Z
+docker push ghcr.io/OWNER/REPO/api:X.Y.Z
+docker push ghcr.io/OWNER/REPO/web:X.Y.Z
 ```
 
 Copy the tracked placeholder template to the ignored production file, then
@@ -317,5 +330,5 @@ compose-style CMD healthcheck.
 local and staging convenience — do not run it against production:
 
 ```bash
-docker run --rm -e ... ghcr.io/OWNER/REPO/api:sha-<commit> seed
+docker run --rm -e ... ghcr.io/OWNER/REPO/api:X.Y.Z seed
 ```

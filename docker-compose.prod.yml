@@ -8,8 +8,8 @@
 #     operator-run instance). Production data does not belong in an anonymous
 #     compose volume next to the app.
 #   - Images come from CI (GHCR) or `make build`:
-#       API_IMAGE=ghcr.io/<owner>/<repo>/api:sha-<commit> \
-#       WEB_IMAGE=ghcr.io/<owner>/<repo>/web:sha-<commit> \
+#       API_IMAGE=ghcr.io/<owner>/<repo>/api:X.Y.Z \
+#       WEB_IMAGE=ghcr.io/<owner>/<repo>/web:X.Y.Z \
 #       docker compose -f docker-compose.prod.yml up -d
 #   - Secrets arrive via the environment (or an env_file kept out of git).
 #
@@ -19,7 +19,7 @@ services:
   # One-shot: same image as the API, overridden to apply embedded migrations,
   # then exits 0 and gates the API start. Idempotent across restarts.
   migrate:
-    image: ${API_IMAGE:?e.g. ghcr.io/<owner>/<repo>/api:sha-<commit>}
+    image: ${API_IMAGE:?e.g. ghcr.io/<owner>/<repo>/api:X.Y.Z}
     command: ["migrate", "up"]
     environment:
       API_ENV: production
@@ -35,7 +35,7 @@ services:
     # audit buffer's final flush (5s); Docker's 10s default would SIGKILL
     # mid-drain and drop the last audit batch.
     stop_grace_period: 30s
-    image: ${API_IMAGE:?e.g. ghcr.io/<owner>/<repo>/api:sha-<commit>}
+    image: ${API_IMAGE:?e.g. ghcr.io/<owner>/<repo>/api:X.Y.Z}
     expose:
       - "8080"
     environment:
@@ -79,7 +79,7 @@ services:
   # No depends_on: nginx serves static files and never talks to the API
   # container — the browser does, through the reverse proxy.
   web:
-    image: ${WEB_IMAGE:?e.g. ghcr.io/<owner>/<repo>/web:sha-<commit>}
+    image: ${WEB_IMAGE:?e.g. ghcr.io/<owner>/<repo>/web:X.Y.Z}
     expose:
       - "8080"
     restart: unless-stopped
