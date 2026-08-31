@@ -79,11 +79,10 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 
 // writeScoped is the scope for mutating queries: own rows only, owner
 // excepted. students.view_all is a visibility key — it widens scoped and
-// readScoped, never writes — because every legacy data.view_center_wide
-// holder receives it in the backfill, and pre-catalog those members could not
-// touch student rows at all. A mutation matching zero rows here is reported
-// as not-found by the callers, masking rows the caller can read but not
-// write.
+// readScoped, never writes — because member writes were own-rows-only before
+// the catalog existed, so a key widening writes would be an escalation. A
+// mutation matching zero rows here is reported as not-found by the callers,
+// masking rows the caller can read but not write.
 func (r *gormRepository) writeScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("students.center_id = ?", sc.CenterID)
 	if !sc.WriteWide() {

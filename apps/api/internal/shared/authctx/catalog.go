@@ -46,8 +46,7 @@ type PermDef struct {
 
 // Resource-action catalog keys. Legacy identity keys (reports.send,
 // members.manage, center.manage, invitations.manage, audit.read, imports.run,
-// dashboard.view, teaching.review_queue) and the deprecated
-// data.view_center_wide live in permissions.go.
+// dashboard.view, teaching.review_queue) live in permissions.go.
 const (
 	PermClassesCreate  = "classes.create"
 	PermClassesList    = "classes.list"
@@ -94,13 +93,11 @@ const (
 	PermAttendanceConfirm = "attendance.confirm"
 	PermAttendanceViewAll = "attendance.view_all"
 
-	PermScoresRead    = "scores.read"
-	PermScoresEdit    = "scores.edit"
-	PermScoresViewAll = "scores.view_all"
+	PermScoresRead = "scores.read"
+	PermScoresEdit = "scores.edit"
 
-	PermTeachingRead    = "teaching.read"
-	PermTeachingEdit    = "teaching.edit"
-	PermTeachingViewAll = "teaching.view_all"
+	PermTeachingRead = "teaching.read"
+	PermTeachingEdit = "teaching.edit"
 
 	PermBillingCreate        = "billing.create"
 	PermBillingList          = "billing.list"
@@ -195,18 +192,16 @@ var permCatalog = []PermDef{
 
 	def(PermScoresRead, PermKindCRUD, RiskLow, "Xem điểm số", "Xem điểm số và cấu phần điểm của lớp."),
 	def(PermScoresEdit, PermKindCRUD, RiskMedium, "Sửa điểm số", "Nhập và cập nhật điểm số của buổi học."),
-	// Scores and teaching rows are reached through their class/session, so
-	// their repositories scope via class resolution (classes/sessions
-	// view_all) and consult no scope key of their own yet. These two keys
-	// are reserved for a direct center-wide surface (e.g. a cross-class score
-	// report); until one exists, granting or denying them changes nothing —
-	// wire or retire them in the legacy-cleanup phase.
-	viewAll(PermScoresViewAll, "Xem mọi điểm số"),
+	// No scores/teaching scope key: those rows are reached through their
+	// class/session, so their repositories scope via class resolution
+	// (classes/sessions view_all). The reserved scores.view_all /
+	// teaching.view_all keys never gained an enforcement site and were
+	// retired in migration 000020; add a key back only together with a
+	// direct center-wide surface (e.g. a cross-class score report).
 
 	def(PermTeachingRead, PermKindCRUD, RiskLow, "Xem giảng dạy", "Xem giáo trình, giáo án và nhận xét của lớp."),
 	def(PermTeachingEdit, PermKindCRUD, RiskLow, "Sửa giảng dạy", "Cập nhật giáo trình, giáo án, ghi chú và nhận xét buổi học."),
 	def(PermTeachingReviewQueue, PermKindSpecial, RiskLow, "Xem hàng chờ duyệt giáo án", "Xem hàng chờ duyệt giáo án của trung tâm."),
-	viewAll(PermTeachingViewAll, "Xem mọi dữ liệu giảng dạy"),
 
 	def(PermBillingCreate, PermKindCRUD, RiskLow, "Tạo kỳ học phí", "Khởi tạo kỳ học phí theo tháng."),
 	def(PermBillingList, PermKindCRUD, RiskLow, "Xem danh sách kỳ học phí", "Xem danh sách kỳ học phí."),
@@ -240,38 +235,6 @@ var permCatalog = []PermDef{
 	def(PermAuditRead, PermKindCRUD, RiskMedium, "Xem nhật ký hoạt động", "Xem nhật ký hoạt động của trung tâm."),
 	def(PermImportsRun, PermKindSpecial, RiskHigh, "Import dữ liệu", "Import danh sách lớp, học viên và liên hệ từ file."),
 	def(PermDashboardView, PermKindSpecial, RiskMedium, "Xem dashboard trung tâm", "Xem dashboard tổng hợp tài chính và vận hành của trung tâm."),
-
-	// Deprecated single-axis scope key: kept known so legacy assignment rows
-	// stay effective during the compatibility window, but no longer
-	// assignable — new writes use the per-resource view_all keys.
-	{
-		Key: PermDataViewCenterWide, Resource: "data", Action: "view_center_wide",
-		Kind: PermKindScope, Risk: RiskHigh,
-		Label:       "Xem dữ liệu toàn trung tâm",
-		Description: "Khóa phạm vi cũ, đã thay bằng các quyền “Xem mọi …” theo từng loại dữ liệu.",
-		Grantable:   false, Deprecated: true,
-	},
-}
-
-// permAliases maps a deprecated key to its canonical equivalence class. Alias
-// expansion is symmetric: a grant of the legacy key grants every canonical
-// key, a deny removes every canonical key. A single canonical key never
-// expands back to the legacy key.
-var permAliases = map[string][]string{
-	PermDataViewCenterWide: {
-		PermClassesViewAll,
-		PermContactsViewAll,
-		PermStudentsViewAll,
-		PermEnrollmentsViewAll,
-		PermSessionsViewAll,
-		PermAttendanceViewAll,
-		PermScoresViewAll,
-		PermTeachingViewAll,
-		PermBillingViewAll,
-		PermPaymentsViewAll,
-		PermStatementsViewAll,
-		PermNotificationsViewAll,
-	},
 }
 
 // permIndex maps key → catalog position; permRegistry and permLabels in
@@ -288,16 +251,6 @@ func init() {
 		permIndex[d.Key] = i
 		permRegistry = append(permRegistry, d.Key)
 		permLabels[d.Key] = d.Label
-	}
-	for legacy, canonical := range permAliases {
-		if _, ok := permIndex[legacy]; !ok {
-			panic("authctx: alias source " + legacy + " missing from catalog")
-		}
-		for _, key := range canonical {
-			if _, ok := permIndex[key]; !ok {
-				panic("authctx: alias target " + key + " missing from catalog")
-			}
-		}
 	}
 }
 
@@ -334,9 +287,11 @@ func GrantableKeys() []string {
 // CatalogVersion is the CAS anchor for permission-assignment writes: reads
 // carry it, replacement writes echo it, and a mismatch is a 409 — a client
 // that rendered an older catalog must reload before writing. Version 1 was
-// the legacy 9-key registry; 2 is the resource-action catalog. Bump on any
-// change that alters what a stored assignment means.
-const CatalogVersion = 2
+// the legacy 9-key registry; 2 the resource-action catalog with the
+// deprecated data.view_center_wide alias; 3 retired the alias and the two
+// unenforced scope keys (scores/teaching view_all). Bump on any change that
+// alters what a stored assignment means.
+const CatalogVersion = 3
 
 // legacyIdentitySet is the pre-catalog identity keys: operations that were
 // permission-gated before the resource-action catalog existed. They stay out
@@ -372,9 +327,7 @@ func DefaultRoleKeys() []string {
 }
 
 // CenterWideFor reports whether the caller sees the whole center's rows for
-// one resource — the per-resource replacement for CenterWide(). key must be a
-// <resource>.view_all catalog key; the legacy axis participates only through
-// alias expansion at set-build time, never here.
+// one resource. key must be a <resource>.view_all catalog key.
 func (s Scope) CenterWideFor(key string) bool {
 	return s.IsOwner || s.Perms.HasKey(key)
 }

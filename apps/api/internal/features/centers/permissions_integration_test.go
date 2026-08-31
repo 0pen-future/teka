@@ -175,11 +175,10 @@ func TestReplaceRolePermissions(t *testing.T) {
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
 }
 
-// Assignment writes accept only grantable catalog keys: the deprecated
-// data.view_center_wide is rejected with a field error even though existing
-// rows for it stay effective — new writes must use the per-resource view_all
-// keys.
-func TestDeprecatedKeyRejectedOnWrite(t *testing.T) {
+// Assignment writes accept only grantable catalog keys: the retired
+// data.view_center_wide is unknown to catalog v3 and rejected with a field
+// error — writes must use the per-resource view_all keys.
+func TestRetiredKeyRejectedOnWrite(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
@@ -191,23 +190,23 @@ func TestDeprecatedKeyRejectedOnWrite(t *testing.T) {
 	hocVu := e.roleID(t, ownerScope.CenterID, "hoc_vu")
 
 	err := e.centersSvc.ReplaceRolePermissions(ctx, ownerScope, hocVu,
-		centers.RolePermissionsRequest{Permissions: []string{authctx.PermDataViewCenterWide}})
+		centers.RolePermissionsRequest{Permissions: []string{"data.view_center_wide"}})
 	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code)
 
 	err = e.centersSvc.ReplaceMemberOverrides(ctx, ownerScope, member.ID,
-		centers.MemberOverridesRequest{Grants: []string{authctx.PermDataViewCenterWide}})
+		centers.MemberOverridesRequest{Grants: []string{"data.view_center_wide"}})
 	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code)
 
 	err = e.centersSvc.ReplaceMemberOverrides(ctx, ownerScope, member.ID,
-		centers.MemberOverridesRequest{Denies: []string{authctx.PermDataViewCenterWide}})
+		centers.MemberOverridesRequest{Denies: []string{"data.view_center_wide"}})
 	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code)
 }
 
-// A pre-migration data.view_center_wide row resolves through alias expansion:
-// the member's very next scope carries every per-resource view_all key, both
-// CenterWide() and CenterWideFor() widen, and a canonical deny narrows one
-// resource without touching the rest.
-func TestLegacyScopeRowExpandsOnResolve(t *testing.T) {
+// A stray data.view_center_wide row — a code rollback re-writing one after
+// migration 000020 deleted them — is unknown to catalog v3 and must drop out
+// of scope resolution without widening anything. Canonical view_all rows keep
+// working, and a canonical deny narrows exactly its resource.
+func TestRetiredScopeRowDropsOnResolve(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 
@@ -221,13 +220,23 @@ func TestLegacyScopeRowExpandsOnResolve(t *testing.T) {
 		 VALUES (?, ?, 'data.view_center_wide', TRUE)`, member.ID, ownerScope.CenterID).Error)
 
 	sc := e.scope(t, member.ID)
-	require.True(t, sc.CenterWide())
-	require.True(t, sc.CenterWideFor(authctx.PermStudentsViewAll))
-	require.True(t, sc.CenterWideFor(authctx.PermBillingViewAll))
+	require.False(t, sc.CenterWideFor(authctx.PermStudentsViewAll),
+		"a retired key must not widen any resource")
+	require.False(t, sc.CenterWideFor(authctx.PermBillingViewAll))
 
 	require.NoError(t, e.db.Exec(
 		`INSERT INTO center_member_permissions (teacher_id, center_id, permission_key, allowed)
-		 VALUES (?, ?, 'students.view_all', FALSE)`, member.ID, ownerScope.CenterID).Error)
+		 VALUES (?, ?, 'students.view_all', TRUE), (?, ?, 'classes.view_all', TRUE)`,
+		member.ID, ownerScope.CenterID, member.ID, ownerScope.CenterID).Error)
+
+	sc = e.scope(t, member.ID)
+	require.True(t, sc.CenterWideFor(authctx.PermStudentsViewAll))
+	require.True(t, sc.CenterWideFor(authctx.PermClassesViewAll))
+
+	require.NoError(t, e.db.Exec(
+		`UPDATE center_member_permissions SET allowed = FALSE
+		 WHERE teacher_id = ? AND center_id = ? AND permission_key = 'students.view_all'`,
+		member.ID, ownerScope.CenterID).Error)
 
 	sc = e.scope(t, member.ID)
 	require.False(t, sc.CenterWideFor(authctx.PermStudentsViewAll),
@@ -555,13 +564,12 @@ func TestAssignmentVersionCAS(t *testing.T) {
 	require.Empty(t, resp.Members[0].Denies)
 }
 
-// TestLegacyScopeKeyRoundTripStaysSavable pins the deprecated-key contract on
-// the assignment read models. The backfill deliberately keeps legacy
-// data.view_center_wide rows effective through the soak window, but the read
-// model must never emit them: the PUT endpoints reject non-grantable keys, so
-// an emitted legacy key would make every save of such a role or member fail
-// 422 — for exactly the pre-catalog centers the backfill was written for.
-func TestLegacyScopeKeyRoundTripStaysSavable(t *testing.T) {
+// TestRetiredScopeKeyRoundTripStaysSavable pins the unknown-key contract on
+// the assignment read models. A stray data.view_center_wide row (a code
+// rollback re-writing one after migration 000020) must never be emitted by
+// the read model: the PUT endpoints reject non-catalog keys, so an emitted
+// retired key would make every save of such a role or member fail 422.
+func TestRetiredScopeKeyRoundTripStaysSavable(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
@@ -572,7 +580,7 @@ func TestLegacyScopeKeyRoundTripStaysSavable(t *testing.T) {
 	ownerScope := e.scope(t, owner.ID)
 	hocVu := e.roleID(t, ownerScope.CenterID, "hoc_vu")
 
-	// A pre-catalog center: role and member still hold the legacy scope row.
+	// A rollback-touched center: role and member hold a stray retired row.
 	require.NoError(t, e.db.Exec(
 		`INSERT INTO center_role_permissions (role_id, permission_key)
 		 VALUES (?, 'data.view_center_wide')`, hocVu).Error)
@@ -583,10 +591,10 @@ func TestLegacyScopeKeyRoundTripStaysSavable(t *testing.T) {
 
 	resp, err := e.centersSvc.Permissions(ctx, ownerScope)
 	require.NoError(t, err)
-	require.NotContains(t, resp.Roles[1].Permissions, authctx.PermDataViewCenterWide,
-		"deprecated keys stay out of the role read model")
-	require.NotContains(t, resp.Members[0].Grants, authctx.PermDataViewCenterWide,
-		"deprecated keys stay out of the override read model")
+	require.NotContains(t, resp.Roles[1].Permissions, "data.view_center_wide",
+		"retired keys stay out of the role read model")
+	require.NotContains(t, resp.Members[0].Grants, "data.view_center_wide",
+		"retired keys stay out of the override read model")
 
 	// The UI saves exactly what it read back; neither write may 422.
 	require.NoError(t, e.centersSvc.ReplaceRolePermissions(ctx, ownerScope, hocVu,

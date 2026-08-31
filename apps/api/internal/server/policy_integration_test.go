@@ -210,11 +210,11 @@ func TestPolicyHTTPRemovedMembershipLosesAccess(t *testing.T) {
 		"a removed member must lose access on the next request, got %d", rec.Code)
 }
 
-// Wave-1 parity in both directions: a single classes.view_all grant widens
-// classes and only classes (students stay narrow), while the legacy
-// data.view_center_wide alias still widens every resource through set-build
-// expansion — the backfilled legacy holder loses nothing. Students is the
-// second probe rather than contacts because contact reads run on the frozen
+// Per-resource parity in both directions: a single classes.view_all grant
+// widens classes and only classes (students stay narrow), while a stray row
+// for the retired data.view_center_wide key — a code rollback re-writing one
+// after migration 000020 — widens nothing at all. Students is the second
+// probe rather than contacts because contact reads run on the frozen
 // ReportsOversight axis (phone privacy), not on a view_all key.
 func TestPolicyHTTPViewAllParity(t *testing.T) {
 	t.Parallel()
@@ -255,13 +255,14 @@ func TestPolicyHTTPViewAllParity(t *testing.T) {
 	require.NotContains(t, body, ownerStudent.ID.String(),
 		"classes.view_all must not leak into students")
 
-	// The legacy alias still widens everything via expansion.
-	e.override(t, memberB.ID, owner.CenterID, authctx.PermDataViewCenterWide, true)
+	// A planted retired-key row drops out as unknown and widens nothing.
+	e.override(t, memberB.ID, owner.CenterID, "data.view_center_wide", true)
 	body = e.get(t, "/api/v1/classes", tokB).Body.String()
-	require.Contains(t, body, ownerClass.ID.String())
+	require.NotContains(t, body, ownerClass.ID.String(),
+		"the retired center-wide key must not widen classes")
 	body = e.get(t, "/api/v1/students", tokB).Body.String()
-	require.Contains(t, body, ownerStudent.ID.String(),
-		"a legacy center-wide holder must keep full visibility")
+	require.NotContains(t, body, ownerStudent.ID.String(),
+		"the retired center-wide key must not widen students")
 }
 
 // An unauthenticated probe of a policy-guarded route must never leak whether

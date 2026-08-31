@@ -5,7 +5,13 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
 import { mockInvites } from "@/features/invitation/__tests__/invitation-handlers";
-import { API_URL, DEFAULT_CENTER_PERMISSIONS, DEFAULT_ROLES, fail } from "@/test/msw/handlers";
+import {
+  API_URL,
+  CATALOG_VERSION,
+  DEFAULT_CENTER_PERMISSIONS,
+  DEFAULT_ROLES,
+  fail,
+} from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
 
@@ -114,7 +120,7 @@ describe("PermissionMatrix on the owner permissions page", () => {
     // assignment version from the read model the edit was composed on.
     expect(received).toEqual({
       permissions: ["audit.read", "dashboard.view"],
-      catalog_version: 2,
+      catalog_version: CATALOG_VERSION,
       assignment_version: HOC_VU.assignment_version,
     });
   });
@@ -303,7 +309,7 @@ describe("MemberPermissionsDialog", () => {
     expect(received).toEqual({
       grants: ["imports.run"],
       denies: ["audit.read"],
-      catalog_version: 2,
+      catalog_version: CATALOG_VERSION,
       assignment_version: 1,
     });
   });

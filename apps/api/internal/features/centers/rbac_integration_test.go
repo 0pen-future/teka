@@ -114,19 +114,20 @@ func TestResolveScopeEffectivePermissions(t *testing.T) {
 		hocVu, hocVu, hocVu).Error)
 	require.NoError(t, e.db.Exec(
 		`INSERT INTO center_member_permissions (teacher_id, center_id, permission_key, allowed)
-		 VALUES (?, ?, 'data.view_center_wide', TRUE), (?, ?, 'dashboard.view', FALSE)`,
+		 VALUES (?, ?, 'students.view_all', TRUE), (?, ?, 'dashboard.view', FALSE)`,
 		member.ID, centerID, member.ID, centerID).Error)
 
 	sc := e.scope(t, member.ID)
 	require.True(t, sc.Has(authctx.PermAuditRead), "role grant must apply")
 	require.False(t, sc.Has("ghost.key"), "unknown keys are ignored on read")
 	require.False(t, sc.Has(authctx.PermDashboardView), "deny must beat the role grant")
-	require.True(t, sc.CenterWide(), "override grant must widen data scope")
+	require.True(t, sc.CenterWideFor(authctx.PermStudentsViewAll),
+		"override grant must widen its resource")
 	require.False(t, sc.IsOwner)
 
 	ownerScope := e.scope(t, owner.ID)
 	require.True(t, ownerScope.Has(authctx.PermAuditRead), "owner bypass")
-	require.True(t, ownerScope.CenterWide())
+	require.True(t, ownerScope.CenterWideFor(authctx.PermStudentsViewAll))
 }
 
 // Closing and reopening a membership resets the stint's permission state

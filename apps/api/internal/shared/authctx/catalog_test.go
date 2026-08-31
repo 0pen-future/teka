@@ -5,8 +5,9 @@ import (
 	"testing"
 )
 
-// The nine pre-catalog keys. Eight stay canonical under the same string; the
-// data-scoping key is deprecated and aliased to the per-resource view_all set.
+// The eight pre-catalog identity keys, canonical under the same string. The
+// ninth pre-catalog key (data.view_center_wide) was decomposed into the
+// per-resource view_all set and retired in catalog v3.
 var legacyIdentityKeys = []string{
 	PermReportsSend,
 	PermMembersManage,
@@ -18,8 +19,9 @@ var legacyIdentityKeys = []string{
 	PermTeachingReviewQueue,
 }
 
-// The full decomposition of data.view_center_wide: one scope key per
-// resource whose repository widens on CenterWide().
+// One scope key per resource whose repository widens on CenterWideFor.
+// Scores/teaching have none: their rows scope via class/session resolution,
+// and the unenforced reserved keys were retired in catalog v3.
 var expectedScopeKeys = []string{
 	PermClassesViewAll,
 	PermContactsViewAll,
@@ -27,12 +29,19 @@ var expectedScopeKeys = []string{
 	PermEnrollmentsViewAll,
 	PermSessionsViewAll,
 	PermAttendanceViewAll,
-	PermScoresViewAll,
-	PermTeachingViewAll,
 	PermBillingViewAll,
 	PermPaymentsViewAll,
 	PermStatementsViewAll,
 	PermNotificationsViewAll,
+}
+
+// Keys the catalog once knew and has since retired: assignment rows for them
+// were deleted by migration 000020, and any row that reappears (a code
+// rollback re-writing one) must drop out of scope resolution as unknown.
+var retiredKeys = []string{
+	"data.view_center_wide",
+	"scores.view_all",
+	"teaching.view_all",
 }
 
 func TestCatalogWellFormed(t *testing.T) {
@@ -62,7 +71,7 @@ func TestCatalogWellFormed(t *testing.T) {
 				t.Fatalf("crud key %q uses non-canonical verb %q", d.Key, d.Action)
 			}
 		case PermKindScope:
-			if d.Action != "view_all" && d.Key != PermDataViewCenterWide {
+			if d.Action != "view_all" {
 				t.Fatalf("scope key %q must use action view_all", d.Key)
 			}
 		case PermKindSpecial:
@@ -104,12 +113,10 @@ func TestLegacyKeysRemainCanonical(t *testing.T) {
 			t.Fatalf("legacy identity key %q must stay grantable and non-deprecated: %+v", key, d)
 		}
 	}
-	d, ok := PermDefOf(PermDataViewCenterWide)
-	if !ok {
-		t.Fatal("data.view_center_wide must remain a known key during compatibility")
-	}
-	if !d.Deprecated || d.Grantable {
-		t.Fatalf("data.view_center_wide must be deprecated and non-grantable for assignment: %+v", d)
+	for _, key := range retiredKeys {
+		if _, ok := PermDefOf(key); ok {
+			t.Fatalf("retired key %q must be gone from the catalog", key)
+		}
 	}
 }
 
@@ -134,61 +141,36 @@ func TestScopeKeysCompleteAndHighRisk(t *testing.T) {
 	}
 }
 
-// A legacy grant resolves to every per-resource canonical grant, and the
-// legacy key itself stays effective so pre-cutover CenterWide() repositories
-// keep their behavior.
-func TestLegacyGrantExpandsToAllScopeKeys(t *testing.T) {
-	set := BuildPermSet([]string{PermDataViewCenterWide}, nil, nil)
-	for _, key := range expectedScopeKeys {
-		if !set.HasKey(key) {
-			t.Fatalf("legacy grant must expand to %q", key)
-		}
-	}
-	if !set.HasKey(PermDataViewCenterWide) {
-		t.Fatal("legacy key must stay effective during compatibility")
+// A retired key no longer resolves to anything: a stray assignment row (a
+// code rollback re-writing one after migration 000020) is dropped as unknown
+// and widens no resource.
+func TestRetiredKeysResolveToNothing(t *testing.T) {
+	set := BuildPermSet(retiredKeys, retiredKeys, nil)
+	if len(set) != 0 {
+		t.Fatalf("retired keys must be dropped, got %v", set)
 	}
 	sc := Scope{Perms: set}
-	if !sc.CenterWide() {
-		t.Fatal("CenterWide() must hold for legacy holders")
-	}
 	for _, key := range expectedScopeKeys {
-		if !sc.CenterWideFor(key) {
-			t.Fatalf("CenterWideFor(%q) must hold for legacy holders", key)
+		if sc.CenterWideFor(key) {
+			t.Fatalf("retired keys must not widen %q", key)
 		}
 	}
 }
 
-// Any equivalent deny wins: a legacy deny removes the whole equivalence
-// class, even keys granted under their canonical name.
-func TestLegacyDenyBeatsCanonicalGrant(t *testing.T) {
+// A deny narrows exactly its own key: the other granted resources stay
+// widened.
+func TestDenyNarrowsOnlyItsKey(t *testing.T) {
 	set := BuildPermSet(
+		[]string{PermStudentsViewAll, PermClassesViewAll, PermBillingViewAll},
+		nil,
 		[]string{PermStudentsViewAll},
-		[]string{PermClassesViewAll},
-		[]string{PermDataViewCenterWide},
 	)
-	for _, key := range append([]string{PermDataViewCenterWide}, expectedScopeKeys...) {
-		if set.HasKey(key) {
-			t.Fatalf("legacy deny must remove %q", key)
-		}
-	}
-}
-
-// A deny of one canonical key never propagates back through the legacy key:
-// the other resources stay widened.
-func TestCanonicalDenyDoesNotPropagateBack(t *testing.T) {
-	set := BuildPermSet([]string{PermDataViewCenterWide}, nil, []string{PermStudentsViewAll})
 	sc := Scope{Perms: set}
 	if sc.CenterWideFor(PermStudentsViewAll) {
-		t.Fatal("denied canonical key must not widen")
+		t.Fatal("denied key must not widen")
 	}
 	if !sc.CenterWideFor(PermClassesViewAll) || !sc.CenterWideFor(PermBillingViewAll) {
 		t.Fatal("deny of one resource must leave the others widened")
-	}
-	// Known pre-cutover gap, closed per-resource in the repository cutover:
-	// the legacy key itself stays effective for repositories still branching
-	// on CenterWide().
-	if !sc.CenterWide() {
-		t.Fatal("legacy key must survive a single-canonical deny during compatibility")
 	}
 }
 
@@ -208,8 +190,10 @@ func TestGrantableKeys(t *testing.T) {
 	for _, key := range GrantableKeys() {
 		grantable[key] = true
 	}
-	if grantable[PermDataViewCenterWide] {
-		t.Fatal("deprecated key must not be assignable")
+	for _, key := range retiredKeys {
+		if grantable[key] {
+			t.Fatalf("retired key %q must not be assignable", key)
+		}
 	}
 	for _, key := range append(append([]string{}, legacyIdentityKeys...), expectedScopeKeys...) {
 		if !grantable[key] {
@@ -308,11 +292,11 @@ func TestDefaultRoleKeysPreserveLegacyBaseline(t *testing.T) {
 
 // The catalog version is the CAS anchor for permission-assignment writes: a
 // client that loaded the read model under an older catalog must get 409, not
-// a silent partial write. Version 1 was the legacy 9-key registry; the
-// resource-action catalog is version 2. Bump it on any catalog change that
-// alters what a stored assignment means.
+// a silent partial write. Version 3 retired the data.view_center_wide alias
+// and the unenforced scores/teaching scope keys. Bump it on any catalog
+// change that alters what a stored assignment means.
 func TestCatalogVersion(t *testing.T) {
-	if CatalogVersion != 2 {
-		t.Fatalf("catalog version must be 2 for the resource-action catalog, got %d", CatalogVersion)
+	if CatalogVersion != 3 {
+		t.Fatalf("catalog version must be 3 after the legacy-key retirement, got %d", CatalogVersion)
 	}
 }

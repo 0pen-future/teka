@@ -14,7 +14,7 @@ export const API_URL = "http://localhost:8080/api/v1";
 export const PUBLIC_API_URL = API_URL.replace(/\/api\/v1\/?$/, "");
 
 /** Version stamp of the mirrored catalog below (`authctx.CatalogVersion`). */
-export const CATALOG_VERSION = 2;
+export const CATALOG_VERSION = 3;
 
 function perm(
   key: string,
@@ -161,7 +161,6 @@ export const PERMISSION_CATALOG = [
   perm("attendance.view_all", "Xem mọi điểm danh", "scope", "high", SCOPE_DESC),
   perm("scores.read", "Xem điểm số", "crud", "low", "Xem điểm số và cấu phần điểm của lớp."),
   perm("scores.edit", "Sửa điểm số", "crud", "medium", "Nhập và cập nhật điểm số của buổi học."),
-  perm("scores.view_all", "Xem mọi điểm số", "scope", "high", SCOPE_DESC),
   perm(
     "teaching.read",
     "Xem giảng dạy",
@@ -183,7 +182,6 @@ export const PERMISSION_CATALOG = [
     "low",
     "Xem hàng chờ duyệt giáo án của trung tâm.",
   ),
-  perm("teaching.view_all", "Xem mọi dữ liệu giảng dạy", "scope", "high", SCOPE_DESC),
   perm("billing.create", "Tạo kỳ học phí", "crud", "low", "Khởi tạo kỳ học phí theo tháng."),
   perm("billing.list", "Xem danh sách kỳ học phí", "crud", "low", "Xem danh sách kỳ học phí."),
   perm(

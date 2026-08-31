@@ -7,18 +7,57 @@ import (
 	"strings"
 	"testing"
 
-	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/migrations"
 )
 
-// The 000018 backfill embeds two key lists that must never drift from the
-// code-owned catalog: the default operational baseline every system role
-// receives, and the per-resource view_all set the legacy
-// data.view_center_wide rows expand into. The SQL cannot import Go, so the
-// lists are literal — this test pins them to authctx and to the checksum the
-// migration records in its ledger row.
+// The 000018 backfill embeds the key lists of the catalog generation it
+// shipped under (catalog v2). Migrations are immutable while the catalog keeps
+// evolving — v3 retired data.view_center_wide and the scores/teaching scope
+// keys — so the expectations here are frozen literals of that v2 generation,
+// not derivations from the live catalog. The test guards exactly one
+// invariant: nobody edits the shipped SQL. Catalog drift is the live tests'
+// job, not this file's.
 
 const backfillUpFile = "000018_resource_action_catalog_backfill.up.sql"
+
+// The default operational baseline of catalog v2, in catalog order — identical
+// in v3, but frozen here because the SQL can never follow a future change.
+var frozenDefaultKeys = []string{
+	"classes.create", "classes.list", "classes.read", "classes.edit",
+	"classes.delete", "classes.archive",
+	"schedules.create", "schedules.edit", "schedules.delete",
+	"contacts.create", "contacts.list", "contacts.read", "contacts.edit",
+	"contacts.delete", "contacts.link_zalo",
+	"students.create", "students.list", "students.read", "students.edit",
+	"students.delete",
+	"enrollments.create", "enrollments.list", "enrollments.read",
+	"enrollments.delete", "enrollments.end",
+	"sessions.create", "sessions.list", "sessions.read", "sessions.delete",
+	"sessions.lifecycle",
+	"attendance.read", "attendance.confirm",
+	"scores.read", "scores.edit",
+	"teaching.read", "teaching.edit",
+	"billing.create", "billing.list", "billing.read", "billing.draft",
+	"billing.close", "billing.void_invoice", "billing.adjust_invoice",
+	"payments.create", "payments.list", "payments.read", "payments.allocate",
+	"payments.reverse",
+	"statements.list", "statements.read", "statements.generate",
+	"statements.revoke",
+	"notifications.mark_sent",
+}
+
+// The scope-expansion targets of catalog v2, in catalog order — including
+// scores.view_all and teaching.view_all, which v3 retired (their rows were
+// deleted again by migration 000020).
+var frozenScopeKeys = []string{
+	"classes.view_all", "contacts.view_all", "students.view_all",
+	"enrollments.view_all", "sessions.view_all", "attendance.view_all",
+	"scores.view_all", "teaching.view_all", "billing.view_all",
+	"payments.view_all", "statements.view_all", "notifications.view_all",
+}
+
+// The pre-catalog center-wide axis the expansion read from; retired in v3.
+const frozenLegacyScopeKey = "data.view_center_wide"
 
 var keyLiteral = regexp.MustCompile(`'([a-z_]+\.[a-z_]+)'`)
 
@@ -57,70 +96,57 @@ func keysIn(block string) []string {
 	return keys
 }
 
-func activeScopeKeys() []string {
-	var keys []string
-	for _, d := range authctx.PermDefs() {
-		if d.Kind == authctx.PermKindScope && !d.Deprecated {
-			keys = append(keys, d.Key)
-		}
-	}
-	return keys
-}
-
 // mappingChecksum is the canonical fingerprint of the SQL-embedded mapping:
 // the default baseline and the scope-expansion targets, both in catalog
-// order. The migration writes it into rbac_backfill_ledger so an operator can
+// order. The migration wrote it into rbac_backfill_ledger so an operator can
 // tell which catalog generation a database was backfilled under.
 func mappingChecksum() string {
-	payload := strings.Join(authctx.DefaultRoleKeys(), "\n") +
-		"\n|\n" + strings.Join(activeScopeKeys(), "\n")
+	payload := strings.Join(frozenDefaultKeys, "\n") +
+		"\n|\n" + strings.Join(frozenScopeKeys, "\n")
 	sum := sha256.Sum256([]byte(payload))
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-func TestBackfillSQLMatchesCatalog(t *testing.T) {
+func TestBackfillSQLMatchesFrozenCatalogV2(t *testing.T) {
 	raw, err := migrations.FS.ReadFile(backfillUpFile)
 	if err != nil {
 		t.Fatalf("read %s: %v", backfillUpFile, err)
 	}
 	src := string(raw)
 
-	defaults := authctx.DefaultRoleKeys()
 	for i, block := range markedBlocks(t, src, "default-keys") {
 		got := keysIn(block)
-		if len(got) != len(defaults) {
-			t.Fatalf("default-keys block %d holds %d keys, catalog baseline holds %d",
-				i, len(got), len(defaults))
+		if len(got) != len(frozenDefaultKeys) {
+			t.Fatalf("default-keys block %d holds %d keys, frozen baseline holds %d",
+				i, len(got), len(frozenDefaultKeys))
 		}
-		for j, key := range defaults {
+		for j, key := range frozenDefaultKeys {
 			if got[j] != key {
-				t.Errorf("default-keys block %d position %d: SQL has %q, catalog has %q",
+				t.Errorf("default-keys block %d position %d: SQL has %q, frozen list has %q",
 					i, j, got[j], key)
 			}
 		}
 	}
 
-	scope := activeScopeKeys()
 	for i, block := range markedBlocks(t, src, "scope-keys") {
 		got := keysIn(block)
-		if len(got) != len(scope) {
-			t.Fatalf("scope-keys block %d holds %d keys, catalog holds %d",
-				i, len(got), len(scope))
+		if len(got) != len(frozenScopeKeys) {
+			t.Fatalf("scope-keys block %d holds %d keys, frozen list holds %d",
+				i, len(got), len(frozenScopeKeys))
 		}
-		for j, key := range scope {
+		for j, key := range frozenScopeKeys {
 			if got[j] != key {
-				t.Errorf("scope-keys block %d position %d: SQL has %q, catalog has %q",
+				t.Errorf("scope-keys block %d position %d: SQL has %q, frozen list has %q",
 					i, j, got[j], key)
 			}
 		}
 	}
 
-	// The single legacy key the expansion reads must be the deprecated one.
 	for _, block := range markedBlocks(t, src, "legacy-scope-key") {
 		got := keysIn(block)
-		if len(got) != 1 || got[0] != authctx.PermDataViewCenterWide {
+		if len(got) != 1 || got[0] != frozenLegacyScopeKey {
 			t.Errorf("legacy-scope-key block must reference exactly %q, got %v",
-				authctx.PermDataViewCenterWide, got)
+				frozenLegacyScopeKey, got)
 		}
 	}
 

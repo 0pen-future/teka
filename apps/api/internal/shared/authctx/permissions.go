@@ -10,17 +10,13 @@ package authctx
 // permission management itself, ownership handoff, and every write-on-behalf
 // branch — those gates stay on Scope.IsOwner.
 const (
-	// PermDataViewCenterWide is the single data-scoping axis: repositories
-	// widen from own-rows to center-wide reads through Scope.CenterWide()
-	// only, never through Has() directly.
-	PermDataViewCenterWide = "data.view_center_wide"
-	PermReportsSend        = "reports.send"
-	PermMembersManage      = "members.manage"
-	PermCenterManage       = "center.manage"
-	PermInvitationsManage  = "invitations.manage"
-	PermAuditRead          = "audit.read"
-	PermImportsRun         = "imports.run"
-	PermDashboardView      = "dashboard.view"
+	PermReportsSend       = "reports.send"
+	PermMembersManage     = "members.manage"
+	PermCenterManage      = "center.manage"
+	PermInvitationsManage = "invitations.manage"
+	PermAuditRead         = "audit.read"
+	PermImportsRun        = "imports.run"
+	PermDashboardView     = "dashboard.view"
 	// PermTeachingReviewQueue grants lesson-plan review visibility on its
 	// own, without exposing the center-wide financial/attendance dashboard
 	// behind PermDashboardView. Review WRITES (approve/redo/reopen) stay
@@ -70,18 +66,13 @@ type PermSet map[string]struct{}
 // BuildPermSet combines role permissions with member overrides into the
 // effective set: (role ∪ grants) − denies. Keys outside the registry are
 // dropped — the database may hold assignments for keys a code rollback no
-// longer defines. Aliased keys expand on every input list before the set
-// algebra, so a legacy grant grants its whole canonical equivalence class and
-// a legacy deny removes it; a canonical key never expands back to its legacy
-// alias.
+// longer defines, and rows for retired keys (the pre-catalog
+// data.view_center_wide axis) fall out the same way.
 func BuildPermSet(rolePerms, grants, denies []string) PermSet {
 	set := make(PermSet, len(rolePerms)+len(grants))
 	add := func(key string) {
 		if KnownPerm(key) {
 			set[key] = struct{}{}
-		}
-		for _, alias := range permAliases[key] {
-			set[alias] = struct{}{}
 		}
 	}
 	for _, key := range rolePerms {
@@ -92,9 +83,6 @@ func BuildPermSet(rolePerms, grants, denies []string) PermSet {
 	}
 	for _, key := range denies {
 		delete(set, key)
-		for _, alias := range permAliases[key] {
-			delete(set, alias)
-		}
 	}
 	return set
 }
@@ -131,11 +119,4 @@ func (s Scope) EffectiveKeys() []string {
 		}
 	}
 	return out
-}
-
-// CenterWide reports whether the caller sees the whole center's data rather
-// than only their own rows — the single scoping switch repositories branch
-// on.
-func (s Scope) CenterWide() bool {
-	return s.IsOwner || s.Has(PermDataViewCenterWide)
 }
