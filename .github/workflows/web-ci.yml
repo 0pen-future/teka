@@ -1,7 +1,10 @@
-# Path-filtered frontend pipeline: lint/format/types, unit tests with a
-# coverage artifact, and the production image (pushed to GHCR on main). The
-# full-stack Playwright e2e job is quarantined to main pushes and a nightly
-# schedule so the PR loop stays fast.
+# Path-filtered frontend pipeline: lint/format/types and unit tests with a
+# coverage artifact. The full-stack Playwright e2e job is quarantined to
+# master pushes so the PR loop stays fast. The production image is built and
+# pushed by web-release.yml on version tags — an accepted trade-off: the
+# production Dockerfile is not exercised on PRs or master pushes (only by the
+# weekly trivy job in security.yml), so a build break surfaces at release-tag
+# time.
 name: Web CI
 
 on:
@@ -21,13 +24,9 @@ on:
       - "Makefile"
       - "docker-compose.yml"
       - ".env.example"
-  schedule:
-    - cron: "0 3 * * *"
 
 concurrency:
-  # event_name in the key so the nightly cron (same ref as main) can never
-  # cancel an in-flight release build.
-  group: web-ci-${{ github.event_name }}-${{ github.ref }}
+  group: web-ci-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -71,43 +70,8 @@ jobs:
           path: apps/web/coverage
           retention-days: 14
 
-  build:
-    needs: [lint, test]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
-        if: github.event_name == 'push'
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/metadata-action@v6
-        id: meta
-        with:
-          images: ghcr.io/${{ github.repository }}/web
-          tags: |
-            type=sha
-            type=raw,value=latest,enable={{is_default_branch}}
-      - uses: docker/build-push-action@v7
-        with:
-          context: apps/web
-          # Deployment-specific: override with a repository variable when the
-          # real API origin is known; /api/v1 assumes same-origin serving.
-          build-args: |
-            VITE_API_URL=${{ vars.VITE_API_URL || '/api/v1' }}
-          push: ${{ github.event_name == 'push' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
   e2e:
-    if: github.event_name == 'push' || github.event_name == 'schedule'
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

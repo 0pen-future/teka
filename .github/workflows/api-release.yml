@@ -1,0 +1,84 @@
+# Release pipeline for the api image: a vX.Y.Z tag builds the production
+# binary and pushes it to GHCR tagged with the semver version (plus a moving
+# latest and the commit sha). The build is gated on the same lint and test
+# jobs as API CI (swagger drift is not re-run; the image regenerates the spec
+# during its own build), so a tag on a bad commit fails before any image is
+# pushed. Prerelease tags (v1.2.3-rc1) do not match the filter and never
+# build.
+name: API Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+concurrency:
+  # Constant group so two tags pushed close together build serially and
+  # cannot race each other for the moving `latest` tag. GitHub keeps only one
+  # pending run per group: with three or more rapid tags the middle runs are
+  # cancelled (not failed) and those versions never get an image — re-run the
+  # cancelled workflow if that happens.
+  group: api-release
+
+permissions:
+  contents: read
+
+jobs:
+  # Mirrors the lint job in api-ci.yml.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/api/go.mod
+          cache-dependency-path: apps/api/go.sum
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.7.2
+          working-directory: apps/api
+
+  # Mirrors the test job in api-ci.yml.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/api/go.mod
+          cache-dependency-path: apps/api/go.sum
+      # Integration tests use testcontainers; ubuntu runners ship with Docker.
+      - run: make test-api
+
+  build:
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v6
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository }}/api
+          tags: |
+            type=semver,pattern={{version}}
+            type=sha
+            type=raw,value=latest
+      - uses: docker/build-push-action@v7
+        with:
+          context: apps/api
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

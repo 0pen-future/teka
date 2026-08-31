@@ -1,0 +1,95 @@
+# Release pipeline for the web image: a vX.Y.Z tag builds the production
+# bundle and pushes it to GHCR tagged with the semver version (plus a moving
+# latest and the commit sha). The build is gated on the same lint and
+# unit-test jobs as Web CI (e2e is not re-run), so a tag on a bad commit
+# fails before any image is pushed. Prerelease tags (v1.2.3-rc1) do not match
+# the filter and never build.
+name: Web Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+concurrency:
+  # Constant group so two tags pushed close together build serially and
+  # cannot race each other for the moving `latest` tag. GitHub keeps only one
+  # pending run per group: with three or more rapid tags the middle runs are
+  # cancelled (not failed) and those versions never get an image — re-run the
+  # cancelled workflow if that happens.
+  group: web-release
+
+permissions:
+  contents: read
+
+jobs:
+  # Mirrors the lint job in web-ci.yml. The working-directory default is
+  # scoped to the JS jobs so any future `run` step in build stays at repo
+  # root.
+  lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run typecheck
+
+  # Mirrors the test job in web-ci.yml, minus the coverage artifact.
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npm run test:coverage
+
+  build:
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v6
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository }}/web
+          tags: |
+            type=semver,pattern={{version}}
+            type=sha
+            type=raw,value=latest
+      - uses: docker/build-push-action@v7
+        with:
+          context: apps/web
+          # Deployment-specific: override with a repository variable when the
+          # real API origin is known; /api/v1 assumes same-origin serving.
+          build-args: |
+            VITE_API_URL=${{ vars.VITE_API_URL || '/api/v1' }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
