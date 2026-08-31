@@ -1,7 +1,7 @@
 ---
 phase: 5
 title: "Cleanup scoping cũ"
-status: pending
+status: done
 priority: P2
 effort: "0.5d"
 dependencies: [4]
@@ -80,9 +80,19 @@ WHERE c.deleted_at IS NULL AND NOT EXISTS (
 
 ## Success Criteria
 
-- [ ] Parity = 0 ghi nhận trước merge (kể cả sau reconcile nếu cần).
-- [ ] Grep contract đạt cả 3 pattern.
-- [ ] Toàn bộ suite xanh, không đổi behavior nào observable.
+- [x] Parity = 0 ghi nhận trước merge (kể cả sau reconcile nếu cần).
+      `classes.teacher_id` ↔ active `giao_vien` stint parity = 0 cả hai chiều
+      (resource-action-rbac phase-08 prod inventory 2026-08-31).
+- [x] Grep contract đạt cả 3 pattern. `session.TeacherID`/attendance row-filter
+      đã thay ở P4; nhánh `classes.teacher_id` còn sót trong readScoped gỡ ở
+      commit fa8cfc8 (class reads stint-only, dead creator arm removed).
+- [x] Toàn bộ suite xanh, không đổi behavior nào observable. Build/vet clean,
+      unit + integration xanh trên các package liên quan (classes, sessions,
+      grading, teaching), `make lint` clean, web suite xanh.
+
+Deploy 2026-08-31 ~11:46 xác nhận: binary provenance = HEAD 602a4cc;
+`/readyz` 200; 0 error/fatal/panic log; denial baseline 403s=0/24h — không
+regression quan sát được.
 
 ## Review carryover từ P1 (code review 2026-08-30)
 

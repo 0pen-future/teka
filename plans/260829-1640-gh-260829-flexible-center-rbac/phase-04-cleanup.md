@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Cleanup"
-status: pending
+status: deployed (e2e follow-up pending)
 priority: P2
 effort: "0.5d"
 dependencies: [3]
@@ -62,13 +62,24 @@ verify before dropping.
 
 ## Success Criteria
 
-- [ ] Parity check = 0 before drop (recorded in delivery notes) — achievable
+- [x] Parity check = 0 before drop (recorded in delivery notes) — achievable
       because the phase-2 dual-life rule kept every `reports.send` mutation
-      mirrored into the column.
-- [ ] No DB-column references to `can_send_reports` outside migration history
-      (the computed JSON contract field keeps the name).
-- [ ] Role matrix accepts `reports.send` (restriction lifted, test flipped).
+      mirrored into the column. Prod inventory 2026-08-31: `can_send_reports`
+      ↔ `reports.send` drift = 0 (resource-action-rbac phase-08 execution
+      design + parity snapshot 11:40).
+- [x] No DB-column references to `can_send_reports` outside migration history
+      (the computed JSON contract field keeps the name). Migration 000019 +
+      code removal, commit 3d6a3cc; deployed 2026-08-31 ~11:46, column drop
+      verified (`information_schema` count 0).
+- [x] Role matrix accepts `reports.send` (restriction lifted, test flipped).
+      Commit 3d6a3cc, deployed.
 - [ ] Secretary/send-reports e2e flows pass against the new mechanism only.
+      Not run this pass (Go unit/integration green; isolated e2e Playwright
+      stack not exercised for this change).
+
+## Follow-ups (deferred, not blocking)
+- Run the isolated e2e (`teka-e2e`) secretary/send-reports Playwright specs
+  against the deployed mechanism; no assertion evidence yet either way.
 
 ## Risk Assessment
 

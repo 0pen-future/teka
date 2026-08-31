@@ -1,7 +1,7 @@
 ---
 title: "Resource-action RBAC permission catalog"
 description: "Code-owned CRUD and special-operation policies assigned by center owners."
-status: in-progress
+status: completed
 priority: P1
 effort: "15-17 engineering days plus rollout soak"
 tags: [authorization, rbac, api, web, migration, security]
@@ -43,7 +43,7 @@ Core resources: classes, contacts, students, enrollments, sessions, schedules, s
 | 5 | [Special-operation policy cutover](./phase-05-special-operation-policy-cutover.md) | 2, 3, 4 | 2.5d |
 | 6 | [Owner permission API and responsive UI](./phase-06-owner-permission-api-and-responsive-ui.md) | 2, 3 | 2d |
 | 7 | [Security verification and rollout](./phase-07-security-verification-and-rollout.md) | 4, 5, 6 | 1.5d |
-| 8 | [Legacy compatibility cleanup](./phase-08-legacy-compatibility-cleanup.md) | 7 + soak | 1d |
+| 8 | [Legacy compatibility cleanup](./phase-08-legacy-compatibility-cleanup.md) — done, deployed | 7 + soak | 1d |
 
 ## Global verification matrix
 
@@ -74,11 +74,36 @@ CAS/409 flow and high-risk confirmation, and the security-verification
 matrix are all implemented and green: `make test-api` full integration
 suite passes repo-wide (coverage 75.9%, floor 60%), `make test-api-unit`,
 `make lint`, web typecheck + 456 Vitest tests. OpenAPI regenerated
-additively. Deployment (which starts the soak window) follows via the
-deployment runbook; Phase 8 legacy retirement stays blocked until soak
-completes — see `phase-08-legacy-compatibility-cleanup.md`. The frozen
-reports axis (`ReportsOversight`/`CanSendReports`) is untouched by design
-and retires in Phase 8.
+additively. The frozen reports axis (`ReportsOversight`/`CanSendReports`)
+retired in Phase 8.
+
+**2026-08-31 — Phase 8 implementation complete, deploy pending.** Soak
+gate lifted by owner decision 09:57 (~7.5h prod soak, 39 requests, zero
+denials). Commits 3d6a3cc..602a4cc: reports-axis retirement (migration
+000019 drops `can_send_reports`), catalog v3 (migration 000020 retires
+`data.view_center_wide`/`scores.view_all`/`teaching.view_all`), contact
+visibility + integrity counts + nav gating aligned to keys, class reads
+stint-only + `GetReadable`/`GetReadableWithRoles` split, code review
+BLOCKER + H2 fixed. Verification: build/vet clean, unit + integration
+green on touched packages, `make lint` clean (5 pre-existing warnings
+only), web suite 457/3 skipped; full `make test-api` run showed only
+environmental testcontainer timeouts (0 assertion failures), targeted
+re-run in progress. Prod parity snapshot 2026-08-31 11:40: 0 rows for the
+3 retired keys in both assignment tables — nothing to delete in prod.
+Follow-ups deferred (see phase-08 file): H1 (duplicated `reports.send` SQL
+algebra), L2 (missing owner `can_send_reports=false` test pin).
+
+**2026-08-31 — Phase 8 deployed, phase and plan complete.** Images rebuilt
+from HEAD 602a4cc, deployed ~11:46 via `docker compose -p teka -f
+docker-compose.prod.yml -f docker-compose.homelab.yml --env-file
+.env.production up -d`. One-shot migrate exit 0: `schema_migrations`
+version=20 dirty=false (000019+000020 applied); `can_send_reports` column
+dropped (verified, count 0); legacy alias rows verified 0 post-migration.
+Pre-migration `pg_dump` backup taken and `pg_restore --list` verified
+(`teka-backups/teka-prod-pre-phase08-260831-1143.dump`). Deployed binary
+provenance = HEAD exactly. `/readyz` 200, web `/` 200, zero error/fatal/panic
+log lines, Traefik healthchecks 200. Denial-metric baseline: 403s = 0/24h
+(3/7d), 31 audited requests/24h — no spike. Phase 8 and the plan are done.
 
 ## Risks
 

@@ -59,10 +59,23 @@ Accepted brainstorm contract + kongming counsel:
 | 1 | [Phase 1: Foundation (zero behavior change)](./phase-01-foundation.md) | Completed |
 | 2 | [Phase 2: API surface](./phase-02-api-surface.md) | Completed |
 | 3 | [Phase 3: Web permission UI](./phase-03-web-permission-ui.md) | Completed |
-| 4 | [Phase 4: Cleanup](./phase-04-cleanup.md) | Pending |
+| 4 | [Phase 4: Cleanup](./phase-04-cleanup.md) | Deployed; e2e follow-up pending |
 
 Dependencies: strictly sequential 1 → 2 → 3 → 4. Phase 4 additionally waits
 for phase 3 soak (deployed + verified in use).
+
+**2026-08-31 — Phase 4 implemented under resource-action-rbac phase 8**
+(commits 3d6a3cc..602a4cc, branch `teka/260831-0016`): migration 000019
+drops `can_send_reports`, down restores from override rows; role-based
+`reports.send` live; legacy endpoints/dialog/dual-write removed; role-matrix
+restriction lifted. Suites green (build/vet/unit/integration); prod parity
+snapshot 0 drift.
+
+**2026-08-31 — Deployed ~11:46.** Migration 000019 applied in prod
+(`schema_migrations` version=20 incl. 000020); `can_send_reports` column
+verified dropped; pre-migration backup taken and verified. Remaining: run
+the isolated e2e (`teka-e2e`) secretary/send-reports Playwright specs — not
+exercised this pass (see phase-04 follow-up).
 
 ## Success Criteria
 
@@ -92,7 +105,9 @@ for phase 3 soak (deployed + verified in use).
       `permissions_integration_test.go:120-122` (role-matrix 422),
       `:205-227` (dual-write parity both directions); UI disables the
       `reports.send` role cell (`permission-matrix.tsx`).
-- [ ] `can_send_reports` column and legacy send-reports endpoints removed (phase 4).
+- [x] `can_send_reports` column and legacy send-reports endpoints removed (phase 4).
+      Migration 000019 + code removal, commit 3d6a3cc; deployed 2026-08-31
+      ~11:46, column drop verified in prod.
 - [x] Audit events recorded for role assignment, role-permission edit, override edit.
       `centers/events.go` + `service.go` (`RolePermissionsChanged`,
       `MemberRoleChanged`, `MemberOverridesChanged`); `audit/subscriber.go`

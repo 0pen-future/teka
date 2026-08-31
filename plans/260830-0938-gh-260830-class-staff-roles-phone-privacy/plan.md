@@ -1,7 +1,7 @@
 ---
 title: "Class staff roles + phone privacy"
 description: "Bảng class_staff chung cho GV/học vụ/trợ giảng với capability map code-owned; scoping đọc/ghi theo assignment (soft-close giữ quyền đọc lịch sử); SĐT liên hệ chỉ owner + học vụ được gán; contact/student CRUD owner-only + migration anchor về owner"
-status: in-progress
+status: completed
 priority: P1
 effort: "11d"
 tags: [api, web, db, security, authz, migration]
@@ -97,10 +97,20 @@ contacts và students hiện có về owner của center.
 | 2 | [Read scoping theo assignment](./phase-02-read-scoping-by-assignment.md) | Done | 1 |
 | 3 | [Phone privacy + data ownership](./phase-03-phone-privacy-and-data-ownership.md) | Done (trừ dry-run prod bước 4 — chờ user) | 2 |
 | 4 | [Writes theo capability map](./phase-04-capability-map-writes.md) | Done | 2, 3 |
-| 5 | [Cleanup scoping cũ](./phase-05-cleanup-legacy-scoping.md) | Pending | 1–4 deployed + soak |
+| 5 | [Cleanup scoping cũ](./phase-05-cleanup-legacy-scoping.md) | Done | 1–4 deployed + soak |
 
 Mỗi phase shippable riêng, theo thứ tự — P4 phụ thuộc P3 thật sự (mask phone/
 URL, zalo mapping cho học vụ, owner anchor cho target filter), không đảo.
+
+**2026-08-31 — Phase 5 implemented dưới resource-action-rbac phase 8**
+(commit fa8cfc8, branch `teka/260831-0016`): nhánh `classes.teacher_id`
+readScoped chết đã gỡ, `GetReadable`/`GetReadableWithRoles` tách,
+`docs/api-guidelines.md` chốt model. Parity `classes.teacher_id` ↔ active
+`giao_vien` = 0 (prod inventory). Suites xanh.
+
+**2026-08-31 — Deployed ~11:46, phase 5 và plan hoàn tất.** Binary
+provenance = HEAD 602a4cc; `/readyz` 200; 0 log error/fatal/panic; denial
+baseline 403s=0/24h — không regression.
 
 ## Acceptance criteria (từ contract, observable)
 
