@@ -50,7 +50,7 @@ func TestRoutePolicyEntriesWellFormed(t *testing.T) {
 	for _, p := range routePolicies {
 		id := fmt.Sprintf("%s %s", p.Method, p.Path)
 		switch p.Kind {
-		case PolicyPublic, PolicyPublicToken, PolicySelf, PolicyOwnerOnly:
+		case PolicyPublic, PolicyPublicToken, PolicySelf, PolicyOwnerOnly, PolicyService:
 			if p.Key != "" {
 				t.Errorf("%s: kind %s must not carry a permission key, has %q", id, p.Kind, p.Key)
 			}

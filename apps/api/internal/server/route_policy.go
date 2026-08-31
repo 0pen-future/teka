@@ -24,6 +24,13 @@ const (
 	// Tenant scope, object visibility, and class-capability checks remain
 	// independent layers behind the permission.
 	PolicyPermission PolicyKind = "permission"
+	// PolicyService routes carry their whole authorization inside the
+	// feature service, because no single catalog key names the allowed
+	// callers: the notifications routes admit reports oversight, an active
+	// class-send stint, or (for reads) the period's own teacher. The policy
+	// layer only guarantees an authenticated live member; the service's own
+	// gates decide, and fail closed.
+	PolicyService PolicyKind = "service"
 )
 
 // RoutePolicy is one route's frozen authorization classification. Method and
@@ -206,12 +213,15 @@ var routePolicies = []RoutePolicy{
 	perm("POST", "/api/v1/billing-periods/:id/statements/generate", authctx.PermStatementsGenerate),
 	perm("POST", "/api/v1/statements/:id/revoke", authctx.PermStatementsRevoke),
 
-	// Reports: frozen legacy oversight axis (ReportsOversight OR class
-	// hoc_vu authorization stays inside the service).
-	perm("POST", "/api/v1/billing-periods/:id/notifications/bulk", authctx.PermReportsSend),
-	perm("GET", "/api/v1/billing-periods/:id/notifications", authctx.PermReportsSend),
-	perm("GET", "/api/v1/billing-periods/:id/notifications/preview", authctx.PermReportsSend),
-	perm("GET", "/api/v1/billing-periods/:id/notifications/run", authctx.PermReportsSend),
-	perm("POST", "/api/v1/billing-periods/:id/notifications/run/resume", authctx.PermReportsSend),
+	// Reports: frozen legacy oversight axis. ReportsOversight OR class
+	// hoc_vu authorization stays inside the service — no one catalog key
+	// covers the allowed callers (a reports.send route gate would deny the
+	// class secretary's send and the period owner's own ledger read before
+	// the service's gates could admit them).
+	classified("POST", "/api/v1/billing-periods/:id/notifications/bulk", PolicyService),
+	classified("GET", "/api/v1/billing-periods/:id/notifications", PolicyService),
+	classified("GET", "/api/v1/billing-periods/:id/notifications/preview", PolicyService),
+	classified("GET", "/api/v1/billing-periods/:id/notifications/run", PolicyService),
+	classified("POST", "/api/v1/billing-periods/:id/notifications/run/resume", PolicyService),
 	perm("POST", "/api/v1/notifications/mark-sent", authctx.PermNotificationsMarkSent),
 }
