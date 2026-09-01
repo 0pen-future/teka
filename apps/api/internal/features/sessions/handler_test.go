@@ -206,6 +206,63 @@ func TestListRangeUnknownClassIs404(t *testing.T) {
 	}
 }
 
+// TestSessionResponsesCarryAttendanceSummary drives the JSON contract the
+// month-calendar UI renders badges from: a confirmed session carries its
+// per-status counts on both the list and the detail endpoint, an unconfirmed
+// one carries null.
+func TestSessionResponsesCarryAttendanceSummary(t *testing.T) {
+	r, deps := newSessionsHTTPTest(t)
+	teacherID, classID := setUpClass(deps)
+	token := mintToken(t, teacherID)
+
+	w, env := do(t, r, http.MethodGet,
+		"/api/v1/classes/"+classID.String()+"/sessions?from=2026-01-01&to=2026-01-31", "", token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d %+v", w.Code, env)
+	}
+	var rows []SessionResponse
+	if err := json.Unmarshal(env.Data, &rows); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if len(rows) != 4 {
+		t.Fatalf("want 4 generated sessions, got %d", len(rows))
+	}
+
+	confirmedAt := time.Now()
+	confirmed := deps.repo.rows[rows[0].ID]
+	confirmed.Status = StatusHeld
+	confirmed.AttendanceConfirmedAt = &confirmedAt
+	deps.repo.setAttendanceCounts(rows[0].ID, 2, 1, 1, 0)
+
+	w, env = do(t, r, http.MethodGet,
+		"/api/v1/classes/"+classID.String()+"/sessions?from=2026-01-01&to=2026-01-31", "", token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("relist: want 200, got %d %+v", w.Code, env)
+	}
+	if err := json.Unmarshal(env.Data, &rows); err != nil {
+		t.Fatalf("decode relist body: %v", err)
+	}
+	want := AttendanceSummary{Present: 2, Late: 1, Absent: 1, Excused: 0}
+	if rows[0].AttendanceSummary == nil || *rows[0].AttendanceSummary != want {
+		t.Fatalf("confirmed session in list must carry counts, want %+v got %+v", want, rows[0].AttendanceSummary)
+	}
+	if rows[1].AttendanceSummary != nil {
+		t.Fatalf("unconfirmed session in list must carry null summary, got %+v", *rows[1].AttendanceSummary)
+	}
+
+	w, env = do(t, r, http.MethodGet, "/api/v1/sessions/"+rows[0].ID.String(), "", token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("detail: want 200, got %d %+v", w.Code, env)
+	}
+	var detail SessionResponse
+	if err := json.Unmarshal(env.Data, &detail); err != nil {
+		t.Fatalf("decode detail body: %v", err)
+	}
+	if detail.AttendanceSummary == nil || *detail.AttendanceSummary != want {
+		t.Fatalf("detail endpoint must carry the same counts, want %+v got %+v", want, detail.AttendanceSummary)
+	}
+}
+
 func TestCreateAdHocValidationAndConflict(t *testing.T) {
 	r, deps := newSessionsHTTPTest(t)
 	teacherID, classID := setUpClass(deps)

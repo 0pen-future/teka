@@ -7,9 +7,16 @@ import { useCenterContext } from "@/features/teaching";
 import { formatSessionDate } from "@/lib/utils";
 
 import { AttendanceRow } from "../components/attendance-row";
+import {
+  ATTENDANCE_STATUSES,
+  type AttendanceMarkStatus,
+  type AttendanceStatus,
+} from "../components/attendance-status-meta";
+import { AttendanceTableHeader } from "../components/attendance-table-header";
 import { CancelSessionDialog } from "../components/cancel-session-dialog";
 import { ClosedPeriodWarning } from "../components/closed-period-warning";
 import { ConfirmAttendanceBar } from "../components/confirm-attendance-bar";
+import { StatusCountChips } from "../components/status-count-chips";
 import {
   useSaveAttendance,
   useSession,
@@ -27,8 +34,36 @@ export interface AttendancePageProps {
   sessionId?: string;
 }
 
-function absentIdsFromRows(rows: AttendanceRowData[]): Set<string> {
-  return new Set(rows.filter((row) => row.status === "absent").map((row) => row.student_id));
+/**
+ * One student's local exception from the all-present default. `note` is kept
+ * as a plain string (`""` = none) so the excused input stays controlled.
+ */
+interface LocalMark {
+  status: AttendanceMarkStatus;
+  note: string;
+}
+
+function marksFromRows(rows: AttendanceRowData[]): Map<string, LocalMark> {
+  const marks = new Map<string, LocalMark>();
+  for (const row of rows) {
+    if (row.status === "late" || row.status === "absent" || row.status === "excused") {
+      marks.set(row.student_id, { status: row.status, note: row.note ?? "" });
+    }
+  }
+  return marks;
+}
+
+function marksEqual(a: Map<string, LocalMark>, b: Map<string, LocalMark>): boolean {
+  if (a.size !== b.size) {
+    return false;
+  }
+  for (const [studentId, mark] of a) {
+    const other = b.get(studentId);
+    if (other?.status !== mark.status || other.note.trim() !== mark.note.trim()) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /** Mint band atop the panel — shared by the live and cancelled branches. */
@@ -50,23 +85,12 @@ function PanelHeader({
   );
 }
 
-function setsEqual(a: Set<string>, b: Set<string>): boolean {
-  if (a.size !== b.size) {
-    return false;
-  }
-  for (const value of a) {
-    if (!b.has(value)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 /**
- * The one-touch điểm danh screen (PRD North Star G4). Everyone defaults to
- * present; only absentees are tapped, purely client-side (`Set<string>`, no
+ * The one-touch điểm danh screen (PRD North Star G4), now the 4-column sheet
+ * (Đúng giờ / Muộn / Vắng / Có lý do). Everyone defaults to Đúng giờ; only
+ * exceptions are tapped, purely client-side (`Map<studentId, LocalMark>`, no
  * network per row). "Xác nhận" is the single request that writes the whole
- * roster server-side.
+ * roster server-side — and every status stays billable.
  */
 export function AttendancePage({ sessionId: sessionIdProp }: AttendancePageProps) {
   const params = useParams<{ id: string }>();
@@ -93,23 +117,23 @@ export function AttendancePage({ sessionId: sessionIdProp }: AttendancePageProps
   // owner only — narrower than the attendance confirm the trợ giảng holds.
   const canCancel = klass ? canWriteClass(isOwner, klass) : false;
 
-  const [absentIds, setAbsentIds] = useState<Set<string>>(new Set());
-  const [baselineIds, setBaselineIds] = useState<Set<string> | null>(null);
+  const [marks, setMarks] = useState<Map<string, LocalMark>>(new Map());
+  const [baselineMarks, setBaselineMarks] = useState<Map<string, LocalMark> | null>(null);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
-  // Tracks which session's roster the local `absentIds`/`baselineIds` state
+  // Tracks which session's roster the local `marks`/`baselineMarks` state
   // was seeded from, so re-seeding only happens once per session (not on
   // every roster refetch, which would wipe an in-flight edit). Adjusting
   // state during render (React's documented pattern for "state that depends
   // on a changed prop") avoids an extra render pass a `useEffect` would add.
   const [seededForSessionId, setSeededForSessionId] = useState<string | undefined>(undefined);
   if (roster && seededForSessionId !== sessionId) {
-    const seeded = absentIdsFromRows(roster.rows);
+    const seeded = marksFromRows(roster.rows);
     setSeededForSessionId(sessionId);
-    setAbsentIds(seeded);
-    setBaselineIds(seeded);
+    setMarks(seeded);
+    setBaselineMarks(seeded);
   }
 
-  const dirty = baselineIds !== null && !setsEqual(absentIds, baselineIds);
+  const dirty = baselineMarks !== null && !marksEqual(marks, baselineMarks);
   // Confirmed server-side with no local edits — the single source of truth
   // for both the button label and the confirm handler's no-op branch.
   const settled = Boolean(session?.attendance_confirmed_at) && !dirty;
@@ -130,20 +154,37 @@ export function AttendancePage({ sessionId: sessionIdProp }: AttendancePageProps
     return counts;
   }, [roster]);
 
-  function toggleAbsent(studentId: string) {
+  function selectStatus(studentId: string, status: AttendanceStatus) {
     // Read-only viewers (hoc_vu, a handed-off teacher) must not accumulate
     // local edits they can never save — a dirty sheet would trap them in the
     // unsaved-changes blocker on the way out.
     if (!canWrite) {
       return;
     }
-    setAbsentIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(studentId)) {
+    setMarks((prev) => {
+      const next = new Map(prev);
+      const current = next.get(studentId);
+      // Tapping Đúng giờ — or the already-selected exception — clears the
+      // exception back to the default.
+      if (status === "present" || current?.status === status) {
         next.delete(studentId);
       } else {
-        next.add(studentId);
+        // A status switch resets the note: the input only shows for excused,
+        // and what the teacher sees must be exactly what gets sent.
+        next.set(studentId, { status, note: "" });
       }
+      return next;
+    });
+  }
+
+  function setMarkNote(studentId: string, note: string) {
+    setMarks((prev) => {
+      const current = prev.get(studentId);
+      if (!current) {
+        return prev;
+      }
+      const next = new Map(prev);
+      next.set(studentId, { ...current, note });
       return next;
     });
   }
@@ -156,14 +197,23 @@ export function AttendancePage({ sessionId: sessionIdProp }: AttendancePageProps
       return;
     }
     saveMutation.mutate(
-      { absent_student_ids: Array.from(absentIds) },
+      {
+        marks: Array.from(marks, ([studentId, mark]) => ({
+          student_id: studentId,
+          status: mark.status,
+          ...(mark.note.trim() ? { note: mark.note.trim() } : {}),
+        })),
+      },
       {
         onSuccess: (response) => {
-          const savedAbsentIds = absentIdsFromRows(response.rows);
-          setAbsentIds(savedAbsentIds);
-          setBaselineIds(savedAbsentIds);
-          const presentCount = response.rows.length - savedAbsentIds.size;
-          hvToast(`Đã điểm danh ${presentCount} có mặt, ${savedAbsentIds.size} vắng`);
+          const savedMarks = marksFromRows(response.rows);
+          setMarks(savedMarks);
+          setBaselineMarks(savedMarks);
+          const savedCounts = countByStatus(response.rows.length, savedMarks);
+          const parts = ATTENDANCE_STATUSES.filter(
+            (status) => status.value === "present" || savedCounts[status.value] > 0,
+          ).map((status) => `${savedCounts[status.value]} ${status.label.toLowerCase()}`);
+          hvToast(`Đã điểm danh ${parts.join(", ")}`);
           if (response.warning) {
             hvToast(response.warning, { variant: "danger", duration: 6000 });
           }
@@ -204,7 +254,7 @@ export function AttendancePage({ sessionId: sessionIdProp }: AttendancePageProps
     );
   }
 
-  const presentCount = roster.rows.length - absentIds.size;
+  const counts = countByStatus(roster.rows.length, marks);
   const closedPeriod = period?.status === "closed";
   const confirmed = Boolean(session.attendance_confirmed_at);
 
@@ -215,19 +265,16 @@ export function AttendancePage({ sessionId: sessionIdProp }: AttendancePageProps
         subtitle={
           confirmed
             ? "Đã xác nhận — chạm để sửa lại"
-            : "Buổi chưa điểm danh — mặc định cả lớp có mặt"
+            : "Buổi chưa điểm danh — mặc định cả lớp đúng giờ"
         }
       />
 
       <div className="flex items-center gap-[10px] border-b border-line-100 px-4 py-3">
-        <span className="rounded-full bg-mint-50 px-3 py-[5px] text-[13px] font-extrabold text-mint-600">
-          Có mặt {presentCount}
-        </span>
-        <span className="rounded-full bg-coral-100 px-3 py-[5px] text-[13px] font-extrabold text-coral-600">
-          Vắng {absentIds.size}
-        </span>
+        <StatusCountChips counts={counts} />
         {confirmed ? (
-          <span className="ml-auto text-[12.5px] text-ink-400">Sửa được cả buổi đã qua</span>
+          <span className="ml-auto shrink-0 text-[12.5px] text-ink-400">
+            Sửa được cả buổi đã qua
+          </span>
         ) : null}
       </div>
 
@@ -250,21 +297,30 @@ export function AttendancePage({ sessionId: sessionIdProp }: AttendancePageProps
       {/* Prototype list viewport, two-pane only: at lg+ rows scroll inside
           430px so the confirm bar never leaves reach. Under lg the document
           already scrolls and the confirm bar is sticky — a nested scroller
-          there would just fight touch scrolling. */}
+          there would just fight touch scrolling. The column header sticks to
+          the top of whichever scroll context applies. */}
       <div className="flex flex-col gap-[6px] px-3 py-[10px] lg:max-h-[430px] lg:overflow-auto">
-        {roster.rows.map((row) => (
-          <AttendanceRow
-            key={row.student_id}
-            row={row}
-            absent={absentIds.has(row.student_id)}
-            duplicateName={(duplicateNames.get(row.student_name) ?? 0) > 1}
-            onToggle={toggleAbsent}
-          />
-        ))}
+        <AttendanceTableHeader />
+        {roster.rows.map((row) => {
+          const mark = marks.get(row.student_id);
+          return (
+            <AttendanceRow
+              key={row.student_id}
+              row={row}
+              status={mark?.status ?? "present"}
+              note={mark?.note ?? ""}
+              duplicateName={(duplicateNames.get(row.student_name) ?? 0) > 1}
+              canWrite={canWrite}
+              onSelect={selectStatus}
+              onNoteChange={setMarkNote}
+            />
+          );
+        })}
       </div>
 
       <ConfirmAttendanceBar
-        absentCount={absentIds.size}
+        absentCount={counts.absent}
+        lateCount={counts.late}
         pending={saveMutation.isPending}
         closedPeriod={closedPeriod}
         settled={settled}
@@ -313,4 +369,20 @@ export function AttendancePage({ sessionId: sessionIdProp }: AttendancePageProps
       </HvModal>
     </div>
   );
+}
+
+function countByStatus(
+  rosterSize: number,
+  marks: Map<string, LocalMark>,
+): Record<AttendanceStatus, number> {
+  const counts: Record<AttendanceStatus, number> = {
+    present: rosterSize - marks.size,
+    late: 0,
+    absent: 0,
+    excused: 0,
+  };
+  for (const mark of marks.values()) {
+    counts[mark.status] += 1;
+  }
+  return counts;
 }

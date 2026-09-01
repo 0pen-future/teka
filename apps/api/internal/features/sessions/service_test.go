@@ -147,6 +147,9 @@ func (f *fakeEnrollmentSource) ActiveOn(_ context.Context, _ authctx.Scope, clas
 type fakeSessionRow struct {
 	Session
 	deleted bool
+	// per-status attendance tallies, mirroring the read queries' grouped
+	// aggregate over live attendance_records
+	present, late, absent, excused int
 }
 
 type fakeRepository struct {
@@ -166,7 +169,17 @@ func (f *fakeRepository) row(r *fakeSessionRow) Row {
 	if c, ok := f.classes.rows[r.ClassID]; ok {
 		name = c.class.Name
 	}
-	return Row{Session: r.Session, ClassName: name}
+	return Row{
+		Session: r.Session, ClassName: name,
+		PresentCount: r.present, LateCount: r.late, AbsentCount: r.absent, ExcusedCount: r.excused,
+	}
+}
+
+// setAttendanceCounts stamps the tallies the real repository would aggregate
+// from attendance_records, so handler tests can drive the summary contract.
+func (f *fakeRepository) setAttendanceCounts(id uuid.UUID, present, late, absent, excused int) {
+	r := f.rows[id]
+	r.present, r.late, r.absent, r.excused = present, late, absent, excused
 }
 
 // visible mirrors gormRepository.scoped: an owner sees every row in their

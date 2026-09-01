@@ -91,7 +91,7 @@ func queryLimit(c *gin.Context) int {
 // pending returns the teacher's unconfirmed past sessions.
 //
 //	@Summary		List pending attendance
-//	@Description	Sessions in the past (evaluated in the teacher's timezone) that are still unconfirmed and planned or held — cancelled sessions never appear. Ordered newest first. from/to optionally bound the range (both inclusive), the same predicate period-closing uses. limit defaults to 50 and is capped at 200; total reflects the unlimited count.
+//	@Description	Sessions in the past (evaluated in the teacher's timezone) that are still unconfirmed and planned or held — cancelled sessions never appear. Ordered newest first. from/to optionally bound the range (both inclusive), the same predicate period-closing uses. limit defaults to 50 and is capped at 200; total reflects the unlimited count. attendance_summary is always null here — pending sessions are unconfirmed by definition; the field exists so every session surface shares one shape.
 //	@Tags			sessions
 //	@Produce		json
 //	@Param			from	query		string	false	"range start, YYYY-MM-DD"
@@ -129,7 +129,7 @@ func (h *Handler) pending(c *gin.Context) {
 // rows first.
 //
 //	@Summary		List (and generate) class sessions
-//	@Description	Generates any session rows missing for [from, to] from the class's effective schedules, then returns every session in the range — including cancelled ones. Idempotent: calling it again with an overlapping range never duplicates a row. Range is capped at 400 days.
+//	@Description	Generates any session rows missing for [from, to] from the class's effective schedules, then returns every session in the range — including cancelled ones. Idempotent: calling it again with an overlapping range never duplicates a row. Range is capped at 400 days — comfortably above the 62-day window a month-calendar view needs. Each session carries attendance_summary (per-status counts over its live attendance records), null until the session's attendance is confirmed.
 //	@Tags			sessions
 //	@Produce		json
 //	@Param			id		path		string	true	"class id"
@@ -212,6 +212,7 @@ func (h *Handler) createAdHoc(c *gin.Context) {
 // get returns one session.
 //
 //	@Summary		Get session
+//	@Description	Carries attendance_summary (per-status counts over the session's live attendance records), null until attendance is confirmed.
 //	@Tags			sessions
 //	@Produce		json
 //	@Param			id	path		string	true	"session id"

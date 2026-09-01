@@ -41,41 +41,46 @@ async function classIdFromRosterTab(page: Page, className: string): Promise<stri
  * its URL. A cancelled session renders no sheet, so pick a row whose status
  * mentions điểm danh (past session, confirmed or not).
  */
-async function openAttendanceSheet(page: Page, className: string, rowText: RegExp) {
+async function openAttendanceSheet(page: Page, className: string) {
   await page.goto("/sessions");
   await page.getByRole("tab", { name: className }).click();
-  const from = new Date();
-  from.setDate(from.getDate() - 90);
-  await page.getByLabel("Từ").fill(from.toISOString().slice(0, 10));
-  const sessionRow = page.getByRole("link", { name: rowText }).filter({ hasText: /điểm danh/ });
+  // The trio picker (and the "Cần điểm danh" shortcut) reach past sessions
+  // without date filtering — a past card's status mentions "điểm danh"
+  // (confirmed or not), while upcoming reads "Sắp tới" and cancelled "Đã huỷ".
+  const sessionRow = page.getByRole("link").filter({ hasText: /điểm danh/ });
   await expect(sessionRow.first()).toBeVisible();
   await sessionRow.first().click();
   await expect(page).toHaveURL(/\/sessions\/.+\/attendance$/);
-  await expect(page.locator("button[aria-pressed]").first()).toBeVisible();
+  await expect(page.getByRole("radiogroup").first()).toBeVisible();
   return page.url();
 }
 
+/** The first student's "Vắng" radio — the toggle target of the flip journey. */
+function firstRowAbsentRadio(page: Page) {
+  return page.getByRole("radiogroup").first().getByRole("radio", { name: "Vắng" });
+}
+
 /**
- * Flips the first roster row and saves the sheet. The live confirm button is
- * the one carrying a "· N vắng" count — the settled "ĐÃ XÁC NHẬN ✓" state and
- * the frozen role-gate label never match it. A successful save toasts the
- * tally and navigates back to /sessions.
+ * Toggles the first student between Vắng and Đúng giờ and saves the sheet.
+ * Anchored name: the live confirm label is XÁC NHẬN/LƯU VÀ TẠO ĐIỀU CHỈNH
+ * plus an optional exception tally — the settled "ĐÃ XÁC NHẬN ✓" state and
+ * the frozen role-gate label (which also contains the words "XÁC NHẬN")
+ * never match it. A successful save toasts the tally and navigates back to
+ * /sessions.
  */
 async function flipFirstRowAndConfirm(page: Page) {
-  const firstRow = page.locator("button[aria-pressed]").first();
-  const before = await firstRow.getAttribute("aria-pressed");
-  await firstRow.click();
-  await expect(firstRow).toHaveAttribute("aria-pressed", before === "true" ? "false" : "true");
-  await page
-    .getByRole("button", { name: /(XÁC NHẬN BUỔI HỌC|LƯU VÀ TẠO ĐIỀU CHỈNH) · \d+ vắng/ })
-    .click();
-  await expect(page.getByText(/Đã điểm danh \d+ có mặt, \d+ vắng/)).toBeVisible();
+  const absentRadio = firstRowAbsentRadio(page);
+  const before = await absentRadio.getAttribute("aria-checked");
+  await absentRadio.click();
+  await expect(absentRadio).toHaveAttribute("aria-checked", before === "true" ? "false" : "true");
+  await page.getByRole("button", { name: /^(XÁC NHẬN|LƯU VÀ TẠO ĐIỀU CHỈNH)( · .+)?$/ }).click();
+  await expect(page.getByText(/Đã điểm danh \d+ đúng giờ/)).toBeVisible();
   await expect(page).toHaveURL(/\/sessions$/);
 }
 
 // Captured before the tro_giang flip below so the restoring afterEach can put
 // the row back even when the journey dies between the flip and its save.
-let flipRestore: { sheetUrl: string; pressed: string | null } | null = null;
+let flipRestore: { sheetUrl: string; absentChecked: string | null } | null = null;
 
 // Restore the seeded roster after the flip journey: reopen the sheet and, if
 // the first row no longer matches its captured state, flip it back and save.
@@ -88,16 +93,16 @@ test.afterEach(async ({ browser }, testInfo) => {
   if (!testInfo.title.includes("records attendance") || !flipRestore) {
     return;
   }
-  const { sheetUrl, pressed } = flipRestore;
+  const { sheetUrl, absentChecked } = flipRestore;
   flipRestore = null;
   const context = await browser.newContext();
   const page = await context.newPage();
   try {
     await login(page, TRO_GIANG);
     await page.goto(sheetUrl);
-    const firstRow = page.locator("button[aria-pressed]").first();
-    await expect(firstRow).toBeVisible();
-    if ((await firstRow.getAttribute("aria-pressed")) !== pressed) {
+    const absentRadio = firstRowAbsentRadio(page);
+    await expect(absentRadio).toBeVisible();
+    if ((await absentRadio.getAttribute("aria-checked")) !== absentChecked) {
       await flipFirstRowAndConfirm(page);
     }
   } finally {
@@ -110,10 +115,10 @@ test("tro_giang records attendance directly on the staffed class", async ({ page
 
   // Thầy Minh holds no giao_vien stint on Toán 8 — this save goes through the
   // tro_giang attendance capability, straight to the server, no approval step.
-  const sheetUrl = await openAttendanceSheet(page, STAFF_CLASS, /Toán 8/);
+  const sheetUrl = await openAttendanceSheet(page, STAFF_CLASS);
   flipRestore = {
     sheetUrl,
-    pressed: await page.locator("button[aria-pressed]").first().getAttribute("aria-pressed"),
+    absentChecked: await firstRowAbsentRadio(page).getAttribute("aria-checked"),
   };
   await flipFirstRowAndConfirm(page);
 });
@@ -208,9 +213,9 @@ test("a handed-off teacher keeps reading history but loses every write", async (
   const minh = await minhContext.newPage();
   await login(minh, TRO_GIANG);
   const classId = await classIdFromRosterTab(minh, HANDOFF_CLASS);
-  const sheetUrl = await openAttendanceSheet(minh, HANDOFF_CLASS, /Lý 7/);
+  const sheetUrl = await openAttendanceSheet(minh, HANDOFF_CLASS);
   await expect(
-    minh.getByRole("button", { name: /XÁC NHẬN BUỔI HỌC|ĐÃ XÁC NHẬN|LƯU VÀ TẠO ĐIỀU CHỈNH/ }),
+    minh.getByRole("button", { name: /^(XÁC NHẬN|ĐÃ XÁC NHẬN ✓|LƯU VÀ TẠO ĐIỀU CHỈNH)( · .+)?$/ }),
   ).toBeEnabled();
 
   // The owner hands the class to herself through the settings card.
@@ -232,7 +237,7 @@ test("a handed-off teacher keeps reading history but loses every write", async (
 
   // …and so is attendance, even on the past session he himself recorded.
   await minh.goto(sheetUrl);
-  await expect(minh.locator("button[aria-pressed]").first()).toBeVisible();
+  await expect(minh.getByRole("radiogroup").first()).toBeVisible();
   const frozen = minh.getByRole("button", {
     name: "CHỈ GIÁO VIÊN, TRỢ GIẢNG LỚP HOẶC CHỦ TRUNG TÂM MỚI XÁC NHẬN ĐƯỢC",
   });

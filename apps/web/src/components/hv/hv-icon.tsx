@@ -1,6 +1,7 @@
 import * as React from "react";
 import {
   Check,
+  Clock,
   FileText,
   Home,
   Plus,
@@ -11,11 +12,13 @@ import {
   type LucideProps,
 } from "lucide-react";
 
-export type HvIconName = "home" | "check" | "users" | "file" | "send" | "wallet" | "x" | "plus";
+export type HvIconName =
+  "home" | "check" | "clock" | "users" | "file" | "send" | "wallet" | "x" | "plus";
 
 const iconRegistry: Record<HvIconName, React.ComponentType<LucideProps>> = {
   home: Home,
   check: Check,
+  clock: Clock,
   users: Users,
   file: FileText,
   send: Send,
@@ -57,6 +60,14 @@ export function HvCheckIcon({
   ...rest
 }: LucideProps) {
   return <Check strokeWidth={strokeWidth} size={size} {...rest} />;
+}
+
+export function HvClockIcon({
+  strokeWidth = DEFAULT_STROKE_WIDTH,
+  size = DEFAULT_SIZE,
+  ...rest
+}: LucideProps) {
+  return <Clock strokeWidth={strokeWidth} size={size} {...rest} />;
 }
 
 export function HvUsersIcon({

@@ -138,19 +138,23 @@ func (s *Service) Confirm(ctx context.Context, sc authctx.Scope, sessionID uuid.
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
-	absentSet, err := validateAbsentees(req.AbsentStudentIDs, roster)
+	marks, err := resolveMarks(req, roster)
 	if err != nil {
 		return nil, err
 	}
 
-	note := trimmedNotePtr(req.Note)
+	sessionNote := trimmedNotePtr(req.Note)
 	now := time.Now()
 	records := make([]Record, 0, len(roster))
 	keepIDs := make([]uuid.UUID, 0, len(roster))
 	for _, e := range roster {
 		status := StatusPresent
-		if absentSet[e.StudentID] {
-			status = StatusAbsent
+		note := sessionNote
+		if m, ok := marks[e.StudentID]; ok {
+			status = m.status
+			if m.note != nil {
+				note = m.note
+			}
 		}
 		records = append(records, Record{
 			ID: id.New(),
@@ -296,20 +300,62 @@ func (s *Service) resolveSessionVia(ctx context.Context, fetch func(context.Cont
 	return session, nil
 }
 
-// validateAbsentees dedups the requested absent ids and confirms each is on
-// the roster active for the session's date, returning a set for O(1) lookup
-// while building records. Any id not on the roster is rejected by name
-// rather than silently dropped — a typo must not leave a student billed for
-// a session they missed.
-func validateAbsentees(ids []uuid.UUID, roster []enrollments.Enrollment) (map[uuid.UUID]bool, error) {
+// resolvedMark is one student's validated exception from the all-present
+// default, with the note already in its stored pointer form.
+type resolvedMark struct {
+	status string
+	note   *string
+}
+
+// resolveMarks validates the request's exception list against the roster
+// active for the session's date and returns a per-student lookup. Any id not
+// on the roster is rejected by name rather than silently dropped — a typo
+// must not leave a student billed for a session they missed.
+//
+// The two body shapes diverge on duplicates deliberately: the legacy
+// absent_student_ids collapses them (its historical behavior, all absent so
+// no conflict), while marks rejects them — two statuses for one student is a
+// client bug the server must not break ties on.
+func resolveMarks(req ConfirmRequest, roster []enrollments.Enrollment) (map[uuid.UUID]resolvedMark, error) {
+	if len(req.Marks) > 0 && len(req.AbsentStudentIDs) > 0 {
+		return nil, apperror.BadRequest("send either marks or absent_student_ids, not both")
+	}
 	rosterSet := make(map[uuid.UUID]bool, len(roster))
 	for _, e := range roster {
 		rosterSet[e.StudentID] = true
 	}
-	seen := make(map[uuid.UUID]bool, len(ids))
-	absent := make(map[uuid.UUID]bool, len(ids))
+	out := make(map[uuid.UUID]resolvedMark, len(req.Marks)+len(req.AbsentStudentIDs))
+	seen := make(map[uuid.UUID]bool, len(req.Marks)+len(req.AbsentStudentIDs))
 	var unknown []string
-	for _, sid := range ids {
+
+	if len(req.Marks) > 0 {
+		for _, m := range req.Marks {
+			switch m.Status {
+			case StatusLate, StatusAbsent, StatusExcused:
+			default:
+				// present is the implicit default, never an explicit mark —
+				// see ConfirmMark.
+				return nil, apperror.Invalid("validation failed", map[string]string{
+					"marks": "status must be one of late, absent, excused; got: " + m.Status,
+				})
+			}
+			if seen[m.StudentID] {
+				return nil, apperror.BadRequest("marks lists student more than once: " + m.StudentID.String())
+			}
+			seen[m.StudentID] = true
+			if !rosterSet[m.StudentID] {
+				unknown = append(unknown, m.StudentID.String())
+				continue
+			}
+			out[m.StudentID] = resolvedMark{status: m.Status, note: trimmedNotePtr(m.Note)}
+		}
+		if len(unknown) > 0 {
+			return nil, studentNotEnrolled("marks", unknown)
+		}
+		return out, nil
+	}
+
+	for _, sid := range req.AbsentStudentIDs {
 		if seen[sid] {
 			continue
 		}
@@ -318,12 +364,12 @@ func validateAbsentees(ids []uuid.UUID, roster []enrollments.Enrollment) (map[uu
 			unknown = append(unknown, sid.String())
 			continue
 		}
-		absent[sid] = true
+		out[sid] = resolvedMark{status: StatusAbsent}
 	}
 	if len(unknown) > 0 {
-		return nil, studentNotEnrolled(unknown)
+		return nil, studentNotEnrolled("absent_student_ids", unknown)
 	}
-	return absent, nil
+	return out, nil
 }
 
 // translateTxErr passes through an already-typed AppError (e.g. from
@@ -352,9 +398,11 @@ func cancelledConflict() error {
 	return appErr
 }
 
-func studentNotEnrolled(ids []string) error {
+// studentNotEnrolled names the offending ids under the request field that
+// carried them, so both body shapes report against their own key.
+func studentNotEnrolled(field string, ids []string) error {
 	appErr := apperror.Invalid("validation failed", map[string]string{
-		"absent_student_ids": "not enrolled for this session: " + strings.Join(ids, ", "),
+		field: "not enrolled for this session: " + strings.Join(ids, ", "),
 	})
 	appErr.Err = ErrStudentNotEnrolled
 	return appErr

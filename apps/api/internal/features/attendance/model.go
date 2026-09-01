@@ -12,12 +12,14 @@ import (
 )
 
 // Attendance status values — mirrors attendance_records.status CHECK.
+// Semantics: present = on time, late = arrived late but attended, absent =
+// missed the session, excused = missed with a stated reason. Every status is
+// billable = true — "late" and "excused" price exactly like "present"; making
+// excused free is a separate product decision this vocabulary does not take.
 const (
 	StatusPresent = "present"
+	StatusLate    = "late"
 	StatusAbsent  = "absent"
-	// StatusExcused (nghỉ có phép) is reserved for P1. The schema and the
-	// billable column already support it, but V1's confirm endpoint never
-	// writes it: present and absent are both billable = true.
 	StatusExcused = "excused"
 )
 

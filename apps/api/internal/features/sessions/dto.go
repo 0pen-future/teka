@@ -24,20 +24,33 @@ type CreateSessionRequest struct {
 	StartTime   string `json:"start_time" binding:"omitempty,hhmm"`
 }
 
+// AttendanceSummary tallies a confirmed session's attendance records by
+// status. All four statuses bill identically; these counts are display data
+// for calendar badges, never a billing input.
+type AttendanceSummary struct {
+	Present int `json:"present"`
+	Late    int `json:"late"`
+	Absent  int `json:"absent"`
+	Excused int `json:"excused"`
+}
+
 // SessionResponse is the public session shape. StudentCount previews the
 // roster size attendance confirmation would cover — every student enrolled
-// in the class on session_date.
+// in the class on session_date. AttendanceSummary is null until the session's
+// attendance is confirmed, so "not recorded yet" stays distinguishable from
+// "recorded with zero students".
 type SessionResponse struct {
-	ID                    uuid.UUID  `json:"id"`
-	ClassID               uuid.UUID  `json:"class_id"`
-	ClassName             string     `json:"class_name"`
-	SessionDate           string     `json:"session_date"`
-	StartTime             *string    `json:"start_time"`
-	Status                string     `json:"status"`
-	CancelReason          *string    `json:"cancel_reason"`
-	AttendanceConfirmedAt *time.Time `json:"attendance_confirmed_at"`
-	StudentCount          int        `json:"student_count"`
-	CreatedAt             time.Time  `json:"created_at"`
+	ID                    uuid.UUID          `json:"id"`
+	ClassID               uuid.UUID          `json:"class_id"`
+	ClassName             string             `json:"class_name"`
+	SessionDate           string             `json:"session_date"`
+	StartTime             *string            `json:"start_time"`
+	Status                string             `json:"status"`
+	CancelReason          *string            `json:"cancel_reason"`
+	AttendanceConfirmedAt *time.Time         `json:"attendance_confirmed_at"`
+	StudentCount          int                `json:"student_count"`
+	AttendanceSummary     *AttendanceSummary `json:"attendance_summary"`
+	CreatedAt             time.Time          `json:"created_at"`
 }
 
 // FromDetail maps a session enriched with its class name and roster size
@@ -47,6 +60,17 @@ func FromDetail(d *Detail) SessionResponse {
 	if d.StartTime != nil {
 		s := string(*d.StartTime)
 		startTime = &s
+	}
+	// The confirmation stamp, not the counts, decides null: an all-zero
+	// tally on a confirmed session is real data (nobody on the roster).
+	var summary *AttendanceSummary
+	if d.AttendanceConfirmedAt != nil {
+		summary = &AttendanceSummary{
+			Present: d.PresentCount,
+			Late:    d.LateCount,
+			Absent:  d.AbsentCount,
+			Excused: d.ExcusedCount,
+		}
 	}
 	return SessionResponse{
 		ID:                    d.ID,
@@ -58,6 +82,7 @@ func FromDetail(d *Detail) SessionResponse {
 		CancelReason:          d.CancelReason,
 		AttendanceConfirmedAt: d.AttendanceConfirmedAt,
 		StudentCount:          d.StudentCount,
+		AttendanceSummary:     summary,
 		CreatedAt:             d.CreatedAt,
 	}
 }

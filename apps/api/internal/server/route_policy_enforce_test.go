@@ -139,6 +139,41 @@ func TestPolicyPermissionRoutesRequireExactKey(t *testing.T) {
 	}
 }
 
+// The notification routes carry their authorization inside the service —
+// reports oversight for the family dimension, the class-send gate for class
+// copies, and own-period scoping for reads (a member watching the ledger of
+// their own period, delegated rows included). The policy layer must therefore
+// pass any live member and leave the decision to the service; a route-level
+// permission gate here would deny the class secretary and the period's own
+// teacher before that authorization could run.
+func TestPolicyServiceRoutesPassPlainMember(t *testing.T) {
+	serviceRoutes := []string{
+		"POST /api/v1/billing-periods/:id/notifications/bulk",
+		"GET /api/v1/billing-periods/:id/notifications",
+		"GET /api/v1/billing-periods/:id/notifications/preview",
+		"GET /api/v1/billing-periods/:id/notifications/run",
+		"POST /api/v1/billing-periods/:id/notifications/run/resume",
+	}
+	byID := map[string]RoutePolicy{}
+	for _, p := range routePolicies {
+		byID[p.Method+" "+p.Path] = p
+	}
+	e := newPolicyProbe(t, memberScope(), nil)
+	for _, id := range serviceRoutes {
+		p, ok := byID[id]
+		if !ok {
+			t.Errorf("service-authorized route %s missing from manifest", id)
+			continue
+		}
+		if p.Kind != PolicyService {
+			t.Errorf("route %s must be service-authorized, manifest says %s", id, p.Kind)
+		}
+		if rec := hit(t, e, p.Method, probePath(p.Path)); rec.Code != http.StatusOK {
+			t.Errorf("%s: plain member got %d at the policy layer, want 200 (service decides)", id, rec.Code)
+		}
+	}
+}
+
 // A member deny wins over the same key arriving through the role — the
 // precedence BuildPermSet establishes, proven here at the HTTP layer.
 func TestPolicyDenyOverridesRoleGrant(t *testing.T) {

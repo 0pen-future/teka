@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { Outlet, useMatches, useSearchParams } from "react-router";
+import { Outlet, useMatches, useNavigate, useSearchParams } from "react-router";
 
 import { HvCard } from "@/components/hv";
-import { cn, formatSessionDate } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import {
   ClassSearchEmptyNote,
   ClassSearchInput,
@@ -10,29 +10,18 @@ import {
   useClassSearch,
 } from "@/features/roster";
 
+import { MonthCalendarModal } from "../components/month-calendar-modal";
 import { SessionListItem } from "../components/session-list-item";
+import { SessionTrioPicker } from "../components/session-trio-picker";
 import { useSessionsList } from "../hooks/use-sessions";
+import { addDaysIso, bySessionOrder, monthOf, resolveAnchor, todayIso } from "../lib/session-dates";
 import type { Session } from "../schemas/attendance-schemas";
 
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function daysAgo(count: number): string {
-  const date = new Date();
-  date.setDate(date.getDate() - count);
-  return date.toISOString().slice(0, 10);
-}
-
-function groupByDateDescending(sessions: Session[]): [string, Session[]][] {
-  const map = new Map<string, Session[]>();
-  for (const session of sessions) {
-    const bucket = map.get(session.session_date) ?? [];
-    bucket.push(session);
-    map.set(session.session_date, bucket);
-  }
-  return Array.from(map.entries()).sort(([a], [b]) => (a < b ? 1 : a > b ? -1 : 0));
-}
+/**
+ * Half-width of the session window queried around the anchor. Wide enough
+ * that even a once-a-week class keeps a prev and next session in range.
+ */
+const WINDOW_RADIUS_DAYS = 45;
 
 /**
  * Finds the `:id` param of the `sessions/:id/attendance` child route from an
@@ -59,10 +48,15 @@ function useSelectedSessionId(): string | undefined {
  */
 export function SessionsPage() {
   const selectedId = useSelectedSessionId();
+  const navigate = useNavigate();
   // `null` means "no explicit choice yet" — falls back to the first active
   // class below, without needing an effect to seed it once classes load.
   const [explicitClassId, setExplicitClassId] = useState<string | null>(null);
-  const [range, setRange] = useState(() => ({ from: daysAgo(13), to: today() }));
+  // The query window is centered here, not on the anchor: recentering happens
+  // only in navigation handlers (arrow/calendar taps at a window edge), never
+  // during render, so a widening window can't feed back into itself.
+  const [windowCenter, setWindowCenter] = useState(todayIso);
+  const [calendarOpen, setCalendarOpen] = useState(false);
 
   const { data: classesPage } = useClassesList({ status: "active", per_page: 100 });
   const classes = classesPage?.items ?? [];
@@ -78,9 +72,12 @@ export function SessionsPage() {
     urlClassId && classes.some((cls) => cls.id === urlClassId) ? urlClassId : null;
   const selectedClassId = explicitClassId ?? linkedClassId ?? classes[0]?.id ?? null;
 
-  const { data: sessions, isPending } = useSessionsList(selectedClassId ?? undefined, range);
+  const { data: sessions, isPending } = useSessionsList(selectedClassId ?? undefined, {
+    from: addDaysIso(windowCenter, -WINDOW_RADIUS_DAYS),
+    to: addDaysIso(windowCenter, WINDOW_RADIUS_DAYS),
+  });
   const allSessions = sessions ?? [];
-  const todayStr = today();
+  const todayStr = todayIso();
 
   const unconfirmedPast = allSessions
     .filter(
@@ -90,10 +87,22 @@ export function SessionsPage() {
         session.session_date < todayStr,
     )
     .sort((a, b) => (a.session_date < b.session_date ? -1 : 1));
-  const unconfirmedPastIds = new Set(unconfirmedPast.map((session) => session.id));
-  const remainingGroups = groupByDateDescending(
-    allSessions.filter((session) => !unconfirmedPastIds.has(session.id)),
-  );
+
+  const sorted = [...allSessions].sort(bySessionOrder);
+  const anchor = resolveAnchor(sorted, selectedId, todayStr);
+  const anchorIndex = anchor ? sorted.findIndex((session) => session.id === anchor.id) : -1;
+  const prev = anchorIndex > 0 ? sorted[anchorIndex - 1]! : null;
+  const next =
+    anchorIndex >= 0 && anchorIndex < sorted.length - 1 ? sorted[anchorIndex + 1]! : null;
+
+  const goToSession = (session: Session) => {
+    // Landing on the window's edge session means its own neighbor may lie
+    // outside the current query — recenter so the next render can see it.
+    if (session.id === sorted[0]?.id || session.id === sorted.at(-1)?.id) {
+      setWindowCenter(session.session_date);
+    }
+    void navigate(`/sessions/${session.id}/attendance`);
+  };
 
   const hasSelection = Boolean(selectedId);
 
@@ -108,7 +117,7 @@ export function SessionsPage() {
         <div>
           <h1 className="font-display text-[26px] font-extrabold text-ink-900">Điểm danh</h1>
           <p className="mt-1 text-[14px] text-ink-500">
-            Mặc định cả lớp có mặt — chỉ chạm vào bạn vắng, rồi xác nhận.
+            Mặc định cả lớp đúng giờ — chỉ chạm vào bạn muộn hoặc vắng, rồi xác nhận.
           </p>
         </div>
 
@@ -158,32 +167,6 @@ export function SessionsPage() {
             </div>
           </div>
         )}
-
-        {/* The date filter lives up here with the other controls so the row
-            below holds only the session card and the panel — both start on
-            the same line, like the prototype's list/panel flex row. */}
-        <div className="flex items-center gap-2 text-[13px] text-ink-500">
-          <label className="flex items-center gap-1">
-            Từ
-            <input
-              type="date"
-              value={range.from}
-              max={range.to}
-              onChange={(event) => setRange((prev) => ({ ...prev, from: event.target.value }))}
-              className="rounded-md border border-line-200 px-2 py-1 text-[13px]"
-            />
-          </label>
-          <label className="flex items-center gap-1">
-            Đến
-            <input
-              type="date"
-              value={range.to}
-              min={range.from}
-              onChange={(event) => setRange((prev) => ({ ...prev, to: event.target.value }))}
-              className="rounded-md border border-line-200 px-2 py-1 text-[13px]"
-            />
-          </label>
-        </div>
       </div>
 
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
@@ -199,47 +182,46 @@ export function SessionsPage() {
 
           {!isPending && selectedClassId && allSessions.length === 0 ? (
             <HvCard variant="flat" className="text-center text-[13px] text-ink-400">
-              Không có buổi học nào trong khoảng thời gian này.
+              Không có buổi học nào quanh thời điểm này.
             </HvCard>
           ) : null}
 
-          {/* Prototype session-list card: one white rounded-20 surface holding
-            every group, section labels in the muted 12.5px/800 band style. */}
           {allSessions.length > 0 ? (
-            <div className="flex flex-col gap-1 rounded-[20px] bg-white p-[14px] shadow-soft-md">
-              {unconfirmedPast.length > 0 ? (
-                <>
-                  <h2 className="px-2 py-1 text-[12.5px] font-extrabold uppercase tracking-[0.4px] text-coral-600">
-                    Cần điểm danh
-                  </h2>
-                  <div className="flex flex-col gap-[6px]">
-                    {unconfirmedPast.map((session) => (
-                      <SessionListItem
-                        key={session.id}
-                        session={session}
-                        unconfirmedPast
-                        selected={session.id === selectedId}
-                      />
-                    ))}
-                  </div>
-                </>
-              ) : null}
+            <div className="flex flex-col gap-3 rounded-[20px] bg-white p-[14px] shadow-soft-md">
+              <SessionTrioPicker
+                prev={prev}
+                anchor={anchor}
+                next={next}
+                today={todayStr}
+                onNavigate={goToSession}
+              />
+              <button
+                type="button"
+                onClick={() => setCalendarOpen(true)}
+                className="min-h-11 self-start rounded-full bg-white px-[18px] font-display text-[13px] font-extrabold text-ink-500 shadow-soft-sm transition-colors hover:bg-cream-100 focus-visible:outline-none focus-visible:ring-4"
+              >
+                Mở lịch tháng
+              </button>
+            </div>
+          ) : null}
 
-              {remainingGroups.map(([date, group]) => (
-                <div key={date} className="flex flex-col gap-[6px]">
-                  <h2 className="px-2 pt-2 text-[12.5px] font-extrabold uppercase tracking-[0.4px] text-ink-400">
-                    {formatSessionDate(date)}
-                  </h2>
-                  {group.map((session) => (
-                    <SessionListItem
-                      key={session.id}
-                      session={session}
-                      unconfirmedPast={false}
-                      selected={session.id === selectedId}
-                    />
-                  ))}
-                </div>
-              ))}
+          {/* Quick entry into overdue sessions, kept from the previous list
+            layout — the trio only ever shows three cards at a time. */}
+          {unconfirmedPast.length > 0 ? (
+            <div className="flex flex-col gap-1 rounded-[20px] bg-white p-[14px] shadow-soft-md">
+              <h2 className="px-2 py-1 text-[12.5px] font-extrabold uppercase tracking-[0.4px] text-coral-600">
+                Cần điểm danh
+              </h2>
+              <div className="flex flex-col gap-[6px]">
+                {unconfirmedPast.map((session) => (
+                  <SessionListItem
+                    key={session.id}
+                    session={session}
+                    unconfirmedPast
+                    selected={session.id === selectedId}
+                  />
+                ))}
+              </div>
             </div>
           ) : null}
         </div>
@@ -259,6 +241,23 @@ export function SessionsPage() {
           )}
         </div>
       </div>
+
+      {/* Mounted only while open so each opening starts fresh on the anchor's
+          month instead of wherever the last browse ended. */}
+      {calendarOpen && selectedClassId ? (
+        <MonthCalendarModal
+          open
+          onOpenChange={setCalendarOpen}
+          classId={selectedClassId}
+          initialMonth={monthOf(anchor?.session_date ?? windowCenter)}
+          today={todayStr}
+          onPickSession={(session) => {
+            setCalendarOpen(false);
+            setWindowCenter(session.session_date);
+            void navigate(`/sessions/${session.id}/attendance`);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

@@ -12,9 +12,7 @@ async function login(page: import("@playwright/test").Page) {
   await expect(page.getByText(/Chào buổi (sáng|trưa|chiều|tối), Cô Lan!/)).toBeVisible();
 }
 
-test("marks absentees and confirms a pending session in one touch each, clearing the dashboard alert", async ({
-  page,
-}) => {
+test("records late/excused marks, confirms, then reopens and edits to absent", async ({ page }) => {
   await login(page);
 
   // The seeder leaves the two most recent past sessions unconfirmed
@@ -24,32 +22,49 @@ test("marks absentees and confirms a pending session in one touch each, clearing
   await expect(page.getByText("buổi đã dạy nhưng chưa điểm danh")).toBeVisible();
   await page.getByRole("link", { name: "Điểm danh ngay" }).first().click();
   await expect(page).toHaveURL(/\/sessions\/.+\/attendance$/);
+  const sheetUrl = page.url();
 
-  // Everyone renders present by default — the roster loads before any tap.
-  // Each attendance row is a tappable button with `aria-pressed`, distinct
-  // from the confirm bar and other page buttons which carry no such attribute.
-  const rows = page.locator("button[aria-pressed]");
+  // Everyone renders Đúng giờ by default — each student is a radiogroup of
+  // the four statuses, purely local until the single confirm.
+  const rows = page.getByRole("radiogroup");
   await expect(rows.first()).toBeVisible();
   const rowCount = await rows.count();
-  expect(rowCount).toBeGreaterThan(0);
+  expect(rowCount).toBeGreaterThanOrEqual(2);
+  await expect(rows.nth(0).getByRole("radio", { name: "Đúng giờ" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
 
-  // Interaction 1 and 2: tap the first two students absent — purely local
-  // state, no confirmation dialog, no per-row network round trip to wait on.
-  await rows.nth(0).click();
-  await expect(rows.nth(0)).toHaveAttribute("aria-pressed", "true");
-  if (rowCount > 1) {
-    await rows.nth(1).click();
-    await expect(rows.nth(1)).toHaveAttribute("aria-pressed", "true");
-  }
-  const absentCount = rowCount > 1 ? 2 : 1;
+  // Mark one student late and one excused-with-note; the note becomes the
+  // "Vắng có phép" subtitle and the excused mark stays out of the button's
+  // VẮNG/MUỘN tally.
+  await rows.nth(0).getByRole("radio", { name: "Muộn" }).click();
+  await rows.nth(1).getByRole("radio", { name: "Có lý do" }).click();
+  await page.getByRole("textbox", { name: /^Lý do của/ }).fill("mẹ báo ốm");
+  await expect(page.getByText(/Vắng có phép — mẹ báo ốm/)).toBeVisible();
 
-  // Interaction 3: the single confirm tap writes the whole roster at once.
-  const confirmButton = page.getByRole("button", { name: /vắng/ });
-  await expect(confirmButton).toHaveText(new RegExp(`${absentCount} vắng`));
-  await confirmButton.click();
+  await page.getByRole("button", { name: /^XÁC NHẬN · 1 MUỘN$/ }).click();
+  await expect(page.getByText(/Đã điểm danh .*1 muộn.*1 có lý do/)).toBeVisible();
+  await expect(page).toHaveURL(/\/sessions$/);
 
-  // Confirming this session navigates back to the list and drops it from
-  // "cần điểm danh" — one fewer pending session than before.
+  // Reopen: the saved four-status sheet comes back, note included, and the
+  // bar reports the settled state instead of offering a save.
+  await page.goto(sheetUrl);
+  await expect(rows.nth(0).getByRole("radio", { name: "Muộn" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  await expect(rows.nth(1).getByRole("radio", { name: "Có lý do" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  await expect(page.getByText(/Vắng có phép — mẹ báo ốm/)).toBeVisible();
+  await expect(page.getByRole("button", { name: /ĐÃ XÁC NHẬN/ })).toBeVisible();
+
+  // Edit after confirm: switch the late student to absent and save again.
+  await rows.nth(0).getByRole("radio", { name: "Vắng" }).click();
+  await page.getByRole("button", { name: /^XÁC NHẬN · 1 VẮNG$/ }).click();
+  await expect(page.getByText(/Đã điểm danh .*1 vắng/)).toBeVisible();
   await expect(page).toHaveURL(/\/sessions$/);
 
   // The dashboard's pending count reflects the just-confirmed session.
@@ -62,20 +77,37 @@ test("marks absentees and confirms a pending session in one touch each, clearing
   }
 });
 
+test("moves between sessions with the trio arrows and the month calendar", async ({ page }) => {
+  await login(page);
+  await page.goto("/sessions");
+
+  // The trio picker anchors on today's session (or the nearest upcoming one)
+  // without any date filtering; ‹ steps the anchor back one session.
+  await expect(page.getByText(/HÔM NAY|ĐANG XEM/)).toBeVisible();
+  await page.getByRole("button", { name: "Buổi trước" }).click();
+  await expect(page).toHaveURL(/\/sessions\/.+\/attendance$/);
+
+  // The month calendar is the long-jump shortcut: any dotted day navigates
+  // straight to that day's session.
+  await page.getByRole("button", { name: "Mở lịch tháng" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText(/Tháng \d+\/\d{4}/)).toBeVisible();
+  const sessionDay = dialog.getByRole("button", { name: /, \d{2}\/\d{2}$/ }).first();
+  await expect(sessionDay).toBeVisible();
+  await sessionDay.click();
+  await expect(dialog).not.toBeVisible();
+  await expect(page).toHaveURL(/\/sessions\/.+\/attendance$/);
+});
+
 test("cancelling a session takes a reason and bills nobody", async ({ page }) => {
   await login(page);
 
   // Cancel an upcoming session rather than a pending one: the pending feed is
-  // shared suite state the previous test already drained, while the weekly
-  // schedule always has future sessions. Extending the list's end date two
-  // weeks out guarantees at least one "Sắp diễn ra" row regardless of which
-  // weekday the suite runs on.
+  // shared suite state the first test already touched, while the weekly
+  // schedule always materializes future sessions — the trio's "Sắp tới" card
+  // reaches one without any date filtering.
   await page.goto("/sessions");
-  const to = new Date();
-  to.setDate(to.getDate() + 14);
-  await page.getByLabel("Đến").fill(to.toISOString().slice(0, 10));
-
-  const upcoming = page.getByRole("link").filter({ hasText: "Sắp diễn ra" }).first();
+  const upcoming = page.getByRole("link").filter({ hasText: "Sắp tới" }).first();
   await expect(upcoming).toBeVisible();
   await upcoming.click();
   await expect(page).toHaveURL(/\/sessions\/.+\/attendance$/);

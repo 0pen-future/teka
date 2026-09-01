@@ -2,6 +2,7 @@ import { HvButton } from "@/components/hv";
 
 export interface ConfirmAttendanceBarProps {
   absentCount: number;
+  lateCount: number;
   pending: boolean;
   /** The session's billing period is already closed — the save becomes an adjustment. */
   closedPeriod: boolean;
@@ -31,6 +32,7 @@ export interface ConfirmAttendanceBarProps {
  */
 export function ConfirmAttendanceBar({
   absentCount,
+  lateCount,
   pending,
   closedPeriod,
   settled,
@@ -38,13 +40,18 @@ export function ConfirmAttendanceBar({
   accessResolved,
   onConfirm,
 }: ConfirmAttendanceBarProps) {
+  // "XÁC NHẬN · n VẮNG · n MUỘN" — only the non-zero exception counts are
+  // appended, so the everyone-on-time default stays the plain one-word tap.
+  const exceptionSuffix =
+    (absentCount > 0 ? ` · ${absentCount} VẮNG` : "") +
+    (lateCount > 0 ? ` · ${lateCount} MUỘN` : "");
   const label = !accessResolved
     ? "Đang tải…"
     : !canWrite
       ? "CHỈ GIÁO VIÊN, TRỢ GIẢNG LỚP HOẶC CHỦ TRUNG TÂM MỚI XÁC NHẬN ĐƯỢC"
       : settled
         ? "ĐÃ XÁC NHẬN ✓"
-        : `${closedPeriod ? "LƯU VÀ TẠO ĐIỀU CHỈNH" : "XÁC NHẬN BUỔI HỌC"} · ${absentCount} vắng`;
+        : `${closedPeriod ? "LƯU VÀ TẠO ĐIỀU CHỈNH" : "XÁC NHẬN"}${exceptionSuffix}`;
   return (
     <div className="sticky bottom-14 z-10 rounded-b-[28px] border-t border-line-100 bg-white px-4 py-[14px] pb-[max(14px,env(safe-area-inset-bottom))] md:bottom-0">
       <HvButton

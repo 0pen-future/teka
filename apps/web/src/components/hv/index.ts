@@ -27,6 +27,7 @@ export type { HvToastOptions, HvToastVariant } from "./hv-toast";
 
 export {
   HvCheckIcon,
+  HvClockIcon,
   HvFileIcon,
   HvHomeIcon,
   HvIcon,

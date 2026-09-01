@@ -369,6 +369,170 @@ func TestGetReturnsNullStatusBeforeFirstConfirm(t *testing.T) {
 	}
 }
 
+func TestConfirmMarksMixedStatuses(t *testing.T) {
+	svc, deps := newTestService()
+	ctx := context.Background()
+	teacherID, classID := id.New(), id.New()
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}
+	unlisted := deps.roster.addEnrollment(classID, id.New())
+	late := deps.roster.addEnrollment(classID, id.New())
+	absent := deps.roster.addEnrollment(classID, id.New())
+	excused := deps.roster.addEnrollment(classID, id.New())
+	sessionID := deps.sessions.addSession(teacherID, classID, time.Now(), sessions.StatusPlanned)
+
+	out, err := svc.Confirm(ctx, sc, sessionID, ConfirmRequest{
+		Marks: []ConfirmMark{
+			{StudentID: late.StudentID, Status: StatusLate},
+			{StudentID: absent.StudentID, Status: StatusAbsent},
+			{StudentID: excused.StudentID, Status: StatusExcused, Note: "mẹ báo ốm"},
+		},
+		Note: "lớp học bù",
+	})
+	if err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+	byStudent := map[uuid.UUID]RowResponse{}
+	for _, row := range out.Rows {
+		byStudent[row.StudentID] = row
+	}
+	assertRow := func(studentID uuid.UUID, wantStatus string, wantNote string) {
+		t.Helper()
+		row, ok := byStudent[studentID]
+		if !ok || row.Status == nil || *row.Status != wantStatus {
+			t.Fatalf("want student %s status %s, got %+v", studentID, wantStatus, row)
+		}
+		if !row.Billable {
+			t.Fatalf("every status must stay billable=true, got %+v", row)
+		}
+		if wantNote == "" {
+			return
+		}
+		if row.Note == nil || *row.Note != wantNote {
+			t.Fatalf("want note %q, got %+v", wantNote, row.Note)
+		}
+	}
+	assertRow(unlisted.StudentID, StatusPresent, "lớp học bù")
+	assertRow(late.StudentID, StatusLate, "lớp học bù")
+	assertRow(absent.StudentID, StatusAbsent, "lớp học bù")
+	// A per-student note wins over the session-level one for that student.
+	assertRow(excused.StudentID, StatusExcused, "mẹ báo ốm")
+}
+
+func TestConfirmMarksReplacePreviousStatuses(t *testing.T) {
+	svc, deps := newTestService()
+	ctx := context.Background()
+	teacherID, classID := id.New(), id.New()
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}
+	a := deps.roster.addEnrollment(classID, id.New())
+	b := deps.roster.addEnrollment(classID, id.New())
+	sessionID := deps.sessions.addSession(teacherID, classID, time.Now(), sessions.StatusPlanned)
+
+	if _, err := svc.Confirm(ctx, sc, sessionID, ConfirmRequest{
+		Marks: []ConfirmMark{{StudentID: a.StudentID, Status: StatusAbsent}},
+	}); err != nil {
+		t.Fatalf("first confirm: %v", err)
+	}
+	out, err := svc.Confirm(ctx, sc, sessionID, ConfirmRequest{
+		Marks: []ConfirmMark{{StudentID: b.StudentID, Status: StatusLate}},
+	})
+	if err != nil {
+		t.Fatalf("re-confirm: %v", err)
+	}
+	for _, row := range out.Rows {
+		switch row.StudentID {
+		case a.StudentID:
+			if row.Status == nil || *row.Status != StatusPresent {
+				t.Fatalf("re-confirm must reset an unlisted student to present, got %+v", row)
+			}
+		case b.StudentID:
+			if row.Status == nil || *row.Status != StatusLate {
+				t.Fatalf("re-confirm must apply the new mark, got %+v", row)
+			}
+		}
+	}
+}
+
+func TestConfirmRejectsMarksCombinedWithLegacyBody(t *testing.T) {
+	svc, deps := newTestService()
+	ctx := context.Background()
+	teacherID, classID := id.New(), id.New()
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}
+	e := deps.roster.addEnrollment(classID, id.New())
+	sessionID := deps.sessions.addSession(teacherID, classID, time.Now(), sessions.StatusPlanned)
+
+	_, err := svc.Confirm(ctx, sc, sessionID, ConfirmRequest{
+		Marks:            []ConfirmMark{{StudentID: e.StudentID, Status: StatusLate}},
+		AbsentStudentIDs: []uuid.UUID{e.StudentID},
+	})
+	if apperror.From(err).Code != apperror.CodeBadRequest {
+		t.Fatalf("sending both marks and absent_student_ids must be 400, got %v", err)
+	}
+}
+
+func TestConfirmRejectsDuplicateStudentInMarks(t *testing.T) {
+	svc, deps := newTestService()
+	ctx := context.Background()
+	teacherID, classID := id.New(), id.New()
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}
+	e := deps.roster.addEnrollment(classID, id.New())
+	sessionID := deps.sessions.addSession(teacherID, classID, time.Now(), sessions.StatusPlanned)
+
+	_, err := svc.Confirm(ctx, sc, sessionID, ConfirmRequest{
+		Marks: []ConfirmMark{
+			{StudentID: e.StudentID, Status: StatusLate},
+			{StudentID: e.StudentID, Status: StatusAbsent},
+		},
+	})
+	if apperror.From(err).Code != apperror.CodeBadRequest {
+		t.Fatalf("duplicate student_id in marks must be 400, got %v", err)
+	}
+}
+
+func TestConfirmRejectsMarkOutsideRoster(t *testing.T) {
+	svc, deps := newTestService()
+	ctx := context.Background()
+	teacherID, classID := id.New(), id.New()
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}
+	deps.roster.addEnrollment(classID, id.New())
+	sessionID := deps.sessions.addSession(teacherID, classID, time.Now(), sessions.StatusPlanned)
+
+	stranger := id.New()
+	_, err := svc.Confirm(ctx, sc, sessionID, ConfirmRequest{
+		Marks: []ConfirmMark{{StudentID: stranger, Status: StatusAbsent}},
+	})
+	var appErr *apperror.AppError
+	if !errors.As(err, &appErr) || appErr.Code != apperror.CodeValidation {
+		t.Fatalf("mark outside roster must be 422, got %v", err)
+	}
+	if appErr.Fields["marks"] == "" {
+		t.Fatalf("422 must name the offending id under the marks field, got %+v", appErr.Fields)
+	}
+	if !errors.Is(err, ErrStudentNotEnrolled) {
+		t.Fatalf("want ErrStudentNotEnrolled cause, got %v", err)
+	}
+}
+
+func TestConfirmRejectsInvalidMarkStatus(t *testing.T) {
+	svc, deps := newTestService()
+	ctx := context.Background()
+	teacherID, classID := id.New(), id.New()
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}
+	e := deps.roster.addEnrollment(classID, id.New())
+	sessionID := deps.sessions.addSession(teacherID, classID, time.Now(), sessions.StatusPlanned)
+
+	// present is the implicit default and everything else is not a status:
+	// the service enforces the vocabulary itself so non-HTTP callers get the
+	// same contract as the gin binding.
+	for _, status := range []string{StatusPresent, "tardy", ""} {
+		_, err := svc.Confirm(ctx, sc, sessionID, ConfirmRequest{
+			Marks: []ConfirmMark{{StudentID: e.StudentID, Status: status}},
+		})
+		if apperror.From(err).Code != apperror.CodeValidation {
+			t.Fatalf("mark status %q must be 422, got %v", status, err)
+		}
+	}
+}
+
 func TestConfirmCrossTenantIs404(t *testing.T) {
 	svc, deps := newTestService()
 	ctx := context.Background()

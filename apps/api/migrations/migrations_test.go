@@ -319,10 +319,10 @@ func TestDownFoldsPersonalChannelIntoManual(t *testing.T) {
 		 VALUES (?, ?, ?, ?, 'zalo_personal')`,
 		notifID, f.teacherID, f.centerID, f.statementID).Error)
 
-	// Roll back through 000005 (zalo_personal_mapping): sixteen steps now
-	// that the additive 000008-000020 sit on top of the migrations this test
+	// Roll back through 000005 (zalo_personal_mapping): seventeen steps now
+	// that the additive 000008-000021 sit on top of the migrations this test
 	// predates.
-	require.NoError(t, database.MigrateDown(m, 16))
+	require.NoError(t, database.MigrateDown(m, 17))
 
 	var channel string
 	require.NoError(t, db.Raw(
@@ -1178,6 +1178,47 @@ func TestDownRestoresRoleGrantedSendReports(t *testing.T) {
 	require.True(t, canSend(roleGranted), "a role-granted sender must survive rollback")
 	require.True(t, canSend(memberGranted), "a member-granted sender must survive rollback")
 	require.False(t, canSend(roleDenied), "a member deny must beat the role grant")
+}
+
+// attendance_records.status admits 'late' after 000021 while staying a closed
+// vocabulary; stepping below it folds late back into present before the
+// narrow CHECK returns, so no surviving row can violate it. Money is safe
+// either way: late rows are billable = true, exactly like present.
+func TestAttendanceLateStatusRoundTrip(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+
+	db := openDB(t, url)
+	f := seedTeachingParents(t, db, "+84900000931")
+	enrollmentID := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO enrollments (id, teacher_id, center_id, student_id, class_id, started_on, unit_price)
+		 VALUES (?, ?, ?, ?, ?, '2026-01-05', 100000)`,
+		enrollmentID, f.teacherID, f.centerID, f.studentID, f.classID).Error)
+
+	recordID := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO attendance_records (id, teacher_id, center_id, session_id, student_id, enrollment_id, status)
+		 VALUES (?, ?, ?, ?, ?, ?, 'late')`,
+		recordID, f.teacherID, f.centerID, f.sessionID, f.studentID, enrollmentID).Error,
+		"the widened CHECK must accept 'late'")
+	require.Error(t, db.Exec(
+		`UPDATE attendance_records SET status = 'tardy' WHERE id = ?`, recordID).Error,
+		"the vocabulary must stay closed to unknown statuses")
+
+	require.NoError(t, m.Migrate(20))
+	var status string
+	require.NoError(t, db.Raw(
+		`SELECT status FROM attendance_records WHERE id = ?`, recordID).Scan(&status).Error)
+	require.Equal(t, "present", status, "down must fold late into present")
+	require.Error(t, db.Exec(
+		`UPDATE attendance_records SET status = 'late' WHERE id = ?`, recordID).Error,
+		"below 000021 the narrow CHECK must reject 'late' again")
 }
 
 // The 000016 anchor migration turns contacts into center-level data: duplicate

@@ -494,9 +494,17 @@ func ensureMember(ctx context.Context, db *gorm.DB, log *slog.Logger, s seedTeac
 		).Error; err != nil {
 			return err
 		}
-		return tx.Exec(
-			"INSERT INTO center_members (teacher_id, center_id) VALUES (?, ?)",
-			accountID, centerID,
+		// Invitation-accept (OpenMembership) joins every member with the
+		// giao_vien system role — the role's permission rows are the
+		// member's whole baseline, so a roleless stint would leave the
+		// member unable to read anything.
+		return tx.Exec(`
+			INSERT INTO center_members (teacher_id, center_id, role_id)
+			VALUES (?, ?, (
+				SELECT cr.id FROM center_roles cr
+				WHERE cr.center_id = ? AND cr.key = 'giao_vien'
+			))`,
+			accountID, centerID, centerID,
 		).Error
 	})
 	if err != nil {

@@ -14,10 +14,20 @@ import (
 	"teka/apps/api/internal/shared/classscope"
 )
 
-// Row is a session joined with the class name the responses display.
+// Row is a session joined with the class name the responses display, plus
+// per-status attendance tallies over the session's live records. The counts
+// are populated only by the read queries that go through
+// withClassNameAndSummary; write-port fetches leave them zero, and the DTO
+// layer reports them as null until attendance_confirmed_at is set — so a
+// confirmed-but-empty session (zeros) stays distinguishable from a session
+// never confirmed (null).
 type Row struct {
-	Session   `gorm:"embedded"`
-	ClassName string
+	Session      `gorm:"embedded"`
+	ClassName    string
+	PresentCount int
+	LateCount    int
+	AbsentCount  int
+	ExcusedCount int
 }
 
 // Repository is the persistence contract for sessions; the service depends on
@@ -136,6 +146,26 @@ func withClassName(q *gorm.DB) *gorm.DB {
 		Select("class_sessions.*, classes.name AS class_name")
 }
 
+// withClassNameAndSummary additionally aggregates the session's live
+// attendance records into one count per status, riding the same grouped
+// LEFT JOIN so a 60-session month listing stays a single round-trip. The
+// status literals mirror the attendance_records CHECK constraint; only rows
+// with deleted_at IS NULL count, so a student soft-removed from the roster
+// after confirmation never inflates a tally.
+func withClassNameAndSummary(q *gorm.DB) *gorm.DB {
+	return q.
+		Joins("JOIN classes ON classes.id = class_sessions.class_id AND classes.center_id = class_sessions.center_id").
+		Joins(`LEFT JOIN attendance_records ON attendance_records.session_id = class_sessions.id
+			AND attendance_records.center_id = class_sessions.center_id
+			AND attendance_records.deleted_at IS NULL`).
+		Select(`class_sessions.*, classes.name AS class_name,
+			COUNT(attendance_records.id) FILTER (WHERE attendance_records.status = 'present')::int AS present_count,
+			COUNT(attendance_records.id) FILTER (WHERE attendance_records.status = 'late')::int AS late_count,
+			COUNT(attendance_records.id) FILTER (WHERE attendance_records.status = 'absent')::int AS absent_count,
+			COUNT(attendance_records.id) FILTER (WHERE attendance_records.status = 'excused')::int AS excused_count`).
+		Group("class_sessions.id, classes.id")
+}
+
 func (r *gormRepository) BulkInsertIgnoreConflicts(ctx context.Context, rows []Session) error {
 	if len(rows) == 0 {
 		return nil
@@ -187,7 +217,7 @@ func (r *gormRepository) GetByID(ctx context.Context, sc authctx.Scope, id uuid.
 
 func (r *gormRepository) ListByClassAndRangeReadable(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]Row, error) {
 	var rows []Row
-	err := withClassName(r.readScoped(ctx, sc).Model(&Session{})).
+	err := withClassNameAndSummary(r.readScoped(ctx, sc).Model(&Session{})).
 		Where("class_sessions.class_id = ?", classID).
 		Where("class_sessions.session_date BETWEEN ? AND ?", from, to).
 		Order("class_sessions.session_date").
@@ -197,7 +227,7 @@ func (r *gormRepository) ListByClassAndRangeReadable(ctx context.Context, sc aut
 
 func (r *gormRepository) GetReadableByID(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Row, error) {
 	var row Row
-	err := withClassName(r.readScoped(ctx, sc).Model(&Session{})).
+	err := withClassNameAndSummary(r.readScoped(ctx, sc).Model(&Session{})).
 		Where("class_sessions.id = ?", id).
 		Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {

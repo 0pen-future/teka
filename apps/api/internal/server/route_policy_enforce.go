@@ -22,6 +22,9 @@ import (
 //   - permission: one grantable catalog key; the owner passes implicitly.
 //     Tenant scope, object visibility, and class-capability checks remain
 //     independent layers in the services and repositories behind it.
+//   - service: authentication and live membership here; the feature
+//     service's own frozen gates (reports oversight, class-send stint,
+//     own-period scoping) are the authorization and fail closed.
 //
 // A route that reaches it without a manifest entry fails closed even for the
 // owner: registering an authenticated route means classifying it, and the
