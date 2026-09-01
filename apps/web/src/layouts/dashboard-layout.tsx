@@ -81,7 +81,6 @@ function useNavGroups(): NavGroup[] {
         },
         { label: "Quản lý lớp học", to: "/classbook", Icon: BookOpenIcon, perm: "classes.list" },
         { label: "Hồ sơ học sinh", to: "/records", Icon: IdCardIcon, perm: "students.list" },
-        { label: "Lớp & học sinh", to: "/students", Icon: HvUsersIcon, perm: "students.list" },
         { label: "Phụ huynh", to: "/contacts", Icon: BookUserIcon, perm: "contacts.list" },
       ],
     },
@@ -132,6 +131,11 @@ function useNavGroups(): NavGroup[] {
         ...(isResolved && !isOwner && canSendReports
           ? [{ label: "Gửi báo cáo", to: "/reports", Icon: HvSendIcon }]
           : []),
+        // Owner-only: class and student records are owner-managed center
+        // data; the page itself redirects non-owners.
+        ...(isResolved && isOwner
+          ? [{ label: "Lớp & học sinh", to: "/students", Icon: HvUsersIcon }]
+          : []),
         // Owner-only: the role-permission read model itself is owner-only.
         ...(isResolved && isOwner
           ? [{ label: "Phân quyền vai trò", to: "/center/permissions", Icon: ShieldCheckIcon }]
@@ -160,8 +164,8 @@ function useNavGroups(): NavGroup[] {
 /**
  * Bottom-bar split (<md only; the sidebar and rail render every entry, in
  * groups): daily actions keep a direct tab, while the billing-cycle entries
- * (Chốt sổ, Gửi thông báo) and the setup-time Phụ huynh and Cài đặt trung tâm
- * entries live behind the Thêm sheet so the bar holds five slots at 360px.
+ * (Chốt sổ, Gửi thông báo), the setup-time Phụ huynh, and the whole Trung tâm
+ * group live behind the Thêm sheet so the bar stays uncrowded at 360px.
  */
 const OVERFLOW_LABELS = new Set([
   "Quản lý lớp học",
@@ -170,6 +174,7 @@ const OVERFLOW_LABELS = new Set([
   "Gửi thông báo",
   "Phụ huynh",
   "Gửi báo cáo",
+  "Lớp & học sinh",
   "Duyệt giáo án",
   "Nhập từ Excel",
   "Nhật ký hoạt động",
@@ -191,7 +196,7 @@ const OVERFLOW_PATH_PREFIXES = [
   "/contacts",
   "/reports",
   "/lesson-plans",
-  "/students/import",
+  "/students",
   "/audit",
   "/center",
 ];

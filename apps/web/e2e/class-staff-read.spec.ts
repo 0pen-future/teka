@@ -19,20 +19,27 @@ async function login(page: Page, user: { phone: string; password: string; name: 
 }
 
 /**
- * The read journey both staff roles share: the assigned class is listed with
- * its roster, class settings render read-only, and the classbook opens
- * without edit affordances. Purely read-only — it must not mutate the shared
- * seeded stack. Attendance is asserted per role below, because the two staff
- * roles diverge there: tro_giang may confirm attendance, hoc_vu may not.
+ * The read journey both staff roles share: the owner-only roster screen
+ * bounces the member home, the assigned class's students read on Hồ sơ học
+ * sinh, class settings render read-only, and the classbook opens without
+ * edit affordances. Purely read-only — it must not mutate the shared seeded
+ * stack. Attendance is asserted per role below, because the two staff roles
+ * diverge there: tro_giang may confirm attendance, hoc_vu may not.
  */
 async function assertStaffReadJourney(page: Page) {
-  // Roster: the assigned class appears as a picker tab and its active
-  // enrollments are readable.
+  // "Lớp & học sinh" is owner-only center administration now — a member
+  // landing on it is sent straight back to the dashboard.
   await page.goto("/students");
+  await expect(page).toHaveURL(/\/$/);
+
+  // The member's read surface for the class's students is Hồ sơ học sinh:
+  // the assigned class appears as a picker tab and its active enrollments
+  // are listed.
+  await page.goto("/records");
   await page.getByRole("tab", { name: STAFF_CLASS }).click();
-  await expect(page).toHaveURL(/class_id=(?!none)/);
-  await expect(page.getByRole("row").filter({ hasText: "Bé An" })).toBeVisible();
-  await expect(page.getByRole("row").filter({ hasText: "Bé Bình" })).toBeVisible();
+  await expect(page).toHaveURL(/class_id=/);
+  await expect(page.getByText("Bé An", { exact: true })).toBeVisible();
+  await expect(page.getByText("Bé Bình", { exact: true })).toBeVisible();
   const classId = new URL(page.url()).searchParams.get("class_id");
   expect(classId).toBeTruthy();
 

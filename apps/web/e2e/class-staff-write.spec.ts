@@ -5,16 +5,14 @@ import { expect, test, type Page } from "@playwright/test";
 // Cô Thu as hoc_vu and Thầy Minh as tro_giang. Thầy Minh also teaches his own
 // "Lý 7 - Chiều Thứ Năm" — the class handed off (and handed back) below.
 //
-// These journeys need the earlier specs' state: billing.spec confirms Cô
-// Lan's pending sessions and closes her current period, which is what puts
-// invoice lines behind "Toán 8 - Tối Thứ Ba" and makes the class period
-// discoverable/sendable. A partial run (--grep) on a freshly seeded DB will
-// find no closed period.
+// In a full run billing.spec has already closed Cô Lan's current period, so
+// the attendance flip below saves against a closed period and each save
+// leaves a pair of mutually cancelling adjustment lines (see the restoring
+// afterEach).
 const STAFF_CLASS = "Toán 8 - Tối Thứ Ba";
 const HANDOFF_CLASS = "Lý 7 - Chiều Thứ Năm";
 const OWNER = { phone: "0901000001", password: "lan-password", name: "Cô Lan" };
 const TRO_GIANG = { phone: "0901000002", password: "minh-password", name: "Thầy Minh" };
-const HOC_VU = { phone: "0901000003", password: "thu-password", name: "Cô Thu" };
 
 async function login(page: Page, user: { phone: string; password: string; name: string }) {
   await page.goto("/login");
@@ -26,11 +24,16 @@ async function login(page: Page, user: { phone: string; password: string; name: 
   ).toBeVisible();
 }
 
-/** Resolves a class id by opening its roster tab and reading the URL. */
-async function classIdFromRosterTab(page: Page, className: string): Promise<string> {
-  await page.goto("/students");
+/**
+ * Resolves a class id by picking the class on Hồ sơ học sinh and reading the
+ * URL. That screen is readable by every class-staff role (the roster screen
+ * behind /students is owner-only now), so both the owner and Thầy Minh can
+ * use it.
+ */
+async function classIdFromRecordsTab(page: Page, className: string): Promise<string> {
+  await page.goto("/records");
   await page.getByRole("tab", { name: className }).click();
-  await expect(page).toHaveURL(/class_id=(?!none)/);
+  await expect(page).toHaveURL(/class_id=/);
   const classId = new URL(page.url()).searchParams.get("class_id");
   expect(classId).toBeTruthy();
   return classId ?? "";
@@ -123,45 +126,11 @@ test("tro_giang records attendance directly on the staffed class", async ({ page
   await flipFirstRowAndConfirm(page);
 });
 
-test("hoc_vu discovers the class period from the roster and sends the class copies", async ({
-  page,
-}) => {
-  await login(page, HOC_VU);
-
-  // Entry point: the roster screen of the staffed class offers "Gửi báo cáo"
-  // to hoc_vu (Cô Thu holds no center-wide send grant — this is the class
-  // role's own path).
-  await classIdFromRosterTab(page, STAFF_CLASS);
-  await page.getByRole("button", { name: "Gửi báo cáo" }).click();
-  const dialog = page.getByRole("dialog");
-  await expect(dialog.getByText(`Gửi báo cáo — lớp ${STAFF_CLASS}`)).toBeVisible();
-
-  // Period discovery: the class bills under Cô Lan's period, which Cô Thu
-  // could never list center-wide — the dialog resolves it through the class's
-  // invoice lines. The ledger fetch swaps the generate button between the
-  // header and the empty-state card, so wait for it before clicking.
-  const ledgerLoaded = page.waitForResponse(
-    (response) =>
-      response.url().includes("/notifications?") && response.request().method() === "GET",
-  );
-  await dialog
-    .getByRole("link", { name: /^Gửi báo cáo lớp/ })
-    .first()
-    .click();
-  await expect(page).toHaveURL(/\/notifications\/.+\?.*class_id=/);
-  await expect(
-    page.getByRole("heading", { name: `Gửi thông báo — lớp ${STAFF_CLASS}` }),
-  ).toBeVisible();
-  await ledgerLoaded;
-
-  // No Zalo session is linked in e2e, so the manual channel is the default
-  // and generating renders one copy-paste card per class contact. Bé An and
-  // Bé Bình (Chị Hoa's children) are the class's active enrollments.
-  await expect(page.getByRole("radio", { name: "Zalo thủ công" })).toBeChecked();
-  await page.getByRole("button", { name: /Tạo (lại|thông báo học phí)/ }).click();
-  await expect(page.getByText("Chị Hoa").first()).toBeVisible();
-  await expect(page.getByRole("button", { name: "Sao chép", exact: true }).first()).toBeVisible();
-});
+// The hoc_vu class-scoped send journey is gone: its only UI entry was the
+// roster screen's "Gửi báo cáo" button, and that screen is owner-only now.
+// The API capability remains, but the UI path was deliberately dropped when
+// the roster moved under owner-only center administration — so there is no
+// send journey to assert for Cô Thu anymore.
 
 /**
  * Reads the class-settings handoff card and, when the current teacher differs
@@ -198,7 +167,7 @@ test.afterEach(async ({ browser }, testInfo) => {
   const page = await context.newPage();
   try {
     await login(page, OWNER);
-    const classId = await classIdFromRosterTab(page, HANDOFF_CLASS);
+    const classId = await classIdFromRecordsTab(page, HANDOFF_CLASS);
     await ensureClassTeacher(page, classId, TRO_GIANG.name, TRO_GIANG.name);
   } finally {
     await context.close();
@@ -212,7 +181,7 @@ test("a handed-off teacher keeps reading history but loses every write", async (
   const minhContext = await browser.newContext();
   const minh = await minhContext.newPage();
   await login(minh, TRO_GIANG);
-  const classId = await classIdFromRosterTab(minh, HANDOFF_CLASS);
+  const classId = await classIdFromRecordsTab(minh, HANDOFF_CLASS);
   const sheetUrl = await openAttendanceSheet(minh, HANDOFF_CLASS);
   await expect(
     minh.getByRole("button", { name: /^(XÁC NHẬN|ĐÃ XÁC NHẬN ✓|LƯU VÀ TẠO ĐIỀU CHỈNH)( · .+)?$/ }),
@@ -224,9 +193,11 @@ test("a handed-off teacher keeps reading history but loses every write", async (
   await login(owner, OWNER);
   await ensureClassTeacher(owner, classId, OWNER.name, `${OWNER.name} (chủ trung tâm)`);
 
-  // History reads survive the handoff: the roster he taught stays visible.
-  await minh.goto(`/students?class_id=${classId}`);
-  await expect(minh.getByRole("row").filter({ hasText: "Bé Phúc" })).toBeVisible();
+  // History reads survive the handoff: the students he taught stay visible
+  // on Hồ sơ học sinh — the member-readable surface, since /students is
+  // owner-only now.
+  await minh.goto(`/records?class_id=${classId}`);
+  await expect(minh.getByText("Bé Phúc", { exact: true })).toBeVisible();
 
   // Every write freezes — settings save is reserved for the new teacher…
   await minh.goto(`/classes/${classId}/settings`);

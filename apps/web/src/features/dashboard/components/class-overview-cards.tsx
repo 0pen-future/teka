@@ -5,6 +5,7 @@ import { Spinner } from "@/components/shared/spinner";
 import type { Session } from "@/features/attendance";
 import { useCurrentPeriod } from "@/features/billing";
 import { formatScheduleSummary, useClassesList, type Class } from "@/features/roster";
+import { useCenterContext } from "@/features/teaching";
 import { cn, formatMoney } from "@/lib/utils";
 
 import { useClassPeriodSessions, useClassStudentCounts } from "../hooks/use-dashboard";
@@ -17,6 +18,8 @@ interface ClassOverviewCardProps {
   sessionsFailed: boolean;
   /** Enrolled headcount; undefined while loading or on failure. */
   studentCount: number | undefined;
+  /** The roster page behind the `Lớp mới` link is owner-only. */
+  isOwner: boolean;
 }
 
 function ClassOverviewCard({
@@ -24,11 +27,18 @@ function ClassOverviewCard({
   sessions,
   sessionsFailed,
   studentCount,
+  isOwner,
 }: ClassOverviewCardProps) {
   const countable = (sessions ?? []).filter((session) => session.status !== "cancelled");
   const confirmed = countable.filter((session) => session.attendance_confirmed_at).length;
   const isNew = sessions != null && countable.length === 0;
   const isFull = countable.length > 0 && confirmed === countable.length;
+
+  // A sessionless class's card opens the roster, which redirects non-owners
+  // straight back to this dashboard — hide it from them instead of looping.
+  if (isNew && !isOwner) {
+    return null;
+  }
 
   // A class with no sessions this period has nothing to attend — its card
   // opens the roster instead, per the prototype's `Lớp mới` branch.
@@ -83,6 +93,7 @@ function ClassOverviewCard({
 /** The prototype `home` screen's "Lớp của bạn" grid — one progress card per active class. */
 export function ClassOverviewCards({ className }: { className?: string }) {
   const { data: period } = useCurrentPeriod();
+  const { isOwner } = useCenterContext();
   const {
     data: classesPage,
     isPending,
@@ -105,7 +116,10 @@ export function ClassOverviewCards({ className }: { className?: string }) {
         </p>
       ) : classes.length === 0 ? (
         <p className="mt-3 text-[14px] text-ink-500">
-          Chưa có lớp nào — tạo lớp đầu tiên ở mục "Lớp & học sinh".
+          {/* Only the owner can reach the owner-only roster page the hint names. */}
+          {isOwner
+            ? 'Chưa có lớp nào — tạo lớp đầu tiên ở mục "Lớp & học sinh".'
+            : "Chưa có lớp nào."}
         </p>
       ) : (
         <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-[14px]">
@@ -116,6 +130,7 @@ export function ClassOverviewCards({ className }: { className?: string }) {
               sessions={sessionQueries[index]?.data}
               sessionsFailed={sessionQueries[index]?.isError ?? false}
               studentCount={countQueries[index]?.data}
+              isOwner={isOwner}
             />
           ))}
         </div>

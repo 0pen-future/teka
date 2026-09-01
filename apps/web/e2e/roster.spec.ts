@@ -47,8 +47,8 @@ test("roster flow: contact, two students, a class, enroll both, end one", async 
   await expect(page.getByText(studentTwoName)).toBeVisible();
 
   // 3. Create a class with one weekly slot (`ClassDialog` create mode) —
-  // class creation lives on the consolidated "Lớp & học sinh" screen; the
-  // new class shows up as a pill tab in the class picker.
+  // a bare /students lands on the "Lớp học" tab, where class creation lives;
+  // the new class shows up as a row in the class list.
   await page.goto("/students");
   await page.getByRole("button", { name: "+ Tạo lớp mới" }).click();
   await page.getByLabel("Tên lớp").fill(className);
@@ -58,11 +58,12 @@ test("roster flow: contact, two students, a class, enroll both, end one", async 
   await page.getByLabel("Thời lượng (phút)").fill("90");
   await page.getByLabel("Đơn giá / buổi (đ)").fill("150000");
   await page.getByRole("dialog").getByRole("button", { name: "Tạo lớp" }).click();
-  await expect(page.getByRole("tab", { name: className })).toBeVisible();
+  await expect(page.getByRole("row").filter({ hasText: className })).toBeVisible();
 
-  // 3b. Add-student wizard on the roster screen: create the profile (Bước
+  // 3b. Add-student wizard on the "Học sinh" tab: create the profile (Bước
   // 1/2), postpone enrollment with "Để sau", find the student on the "Chưa
   // ghi danh" tab, then enroll from there (Bước 2 reused standalone).
+  await page.getByRole("tab", { name: "Học sinh" }).click();
   await page.getByRole("button", { name: "+ Thêm học sinh" }).click();
   await page.getByLabel("Họ và tên").fill(studentThreeName);
   await page.getByRole("combobox", { name: "Người liên hệ" }).fill(contactName);
@@ -71,7 +72,7 @@ test("roster flow: contact, two students, a class, enroll both, end one", async 
   await expect(page.getByText("Bước 2/2")).toBeVisible();
   await page.getByRole("button", { name: "Để sau" }).click();
   await expect(page.getByText(/Đã lưu hồ sơ — ghi danh sau/)).toBeVisible();
-  await expect(page).toHaveURL(/class_id=none/);
+  await expect(page).toHaveURL(/tab=unenrolled/);
 
   await page.getByPlaceholder("Tìm theo tên học sinh").fill(studentThreeName);
   const studentThreeRow = page.getByRole("row").filter({ hasText: studentThreeName });
@@ -82,8 +83,9 @@ test("roster flow: contact, two students, a class, enroll both, end one", async 
   await page.getByRole("dialog").getByRole("button", { name: "Ghi danh vào lớp" }).click();
   await expect(page.getByText(/tính tiền từ buổi có mặt đầu tiên/)).toBeVisible();
 
-  // Enrolling moves the roster to that class's tab; the student is on it.
-  await expect(page).toHaveURL(/class_id=(?!none)/);
+  // Enrolling lands on the class's students tab; the student is on it.
+  await expect(page).toHaveURL(/tab=students/);
+  await expect(page).toHaveURL(/class_id=/);
   await expect(page.getByRole("row").filter({ hasText: studentThreeName })).toBeVisible();
 
   // 4. Enroll both remaining students from the "Chưa ghi danh" tab — the
@@ -115,7 +117,10 @@ test("roster flow: contact, two students, a class, enroll both, end one", async 
   await expect(page.getByText(/— \d{4}-\d{2}-\d{2}/)).toBeVisible();
 
   // The other student's enrollment is untouched by ending the first one.
+  // A bare /students opens the classes tab; the class pills live on the
+  // "Học sinh" tab.
   await page.goto("/students");
+  await page.getByRole("tab", { name: "Học sinh" }).click();
   await page.getByRole("tab", { name: className }).click();
   await page.getByPlaceholder("Tìm theo tên học sinh").fill(studentTwoName);
   await page.getByRole("link", { name: studentTwoName }).click();

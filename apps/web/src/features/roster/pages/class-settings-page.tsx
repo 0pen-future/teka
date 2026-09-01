@@ -51,8 +51,10 @@ function toDefaults(klass: Class): ClassSettingsInput {
 }
 
 /**
- * "Cài đặt lớp" screen (prototype `classCfg`, reached from the tab row on
- * "Lớp & học sinh"): one form for name, khung-giờ slots and unit price.
+ * "Cài đặt lớp" screen (prototype `classCfg`): the owner arrives from the
+ * per-row ⚙ link on the classes tab of "Lớp & học sinh"; members arrive from
+ * their teaching screens (classbook, records). One form for name, khung-giờ
+ * slots and unit price.
  * Saving fans out into `PUT /classes/:id` for name/price plus a
  * schedule diff — new rows are added first (`effective_from` = today), then
  * replaced rows are closed with `effective_to` = yesterday per the API's
@@ -102,7 +104,12 @@ export function ClassSettingsPage() {
   }
 
   const canWrite = canWriteClass(isOwner, klass);
-  const backTo = `/students?class_id=${klass.id}`;
+  // Members can read this page, but the roster screen behind the old back
+  // link is owner-only now — send them to their per-class records instead.
+  const backTo = isOwner
+    ? `/students?tab=students&class_id=${klass.id}`
+    : `/records?class_id=${klass.id}`;
+  const backLabel = isOwner ? "← Lớp & học sinh" : "← Hồ sơ học sinh";
   const activeStudents = (enrollmentsPage?.items ?? []).filter(
     (enrollment) => !enrollment.ended_on,
   ).length;
@@ -171,7 +178,7 @@ export function ClassSettingsPage() {
           to={backTo}
           className="font-display text-[13px] font-bold text-ink-500 hover:text-mint-600"
         >
-          ← Lớp &amp; học sinh
+          {backLabel}
         </Link>
         <h1 className="mt-2 font-display text-[22px] font-bold text-ink-900">
           Cài đặt lớp — {klass.name}

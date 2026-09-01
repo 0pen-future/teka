@@ -13,11 +13,15 @@ import { contactsKeys, enrollmentsKeys, studentsKeys } from "./roster-keys";
 
 export { studentsKeys };
 
-export function useStudentsList(params: ListStudentsParams = {}) {
+export function useStudentsList(
+  params: ListStudentsParams = {},
+  options: { enabled?: boolean } = {},
+) {
   return useQuery({
     queryKey: studentsKeys.list(params),
     queryFn: () => listStudents(params),
     placeholderData: keepPreviousData,
+    enabled: options.enabled ?? true,
   });
 }
 

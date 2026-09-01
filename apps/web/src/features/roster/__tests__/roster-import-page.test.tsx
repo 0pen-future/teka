@@ -109,6 +109,9 @@ describe("RosterImportPage — role gate", () => {
     expect(await screen.findByText(/Chỉ chủ trung tâm mới nhập được/)).toBeInTheDocument();
     expect(screen.queryByLabelText("Chọn file Excel")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Tải file mẫu" })).not.toBeInTheDocument();
+    // "Lớp & học sinh" is owner-only now, so the copy must not send a member
+    // there as a self-serve alternative.
+    expect(screen.queryByRole("link", { name: "Lớp & học sinh" })).not.toBeInTheDocument();
   });
 });
 
