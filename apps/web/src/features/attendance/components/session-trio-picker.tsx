@@ -79,11 +79,13 @@ function ArrowButton({
   glyph,
   target,
   onNavigate,
+  className,
 }: {
   label: string;
   glyph: string;
   target: Session | null;
   onNavigate: (session: Session) => void;
+  className?: string;
 }) {
   return (
     <button
@@ -100,6 +102,7 @@ function ArrowButton({
         target
           ? "bg-white text-ink-500 shadow-soft-sm hover:bg-cream-100"
           : "bg-cream-100 text-ink-300",
+        className,
       )}
     >
       {glyph}
@@ -123,7 +126,23 @@ export function SessionTrioPicker({
   const anchorCaption = anchor?.session_date === today ? "HÔM NAY" : "ĐANG XEM";
   return (
     <div className="flex flex-row items-stretch gap-2 lg:flex-col">
-      <ArrowButton label="Buổi trước" glyph="‹" target={prev} onNavigate={onNavigate} />
+      {/* `contents` keeps both arrows direct flex items of the mobile row
+          (next pushed to the end via `max-lg:order-last`); at lg+ the wrapper
+          becomes a real row so the arrows share one line above the cards.
+          Accepted trade-off: on mobile the next arrow's tab/reading order
+          (right after prev) no longer matches its visual position at the end
+          of the row — harmless here since both buttons carry distinct
+          self-describing aria-labels. */}
+      <div className="contents lg:flex lg:flex-row lg:justify-between">
+        <ArrowButton label="Buổi trước" glyph="‹" target={prev} onNavigate={onNavigate} />
+        <ArrowButton
+          label="Buổi kế tiếp"
+          glyph="›"
+          target={next}
+          onNavigate={onNavigate}
+          className="max-lg:order-last"
+        />
+      </div>
       <TrioCard
         caption="TRƯỚC"
         session={prev}
@@ -145,7 +164,6 @@ export function SessionTrioPicker({
         today={today}
         onNavigate={onNavigate}
       />
-      <ArrowButton label="Buổi kế tiếp" glyph="›" target={next} onNavigate={onNavigate} />
     </div>
   );
 }
