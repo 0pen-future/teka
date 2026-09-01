@@ -47,7 +47,7 @@ describe("Phụ huynh nav entry", () => {
     }
   });
 
-  it("sits after Lớp & học sinh in the sidebar order", async () => {
+  it("sits after Hồ sơ học sinh in the sidebar order", async () => {
     renderLayout();
     await screen.findAllByRole("link", { name: "Phụ huynh" });
 
@@ -56,10 +56,10 @@ describe("Phụ huynh nav entry", () => {
     const labels = within(sidebarNav)
       .getAllByRole("link")
       .map((link) => link.textContent);
-    const students = labels.indexOf("Lớp & học sinh");
+    const records = labels.indexOf("Hồ sơ học sinh");
     const contacts = labels.indexOf("Phụ huynh");
-    expect(students).toBeGreaterThanOrEqual(0);
-    expect(contacts).toBe(students + 1);
+    expect(records).toBeGreaterThanOrEqual(0);
+    expect(contacts).toBe(records + 1);
   });
 });
 
@@ -71,12 +71,13 @@ describe("grouped sidebar", () => {
     await within(sidebarNav).findByRole("link", { name: "Duyệt giáo án" });
 
     const expected: Record<string, string[]> = {
-      "Dạy học": ["Điểm danh", "Quản lý lớp học", "Hồ sơ học sinh", "Lớp & học sinh", "Phụ huynh"],
+      "Dạy học": ["Điểm danh", "Quản lý lớp học", "Hồ sơ học sinh", "Phụ huynh"],
       "Học phí": ["Chốt sổ", "Gửi thông báo", "Thu tiền"],
       "Trung tâm": [
         "Duyệt giáo án",
         "Nhập từ Excel",
         "Nhật ký hoạt động",
+        "Lớp & học sinh",
         "Phân quyền vai trò",
         "Cài đặt trung tâm",
       ],
@@ -107,7 +108,7 @@ describe("grouped sidebar", () => {
 });
 
 describe("bottom tab bar", () => {
-  it("keeps four primary tabs plus a Thêm tab", async () => {
+  it("keeps three primary tabs plus a Thêm tab", async () => {
     renderLayout();
     const { nav } = await findBottomNav();
 
@@ -117,10 +118,12 @@ describe("bottom tab bar", () => {
     const tabLabels = within(nav)
       .getAllByRole("link")
       .map((link) => link.textContent);
-    expect(tabLabels).toEqual(["Tổng quan", "Điểm danh", "Lớp & học sinh", "Thu tiền"]);
+    expect(tabLabels).toEqual(["Tổng quan", "Điểm danh", "Thu tiền"]);
     expect(within(nav).queryByText("Chốt sổ")).not.toBeInTheDocument();
     expect(within(nav).queryByText("Gửi thông báo")).not.toBeInTheDocument();
     expect(within(nav).queryByText("Phụ huynh")).not.toBeInTheDocument();
+    // Now an owner-only Trung tâm entry, reachable through the Thêm sheet.
+    expect(within(nav).queryByText("Lớp & học sinh")).not.toBeInTheDocument();
   });
 
   it("opens the Thêm sheet listing the overflow entries and navigates from it", async () => {
@@ -153,7 +156,8 @@ describe("bottom tab bar", () => {
     const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
 
     const importLink = await within(sidebarNav).findByRole("link", { name: "Nhập từ Excel" });
-    const studentsLink = within(sidebarNav).getByRole("link", { name: "Lớp & học sinh" });
+    // Both entries are owner-gated behind /centers/me now — wait for each.
+    const studentsLink = await within(sidebarNav).findByRole("link", { name: "Lớp & học sinh" });
     // /students/import is a subpath of /students; only the deeper entry lights up.
     expect(importLink).toHaveAttribute("aria-current", "page");
     expect(studentsLink).not.toHaveAttribute("aria-current");
@@ -213,6 +217,17 @@ describe("bottom tab bar", () => {
       "href",
       "/lesson-plans",
     );
+    // The owner-only roster entry lives here too, never on the primary tabs.
+    expect(await within(sheet).findByRole("link", { name: "Lớp & học sinh" })).toHaveAttribute(
+      "href",
+      "/students",
+    );
+  });
+
+  it("marks Thêm active on /students now that the entry moved to the sheet", async () => {
+    renderLayout("/students");
+    const { moreTab } = await findBottomNav();
+    expect(moreTab).toHaveClass("text-mint-600");
   });
 
   it("renders period-scoped sheet entries disabled while no period resolves", async () => {
@@ -246,13 +261,7 @@ describe("teaching v2 nav", () => {
     const labels = within(group)
       .getAllByRole("link")
       .map((link) => link.textContent);
-    expect(labels).toEqual([
-      "Điểm danh",
-      "Quản lý lớp học",
-      "Hồ sơ học sinh",
-      "Lớp & học sinh",
-      "Phụ huynh",
-    ]);
+    expect(labels).toEqual(["Điểm danh", "Quản lý lớp học", "Hồ sơ học sinh", "Phụ huynh"]);
     expect(within(group).getByRole("link", { name: "Quản lý lớp học" })).toHaveAttribute(
       "href",
       "/classbook",
@@ -277,6 +286,7 @@ describe("teaching v2 nav", () => {
       "Duyệt giáo án",
       "Nhập từ Excel",
       "Nhật ký hoạt động",
+      "Lớp & học sinh",
       "Phân quyền vai trò",
       "Cấu hình lớp học",
       "Cài đặt trung tâm",
@@ -364,12 +374,10 @@ describe("teaching v2 nav", () => {
       "href",
       "/sessions",
     );
-    expect(within(sidebarNav).getByRole("link", { name: "Lớp & học sinh" })).toHaveAttribute(
-      "href",
-      "/students",
-    );
-    // Both students entries ride the same key.
     expect(within(sidebarNav).getByRole("link", { name: "Hồ sơ học sinh" })).toBeInTheDocument();
+    // Lớp & học sinh is owner-only now — students.list alone no longer
+    // surfaces it anywhere, in any group.
+    expect(screen.queryByText("Lớp & học sinh")).not.toBeInTheDocument();
     // Entries whose route key the member lacks disappear entirely — no
     // disabled placeholder that would only 403 on click.
     expect(within(sidebarNav).queryByText("Quản lý lớp học")).not.toBeInTheDocument();

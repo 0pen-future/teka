@@ -223,4 +223,38 @@ describe("DashboardPage", () => {
     expect(card).toHaveAttribute("href", "/students?class_id=class-new");
     expect(await within(card as HTMLElement).findByText("Lớp mới")).toBeInTheDocument();
   });
+
+  it("hides the sessionless class's card from a non-owner member", async () => {
+    const classNew = makeClass({ id: "class-new", name: "Toán 7C" });
+    const classOld = makeClass({ id: "class-old", name: "Toán 9A" });
+    server.use(
+      // Member-shaped `/centers/me` (no `members` array).
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh" })),
+      ),
+      http.get(`${API_URL}/classes`, () =>
+        HttpResponse.json(ok([classNew, classOld], listMeta(2))),
+      ),
+      http.get(`${API_URL}/classes/:id/sessions`, ({ params }) =>
+        HttpResponse.json(
+          ok(
+            params.id === "class-old"
+              ? [makeClassSession({ id: "s1", class_id: "class-old" })]
+              : [],
+          ),
+        ),
+      ),
+    );
+    renderDashboard();
+
+    // The class with sessions keeps its attendance card…
+    expect((await screen.findByText("Toán 9A")).closest("a")).toHaveAttribute(
+      "href",
+      "/sessions?class_id=class-old",
+    );
+    // …while the sessionless card would link the owner-only roster page and
+    // bounce a member straight back here, so it never renders for them.
+    expect(screen.queryByText("Toán 7C")).not.toBeInTheDocument();
+    expect(screen.queryByText("Lớp mới")).not.toBeInTheDocument();
+  });
 });

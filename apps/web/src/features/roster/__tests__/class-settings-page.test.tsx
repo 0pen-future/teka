@@ -219,6 +219,27 @@ describe("ClassSettingsPage", () => {
     expect(replacement?.effective_from).toBe(todayIso());
   });
 
+  describe("back link by role", () => {
+    it("points the owner back at the students tab of Lớp & học sinh", async () => {
+      renderClassSettings();
+
+      const back = await screen.findByRole("link", { name: "← Lớp & học sinh" });
+      expect(back).toHaveAttribute(
+        "href",
+        `/students?tab=students&class_id=${classWithSchedule.id}`,
+      );
+    });
+
+    it("points a member at their per-class records, not the owner-only roster", async () => {
+      server.use(memberCenterHandler, classWithStaffRoles(["giao_vien"]));
+      renderClassSettings();
+
+      const back = await screen.findByRole("link", { name: "← Hồ sơ học sinh" });
+      expect(back).toHaveAttribute("href", `/records?class_id=${classWithSchedule.id}`);
+      expect(screen.queryByRole("link", { name: "← Lớp & học sinh" })).not.toBeInTheDocument();
+    });
+  });
+
   describe("write access by class-staff role", () => {
     it("shows an enabled save button for the center owner", async () => {
       renderClassSettings();

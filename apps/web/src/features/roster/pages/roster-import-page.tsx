@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
 
 import { HvButton, HvCard } from "@/components/hv";
 import { useCenter } from "@/features/center";
@@ -37,12 +37,8 @@ export function RosterImportPage() {
         <ImportPageHeading />
         <HvCard className="mt-[18px]">
           <p className="text-[14px] text-ink-500">
-            Chỉ chủ trung tâm mới nhập được dữ liệu từ file Excel. Nhờ chủ trung tâm nhập giúp, hoặc
-            tự thêm lớp và học sinh trong màn hình{" "}
-            <Link to="/students" className="font-bold text-mint-600">
-              Lớp &amp; học sinh
-            </Link>
-            .
+            Chỉ chủ trung tâm mới nhập được dữ liệu từ file Excel. Nhờ chủ trung tâm nhập giúp nếu
+            bạn cần thêm lớp hoặc học sinh hàng loạt.
           </p>
         </HvCard>
       </div>
