@@ -39,13 +39,14 @@ function HvModalOverlay({
 export type HvModalSize = "md" | "lg" | "xl";
 
 /**
- * "md" and "lg" are content-sized cards; "xl" is a fixed-height workspace
- * (90dvh, page width) whose body scrolls while title and footer stay put.
+ * "md" and "lg" are content-sized cards; "xl" is a page-width workspace that
+ * grows with its content up to 90dvh, after which the body scrolls while
+ * title and footer stay put.
  */
 const sizeClassName: Record<HvModalSize, string> = {
   md: "sm:max-w-md",
   lg: "sm:max-w-[720px]",
-  xl: "flex max-h-[95dvh] flex-col overflow-hidden sm:h-[90dvh] sm:max-w-[var(--w-page)]",
+  xl: "flex max-h-[95dvh] flex-col overflow-hidden sm:max-h-[90dvh] sm:max-w-[var(--w-page)]",
 };
 
 function HvModalContent({

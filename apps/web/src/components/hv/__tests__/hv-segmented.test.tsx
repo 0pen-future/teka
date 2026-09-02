@@ -42,6 +42,22 @@ function Harness({
 }
 
 describe("HvSegmented", () => {
+  it("styles both variants as a bordered button group with a mint-filled active item", () => {
+    const { unmount } = render(<Harness variant="tabs" />);
+    expect(screen.getByRole("tablist")).toHaveClass("border-2", "border-line-200", "bg-white");
+    const activeTab = screen.getByRole("tab", { name: "Ghi chú" });
+    expect(activeTab).toHaveAttribute("data-state", "active");
+    expect(activeTab).toHaveClass("data-[state=active]:bg-mint-400");
+    expect(screen.getByRole("tab", { name: "Điểm" })).toHaveAttribute("data-state", "inactive");
+    unmount();
+
+    render(<Harness variant="segmented" />);
+    expect(screen.getByRole("radiogroup")).toHaveClass("border-2", "border-line-200");
+    expect(screen.getByRole("radio", { name: "Ghi chú" })).toHaveClass(
+      "data-[state=checked]:bg-mint-400",
+    );
+  });
+
   it("renders the segmented variant as a radio group", async () => {
     const user = userEvent.setup();
     const onValueChange = vi.fn();

@@ -89,7 +89,7 @@ describe("HvModal size", () => {
     expect(dialog).toHaveClass("sm:max-w-md");
   });
 
-  it("renders xl as a fixed-height workspace with a scrolling body", () => {
+  it("renders xl as a content-height workspace capped at 90dvh with a scrolling body", () => {
     render(
       <HvModal
         open
@@ -103,7 +103,8 @@ describe("HvModal size", () => {
     );
     const dialog = screen.getByRole("dialog");
     expect(dialog).toHaveAttribute("data-size", "xl");
-    expect(dialog).toHaveClass("sm:h-[90dvh]", "flex-col");
+    expect(dialog).toHaveClass("sm:max-h-[90dvh]", "flex-col");
+    expect(dialog).not.toHaveClass("sm:h-[90dvh]");
     expect(dialog).not.toHaveClass("sm:max-w-md");
     const body = screen.getByText("Nội dung").parentElement;
     expect(body).toHaveClass("flex-1", "min-h-0", "overflow-auto");

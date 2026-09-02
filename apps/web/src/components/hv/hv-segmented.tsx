@@ -30,17 +30,32 @@ export interface HvSegmentedProps<T extends string> {
   className?: string;
 }
 
-const containerClassName = "inline-flex gap-1 rounded-[var(--radius-md)] bg-cream-100 p-1";
+/**
+ * A bordered button group rather than a tinted well: the outline and the
+ * mint-filled active item borrow `HvButton`'s vocabulary so the control reads
+ * as clickable at a glance, not as a label strip.
+ */
+const containerClassName =
+  "inline-flex gap-1 rounded-[var(--radius-md)] border-2 border-line-200 bg-white p-1";
 
 const itemClassName = cn(
   "inline-flex min-h-11 flex-1 cursor-pointer select-none items-center justify-center gap-1.5",
-  "rounded-[calc(var(--radius-md)-4px)] px-3 font-display text-[length:var(--text-sm)] font-bold",
+  "rounded-[calc(var(--radius-md)-4px)] px-3.5 font-display text-[length:var(--text-sm)] font-bold",
   "text-ink-500 transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)]",
-  "hover:text-ink-700 focus-visible:outline-none focus-visible:ring-4",
+  "focus-visible:outline-none focus-visible:ring-4",
   "disabled:cursor-not-allowed disabled:opacity-50",
 );
 
-const activeClassName = "bg-white text-ink-900 shadow-sm";
+/** Hover only lifts idle items; the selected one keeps its fill under the pointer. */
+const tabStateClassName = cn(
+  "data-[state=inactive]:hover:bg-cream-100 data-[state=inactive]:hover:text-ink-900",
+  "data-[state=active]:bg-mint-400 data-[state=active]:text-white",
+);
+
+const radioStateClassName = cn(
+  "data-[state=unchecked]:hover:bg-cream-100 data-[state=unchecked]:hover:text-ink-900",
+  "data-[state=checked]:bg-mint-400 data-[state=checked]:text-white",
+);
 
 function ItemBody<T extends string>({ option }: { option: HvSegmentedOption<T> }) {
   return (
@@ -127,10 +142,11 @@ export function HvSegmented<T extends string>({
               aria-selected={active}
               aria-controls={`${base}-panel-${option.value}`}
               tabIndex={active ? 0 : -1}
+              data-state={active ? "active" : "inactive"}
               disabled={option.disabled}
               onClick={() => onValueChange(option.value)}
               onKeyDown={(event) => handleKeyDown(event, option.value)}
-              className={cn(itemClassName, active && activeClassName)}
+              className={cn(itemClassName, tabStateClassName)}
             >
               <ItemBody option={option} />
             </button>
@@ -153,10 +169,7 @@ export function HvSegmented<T extends string>({
           key={option.value}
           value={option.value}
           disabled={option.disabled}
-          className={cn(
-            itemClassName,
-            "data-[state=checked]:bg-white data-[state=checked]:text-ink-900 data-[state=checked]:shadow-sm",
-          )}
+          className={cn(itemClassName, radioStateClassName)}
         >
           <ItemBody option={option} />
         </RadioGroup.Item>
