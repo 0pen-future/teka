@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { MAX_SCORE_SET_COMPONENTS, findDuplicateIndexes } from "../lib/score-set-components";
+
 /**
  * `grading.ScoreSetResponse` — one center-wide bộ điểm: a name plus an
  * ordered list of column names (order = position, index-based, mirroring
@@ -21,20 +23,15 @@ export type ScoreSet = z.infer<typeof scoreSetSchema>;
 const componentNamesField = z
   .array(z.string().trim().min(1, "Tên cột điểm không được để trống").max(50, "Tối đa 50 ký tự"))
   .min(1, "Cần ít nhất 1 cột điểm")
-  .max(10, "Tối đa 10 cột điểm")
+  .max(MAX_SCORE_SET_COMPONENTS, `Tối đa ${MAX_SCORE_SET_COMPONENTS} cột điểm`)
   .superRefine((names, ctx) => {
-    const seen = new Set<string>();
-    names.forEach((name, index) => {
-      const key = name.trim().toLowerCase();
-      if (key && seen.has(key)) {
-        ctx.addIssue({
-          code: "custom",
-          path: [index],
-          message: "Tên cột điểm bị trùng",
-        });
-      }
-      seen.add(key);
-    });
+    for (const index of findDuplicateIndexes(names)) {
+      ctx.addIssue({
+        code: "custom",
+        path: [index],
+        message: "Tên cột điểm bị trùng",
+      });
+    }
   });
 
 /** `grading.ScoreSetRequest` — create/update body for one bộ điểm. */
