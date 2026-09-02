@@ -24,7 +24,7 @@ interface CourseViewProps {
   monthStart: string;
   monthNumber: number;
   previousMonthNumber: number;
-  /** Whether the viewer may edit curriculum/giáo án — see `SessionDetailPanel`'s prop of the same name. */
+  /** Whether the viewer may edit curriculum/giáo án — see `SessionExpandRow`'s prop of the same name. */
   canWrite: boolean;
 }
 

@@ -76,3 +76,36 @@ describe("HvModal", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });
+
+describe("HvModal size", () => {
+  it("defaults to the md card width", () => {
+    render(
+      <HvModal open onOpenChange={vi.fn()} title="Xác nhận">
+        <p>Nội dung</p>
+      </HvModal>,
+    );
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveAttribute("data-size", "md");
+    expect(dialog).toHaveClass("sm:max-w-md");
+  });
+
+  it("renders xl as a fixed-height workspace with a scrolling body", () => {
+    render(
+      <HvModal
+        open
+        onOpenChange={vi.fn()}
+        title="Bảng điểm"
+        size="xl"
+        footer={<button>Đóng</button>}
+      >
+        <p>Nội dung</p>
+      </HvModal>,
+    );
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveAttribute("data-size", "xl");
+    expect(dialog).toHaveClass("sm:h-[90dvh]", "flex-col");
+    expect(dialog).not.toHaveClass("sm:max-w-md");
+    const body = screen.getByText("Nội dung").parentElement;
+    expect(body).toHaveClass("flex-1", "min-h-0", "overflow-auto");
+  });
+});

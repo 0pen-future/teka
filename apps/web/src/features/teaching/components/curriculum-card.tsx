@@ -11,7 +11,7 @@ interface CurriculumCardProps {
   /** Lessons already taught — held sessions on the lesson axis. */
   doneCount: number;
   onEdit: () => void;
-  /** Whether the viewer may edit the curriculum — see `SessionDetailPanel`'s prop of the same name. */
+  /** Whether the viewer may edit the curriculum — see `SessionExpandRow`'s prop of the same name. */
   canWrite: boolean;
 }
 

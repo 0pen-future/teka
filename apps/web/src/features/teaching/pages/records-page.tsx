@@ -16,6 +16,7 @@ import {
 } from "../components/student-records-table";
 import { useClassMarks } from "../hooks/use-class-marks";
 import { useMonthSessions } from "../hooks/use-month-sessions";
+import { parseMonthParam } from "../lib/classbook-stats";
 import { downloadCsv, type CsvCell } from "../lib/csv";
 import { meanScore } from "../lib/classbook-stats";
 import { aggregateStudent, studentSessionRows, trendOf } from "../lib/student-stats";
@@ -37,7 +38,10 @@ export function RecordsPage() {
   const selectedClass = classes.find((klass) => klass.id === effectiveClassId);
   const selectedClassId = selectedClass?.id;
 
-  const { month, sessions, rosters, sessionsPending } = useMonthSessions(selectedClassId);
+  const { month, sessions, rosters, sessionsPending } = useMonthSessions(
+    selectedClassId,
+    parseMonthParam(null),
+  );
   const { sessionScores } = useClassMarks(selectedClassId, month.from.slice(0, 7));
 
   const { data: enrollmentsPage } = useEnrollmentsList(

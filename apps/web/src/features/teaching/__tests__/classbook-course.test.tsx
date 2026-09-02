@@ -126,8 +126,8 @@ describe("ClassbookPage course view — giáo án", () => {
     expect(getTeachingApiStore().plans.get(`${CLASS_ID}#2`)?.status).toBe("pending");
 
     // The same pending status shows on the upcoming session row without reload.
-    await user.click(screen.getByRole("tab", { name: "Buổi học & nhận xét" }));
-    const plannedRow = await screen.findByRole("button", { name: /Th 4, 19\/08/ });
+    await user.click(screen.getByRole("tab", { name: "Buổi học" }));
+    const plannedRow = (await screen.findByRole("button", { name: /Th 4, 19\/08/ })).closest("tr")!;
     expect(within(plannedRow).getByText("Chờ duyệt")).toBeInTheDocument();
   });
 

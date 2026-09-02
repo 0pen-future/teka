@@ -1,7 +1,9 @@
 import { http, HttpResponse } from "msw";
 
-import type { Session } from "@/features/attendance";
+import type { AttendanceRow, Session } from "@/features/attendance";
 import { API_URL, fail, listMeta, ok } from "@/test/msw/handlers";
+
+type AttendanceStatus = NonNullable<AttendanceRow["status"]>;
 
 import type {
   Class,
@@ -183,6 +185,9 @@ export function seedRosterStore() {
     // sessionId → absent student ids for the attendance-sheet handler; empty
     // by default (everyone present), tests mutate via `getRosterStore()`.
     absences: {} as Record<string, string[]>,
+    // sessionId → studentId → explicit attendance status; wins over `absences`
+    // so tests can stage `late`/`excused` rows the boolean list cannot express.
+    attendanceStatus: {} as Record<string, Record<string, AttendanceStatus>>,
   };
 }
 
@@ -583,13 +588,16 @@ export const rosterHandlers = [
       .map((enrollment) => {
         const student = store.students.find((item) => item.id === enrollment.student_id);
         const absent = absentIds.has(enrollment.student_id);
+        const override = store.attendanceStatus[session.id]?.[enrollment.student_id];
+        const status: AttendanceStatus | null =
+          session.status === "held" ? (override ?? (absent ? "absent" : "present")) : null;
         return {
           student_id: enrollment.student_id,
           student_name: student?.full_name ?? enrollment.student_name,
           display_note: student?.display_note ?? null,
           enrollment_id: enrollment.id,
-          status: session.status === "held" ? (absent ? "absent" : "present") : null,
-          billable: session.status === "held" && !absent,
+          status,
+          billable: status !== null,
           note: null,
         };
       });

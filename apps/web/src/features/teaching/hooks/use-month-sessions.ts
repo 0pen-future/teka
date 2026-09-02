@@ -7,28 +7,37 @@ import {
   type AttendanceResponse,
   type Session,
 } from "@/features/attendance";
-import { currentMonth } from "@/features/roster";
+
+import { monthWindow, type MonthWindow } from "../lib/classbook-stats";
 
 export interface MonthSessions {
-  month: ReturnType<typeof currentMonth>;
+  month: MonthWindow;
   sessions: Session[];
   heldSessions: Session[];
   /** Rosters by session id — only entries whose query has resolved. */
   rosters: Map<string, AttendanceResponse>;
   sessionsPending: boolean;
+  sessionsError: boolean;
+  refetchSessions: () => void;
 }
 
 /**
- * The current month's sessions for a class plus one cached roster query per
- * held session (the sessions payload only carries a preview `student_count`).
- * Query keys match `useSessionRoster`, so the classbook detail panel and the
- * student record pages all dedupe into the same cache entries.
+ * One month's sessions for a class plus one cached roster query per held
+ * session (the sessions payload only carries a preview `student_count`).
+ * `month` is "YYYY-MM"; the window ends today for the current month. Query
+ * keys match `useSessionRoster`, so the classbook expand row and the student
+ * record pages all dedupe into the same cache entries.
  */
-export function useMonthSessions(classId: string | undefined): MonthSessions {
-  const month = currentMonth();
-  const { data: sessions, isPending } = useSessionsList(classId, {
-    from: month.from,
-    to: month.to,
+export function useMonthSessions(classId: string | undefined, month: string): MonthSessions {
+  const win = monthWindow(month);
+  const {
+    data: sessions,
+    isPending,
+    isError,
+    refetch,
+  } = useSessionsList(classId, {
+    from: win.from,
+    to: win.to,
   });
 
   const heldSessions = (sessions ?? []).filter((session) => session.status === "held");
@@ -46,5 +55,13 @@ export function useMonthSessions(classId: string | undefined): MonthSessions {
     }
   });
 
-  return { month, sessions: sessions ?? [], heldSessions, rosters, sessionsPending: isPending };
+  return {
+    month: win,
+    sessions: sessions ?? [],
+    heldSessions,
+    rosters,
+    sessionsPending: isPending,
+    sessionsError: isError,
+    refetchSessions: () => void refetch(),
+  };
 }

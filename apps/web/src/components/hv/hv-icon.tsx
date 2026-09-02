@@ -1,11 +1,20 @@
 import * as React from "react";
 import {
+  AlertTriangle,
+  ArrowDown,
+  ArrowUp,
   Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   FileText,
   Home,
+  Info,
   Plus,
   Send,
+  Table,
+  Trash2,
   Users,
   Wallet,
   X,
@@ -13,11 +22,31 @@ import {
 } from "lucide-react";
 
 export type HvIconName =
-  "home" | "check" | "clock" | "users" | "file" | "send" | "wallet" | "x" | "plus";
+  | "home"
+  | "check"
+  | "chevron-down"
+  | "chevron-left"
+  | "chevron-right"
+  | "clock"
+  | "users"
+  | "file"
+  | "send"
+  | "wallet"
+  | "x"
+  | "plus"
+  | "arrow-up"
+  | "arrow-down"
+  | "trash"
+  | "table"
+  | "info"
+  | "alert";
 
 const iconRegistry: Record<HvIconName, React.ComponentType<LucideProps>> = {
   home: Home,
   check: Check,
+  "chevron-down": ChevronDown,
+  "chevron-left": ChevronLeft,
+  "chevron-right": ChevronRight,
   clock: Clock,
   users: Users,
   file: FileText,
@@ -25,6 +54,12 @@ const iconRegistry: Record<HvIconName, React.ComponentType<LucideProps>> = {
   wallet: Wallet,
   x: X,
   plus: Plus,
+  "arrow-up": ArrowUp,
+  "arrow-down": ArrowDown,
+  trash: Trash2,
+  table: Table,
+  info: Info,
+  alert: AlertTriangle,
 };
 
 const DEFAULT_STROKE_WIDTH = 2;

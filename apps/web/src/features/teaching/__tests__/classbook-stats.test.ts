@@ -9,10 +9,15 @@ import {
   deriveSessions,
   lessonIndexBySession,
   meanScore,
-  parseScoreInput,
+  monthWindow,
   monthlyHeadcount,
+  parseMonthParam,
   retentionStat,
+  scoredStudentCount,
   sessionGross,
+  sessionWorkStatus,
+  shiftMonth,
+  type SessionDerived,
 } from "../lib/classbook-stats";
 
 function makeSession(overrides: Partial<Session> & Pick<Session, "id" | "status">): Session {
@@ -72,22 +77,6 @@ describe("meanScore", () => {
 
   it("returns null for no scores instead of a fake zero", () => {
     expect(meanScore([])).toBeNull();
-  });
-});
-
-describe("parseScoreInput", () => {
-  it("accepts comma decimals and rounds to the nearest 0.5", () => {
-    expect(parseScoreInput("7,3")).toBe(7.5);
-  });
-
-  it("clamps to the 0–10 range", () => {
-    expect(parseScoreInput("12")).toBe(10);
-    expect(parseScoreInput("-1")).toBe(0);
-  });
-
-  it("rejects unparseable input", () => {
-    expect(parseScoreInput("abc")).toBeNull();
-    expect(parseScoreInput("")).toBeNull();
   });
 });
 
@@ -270,5 +259,104 @@ describe("monthlyHeadcount", () => {
     );
     expect(history.map((item) => item.label)).toEqual(["T10", "T11", "T12", "T1", "T2"]);
     expect(history.map((item) => item.count)).toEqual([0, 1, 1, 1, 1]);
+  });
+});
+
+describe("month window", () => {
+  it("ends today for the current month and spans the full month otherwise", () => {
+    expect(monthWindow("2026-08", "2026-08-20")).toEqual({
+      month: "2026-08",
+      from: "2026-08-01",
+      to: "2026-08-20",
+      label: "08",
+    });
+    expect(monthWindow("2026-07", "2026-08-20")).toMatchObject({
+      from: "2026-07-01",
+      to: "2026-07-31",
+    });
+    expect(monthWindow("2026-09", "2026-08-20")).toMatchObject({
+      from: "2026-09-01",
+      to: "2026-09-30",
+    });
+    expect(monthWindow("2028-02", "2026-08-20").to).toBe("2028-02-29");
+  });
+
+  it("parses ?month= and falls back to today's month", () => {
+    expect(parseMonthParam("2026-07", "2026-08-20")).toBe("2026-07");
+    expect(parseMonthParam(null, "2026-08-20")).toBe("2026-08");
+    expect(parseMonthParam("2026-13", "2026-08-20")).toBe("2026-08");
+    expect(parseMonthParam("abc", "2026-08-20")).toBe("2026-08");
+    expect(parseMonthParam("2026-8", "2026-08-20")).toBe("2026-08");
+  });
+
+  it("shifts across year boundaries", () => {
+    expect(shiftMonth("2026-01", -1)).toBe("2025-12");
+    expect(shiftMonth("2026-12", 1)).toBe("2027-01");
+    expect(shiftMonth("2026-08", 0)).toBe("2026-08");
+  });
+});
+
+describe("sessionWorkStatus", () => {
+  const derived = (overrides: Partial<SessionDerived>): SessionDerived => ({
+    session: makeSession({ id: "s1", status: "held" }),
+    lessonIndex: 0,
+    present: 2,
+    eligible: 3,
+    gross: 0,
+    net: 0,
+    average: null,
+    ...overrides,
+  });
+
+  it("marks a held session done once it has a note and every present student scored", () => {
+    expect(sessionWorkStatus(derived({}), "Lớp sôi nổi", 2)).toEqual({
+      hasNote: true,
+      scored: 2,
+      total: 2,
+      noteChip: "done",
+      scoreChip: "done",
+    });
+  });
+
+  it("flags missing note and partial scoring", () => {
+    expect(sessionWorkStatus(derived({}), "   ", 1)).toMatchObject({
+      noteChip: "missing",
+      scoreChip: "partial",
+      scored: 1,
+      total: 2,
+    });
+  });
+
+  it("shows no scoring chip while the roster is unknown or nobody was present", () => {
+    // Roster still loading: a "0/0" chip would flash on every held row.
+    expect(sessionWorkStatus(derived({ present: null }), "note", 0)).toMatchObject({
+      noteChip: "done",
+      scoreChip: "none",
+      total: 0,
+    });
+    // Everyone absent: nothing to grade, so no work is pending either.
+    expect(sessionWorkStatus(derived({ present: 0 }), undefined, 0).scoreChip).toBe("none");
+  });
+
+  it("carries no work for cancelled and planned sessions", () => {
+    const cancelled = derived({
+      session: makeSession({ id: "c", status: "cancelled" }),
+      present: null,
+    });
+    expect(sessionWorkStatus(cancelled, undefined, 0)).toMatchObject({
+      noteChip: "none",
+      scoreChip: "none",
+      total: 0,
+    });
+    const planned = derived({
+      session: makeSession({ id: "p", status: "planned" }),
+      present: null,
+    });
+    expect(sessionWorkStatus(planned, "note", 3).scoreChip).toBe("none");
+  });
+
+  it("counts students holding a general score", () => {
+    expect(scoredStudentCount(undefined)).toBe(0);
+    expect(scoredStudentCount({ a: 7, b: 8.5 })).toBe(2);
   });
 });

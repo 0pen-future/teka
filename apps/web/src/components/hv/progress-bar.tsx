@@ -38,6 +38,8 @@ export function ProgressBar({
   label,
   showValue = false,
   className,
+  "aria-label": ariaLabel,
+  "aria-labelledby": ariaLabelledBy,
   ...rest
 }: ProgressBarProps) {
   const clamped = Math.min(100, Math.max(0, value));
@@ -59,6 +61,8 @@ export function ProgressBar({
       ) : null}
       <div
         role="progressbar"
+        aria-label={ariaLabel}
+        aria-labelledby={ariaLabelledBy}
         aria-valuenow={clamped}
         aria-valuemin={0}
         aria-valuemax={100}
