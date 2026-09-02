@@ -1,0 +1,550 @@
+<title>Teka Web UI Review</title>
+<meta name="description" content="Rà soát giao diện web Teka: nhất quán giữa các trang và phân tách chức năng theo vai trò">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito:wght@600;700;800&display=swap">
+<style>
+  :root{
+    --cream-50:#fbfdfb;--cream-100:#f4f8f3;--cream-200:#eaf1ea;--cream-300:#dfe9df;
+    --ink-900:#1c3a31;--ink-700:#27433b;--ink-500:#5b756c;--ink-400:#86998f;--ink-300:#aab9b1;
+    --mint-50:#e9f7f1;--mint-100:#d3efe3;--mint-200:#a9e0cb;--mint-400:#5cc9a7;--mint-500:#3fa888;--mint-600:#2e8d6e;--mint-700:#1f6b53;
+    --sky-50:#eaf5fb;--sky-100:#d6ecf7;--sky-300:#7fc8e8;--sky-400:#4fa9d4;--sky-500:#2d7aa0;--sky-600:#226383;
+    --sun-100:#fff4d6;--sun-300:#ffd86b;--sun-400:#ffc83d;--sun-500:#f0a500;--sun-600:#b87d00;
+    --coral-100:#ffe7e1;--coral-400:#ff7a66;--coral-500:#e85a44;--coral-600:#b23a28;
+    --line-100:#eef4ee;--line-200:#e2ece2;--line-300:#cfe0d4;
+    --radius-xs:8px;--radius-sm:12px;--radius-md:16px;--radius-lg:20px;--radius-xl:24px;--radius-pill:999px;
+    --shadow-sm:0 2px 6px rgba(28,58,49,.08);--shadow-md:0 8px 20px -8px rgba(28,58,49,.18);
+    --press-mint:0 5px 0 var(--mint-500);--press-sky:0 5px 0 var(--sky-400);--press-coral:0 5px 0 var(--coral-500);
+    --font-display:"Baloo 2",system-ui,sans-serif;--font-body:"Nunito",system-ui,sans-serif;
+    --dur-fast:140ms;--dur-base:220ms;--ease-out:cubic-bezier(.22,1,.36,1);
+    --w-page:1080px;--w-content:720px;
+    color-scheme:light;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth;scroll-padding-top:24px}
+  body{margin:0;background:var(--cream-100);color:var(--ink-700);font:600 15px/1.6 var(--font-body);-webkit-font-smoothing:antialiased}
+  h1,h2,h3,h4{font-family:var(--font-display);color:var(--ink-900);margin:0;line-height:1.2;text-wrap:balance}
+  h1{font-size:38px;font-weight:800}
+  h2{font-size:26px;font-weight:800}
+  h3{font-size:20px;font-weight:700}
+  h4{font-size:17px;font-weight:700}
+  p{margin:0;text-wrap:pretty}
+  a{color:var(--mint-600);font-weight:700}
+  a:focus-visible,button:focus-visible{outline:3px solid var(--sky-300);outline-offset:2px;border-radius:var(--radius-xs)}
+  code{font:600 13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--cream-200);padding:1px 6px;border-radius:6px;color:var(--ink-900)}
+  pre{margin:0;background:var(--ink-900);color:var(--cream-50);padding:14px 16px;border-radius:var(--radius-md);overflow-x:auto;font:600 13px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}
+  pre code{background:transparent;color:inherit;padding:0;font:inherit}
+  .muted{color:var(--ink-500)}
+  .cap{font-size:12px;letter-spacing:.06em;text-transform:uppercase;font-weight:800;color:var(--ink-500)}
+
+  .shell{max-width:1320px;margin:0 auto;padding:32px 20px 96px;display:grid;grid-template-columns:1fr;gap:32px}
+  @media(min-width:1024px){.shell{grid-template-columns:236px minmax(0,var(--w-page));padding:40px 32px 120px}}
+  nav.toc{align-self:start;position:sticky;top:24px;display:none}
+  @media(min-width:1024px){nav.toc{display:block}}
+  nav.toc .brand{display:flex;align-items:center;gap:10px;margin-bottom:20px}
+  nav.toc .brand .logo{width:40px;height:40px;border-radius:var(--radius-sm);background:var(--mint-400);box-shadow:0 3px 0 var(--mint-500);display:grid;place-items:center;color:#fff;font:800 20px var(--font-display)}
+  nav.toc .brand div{line-height:1.15}
+  nav.toc .brand strong{font:800 17px var(--font-display);color:var(--ink-900);display:block}
+  nav.toc ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+  nav.toc a{display:flex;gap:10px;align-items:baseline;padding:9px 12px;border-radius:14px;color:var(--ink-500);font-size:14px;font-weight:700;text-decoration:none;transition:background var(--dur-fast) var(--ease-out),color var(--dur-fast)}
+  nav.toc a:hover{background:var(--cream-200);color:var(--ink-900)}
+  nav.toc a .n{font:800 12px var(--font-display);color:var(--ink-300);min-width:16px}
+  nav.toc .meta{margin-top:20px;padding:14px;border-radius:var(--radius-md);background:#fff;box-shadow:var(--shadow-sm);font-size:12.5px;color:var(--ink-500);display:flex;flex-direction:column;gap:4px}
+  nav.toc .meta b{color:var(--ink-900)}
+
+  main{display:flex;flex-direction:column;gap:56px;min-width:0}
+  section{display:flex;flex-direction:column;gap:20px}
+  .sec-head{display:flex;flex-direction:column;gap:6px}
+  .sec-head .lede{font-size:15px;color:var(--ink-500);max-width:65ch}
+
+  header.hero{background:#fff;border-radius:var(--radius-xl);box-shadow:var(--shadow-md);padding:32px;display:grid;gap:20px}
+  @media(min-width:720px){header.hero{grid-template-columns:1.4fr 1fr;align-items:end}}
+  header.hero .lede{font-size:16px;color:var(--ink-500);max-width:58ch;margin-top:10px}
+  .pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:var(--radius-pill);font:700 13px var(--font-display);background:var(--mint-50);color:var(--mint-600)}
+  .pill.sky{background:var(--sky-50);color:var(--sky-500)}
+  .pill.sun{background:var(--sun-100);color:var(--sun-600)}
+  .pill.coral{background:var(--coral-100);color:var(--coral-600)}
+  .pill.neutral{background:var(--cream-200);color:var(--ink-500)}
+  .pill .dot{width:8px;height:8px;border-radius:50%;background:currentColor}
+
+  .score{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+  .score .tile{background:var(--cream-100);border-radius:var(--radius-md);padding:14px 16px;display:flex;flex-direction:column;gap:2px}
+  .score .tile b{font:800 26px/1.1 var(--font-display);color:var(--ink-900);font-variant-numeric:tabular-nums}
+  .score .tile span{font-size:12.5px;color:var(--ink-500)}
+  .score .tile.good b{color:var(--mint-600)}
+  .score .tile.warn b{color:var(--sun-600)}
+  .score .tile.bad b{color:var(--coral-600)}
+
+  .card{background:#fff;border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+  .card.flat{box-shadow:none;border:1.5px solid var(--line-200)}
+  .grid2{display:grid;gap:16px}
+  @media(min-width:720px){.grid2{grid-template-columns:1fr 1fr}}
+  .grid3{display:grid;gap:16px}
+  @media(min-width:720px){.grid3{grid-template-columns:repeat(3,1fr)}}
+
+  .swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:10px}
+  .sw{border-radius:var(--radius-sm);overflow:hidden;border:1.5px solid var(--line-200);background:#fff}
+  .sw i{display:block;height:44px}
+  .sw div{padding:6px 8px;font-size:12px;line-height:1.3}
+  .sw div b{display:block;color:var(--ink-900);font-family:var(--font-display)}
+  .sw div span{color:var(--ink-400);font-variant-numeric:tabular-nums}
+
+  .kit{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+  .hvbtn{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 18px;border-radius:var(--radius-md);font:800 15px var(--font-display);color:#fff;background:var(--mint-400);box-shadow:var(--press-mint);border:0;cursor:pointer;transition:transform var(--dur-fast) var(--ease-out),box-shadow var(--dur-fast)}
+  .hvbtn:active{transform:translateY(4px);box-shadow:0 1px 0 var(--mint-500)}
+  .hvbtn.sky{background:var(--sky-300);color:var(--sky-600);box-shadow:var(--press-sky)}
+  .hvbtn.sky:active{box-shadow:0 1px 0 var(--sky-400)}
+  .hvbtn.coral{background:var(--coral-400);box-shadow:var(--press-coral)}
+  .hvbtn.coral:active{box-shadow:0 1px 0 var(--coral-500)}
+  .hvbtn.ghost{background:transparent;color:var(--ink-500);box-shadow:none;border:2px solid var(--line-200)}
+  .hvbtn.ghost:active{transform:none}
+  .shadbtn{display:inline-flex;align-items:center;height:32px;padding:0 12px;border-radius:8px;background:#5cc9a7;color:#fff;font:600 13px var(--font-body);border:0;position:relative}
+  .shadbtn::after{content:"32px";position:absolute;right:-42px;top:6px;font:800 11px var(--font-display);color:var(--coral-600)}
+
+  table{border-collapse:separate;border-spacing:0;width:100%;font-size:13.5px}
+  .tablewrap{overflow-x:auto;border-radius:var(--radius-lg);background:#fff;box-shadow:var(--shadow-sm)}
+  th{position:sticky;top:0;background:var(--cream-200);text-align:left;font:800 12px var(--font-body);letter-spacing:.04em;text-transform:uppercase;color:var(--ink-500);padding:10px 12px;white-space:nowrap}
+  td{padding:10px 12px;border-top:1px solid var(--line-100);vertical-align:top;color:var(--ink-700)}
+  td:first-child{font-weight:800;color:var(--ink-900);white-space:nowrap}
+  td code{white-space:nowrap}
+  .ok{color:var(--mint-600);font-weight:800}
+  .mid{color:var(--sun-600);font-weight:800}
+  .no{color:var(--coral-600);font-weight:800}
+  .cell{display:inline-block;min-width:24px;text-align:center;border-radius:6px;padding:1px 8px;font:800 12.5px var(--font-display)}
+  .cell.full{background:var(--mint-50);color:var(--mint-600)}
+  .cell.read{background:var(--sky-50);color:var(--sky-500)}
+  .cell.cond{background:var(--sun-100);color:var(--sun-600)}
+  .cell.none{background:var(--cream-200);color:var(--ink-400)}
+  .cell.gap{background:var(--coral-100);color:var(--coral-600)}
+  .legend{display:flex;flex-wrap:wrap;gap:8px 16px;font-size:13px;color:var(--ink-500);align-items:center}
+
+  .finding{background:#fff;border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:18px 20px 18px 22px;display:grid;gap:10px;position:relative;overflow:hidden}
+  .finding::before{content:"";position:absolute;left:0;top:0;bottom:0;width:6px;background:var(--sev)}
+  .finding.p0{--sev:var(--coral-400)}.finding.p1{--sev:var(--sun-400)}.finding.p2{--sev:var(--sky-300)}
+  .finding .top{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center}
+  .finding .top .id{font:800 13px var(--font-display);color:var(--ink-400)}
+  .finding h4{flex:1 1 auto}
+  .finding .evidence{font-size:13.5px;color:var(--ink-500)}
+  .finding .fix{display:grid;gap:6px;padding:12px 14px;background:var(--mint-50);border-radius:var(--radius-sm);font-size:14px}
+  .finding .fix b{color:var(--mint-700);font-family:var(--font-display)}
+  .finding ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px;font-size:14px}
+  .findings{display:flex;flex-direction:column;gap:14px}
+
+  .roles{display:grid;gap:12px}
+  @media(min-width:720px){.roles{grid-template-columns:repeat(4,1fr)}}
+  .role{background:#fff;border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:16px 18px;display:flex;flex-direction:column;gap:8px;border-top:6px solid var(--rc)}
+  .role.owner{--rc:var(--mint-400)}.role.gv{--rc:var(--sky-300)}.role.hv{--rc:var(--sun-400)}.role.tg{--rc:var(--coral-300, #ff9b8a)}
+  .role h4{display:flex;align-items:center;gap:8px}
+  .role .key{font:700 12px ui-monospace,monospace;color:var(--ink-400)}
+  .role ul{margin:0;padding-left:16px;font-size:13.5px;display:flex;flex-direction:column;gap:3px}
+  .role .src{font-size:12px;color:var(--ink-400)}
+
+  .plan{display:grid;gap:14px}
+  @media(min-width:720px){.plan{grid-template-columns:repeat(3,1fr)}}
+  .plan .col{background:#fff;border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:18px;display:flex;flex-direction:column;gap:10px}
+  .plan .col h4{display:flex;align-items:center;gap:8px}
+  .plan ol{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:14px}
+  .plan li b{color:var(--ink-900)}
+  .foot{font-size:12.5px;color:var(--ink-400);border-top:1.5px solid var(--line-200);padding-top:16px;display:flex;flex-wrap:wrap;gap:6px 20px}
+  .ba{display:grid;gap:10px}
+  @media(min-width:720px){.ba{grid-template-columns:1fr 1fr}}
+  .ba .lab{font:800 12px var(--font-display);letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px}
+  .ba .before .lab{color:var(--coral-600)}.ba .after .lab{color:var(--mint-600)}
+  .ba pre{height:calc(100% - 22px)}
+  .nav-demo{display:flex;flex-direction:column;gap:6px;font-size:13.5px}
+  .nav-demo .g{font:800 11.5px var(--font-body);letter-spacing:.07em;text-transform:uppercase;color:var(--ink-400);margin-top:6px}
+  .nav-demo .i{display:flex;justify-content:space-between;gap:10px;padding:6px 10px;border-radius:10px;background:var(--cream-100)}
+  .nav-demo .i .w{font-size:12px;color:var(--ink-400);white-space:nowrap}
+  @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto}}
+</style>
+
+<div class="shell">
+<nav class="toc" aria-label="Mục lục">
+  <div class="brand"><div class="logo">T</div><div><strong>Teka Web UI Review</strong><span class="muted" style="font-size:12.5px">02/09/2026</span></div></div>
+  <ol>
+    <li><a href="#tomtat"><span class="n">0</span>Tóm tắt</a></li>
+    <li><a href="#ds"><span class="n">1</span>Design system giữ nguyên</a></li>
+    <li><a href="#pages"><span class="n">2</span>Chấm điểm 27 trang</a></li>
+    <li><a href="#consistency"><span class="n">3</span>Phát hiện nhất quán</a></li>
+    <li><a href="#roles"><span class="n">4</span>Phân tách theo vai trò</a></li>
+    <li><a href="#plan"><span class="n">5</span>Kế hoạch ưu tiên</a></li>
+  </ol>
+  <div class="meta">
+    <span><b>Phạm vi</b> apps/web · 27 route · 3 layout</span>
+    <span><b>Rubric</b> ak-ui-ux-pro-max (a11y, touch, style, nav, form)</span>
+    <span><b>Nguồn RBAC</b> catalog.go v3, class_staff.go, route_policy.go</span>
+    <span><b>Ràng buộc</b> không đổi design system</span>
+  </div>
+</nav>
+
+<main>
+
+<header class="hero" id="tomtat">
+  <div>
+    <p class="cap">Rà soát giao diện web · Học Vui Mỗi Ngày</p>
+    <h1 style="margin-top:6px">Một bộ kit tốt, dùng chưa đều</h1>
+    <p class="lede">Bộ hv kit (HvButton, HvCard, HvBadge, HvModal) và token màu đã đủ mạnh. Vấn đề nằm ở chỗ 27 trang tự dựng lại tiêu đề, nút tab, thẻ thống kê, trạng thái tải và hộp xác nhận theo cách riêng. Về vai trò: quyền ở API rõ ràng, nhưng shell web gọi mọi thành viên là "Giáo viên" và học vụ hiện không có lối vào gửi báo cáo lớp.</p>
+    <div class="pills">
+      <span class="pill"><span class="dot"></span>Giữ nguyên DS</span>
+      <span class="pill sky">27 trang đã đọc mã nguồn</span>
+      <span class="pill sun">12 phát hiện nhất quán</span>
+      <span class="pill coral">8 khoảng trống vai trò</span>
+    </div>
+  </div>
+  <div class="score" aria-label="Chỉ số tổng hợp">
+    <div class="tile good"><b>60 / 0</b><span>file dùng HvButton / shadcn Button</span></div>
+    <div class="tile good"><b>28 / 0</b><span>file dùng HvModal / shadcn Dialog</span></div>
+    <div class="tile bad"><b>5</b><span>biến thể tiêu đề h1 khác nhau</span></div>
+    <div class="tile bad"><b>0</b><span>trang dùng PageHeader chung</span></div>
+    <div class="tile warn"><b>3</b><span>luồng còn ConfirmDialog kiểu shadcn (nút 32px)</span></div>
+    <div class="tile warn"><b>~20</b><span>trang tự viết "Đang tải…" bằng thẻ p</span></div>
+  </div>
+</header>
+
+<!-- 1. DESIGN SYSTEM -->
+<section id="ds">
+  <div class="sec-head">
+    <p class="cap">1 · Hợp đồng design system</p>
+    <h2>Giữ nguyên, và coi đây là chuẩn để so</h2>
+    <p class="lede">Mọi đề xuất bên dưới chỉ dùng token và component đã có trong <code>src/styles/tokens</code> và <code>components/hv</code>. Không thêm màu, không đổi font, không đổi bán kính.</p>
+  </div>
+  <div class="card">
+    <h3>Bảng màu (đã dùng đúng trên toàn bộ trang)</h3>
+    <div class="swatches">
+      <div class="sw"><i style="background:#f4f8f3"></i><div><b>cream-100</b><span>#f4f8f3 nền app</span></div></div>
+      <div class="sw"><i style="background:#eaf1ea"></i><div><b>cream-200</b><span>#eaf1ea header bảng</span></div></div>
+      <div class="sw"><i style="background:#1c3a31"></i><div><b>ink-900</b><span>#1c3a31 tiêu đề</span></div></div>
+      <div class="sw"><i style="background:#5b756c"></i><div><b>ink-500</b><span>#5b756c phụ</span></div></div>
+      <div class="sw"><i style="background:#5cc9a7"></i><div><b>mint-400</b><span>#5cc9a7 primary</span></div></div>
+      <div class="sw"><i style="background:#2e8d6e"></i><div><b>mint-600</b><span>#2e8d6e ink on light</span></div></div>
+      <div class="sw"><i style="background:#7fc8e8"></i><div><b>sky-300</b><span>#7fc8e8 secondary</span></div></div>
+      <div class="sw"><i style="background:#ffc83d"></i><div><b>sun-400</b><span>#ffc83d reward/warn</span></div></div>
+      <div class="sw"><i style="background:#ff7a66"></i><div><b>coral-400</b><span>#ff7a66 danger</span></div></div>
+      <div class="sw"><i style="background:#e2ece2"></i><div><b>line-200</b><span>#e2ece2 viền</span></div></div>
+    </div>
+    <p class="muted" style="font-size:13.5px">Tương phản: ink-900 trên trắng 12.6:1, mint-600 trên trắng 4.6:1 (đạt AA cho chữ thường), chữ trắng trên mint-400 chỉ 2.3:1 nên chỉ dùng cho chữ đậm cỡ lớn như hiện tại trong HvButton và header điểm danh.</p>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <h3>Chữ và cỡ</h3>
+      <p style="font:800 30px/1.1 var(--font-display);color:var(--ink-900)">Baloo 2 cho tiêu đề</p>
+      <p style="font:600 15px/1.6 var(--font-body)">Nunito 600 cho thân, thang cỡ 12 · 13 · 15 · 17 · 20 · 24 · 30 · 38 (biến <code>--text-*</code>). Phần lớn trang vẫn gõ <code>text-[13.5px]</code>, <code>text-[14.5px]</code>, <code>text-[26px]</code> thay vì token, là nguồn gốc của độ lệch tiêu đề ở phần 3.</p>
+    </div>
+    <div class="card">
+      <h3>Nút trong kit so với nút rò rỉ từ shadcn</h3>
+      <div class="kit">
+        <button class="hvbtn">Lưu thay đổi</button>
+        <button class="hvbtn sky">Thử lại</button>
+        <button class="hvbtn coral">Xoá</button>
+        <button class="hvbtn ghost">Huỷ</button>
+      </div>
+      <p class="muted" style="font-size:13.5px">HvButton: sm 44 · md 56 · lg 64 px, bóng nhấn <code>0 5px 0</code>, bo 16px. Đủ chuẩn chạm 44px.</p>
+      <div class="kit" style="margin-top:4px"><button class="shadbtn">Xác nhận</button></div>
+      <p class="muted" style="font-size:13.5px">Nút shadcn (h-8 = 32px) vẫn xuất hiện qua <code>shared/confirm-dialog.tsx</code> trong 3 luồng: gửi thông báo, ẩn danh học sinh, gỡ Zalo. Dưới chuẩn chạm và khác hẳn ngôn ngữ nút còn lại.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 2. PAGES -->
+<section id="pages">
+  <div class="sec-head">
+    <p class="cap">2 · Chấm điểm từng trang</p>
+    <h2>27 trang, đọc trực tiếp mã nguồn</h2>
+    <p class="lede">Mỗi ô ghi thành phần trang đang dùng. Ô đỏ là nơi trang tự dựng thay vì dùng kit; ô vàng là dùng kit nhưng lệch chuẩn chung.</p>
+  </div>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Trang</th><th>Route</th><th>Tiêu đề h1</th><th>Nút</th><th>Bề mặt</th><th>Trạng thái tải / rỗng</th><th>Hộp thoại</th><th>Chặn theo quyền</th></tr></thead>
+    <tbody>
+      <tr><td>Tổng quan</td><td><code>/</code></td><td class="no">28px/800 tự viết</td><td class="no">Link giả HvButton (danger)</td><td class="no">div tự dựng, 0 HvCard</td><td class="mid">alert ẩn khi rỗng</td><td>—</td><td class="mid">không có, giống nhau mọi vai trò</td></tr>
+      <tr><td>Điểm danh (danh sách)</td><td><code>/sessions</code></td><td class="mid">26px/800 tự viết</td><td class="no">pill lớp là button thô (role=tab)</td><td class="mid">HvCard rỗng, div 20px cho danh sách</td><td class="no">p "Đang tải…"</td><td class="ok">MonthCalendarModal</td><td class="mid">không có</td></tr>
+      <tr><td>Điểm danh (buổi)</td><td><code>/sessions/:id/attendance</code></td><td class="mid">header mint tự dựng</td><td class="ok">HvButton + radio thô 44px hợp lệ</td><td class="mid">div 28px tự dựng</td><td class="no">p "Đang tải…"</td><td class="ok">HvModal ×2</td><td class="ok">canRecordAttendance, nhãn chỉ-xem</td></tr>
+      <tr><td>Quản lý lớp học</td><td><code>/classbook</code></td><td class="mid">26px/800</td><td class="no">CSV, pill, tab đều button thô</td><td class="no">5 thẻ thống kê div thô</td><td class="no">p + div rỗng tự dựng</td><td>panel con</td><td class="mid">canWriteClass ẩn input, không báo chỉ-xem</td></tr>
+      <tr><td>Hồ sơ học sinh</td><td><code>/records</code></td><td class="mid">26px/800</td><td class="no">CSV, pill thô</td><td class="no">div rỗng tự dựng</td><td class="no">p "Đang tải…"</td><td>—</td><td class="no">input ghi chú không gate theo lớp</td></tr>
+      <tr><td>Hồ sơ 1 học sinh</td><td><code>/records/:studentId</code></td><td class="no">24px/800 + avatar 54px</td><td class="no">nút lưu className riêng</td><td class="no">3 thẻ thống kê div thô</td><td class="no">div rỗng tự dựng</td><td>—</td><td class="no">không có</td></tr>
+      <tr><td>Duyệt giáo án</td><td><code>/lesson-plans</code></td><td class="mid">26px/800</td><td class="no">4 nút panel đều button thô</td><td class="mid">section 24px, header sky-300</td><td class="no">null khi đang resolve</td><td>—</td><td class="ok">has(teaching.review_queue) + Navigate</td></tr>
+      <tr><td>Phụ huynh</td><td><code>/contacts</code></td><td class="mid">22px/700, không mô tả</td><td class="ok">HvButton</td><td class="ok">HvCard flat</td><td class="no">p "Đang tải…"</td><td class="ok">dialog riêng</td><td class="mid">isOwner ẩn nút tạo</td></tr>
+      <tr><td>Chi tiết phụ huynh</td><td><code>/contacts/:id</code></td><td class="mid">22px/700 trong HvCard</td><td class="ok">HvButton</td><td class="ok">HvCard</td><td class="no">p</td><td class="no">ConfirmDialog shadcn</td><td class="mid">isOwner ẩn sửa</td></tr>
+      <tr><td>Lớp &amp; học sinh</td><td><code>/students</code></td><td class="mid">26px/800, mô tả 13.5px</td><td class="no">tab + pill button thô</td><td class="mid">RosterTable riêng, có mobile</td><td class="no">p + HvCard flat</td><td class="no">AnonymizeStudentDialog dùng ConfirmDialog</td><td class="ok">shell guard Navigate</td></tr>
+      <tr><td>Chi tiết học sinh</td><td><code>/students/:id</code></td><td class="mid">22px/700 trong HvCard</td><td class="ok">HvButton sm</td><td class="ok">HvCard</td><td class="no">p</td><td class="ok">dialog riêng</td><td class="mid">isOwner ẩn sửa/xoá</td></tr>
+      <tr><td>Nhập từ Excel</td><td><code>/students/import</code></td><td class="mid">26px/800, 13.5px</td><td class="mid">HvButton + input file thô</td><td class="ok">HvCard theo bước</td><td class="ok">HvCard flat lỗi</td><td>—</td><td class="ok">nhánh non-owner có giải thích</td></tr>
+      <tr><td>Cài đặt lớp</td><td><code>/classes/:id/settings</code></td><td class="mid">22px/700 + back link</td><td class="mid">HvButton + select thô</td><td class="ok">HvCard, padding sm</td><td class="no">p</td><td class="ok">HvModal</td><td class="ok">canWriteClass + text giải thích</td></tr>
+      <tr><td>Chốt sổ</td><td><code>/billing/:periodId</code></td><td class="no">18px/700, không h1 chuẩn</td><td class="no">secondaryLinkButtonClassName chép HvButton</td><td class="no">HvCard flat + div rỗng 8 + badge span</td><td class="no">p, div</td><td class="ok">HvModal ×2</td><td class="mid">không có, dựa 403</td></tr>
+      <tr><td>Thu tiền</td><td><code>/collections/:periodId</code></td><td class="mid">22px/700, không mô tả</td><td class="no">chip lọc + pill lớp button thô</td><td class="mid">HvCard flat, progress div</td><td class="ok">HvCard flat</td><td class="ok">HvModal</td><td class="mid">không có, dựa 403</td></tr>
+      <tr><td>Gửi thông báo</td><td><code>/notifications/:periodId</code></td><td class="mid">22px/700 + tab</td><td class="no">tab thô, radio thô</td><td class="ok">HvCard flat, MessageCard</td><td class="ok">HvCard flat, EmptyState (1 lần duy nhất)</td><td class="no">ConfirmDialog shadcn</td><td class="ok">canSend + ledger chỉ-xem</td></tr>
+      <tr><td>Gửi báo cáo</td><td><code>/reports</code></td><td class="mid">26px/800</td><td class="mid">Link không styled</td><td class="ok">HvCard</td><td class="ok">HvCard flat</td><td>—</td><td class="mid">chỉ ẩn nav</td></tr>
+      <tr><td>Nhật ký hoạt động</td><td><code>/audit</code></td><td class="no">22px/800 (biến thể riêng)</td><td class="ok">HvButton</td><td>—</td><td class="no">p</td><td>—</td><td class="ok">has(audit.read) + Navigate</td></tr>
+      <tr><td>Hồ sơ</td><td><code>/profile</code></td><td class="mid">26px/800</td><td class="mid">HvButton + nút xlsx thô</td><td class="mid">HvCard + khối tối bg-surface-dark</td><td>—</td><td>—</td><td class="mid">tiêu đề "Hồ sơ giáo viên" cho mọi vai trò</td></tr>
+      <tr><td>Trung tâm</td><td><code>/center</code></td><td class="mid">26px/800</td><td class="ok">HvButton, aria-label đủ</td><td class="ok">HvCard</td><td class="no">p</td><td class="ok">dialog riêng</td><td class="ok">nhánh owner/member</td></tr>
+      <tr><td>Phân quyền vai trò</td><td><code>/center/permissions</code></td><td class="mid">26px/800</td><td class="ok">trong PermissionMatrix</td><td class="ok">HvCard</td><td>—</td><td class="ok">HvModal</td><td class="ok">shell guard</td></tr>
+      <tr><td>Cấu hình lớp học</td><td><code>/center/class-config</code></td><td class="mid">26px/800</td><td class="ok">HvButton</td><td class="no">li thô + table thô, không mobile</td><td class="no">p</td><td class="ok">modal riêng</td><td class="ok">shell guard</td></tr>
+      <tr><td>Đăng nhập</td><td><code>/login</code></td><td class="no">p 22px, không h1</td><td class="ok">HvButton lg block</td><td class="ok">HvCard raised lg</td><td>—</td><td>—</td><td>—</td></tr>
+      <tr><td>Quên mật khẩu</td><td><code>/forgot-password</code></td><td class="no">p 17px, không h1</td><td class="ok">HvButton</td><td class="ok">HvCard</td><td>—</td><td>—</td><td>—</td></tr>
+      <tr><td>Đặt lại mật khẩu</td><td><code>/reset-password/:token</code></td><td class="no">p 17px; label thiếu font-display</td><td class="ok">HvButton</td><td class="ok">HvCard</td><td>—</td><td>—</td><td>—</td></tr>
+      <tr><td>Nhận lời mời</td><td><code>/invite/:token</code></td><td class="no">p 22px, không h1</td><td class="ok">HvButton</td><td class="ok">HvCard</td><td class="ok">InviteError</td><td>—</td><td>—</td></tr>
+      <tr><td>Bảng kê phụ huynh</td><td><code>/s/:token</code></td><td class="mid">header mint riêng, 21px</td><td>—</td><td class="no">0 thành phần hv</td><td class="ok">StatementSkeleton</td><td>—</td><td>—</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="legend"><span class="ok">■ đúng kit</span><span class="mid">■ dùng kit nhưng lệch chuẩn chung</span><span class="no">■ tự dựng / thiếu</span></div>
+</section>
+
+<!-- 3. CONSISTENCY -->
+<section id="consistency">
+  <div class="sec-head">
+    <p class="cap">3 · Phát hiện nhất quán</p>
+    <h2>12 phát hiện, xếp theo mức ảnh hưởng</h2>
+    <p class="lede">Đỏ: vi phạm chuẩn chạm/a11y hoặc lặp ở trên 5 trang. Vàng: lệch chuẩn thấy bằng mắt. Xanh: dọn dẹp.</p>
+  </div>
+  <div class="findings">
+
+    <article class="finding p0">
+      <div class="top"><span class="id">C1</span><h4>Tiêu đề trang có 5 biến thể, mô tả có 2 cỡ, PageHeader chung không ai dùng</h4><span class="pill coral">P0</span></div>
+      <p class="evidence">12 trang dùng 26px/800, 5 trang 22px/700, còn lại 28px, 24px, 22px/800 và 18px. Mô tả 14px ở 10 trang, 13.5px ở 2 trang. <code>shared/page-header.tsx</code> viết theo shadcn (text-2xl, text-muted-foreground) nên không trang nào chọn. Trang auth đặt tiêu đề bằng thẻ p.</p>
+      <div class="fix"><b>Đề xuất</b>
+        <span>Thay <code>shared/page-header.tsx</code> bằng <code>hv/hv-page-header.tsx</code> với đúng 2 bậc: <b>hub</b> (26px/800 + mô tả 14px ink-500, cho trang danh sách) và <b>detail</b> (22px/700 trong HvCard, có back link, cho trang chi tiết). Slot <code>actions</code> bên phải, slot <code>tabs</code> bên dưới. Trang auth dùng bậc detail với thẻ h1.</span>
+      </div>
+      <div class="ba">
+        <div class="before"><div class="lab">Hiện tại (6 file khác nhau)</div><pre><code>&lt;h1 className="font-display text-[26px] font-extrabold text-ink-900"&gt;
+&lt;h1 className="font-display text-[22px] font-bold text-ink-900"&gt;
+&lt;h1 className="font-display text-[18px] font-bold text-ink-900"&gt;
+&lt;p className="font-display text-[22px] font-extrabold"&gt; // login</code></pre></div>
+        <div class="after"><div class="lab">Sau</div><pre><code>&lt;HvPageHeader
+  tier="hub"                 // | "detail"
+  title="Thu tiền"
+  description="Tháng 9/2026 · 3 lớp"
+  actions={&lt;HvButton size="sm"&gt;Thu tiền&lt;/HvButton&gt;}
+/&gt;</code></pre></div>
+      </div>
+    </article>
+
+    <article class="finding p0">
+      <div class="top"><span class="id">C2</span><h4>Nút tab, pill lớp, chip lọc là button thô ở 6 trang; nút CSV và panel duyệt giáo án tự viết style</h4><span class="pill coral">P0</span></div>
+      <p class="evidence">Pill chọn lớp lặp ở /sessions, /classbook, /records, /students, /collections với className hơi khác nhau mỗi chỗ. Tab mục đích ở /notifications và tab khu vực ở /students, /classbook cũng vậy. CSV export chép nguyên 1 chuỗi class ở 3 trang. PlanReviewPanel có 4 nút tự style, dashboard và billing chép HvButton bằng chuỗi className để bọc Link.</p>
+      <div class="fix"><b>Đề xuất</b>
+        <span>Thêm 3 thành phần vào hv kit, tất cả min-h 44px, focus ring sky-300 như hiện có: <code>HvSegmented</code> (role=tablist, pill mint-400 khi chọn, dùng cho chọn lớp và tab mục đích), <code>HvTabs</code> (gạch dưới 3px, cho tab khu vực), <code>HvChip</code> (lọc trạng thái thu tiền). Thêm prop <code>asChild</code> hoặc <code>HvLinkButton</code> để dashboard, billing, reports bọc Link mà không chép class. CSV export thành <code>HvButton variant="ghost" size="sm"</code>.</span>
+      </div>
+    </article>
+
+    <article class="finding p0">
+      <div class="top"><span class="id">C3</span><h4>ConfirmDialog kiểu shadcn còn ở 3 luồng, mang nút 32px và chữ text-muted-foreground vào app</h4><span class="pill coral">P0</span></div>
+      <p class="evidence"><code>collections/pages/notifications-page.tsx</code>, <code>roster/components/anonymize-student-dialog.tsx</code>, <code>roster/pages/contact-detail-page.tsx</code>. Cùng lúc, HvModal đã được dùng ở 28 file. Đây là điểm lệch nhìn thấy rõ nhất giữa hai hộp thoại kề nhau (gỡ Zalo và chọn bạn Zalo trên cùng một trang).</p>
+      <div class="fix"><b>Đề xuất</b><span>Viết lại <code>HvConfirmDialog</code> trên HvModal: tiêu đề Baloo 2, hai HvButton (ghost "Huỷ" + primary/danger), prop <code>pending</code> đổi nhãn "Đang xử lý…". Xoá <code>shared/confirm-dialog.tsx</code>, <code>shared/page-header.tsx</code>, <code>shared/data-table.tsx</code> (0 usage) để không ai dùng lại.</span></div>
+    </article>
+
+    <article class="finding p0">
+      <div class="top"><span class="id">C4</span><h4>Trạng thái tải, rỗng, lỗi được viết tay ở gần như mọi trang</h4><span class="pill coral">P0</span></div>
+      <p class="evidence">"Đang tải…" là thẻ p 13px ink-400 ở khoảng 20 trang; trạng thái rỗng có 3 kiểu (HvCard flat, div 24px tự dựng, p trần); lỗi lúc là p coral-600, lúc là toast. EmptyState chung chỉ được dùng 1 lần và có viền đứt kiểu shadcn.</p>
+      <div class="fix"><b>Đề xuất</b><span>Một <code>HvStateBlock kind="loading|empty|error"</code> đặt trong HvCard flat, căn giữa, có slot hành động. Loading dùng skeleton tone cream-200 (như StatementSkeleton đã có) thay chữ. Thông điệp rỗng nhận vai trò để nói đúng việc: "Chủ trung tâm quản lý danh bạ" thay vì "Không có dữ liệu".</span></div>
+    </article>
+
+    <article class="finding p1">
+      <div class="top"><span class="id">C5</span><h4>Thẻ thống kê dựng bằng div thô ở 4 trang với cùng một chuỗi class</h4><span class="pill sun">P1</span></div>
+      <p class="evidence"><code>rounded-[20px] bg-white shadow-soft-md px-4 py-[14px]</code> xuất hiện ở classbook (5 thẻ), records, student-record (3 thẻ), class-settings (HvCard padding sm). Đổi bán kính hay bóng phải sửa 4 chỗ.</p>
+      <div class="fix"><b>Đề xuất</b><span><code>HvStatCard label value hint tone</code> dựng trên HvCard padding="sm" + StatPill, số dùng <code>tabular-nums</code>. Dashboard cũng chuyển sang thẻ này để cùng ngôn ngữ với classbook.</span></div>
+    </article>
+
+    <article class="finding p1">
+      <div class="top"><span class="id">C6</span><h4>Select, input file, radio và textarea thô mỗi nơi một kiểu</h4><span class="pill sun">P1</span></div>
+      <p class="evidence">Native select ở class-settings, class-staff-section, member-permissions-dialog (min-h-11, viền line-200). Input file ở import dùng pseudo <code>file:</code>. Radio kênh gửi ở notifications thô. Textarea nhận xét ở PlanReviewPanel và ô ghi chú ở StudentSessionsTable không qua Field.</p>
+      <div class="fix"><b>Đề xuất</b><span>Giữ native (tốt cho a11y và bàn phím di động) nhưng bọc một lần: <code>HvSelect</code>, <code>HvFileInput</code>, <code>HvRadioGroup</code> với cùng chiều cao 44px, bo 12px, viền line-200, focus mint-400. Mọi ô nhập đi qua Field/FieldLabel/FieldError như trang login đang làm.</span></div>
+    </article>
+
+    <article class="finding p1">
+      <div class="top"><span class="id">C7</span><h4>Cỡ chữ tuỳ ý: 12.5, 13, 13.5, 14, 14.5, 15 px</h4><span class="pill sun">P1</span></div>
+      <p class="evidence">Thang token có 12 · 13 · 15 · 17 · 20 · 24 · 30 nhưng các trang gõ thẳng px. 13.5px và 14.5px không thuộc thang, xuất hiện ở students, import, class-config, profile, statement.</p>
+      <div class="fix"><b>Đề xuất</b><span>Quy ước: caption 12/13, thân 15, nhãn nhấn 17. Chạy một lượt thay <code>text-[13.5px]</code> thành <code>text-[length:var(--text-sm)]</code> (13) hoặc 15 tuỳ vai trò. Thêm rule ESLint/grep trong CI cấm <code>text-\[1[34]\.5px\]</code>.</span></div>
+    </article>
+
+    <article class="finding p1">
+      <div class="top"><span class="id">C8</span><h4>Badge và thông báo trong trang tự dựng bằng span/div</h4><span class="pill sun">P1</span></div>
+      <p class="evidence">Billing: span pill "✓ Đã chốt" mint-50; MessageCard: span "Đã gửi"; class-settings: div sun-100 cảnh báo đổi giá; profile: khối tối <code>bg-surface-dark</code>. HvBadge và StatusPill có sẵn nhưng chỉ dùng ở roster và collections.</p>
+      <div class="fix"><b>Đề xuất</b><span>Span trạng thái thành <code>HvBadge variant="success" size="sm"</code>. Thêm <code>HvNotice tone="info|warning|danger"</code> (nền 100, chữ 600 của cùng họ màu, bo 12px) cho cảnh báo trong form. Khối xem trước Zalo ở profile là chỗ duy nhất dùng nền tối; giữ nhưng đặt tên token rõ trong effects.css.</span></div>
+    </article>
+
+    <article class="finding p2">
+      <div class="top"><span class="id">C9</span><h4>Bốn cách dựng bảng, một cách không có bản mobile</h4><span class="pill sky">P2</span></div>
+      <p class="evidence">RosterTable (table + card mobile, header cream-200 dính), ReviewTable (table + ReviewCardList), ClassConfig (table thô min-w 420px, không mobile), MemberList (ul divide-y). DataTable chung theo shadcn: 0 usage.</p>
+      <div class="fix"><b>Đề xuất</b><span>Rút RosterTable thành <code>HvTable</code> chung: header cream-200 dính, th có <code>scope="col"</code>, dưới sm tự chuyển sang HvCard flat theo cột đánh dấu <code>primary</code>. Cấu hình lớp học dùng ngay.</span></div>
+    </article>
+
+    <article class="finding p2">
+      <div class="top"><span class="id">C10</span><h4>Chuẩn chạm và a11y còn vài lỗ nhỏ</h4><span class="pill sky">P2</span></div>
+      <ul>
+        <li>Nút đóng ✕ ở PlanReviewPanel và SessionDetailPanel chưa có aria-label và chưa chắc 44px.</li>
+        <li>Nút "Duyệt" ở PlanReviewPanel cao khoảng 42px (py-[11px]); nút xlsx ở profile và CSV ở classbook khoảng 36px.</li>
+        <li>Tooltip <code>title</code> trên nút disabled (ghép Zalo, gán bộ điểm) không hiện trên cảm ứng; thay bằng dòng trợ giúp dưới nút.</li>
+        <li>th trong bảng cấu hình lớp thiếu scope; input ghi chú ở StudentSessionsTable thiếu aria-label.</li>
+        <li>Trang auth: tiêu đề là p nên đọc màn hình không có h1; label ở reset-password thiếu font-display so với login.</li>
+      </ul>
+    </article>
+
+    <article class="finding p2">
+      <div class="top"><span class="id">C11</span><h4>Chiều rộng và khoảng cách gõ tay</h4><span class="pill sky">P2</span></div>
+      <p class="evidence"><code>max-w-[640px]</code> lặp ở class-settings và class-staff-section; <code>gap-[22px]</code>, <code>border-b-[3px]</code>, <code>px-[18px]</code>, <code>py-[14px]</code> rải rác. Token có <code>--w-content</code> 720 và <code>--w-page</code> 1080.</p>
+      <div class="fix"><b>Đề xuất</b><span>Thêm <code>--w-form: 640px</code> vào spacing.css và dùng <code>max-w-[var(--w-form)]</code>. Khoảng cách về thang 4pt (16/20/24), bỏ 14/18/22.</span></div>
+    </article>
+
+    <article class="finding p2">
+      <div class="top"><span class="id">C12</span><h4>Trang bảng kê công khai không dùng thành phần hv nào</h4><span class="pill sky">P2</span></div>
+      <p class="evidence"><code>/s/:token</code> có header mint riêng, footer riêng, không HvCard/HvBadge dù nhìn giống app. Đây là bề mặt phụ huynh nhìn thấy nên cần khớp nhất.</p>
+      <div class="fix"><b>Đề xuất</b><span>Dùng HvCard cho từng ChildSection, StatusPill (Đã đóng / Đóng thiếu / Chưa đóng) cho tổng kỳ, header dùng cùng khối "header mint" với trang điểm danh sau khi tách thành <code>HvPanelHeader</code>.</span></div>
+    </article>
+
+  </div>
+</section>
+
+<!-- 4. ROLES -->
+<section id="roles">
+  <div class="sec-head">
+    <p class="cap">4 · Phân tách chức năng theo vai trò</p>
+    <h2>Quyền ở API đã rõ, giao diện chưa kể cùng câu chuyện</h2>
+    <p class="lede">Mô hình thực tế có hai tầng: vai trò trung tâm (owner đứng ngoài; thành viên mang một trong ba vai trò giao_vien / hoc_vu / tro_giang, quyền do owner chỉnh trong ma trận) và phân công theo lớp (cùng ba key, quyền cố định trong <code>class_staff.go</code>).</p>
+  </div>
+
+  <div class="roles">
+    <div class="role owner"><h4>Chủ trung tâm <span class="key">owner</span></h4>
+      <ul><li>Toàn bộ catalog, mọi lớp</li><li>Riêng owner: phân quyền, bộ điểm, gán nhân sự lớp, duyệt giáo án</li><li>Chốt sổ, thu tiền, gửi thông báo toàn trung tâm</li></ul>
+      <p class="src">Nguồn: route_policy.go, has() = true</p></div>
+    <div class="role gv"><h4>Giáo viên <span class="key">giao_vien</span></h4>
+      <ul><li>Điểm danh, huỷ buổi, nhận xét, điểm, giáo án, ghi danh, lịch của lớp mình</li><li>Vai trò mặc định khi được mời</li><li>Không có quyền gửi báo cáo</li></ul>
+      <p class="src">Nguồn: class_staff.go capability map</p></div>
+    <div class="role hv"><h4>Học vụ <span class="key">hoc_vu</span></h4>
+      <ul><li>Đọc mọi thứ của lớp được gán</li><li>Duy nhất có <code>statement.send</code> theo lớp</li><li>Không ghi điểm danh, không ghi điểm</li></ul>
+      <p class="src">Nguồn: class_staff.go, brainstorm 260902-0856</p></div>
+    <div class="role tg"><h4>Trợ giảng <span class="key">tro_giang</span></h4>
+      <ul><li>Điểm danh lớp được gán</li><li>Đọc phần còn lại</li><li>Không huỷ buổi, không nhận xét, không gửi</li></ul>
+      <p class="src">Nguồn: class_staff.go attendance.write</p></div>
+  </div>
+
+  <div class="card flat" style="gap:6px">
+    <p class="cap">Sự thật quan trọng từ mã nguồn</p>
+    <p>Ba vai trò trung tâm nhận <b>cùng một bộ quyền mặc định</b> (<code>DefaultRoleKeys()</code>: mọi key grantable, trừ scope và các key định danh cũ). Nghĩa là học vụ và trợ giảng, ngay sau khi được mời, thấy đúng menu như giáo viên; khác biệt thật chỉ đến từ phân công theo lớp và từ việc owner tự chỉnh ma trận. Đồng thời <code>GET /centers/me</code> cho thành viên <b>không trả về role_key</b>, nên web không thể biết mình đang phục vụ ai để đổi nhãn hay đổi màn hình.</p>
+  </div>
+
+  <h3>Ma trận chức năng × vai trò (trạng thái web hiện tại)</h3>
+  <div class="legend"><span class="cell full">✓</span> đầy đủ <span class="cell read">đọc</span> chỉ xem <span class="cell cond">tuỳ</span> tuỳ quyền owner cấp / theo lớp <span class="cell none">—</span> không có, đã ẩn đúng <span class="cell gap">!</span> khoảng trống cần sửa</div>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Chức năng</th><th>Owner</th><th>Giáo viên</th><th>Học vụ</th><th>Trợ giảng</th><th>Ghi chú</th></tr></thead>
+    <tbody>
+      <tr><td>Tổng quan</td><td><span class="cell full">✓</span></td><td><span class="cell full">✓</span></td><td><span class="cell full">✓</span></td><td><span class="cell full">✓</span></td><td>Một màn hình cho mọi vai trò; cảnh báo "chưa điểm danh" hiện cả với học vụ dù họ không được điểm danh</td></tr>
+      <tr><td>Điểm danh buổi</td><td><span class="cell full">✓</span></td><td><span class="cell full">✓</span></td><td><span class="cell read">đọc</span></td><td><span class="cell full">✓</span></td><td>Đúng. Học vụ thấy nút "CHỈ GIÁO VIÊN…" disabled: cách báo chỉ-xem tốt, nên nhân rộng</td></tr>
+      <tr><td>Huỷ buổi học</td><td><span class="cell full">✓</span></td><td><span class="cell full">✓</span></td><td><span class="cell none">—</span></td><td><span class="cell none">—</span></td><td>canWriteClass, ẩn đúng</td></tr>
+      <tr><td>Nhận xét, điểm (classbook)</td><td><span class="cell full">✓</span></td><td><span class="cell full">✓</span></td><td><span class="cell read">đọc</span></td><td><span class="cell read">đọc</span></td><td>Input bị disable im lặng, không có nhãn chỉ-xem như điểm danh</td></tr>
+      <tr><td>Ghi chú học sinh (/records)</td><td><span class="cell full">✓</span></td><td><span class="cell full">✓</span></td><td><span class="cell gap">!</span></td><td><span class="cell gap">!</span></td><td>Ô nhập hiện với mọi người, chỉ API chặn; cần gate bằng canWriteClass</td></tr>
+      <tr><td>Gửi báo cáo lớp (bảng kê, nhận xét)</td><td><span class="cell full">✓</span></td><td><span class="cell none">—</span></td><td><span class="cell gap">!</span></td><td><span class="cell none">—</span></td><td>Học vụ có quyền API nhưng nút "Gửi báo cáo" trên /classbook đã bị xoá ở d3e6b28; brainstorm 260902-0856 đã chốt khôi phục</td></tr>
+      <tr><td>Gửi thông báo học phí (/notifications)</td><td><span class="cell full">✓</span></td><td><span class="cell read">đọc</span></td><td><span class="cell cond">tuỳ</span></td><td><span class="cell read">đọc</span></td><td>Học vụ chỉ gửi ở chế độ lớp (?class_id) nhưng nav không có lối vào chế độ đó</td></tr>
+      <tr><td>Chốt sổ, Thu tiền</td><td><span class="cell full">✓</span></td><td><span class="cell cond">tuỳ</span></td><td><span class="cell cond">tuỳ</span></td><td><span class="cell cond">tuỳ</span></td><td>billing.read có trong bộ mặc định nên cả ba đều thấy menu Học phí, phạm vi dòng của mình; không có guard, dựa 403</td></tr>
+      <tr><td>Gửi báo cáo (/reports)</td><td><span class="cell none">—</span></td><td><span class="cell cond">tuỳ</span></td><td><span class="cell cond">tuỳ</span></td><td><span class="cell cond">tuỳ</span></td><td>Theo cờ "Thư ký gửi báo cáo", độc lập với vai trò; nhãn cờ và vai trò học vụ dễ nhầm nhau</td></tr>
+      <tr><td>Phụ huynh, Học sinh chi tiết</td><td><span class="cell full">✓</span></td><td><span class="cell read">đọc</span></td><td><span class="cell read">đọc</span></td><td><span class="cell read">đọc</span></td><td>Sửa chỉ owner, ẩn đúng</td></tr>
+      <tr><td>Cài đặt lớp</td><td><span class="cell full">✓</span></td><td><span class="cell full">✓</span></td><td><span class="cell read">đọc</span></td><td><span class="cell read">đọc</span></td><td>Có dòng giải thích cho người chỉ xem; phần nhân sự lớp chỉ owner</td></tr>
+      <tr><td>Duyệt giáo án</td><td><span class="cell full">✓</span></td><td><span class="cell cond">tuỳ</span></td><td><span class="cell cond">tuỳ</span></td><td><span class="cell cond">tuỳ</span></td><td>Cần owner cấp teaching.review_queue; hành động luôn chỉ owner. Có Navigate guard</td></tr>
+      <tr><td>Lớp &amp; học sinh, Nhập Excel, Phân quyền, Cấu hình lớp</td><td><span class="cell full">✓</span></td><td><span class="cell none">—</span></td><td><span class="cell none">—</span></td><td><span class="cell none">—</span></td><td>Shell guard Navigate về "/", đúng</td></tr>
+      <tr><td>Nhật ký hoạt động</td><td><span class="cell full">✓</span></td><td><span class="cell cond">tuỳ</span></td><td><span class="cell cond">tuỳ</span></td><td><span class="cell cond">tuỳ</span></td><td>audit.read không trong bộ mặc định; có guard</td></tr>
+      <tr><td>Nhãn vai trò trong shell</td><td><span class="cell full">✓</span></td><td><span class="cell full">✓</span></td><td><span class="cell gap">!</span></td><td><span class="cell gap">!</span></td><td>CenterCard hiện "Giáo viên", footer "Hồ sơ giáo viên", trang /profile tiêu đề "Hồ sơ giáo viên" cho học vụ và trợ giảng</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>8 khoảng trống và đề xuất</h3>
+  <div class="findings">
+    <article class="finding p0"><div class="top"><span class="id">R1</span><h4>Shell không biết vai trò của người dùng</h4><span class="pill coral">P0</span></div>
+      <p class="evidence">Member shape của <code>/centers/me</code> chỉ có center_name, can_send_reports, permissions. Web buộc phải hiện "Giáo viên" cho mọi thành viên (<code>dashboard-layout.tsx</code> CenterCard, SidebarFooter, ProfilePage).</p>
+      <div class="fix"><b>Đề xuất</b><span>API thêm <code>role_key</code> và <code>role_name</code> vào member response (nhãn lấy từ API theo đúng frontend-guidelines). Web: CenterContext thêm <code>roleKey</code>, <code>roleName</code>; CenterCard hiện roleName; nhãn "Hồ sơ giáo viên" thành "Hồ sơ của tôi"; MemberList thêm HvBadge neutral tên vai trò cạnh tên thành viên (hiện chỉ có "Chủ" và "Thư ký gửi báo cáo").</span></div></article>
+
+    <article class="finding p0"><div class="top"><span class="id">R2</span><h4>Học vụ không có lối vào gửi báo cáo lớp</h4><span class="pill coral">P0</span></div>
+      <p class="evidence">Quyền <code>statement.send</code> theo lớp tồn tại ở API, helper <code>canSendClassReports</code> tồn tại ở web, nhưng nút và dialog đã bị xoá ở d3e6b28. Trang /notifications chế độ lớp chỉ đến được bằng gõ tay ?class_id.</p>
+      <div class="fix"><b>Đề xuất</b><span>Thực hiện brainstorm 260902-0856: trên /classbook, khi <code>canSendClassReports</code> đúng, hiện HvButton secondary "Gửi báo cáo" ở slot actions của HvPageHeader, mở HvModal chọn kỳ và loại (bảng kê / nhận xét buổi). Không hiện với giáo viên và trợ giảng.</span></div></article>
+
+    <article class="finding p1"><div class="top"><span class="id">R3</span><h4>Ba cách báo "bạn chỉ được xem"</h4><span class="pill sun">P1</span></div>
+      <p class="evidence">Điểm danh: nút disabled với nhãn giải thích. Cài đặt lớp: một dòng text. Classbook: input disabled im lặng. Records: không báo gì, API từ chối khi lưu.</p>
+      <div class="fix"><b>Đề xuất</b><span>Một mẫu duy nhất: <code>HvNotice tone="info"</code> đầu vùng nội dung với câu "Bạn đang xem với vai trò Học vụ. Chỉ giáo viên của lớp mới sửa được nhận xét." và các ô nhập chuyển thành chữ thường (read-only distinction), không phải input disabled. Gate ô ghi chú ở /records bằng canWriteClass.</span></div></article>
+
+    <article class="finding p1"><div class="top"><span class="id">R4</span><h4>Hai pattern chặn deep-link, và một nhóm trang không chặn</h4><span class="pill sun">P1</span></div>
+      <p class="evidence">Shell guard (Navigate về "/") ở students, permissions, class-config; has(key) + Navigate ở lesson-plans, audit; mask nội dung ở notifications; billing, collections, reports, contacts không chặn, dựa vào 403.</p>
+      <div class="fix"><b>Đề xuất</b><span>Một wrapper route-level <code>RequirePermission keys ownerOnly fallback</code> trong router, trả null khi chưa resolved (tránh nháy), Navigate về "/" khi thiếu, giữ hành vi hiện tại của từng trang. Trang bị 403 giữa chừng hiện HvStateBlock kind="error" với nút về Tổng quan thay vì p coral.</span></div></article>
+
+    <article class="finding p1"><div class="top"><span class="id">R5</span><h4>Menu giống nhau cho ba vai trò vì bộ quyền mặc định giống nhau</h4><span class="pill sun">P1</span></div>
+      <p class="evidence">Trợ giảng thấy "Chốt sổ", "Thu tiền", "Quản lý lớp học" dù chỉ làm điểm danh. Học vụ thấy "Điểm danh" là mục đầu tiên dù không được điểm danh. Đây là quyết định sản phẩm, không phải lỗi mã.</p>
+      <div class="fix"><b>Đề xuất (chờ quyết định)</b><span>Hai lựa chọn. <b>A</b>: giữ bộ mặc định, thêm "preset khuyến nghị" trong ma trận phân quyền (nút "Áp dụng mặc định cho Trợ giảng") để owner bấm một lần. <b>B</b>: đổi DefaultRoleKeys theo vai trò ở migration mới (trợ giảng: attendance + sessions.read + students.read; học vụ: billing/payments/statements/notifications + reads; giáo viên: như hiện tại). B thay đổi hành vi trung tâm đang chạy nên cần owner đồng ý và có thông báo.</span></div></article>
+
+    <article class="finding p2"><div class="top"><span class="id">R6</span><h4>Tổng quan không theo vai trò</h4><span class="pill sky">P2</span></div>
+      <p class="evidence">Cùng lời chào, cùng alert điểm danh, cùng thẻ lớp.</p>
+      <div class="fix"><b>Đề xuất</b><span>Sau R1, dashboard chọn khối theo roleKey: trợ giảng thấy buổi hôm nay cần điểm danh; học vụ thấy số bảng kê chưa gửi và phụ huynh chưa đóng; giáo viên thấy điểm danh treo và giáo án chờ; owner thấy tổng thu và lớp thiếu giáo viên. Cùng HvStatCard, khác dữ liệu.</span></div></article>
+
+    <article class="finding p2"><div class="top"><span class="id">R7</span><h4>Cờ "Thư ký gửi báo cáo" và vai trò Học vụ dễ bị hiểu là một</h4><span class="pill sky">P2</span></div>
+      <p class="evidence">Cờ là quyền gửi toàn trung tâm (reports.send), vai trò học vụ là gửi theo lớp. MemberList chỉ hiện cờ, không hiện vai trò.</p>
+      <div class="fix"><b>Đề xuất</b><span>Trong MemberList hiện cả hai badge: neutral "Học vụ" (vai trò) và info "Gửi báo cáo toàn trung tâm" (cờ). Trong MemberPermissionsDialog thêm một dòng mô tả dưới select vai trò nói rõ vai trò không tự cấp quyền gửi toàn trung tâm.</span></div></article>
+
+    <article class="finding p2"><div class="top"><span class="id">R8</span><h4>Nav mobile "Thêm" gom mọi mục quản trị, không phân nhóm theo vai trò</h4><span class="pill sky">P2</span></div>
+      <p class="evidence">Bottom tab bar dưới md có 4 mục + "Thêm"; sheet "Thêm" liệt kê phẳng theo OVERFLOW_LABELS.</p>
+      <div class="fix"><b>Đề xuất</b><span>Sheet "Thêm" giữ nhóm Học phí / Trung tâm như sidebar, và mục đầu tiên của bottom bar đổi theo vai trò sau R1 (trợ giảng: Điểm danh; học vụ: Thu tiền; giáo viên: Điểm danh; owner: Tổng quan).</span></div></article>
+  </div>
+
+  <div class="card">
+    <h3>Sidebar mục tiêu theo vai trò (sau R1, R2, R5-A)</h3>
+    <div class="grid2">
+      <div class="nav-demo"><p class="cap">Học vụ</p>
+        <div class="g">Dạy học</div><div class="i"><span>Quản lý lớp học</span><span class="w">đọc + Gửi báo cáo</span></div><div class="i"><span>Hồ sơ học sinh</span><span class="w">đọc</span></div><div class="i"><span>Phụ huynh</span><span class="w">đọc</span></div>
+        <div class="g">Học phí</div><div class="i"><span>Thu tiền</span><span class="w">lớp được gán</span></div><div class="i"><span>Gửi thông báo</span><span class="w">chế độ lớp</span></div>
+        <div class="g">Trung tâm</div><div class="i"><span>Cài đặt trung tâm</span><span class="w"></span></div>
+      </div>
+      <div class="nav-demo"><p class="cap">Trợ giảng</p>
+        <div class="g">Dạy học</div><div class="i"><span>Điểm danh</span><span class="w">ghi, có chấm chờ</span></div><div class="i"><span>Quản lý lớp học</span><span class="w">đọc</span></div><div class="i"><span>Hồ sơ học sinh</span><span class="w">đọc</span></div>
+        <div class="g">Trung tâm</div><div class="i"><span>Cài đặt trung tâm</span><span class="w"></span></div>
+      </div>
+    </div>
+    <p class="muted" style="font-size:13.5px">Giáo viên giữ nguyên menu hiện tại. Owner giữ nguyên và thêm badge vai trò trong danh sách thành viên.</p>
+  </div>
+</section>
+
+<!-- 5. PLAN -->
+<section id="plan">
+  <div class="sec-head">
+    <p class="cap">5 · Kế hoạch ưu tiên</p>
+    <h2>Ba đợt, mỗi đợt tự đứng được</h2>
+    <p class="lede">Thứ tự chọn theo số trang được sửa cùng lúc và theo rủi ro chuẩn chạm. Không đợt nào đổi token.</p>
+  </div>
+  <div class="plan">
+    <div class="col"><h4><span class="pill coral">Đợt 1</span> Kit và vai trò</h4>
+      <ol>
+        <li><b>HvPageHeader</b> 2 bậc, áp cho 27 trang (C1)</li>
+        <li><b>HvConfirmDialog</b> trên HvModal, xoá shared/ shadcn (C3)</li>
+        <li><b>HvStateBlock</b> loading / empty / error (C4)</li>
+        <li><b>role_key trong /centers/me</b> + nhãn shell, MemberList (R1)</li>
+        <li><b>Nút Gửi báo cáo</b> cho học vụ trên /classbook (R2)</li>
+      </ol></div>
+    <div class="col"><h4><span class="pill sun">Đợt 2</span> Điều khiển và form</h4>
+      <ol>
+        <li><b>HvSegmented, HvTabs, HvChip</b>, HvButton asChild (C2)</li>
+        <li><b>HvStatCard</b> cho classbook, records, dashboard (C5)</li>
+        <li><b>HvSelect, HvFileInput, HvRadioGroup</b>, mọi ô qua Field (C6)</li>
+        <li><b>HvNotice</b> + mẫu chỉ-xem thống nhất, gate /records (C8, R3)</li>
+        <li><b>Quét cỡ chữ</b> về thang token + rule CI (C7)</li>
+      </ol></div>
+    <div class="col"><h4><span class="pill sky">Đợt 3</span> Cấu trúc</h4>
+      <ol>
+        <li><b>RequirePermission</b> ở router (R4)</li>
+        <li><b>HvTable</b> chung, mobile cho cấu hình lớp (C9)</li>
+        <li><b>Tổng quan theo vai trò</b>, bottom bar theo vai trò (R6, R8)</li>
+        <li><b>Preset quyền</b> theo vai trò, chờ quyết định A/B (R5)</li>
+        <li><b>Bảng kê công khai</b> dùng hv kit, a11y nhỏ (C10, C12)</li>
+      </ol></div>
+  </div>
+  <div class="card flat">
+    <h4>Quyết định cần chủ sản phẩm chốt</h4>
+    <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:14px">
+      <li><b>R5</b>: giữ bộ quyền mặc định giống nhau và thêm preset (A), hay đổi mặc định theo vai trò bằng migration (B)?</li>
+      <li><b>C1</b>: trang chi tiết (phụ huynh, học sinh, cài đặt lớp) giữ tiêu đề 22px trong HvCard như hiện tại, hay đưa ra ngoài card như trang hub?</li>
+      <li><b>R6</b>: có muốn Tổng quan khác nhau theo vai trò không, hay chỉ cần bỏ alert điểm danh với học vụ?</li>
+    </ul>
+  </div>
+  <div class="foot">
+    <span>Phương pháp: đọc mã nguồn 27 trang, 3 layout, hv kit, tokens, catalog.go, class_staff.go, route_policy.go, migration 000013; đếm usage bằng grep.</span>
+    <span>Rubric: ak-ui-ux-pro-max ưu tiên 1-2-4-9-8 (a11y, chạm, style, nav, form); ak-frontend-design register Product; quy tắc anti-cream và no-bounce của skill đó được bỏ qua có chủ đích vì giữ nguyên DS.</span>
+  </div>
+</section>
+
+</main>
+</div>

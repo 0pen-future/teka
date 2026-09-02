@@ -1,0 +1,725 @@
+<title>Quản lý lớp học Redesign</title>
+<meta name="description" content="Ba phương án thiết kế lại trang Quản lý lớp học (/classbook) theo design system Học Vui Mỗi Ngày">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito:wght@600;700;800&display=swap">
+<style>
+  :root{
+    --cream-50:#fbfdfb;--cream-100:#f4f8f3;--cream-200:#eaf1ea;--cream-300:#dfe9df;
+    --ink-900:#1c3a31;--ink-700:#27433b;--ink-500:#5b756c;--ink-400:#86998f;--ink-300:#aab9b1;
+    --mint-50:#e9f7f1;--mint-100:#d3efe3;--mint-200:#a9e0cb;--mint-300:#7fd2b4;--mint-400:#5cc9a7;--mint-500:#3fa888;--mint-600:#2e8d6e;--mint-700:#1f6b53;
+    --sky-50:#eaf5fb;--sky-100:#d6ecf7;--sky-300:#7fc8e8;--sky-400:#4fa9d4;--sky-500:#2d7aa0;
+    --sun-100:#fff4d6;--sun-300:#ffd86b;--sun-400:#ffc83d;--sun-500:#f0a500;--sun-600:#b87d00;
+    --coral-100:#ffe7e1;--coral-300:#ff9b8a;--coral-400:#ff7a66;--coral-500:#e85a44;--coral-600:#b23a28;
+    --line-100:#eef4ee;--line-200:#e2ece2;--line-300:#cfe0d4;
+    --white:#ffffff;
+    --radius-xs:8px;--radius-sm:12px;--radius-md:16px;--radius-lg:20px;--radius-xl:24px;--radius-pill:999px;
+    --shadow-sm:0 2px 6px rgba(28,58,49,.08);--shadow-md:0 8px 20px -8px rgba(28,58,49,.18);--shadow-lg:0 18px 40px -18px rgba(28,58,49,.28);
+    --press-mint:0 5px 0 var(--mint-500);--press-line:0 4px 0 var(--line-300);
+    --font-display:"Baloo 2",system-ui,sans-serif;--font-body:"Nunito",system-ui,sans-serif;
+    --dur-fast:140ms;--dur-base:220ms;--ease-out:cubic-bezier(.22,1,.36,1);
+    color-scheme:light;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth;scroll-padding-top:24px}
+  body{margin:0;background:var(--cream-100);color:var(--ink-700);font:600 15px/1.6 var(--font-body);-webkit-font-smoothing:antialiased}
+  h1,h2,h3,h4{font-family:var(--font-display);color:var(--ink-900);margin:0;line-height:1.2;text-wrap:balance}
+  h1{font-size:36px;font-weight:800}h2{font-size:26px;font-weight:800}h3{font-size:19px;font-weight:700}h4{font-size:16px;font-weight:700}
+  p{margin:0;text-wrap:pretty}
+  a{color:var(--mint-600);font-weight:700}
+  code{font:600 12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--cream-200);padding:1px 6px;border-radius:6px;color:var(--ink-900)}
+  :focus-visible{outline:none;box-shadow:0 0 0 4px var(--mint-200)}
+  .muted{color:var(--ink-500)}
+  .cap{font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;font-weight:800;color:var(--ink-400)}
+
+  /* ---------- document shell ---------- */
+  .shell{max-width:1320px;margin:0 auto;padding:32px 20px 96px;display:grid;grid-template-columns:1fr;gap:32px}
+  @media(min-width:1100px){.shell{grid-template-columns:220px minmax(0,1fr);padding:40px 32px 120px}}
+  nav.toc{display:none;align-self:start;position:sticky;top:24px}
+  @media(min-width:1100px){nav.toc{display:block}}
+  nav.toc .brand{display:flex;align-items:center;gap:10px;margin-bottom:20px}
+  nav.toc .logo{width:40px;height:40px;border-radius:var(--radius-sm);background:var(--mint-400);box-shadow:0 3px 0 var(--mint-500);display:grid;place-items:center;color:var(--white);font:800 20px var(--font-display)}
+  nav.toc strong{font:800 17px var(--font-display);color:var(--ink-900);display:block;line-height:1.15}
+  nav.toc ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+  nav.toc a{display:flex;gap:10px;align-items:baseline;padding:9px 12px;border-radius:14px;color:var(--ink-500);font-size:14px;text-decoration:none;transition:background var(--dur-fast) var(--ease-out)}
+  nav.toc a:hover{background:var(--cream-200);color:var(--ink-900)}
+  nav.toc a .n{font:800 12px var(--font-display);color:var(--ink-300);min-width:16px}
+  nav.toc .meta{margin-top:20px;padding:14px;border-radius:var(--radius-md);background:var(--white);box-shadow:var(--shadow-sm);font-size:12.5px;color:var(--ink-500);display:flex;flex-direction:column;gap:4px}
+  nav.toc .meta b{color:var(--ink-900)}
+  main{display:flex;flex-direction:column;gap:64px;min-width:0}
+  section{display:flex;flex-direction:column;gap:20px}
+  .sec-head{display:flex;flex-direction:column;gap:8px}
+  .sec-head .lede{font-size:15px;color:var(--ink-500);max-width:68ch}
+  .thesis{display:grid;gap:12px;padding:18px 20px;background:var(--white);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm)}
+  @media(min-width:860px){.thesis{grid-template-columns:1.2fr 1fr 1fr}}
+  .thesis div{display:flex;flex-direction:column;gap:4px;font-size:14px}
+  .thesis .cap{margin-bottom:2px}
+  header.hero{background:var(--white);border-radius:var(--radius-xl);box-shadow:var(--shadow-md);padding:32px;display:grid;gap:24px}
+  @media(min-width:860px){header.hero{grid-template-columns:1.4fr 1fr;align-items:start}}
+  header.hero .lede{font-size:16px;color:var(--ink-500);max-width:56ch;margin-top:10px}
+  .pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:var(--radius-pill);font:700 13px var(--font-display);background:var(--mint-50);color:var(--mint-600)}
+  .pill.sky{background:var(--sky-50);color:var(--sky-500)}.pill.sun{background:var(--sun-100);color:var(--sun-600)}.pill.coral{background:var(--coral-100);color:var(--coral-600)}.pill.neutral{background:var(--cream-200);color:var(--ink-500)}
+  .pick{display:flex;flex-direction:column;gap:8px}
+  .pick a{display:grid;grid-template-columns:34px 1fr auto;align-items:center;gap:12px;padding:12px 14px;border-radius:var(--radius-md);background:var(--cream-100);text-decoration:none;color:var(--ink-700);transition:transform var(--dur-fast) var(--ease-out),box-shadow var(--dur-fast) var(--ease-out)}
+  .pick a:hover{transform:translateY(-2px);box-shadow:var(--shadow-md)}
+  .pick .k{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font:800 16px var(--font-display);color:var(--white)}
+  .pick .k.a{background:var(--mint-400)}.pick .k.b{background:var(--sky-400)}.pick .k.c{background:var(--sun-500)}
+  .pick b{display:block;font:700 15px var(--font-display);color:var(--ink-900)}
+  .pick span{font-size:12.5px;color:var(--ink-500)}
+  .pick .tag{font:800 11px var(--font-display);letter-spacing:.04em;color:var(--ink-400)}
+
+  .card{background:var(--white);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+  .grid3{display:grid;gap:16px}@media(min-width:900px){.grid3{grid-template-columns:1fr 1fr 1fr}}
+  .grid2{display:grid;gap:16px}@media(min-width:900px){.grid2{grid-template-columns:1fr 1fr}}
+  ul.plain{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:14px}
+  ul.plain li::marker{color:var(--mint-400)}
+  ul.plain.warn li::marker{color:var(--sun-500)}
+  .tablewrap{overflow-x:auto;border-radius:var(--radius-lg);background:var(--white);box-shadow:var(--shadow-sm)}
+  table.spec{border-collapse:separate;border-spacing:0;width:100%;font-size:13.5px}
+  table.spec th{text-align:left;padding:12px 14px;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-400);border-bottom:1.5px solid var(--line-200);white-space:nowrap}
+  table.spec td{padding:11px 14px;border-bottom:1px solid var(--line-100);vertical-align:top}
+  table.spec tr:last-child td{border-bottom:0}
+  table.spec td:first-child{font-weight:800;color:var(--ink-900);white-space:nowrap}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:-1px}
+  .dot.g{background:var(--mint-400)}.dot.y{background:var(--sun-400)}.dot.r{background:var(--coral-400)}
+
+  /* ---------- mockup frame ---------- */
+  .frame{background:var(--cream-100);border:1.5px solid var(--line-300);border-radius:var(--radius-xl);overflow:hidden}
+  .frame .bar{display:flex;align-items:center;gap:8px;padding:10px 16px;background:var(--cream-50);border-bottom:1.5px solid var(--line-200);font-size:12.5px;color:var(--ink-500)}
+  .frame .bar .url{margin-left:auto;font:700 12px ui-monospace,Menlo,monospace;color:var(--ink-400)}
+  .frame .bar i{width:10px;height:10px;border-radius:50%;background:var(--line-300);display:inline-block}
+  .frame .stage{padding:24px}
+  .frame:not(.phone) .stage{zoom:.86}
+  .frame.phone{width:390px;max-width:100%}
+  .frame.phone .stage{padding:16px 14px}
+  .frames{display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start}
+  .frames .desk{flex:1 1 640px;min-width:0}
+  .frames .mob{flex:0 0 390px;max-width:100%}
+  .caption{font-size:12.5px;color:var(--ink-500);margin-top:8px}
+
+  /* mock primitives (mirror the hv kit) */
+  .m-h1{font:800 26px/1.15 var(--font-display);color:var(--ink-900)}
+  .m-sub{font-size:14px;color:var(--ink-500)}
+  .m-cap{font-size:11.5px;font-weight:800;letter-spacing:.3px;color:var(--ink-400)}
+  .m-num{font:800 22px/1.1 var(--font-display);color:var(--ink-900);font-variant-numeric:tabular-nums}
+  .m-card{background:var(--white);border-radius:var(--radius-lg);box-shadow:var(--shadow-md)}
+  .m-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 18px;border-radius:var(--radius-md);font:700 13px var(--font-display);letter-spacing:.02em;cursor:pointer;border:0;transition:transform var(--dur-fast) var(--ease-out),box-shadow var(--dur-fast) var(--ease-out)}
+  .m-btn.primary{background:var(--mint-400);color:var(--white);box-shadow:var(--press-mint)}
+  .m-btn.ghost{background:var(--white);color:var(--mint-600);box-shadow:0 5px 0 var(--line-300),inset 0 0 0 2px var(--line-200)}
+  .m-btn:active{transform:translateY(5px);box-shadow:none}
+  .m-btn.icon{width:44px;padding:0}
+  .m-btn.sm{min-height:36px;padding:0 12px;font-size:12.5px;border-radius:var(--radius-sm)}
+  .m-btn.sm.ghost{box-shadow:0 3px 0 var(--line-300),inset 0 0 0 2px var(--line-200)}
+  .m-btn.sm:active{transform:translateY(3px)}
+  .m-btn svg{width:16px;height:16px}
+  svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+  .m-pill{display:inline-flex;align-items:center;white-space:nowrap;border-radius:var(--radius-pill);padding:3px 10px;font-size:12px;font-weight:800;line-height:1.4}
+  .m-pill.none{background:var(--cream-200);color:var(--ink-400)}
+  .m-pill.draft{background:var(--sky-50);color:var(--sky-500)}
+  .m-pill.pending{background:var(--sun-100);color:var(--sun-600)}
+  .m-pill.approved{background:var(--mint-50);color:var(--mint-600)}
+  .m-pill.redo{background:var(--coral-100);color:var(--coral-600)}
+  .m-pill.todo{background:var(--sun-100);color:var(--sun-600)}
+  .m-pill.done{background:var(--mint-50);color:var(--mint-600)}
+  .m-pill.cancel{background:var(--coral-100);color:var(--coral-600)}
+  .m-pill.plan{background:var(--cream-200);color:var(--ink-500)}
+  .m-bar{height:6px;border-radius:999px;background:var(--cream-300);overflow:hidden;position:relative}
+  .m-bar>i{position:absolute;inset:0 auto 0 0;border-radius:999px;background:var(--mint-400)}
+  .m-bar.sky>i{background:var(--sky-300)}.m-bar.sun>i{background:var(--sun-400)}
+  .m-seg{display:flex;background:var(--cream-200);border-radius:var(--radius-md);padding:4px;gap:4px}
+  .m-seg>span{flex:1;text-align:center;white-space:nowrap;padding:8px 10px;border-radius:12px;font:700 13.5px var(--font-display);color:var(--ink-500)}
+  .m-seg>span.on{background:var(--white);color:var(--ink-900);box-shadow:var(--shadow-sm)}
+  .m-tabs{display:flex;gap:22px;border-bottom:1.5px solid var(--line-200)}
+  .m-tabs>span{padding:10px 2px;font-size:14.5px;font-weight:800;color:var(--ink-400);border-bottom:3px solid transparent;margin-bottom:-1.5px}
+  .m-tabs>span.on{color:var(--ink-900);border-color:var(--mint-400)}
+  .m-textarea{border:2px solid var(--line-200);border-radius:14px;padding:10px 12px;font-size:13.5px;color:var(--ink-700);min-height:88px;background:var(--white)}
+  .m-textarea.ph{color:var(--ink-400)}
+  .m-input{display:flex;align-items:center;gap:8px;min-height:40px;padding:0 12px;border-radius:var(--radius-md);background:var(--white);box-shadow:inset 0 0 0 2px var(--line-200);font-size:13.5px;color:var(--ink-400)}
+  .m-chip{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 18px;border-radius:var(--radius-pill);font:800 14px var(--font-display);background:var(--white);color:var(--ink-500);box-shadow:var(--shadow-sm)}
+  .m-chip.on{background:var(--mint-400);color:var(--white);box-shadow:var(--press-mint)}
+  .m-score{display:inline-flex;align-items:center;justify-content:center;width:64px;height:40px;border-radius:12px;border:2px solid var(--line-200);font:800 16px var(--font-display);color:var(--ink-900);background:var(--white)}
+  .m-score.saved{border-color:var(--mint-400)}
+  .m-score.empty{color:var(--ink-300)}
+  .num{font-variant-numeric:tabular-nums}
+  .neg{color:var(--coral-600)}
+  .stepper{display:inline-flex;align-items:center;gap:4px;background:var(--white);border-radius:var(--radius-md);box-shadow:var(--shadow-sm);padding:4px}
+  .stepper>span{min-width:120px;text-align:center;font:800 14px var(--font-display);color:var(--ink-900)}
+  .stepper>b{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;color:var(--ink-500)}
+  .stepper>b:hover{background:var(--cream-100)}
+
+  /* ---------- OPTION A: workspace 3 pane ---------- */
+  .A{display:grid;grid-template-columns:216px minmax(0,1fr);gap:18px;align-items:start}
+  @media(max-width:900px){.A{grid-template-columns:1fr}}
+  .A .rail{display:flex;flex-direction:column;gap:8px}
+  .A .rail .cls{display:flex;flex-direction:column;gap:2px;padding:12px 14px;border-radius:var(--radius-md);background:var(--white);box-shadow:var(--shadow-sm)}
+  .A .rail .cls.on{background:var(--mint-50);box-shadow:inset 0 0 0 2px var(--mint-300)}
+  .A .rail .cls b{font:700 14.5px var(--font-display);color:var(--ink-900)}
+  .A .rail .cls small{font-size:12px;color:var(--ink-500)}
+  .A .rail .cls .todo{margin-top:4px;display:flex;gap:6px;flex-wrap:wrap}
+  .A .main{display:flex;flex-direction:column;gap:16px;min-width:0}
+  .A .head{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start}
+  .A .head .t{flex:1 1 260px;display:flex;flex-direction:column;gap:2px}
+  .A .head .acts{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .A .kpi{display:grid;grid-template-columns:repeat(4,1fr);background:var(--white);border-radius:var(--radius-lg);box-shadow:var(--shadow-md)}
+  @media(max-width:700px){.A .kpi{grid-template-columns:1fr 1fr}}
+  .A .kpi>div{padding:14px 18px;display:flex;flex-direction:column;gap:2px;border-right:1.5px solid var(--line-100)}
+  .A .kpi>div:last-child{border-right:0}
+  .A .kpi small{font-size:12px;color:var(--ink-500)}
+  .A .body{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(280px,1fr);gap:16px;align-items:start}
+  @media(max-width:1000px){.A .body{grid-template-columns:1fr}}
+  .A .list{background:var(--white);border-radius:var(--radius-lg);box-shadow:var(--shadow-md);overflow:hidden}
+  .A .row{display:grid;grid-template-columns:52px minmax(0,1fr) 76px 48px 92px;gap:10px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line-100)}
+  .A .row.hd{padding:10px 16px;border-bottom:1.5px solid var(--line-200)}
+  .A .row.on{background:var(--mint-50)}
+  .A .row:last-child{border-bottom:0}
+  .A .date{display:flex;flex-direction:column;align-items:center;justify-content:center;width:48px;height:48px;border-radius:12px;background:var(--cream-100);line-height:1}
+  .A .date b{font:800 17px var(--font-display);color:var(--ink-900)}
+  .A .date span{font-size:10.5px;font-weight:800;color:var(--ink-400);letter-spacing:.04em}
+  .A .row.cancel .date{background:var(--coral-100)}.A .row.cancel .date b{color:var(--coral-600)}
+  .A .les{display:flex;flex-direction:column;gap:4px;min-width:0}
+  .A .les b{font-size:13.5px;color:var(--ink-900);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .A .les .chips{display:flex;gap:6px;flex-wrap:wrap}
+  .A .att{display:flex;flex-direction:column;gap:5px}
+  .A .att b{font-size:13.5px;color:var(--ink-700)}
+  .A .v{font-size:13.5px;font-weight:800;color:var(--ink-700)}
+  .A .foot{padding:10px 16px;font-size:12px;color:var(--ink-400);border-top:1px solid var(--line-100)}
+  .panel{background:var(--white);border-radius:var(--radius-xl);box-shadow:var(--shadow-lg);overflow:hidden}
+  .panel .ph{background:var(--mint-400);color:var(--white);padding:14px 18px;display:flex;gap:10px;align-items:flex-start}
+  .panel .ph h4{color:var(--white);font-size:17px;flex:1}
+  .panel .ph .x{width:40px;height:40px;border-radius:12px;background:var(--white);color:var(--mint-600);display:grid;place-items:center;flex:none}
+  .panel .ph .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  .panel .ph .chips span{background:rgba(255,255,255,.22);border-radius:999px;padding:3px 11px;font-size:12px;font-weight:800}
+  .panel .pb{padding:14px 18px 16px;display:flex;flex-direction:column;gap:12px}
+  .stu{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:12px}
+  .stu:hover{background:var(--cream-100)}
+  .stu b{flex:1;font-size:13.5px;color:var(--ink-700)}
+  .stu small{font-size:12px;color:var(--ink-400)}
+
+  /* ---------- OPTION B: timeline by week ---------- */
+  .B{display:flex;flex-direction:column;gap:16px}
+  .B .chips{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .B .hero{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1.6fr);background:var(--white);border-radius:var(--radius-xl);box-shadow:var(--shadow-md);overflow:hidden}
+  @media(max-width:860px){.B .hero{grid-template-columns:1fr}}
+  .B .hero .id{padding:20px 22px;display:flex;flex-direction:column;gap:8px;background:var(--mint-50);border-right:1.5px solid var(--mint-100)}
+  .B .hero .id h4{font-size:24px;color:var(--ink-900)}
+  .B .hero .id .meta{display:flex;flex-direction:column;gap:3px;font-size:13px;color:var(--ink-500)}
+  .B .hero .id .meta b{color:var(--ink-700)}
+  .B .hero .id .acts{display:flex;gap:8px;margin-top:auto;padding-top:10px;flex-wrap:wrap}
+  .B .hero .stats{display:grid;grid-template-columns:1fr 1fr;gap:0}
+  .B .hero .stats>div{padding:16px 20px;border-bottom:1.5px solid var(--line-100);border-right:1.5px solid var(--line-100);display:flex;flex-direction:column;gap:6px}
+  .B .hero .stats>div:nth-child(2n){border-right:0}
+  .B .hero .stats>div:nth-child(n+3){border-bottom:0}
+  .B .hero .stats small{font-size:12px;color:var(--ink-500)}
+  .B .body{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(300px,1fr);gap:16px;align-items:start}
+  @media(max-width:1000px){.B .body{grid-template-columns:1fr}}
+  .B .week{display:flex;flex-direction:column;gap:8px}
+  .B .wk{display:flex;align-items:baseline;gap:10px;padding:6px 4px 2px}
+  .B .wk b{font:800 14px var(--font-display);color:var(--ink-900)}
+  .B .wk span{font-size:12.5px;color:var(--ink-500)}
+  .B .wk .sum{margin-left:auto;font-size:12.5px;color:var(--ink-500);font-weight:700}
+  .B .ses{display:grid;grid-template-columns:44px minmax(0,1fr);gap:12px;align-items:stretch}
+  .B .ses .dt{display:flex;flex-direction:column;align-items:center;gap:4px;padding-top:6px}
+  .B .ses .dt b{width:36px;height:36px;border-radius:50%;background:var(--mint-400);color:var(--white);display:grid;place-items:center;font:800 13px var(--font-display);box-shadow:0 3px 0 var(--mint-500)}
+  .B .ses .dt i{flex:1;width:2px;background:var(--line-300);border-radius:2px;min-height:14px}
+  .B .ses.plan .dt b{background:var(--white);color:var(--ink-400);box-shadow:inset 0 0 0 2px var(--line-300)}
+  .B .ses.cancel .dt b{background:var(--coral-100);color:var(--coral-600);box-shadow:none}
+  .B .ses .bx{background:var(--white);border-radius:var(--radius-md);box-shadow:var(--shadow-sm);padding:12px 14px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 16px;align-items:center}
+  .B .ses.on .bx{box-shadow:inset 0 0 0 2px var(--mint-300),var(--shadow-sm);background:var(--mint-50)}
+  .B .ses .bx .l{display:flex;flex-direction:column;gap:4px;min-width:0}
+  .B .ses .bx .l b{font-size:14px;color:var(--ink-900)}
+  .B .ses .bx .l small{font-size:12.5px;color:var(--ink-500);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .B .ses .bx .r{display:flex;gap:14px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+  .B .ses .bx .r div{display:flex;flex-direction:column;align-items:flex-end;line-height:1.2}
+  .B .ses .bx .r b{font-size:14px;color:var(--ink-900)}
+  .B .ses .bx .r span{font-size:11px;font-weight:800;letter-spacing:.04em;color:var(--ink-400)}
+  .B .ses .bx .chips{grid-column:1/-1;display:flex;gap:6px;flex-wrap:wrap}
+
+  /* ---------- OPTION C: ledger + inline expand ---------- */
+  .C{display:flex;flex-direction:column;gap:14px}
+  .C .tool{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+  .C .tool .sel{display:inline-flex;align-items:center;gap:10px;min-height:44px;padding:0 14px 0 16px;border-radius:var(--radius-md);background:var(--white);box-shadow:var(--shadow-sm);font:800 15px var(--font-display);color:var(--ink-900)}
+  .C .tool .sel small{font:600 12px var(--font-body);color:var(--ink-500)}
+  .C .tool .sp{flex:1}
+  .C .strip{display:grid;grid-template-columns:repeat(4,auto);gap:0 32px;padding:12px 4px;align-items:baseline;border-bottom:1.5px solid var(--line-200)}
+  @media(max-width:760px){.C .strip{grid-template-columns:1fr 1fr;gap:8px 16px}}
+  .C .strip>div{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+  .C .strip .m-num{font-size:20px}
+  .C .strip small{font-size:12px;color:var(--ink-500)}
+  .C table{width:100%;border-collapse:separate;border-spacing:0;font-size:13.5px;background:var(--white);border-radius:var(--radius-lg);box-shadow:var(--shadow-md);overflow:hidden}
+  .C th{text-align:left;padding:10px 12px;font-size:11.5px;font-weight:800;letter-spacing:.3px;color:var(--ink-400);border-bottom:1.5px solid var(--line-200);white-space:nowrap}
+  .C td{padding:9px 12px;border-bottom:1px solid var(--line-100);vertical-align:middle}
+  .C tr.on td{background:var(--mint-50)}
+  .C td.d{font-weight:800;color:var(--ink-900);white-space:nowrap}
+  .C td.d small{display:block;font-weight:700;color:var(--ink-400);font-size:11.5px}
+  .C td .m-bar{width:64px;display:inline-block;vertical-align:middle;margin-left:8px}
+  .C .ex td{padding:0;background:var(--cream-50)}
+  .C .exp{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr);gap:0;border-top:1.5px solid var(--mint-200);border-bottom:1.5px solid var(--mint-200)}
+  @media(max-width:900px){.C .exp{grid-template-columns:1fr}}
+  .C .exp>div{padding:14px 16px;display:flex;flex-direction:column;gap:8px;border-right:1.5px solid var(--line-100)}
+  .C .exp>div:last-child{border-right:0}
+  .C .exp h5{margin:0;font:800 11.5px var(--font-body);letter-spacing:.3px;color:var(--ink-400)}
+  .C .exp .ttl{font:700 15px var(--font-display);color:var(--ink-900)}
+  .C .exp .kv{font-size:13px;color:var(--ink-700);display:flex;flex-direction:column;gap:4px}
+  .C .exp .kv b{color:var(--ink-500);font-weight:800;font-size:12px}
+  .C .exp .srow{display:grid;grid-template-columns:minmax(0,1fr) 64px 64px 64px;gap:8px;align-items:center;font-size:13px}
+  .C .exp .srow .m-score{width:100%;height:34px;font-size:14px}
+  .C .exp .srow.h{font-size:11px;font-weight:800;color:var(--ink-400);letter-spacing:.3px}
+  .C .exp>div.ft{grid-column:1/-1;flex-direction:row;gap:10px;align-items:center;padding:10px 16px;border-top:1px solid var(--line-100);background:var(--white)}
+  .C .exp .ft .sp{flex:1}
+  .C .exp .ft small{font-size:12.5px;font-weight:700;color:var(--sun-600)}
+  .C .kbd{display:inline-block;padding:1px 6px;border-radius:6px;background:var(--cream-200);font:700 11px ui-monospace,Menlo,monospace;color:var(--ink-500);border:1px solid var(--line-300)}
+
+  /* mobile shared */
+  .mob .m-h1{font-size:22px}
+  .mob .A .row{grid-template-columns:44px minmax(0,1fr) auto}
+  .mob .sheet{background:var(--white);border-radius:24px 24px 0 0;box-shadow:var(--shadow-lg);padding:8px 16px 16px;margin:0 -14px -16px;display:flex;flex-direction:column;gap:10px}
+  .mob .sheet .grab{width:44px;height:5px;border-radius:999px;background:var(--line-300);margin:0 auto 4px}
+  .mob .sheet h4{font-size:16px}
+
+  @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="shell">
+  <nav class="toc" aria-label="Mục lục">
+    <div class="brand"><div class="logo">T</div><div><strong>Quản lý lớp học</strong><span class="muted" style="font-size:12.5px">3 phương án redesign</span></div></div>
+    <ol>
+      <li><a href="#hien-trang"><span class="n">0</span>Hiện trạng & mục tiêu</a></li>
+      <li><a href="#opt-a"><span class="n">A</span>Bàn làm việc 3 cột</a></li>
+      <li><a href="#opt-b"><span class="n">B</span>Dòng thời gian tuần</a></li>
+      <li><a href="#opt-c"><span class="n">C</span>Sổ lớp mở rộng tại chỗ</a></li>
+      <li><a href="#so-sanh"><span class="n">4</span>So sánh & đề xuất</a></li>
+      <li><a href="#chung"><span class="n">5</span>Cải tiến chung</a></li>
+    </ol>
+    <div class="meta"><span><b>Route</b> /classbook</span><span><b>File</b> teaching/pages/classbook-page.tsx</span><span><b>DS</b> Học Vui Mỗi Ngày, hv kit</span><span><b>Ngày</b> 02/09/2026</span></div>
+  </nav>
+
+  <main>
+    <header class="hero" id="top">
+      <div>
+        <span class="cap">Redesign · web app · 2 nhánh màn hình</span>
+        <h1 style="margin-top:8px">Quản lý lớp học, ba cách sắp lại</h1>
+        <p class="lede">Cùng một dữ liệu (lớp, buổi, sĩ số, điểm, doanh thu, giáo án), cùng một design system, nhưng ba mô hình tương tác khác nhau. Chọn theo cách trung tâm của bạn làm việc, không phải theo màu.</p>
+        <div class="pills">
+          <span class="pill">Baloo 2 + Nunito</span><span class="pill">Mint · Cream · Ink</span><span class="pill sky">hv kit: Card, Segmented, StateBlock, ScoreInput</span><span class="pill neutral">Giữ nguyên API & hooks</span>
+        </div>
+      </div>
+      <div class="pick" aria-label="Chọn nhanh">
+        <a href="#opt-a"><span class="k a">A</span><span><b>Bàn làm việc 3 cột</b><span>Lớp ở cột trái như hộp thư, buổi ở giữa, chi tiết bên phải. Có bộ đếm "cần làm".</span></span><span class="tag">HÀNG ĐỢI</span></a>
+        <a href="#opt-b"><span class="k b">B</span><span><b>Dòng thời gian tuần</b><span>Thẻ lớp làm đầu trang, buổi học xếp theo tuần với tổng tuần. Hợp họp tuần.</span></span><span class="tag">THỜI GIAN</span></a>
+        <a href="#opt-c"><span class="k c">C</span><span><b>Sổ lớp mở rộng tại chỗ</b><span>Một bảng duy nhất, bấm buổi thì mở rộng ngay dưới dòng. Một code path cho mọi màn hình.</span></span><span class="tag">MẬT ĐỘ</span></a>
+      </div>
+    </header>
+
+    <!-- ================= 0. HIỆN TRẠNG ================= -->
+    <section id="hien-trang">
+      <div class="sec-head">
+        <span class="cap">0 · Hiện trạng</span>
+        <h2>Trang đang làm đúng việc, nhưng chưa dẫn người dùng đi đâu</h2>
+        <p class="lede">Đọc từ <code>classbook-page.tsx</code>, <code>sessions-table.tsx</code>, <code>session-detail-panel.tsx</code> và screenshot 1280px trên nhánh hiện tại.</p>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <h3>Điểm cần sửa</h3>
+          <ul class="plain warn">
+            <li><b>5 thẻ số bằng nhau</b> ở đầu trang, ô Lãi/lỗ xuống dòng. Không thẻ nào nói "hôm nay cần làm gì".</li>
+            <li><b>Bảng buổi đầy dấu "—"</b>: buổi chưa điểm danh và buổi hủy hiển thị 4 ô trống giống nhau, mất ý nghĩa.</li>
+            <li><b>Không thấy trạng thái nhận xét / chấm điểm</b> ở danh sách. Muốn biết buổi nào chưa nhận xét phải bấm từng buổi.</li>
+            <li><b>Tab lớp dạng pill</b> tràn dòng khi trung tâm có hơn 6 lớp; ô tìm kiếm xuất hiện nhưng pill vẫn chiếm chỗ.</li>
+            <li><b>Không chuyển tháng</b> ngay trên trang; tháng lấy từ "Kỳ hiện tại" ở header.</li>
+            <li><b>Chi tiết buổi</b> tách hai nhánh render (panel bên / HvModal sheet), phải giữ ref + guard ở cả hai.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Giữ lại vì đang tốt</h3>
+          <ul class="plain">
+            <li>Header mint của panel chi tiết với chip số liệu buổi.</li>
+            <li>HvSegmented 3 tab Nhận xét / Giáo án / Điểm buổi và guard điểm chưa lưu.</li>
+            <li>Chấm điểm theo học sinh (accordion) và "Mở bảng đầy đủ".</li>
+            <li>Tab "Chương trình & giáo án": thẻ lộ trình, giáo án buổi tới, sĩ số theo tháng.</li>
+            <li>Toàn bộ hooks (useMonthSessions, useClassMarks, useClassTeaching) và CSV export.</li>
+          </ul>
+          <p class="muted" style="font-size:13px">Mục tiêu chung cho cả ba phương án: tối đa 4 chỉ số trên màn hình đầu, trạng thái công việc nhìn thấy ngay ở danh sách, một cơ chế chi tiết buổi thay vì hai.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= A ================= -->
+    <section id="opt-a">
+      <div class="sec-head">
+        <span class="cap">Phương án A</span>
+        <h2>Bàn làm việc 3 cột</h2>
+        <p class="lede">Mô hình hộp thư: lớp ở cột trái, buổi ở giữa, chi tiết bên phải. Mỗi lớp mang bộ đếm việc chưa xong, nên giáo viên mở trang là biết đi đâu trước.</p>
+      </div>
+      <div class="thesis">
+        <div><span class="cap">Thesis</span>Master-detail 3 cấp, tối ưu cho giáo viên dạy nhiều lớp và chủ trung tâm duyệt nhanh. Điểm nhớ: chip "cần làm" trên từng lớp và từng buổi.</div>
+        <div><span class="cap">Thay đổi lớn</span>Bỏ pill lớp, thêm cột lớp 232px. 5 thẻ số gộp thành 1 dải 4 ô. Bảng buổi có cột ngày dạng khối + chip trạng thái.</div>
+        <div><span class="cap">Mobile</span>Cột lớp thành nút chọn mở sheet. Chi tiết buổi vẫn là bottom sheet (HvModal).</div>
+      </div>
+
+      <div class="frames">
+        <div class="desk">
+          <div class="frame">
+            <div class="bar"><i></i><i></i><i></i><span>Desktop 1280 · vùng nội dung, sidebar app giữ nguyên</span><span class="url">/classbook?class_id=…</span></div>
+            <div class="stage">
+              <div class="A">
+                <aside class="rail">
+                  <div class="m-input"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Tìm lớp…</div>
+                  <div class="cls on"><b>Toán 8 · Tối Thứ Ba</b><small>19:00 – 20:30 · 14 HS</small><div class="todo"><span class="m-pill todo">1 buổi chưa nhận xét</span></div></div>
+                  <div class="cls"><b>Lý 7 · Chiều Thứ Năm</b><small>15:30 – 17:00 · 9 HS</small><div class="todo"><span class="m-pill todo">2 chưa chấm</span><span class="m-pill redo">Giáo án làm lại</span></div></div>
+                  <div class="cls"><b>Văn 9 · Sáng Thứ Bảy</b><small>08:00 – 09:30 · 17 HS</small><div class="todo"><span class="m-pill done">Xong tháng 9</span></div></div>
+                  <div class="cls"><b>Anh 6 · Tối Thứ Sáu</b><small>18:30 – 20:00 · 11 HS</small></div>
+                </aside>
+                <div class="main">
+                  <div class="head">
+                    <div class="t"><div class="m-h1">Toán 8 · Tối Thứ Ba</div><div class="m-sub">Cô Lan · Phòng 2 · Bài 6/24 đang dạy</div></div>
+                    <div class="acts">
+                      <div class="stepper"><b>‹</b><span>Tháng 9/2026</span><b>›</b></div>
+                      <button class="m-btn ghost"><svg class="i" viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v3h16v-3"/></svg>Tải CSV</button>
+                    </div>
+                  </div>
+                  <div class="kpi">
+                    <div><span class="m-cap">SĨ SỐ</span><span class="m-num">14</span><small>13 tháng trước, tái tục 92%</small></div>
+                    <div><span class="m-cap">CHUYÊN CẦN T9</span><span class="m-num">93%</span><small>26/28 lượt có mặt</small></div>
+                    <div><span class="m-cap">ĐIỂM TB LỚP</span><span class="m-num">7,4</span><small>trung bình 2 buổi đã chấm</small></div>
+                    <div><span class="m-cap">LÃI/LỖ T9</span><span class="m-num">3.300.000đ</span><small>thu 3.900.000đ · chi 600.000đ</small></div>
+                  </div>
+                  <div class="m-seg" style="max-width:420px"><span class="on">Buổi học</span><span>Chương trình & giáo án</span></div>
+                  <div class="body">
+                    <div class="list">
+                      <div class="row hd"><span class="m-cap">BUỔI</span><span class="m-cap">BÀI HỌC · VIỆC CẦN LÀM</span><span class="m-cap">CÓ MẶT</span><span class="m-cap">ĐTB</span><span class="m-cap">DOANH THU</span></div>
+                      <div class="row"><div class="date"><b>01</b><span>TH 3</span></div><div class="les"><b>Bài 5 · Phân tích đa thức thành nhân tử</b><div class="chips"><span class="m-pill approved">Đã duyệt</span><span class="m-pill done">Đã nhận xét</span><span class="m-pill done">14/14 đã chấm</span></div></div><div class="att"><b>13/14</b><div class="m-bar"><i style="width:93%"></i></div></div><div class="v num">7,6</div><div class="v num">1.650.000đ</div></div>
+                      <div class="row on"><div class="date"><b>08</b><span>TH 3</span></div><div class="les"><b>Bài 6 · Chia đa thức cho đơn thức</b><div class="chips"><span class="m-pill approved">Đã duyệt</span><span class="m-pill todo">Chưa nhận xét</span><span class="m-pill done">14/14 đã chấm</span></div></div><div class="att"><b>13/14</b><div class="m-bar"><i style="width:93%"></i></div></div><div class="v num">7,2</div><div class="v num">1.650.000đ</div></div>
+                      <div class="row cancel"><div class="date"><b>15</b><span>TH 3</span></div><div class="les"><b>Nghỉ · Cô Lan bận việc gia đình</b><div class="chips"><span class="m-pill cancel">Buổi hủy</span></div></div><div class="att"><b class="muted">Không tính</b></div><div class="v muted">·</div><div class="v muted">·</div></div>
+                      <div class="row"><div class="date"><b>22</b><span>TH 3</span></div><div class="les"><b>Bài 7 · Chia đa thức một biến</b><div class="chips"><span class="m-pill pending">Chờ duyệt</span><span class="m-pill plan">Chưa điểm danh</span></div></div><div class="att"><b class="muted">14 HS</b></div><div class="v muted">·</div><div class="v muted">·</div></div>
+                      <div class="row"><div class="date"><b>29</b><span>TH 3</span></div><div class="les"><b>Bài 8 · Ôn tập chương I</b><div class="chips"><span class="m-pill none">Chưa soạn</span><span class="m-pill plan">Chưa điểm danh</span></div></div><div class="att"><b class="muted">14 HS</b></div><div class="v muted">·</div><div class="v muted">·</div></div>
+                      <div class="foot">Doanh thu buổi = học phí HS có mặt trừ 300.000đ chi phí buổi. Buổi hủy và buổi chưa điểm danh không tính.</div>
+                    </div>
+                    <div class="panel">
+                      <div class="ph"><div style="flex:1"><h4>Th 3, 08/09 · Bài 6</h4><div class="chips"><span>13/14 có mặt</span><span>ĐTB 7,2</span><span>Lãi 1.650.000đ</span></div></div><div class="x"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></div></div>
+                      <div class="pb">
+                        <div class="m-seg"><span class="on">Nhận xét</span><span>Giáo án</span><span>Điểm buổi</span></div>
+                        <span class="m-cap">NHẬN XÉT CHUNG CỦA BUỔI</span>
+                        <div class="m-textarea ph">Không khí lớp, phần yếu cần lưu ý cho họp tuần…</div>
+                        <div style="display:flex;gap:10px;align-items:center"><button class="m-btn primary">Lưu nhận xét</button><span class="muted" style="font-size:12.5px">Chưa có nhận xét</span></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p class="caption">Cột lớp là hàng đợi: chip vàng "cần làm" tổng hợp từ buổi chưa nhận xét, học sinh chưa chấm và giáo án bị trả lại. Dải KPI 4 ô, tái tục lồng vào ô Sĩ số.</p>
+        </div>
+        <div class="mob">
+          <div class="frame phone">
+            <div class="bar"><i></i><i></i><span>390</span><span class="url">/classbook</span></div>
+            <div class="stage">
+              <div class="A" style="grid-template-columns:1fr;gap:12px">
+                <div class="main" style="gap:12px">
+                  <div class="m-h1">Quản lý lớp học</div>
+                  <div class="C"><div class="tool"><div class="sel" style="width:100%">Toán 8 · Tối Thứ Ba<small style="margin-left:auto">14 HS</small><svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></div></div></div>
+                  <div style="display:flex;gap:8px;align-items:center;justify-content:space-between"><div class="stepper"><b>‹</b><span>Tháng 9/2026</span><b>›</b></div><span class="m-pill todo">1 chưa nhận xét</span></div>
+                  <div class="kpi" style="grid-template-columns:1fr 1fr"><div><span class="m-cap">SĨ SỐ</span><span class="m-num">14</span></div><div><span class="m-cap">CHUYÊN CẦN</span><span class="m-num">93%</span></div><div style="border-top:1.5px solid var(--line-100)"><span class="m-cap">ĐIỂM TB</span><span class="m-num">7,4</span></div><div style="border-top:1.5px solid var(--line-100)"><span class="m-cap">LÃI/LỖ</span><span class="m-num" style="font-size:18px">3.300.000đ</span></div></div>
+                  <div class="list">
+                    <div class="row"><div class="date"><b>01</b><span>TH 3</span></div><div class="les"><b>Bài 5 · Phân tích đa thức</b><div class="chips"><span class="m-pill done">Đã nhận xét</span></div></div><div class="v num">7,6</div></div>
+                    <div class="row on"><div class="date"><b>08</b><span>TH 3</span></div><div class="les"><b>Bài 6 · Chia đa thức</b><div class="chips"><span class="m-pill todo">Chưa nhận xét</span></div></div><div class="v num">7,2</div></div>
+                    <div class="row cancel"><div class="date"><b>15</b><span>TH 3</span></div><div class="les"><b>Nghỉ</b><div class="chips"><span class="m-pill cancel">Buổi hủy</span></div></div><div class="v muted">·</div></div>
+                  </div>
+                  <div class="sheet"><div class="grab"></div><h4>Th 3, 08/09 · Bài 6</h4><div class="m-seg"><span class="on">Nhận xét</span><span>Giáo án</span><span>Điểm buổi</span></div><div class="m-textarea ph" style="min-height:64px">Không khí lớp, phần yếu cần lưu ý…</div><button class="m-btn primary">Lưu nhận xét</button></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p class="caption">Dưới 640px: nút chọn lớp mở sheet danh sách lớp (kèm chip cần làm), chi tiết buổi là bottom sheet như hiện tại.</p>
+        </div>
+      </div>
+
+      <div class="grid3">
+        <div class="card"><h4>Điểm mạnh</h4><ul class="plain"><li>Chuyển lớp không mất ngữ cảnh; hợp chủ trung tâm duyệt 8 đến 15 lớp.</li><li>Chip cần làm biến trang thành to-do, giảm số lần bấm mò.</li><li>Cột lớp có thể tái dùng cho trang Điểm danh và Chốt sổ.</li></ul></div>
+        <div class="card"><h4>Đánh đổi</h4><ul class="plain warn"><li>Mất 232px chiều ngang; ở 1024 đến 1200px phải ẩn panel chi tiết hoặc cột lớp.</li><li>Bộ đếm cần làm cần thêm 1 query tổng hợp theo trung tâm (hoặc endpoint mới), không có sẵn.</li><li>Ba cột trên màn hình 13" dễ chật nếu tên bài dài.</li></ul></div>
+        <div class="card"><h4>Việc phải làm</h4><ul class="plain"><li>Mới: <code>class-rail.tsx</code>, <code>class-kpi-strip.tsx</code>, hook <code>use-class-todos.ts</code>.</li><li>Sửa: <code>sessions-table.tsx</code> (cột ngày, chip), <code>classbook-page.tsx</code> (layout 3 cột).</li><li>Xóa: <code>class-stat-cards.tsx</code>, pill lớp trong page.</li><li>Ước lượng: 4 đến 5 ngày, có API todo thì thêm 1 đến 2 ngày backend.</li></ul></div>
+      </div>
+    </section>
+
+    <!-- ================= B ================= -->
+    <section id="opt-b">
+      <div class="sec-head">
+        <span class="cap">Phương án B</span>
+        <h2>Dòng thời gian tuần</h2>
+        <p class="lede">Giữ pill chọn lớp quen thuộc, thay 5 thẻ số bằng một thẻ lớp làm đầu trang, và xếp buổi học theo tuần với tổng tuần. Trang được đọc như biên bản họp tuần.</p>
+      </div>
+      <div class="thesis">
+        <div><span class="cap">Thesis</span>Trục thời gian là nhịp của trung tâm (họp tuần, chốt tháng). Điểm nhớ: hàng tuần có dòng tổng (buổi, lượt có mặt, doanh thu) ngay trên các buổi.</div>
+        <div><span class="cap">Thay đổi lớn</span>Thẻ lớp gộp tên, lịch, giáo viên, lộ trình, 4 KPI có thanh tiến độ và nút hành động. Bảng buổi thành danh sách theo tuần.</div>
+        <div><span class="cap">Mobile</span>Thẻ lớp xếp dọc, timeline một cột, chi tiết là bottom sheet. Không đổi mô hình so với desktop.</div>
+      </div>
+
+      <div class="frames">
+        <div class="desk">
+          <div class="frame">
+            <div class="bar"><i></i><i></i><i></i><span>Desktop 1280</span><span class="url">/classbook?class_id=…&month=2026-09</span></div>
+            <div class="stage">
+              <div class="B">
+                <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start">
+                  <div style="flex:1 1 260px"><div class="m-h1">Quản lý lớp học</div><div class="m-sub">Số liệu cho họp tuần và chốt tháng của từng lớp.</div></div>
+                  <div class="stepper"><b>‹</b><span>Tháng 9/2026</span><b>›</b></div>
+                </div>
+                <div class="chips"><span class="m-chip">Lý 7 · Chiều T5</span><span class="m-chip on">Toán 8 · Tối T3</span><span class="m-chip">Văn 9 · Sáng T7</span><span class="m-chip">Anh 6 · Tối T6</span><span class="m-input" style="min-height:44px;border-radius:999px;box-shadow:var(--shadow-sm)"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Tìm lớp</span></div>
+                <div class="hero">
+                  <div class="id">
+                    <h4>Toán 8 · Tối Thứ Ba</h4>
+                    <div class="meta"><span>Giáo viên <b>Cô Lan</b> · Phòng 2</span><span>Lịch <b>Thứ Ba 19:00 – 20:30</b></span><span>Lộ trình <b>Bài 6/24</b> · Chia đa thức cho đơn thức</span></div>
+                    <div class="m-bar" style="max-width:220px"><i style="width:25%"></i></div>
+                    <div class="acts"><button class="m-btn ghost sm"><svg class="i" viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v3h16v-3"/></svg>Tải CSV</button><button class="m-btn ghost sm">Chương trình & giáo án</button></div>
+                  </div>
+                  <div class="stats">
+                    <div><span class="m-cap">SĨ SỐ HIỆN TẠI</span><span class="m-num">14 <span style="font-size:13px;color:var(--mint-600)">+1</span></span><small>13 → 14 học sinh, tái tục 92%</small></div>
+                    <div><span class="m-cap">CHUYÊN CẦN THÁNG 9</span><span class="m-num">93%</span><div class="m-bar"><i style="width:93%"></i></div><small>26/28 lượt có mặt</small></div>
+                    <div><span class="m-cap">ĐIỂM TB LỚP</span><span class="m-num">7,4</span><div class="m-bar sky"><i style="width:74%"></i></div><small>2 buổi đã chấm, cao nhất 7,6</small></div>
+                    <div><span class="m-cap">LÃI/LỖ THÁNG 9</span><span class="m-num">3.300.000đ</span><small>thu 3.900.000đ · chi 600.000đ · 2 buổi</small></div>
+                  </div>
+                </div>
+                <div class="body">
+                  <div class="week">
+                    <div class="wk"><b>Tuần 1</b><span>01 – 07/09</span><span class="sum">1 buổi · 13/14 · 1.650.000đ</span></div>
+                    <div class="ses"><div class="dt"><b>01</b><i></i></div><div class="bx"><div class="l"><b>Bài 5 · Phân tích đa thức thành nhân tử</b><small>"Lớp sôi nổi, 3 bạn còn nhầm dấu khi đặt nhân tử chung."</small></div><div class="r"><div><b>13/14</b><span>CÓ MẶT</span></div><div><b>7,6</b><span>ĐTB</span></div><div><b>1.650.000đ</b><span>LÃI</span></div></div><div class="chips"><span class="m-pill approved">Giáo án đã duyệt</span><span class="m-pill done">14/14 đã chấm</span></div></div></div>
+                    <div class="wk"><b>Tuần 2</b><span>08 – 14/09</span><span class="sum">1 buổi · 13/14 · 1.650.000đ</span></div>
+                    <div class="ses on"><div class="dt"><b>08</b><i></i></div><div class="bx"><div class="l"><b>Bài 6 · Chia đa thức cho đơn thức</b><small class="muted">Chưa có nhận xét chung</small></div><div class="r"><div><b>13/14</b><span>CÓ MẶT</span></div><div><b>7,2</b><span>ĐTB</span></div><div><b>1.650.000đ</b><span>LÃI</span></div></div><div class="chips"><span class="m-pill approved">Giáo án đã duyệt</span><span class="m-pill todo">Chưa nhận xét</span></div></div></div>
+                    <div class="wk"><b>Tuần 3</b><span>15 – 21/09</span><span class="sum">Buổi hủy</span></div>
+                    <div class="ses cancel"><div class="dt"><b>15</b><i></i></div><div class="bx"><div class="l"><b>Nghỉ · Cô Lan bận việc gia đình</b><small class="muted">Đã báo phụ huynh qua Zalo 14/09</small></div><div class="r"><span class="m-pill cancel">Buổi hủy</span></div></div></div>
+                    <div class="wk"><b>Tuần 4</b><span>22 – 28/09</span><span class="sum">Sắp tới</span></div>
+                    <div class="ses plan"><div class="dt"><b>22</b><i></i></div><div class="bx"><div class="l"><b>Bài 7 · Chia đa thức một biến</b><small class="muted">14 học sinh dự kiến</small></div><div class="r"><span class="m-pill pending">Giáo án chờ duyệt</span></div></div></div>
+                  </div>
+                  <div class="panel">
+                    <div class="ph"><div style="flex:1"><h4>Th 3, 08/09 · Bài 6</h4><div class="chips"><span>13/14 có mặt</span><span>ĐTB 7,2</span></div></div><div class="x"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></div></div>
+                    <div class="pb">
+                      <div class="m-seg"><span>Nhận xét</span><span>Giáo án</span><span class="on">Điểm buổi</span></div>
+                      <p class="muted" style="font-size:12.5px">Chấm từng đầu điểm (0 đến 10), tự lưu khi rời ô.</p>
+                      <button class="m-btn ghost sm" style="align-self:flex-start">Mở bảng đầy đủ</button>
+                      <div class="stu"><b>Bé An</b><span class="m-pill done">8,0</span><small>3/3</small></div>
+                      <div class="stu"><b>Bảo Châu</b><span class="m-pill done">7,5</span><small>3/3</small></div>
+                      <div class="stu" style="background:var(--cream-100)"><b>Gia Hân</b><div style="display:flex;gap:6px"><span class="m-score saved">7</span><span class="m-score">8</span><span class="m-score empty">·</span></div></div>
+                      <div class="stu"><b>Khánh Duy</b><span class="m-pill todo">Chưa chấm</span><small>0/3</small></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p class="caption">Thẻ lớp là "trang bìa" của lớp trong tháng: định danh bên trái trên nền mint nhạt, 4 KPI bên phải có thanh tiến độ. Dòng tổng tuần đọc được ngay cả khi thu gọn các buổi.</p>
+        </div>
+        <div class="mob">
+          <div class="frame phone">
+            <div class="bar"><i></i><i></i><span>390</span><span class="url">/classbook</span></div>
+            <div class="stage">
+              <div class="B" style="gap:12px">
+                <div class="m-h1">Quản lý lớp học</div>
+                <div class="chips" style="flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px"><span class="m-chip on">Toán 8</span><span class="m-chip">Lý 7</span><span class="m-chip">Văn 9</span><span class="m-chip">Anh 6</span></div>
+                <div class="stepper" style="align-self:flex-start"><b>‹</b><span>Tháng 9/2026</span><b>›</b></div>
+                <div class="hero" style="grid-template-columns:1fr">
+                  <div class="id" style="border-right:0;border-bottom:1.5px solid var(--mint-100)"><h4 style="font-size:19px">Toán 8 · Tối Thứ Ba</h4><div class="meta"><span>Cô Lan · Thứ Ba 19:00 · Bài 6/24</span></div></div>
+                  <div class="stats"><div><span class="m-cap">SĨ SỐ</span><span class="m-num">14</span></div><div><span class="m-cap">CHUYÊN CẦN</span><span class="m-num">93%</span></div><div><span class="m-cap">ĐIỂM TB</span><span class="m-num">7,4</span></div><div><span class="m-cap">LÃI/LỖ</span><span class="m-num" style="font-size:18px">3.300.000đ</span></div></div>
+                </div>
+                <div class="week">
+                  <div class="wk"><b>Tuần 2</b><span>08 – 14/09</span></div>
+                  <div class="ses on"><div class="dt"><b>08</b><i></i></div><div class="bx" style="grid-template-columns:1fr"><div class="l"><b>Bài 6 · Chia đa thức</b><small>13/14 có mặt · ĐTB 7,2 · 1.650.000đ</small></div><div class="chips"><span class="m-pill todo">Chưa nhận xét</span></div></div></div>
+                  <div class="wk"><b>Tuần 3</b><span>15 – 21/09</span></div>
+                  <div class="ses cancel"><div class="dt"><b>15</b><i></i></div><div class="bx" style="grid-template-columns:1fr"><div class="l"><b>Nghỉ</b><small>Cô Lan bận việc gia đình</small></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p class="caption">Pill lớp cuộn ngang một dòng thay vì tràn nhiều dòng. Timeline giữ nguyên cấu trúc, chỉ đổi cột số liệu thành một dòng phụ.</p>
+        </div>
+      </div>
+
+      <div class="grid3">
+        <div class="card"><h4>Điểm mạnh</h4><ul class="plain"><li>Ít thay đổi thói quen nhất: pill lớp, panel chi tiết, tab chương trình đều còn.</li><li>Tổng tuần trả lời đúng câu "họp tuần cần gì" mà trang tự mô tả.</li><li>Thẻ lớp gộp 5 thẻ + tiêu đề thành một khối, tiết kiệm 120px dọc.</li></ul></div>
+        <div class="card"><h4>Đánh đổi</h4><ul class="plain warn"><li>Timeline tốn chỗ dọc hơn bảng; tháng 8 buổi + 4 tiêu đề tuần cần cuộn.</li><li>Nhóm theo tuần cần helper <code>groupByWeek</code> và quy ước tuần bắt đầu Thứ Hai.</li><li>Vẫn hai nhánh render chi tiết (panel / sheet) như hiện tại.</li></ul></div>
+        <div class="card"><h4>Việc phải làm</h4><ul class="plain"><li>Mới: <code>class-hero-card.tsx</code>, <code>session-timeline.tsx</code>, <code>lib/week-groups.ts</code>.</li><li>Sửa: <code>classbook-page.tsx</code> (month stepper, thay stat cards), <code>classbook-stats.ts</code> (tổng tuần).</li><li>Xóa: <code>class-stat-cards.tsx</code>, <code>sessions-table.tsx</code>.</li><li>Ước lượng: 3 đến 4 ngày, không cần API mới.</li></ul></div>
+      </div>
+    </section>
+
+    <!-- ================= C ================= -->
+    <section id="opt-c">
+      <div class="sec-head">
+        <span class="cap">Phương án C</span>
+        <h2>Sổ lớp mở rộng tại chỗ</h2>
+        <p class="lede">Một bảng duy nhất, mật độ cao. Bấm một buổi thì ba tab Nhận xét, Giáo án, Điểm buổi mở rộng ngay dưới dòng đó, cùng một code path cho desktop lẫn điện thoại.</p>
+      </div>
+      <div class="thesis">
+        <div><span class="cap">Thesis</span>Sổ điểm giấy của giáo viên: mọi thứ trên một mặt, không panel, không sheet. Điểm nhớ: dòng mở rộng ba cột (nhận xét, giáo án, điểm) ngay trong bảng.</div>
+        <div><span class="cap">Thay đổi lớn</span>Chọn lớp bằng nút select (mở danh sách có tìm kiếm). KPI thành một dải chữ trên hairline, không thẻ. Bảng thêm cột Nhận xét và Chấm điểm dạng trạng thái.</div>
+        <div><span class="cap">Mobile</span>Bảng ẩn cột ĐTB và Doanh thu, dòng mở rộng xếp dọc 3 khối. Không HvModal, không biến thể sheet.</div>
+      </div>
+
+      <div class="frames">
+        <div class="desk">
+          <div class="frame">
+            <div class="bar"><i></i><i></i><i></i><span>Desktop 1280</span><span class="url">/classbook?class_id=…&session=…</span></div>
+            <div class="stage">
+              <div class="C">
+                <div class="tool">
+                  <div class="m-h1" style="margin-right:8px">Quản lý lớp học</div>
+                  <div class="sel">Toán 8 · Tối Thứ Ba<small>14 HS · Cô Lan</small><svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></div>
+                  <div class="stepper"><b>‹</b><span>Tháng 9/2026</span><b>›</b></div>
+                  <span class="sp"></span>
+                  <div class="m-seg" style="min-width:300px"><span class="on">Buổi học</span><span>Chương trình & giáo án</span></div>
+                  <button class="m-btn ghost icon" aria-label="Tải CSV"><svg class="i" viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v3h16v-3"/></svg></button>
+                </div>
+                <div class="strip">
+                  <div><span class="m-cap">SĨ SỐ</span><span class="m-num">14</span><small>tái tục 92%</small></div>
+                  <div><span class="m-cap">CHUYÊN CẦN</span><span class="m-num">93%</span><small>26/28 lượt</small></div>
+                  <div><span class="m-cap">ĐIỂM TB</span><span class="m-num">7,4</span><small>2 buổi</small></div>
+                  <div><span class="m-cap">LÃI/LỖ T9</span><span class="m-num">3.300.000đ</span><small>thu 3,9tr · chi 0,6tr</small></div>
+                </div>
+                <table>
+                  <thead><tr><th>BUỔI</th><th>BÀI HỌC</th><th>GIÁO ÁN</th><th>CÓ MẶT</th><th>ĐTB</th><th>DOANH THU</th><th>NHẬN XÉT</th><th>CHẤM ĐIỂM</th></tr></thead>
+                  <tbody>
+                    <tr><td class="d">Th 3, 01/09</td><td>Bài 5 · Phân tích đa thức thành nhân tử</td><td><span class="m-pill approved">Đã duyệt</span></td><td class="num">13/14<span class="m-bar"><i style="width:93%"></i></span></td><td class="num">7,6</td><td class="num">1.650.000đ</td><td><span class="m-pill done">Đã có</span></td><td><span class="m-pill done">14/14</span></td></tr>
+                    <tr class="on"><td class="d">Th 3, 08/09<small>đang mở</small></td><td>Bài 6 · Chia đa thức cho đơn thức</td><td><span class="m-pill approved">Đã duyệt</span></td><td class="num">13/14<span class="m-bar"><i style="width:93%"></i></span></td><td class="num">7,2</td><td class="num">1.650.000đ</td><td><span class="m-pill todo">Chưa có</span></td><td><span class="m-pill done">14/14</span></td></tr>
+                    <tr class="ex"><td colspan="8">
+                      <div class="exp">
+                        <div><h5>NHẬN XÉT CHUNG</h5><div class="m-textarea ph" style="min-height:96px">Không khí lớp, phần yếu cần lưu ý cho họp tuần…</div><button class="m-btn primary sm" style="align-self:flex-start">Lưu nhận xét</button></div>
+                        <div><h5>GIÁO ÁN · BÀI 6/24</h5><div class="ttl">Chia đa thức cho đơn thức</div><div class="kv"><span><b>Mục tiêu</b> HS chia được đa thức cho đơn thức, nhận diện khi nào phép chia hết.</span><span><b>Hoạt động</b> Ôn nhân đơn thức (10'), ví dụ mẫu (20'), luyện tập nhóm (40'), chữa bài (20').</span><span><b>Bài tập về nhà</b> SGK 63, 64, 65.</span></div><span class="m-pill approved" style="align-self:flex-start">Đã duyệt 06/09</span></div>
+                        <div><h5>ĐIỂM BUỔI · 3 ĐẦU ĐIỂM</h5>
+                          <div class="srow h"><span>HỌC SINH</span><span>Miệng</span><span>15 phút</span><span>1 tiết</span></div>
+                          <div class="srow"><span>Bé An</span><span class="m-score saved">8</span><span class="m-score saved">7,5</span><span class="m-score saved">8</span></div>
+                          <div class="srow"><span>Bảo Châu</span><span class="m-score saved">7</span><span class="m-score saved">8</span><span class="m-score saved">7,5</span></div>
+                          <div class="srow"><span>Gia Hân</span><span class="m-score saved">7</span><span class="m-score">8</span><span class="m-score empty">·</span></div>
+                          <div class="srow"><span class="muted">+ 11 học sinh</span><span></span><span></span><span></span></div>
+                          <button class="m-btn ghost sm" style="align-self:flex-start">Mở bảng đầy đủ</button>
+                        </div>
+                        <div class="ft"><span class="muted" style="font-size:12.5px">Di chuyển <span class="kbd">↑</span> <span class="kbd">↓</span> · mở/đóng <span class="kbd">Enter</span></span><span class="sp"></span><small>1 ô chưa lưu</small><button class="m-btn ghost sm">Đóng</button></div>
+                      </div>
+                    </td></tr>
+                    <tr><td class="d">Th 3, 15/09</td><td class="muted">Nghỉ · Cô Lan bận việc gia đình</td><td><span class="m-pill cancel">Buổi hủy</span></td><td class="muted">·</td><td class="muted">·</td><td class="muted">·</td><td class="muted">·</td><td class="muted">·</td></tr>
+                    <tr><td class="d">Th 3, 22/09</td><td>Bài 7 · Chia đa thức một biến</td><td><span class="m-pill pending">Chờ duyệt</span></td><td class="muted">14 dự kiến</td><td class="muted">·</td><td class="muted">·</td><td class="muted">·</td><td class="muted">·</td></tr>
+                    <tr><td class="d">Th 3, 29/09</td><td>Bài 8 · Ôn tập chương I</td><td><span class="m-pill none">Chưa soạn</span></td><td class="muted">14 dự kiến</td><td class="muted">·</td><td class="muted">·</td><td class="muted">·</td><td class="muted">·</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          <p class="caption">Dòng mở rộng viền mint trên dưới, ba khối cạnh nhau nên nhận xét, giáo án và điểm cùng hiện một lúc thay vì phải đổi tab. Chỉ một dòng mở tại một thời điểm; guard điểm chưa lưu chặn việc đổi dòng.</p>
+        </div>
+        <div class="mob">
+          <div class="frame phone">
+            <div class="bar"><i></i><i></i><span>390</span><span class="url">/classbook</span></div>
+            <div class="stage">
+              <div class="C" style="gap:10px">
+                <div class="m-h1">Quản lý lớp học</div>
+                <div class="tool"><div class="sel" style="width:100%">Toán 8 · Tối Thứ Ba<small style="margin-left:auto">14 HS</small><svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></div></div>
+                <div class="stepper" style="align-self:flex-start"><b>‹</b><span>Tháng 9/2026</span><b>›</b></div>
+                <div class="strip" style="grid-template-columns:1fr 1fr"><div><span class="m-cap">SĨ SỐ</span><span class="m-num">14</span></div><div><span class="m-cap">CHUYÊN CẦN</span><span class="m-num">93%</span></div><div><span class="m-cap">ĐIỂM TB</span><span class="m-num">7,4</span></div><div><span class="m-cap">LÃI/LỖ</span><span class="m-num" style="font-size:17px">3.300.000đ</span></div></div>
+                <table>
+                  <thead><tr><th>BUỔI</th><th>CÓ MẶT</th><th>VIỆC</th></tr></thead>
+                  <tbody>
+                    <tr><td class="d">01/09<small>Bài 5</small></td><td class="num">13/14</td><td><span class="m-pill done">Xong</span></td></tr>
+                    <tr class="on"><td class="d">08/09<small>Bài 6</small></td><td class="num">13/14</td><td><span class="m-pill todo">Nhận xét</span></td></tr>
+                    <tr class="ex"><td colspan="3"><div class="exp" style="grid-template-columns:1fr">
+                      <div><h5>NHẬN XÉT CHUNG</h5><div class="m-textarea ph" style="min-height:64px">Không khí lớp, phần yếu…</div><button class="m-btn primary sm" style="align-self:flex-start">Lưu nhận xét</button></div>
+                      <div style="border-top:1.5px solid var(--line-100)"><h5>ĐIỂM BUỔI</h5><div class="srow" style="grid-template-columns:1fr 52px 52px 52px"><span>Bé An</span><span class="m-score saved">8</span><span class="m-score saved">7,5</span><span class="m-score saved">8</span></div><div class="srow" style="grid-template-columns:1fr 52px 52px 52px"><span>Gia Hân</span><span class="m-score saved">7</span><span class="m-score">8</span><span class="m-score empty">·</span></div></div>
+                    </div></td></tr>
+                    <tr><td class="d">15/09<small>Nghỉ</small></td><td class="muted">·</td><td><span class="m-pill cancel">Hủy</span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          <p class="caption">Cùng bảng, cùng dòng mở rộng, chỉ ẩn bớt cột. Không cần <code>useMediaQuery</code> để đổi giữa panel và sheet.</p>
+        </div>
+      </div>
+
+      <div class="grid3">
+        <div class="card"><h4>Điểm mạnh</h4><ul class="plain"><li>Một cơ chế chi tiết cho mọi màn hình: bỏ nhánh <code>variant="sheet"</code>, bỏ HvModal ở page, guard đơn giản hơn.</li><li>Nhìn thấy trạng thái nhận xét và chấm điểm của cả tháng trong một lượt cuộn.</li><li>Điều hướng bàn phím tự nhiên, hợp giáo viên chấm nhanh hàng loạt.</li></ul></div>
+        <div class="card"><h4>Đánh đổi</h4><ul class="plain warn"><li>Mở rộng đẩy các dòng dưới xuống; lớp 20 HS thì khối điểm phải cuộn trong hoặc dựa vào "Mở bảng đầy đủ".</li><li>Mật độ cao, ít "mềm" hơn phần còn lại của app; cần giữ pill và nút chunky để không lạc tông.</li><li>8 cột ở 1024px sát giới hạn, phải cuộn ngang trong bảng.</li></ul></div>
+        <div class="card"><h4>Việc phải làm</h4><ul class="plain"><li>Mới: <code>class-select.tsx</code>, <code>class-kpi-strip.tsx</code>, <code>session-expand-row.tsx</code>.</li><li>Sửa: <code>sessions-table.tsx</code> (2 cột trạng thái, hàng mở rộng), <code>session-detail-panel.tsx</code> thành 3 khối cạnh nhau, <code>classbook-page.tsx</code> (bỏ isMobile + HvModal).</li><li>Xóa: <code>class-stat-cards.tsx</code>, nhánh sheet của panel.</li><li>Ước lượng: 3 đến 4 ngày, không cần API mới.</li></ul></div>
+      </div>
+    </section>
+
+    <!-- ================= SO SÁNH ================= -->
+    <section id="so-sanh">
+      <div class="sec-head">
+        <span class="cap">4 · So sánh</span>
+        <h2>Chọn theo cách trung tâm làm việc</h2>
+        <p class="lede">Ba phương án dùng chung palette, font, pill, nút chunky và panel mint. Khác nhau ở mô hình điều hướng và chỗ đặt chi tiết buổi.</p>
+      </div>
+      <div class="tablewrap">
+        <table class="spec">
+          <thead><tr><th>Tiêu chí</th><th>A · Bàn làm việc 3 cột</th><th>B · Dòng thời gian tuần</th><th>C · Sổ lớp mở rộng</th></tr></thead>
+          <tbody>
+            <tr><td>Hợp với</td><td>Chủ trung tâm duyệt nhiều lớp, GV dạy 3+ lớp</td><td>Họp tuần, chốt tháng, đọc xu hướng</td><td>GV chấm và nhận xét nhanh, dùng bàn phím</td></tr>
+            <tr><td>Nhiều lớp (10+)</td><td><span class="dot g"></span>Cột lớp cuộn + tìm kiếm</td><td><span class="dot y"></span>Pill cuộn ngang, khó quét</td><td><span class="dot g"></span>Select có tìm kiếm</td></tr>
+            <tr><td>Thấy việc cần làm</td><td><span class="dot g"></span>Ở cả lớp lẫn buổi</td><td><span class="dot y"></span>Ở buổi</td><td><span class="dot g"></span>2 cột trạng thái mỗi buổi</td></tr>
+            <tr><td>Chi tiết buổi</td><td>Panel phải, sheet mobile (2 nhánh)</td><td>Panel phải, sheet mobile (2 nhánh)</td><td><span class="dot g"></span>Hàng mở rộng, 1 nhánh</td></tr>
+            <tr><td>Chiều dọc cho 8 buổi</td><td><span class="dot g"></span>Gọn, bảng cuộn trong</td><td><span class="dot r"></span>Dài nhất (tiêu đề tuần)</td><td><span class="dot y"></span>Gọn khi đóng, dài khi mở</td></tr>
+            <tr><td>Thay đổi thói quen</td><td><span class="dot y"></span>Lớn: bỏ pill, thêm cột</td><td><span class="dot g"></span>Nhỏ nhất</td><td><span class="dot y"></span>Vừa: chi tiết đổi chỗ</td></tr>
+            <tr><td>API mới</td><td><span class="dot y"></span>Tổng hợp "cần làm" theo trung tâm</td><td><span class="dot g"></span>Không</td><td><span class="dot g"></span>Không</td></tr>
+            <tr><td>Ước lượng FE</td><td>4 đến 5 ngày</td><td>3 đến 4 ngày</td><td>3 đến 4 ngày</td></tr>
+            <tr><td>Rủi ro chính</td><td>Chật ở 1024 đến 1200px</td><td>Cuộn nhiều, tổng tuần cần quy ước</td><td>Khối điểm cao với lớp đông</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <h3>Đề xuất</h3>
+          <p style="font-size:14px">Nếu chỉ chọn một: <b>B</b> cho đợt này. Rủi ro thấp nhất, không cần API, giữ được panel và guard vừa làm xong ở nhánh chấm điểm, và trả lời đúng mục đích trang tự nêu (số liệu họp tuần).</p>
+          <p style="font-size:14px">Nếu chấp nhận thêm backend: <b>A</b> là hướng dài hạn vì cột lớp + bộ đếm cần làm dùng lại được cho Điểm danh và Chốt sổ, biến ba trang thành một bàn làm việc chung.</p>
+          <p style="font-size:14px"><b>C</b> đáng chọn nếu ưu tiên số một là xóa nhánh mobile riêng và giáo viên phàn nàn phải bấm nhiều để chấm.</p>
+        </div>
+        <div class="card">
+          <h3>Có thể ghép</h3>
+          <ul class="plain">
+            <li><b>B + C:</b> thẻ lớp và timeline của B, nhưng chi tiết buổi mở rộng tại chỗ như C. Bỏ được nhánh sheet mà vẫn giữ nhịp tuần.</li><li><b>A + B:</b> cột lớp của A, thẻ lớp và tổng tuần của B ở cột giữa. Đắt nhất, hợp khi đã có API cần làm.</li>
+            <li>Mọi phương án đều dùng chung: dải KPI 4 ô, month stepper, chip trạng thái nhận xét / chấm điểm, HvStateBlock cho trống / lỗi / đang tải.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= CHUNG ================= -->
+    <section id="chung">
+      <div class="sec-head">
+        <span class="cap">5 · Áp dụng cho mọi phương án</span>
+        <h2>Cải tiến không phụ thuộc lựa chọn</h2>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <h4>Ngôn ngữ trạng thái thay cho dấu gạch</h4>
+          <ul class="plain">
+            <li>Buổi chưa điểm danh: "14 dự kiến" ở cột có mặt, các cột số để chấm mờ, chip "Chưa điểm danh".</li>
+            <li>Buổi hủy: nền ngày coral nhạt, lý do hủy ở cột bài học, chip "Buổi hủy". Không lặp "—" 4 lần.</li>
+            <li>Chip nhận xét: Đã có / Chưa có. Chip chấm điểm: n/N đã chấm, vàng khi chưa đủ.</li>
+            <li>Dấu "—" chỉ còn dùng cho giá trị chưa tồn tại thật (điểm TB khi chưa chấm ai).</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4>Số liệu đầu trang</h4>
+          <ul class="plain">
+            <li>Tối đa 4 chỉ số: Sĩ số (kèm tái tục), Chuyên cần, Điểm TB, Lãi/lỗ. Tái tục chi tiết ở tab Chương trình (thẻ sĩ số theo tháng đã có).</li>
+            <li>Lãi/lỗ âm dùng <code>text-coral-600</code> như bảng buổi, dòng phụ "thu · chi" trên một dòng, không xuống hàng.</li>
+            <li>Số dùng <code>tabular-nums</code> để cột số thẳng hàng.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4>Điều hướng tháng và lớp</h4>
+          <ul class="plain">
+            <li>Month stepper ngay trên trang, ghi vào <code>?month=YYYY-MM</code> bên cạnh <code>class_id</code> để chia sẻ được link.</li>
+            <li>Lớp đang chọn hiện tên đầy đủ + giáo viên + lịch ở một chỗ, thay vì chỉ có pill.</li>
+            <li>Không có lớp nào: HvStateBlock "Chưa có lớp đang hoạt động" với nút "Tạo lớp" (chủ trung tâm) thay cho khung trống.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4>Kỹ thuật</h4>
+          <ul class="plain">
+            <li>Giữ nguyên hooks và guard điểm chưa lưu; chỉ đổi lớp trình bày. Test hiện có cho <code>classbook-page</code> cần cập nhật selector, không đổi hành vi.</li>
+            <li>Chip trạng thái tính từ dữ liệu đã có trong <code>deriveSessions</code> + <code>sessionNotes</code> + <code>sessionScores</code>, không cần API cho B và C.</li>
+            <li>Khối KPI và chip trạng thái nên là component trong <code>features/teaching/components</code>; nếu Điểm danh dùng lại thì mới đưa lên <code>components/hv</code>.</li>
+          </ul>
+        </div>
+      </div>
+      <p class="muted" style="font-size:13px">Ghi chú: mock dùng số liệu ví dụ (lớp Toán 8, tháng 9/2026), không phải dữ liệu thật. Bo góc 20 đến 24px và nền kem là quy ước sẵn có của design system Học Vui Mỗi Ngày nên được giữ nguyên.</p>
+    </section>
+  </main>
+</div>

@@ -1,0 +1,667 @@
+<title>Chấm điểm thành phần</title>
+<meta name="description" content="Redesign màn chấm điểm sau buổi học và màn định nghĩa bộ điểm khi có từ 5 cột điểm trở lên">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito:wght@600;700;800&display=swap">
+<style>
+  :root{
+    --cream-50:#fbfdfb;--cream-100:#f4f8f3;--cream-200:#eaf1ea;--cream-300:#dfe9df;
+    --ink-900:#1c3a31;--ink-700:#27433b;--ink-500:#5b756c;--ink-400:#86998f;--ink-300:#aab9b1;
+    --mint-50:#e9f7f1;--mint-100:#d3efe3;--mint-200:#a9e0cb;--mint-400:#5cc9a7;--mint-500:#3fa888;--mint-600:#2e8d6e;--mint-700:#1f6b53;
+    --sky-50:#eaf5fb;--sky-100:#d6ecf7;--sky-300:#7fc8e8;--sky-400:#4fa9d4;--sky-500:#2d7aa0;--sky-600:#226383;
+    --sun-100:#fff4d6;--sun-300:#ffd86b;--sun-400:#ffc83d;--sun-500:#f0a500;--sun-600:#b87d00;
+    --coral-100:#ffe7e1;--coral-300:#ff9b8a;--coral-400:#ff7a66;--coral-500:#e85a44;--coral-600:#b23a28;
+    --line-100:#eef4ee;--line-200:#e2ece2;--line-300:#cfe0d4;
+    --radius-xs:8px;--radius-sm:12px;--radius-md:16px;--radius-lg:20px;--radius-xl:24px;--radius-pill:999px;
+    --shadow-sm:0 2px 6px rgba(28,58,49,.08);--shadow-md:0 8px 20px -8px rgba(28,58,49,.18);--shadow-lg:0 18px 40px -18px rgba(28,58,49,.28);
+    --press-mint:0 5px 0 var(--mint-500);--press-sky:0 5px 0 var(--sky-400);
+    --font-display:"Baloo 2",system-ui,sans-serif;--font-body:"Nunito",system-ui,sans-serif;
+    --dur-fast:140ms;--dur-base:220ms;--dur-slow:360ms;--ease-out:cubic-bezier(.22,1,.36,1);
+    --w-page:1080px;--w-content:720px;
+    color-scheme:light;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth;scroll-padding-top:24px}
+  body{margin:0;background:var(--cream-100);color:var(--ink-700);font:600 15px/1.6 var(--font-body);-webkit-font-smoothing:antialiased}
+  h1,h2,h3,h4{font-family:var(--font-display);color:var(--ink-900);margin:0;line-height:1.2;text-wrap:balance}
+  h1{font-size:38px;font-weight:800}h2{font-size:26px;font-weight:800}h3{font-size:20px;font-weight:700}h4{font-size:17px;font-weight:700}
+  p{margin:0;text-wrap:pretty}
+  a{color:var(--mint-600);font-weight:700}
+  :focus-visible{outline:3px solid var(--sky-300);outline-offset:2px}
+  code{font:600 13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--cream-200);padding:1px 6px;border-radius:6px;color:var(--ink-900)}
+  .muted{color:var(--ink-500)}
+  .cap{font-size:12px;letter-spacing:.06em;text-transform:uppercase;font-weight:800;color:var(--ink-500)}
+  .shell{max-width:1320px;margin:0 auto;padding:32px 20px 96px;display:grid;grid-template-columns:1fr;gap:32px}
+  @media(min-width:1024px){.shell{grid-template-columns:236px minmax(0,var(--w-page));padding:40px 32px 120px}}
+  nav.toc{align-self:start;position:sticky;top:24px;display:none}
+  @media(min-width:1024px){nav.toc{display:block}}
+  nav.toc .brand{display:flex;align-items:center;gap:10px;margin-bottom:20px}
+  nav.toc .logo{width:40px;height:40px;border-radius:var(--radius-sm);background:var(--mint-400);box-shadow:0 3px 0 var(--mint-500);display:grid;place-items:center;color:#fff;font:800 20px var(--font-display)}
+  nav.toc strong{font:800 17px var(--font-display);color:var(--ink-900);display:block;line-height:1.15}
+  nav.toc ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+  nav.toc a{display:flex;gap:10px;align-items:baseline;padding:9px 12px;border-radius:14px;color:var(--ink-500);font-size:14px;text-decoration:none;transition:background var(--dur-fast) var(--ease-out)}
+  nav.toc a:hover{background:var(--cream-200);color:var(--ink-900)}
+  nav.toc a .n{font:800 12px var(--font-display);color:var(--ink-300);min-width:16px}
+  nav.toc .meta{margin-top:20px;padding:14px;border-radius:var(--radius-md);background:#fff;box-shadow:var(--shadow-sm);font-size:12.5px;color:var(--ink-500);display:flex;flex-direction:column;gap:4px}
+  nav.toc .meta b{color:var(--ink-900)}
+  main{display:flex;flex-direction:column;gap:56px;min-width:0}
+  section{display:flex;flex-direction:column;gap:20px}
+  .sec-head{display:flex;flex-direction:column;gap:6px}
+  .sec-head .lede{font-size:15px;color:var(--ink-500);max-width:65ch}
+  header.hero{background:#fff;border-radius:var(--radius-xl);box-shadow:var(--shadow-md);padding:32px;display:grid;gap:20px}
+  @media(min-width:720px){header.hero{grid-template-columns:1.3fr 1fr;align-items:end}}
+  header.hero .lede{font-size:16px;color:var(--ink-500);max-width:58ch;margin-top:10px}
+  .pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:var(--radius-pill);font:700 13px var(--font-display);background:var(--mint-50);color:var(--mint-600)}
+  .pill.sky{background:var(--sky-50);color:var(--sky-500)}.pill.sun{background:var(--sun-100);color:var(--sun-600)}.pill.coral{background:var(--coral-100);color:var(--coral-600)}.pill.neutral{background:var(--cream-200);color:var(--ink-500)}
+  .score{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+  .score .tile{background:var(--cream-100);border-radius:var(--radius-md);padding:14px 16px;display:flex;flex-direction:column;gap:2px}
+  .score .tile b{font:800 26px/1.1 var(--font-display);color:var(--ink-900);font-variant-numeric:tabular-nums}
+  .score .tile span{font-size:12.5px;color:var(--ink-500)}
+  .score .bad b{color:var(--coral-600)}.score .good b{color:var(--mint-600)}
+  .card{background:#fff;border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+  .card.flat{box-shadow:none;border:1.5px solid var(--line-200)}
+  .grid2{display:grid;gap:16px}@media(min-width:800px){.grid2{grid-template-columns:1fr 1fr}}
+  .tablewrap{overflow-x:auto;border-radius:var(--radius-lg);background:#fff;box-shadow:var(--shadow-sm)}
+  table.spec{border-collapse:separate;border-spacing:0;width:100%;font-size:13.5px}
+  table.spec th{background:var(--cream-200);text-align:left;font:800 12px var(--font-body);letter-spacing:.04em;text-transform:uppercase;color:var(--ink-500);padding:10px 12px;white-space:nowrap}
+  table.spec td{padding:10px 12px;border-top:1px solid var(--line-100);vertical-align:top}
+  table.spec td:first-child{font-weight:800;color:var(--ink-900);white-space:nowrap}
+  .no{color:var(--coral-600);font-weight:800}.ok{color:var(--mint-600);font-weight:800}
+
+  /* ---------- mock frame ---------- */
+  .frame{background:var(--cream-100);border:1.5px solid var(--line-200);border-radius:var(--radius-xl);padding:18px;display:flex;flex-direction:column;gap:12px;overflow:hidden}
+  .frame .fl{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:var(--ink-400)}
+  .frame .fl b{font-family:var(--font-display);color:var(--ink-900)}
+  .callouts{display:flex;flex-direction:column;gap:8px;font-size:14px}
+  .callouts li{display:flex;gap:10px;align-items:flex-start}
+  .callouts ol{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px}
+  .num{flex:none;width:22px;height:22px;border-radius:50%;background:var(--sun-400);color:var(--ink-900);font:800 12px/22px var(--font-display);text-align:center}
+  .num.red{background:var(--coral-400);color:#fff}
+  .tag{position:absolute;z-index:5;width:22px;height:22px;border-radius:50%;background:var(--sun-400);color:var(--ink-900);font:800 12px/22px var(--font-display);text-align:center;box-shadow:var(--shadow-sm)}
+
+  /* ---------- hv kit replicas ---------- */
+  .hvbtn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 18px;border-radius:var(--radius-md);font:800 15px var(--font-display);color:#fff;background:var(--mint-400);box-shadow:var(--press-mint);border:0;cursor:pointer;transition:transform var(--dur-fast) var(--ease-out),box-shadow var(--dur-fast);white-space:nowrap}
+  .hvbtn:active{transform:translateY(4px);box-shadow:0 1px 0 var(--mint-500)}
+  .hvbtn.sky{background:var(--sky-300);color:var(--sky-600);box-shadow:var(--press-sky)}
+  .hvbtn.ghost{background:transparent;color:var(--ink-500);box-shadow:none;border:2px solid var(--line-200)}
+  .hvbtn.ghost:active{transform:none}
+  .hvbtn.danger{background:var(--coral-400);box-shadow:0 5px 0 var(--coral-500)}
+  .hvbtn.icon{width:44px;padding:0}
+  .hvbtn.sm{font-size:14px;padding:0 14px}
+  .hvbtn[disabled]{background:var(--cream-200);color:var(--ink-400);box-shadow:none;cursor:default}
+  .badge{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:var(--radius-pill);font:800 12px var(--font-display);background:var(--cream-200);color:var(--ink-500);white-space:nowrap}
+  .badge.success{background:var(--mint-50);color:var(--mint-600)}.badge.info{background:var(--sky-50);color:var(--sky-500)}.badge.warning{background:var(--sun-100);color:var(--sun-600)}.badge.danger{background:var(--coral-100);color:var(--coral-600)}
+  .badge.click{cursor:pointer;border:1.5px solid transparent}.badge.click:hover{border-color:var(--mint-400);color:var(--mint-600);background:var(--mint-50)}
+  .notice{display:flex;gap:10px;padding:10px 14px;border-radius:var(--radius-sm);font-size:13.5px;background:var(--sky-50);color:var(--sky-600)}
+  .notice.warning{background:var(--sun-100);color:var(--sun-600)}
+  .seg{display:inline-flex;gap:4px;padding:4px;background:var(--cream-200);border-radius:14px}
+  .seg button{min-height:36px;padding:0 14px;border:0;border-radius:11px;background:transparent;font:800 13px var(--font-body);color:var(--ink-400);cursor:pointer}
+  .seg button[aria-selected="true"]{background:#fff;color:var(--mint-600);box-shadow:var(--shadow-sm)}
+  .hvinput{min-height:44px;width:100%;border:2px solid var(--line-200);border-radius:var(--radius-sm);padding:0 12px;font:700 15px var(--font-body);color:var(--ink-900);background:#fff;outline:none}
+  .hvinput:focus{border-color:var(--mint-400)}
+  .hvinput.err{border-color:var(--coral-400)}
+  .scorein{width:100%;min-width:64px;height:44px;border:2px solid var(--line-200);border-radius:var(--radius-sm);text-align:center;font:800 16px var(--font-body);color:var(--ink-900);background:#fff;outline:none;font-variant-numeric:tabular-nums;transition:background var(--dur-slow) var(--ease-out),border-color var(--dur-fast)}
+  .scorein:focus{border-color:var(--mint-400);box-shadow:0 0 0 3px var(--mint-100)}
+  .scorein.dirty{background:var(--sun-100);border-color:var(--sun-300)}
+  .scorein.saved{background:var(--mint-50);border-color:var(--mint-200)}
+  .scorein::placeholder{color:var(--ink-300);font-weight:700}
+  .modal{background:#fff;border-radius:var(--radius-xl);box-shadow:var(--shadow-lg);overflow:hidden;display:flex;flex-direction:column;max-width:100%}
+  .modal .mh{display:flex;align-items:center;justify-content:space-between;padding:18px 22px 10px}
+  .modal .mh h3{font-size:20px}
+  .modal .mb{padding:6px 22px 18px;display:flex;flex-direction:column;gap:14px}
+  .modal .mf{display:flex;justify-content:flex-end;gap:10px;padding:14px 22px;border-top:1.5px solid var(--line-200);background:#fff}
+  .xclose{width:44px;height:44px;border-radius:50%;border:0;background:var(--cream-200);color:var(--ink-500);font:800 16px var(--font-display);cursor:pointer}
+
+  /* ---------- current state mock ---------- */
+  .cur{display:grid;grid-template-columns:1.6fr 1fr;gap:12px;min-width:0}
+  .cur .sess{background:#fff;border-radius:20px;box-shadow:var(--shadow-sm);padding:12px;display:flex;flex-direction:column;gap:6px;font-size:12.5px}
+  .cur .sess div{padding:8px 10px;border-radius:10px;background:var(--cream-100);display:flex;justify-content:space-between}
+  .cur .sess div.sel{background:var(--mint-50);color:var(--mint-700);font-weight:800}
+  .cur .panel{background:#fff;border-radius:24px;box-shadow:var(--shadow-md);overflow:hidden;min-width:0;position:relative}
+  .cur .ph{background:var(--mint-400);color:#fff;padding:10px 14px;font:700 14px var(--font-display)}
+  .cur .tabs{margin:10px 12px 0;display:flex;gap:4px;background:var(--cream-200);padding:4px;border-radius:14px}
+  .cur .tabs span{flex:1;text-align:center;font-size:12px;font-weight:800;padding:6px;border-radius:11px;color:var(--ink-400)}
+  .cur .tabs span.on{background:#fff;color:var(--mint-600)}
+  .cur .gridwrap{margin:10px 12px 12px;max-height:180px;overflow:auto;border:1px dashed var(--coral-300);border-radius:8px}
+  .cur table{border-collapse:separate;border-spacing:0 4px;font-size:12.5px;min-width:max-content}
+  .cur th{padding:4px 6px;color:var(--ink-400);font-weight:800;white-space:nowrap}
+  .cur th:first-child,.cur td:first-child{position:sticky;left:0;background:#fff;text-align:left;font-weight:700}
+  .cur td{padding:2px 6px;text-align:center}
+  .cur td input{width:56px;height:32px;border:2px solid var(--line-200);border-radius:10px;text-align:center;font:800 12.5px var(--font-body)}
+  .cur .vang{display:inline-block;background:var(--coral-100);color:var(--coral-600);border-radius:999px;padding:2px 8px;font-size:11px;font-weight:800}
+  .cur .save{margin:0 12px 12px;display:inline-block;background:var(--cream-200);color:var(--ink-400);border-radius:14px;padding:8px 16px;font-size:12.5px;font-weight:800}
+  @media(max-width:700px){.cur{grid-template-columns:1fr}}
+
+  /* ---------- redesign A: by student ---------- */
+  .panelA{background:#fff;border-radius:24px;box-shadow:var(--shadow-md);overflow:hidden;width:100%;max-width:420px;margin:0 auto;position:relative}
+  .panelA .ph{background:var(--mint-400);color:#fff;padding:14px 18px;display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+  .panelA .ph h3{color:#fff;font-size:17px}
+  .panelA .ph .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  .panelA .ph .chips span{background:rgba(255,255,255,.22);border-radius:999px;padding:3px 10px;font-size:12px;font-weight:800}
+  .panelA .ph .x{width:44px;height:44px;border-radius:50%;border:0;background:rgba(255,255,255,.2);color:#fff;font:800 16px var(--font-display);flex:none}
+  .panelA .tabs{margin:12px 14px 0;display:flex;gap:4px;background:var(--cream-200);padding:4px;border-radius:14px}
+  .panelA .tabs span{flex:1;text-align:center;font-size:13px;font-weight:800;padding:8px;border-radius:11px;color:var(--ink-400)}
+  .panelA .tabs span.on{background:#fff;color:var(--mint-600);box-shadow:var(--shadow-sm)}
+  .panelA .head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 18px 6px}
+  .panelA .head p{font-size:12.5px;color:var(--ink-400)}
+  .stulist{display:flex;flex-direction:column;gap:6px;padding:6px 14px 0;max-height:520px;overflow-y:auto}
+  .stu{border-radius:14px;border:1.5px solid var(--line-100);background:#fff;overflow:hidden}
+  .stu .row{display:grid;grid-template-columns:1fr auto auto 24px;gap:10px;align-items:center;min-height:56px;padding:0 12px 0 14px;cursor:pointer;background:transparent;border:0;width:100%;text-align:left;font:inherit;color:inherit}
+  .stu .row:hover{background:var(--cream-100)}
+  .stu .name{font-weight:800;color:var(--ink-900);font-size:14.5px}
+  .stu .prog{display:flex;gap:3px;align-items:center}
+  .stu .prog i{width:7px;height:7px;border-radius:50%;background:var(--cream-300)}
+  .stu .prog i.on{background:var(--mint-400)}
+  .stu .prog i.dirty{background:var(--sun-400)}
+  .stu .prog small{font:800 11.5px var(--font-body);color:var(--ink-400);margin-left:4px;font-variant-numeric:tabular-nums}
+  .stu .avg{font:800 13px var(--font-display);color:var(--mint-600);background:var(--mint-50);border-radius:999px;padding:2px 9px;min-width:44px;text-align:center;font-variant-numeric:tabular-nums}
+  .stu .avg.empty{background:var(--cream-200);color:var(--ink-400)}
+  .stu .chev{color:var(--ink-300);transition:transform var(--dur-base) var(--ease-out);text-align:center}
+  .stu.open{border-color:var(--mint-200);box-shadow:var(--shadow-sm)}
+  .stu.open .chev{transform:rotate(180deg)}
+  .stu .body{display:none;padding:4px 14px 14px;border-top:1.5px solid var(--line-100);background:var(--cream-50)}
+  .stu.open .body{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px}
+  @media(max-width:360px){.stu.open .body{grid-template-columns:1fr}}
+  .stu .body label{display:flex;flex-direction:column;gap:4px;font:800 12px var(--font-body);color:var(--ink-500)}
+  .stu .body label span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .stu.absent .row{opacity:.7;cursor:default}
+  .stu.absent .row:hover{background:transparent}
+  .abs-sep{font:800 11.5px var(--font-body);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-400);padding:10px 6px 2px}
+  .statusbar{position:sticky;bottom:0;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 18px;border-top:1.5px solid var(--line-200);background:#fff;margin-top:8px}
+  .statusbar .st{font-size:13px;color:var(--ink-500)}
+  .statusbar .st b{color:var(--ink-900);font-family:var(--font-display)}
+  .statusbar .st .d{color:var(--sun-600);font-weight:800}
+
+  /* ---------- redesign B: full table ---------- */
+  .modalB{max-width:100%}
+  .gridB-wrap{max-height:460px;overflow:auto;border:1.5px solid var(--line-200);border-radius:var(--radius-md)}
+  table.gridB{border-collapse:separate;border-spacing:0;font-size:13.5px;min-width:max-content}
+  .gridB th{position:sticky;top:0;z-index:3;background:var(--cream-200);padding:8px 6px;width:76px;min-width:76px;max-width:76px;text-align:center;vertical-align:bottom}
+  .gridB th button{all:unset;cursor:pointer;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font:800 12px/1.25 var(--font-body);color:var(--ink-500);max-width:64px;text-align:center}
+  .gridB th button:hover,.gridB th.focus button{color:var(--mint-600)}
+  .gridB th.focus{background:var(--mint-50)}
+  .gridB th:first-child,.gridB td:first-child{position:sticky;left:0;z-index:2;background:#fff;text-align:left;width:180px;min-width:180px;max-width:180px;padding-left:12px}
+  .gridB th:first-child{z-index:4;background:var(--cream-200)}
+  .gridB th:last-child,.gridB td:last-child{position:sticky;right:0;z-index:2;background:var(--cream-50);width:64px;min-width:64px}
+  .gridB th:last-child{z-index:4;background:var(--cream-200)}
+  .gridB td{padding:3px 4px;border-bottom:1px solid var(--line-100);text-align:center;vertical-align:middle}
+  .gridB td:first-child{font-weight:800;color:var(--ink-900);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .gridB td:first-child small{display:block;font:700 11px var(--font-body);color:var(--ink-400)}
+  .gridB td.avg{font:800 13.5px var(--font-display);color:var(--mint-600);font-variant-numeric:tabular-nums}
+  .gridB tr.absent td{background:var(--cream-50)}
+  .gridB tr.absent td.vang{text-align:left;padding-left:12px}
+  .gridB tr.absent td.vang .badge{margin-left:4px}
+  .gridB tr:hover td{background:var(--cream-100)}
+  .gridB tr:hover td:first-child{background:var(--cream-100)}
+  .kbd{display:inline-block;padding:1px 7px;border-radius:6px;border:1.5px solid var(--line-300);background:#fff;font:800 12px ui-monospace,monospace;color:var(--ink-700)}
+  .legendB{display:flex;flex-wrap:wrap;gap:8px 16px;font-size:13px;color:var(--ink-500);align-items:center}
+  .sw{display:inline-block;width:14px;height:14px;border-radius:4px;border:1.5px solid var(--line-300);vertical-align:-2px;margin-right:4px}
+
+  /* ---------- redesign C: editor ---------- */
+  .comp-rows{display:flex;flex-direction:column;gap:8px}
+  .crow{display:grid;grid-template-columns:32px 24px 1fr 44px;gap:8px;align-items:center}
+  .crow .handle{width:32px;height:44px;display:grid;place-items:center;color:var(--ink-300);cursor:grab;border-radius:10px;font-size:18px;letter-spacing:-2px}
+  .crow .handle:hover{background:var(--cream-200);color:var(--ink-500)}
+  .crow .idx{font:800 12px var(--font-display);color:var(--ink-400);text-align:center}
+  .crow .err{grid-column:3;font-size:12.5px;color:var(--coral-600);font-weight:700;margin-top:-4px}
+  .crow.has-err .hvinput{border-color:var(--coral-400)}
+  .addrow{min-height:44px;border:2px dashed var(--line-300);border-radius:14px;background:transparent;color:var(--mint-600);font:800 14px var(--font-display);cursor:pointer;width:100%}
+  .addrow:hover{border-color:var(--mint-400);background:var(--mint-50)}
+  .preview{display:flex;gap:0;overflow-x:auto;border:1.5px solid var(--line-200);border-radius:12px;background:var(--cream-200)}
+  .preview div{flex:none;width:76px;padding:8px 6px;font:800 11.5px/1.25 var(--font-body);color:var(--ink-500);text-align:center;border-right:1px solid var(--line-200);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;height:44px}
+  .preview div.name{width:150px;text-align:left;padding-left:12px;background:#fff;color:var(--ink-900);display:block;line-height:28px}
+  .preview div.clip{color:var(--coral-600)}
+  .lbl{display:flex;justify-content:space-between;align-items:baseline;font:800 13px var(--font-body);color:var(--ink-700)}
+  .lbl .cnt{font:800 12px var(--font-display);color:var(--ink-400);font-variant-numeric:tabular-nums}
+  textarea.hvinput{min-height:180px;padding:10px 12px;line-height:1.5;resize:vertical;font-weight:700}
+  .tmpl{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  .tmpl .cap{margin-right:4px}
+
+  /* ---------- redesign D: list & assign ---------- */
+  .setcard{border:1.5px solid var(--line-200);border-radius:var(--radius-md);padding:14px 16px;display:flex;flex-direction:column;gap:8px}
+  .setcard .top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+  .setcard .top b{font:800 15px var(--font-display);color:var(--ink-900)}
+  .setcard .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .setcard .meta{font-size:12.5px;color:var(--ink-400)}
+  .radiocard{display:grid;grid-template-columns:24px 1fr;gap:12px;align-items:start;border:2px solid var(--line-200);border-radius:var(--radius-md);padding:12px 14px;cursor:pointer;background:#fff}
+  .radiocard:hover{border-color:var(--mint-200)}
+  .radiocard.on{border-color:var(--mint-400);background:var(--mint-50)}
+  .radiocard .dot{width:22px;height:22px;border-radius:50%;border:2px solid var(--line-300);margin-top:2px;display:grid;place-items:center}
+  .radiocard.on .dot{border-color:var(--mint-400)}
+  .radiocard.on .dot::after{content:"";width:12px;height:12px;border-radius:50%;background:var(--mint-400)}
+  .radiocard b{font:800 15px var(--font-display);color:var(--ink-900)}
+  .radiocard .chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+  .plan{display:grid;gap:14px}@media(min-width:720px){.plan{grid-template-columns:repeat(3,1fr)}}
+  .plan .col{background:#fff;border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:18px;display:flex;flex-direction:column;gap:10px}
+  .plan ol{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:14px}
+  .foot{font-size:12.5px;color:var(--ink-400);border-top:1.5px solid var(--line-200);padding-top:16px}
+  @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto}}
+</style>
+
+<div class="shell">
+<nav class="toc" aria-label="Mục lục">
+  <div class="brand"><div class="logo">T</div><div><strong>Chấm điểm thành phần</strong><span class="muted" style="font-size:12.5px">Redesign · 02/09/2026</span></div></div>
+  <ol>
+    <li><a href="#tomtat"><span class="n">0</span>Tóm tắt</a></li>
+    <li><a href="#hientrang"><span class="n">1</span>Hiện trạng</a></li>
+    <li><a href="#A"><span class="n">2</span>Chấm theo học sinh</a></li>
+    <li><a href="#B"><span class="n">3</span>Bảng đầy đủ</a></li>
+    <li><a href="#C"><span class="n">4</span>Soạn bộ điểm</a></li>
+    <li><a href="#D"><span class="n">5</span>Danh sách và gán</a></li>
+    <li><a href="#spec"><span class="n">6</span>Đặc tả và thứ tự làm</a></li>
+  </ol>
+  <div class="meta">
+    <span><b>Mã nguồn</b> component-score-grid, session-detail-panel, score-set-editor-modal, assign-score-set-dialog, class-config-page</span>
+    <span><b>Báo cáo</b> plans/reports/ui-redesign-260902-1029-…md</span>
+    <span><b>Ràng buộc</b> giữ nguyên DS, API giữ nguyên</span>
+  </div>
+</nav>
+
+<main>
+
+<header class="hero" id="tomtat">
+  <div>
+    <p class="cap">Redesign · Quản lý lớp học và Cấu hình lớp học</p>
+    <h1 style="margin-top:6px">Tám cột điểm trong bốn trăm pixel</h1>
+    <p class="lede">Bảng học sinh × cột điểm hiện nằm trong panel bên phải rộng chỉ 320–420px. Từ 5 cột trở lên là cuộn hai chiều, tiêu đề cột trôi mất, ô nhập 34px. Đề xuất tách thành hai cách nhập cùng một nguồn dữ liệu: theo học sinh cho panel và điện thoại, bảng đầy đủ cho màn rộng. Trình soạn bộ điểm đổi sang hàng 48px, lỗi theo hàng, dán danh sách và xem trước cột.</p>
+    <div class="pills">
+      <span class="pill">Giữ nguyên DS</span>
+      <span class="pill sky">Không đổi API (2 mục tuỳ chọn)</span>
+      <span class="pill sun">Mockup bấm được</span>
+    </div>
+  </div>
+  <div class="score" aria-label="Chỉ số">
+    <div class="tile bad"><b>760px</b><span>bề rộng bảng 8 cột hiện tại trong panel ~400px</span></div>
+    <div class="tile bad"><b>34px</b><span>chiều cao ô nhập, dưới chuẩn 44px</span></div>
+    <div class="tile good"><b>0</b><span>cuộn ngang ở cả hai chế độ mới</span></div>
+    <div class="tile good"><b>1</b><span>thao tác để tạo bộ 8 cột (dán 8 dòng)</span></div>
+  </div>
+</header>
+
+<!-- 1. current -->
+<section id="hientrang">
+  <div class="sec-head"><p class="cap">1 · Hiện trạng</p><h2>Bảng lưới trong panel hẹp</h2>
+    <p class="lede">Mô phỏng trung thực bố cục hiện tại của tab Điểm buổi với bộ điểm 8 cột. Khung đỏ nét đứt là vùng cuộn 2 chiều <code>max-h-[280px] overflow-auto</code>.</p></div>
+  <div class="frame">
+    <div class="fl"><b>/classbook · tab Buổi học · panel Chi tiết buổi</b><span>1080px, panel ≈ 400px</span></div>
+    <div class="cur">
+      <div class="sess">
+        <div><span>Th 2 · 01/09</span><span>18/20 · TB 7.8</span></div>
+        <div class="sel"><span>Th 4 · 02/09</span><span>17/20 · TB —</span></div>
+        <div><span>Th 6 · 04/09</span><span>Chưa điểm danh</span></div>
+        <div><span>Th 2 · 08/09</span><span>Chưa điểm danh</span></div>
+        <div><span>Th 4 · 10/09</span><span>Chưa điểm danh</span></div>
+      </div>
+      <div class="panel">
+        <span class="tag" style="left:8px;top:8px">1</span>
+        <div class="ph">Buổi 02/09 — IELTS 6.5 tối</div>
+        <div class="tabs"><span>Nhận xét</span><span>Giáo án</span><span class="on">Điểm buổi</span></div>
+        <div style="margin:8px 12px 0;font-size:11.5px;color:var(--ink-400)">Chấm điểm từng đầu điểm (0–10) rồi bấm lưu — điểm thành phần chưa vào báo cáo phụ huynh.</div>
+        <div class="gridwrap"><span class="tag" style="right:8px;top:80px">2</span>
+          <table>
+            <thead><tr><th>Học sinh</th><th>Listening</th><th>Reading</th><th>Writing Task 1</th><th>Writing Task 2</th><th>Speaking Part 1</th><th>Speaking Part 2 &amp; 3</th><th>Vocabulary</th><th>Grammar</th></tr></thead>
+            <tbody>
+              <tr><td>Nguyễn An</td><td><input value="7"></td><td><input value="6.5"></td><td><input></td><td><input></td><td><input></td><td><input></td><td><input></td><td><input></td></tr>
+              <tr><td>Trần Bảo</td><td><input value="8"></td><td><input></td><td><input></td><td><input></td><td><input></td><td><input></td><td><input></td><td><input></td></tr>
+              <tr><td>Lê Chi</td><td><span class="vang">Vắng</span></td><td><span class="vang">Vắng</span></td><td><span class="vang">Vắng</span></td><td><span class="vang">Vắng</span></td><td><span class="vang">Vắng</span></td><td><span class="vang">Vắng</span></td><td><span class="vang">Vắng</span></td><td><span class="vang">Vắng</span></td></tr>
+              <tr><td>Phạm Dũng</td><td><input></td><td><input></td><td><input></td><td><input></td><td><input></td><td><input></td><td><input></td><td><input></td></tr>
+              <tr><td>Hoàng Em</td><td><input></td><td><input></td><td><input></td><td><input></td><td><input></td><td><input></td><td><input></td><td><input></td></tr>
+              <tr><td>Vũ Giang</td><td><input></td><td><input></td><td><input></td><td><input></td><td><input></td><td><input></td><td><input></td><td><input></td></tr>
+              <tr><td>Đỗ Hà</td><td><input></td><td><input></td><td><input></td><td><input></td><td><input></td><td><input></td><td><input></td><td><input></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <span class="save">Lưu điểm thành phần</span>
+      </div>
+    </div>
+    <div class="callouts"><ol>
+      <li><span class="num">1</span><span>Panel <code>min-w-[320px] flex-1</code> cạnh bảng buổi <code>flex-[1.6]</code>: bảng 8 cột cần 760px nhưng chỉ có khoảng 400px.</span></li>
+      <li><span class="num">2</span><span>Cuộn ngang lẫn dọc trong vùng 280px: tiêu đề cột không dính, cuộn xuống là không biết đang nhập cột nào. Học sinh vắng chiếm 8 pill "Vắng".</span></li>
+      <li><span class="num red">!</span><span>Ô <code>type=number</code> 64×34px có spinner, Tab đi theo hàng, không có tiến độ, không biết ô nào chưa lưu, nút lưu là chuỗi className riêng. Dưới <code>sm</code> panel rơi xuống dưới bảng buổi và hiện được 2–3 cột.</span></li>
+    </ol></div>
+  </div>
+</section>
+
+<!-- 2. A -->
+<section id="A">
+  <div class="sec-head"><p class="cap">2 · Đề xuất A · mặc định trong panel và trên điện thoại</p><h2>Chấm theo học sinh</h2>
+    <p class="lede">Danh sách học sinh 56px một hàng, bấm mở thẻ chấm với các cột xếp lưới hai cột. Enter hoặc Tab ở ô cuối tự mở học sinh kế tiếp. Không có cuộn ngang ở bất kỳ bề rộng nào. Thử bấm vào một học sinh và gõ điểm.</p></div>
+  <div class="grid2">
+    <div class="frame">
+      <div class="fl"><b>Panel Chi tiết buổi · tab Điểm buổi</b><span>≤ 420px</span></div>
+      <div class="panelA" id="panelA">
+        <div class="ph">
+          <div><h3>Buổi 02/09 · IELTS 6.5 tối</h3><div class="chips"><span>17/20 có mặt</span><span>Điểm TB —</span></div></div>
+          <button class="x" aria-label="Đóng chi tiết buổi">✕</button>
+        </div>
+        <div class="tabs"><span>Nhận xét</span><span>Giáo án</span><span class="on">Điểm buổi</span></div>
+        <div class="head">
+          <p>8 cột điểm · 0–10, bước 0.5. Chưa vào báo cáo phụ huynh.</p>
+          <button class="hvbtn ghost sm" type="button" onclick="document.getElementById('B').scrollIntoView()">Mở bảng</button>
+        </div>
+        <div class="stulist" id="stulist"></div>
+        <div class="statusbar">
+          <div class="st" id="statusA"><b>0/17</b> học sinh đã chấm</div>
+          <button class="hvbtn sm" id="saveA" type="button" disabled>Lưu điểm</button>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Điều gì thay đổi</h3>
+      <div class="callouts"><ol>
+        <li><span class="num">1</span><span><b>Hàng học sinh</b> gồm tên, 8 chấm tiến độ (xanh đã có điểm, vàng chưa lưu), điểm trung bình buổi bằng StatPill. Nhìn danh sách là biết chấm tới đâu.</span></li>
+        <li><span class="num">2</span><span><b>Thẻ chấm</b> mở dưới hàng, chỉ một thẻ mở. Cột xếp lưới 2 cột, nhãn là tên cột (cắt bằng dấu ba chấm, có title). Ô 44px <code>inputmode="decimal"</code>, không spinner.</span></li>
+        <li><span class="num">3</span><span><b>Bàn phím</b>: Enter hoặc Tab sang ô kế; hết 8 ô thì tự mở học sinh tiếp theo và focus ô đầu. Chấm cả lớp từ tập bài không cần chạm chuột.</span></li>
+        <li><span class="num">4</span><span><b>Học sinh vắng</b> gom xuống cuối, một badge "Vắng" duy nhất, không mở được.</span></li>
+        <li><span class="num">5</span><span><b>Thanh trạng thái dính đáy</b>: số học sinh đã chấm, số ô chưa lưu, HvButton "Lưu điểm". Tự lưu khi rời ô sau 800ms bằng hook <code>use-debounced-save</code> đã có; ô vừa lưu nháy mint-50 rồi về trắng.</span></li>
+        <li><span class="num">6</span><span><b>Điện thoại</b>: dưới <code>sm</code> panel mở dạng bottom sheet HvModal, cùng danh sách này, lưới thẻ chấm về 1 cột dưới 360px.</span></li>
+      </ol></div>
+    </div>
+  </div>
+</section>
+
+<!-- 3. B -->
+<section id="B">
+  <div class="sec-head"><p class="cap">3 · Đề xuất B · màn ≥ 1024px</p><h2>Bảng đầy đủ trong HvModal cỡ lớn</h2>
+    <p class="lede">Nút "Mở bảng" mở HvModal <code>size="xl"</code> rộng 1080px, cao 90dvh. Tiêu đề cột dính trên, tên học sinh dính trái, cột trung bình dính phải. Bấm tiêu đề cột để chấm cả lớp theo cột đó. Thử gõ điểm rồi bấm Enter.</p></div>
+  <div class="frame">
+    <div class="fl"><b>HvModal size="xl" · Điểm buổi 02/09 · IELTS 6.5 tối</b><span>1080 × 90dvh</span></div>
+    <div class="modal modalB">
+      <div class="mh"><h3>Điểm buổi 02/09 · IELTS 6.5 tối</h3><button class="xclose" aria-label="Đóng">✕</button></div>
+      <div class="mb">
+        <div class="legendB">
+          <span><span class="kbd">Enter</span> xuống cùng cột</span>
+          <span><span class="kbd">Tab</span> sang phải</span>
+          <span><span class="kbd">Shift</span>+<span class="kbd">Enter</span> lên</span>
+          <span><span class="sw" style="background:var(--sun-100);border-color:var(--sun-300)"></span>chưa lưu</span>
+          <span><span class="sw" style="background:var(--mint-50);border-color:var(--mint-200)"></span>vừa lưu</span>
+        </div>
+        <div class="gridB-wrap"><table class="gridB" id="gridB"></table></div>
+      </div>
+      <div class="mf" style="justify-content:space-between">
+        <div class="st" id="statusB" style="font-size:13.5px;color:var(--ink-500)"><b style="font-family:var(--font-display);color:var(--ink-900)">0/17</b> học sinh đã chấm</div>
+        <div style="display:flex;gap:10px"><button class="hvbtn ghost">Đóng</button><button class="hvbtn" id="saveB" disabled>Lưu điểm</button></div>
+      </div>
+    </div>
+    <div class="callouts"><ol>
+      <li><span class="num">1</span><span>Cột tên 180px dính trái, mỗi cột điểm cố định 76px, tên cột <code>line-clamp-2</code> có <code>title</code>: 8 cột + TB = 852px, vừa 1080px không cuộn ngang. Tối đa 10 cột = 1004px vẫn vừa.</span></li>
+      <li><span class="num">2</span><span>Ô 44px; nền sun-100 khi chưa lưu, nền mint-50 khi vừa lưu rồi nhạt dần theo <code>--dur-slow</code>. Nhập sai (ngoài 0–10) viền coral và không gửi.</span></li>
+      <li><span class="num">3</span><span>Bấm tiêu đề cột thì cột tô mint-50 và focus ô đầu: chấm theo rubric cho cả lớp bằng Enter liên tiếp.</span></li>
+      <li><span class="num">4</span><span>Học sinh vắng gom cuối bảng, một ô gộp "Vắng". Cột TB tính trung bình các ô đã nhập, để giáo viên đối chiếu ngay.</span></li>
+      <li><span class="num">5</span><span>Footer HvModal dính, cùng thanh trạng thái và nút lưu với chế độ A. Đóng khi còn ô chưa lưu thì HvConfirmDialog hỏi "Lưu trước khi đóng?".</span></li>
+    </ol></div>
+  </div>
+</section>
+
+<!-- 4. C -->
+<section id="C">
+  <div class="sec-head"><p class="cap">4 · Đề xuất C · Cấu hình lớp học</p><h2>Trình soạn bộ điểm</h2>
+    <p class="lede">HvModal <code>size="lg"</code> 720px. Hai cách nhập chuyển bằng segmented: từng cột với hàng 48px, hoặc dán danh sách mỗi dòng một cột. Lỗi hiện ngay dưới hàng lỗi, có đếm và xem trước tiêu đề cột. Thử chuyển sang "Dán danh sách".</p></div>
+  <div class="frame">
+    <div class="fl"><b>HvModal size="lg" · Sửa bộ điểm</b><span>720px</span></div>
+    <div class="modal" style="max-width:720px;margin:0 auto;width:100%">
+      <div class="mh"><h3>Sửa bộ điểm</h3><button class="xclose" aria-label="Đóng">✕</button></div>
+      <div class="mb">
+        <div>
+          <div class="lbl"><span>Tên bộ điểm</span></div>
+          <input class="hvinput" value="IELTS 8 kỹ năng" style="margin-top:6px">
+        </div>
+        <div class="tmpl"><span class="cap">Mẫu nhanh</span>
+          <span class="badge click" data-tmpl="Listening,Reading,Writing,Speaking">4 kỹ năng IELTS</span>
+          <span class="badge click" data-tmpl="Bài tập về nhà,Kiểm tra 15 phút,Kiểm tra 1 tiết,Thuyết trình">Toán tiểu học</span>
+          <span class="badge click" data-tmpl="Từ vựng,Ngữ pháp,Nghe,Nói,Đọc,Viết">Tiếng Anh 6 phần</span>
+        </div>
+        <div>
+          <div class="lbl"><span>Cột điểm</span><span class="cnt" id="cnt">8/10 cột</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin:8px 0 10px;flex-wrap:wrap">
+            <div class="seg" role="tablist" id="segC">
+              <button role="tab" aria-selected="true" data-mode="rows">Từng cột</button>
+              <button role="tab" aria-selected="false" data-mode="paste">Dán danh sách</button>
+            </div>
+            <span class="muted" style="font-size:12.5px">Kéo tay cầm ≡ để sắp thứ tự</span>
+          </div>
+          <div id="modeRows" class="comp-rows"></div>
+          <div id="modePaste" hidden>
+            <textarea class="hvinput" id="pasteArea" placeholder="Mỗi dòng một cột điểm. Có thể dán từ Excel."></textarea>
+            <p class="muted" style="font-size:12.5px;margin-top:6px">Tách theo xuống dòng, dấu phẩy hoặc chấm phẩy. Bỏ dòng trống, bỏ trùng.</p>
+          </div>
+          <button class="addrow" id="addRow" type="button" style="margin-top:8px">+ Thêm cột điểm</button>
+        </div>
+        <div>
+          <div class="lbl"><span>Xem trước tiêu đề trong bảng chấm</span><span class="cnt">cột 76px</span></div>
+          <div class="preview" id="preview" style="margin-top:6px"></div>
+          <p class="muted" style="font-size:12.5px;margin-top:6px">Tên đỏ sẽ bị cắt sau 2 dòng; nên rút gọn hoặc viết tắt.</p>
+        </div>
+      </div>
+      <div class="mf"><button class="hvbtn ghost">Huỷ</button><button class="hvbtn">Lưu</button></div>
+    </div>
+    <div class="callouts"><ol>
+      <li><span class="num">1</span><span><b>Hàng 48px</b>: tay cầm kéo thả 32×44, số thứ tự, input 44px, nút xoá HvButton ghost 44px. Menu ↑ ↓ giữ trong hàng cho bàn phím (không hiện ở mockup).</span></li>
+      <li><span class="num">2</span><span><b>Lỗi theo hàng</b>: hàng trùng tên viền coral và ghi "Tên cột điểm bị trùng với cột 3" ngay dưới, thay vì gom ở cuối.</span></li>
+      <li><span class="num">3</span><span><b>Dán danh sách</b>: một textarea, tách dòng, đổ ngược lại thành hàng khi chuyển chế độ. Tạo bộ 8 cột trong một thao tác.</span></li>
+      <li><span class="num">4</span><span><b>Đếm n/10</b> cạnh nhãn; đủ 10 ẩn nút thêm và hiện HvNotice. Enter ở hàng cuối tự thêm hàng.</span></li>
+      <li><span class="num">5</span><span><b>Xem trước</b> mô phỏng đúng tiêu đề 76px của bảng đầy đủ, tô đỏ tên sẽ bị cắt. Mẫu nhanh chỉ điền sẵn phía web, là quyết định sản phẩm cần chốt.</span></li>
+    </ol></div>
+  </div>
+</section>
+
+<!-- 5. D -->
+<section id="D">
+  <div class="sec-head"><p class="cap">5 · Đề xuất D · Cấu hình lớp học</p><h2>Danh sách bộ điểm và gán cho lớp</h2>
+    <p class="lede">Cột hiển thị dạng chip thay vì chuỗi nối dấu phẩy. Gán bộ điểm chọn bằng thẻ radio có chip cột để thấy trước khi bấm Gán; lớp đã có điểm bị khoá ngay khi mở.</p></div>
+  <div class="grid2">
+    <div class="frame">
+      <div class="fl"><b>Bộ điểm</b><span>HvCard</span></div>
+      <div class="card" style="gap:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <div><h4>Bộ điểm</h4><p class="muted" style="font-size:12.5px">Mỗi bộ điểm gồm tối đa 10 cột, theo thứ tự.</p></div>
+          <button class="hvbtn sm">+ Tạo bộ điểm</button>
+        </div>
+        <div class="setcard">
+          <div class="top"><span><b>IELTS 8 kỹ năng</b> <span class="badge">8 cột</span></span><span style="display:flex;gap:6px"><button class="hvbtn ghost sm">Sửa</button><button class="hvbtn ghost sm" style="color:var(--coral-500)">Xoá</button></span></div>
+          <div class="chips"><span class="badge">Listening</span><span class="badge">Reading</span><span class="badge">Writing Task 1</span><span class="badge">Writing Task 2</span><span class="badge">Speaking Part 1</span><span class="badge">Speaking Part 2 &amp; 3</span><span class="badge">Vocabulary</span><span class="badge">Grammar</span></div>
+          <div class="meta">Đang dùng ở 3 lớp · sửa bộ không đổi lớp đã gán</div>
+        </div>
+        <div class="setcard">
+          <div class="top"><span><b>Toán tiểu học</b> <span class="badge">4 cột</span></span><span style="display:flex;gap:6px"><button class="hvbtn ghost sm">Sửa</button><button class="hvbtn ghost sm" style="color:var(--coral-500)">Xoá</button></span></div>
+          <div class="chips"><span class="badge">Bài tập về nhà</span><span class="badge">Kiểm tra 15 phút</span><span class="badge">Kiểm tra 1 tiết</span><span class="badge">Thuyết trình</span></div>
+          <div class="meta">Chưa gán cho lớp nào</div>
+        </div>
+      </div>
+    </div>
+    <div class="frame">
+      <div class="fl"><b>HvModal · Bộ điểm · IELTS 6.5 tối</b><span>448px</span></div>
+      <div class="modal" style="max-width:448px;margin:0 auto;width:100%">
+        <div class="mh"><h3>Bộ điểm · IELTS 6.5 tối</h3><button class="xclose" aria-label="Đóng">✕</button></div>
+        <div class="mb">
+          <div class="notice warning">Lớp đã có 34 điểm được ghi nhận nên không thể đổi hoặc xoá bộ điểm. Xoá điểm đã nhập trước khi thực hiện lại.</div>
+          <div class="lbl"><span>Chọn bộ điểm</span></div>
+          <div style="display:flex;flex-direction:column;gap:8px" id="radios">
+            <div class="radiocard on"><span class="dot"></span><div><b>IELTS 8 kỹ năng</b> <span class="badge success">Đang dùng</span><div class="chips"><span class="badge">Listening</span><span class="badge">Reading</span><span class="badge">Writing Task 1</span><span class="badge">Writing Task 2</span><span class="badge">+4</span></div></div></div>
+            <div class="radiocard"><span class="dot"></span><div><b>Toán tiểu học</b><div class="chips"><span class="badge">Bài tập về nhà</span><span class="badge">Kiểm tra 15 phút</span><span class="badge">Kiểm tra 1 tiết</span><span class="badge">Thuyết trình</span></div></div></div>
+          </div>
+        </div>
+        <div class="mf"><button class="hvbtn ghost">Đóng</button><button class="hvbtn danger" disabled>Xoá gán</button><button class="hvbtn" disabled>Gán</button></div>
+      </div>
+    </div>
+  </div>
+  <div class="card flat" style="gap:6px"><p class="cap">API tuỳ chọn cho phần này</p>
+    <p>"Đang dùng ở 3 lớp" cần <code>class_count</code> trong <code>GET /score-sets</code> (đếm theo <code>source_set_id</code>). Khoá sớm cần <code>has_scores</code> trong <code>GET /classes/:id/score-components</code>; hiện web chỉ biết qua 409 sau khi bấm. Không có hai trường này thì phần còn lại vẫn làm được.</p></div>
+</section>
+
+<!-- 6. spec -->
+<section id="spec">
+  <div class="sec-head"><p class="cap">6 · Đặc tả</p><h2>Thành phần, kích thước, bàn phím</h2></div>
+  <div class="tablewrap"><table class="spec">
+    <thead><tr><th>Thành phần</th><th>Kit hiện có</th><th>Mới hoặc mở rộng</th><th>Kích thước</th></tr></thead>
+    <tbody>
+      <tr><td>HvScoreInput</td><td>chưa có, đang là input thô</td><td>mới trong <code>components/hv</code>: <code>inputmode=decimal</code>, state idle · dirty · saved · invalid, dùng cho cả điểm chung</td><td>44px cao, 64–76px rộng, chữ 16px tabular</td></tr>
+      <tr><td>HvModal size</td><td>chỉ max-w-md 448px</td><td>thêm prop <code>size: md · lg · xl</code> = 448 · 720 · 1080px; xl cao 90dvh, body cuộn, footer dính</td><td>—</td></tr>
+      <tr><td>Hàng học sinh (A)</td><td>—</td><td><code>score-entry-by-student.tsx</code>, accordion, chấm tiến độ, StatPill TB</td><td>56px, padding 14px</td></tr>
+      <tr><td>Bảng (B)</td><td>—</td><td><code>score-entry-table-modal.tsx</code>, sticky 3 phía, colspan vắng, cột TB</td><td>tên 180px, cột 76px, ô 44px</td></tr>
+      <tr><td>Draft chung</td><td>useState trong grid</td><td><code>use-score-draft.ts</code>: draft, dirtyCount, parse, save, autosave 800ms qua <code>use-debounced-save</code></td><td>—</td></tr>
+      <tr><td>Hàng cột điểm (C)</td><td>input + glyph ↑↓</td><td>tay cầm kéo, input, HvButton ghost icon xoá; lỗi theo hàng</td><td>48px, tay cầm 32×44</td></tr>
+      <tr><td>Dán danh sách (C)</td><td>—</td><td>textarea, tách theo \n , ;</td><td>min 180px</td></tr>
+      <tr><td>Radio card (D)</td><td>select thô</td><td>thẻ chọn với chip HvBadge, trạng thái Đang dùng</td><td>padding 12/14, viền 2px</td></tr>
+      <tr><td>Nút lưu</td><td>chuỗi className saveButtonActive/Idle</td><td>HvButton sm; xoá <code>save-button-styles.ts</code></td><td>44px</td></tr>
+    </tbody>
+  </table></div>
+  <div class="plan">
+    <div class="col"><h4><span class="pill coral">Đợt 1</span> Nền và panel</h4><ol><li>HvScoreInput, HvModal size, use-score-draft</li><li>Chế độ theo học sinh thay grid hiện tại</li><li>Tự lưu khi rời ô + thanh trạng thái</li></ol></div>
+    <div class="col"><h4><span class="pill sun">Đợt 2</span> Bảng và soạn bộ</h4><ol><li>Bảng đầy đủ trong modal xl, bàn phím Enter/Tab</li><li>Trình soạn: hàng 48px, lỗi theo hàng, dán danh sách, đếm, xem trước</li></ol></div>
+    <div class="col"><h4><span class="pill sky">Đợt 3</span> Danh sách và gán</h4><ol><li>Bộ điểm dạng chip, xoá có lý do</li><li>Assign dialog radio card, khoá sớm</li><li>API tuỳ chọn class_count, has_scores</li></ol></div>
+  </div>
+  <div class="card flat"><h4>Cần chốt</h4>
+    <ul style="margin:0;padding-left:18px;font-size:14px;display:flex;flex-direction:column;gap:6px">
+      <li>Giữ nút "Lưu điểm" song song tự lưu khi rời ô (đề xuất), hay chỉ một?</li>
+      <li>Mẫu bộ điểm gợi ý có phù hợp tập khách hàng hiện tại không?</li>
+      <li>Có cần trọng số hoặc điểm tối đa theo cột? Nếu có là đổi schema, ngoài phạm vi này.</li>
+    </ul></div>
+  <div class="foot">Mockup dùng đúng token của Học Vui Mỗi Ngày (cream, ink, mint, sky, sun, coral; Baloo 2 / Nunito; bo 12–24px; bóng nhấn 0 5px 0). Dữ liệu là ví dụ. Báo cáo chi tiết: plans/reports/ui-redesign-260902-1029-session-scoring-and-score-sets.md</div>
+</section>
+</main>
+</div>
+
+<script>
+(function(){
+  var COMPS=["Listening","Reading","Writing Task 1","Writing Task 2","Speaking Part 1","Speaking Part 2 & 3","Vocabulary","Grammar"];
+  var PRESENT=["Nguyễn Minh An","Trần Gia Bảo","Phạm Tuấn Dũng","Hoàng Thu Em","Vũ Hương Giang","Đỗ Ngọc Hà","Bùi Khánh Huy","Lý Mai Khanh","Ngô Bảo Lâm","Đinh Hồng Minh","Phan Thảo Nhi","Tạ Quang Phúc","Lương Minh Quân","Dương Ánh Sao","Mai Anh Thư","Cao Đức Trí","Hồ Yến Vy"];
+  var ABSENT=["Lê Lan Chi","Trịnh Văn Kiên"];
+  var seed={"0#0":7,"0#1":6.5,"0#2":6,"0#3":6.5,"0#4":7,"0#5":7,"0#6":8,"0#7":7.5,"1#0":8,"1#1":7};
+  var stored={}; for(var k in seed) stored[k]=seed[k];
+  var draft={};
+  function val(s,c){var k=s+"#"+c; return k in draft?draft[k]:(k in stored?stored[k]:"");}
+  function parse(v){var n=parseFloat(String(v).replace(",",".")); if(isNaN(n)) return null; return Math.min(10,Math.max(0,Math.round(n*2)/2));}
+  function stuDone(s){var n=0;for(var c=0;c<COMPS.length;c++){if(val(s,c)!=="") n++;} return n;}
+  function stuAvg(s){var t=0,n=0;for(var c=0;c<COMPS.length;c++){var v=parse(val(s,c)); if(v!==null){t+=v;n++;}} return n?(t/n).toFixed(1):null;}
+  function dirtyCount(){return Object.keys(draft).length;}
+  function doneCount(){var n=0;for(var s=0;s<PRESENT.length;s++){if(stuDone(s)===COMPS.length) n++;} return n;}
+  function updateStatus(){
+    var d=dirtyCount(), done=doneCount();
+    var html="<b>"+done+"/"+PRESENT.length+"</b> học sinh đã chấm"+(d?' · <span class="d">'+d+' ô chưa lưu</span>':"");
+    document.getElementById("statusA").innerHTML=html;
+    document.getElementById("statusB").innerHTML=html.replace("<b>",'<b style="font-family:var(--font-display);color:var(--ink-900)">');
+    document.getElementById("saveA").disabled=!d; document.getElementById("saveB").disabled=!d;
+  }
+  function commit(){
+    var keys=Object.keys(draft);
+    keys.forEach(function(k){var v=parse(draft[k]); if(draft[k]===""||v===null) delete stored[k]; else stored[k]=v;});
+    draft={};
+    document.querySelectorAll(".scorein.dirty").forEach(function(i){i.classList.remove("dirty");i.classList.add("saved");setTimeout(function(){i.classList.remove("saved");},900);});
+    renderA(openIdx); renderB(); updateStatus();
+  }
+  document.getElementById("saveA").onclick=commit; document.getElementById("saveB").onclick=commit;
+  var autosaveT=null;
+  function scheduleAutosave(){clearTimeout(autosaveT); autosaveT=setTimeout(commit,1400);}
+
+  /* ---- A ---- */
+  var openIdx=1;
+  var list=document.getElementById("stulist");
+  function renderA(open){
+    openIdx=open; list.innerHTML="";
+    PRESENT.forEach(function(name,s){
+      var d=stuDone(s), avg=stuAvg(s), isOpen=s===open;
+      var el=document.createElement("div"); el.className="stu"+(isOpen?" open":"");
+      var dots=""; for(var c=0;c<COMPS.length;c++){var k=s+"#"+c; dots+='<i class="'+(k in draft?"dirty":(val(s,c)!==""?"on":""))+'"></i>';}
+      el.innerHTML='<button class="row" type="button" aria-expanded="'+isOpen+'"><span class="name">'+name+'</span><span class="prog">'+dots+'<small>'+d+'/'+COMPS.length+'</small></span><span class="avg'+(avg?"":" empty")+'">'+(avg||"—")+'</span><span class="chev">⌄</span></button><div class="body"></div>';
+      el.querySelector(".row").onclick=function(){renderA(isOpen?-1:s); if(!isOpen){var f=list.querySelector(".stu.open .scorein"); if(f) f.focus();}};
+      if(isOpen){
+        var body=el.querySelector(".body");
+        COMPS.forEach(function(cn,c){
+          var k=s+"#"+c;
+          var lab=document.createElement("label"); lab.innerHTML='<span title="'+cn+'">'+cn+'</span>';
+          var inp=document.createElement("input"); inp.className="scorein"+(k in draft?" dirty":""); inp.setAttribute("inputmode","decimal"); inp.placeholder="—"; inp.value=val(s,c); inp.setAttribute("aria-label","Điểm "+cn+" "+name);
+          inp.oninput=function(){draft[k]=inp.value; inp.classList.add("dirty"); updateStatus(); refreshRow(el,s);};
+          inp.onblur=function(){if(k in draft) scheduleAutosave();};
+          inp.onkeydown=function(e){ if(e.key==="Enter"){e.preventDefault(); var all=body.querySelectorAll(".scorein"); if(c<COMPS.length-1){all[c+1].focus();} else if(s<PRESENT.length-1){renderA(s+1); var f=list.querySelector(".stu.open .scorein"); if(f) f.focus(); list.querySelector(".stu.open").scrollIntoView({block:"nearest"});} } };
+          lab.appendChild(inp); body.appendChild(lab);
+        });
+      }
+      list.appendChild(el);
+    });
+    var sep=document.createElement("div"); sep.className="abs-sep"; sep.textContent="Vắng buổi này"; list.appendChild(sep);
+    ABSENT.forEach(function(name){var el=document.createElement("div"); el.className="stu absent"; el.innerHTML='<div class="row"><span class="name">'+name+'</span><span></span><span class="badge danger">Vắng</span><span></span></div>'; list.appendChild(el);});
+  }
+  function refreshRow(el,s){
+    var d=stuDone(s), avg=stuAvg(s); var dots=""; for(var c=0;c<COMPS.length;c++){var k=s+"#"+c; dots+='<i class="'+(k in draft?"dirty":(val(s,c)!==""?"on":""))+'"></i>';}
+    el.querySelector(".prog").innerHTML=dots+'<small>'+d+'/'+COMPS.length+'</small>';
+    var a=el.querySelector(".avg"); a.textContent=avg||"—"; a.className="avg"+(avg?"":" empty");
+  }
+
+  /* ---- B ---- */
+  var tbl=document.getElementById("gridB"); var focusCol=-1;
+  function renderB(){
+    var h='<thead><tr><th>Học sinh</th>';
+    COMPS.forEach(function(cn,c){h+='<th class="'+(c===focusCol?"focus":"")+'" title="'+cn+'"><button type="button" data-col="'+c+'">'+cn+'</button></th>';});
+    h+='<th>TB</th></tr></thead><tbody>';
+    PRESENT.forEach(function(name,s){
+      h+='<tr><td>'+name+'<small>'+stuDone(s)+'/'+COMPS.length+' cột</small></td>';
+      COMPS.forEach(function(cn,c){var k=s+"#"+c; h+='<td><input class="scorein'+(k in draft?" dirty":"")+'" inputmode="decimal" placeholder="—" data-s="'+s+'" data-c="'+c+'" value="'+val(s,c)+'" aria-label="Điểm '+cn+' '+name+'"></td>';});
+      h+='<td class="avg">'+(stuAvg(s)||"—")+'</td></tr>';
+    });
+    ABSENT.forEach(function(name){h+='<tr class="absent"><td>'+name+'</td><td class="vang" colspan="'+COMPS.length+'"><span class="badge danger">Vắng</span></td><td></td></tr>';});
+    tbl.innerHTML=h+'</tbody>';
+    tbl.querySelectorAll("th button").forEach(function(b){b.onclick=function(){focusCol=+b.dataset.col; renderB(); var f=tbl.querySelector('input[data-s="0"][data-c="'+focusCol+'"]'); if(f){f.focus(); f.select();}};});
+    tbl.querySelectorAll("input").forEach(function(inp){
+      var s=+inp.dataset.s, c=+inp.dataset.c, k=s+"#"+c;
+      inp.oninput=function(){draft[k]=inp.value; inp.classList.add("dirty"); updateStatus(); var tr=inp.closest("tr"); tr.querySelector(".avg").textContent=stuAvg(s)||"—"; tr.querySelector("td small").textContent=stuDone(s)+"/"+COMPS.length+" cột";};
+      inp.onblur=function(){if(k in draft) scheduleAutosave();};
+      inp.onkeydown=function(e){
+        var t=null;
+        if(e.key==="Enter"&&!e.shiftKey) t=tbl.querySelector('input[data-s="'+(s+1)+'"][data-c="'+c+'"]');
+        else if(e.key==="Enter"&&e.shiftKey) t=tbl.querySelector('input[data-s="'+(s-1)+'"][data-c="'+c+'"]');
+        else if(e.key==="ArrowDown") t=tbl.querySelector('input[data-s="'+(s+1)+'"][data-c="'+c+'"]');
+        else if(e.key==="ArrowUp") t=tbl.querySelector('input[data-s="'+(s-1)+'"][data-c="'+c+'"]');
+        if(t){e.preventDefault(); t.focus(); t.select();}
+      };
+    });
+  }
+
+  /* ---- C ---- */
+  var comps=COMPS.slice(); comps[7]="Grammar"; 
+  var rowsEl=document.getElementById("modeRows"), pasteEl=document.getElementById("modePaste"), area=document.getElementById("pasteArea"), cnt=document.getElementById("cnt"), prev=document.getElementById("preview"), addBtn=document.getElementById("addRow");
+  var mode="rows";
+  function dupIndex(i){var k=comps[i].trim().toLowerCase(); if(!k) return -1; for(var j=0;j<i;j++){if(comps[j].trim().toLowerCase()===k) return j;} return -1;}
+  function renderC(){
+    cnt.textContent=comps.length+"/10 cột"; addBtn.hidden=(mode==="paste")||comps.length>=10;
+    rowsEl.innerHTML="";
+    comps.forEach(function(name,i){
+      var dup=dupIndex(i), blank=name.trim()==="";
+      var r=document.createElement("div"); r.className="crow"+((dup>=0||blank)?" has-err":"");
+      r.innerHTML='<span class="handle" draggable="true" aria-label="Kéo để sắp thứ tự">≡</span><span class="idx">'+(i+1)+'</span><input class="hvinput" value="'+name.replace(/"/g,"&quot;")+'" aria-label="Tên cột điểm '+(i+1)+'"><button class="hvbtn ghost icon" type="button" aria-label="Xoá cột điểm '+(i+1)+'">✕</button>'+(dup>=0?'<div class="err">Tên cột điểm bị trùng với cột '+(dup+1)+'</div>':(blank?'<div class="err">Tên cột điểm không được để trống</div>':""));
+      var inp=r.querySelector("input");
+      inp.oninput=function(){comps[i]=inp.value; renderPreview(); var wasErr=r.classList.contains("has-err"); var nowErr=dupIndex(i)>=0||inp.value.trim()===""; if(wasErr!==nowErr) renderC();};
+      inp.onkeydown=function(e){if(e.key==="Enter"){e.preventDefault(); if(i===comps.length-1&&comps.length<10){comps.push(""); renderC(); rowsEl.querySelectorAll("input")[i+1].focus();} else { var n=rowsEl.querySelectorAll("input")[i+1]; if(n) n.focus(); }}};
+      r.querySelector("button").onclick=function(){if(comps.length>1){comps.splice(i,1); renderC();}};
+      var hd=r.querySelector(".handle");
+      hd.ondragstart=function(e){e.dataTransfer.setData("text/plain",i); r.style.opacity=.5;};
+      hd.ondragend=function(){r.style.opacity=1;};
+      r.ondragover=function(e){e.preventDefault(); r.style.background="var(--mint-50)";};
+      r.ondragleave=function(){r.style.background="";};
+      r.ondrop=function(e){e.preventDefault(); var from=+e.dataTransfer.getData("text/plain"); var m=comps.splice(from,1)[0]; comps.splice(i,0,m); renderC();};
+      rowsEl.appendChild(r);
+    });
+    renderPreview();
+  }
+  function renderPreview(){
+    prev.innerHTML='<div class="name">Học sinh</div>'+comps.map(function(n){var t=n.trim()||"…"; return '<div class="'+(t.length>18?"clip":"")+'" title="'+t+'">'+t+'</div>';}).join("")+'<div>TB</div>';
+  }
+  document.getElementById("segC").querySelectorAll("button").forEach(function(b){
+    b.onclick=function(){
+      var next=b.dataset.mode; if(next===mode) return;
+      if(next==="paste"){area.value=comps.join("\n");}
+      else { var seen={}; comps=area.value.split(/[\n,;]+/).map(function(s){return s.trim();}).filter(function(s){if(!s) return false; var k=s.toLowerCase(); if(seen[k]) return false; seen[k]=1; return true;}).slice(0,10); if(!comps.length) comps=[""]; }
+      mode=next; document.getElementById("segC").querySelectorAll("button").forEach(function(x){x.setAttribute("aria-selected",x===b);});
+      rowsEl.hidden=mode==="paste"; pasteEl.hidden=mode!=="paste"; renderC();
+    };
+  });
+  area.oninput=function(){var seen={}; var arr=area.value.split(/[\n,;]+/).map(function(s){return s.trim();}).filter(function(s){if(!s) return false; var k=s.toLowerCase(); if(seen[k]) return false; seen[k]=1; return true;}); cnt.textContent=Math.min(arr.length,10)+"/10 cột"+(arr.length>10?" · thừa "+(arr.length-10):""); comps=arr.slice(0,10); renderPreview();};
+  addBtn.onclick=function(){if(comps.length<10){comps.push(""); renderC(); var ins=rowsEl.querySelectorAll("input"); ins[ins.length-1].focus();}};
+  document.querySelectorAll(".badge.click[data-tmpl]").forEach(function(b){b.onclick=function(){comps=b.dataset.tmpl.split(","); if(mode==="paste") area.value=comps.join("\n"); renderC();};});
+
+  /* ---- D ---- */
+  document.querySelectorAll("#radios .radiocard").forEach(function(r){r.onclick=function(){document.querySelectorAll("#radios .radiocard").forEach(function(x){x.classList.remove("on");}); r.classList.add("on");};});
+
+  renderA(openIdx); renderB(); renderC(); updateStatus();
+})();
+</script>
