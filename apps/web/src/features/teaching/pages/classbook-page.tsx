@@ -49,8 +49,12 @@ type Navigation =
   | { kind: "view"; view: ClassbookView };
 
 const viewOptions: HvSegmentedOption<ClassbookView>[] = [
-  { value: "sessions", label: "Buổi học" },
-  { value: "course", label: "Chương trình & giáo án" },
+  { value: "sessions", label: "Buổi học", icon: <HvIcon name="table" size={16} /> },
+  {
+    value: "course",
+    label: "Chương trình & giáo án",
+    icon: <HvIcon name="file" size={16} />,
+  },
 ];
 
 /**
@@ -141,7 +145,10 @@ export function ClassbookPage() {
   // keepPreviousData holds the previous class's page while switching;
   // gate on the driving id so its prices never touch this class's rows.
   const enrollments = selectedClassId ? (enrollmentsPage?.items ?? []) : [];
+  const headcount = activeHeadcount(enrollments);
 
+  // The picker's second line names the class's giáo viên; a class between
+  // handoffs simply shows no name.
   const unitPriceByEnrollmentId = new Map(
     enrollments.map((enrollment) => [enrollment.id, enrollment.unit_price]),
   );
@@ -157,7 +164,7 @@ export function ClassbookPage() {
   const kpis: ClassKpi[] = [
     {
       label: "SĨ SỐ",
-      value: String(activeHeadcount(enrollments)),
+      value: String(headcount),
       sub: `tái tục ${retention.pct}%`,
     },
     {
@@ -313,45 +320,46 @@ export function ClassbookPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-3">
+      <header className="flex flex-col gap-3">
         <h1 className="font-display text-[26px] font-extrabold text-ink-900">Quản lý lớp học</h1>
-        {classes.length > 0 ? (
-          <ClassSelect
-            classes={classes}
-            selected={selectedClass}
-            headcount={activeHeadcount(enrollments)}
-            today={today}
-            onSelect={(classId) => requestNavigation({ kind: "class", classId })}
+        <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap">
+          {classes.length > 0 ? (
+            <ClassSelect
+              classes={classes}
+              selected={selectedClass}
+              today={today}
+              onSelect={(classId) => requestNavigation({ kind: "class", classId })}
+            />
+          ) : null}
+          <MonthStepper
+            month={month}
+            onChange={(next) => requestNavigation({ kind: "month", month: next })}
           />
-        ) : null}
-        <MonthStepper
-          month={month}
-          onChange={(next) => requestNavigation({ kind: "month", month: next })}
-        />
-        <div className="ml-auto flex items-center gap-2">
-          <HvSegmented<ClassbookView>
-            variant="tabs"
-            idBase="classbook-view"
-            aria-label="Chế độ xem"
-            options={viewOptions}
-            value={view}
-            onValueChange={(next) => {
-              if (next !== view) requestNavigation({ kind: "view", view: next });
-            }}
-          />
-          <HvButton
-            type="button"
-            variant="ghost"
-            size="sm"
-            aria-label="Tải dữ liệu lớp (CSV)"
-            title="Tải dữ liệu lớp (CSV)"
-            icon={<HvIcon name="arrow-down" />}
-            onClick={exportCsv}
-            disabled={!selectedClass}
-            className="w-11 px-0"
-          />
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <HvSegmented<ClassbookView>
+              variant="tabs"
+              idBase="classbook-view"
+              aria-label="Chế độ xem"
+              options={viewOptions}
+              value={view}
+              onValueChange={(next) => {
+                if (next !== view) requestNavigation({ kind: "view", view: next });
+              }}
+            />
+            <HvButton
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-label="Tải dữ liệu lớp (CSV)"
+              title="Tải dữ liệu lớp (CSV)"
+              icon={<HvIcon name="arrow-down" />}
+              onClick={exportCsv}
+              disabled={!selectedClass}
+              className="w-11 px-0"
+            />
+          </div>
         </div>
-      </div>
+      </header>
 
       {noClasses ? (
         <HvStateBlock

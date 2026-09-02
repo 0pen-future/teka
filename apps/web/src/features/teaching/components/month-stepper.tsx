@@ -1,4 +1,4 @@
-import { HvButton, HvIcon } from "@/components/hv";
+import { HvIcon } from "@/components/hv";
 
 import { shiftMonth } from "../lib/classbook-stats";
 
@@ -8,32 +8,37 @@ interface MonthStepperProps {
   onChange: (month: string) => void;
 }
 
-/** "‹ Tháng 9/2026 ›" — the toolbar's month control, mirrored in `?month=`. */
+const arrowClassName =
+  "grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-[var(--radius-sm)] text-ink-500 transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)] hover:bg-cream-100 hover:text-ink-900 focus-visible:ring-4 focus-visible:outline-none";
+
+/**
+ * "‹ Tháng 9/2026 ›" — the toolbar's month control, mirrored in `?month=`.
+ * One white card with the two arrows inside it, so it sits beside the class
+ * picker as a peer control rather than as two loose buttons.
+ */
 export function MonthStepper({ month, onChange }: MonthStepperProps) {
   const [year = "", monthNumber = ""] = month.split("-");
   return (
-    <div className="flex items-center gap-1">
-      <HvButton
+    <div className="inline-flex shrink-0 items-center gap-1 rounded-[var(--radius-md)] bg-white p-1 shadow-soft-sm">
+      <button
         type="button"
-        variant="ghost"
-        size="sm"
         aria-label="Tháng trước"
-        icon={<HvIcon name="chevron-left" />}
         onClick={() => onChange(shiftMonth(month, -1))}
-        className="w-11 px-0"
-      />
-      <span className="min-w-[124px] text-center font-display text-[15px] font-extrabold text-ink-900 tabular-nums">
+        className={arrowClassName}
+      >
+        <HvIcon name="chevron-left" size={18} />
+      </button>
+      <span className="min-w-[120px] text-center font-display text-[14px] font-extrabold text-ink-900 tabular-nums">
         Tháng {Number(monthNumber)}/{year}
       </span>
-      <HvButton
+      <button
         type="button"
-        variant="ghost"
-        size="sm"
         aria-label="Tháng sau"
-        icon={<HvIcon name="chevron-right" />}
         onClick={() => onChange(shiftMonth(month, 1))}
-        className="w-11 px-0"
-      />
+        className={arrowClassName}
+      >
+        <HvIcon name="chevron-right" size={18} />
+      </button>
     </div>
   );
 }

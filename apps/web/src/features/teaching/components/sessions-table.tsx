@@ -222,7 +222,7 @@ export function SessionsTable({
                       )}
                     </td>
 
-                    <td className={cn(cellClassName, "min-w-[96px]")}>
+                    <td className={cn(cellClassName, "min-w-[96px] whitespace-nowrap")}>
                       {cancelled ? (
                         muted
                       ) : planned ? (
@@ -230,7 +230,7 @@ export function SessionsTable({
                       ) : row.present === null ? (
                         muted
                       ) : (
-                        <span className="flex flex-col gap-1">
+                        <span className="inline-flex items-center gap-2">
                           <span className="font-extrabold text-ink-900 tabular-nums">
                             {row.present}/{row.eligible}
                           </span>
@@ -239,7 +239,7 @@ export function SessionsTable({
                             color={attendancePct < 70 ? "missing" : "mint"}
                             size="sm"
                             aria-label={`Có mặt ${attendancePct}%`}
-                            className="w-16"
+                            className="w-12 sm:w-16"
                           />
                         </span>
                       )}

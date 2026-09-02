@@ -94,6 +94,5 @@ export function formatScore(value: number | null): string {
   return value === null ? "—" : String(value);
 }
 
-export function formatAverage(value: number | null): string {
-  return value === null ? "—" : value.toFixed(1);
-}
+/** Row averages read like the ledger's ĐTB column: one decimal, Vietnamese comma. */
+export { formatLedgerScore as formatAverage } from "../lib/classbook-stats";

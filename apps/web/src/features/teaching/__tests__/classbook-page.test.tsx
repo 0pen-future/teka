@@ -175,7 +175,9 @@ describe("ClassbookPage sessions ledger", () => {
 
     await user.click(screen.getByRole("button", { name: "Mở Toán 6A" }));
     expect(await screen.findByText("SĨ SỐ")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Chọn lớp/ })).toHaveTextContent("Toán 6A");
+    const picker = screen.getByRole("combobox", { name: /^Chọn lớp/ });
+    // Class name and khung giờ read as one label; headcount and giáo viên follow.
+    expect(picker).toHaveTextContent("Toán 6A · Tối Thứ Ba");
   });
 
   it("shows the empty class state when no class is active", async () => {
@@ -183,7 +185,7 @@ describe("ClassbookPage sessions ledger", () => {
     renderClassbookPage();
 
     expect(await screen.findByText("Chưa có lớp đang hoạt động")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^Chọn lớp/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /^Chọn lớp/ })).not.toBeInTheDocument();
   });
 });
 
@@ -436,20 +438,57 @@ describe("ClassbookPage unsaved-score guards", () => {
       renderClassbookPage();
       await typeUnsavedComponentScore(user);
 
-      await user.click(screen.getByRole("button", { name: /^Chọn lớp/ }));
-      const picker = await screen.findByRole("dialog", { name: /^Chọn lớp/ });
-      await user.click(within(picker).getByRole("button", { name: /Toán 6B/ }));
+      await user.click(screen.getByRole("combobox", { name: /^Chọn lớp/ }));
+      const picker = await screen.findByRole("listbox");
+      // Options carry the khung giờ in the label so same-named classes differ.
+      expect(within(picker).getByRole("option", { name: /Toán 6B/ })).toHaveTextContent(
+        "Toán 6B · Tối Thứ Ba",
+      );
+      await user.click(within(picker).getByRole("option", { name: /Toán 6B/ }));
 
       const guard = await screen.findByRole("dialog", { name: "Còn 1 ô chưa lưu" });
-      // The modal hides the page from the a11y tree while it is open.
-      expect(screen.getByRole("button", { name: /^Chọn lớp/, hidden: true })).toHaveTextContent(
+      // The guard dialog hides the page from the a11y tree while it is open.
+      expect(screen.getByRole("combobox", { name: /^Chọn lớp/, hidden: true })).toHaveTextContent(
         "Toán 6A",
       );
 
       await user.click(within(guard).getByRole("button", { name: "Bỏ thay đổi" }));
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-      expect(screen.getByRole("button", { name: /^Chọn lớp/ })).toHaveTextContent("Toán 6B");
+      expect(screen.getByRole("combobox", { name: /^Chọn lớp/ })).toHaveTextContent("Toán 6B");
       expect(screen.queryByRole("region", { name: /Chi tiết buổi/ })).not.toBeInTheDocument();
+      expect(puts.count).toBe(0);
+    });
+
+    it("keeps the current class when the guard is dismissed with Ở lại", async () => {
+      getRosterStore().classes.push({
+        ...classWithSchedule,
+        id: "70000000-0000-4000-8000-000000000002",
+        name: "Toán 6B",
+      });
+      const puts = countScorePuts();
+      const user = userEvent.setup();
+      renderClassbookPage();
+      await typeUnsavedComponentScore(user);
+
+      await user.click(screen.getByRole("combobox", { name: /^Chọn lớp/ }));
+      await user.click(
+        within(await screen.findByRole("listbox")).getByRole("option", { name: /Toán 6B/ }),
+      );
+      const guard = await screen.findByRole("dialog", { name: "Còn 1 ô chưa lưu" });
+      await user.click(within(guard).getByRole("button", { name: "Ở lại" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+      const trigger = screen.getByRole("combobox", { name: /^Chọn lớp/ });
+      expect(trigger).toHaveTextContent("Toán 6A");
+      expect(screen.getByRole("region", { name: /Chi tiết buổi/ })).toBeInTheDocument();
+
+      // The Select is fully controlled, so the rejected pick must not stick:
+      // choosing the same class again has to reach the guard a second time.
+      await user.click(trigger);
+      await user.click(
+        within(await screen.findByRole("listbox")).getByRole("option", { name: /Toán 6B/ }),
+      );
+      expect(await screen.findByRole("dialog", { name: "Còn 1 ô chưa lưu" })).toBeInTheDocument();
       expect(puts.count).toBe(0);
     });
 

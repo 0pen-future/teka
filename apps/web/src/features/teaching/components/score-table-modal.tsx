@@ -8,6 +8,7 @@ import {
   type ParsedScore,
 } from "@/components/hv";
 import type { AttendanceRow } from "@/features/attendance";
+import { cn } from "@/lib/utils";
 
 import {
   areRowPropsEqual,
@@ -31,7 +32,15 @@ export interface ScoreTableModalProps {
 
 const NAME_COLUMN = "w-[180px] min-w-[180px]";
 const SCORE_COLUMN = "w-[72px] min-w-[72px]";
-const HEADER_CELL = "sticky top-0 z-10 bg-white px-1.5 py-2 text-[12px] font-bold text-ink-500";
+/**
+ * Header band shared with the roster table: cream-200, 12px extrabold
+ * uppercase ink-500. Sticky cells need an opaque background so rows scrolling
+ * underneath never bleed through.
+ */
+const HEADER_CELL =
+  "sticky top-0 z-10 bg-cream-200 px-2 py-2.5 text-[12px] font-extrabold uppercase tracking-[0.4px] text-ink-500";
+/** Body cells carry the hairline themselves: `border-separate` keeps sticky cells crisp but drops `<tr>` borders. */
+const BODY_CELL = "border-b border-line-100 py-1.5";
 
 interface TableRowProps {
   studentId: string;
@@ -62,9 +71,13 @@ const TableRow = React.memo(function TableRow({
     <tr>
       <th
         scope="row"
-        className={`sticky left-0 z-10 bg-white px-2 py-1 text-left font-normal ${NAME_COLUMN}`}
+        className={cn(
+          "sticky left-0 z-10 bg-white px-2 text-left font-normal",
+          BODY_CELL,
+          NAME_COLUMN,
+        )}
       >
-        <span className="block truncate text-[13.5px] font-bold text-ink-900">{name}</span>
+        <span className="block truncate text-[13.5px] font-extrabold text-ink-900">{name}</span>
         {displayNote || late ? (
           <span className="block truncate text-[12px] text-ink-400">
             {[displayNote, late ? "Đi muộn" : null].filter(Boolean).join(" · ")}
@@ -72,7 +85,7 @@ const TableRow = React.memo(function TableRow({
         ) : null}
       </th>
       {cells.map((cell) => (
-        <td key={cell.key} className={`px-1 py-1 ${SCORE_COLUMN}`}>
+        <td key={cell.key} className={cn("px-1", BODY_CELL, SCORE_COLUMN)}>
           <HvScoreInput
             ref={(element) => registerInput(cell.key, element)}
             size="sm"
@@ -86,7 +99,11 @@ const TableRow = React.memo(function TableRow({
         </td>
       ))}
       <td
-        className={`px-1.5 py-1 text-center text-[13.5px] font-bold text-ink-700 tabular-nums ${SCORE_COLUMN}`}
+        className={cn(
+          "px-1.5 text-center text-[13.5px] font-extrabold text-ink-700 tabular-nums",
+          BODY_CELL,
+          SCORE_COLUMN,
+        )}
       >
         {formatAverage(average)}
       </td>
@@ -153,12 +170,7 @@ export function ScoreTableModal({
           isSaving={draft.isSaving}
           onSave={() => void flush()}
           actions={
-            <HvButton
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => onOpenChange(false)}
-            >
+            <HvButton type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
               Đóng
             </HvButton>
           }
@@ -168,10 +180,7 @@ export function ScoreTableModal({
       <table className="w-full border-separate border-spacing-0 text-[13px]">
         <thead>
           <tr>
-            <th
-              scope="col"
-              className={`sticky top-0 left-0 z-20 bg-white px-2 py-2 text-left text-[12px] font-bold text-ink-500 ${NAME_COLUMN}`}
-            >
+            <th scope="col" className={cn(HEADER_CELL, "left-0 z-20 text-left", NAME_COLUMN)}>
               Học sinh
             </th>
             {components.map((component) => (
@@ -180,12 +189,12 @@ export function ScoreTableModal({
                 scope="col"
                 aria-label={component.name}
                 title={component.name}
-                className={`${HEADER_CELL} text-center ${SCORE_COLUMN}`}
+                className={cn(HEADER_CELL, "text-center", SCORE_COLUMN)}
               >
                 <span className="line-clamp-2 break-words">{component.name}</span>
               </th>
             ))}
-            <th scope="col" className={`${HEADER_CELL} text-center ${SCORE_COLUMN}`}>
+            <th scope="col" className={cn(HEADER_CELL, "text-center", SCORE_COLUMN)}>
               TB
             </th>
           </tr>
@@ -215,7 +224,7 @@ export function ScoreTableModal({
                 colSpan={components.length + 2}
                 className="sticky left-0 bg-cream-50 px-2 py-2.5 text-[12.5px] text-ink-500"
               >
-                <span className="font-bold">Vắng ({absentRows.length}):</span>{" "}
+                <span className="font-extrabold">Vắng ({absentRows.length}):</span>{" "}
                 {absentRows.map((row) => row.student_name).join(", ")}
               </td>
             </tr>

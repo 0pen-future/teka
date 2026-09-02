@@ -141,7 +141,7 @@ describe("ScoreTableModal", () => {
     const anRow = within(dialog)
       .getByRole("rowheader", { name: /Nguyễn Văn An/ })
       .closest("tr")!;
-    expect(within(anRow).getAllByRole("cell").at(-1)).toHaveTextContent("7.5");
+    expect(within(anRow).getAllByRole("cell").at(-1)).toHaveTextContent("7,5");
 
     await user.click(anQuiz);
     await user.keyboard("{Enter}");
