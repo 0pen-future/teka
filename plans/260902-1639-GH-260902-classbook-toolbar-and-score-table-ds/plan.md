@@ -1,6 +1,6 @@
 ---
 title: "Classbook toolbar & score-table modal design-system pass"
-status: implemented
+status: completed
 created: 2026-09-02
 branch: teka/260902-1241
 ---

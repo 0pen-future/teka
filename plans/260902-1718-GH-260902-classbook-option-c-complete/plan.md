@@ -1,6 +1,6 @@
 ---
 title: "Classbook — close the gap to design Option C"
-status: implemented
+status: completed
 updated: 2026-09-02
 created: 2026-09-02
 branch: teka/260902-1241
