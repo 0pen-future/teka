@@ -1,11 +1,12 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
-import { API_URL } from "@/test/msw/handlers";
+import { API_URL, ok } from "@/test/msw/handlers";
 import {
+  classWithSchedule,
   getRosterStore,
   resetRosterStore,
   rosterHandlers,
@@ -14,21 +15,48 @@ import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
 
 import { ClassbookPage } from "../pages/classbook-page";
-import { resetTeachingApiStore, seedTeachingSession, teachingHandlers } from "./teaching-handlers";
+import {
+  resetTeachingApiStore,
+  seedScoreComponents,
+  seedTeachingSession,
+  teachingHandlers,
+} from "./teaching-handlers";
+
+/** `classWithSchedule.id` in `roster-handlers.ts` — the only seeded class. */
+const CLASS_ID = "70000000-0000-4000-8000-000000000001";
 
 function renderClassbookPage(route = "/classbook") {
   signInAs(testPrimaryTeacher);
   return renderWithProviders(<ClassbookPage />, { route, path: "/classbook" });
 }
 
-/** The stat card element owning `label` — its value/sub live in siblings. */
-function statCard(label: string): HTMLElement {
+/** The KPI tile owning `label` — its value/sub are sibling `<dd>`s. */
+function kpi(label: string): HTMLElement {
   return screen.getByText(label).parentElement!;
 }
 
-/** The day-5 held session's table row (its label under the frozen clock). */
+/** The day-5 held session's BUỔI button (its label under the frozen clock). */
 async function findHeldRow() {
   return await screen.findByRole("button", { name: /Th 4, 05\/08/ });
+}
+
+/** The whole `<tr>` a BUỔI button sits in — the other cells live there. */
+function rowOf(button: HTMLElement): HTMLElement {
+  return button.closest("tr")!;
+}
+
+const heldRegionName = "Chi tiết buổi Th 4, 05/08";
+
+/** Replaces the scores PUT with a counter that acknowledges every save. */
+function countScorePuts() {
+  const counter = { count: 0 };
+  server.use(
+    http.put(`${API_URL}/sessions/:id/scores`, () => {
+      counter.count += 1;
+      return HttpResponse.json(ok([]));
+    }),
+  );
+  return counter;
 }
 
 beforeEach(() => {
@@ -54,56 +82,58 @@ beforeEach(() => {
 afterEach(() => {
   useAuthStore.getState().clearSession();
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
-describe("ClassbookPage stats", () => {
-  it("derives the five stat cards from sessions, rosters and enrollments", async () => {
+describe("ClassbookPage KPI strip", () => {
+  it("derives the four KPIs from sessions, rosters and enrollments", async () => {
     renderClassbookPage();
 
     // Rosters resolved: both held sessions show 1/1 present.
     expect(await screen.findAllByText("1/1")).toHaveLength(2);
 
-    const headcount = statCard("SĨ SỐ HIỆN TẠI");
+    const headcount = kpi("SĨ SỐ");
     expect(within(headcount).getByText("1")).toBeInTheDocument();
-    expect(within(headcount).getByText("học sinh đang học")).toBeInTheDocument();
-
-    const attendance = statCard("CHUYÊN CẦN THÁNG 8");
-    expect(within(attendance).getByText("100%")).toBeInTheDocument();
-    expect(within(attendance).getByText("2/2 lượt có mặt")).toBeInTheDocument();
-
     // The single enrollment spans July and August → full retention.
-    const retention = statCard("TÁI TỤC T7→T8");
-    expect(within(retention).getByText("100%")).toBeInTheDocument();
-    expect(within(retention).getByText("1 → 1 học sinh")).toBeInTheDocument();
+    expect(within(headcount).getByText("tái tục 100%")).toBeInTheDocument();
+
+    const attendance = kpi("CHUYÊN CẦN");
+    expect(within(attendance).getByText("100%")).toBeInTheDocument();
+    expect(within(attendance).getByText("2/2 lượt")).toBeInTheDocument();
 
     // No scores stored yet — dash, never a fake zero.
-    const average = statCard("ĐIỂM TB LỚP");
+    const average = kpi("ĐIỂM TB");
     expect(within(average).getByText("—")).toBeInTheDocument();
-    expect(within(average).getByText("trung bình 0 buổi")).toBeInTheDocument();
+    expect(within(average).getByText("0 buổi")).toBeInTheDocument();
 
     // 2 held × 1 present × 150.000đ = 300.000đ gross − 2 × 300.000đ cost.
-    const profit = statCard("LÃI/LỖ THÁNG 8");
-    expect(within(profit).getByText("-300.000đ")).toBeInTheDocument();
-    expect(within(profit).getByText("thu 300.000đ − chi 600.000đ")).toBeInTheDocument();
+    const profit = kpi("LÃI/LỖ T8");
+    expect(within(profit).getByText("-300.000đ")).toHaveClass("text-coral-600");
+    expect(within(profit).getByText("thu 300.000đ · chi 600.000đ")).toBeInTheDocument();
   });
 });
 
-describe("ClassbookPage sessions table", () => {
+describe("ClassbookPage sessions ledger", () => {
   it("renders held, cancelled and planned rows with the month window applied", async () => {
     renderClassbookPage();
 
-    const heldRow = await findHeldRow();
+    const heldRow = rowOf(await findHeldRow());
     expect(within(heldRow).getByText("1/1")).toBeInTheDocument();
     expect(within(heldRow).getByText("Chưa nộp")).toBeInTheDocument();
     // 1 present × 150.000đ − 300.000đ session cost.
     expect(within(heldRow).getByText("-150.000đ")).toBeInTheDocument();
+    // Work chips: no note yet, nobody scored out of the one present student.
+    expect(within(heldRow).getByText("Chưa có")).toBeInTheDocument();
+    expect(within(heldRow).getByText("0/1")).toBeInTheDocument();
+    // Phone-only VIỆC column names the next chore (hidden by CSS on sm+).
+    expect(within(heldRow).getByText("Nhận xét").closest("td")).toHaveClass("sm:hidden");
 
-    const cancelledRow = screen.getByRole("button", { name: /Th 7, 08\/08/ });
-    expect(within(cancelledRow).getByText("buổi hủy")).toBeInTheDocument();
+    const cancelledRow = rowOf(screen.getByRole("button", { name: /Th 7, 08\/08/ }));
     expect(within(cancelledRow).getByText("Nghỉ lễ")).toBeInTheDocument();
+    expect(within(cancelledRow).getByText("Buổi hủy")).toBeInTheDocument();
 
-    const plannedRow = screen.getByRole("button", { name: /Th 4, 19\/08/ });
-    expect(within(plannedRow).getByText("1 HS")).toBeInTheDocument();
+    const plannedRow = rowOf(screen.getByRole("button", { name: /Th 4, 19\/08/ }));
+    expect(within(plannedRow).getByText("1 dự kiến")).toBeInTheDocument();
     expect(within(plannedRow).getByText("Chưa nộp")).toBeInTheDocument();
 
     // Day 26 is after the frozen "today" (Aug 20) — outside the month window.
@@ -114,16 +144,59 @@ describe("ClassbookPage sessions table", () => {
     ).toBeInTheDocument();
   });
 
-  it("saves a session note from the detail panel and mirrors it in the table", async () => {
+  it("reads the month from the URL and shows the empty month state", async () => {
+    renderClassbookPage("/classbook?month=2026-07");
+
+    expect(await screen.findByText("Tháng 7/2026")).toBeInTheDocument();
+    expect(await screen.findByText("Chưa có buổi học nào trong tháng 7.")).toBeInTheDocument();
+    expect(screen.getByText("LÃI/LỖ T7")).toBeInTheDocument();
+  });
+
+  it("steps the month with the stepper", async () => {
+    const user = userEvent.setup();
+    renderClassbookPage();
+    await findHeldRow();
+
+    await user.click(screen.getByRole("button", { name: "Tháng trước" }));
+    expect(await screen.findByText("Tháng 7/2026")).toBeInTheDocument();
+    expect(await screen.findByText("Chưa có buổi học nào trong tháng 7.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Tháng sau" }));
+    expect(await screen.findByText("Tháng 8/2026")).toBeInTheDocument();
+    expect(await findHeldRow()).toBeInTheDocument();
+  });
+
+  it("explains a class_id that matches no active class and offers the first one", async () => {
+    const user = userEvent.setup();
+    renderClassbookPage("/classbook?class_id=70000000-0000-4000-8000-00000000dead");
+
+    expect(await screen.findByText("Không tìm thấy lớp")).toBeInTheDocument();
+    expect(screen.queryByText("SĨ SỐ")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Mở Toán 6A" }));
+    expect(await screen.findByText("SĨ SỐ")).toBeInTheDocument();
+    const picker = screen.getByRole("combobox", { name: /^Chọn lớp/ });
+    // Class name and khung giờ read as one label; headcount and giáo viên follow.
+    expect(picker).toHaveTextContent("Toán 6A · Tối Thứ Ba");
+  });
+
+  it("shows the empty class state when no class is active", async () => {
+    getRosterStore().classes.length = 0;
+    renderClassbookPage();
+
+    expect(await screen.findByText("Chưa có lớp đang hoạt động")).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /^Chọn lớp/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("ClassbookPage expanded session row", () => {
+  it("saves a session note from the expanded row and flips the row chip", async () => {
     const user = userEvent.setup();
     renderClassbookPage();
 
     await user.click(await findHeldRow());
-
-    expect(
-      await screen.findByRole("heading", { name: "Buổi Th 4, 05/08 — Toán 6A" }),
-    ).toBeInTheDocument();
-    expect(screen.getByText("1/1 có mặt")).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: heldRegionName })).toBeInTheDocument();
+    expect(within(rowOf(await findHeldRow())).getByText("đang mở")).toBeInTheDocument();
 
     const textarea = screen.getByLabelText("NHẬN XÉT CHUNG CỦA BUỔI");
     await user.type(textarea, "Lớp sôi nổi, cần ôn phân số");
@@ -135,9 +208,9 @@ describe("ClassbookPage sessions table", () => {
       await screen.findByText("Đã lưu nhận xét buổi Th 4, 05/08 — Toán 6A"),
     ).toBeInTheDocument();
     expect(screen.getByText("Đã lưu ✓")).toBeInTheDocument();
-    // Table row shows the saved note too (panel textarea + row cell).
-    const heldRow = await findHeldRow();
-    expect(within(heldRow).getByText("Lớp sôi nổi, cần ôn phân số")).toBeInTheDocument();
+    const heldRow = rowOf(await findHeldRow());
+    expect(within(heldRow).getByText("Đã có")).toBeInTheDocument();
+    expect(within(heldRow).queryByText("Chưa có")).not.toBeInTheDocument();
   });
 
   it("keeps the typed note draft editable when the save fails", async () => {
@@ -165,27 +238,49 @@ describe("ClassbookPage sessions table", () => {
     expect(screen.getByText("Chưa lưu")).toBeInTheDocument();
   });
 
-  it("saves scores and recomputes the session and class averages", async () => {
+  it("saves general scores inline and recomputes the session and class averages", async () => {
     const user = userEvent.setup();
     renderClassbookPage();
 
     await user.click(await findHeldRow());
-    await user.click(await screen.findByRole("tab", { name: "Điểm buổi" }));
 
     const input = await screen.findByLabelText("Điểm Nguyễn Văn An");
-    await user.type(input, "7.5");
-    expect(screen.getByText("Chưa lưu")).toBeInTheDocument();
+    expect(input).toHaveAttribute("type", "text");
+    // Vietnamese decimal comma is accepted and normalised to 7.5 on save.
+    await user.type(input, "7,5");
+    expect(screen.getByRole("status")).toHaveTextContent("1 ô chưa lưu");
 
     await user.click(screen.getByRole("button", { name: "Lưu điểm buổi" }));
 
     expect(
       await screen.findByText("Đã lưu điểm 1 học sinh — buổi Th 4, 05/08"),
     ).toBeInTheDocument();
-    const heldRow = await findHeldRow();
-    expect(within(heldRow).getByText("7.5")).toBeInTheDocument();
-    const average = statCard("ĐIỂM TB LỚP");
-    expect(within(average).getByText("7.5")).toBeInTheDocument();
-    expect(within(average).getByText("trung bình 1 buổi")).toBeInTheDocument();
+    const heldRow = rowOf(await findHeldRow());
+    expect(within(heldRow).getByText("7,5")).toBeInTheDocument();
+    const average = kpi("ĐIỂM TB");
+    expect(within(average).getByText("7,5")).toBeInTheDocument();
+    expect(within(average).getByText("1 buổi")).toBeInTheDocument();
+  });
+
+  it("blocks saving while a general score cannot be parsed", async () => {
+    const user = userEvent.setup();
+    renderClassbookPage();
+
+    await user.click(await findHeldRow());
+
+    const input = await screen.findByLabelText("Điểm Nguyễn Văn An");
+    await user.type(input, "abc");
+    await user.tab();
+
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveAccessibleDescription("Điểm 0–10, bước 0,5");
+    expect(screen.getByRole("button", { name: "Lưu điểm buổi" })).toBeDisabled();
+
+    await user.clear(input);
+    await user.type(input, "8");
+    await user.tab();
+    expect(input).not.toHaveAttribute("aria-invalid");
+    expect(screen.getByRole("button", { name: "Lưu điểm buổi" })).toBeEnabled();
   });
 
   it("shows the empty giáo án state for a session without a plan", async () => {
@@ -193,11 +288,39 @@ describe("ClassbookPage sessions table", () => {
     renderClassbookPage();
 
     await user.click(await findHeldRow());
-    await user.click(await screen.findByRole("tab", { name: "Giáo án" }));
 
     expect(
-      screen.getByText("Chưa có giáo án cho buổi này — soạn ở tab Chương trình & giáo án."),
+      await screen.findByText("Chưa có giáo án cho buổi này — soạn ở tab Chương trình & giáo án."),
     ).toBeInTheDocument();
+  });
+
+  it("closes with the footer button, Escape, and walks rows with the arrow keys", async () => {
+    const user = userEvent.setup();
+    renderClassbookPage();
+
+    const heldButton = await findHeldRow();
+    await user.click(heldButton);
+    await screen.findByRole("region", { name: heldRegionName });
+    await user.click(screen.getByRole("button", { name: "Đóng chi tiết buổi" }));
+    expect(screen.queryByRole("region", { name: /Chi tiết buổi/ })).not.toBeInTheDocument();
+    expect(heldButton).toHaveFocus();
+
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByLabelText("NHẬN XÉT CHUNG CỦA BUỔI"));
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("region", { name: /Chi tiết buổi/ })).not.toBeInTheDocument();
+    expect(heldButton).toHaveFocus();
+
+    await user.keyboard("{Enter}");
+    await screen.findByRole("region", { name: heldRegionName });
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("region", { name: /Chi tiết buổi/ })).not.toBeInTheDocument();
+    expect(heldButton).toHaveFocus();
+
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("button", { name: /Th 7, 08\/08/ })).toHaveFocus();
+    await user.keyboard("{ArrowUp}");
+    expect(heldButton).toHaveFocus();
   });
 });
 
@@ -225,5 +348,169 @@ describe("ClassbookPage CSV export", () => {
     expect(text).toContain('"Th 4, 05/08";"Đã dạy"');
     expect(text).toContain('"Hủy"');
     expect(text).toContain('"-150000"');
+  });
+});
+
+describe("ClassbookPage unsaved-score guards", () => {
+  it("saves an unsaved general score through 'Lưu và đóng' before switching sessions", async () => {
+    let markPuts = 0;
+    server.use(
+      http.put(`${API_URL}/sessions/:id/marks`, () => {
+        markPuts += 1;
+        return HttpResponse.json(ok([]));
+      }),
+    );
+    const user = userEvent.setup();
+    renderClassbookPage();
+
+    await user.click(await findHeldRow());
+    await user.type(await screen.findByLabelText("Điểm Nguyễn Văn An"), "8");
+    await user.click(screen.getByRole("button", { name: /Th 4, 12\/08/ }));
+
+    const guard = await screen.findByRole("dialog", { name: "Còn 1 ô chưa lưu" });
+    await user.click(within(guard).getByRole("button", { name: "Lưu và đóng" }));
+
+    expect(
+      await screen.findByText("Đã lưu điểm 1 học sinh — buổi Th 4, 05/08"),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByRole("region", { name: "Chi tiết buổi Th 4, 12/08" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(markPuts).toBe(1);
+  });
+
+  it("guards an unsaved note and saves it through 'Lưu và đóng'", async () => {
+    const user = userEvent.setup();
+    renderClassbookPage();
+
+    await user.click(await findHeldRow());
+    await user.type(await screen.findByLabelText("NHẬN XÉT CHUNG CỦA BUỔI"), "Lớp sôi nổi");
+    await user.keyboard("{Escape}");
+
+    const guard = await screen.findByRole("dialog", { name: "Còn 1 ô chưa lưu" });
+    await user.click(within(guard).getByRole("button", { name: "Lưu và đóng" }));
+
+    expect(
+      await screen.findByText("Đã lưu nhận xét buổi Th 4, 05/08 — Toán 6A"),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: /Chi tiết buổi/ })).not.toBeInTheDocument(),
+    );
+    expect(within(rowOf(await findHeldRow())).getByText("Đã có")).toBeInTheDocument();
+  });
+
+  async function typeUnsavedComponentScore(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(await findHeldRow());
+    await user.type(await screen.findByLabelText("Điểm 15 phút Nguyễn Văn An"), "9");
+  }
+
+  describe("with component scores", () => {
+    beforeEach(() => {
+      seedScoreComponents(CLASS_ID, [{ id: "comp-quiz", name: "15 phút", position: 1 }]);
+    });
+
+    it("guards switching sessions while component scores are unsaved", async () => {
+      const puts = countScorePuts();
+      const user = userEvent.setup();
+      renderClassbookPage();
+      await typeUnsavedComponentScore(user);
+
+      await user.click(screen.getByRole("button", { name: /Th 4, 12\/08/ }));
+      const guard = await screen.findByRole("dialog", { name: "Còn 1 ô chưa lưu" });
+      await user.click(within(guard).getByRole("button", { name: "Bỏ thay đổi" }));
+
+      expect(
+        await screen.findByRole("region", { name: "Chi tiết buổi Th 4, 12/08" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(puts.count).toBe(0);
+    });
+
+    it("guards switching classes while component scores are unsaved", async () => {
+      getRosterStore().classes.push({
+        ...classWithSchedule,
+        id: "70000000-0000-4000-8000-000000000002",
+        name: "Toán 6B",
+      });
+      const puts = countScorePuts();
+      const user = userEvent.setup();
+      renderClassbookPage();
+      await typeUnsavedComponentScore(user);
+
+      await user.click(screen.getByRole("combobox", { name: /^Chọn lớp/ }));
+      const picker = await screen.findByRole("listbox");
+      // Options carry the khung giờ in the label so same-named classes differ.
+      expect(within(picker).getByRole("option", { name: /Toán 6B/ })).toHaveTextContent(
+        "Toán 6B · Tối Thứ Ba",
+      );
+      await user.click(within(picker).getByRole("option", { name: /Toán 6B/ }));
+
+      const guard = await screen.findByRole("dialog", { name: "Còn 1 ô chưa lưu" });
+      // The guard dialog hides the page from the a11y tree while it is open.
+      expect(screen.getByRole("combobox", { name: /^Chọn lớp/, hidden: true })).toHaveTextContent(
+        "Toán 6A",
+      );
+
+      await user.click(within(guard).getByRole("button", { name: "Bỏ thay đổi" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(screen.getByRole("combobox", { name: /^Chọn lớp/ })).toHaveTextContent("Toán 6B");
+      expect(screen.queryByRole("region", { name: /Chi tiết buổi/ })).not.toBeInTheDocument();
+      expect(puts.count).toBe(0);
+    });
+
+    it("keeps the current class when the guard is dismissed with Ở lại", async () => {
+      getRosterStore().classes.push({
+        ...classWithSchedule,
+        id: "70000000-0000-4000-8000-000000000002",
+        name: "Toán 6B",
+      });
+      const puts = countScorePuts();
+      const user = userEvent.setup();
+      renderClassbookPage();
+      await typeUnsavedComponentScore(user);
+
+      await user.click(screen.getByRole("combobox", { name: /^Chọn lớp/ }));
+      await user.click(
+        within(await screen.findByRole("listbox")).getByRole("option", { name: /Toán 6B/ }),
+      );
+      const guard = await screen.findByRole("dialog", { name: "Còn 1 ô chưa lưu" });
+      await user.click(within(guard).getByRole("button", { name: "Ở lại" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+      const trigger = screen.getByRole("combobox", { name: /^Chọn lớp/ });
+      expect(trigger).toHaveTextContent("Toán 6A");
+      expect(screen.getByRole("region", { name: /Chi tiết buổi/ })).toBeInTheDocument();
+
+      // The Select is fully controlled, so the rejected pick must not stick:
+      // choosing the same class again has to reach the guard a second time.
+      await user.click(trigger);
+      await user.click(
+        within(await screen.findByRole("listbox")).getByRole("option", { name: /Toán 6B/ }),
+      );
+      expect(await screen.findByRole("dialog", { name: "Còn 1 ô chưa lưu" })).toBeInTheDocument();
+      expect(puts.count).toBe(0);
+    });
+
+    it("guards stepping the month while component scores are unsaved", async () => {
+      const puts = countScorePuts();
+      const user = userEvent.setup();
+      renderClassbookPage();
+      await typeUnsavedComponentScore(user);
+
+      await user.click(screen.getByRole("button", { name: "Tháng trước" }));
+      const guard = await screen.findByRole("dialog", { name: "Còn 1 ô chưa lưu" });
+      await user.click(within(guard).getByRole("button", { name: "Ở lại" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(screen.getByText("Tháng 8/2026")).toBeInTheDocument();
+      expect(screen.getByLabelText("Điểm 15 phút Nguyễn Văn An")).toHaveValue("9");
+
+      await user.click(screen.getByRole("button", { name: "Tháng trước" }));
+      const again = await screen.findByRole("dialog", { name: "Còn 1 ô chưa lưu" });
+      await user.click(within(again).getByRole("button", { name: "Bỏ thay đổi" }));
+      expect(await screen.findByText("Tháng 7/2026")).toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: /Chi tiết buổi/ })).not.toBeInTheDocument();
+      expect(puts.count).toBe(0);
+    });
   });
 });

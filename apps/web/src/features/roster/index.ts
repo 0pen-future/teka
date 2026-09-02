@@ -22,7 +22,7 @@ export {
 } from "./schemas/roster-schemas";
 export type { Class, Contact, Enrollment, Schedule, Student } from "./schemas/roster-schemas";
 
-export { formatScheduleSummary, formatWeekday } from "./lib/roster-format";
+export { formatScheduleLabel, formatScheduleSummary, formatWeekday } from "./lib/roster-format";
 export { currentMonth } from "./lib/current-month";
 export { activeSchedules } from "./lib/schedule-diff";
 export { canRecordAttendance, canSendClassReports, canWriteClass } from "./lib/class-permissions";

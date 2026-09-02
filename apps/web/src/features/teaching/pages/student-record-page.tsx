@@ -9,6 +9,7 @@ import { StudentSessionsTable } from "../components/student-sessions-table";
 import { useClassMarks } from "../hooks/use-class-marks";
 import { useClassTeaching } from "../hooks/use-class-teaching";
 import { useMonthSessions } from "../hooks/use-month-sessions";
+import { parseMonthParam } from "../lib/classbook-stats";
 import { useSaveMarks } from "../hooks/use-teaching-mutations";
 import { downloadCsv, type CsvCell } from "../lib/csv";
 import { meanScore } from "../lib/classbook-stats";
@@ -39,7 +40,10 @@ export function StudentRecordPage() {
     enrollments.find((item) => !item.ended_on) ??
     [...enrollments].sort((a, b) => a.started_on.localeCompare(b.started_on)).at(-1);
 
-  const { month, sessions, rosters, sessionsPending } = useMonthSessions(enrollment?.class_id);
+  const { month, sessions, rosters, sessionsPending } = useMonthSessions(
+    enrollment?.class_id,
+    parseMonthParam(null),
+  );
   const monthNumber = Number(month.label);
   const monthKey = month.from.slice(0, 7);
   const { sessionScores, personalNotes } = useClassMarks(enrollment?.class_id, monthKey);

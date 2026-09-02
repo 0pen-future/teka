@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { Navigate } from "react-router";
 
-import { HvButton, HvCard, hvToast } from "@/components/hv";
+import { HvButton, HvCard, HvConfirmDialog, HvStateBlock, hvToast } from "@/components/hv";
 import { useClassesList, type Class } from "@/features/roster";
 import { useCenterContext } from "@/features/teaching";
 
 import { AssignScoreSetDialog } from "../components/assign-score-set-dialog";
+import { ClassScoreSetTable, type ClassScoreSetRow } from "../components/class-score-set-table";
+import { ScoreSetCard } from "../components/score-set-card";
 import { ScoreSetEditorModal } from "../components/score-set-editor-modal";
 import { useDeleteScoreSet, useScoreSets } from "../hooks/use-score-sets";
 import type { ScoreSet } from "../schemas/grading";
@@ -30,7 +32,9 @@ export function ClassConfigPage() {
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <h1 className="font-display text-[26px] font-extrabold text-ink-900">Cấu hình lớp học</h1>
+        <h1 className="font-display text-[length:var(--text-xl)] font-bold text-ink-900">
+          Cấu hình lớp học
+        </h1>
         <p className="mt-1 text-[14px] text-ink-500">
           Tạo bộ điểm dùng chung cho trung tâm rồi gán từng lớp vào một bộ điểm để nhập điểm theo
           đúng cột.
@@ -47,7 +51,7 @@ function ScoreSetsSection() {
   const deleteMutation = useDeleteScoreSet();
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<ScoreSet | undefined>(undefined);
-  const [armedDeleteId, setArmedDeleteId] = useState<string | null>(null);
+  const [deletingSet, setDeletingSet] = useState<ScoreSet | null>(null);
 
   function openCreate() {
     setEditing(undefined);
@@ -59,15 +63,17 @@ function ScoreSetsSection() {
     setEditorOpen(true);
   }
 
-  function confirmDelete(scoreSet: ScoreSet) {
+  function confirmDelete() {
+    if (!deletingSet) return;
+    const scoreSet = deletingSet;
     deleteMutation.mutate(scoreSet.id, {
       onSuccess: () => {
         hvToast(`Đã xóa bộ điểm ${scoreSet.name}`, { variant: "success" });
-        setArmedDeleteId(null);
+        setDeletingSet(null);
       },
       onError: () => {
         hvToast("Có lỗi xảy ra, thử lại sau", { variant: "danger" });
-        setArmedDeleteId(null);
+        setDeletingSet(null);
       },
     });
   }
@@ -85,65 +91,53 @@ function ScoreSetsSection() {
       </div>
 
       {isPending ? (
-        <p className="mt-3 text-[13px] text-ink-400">Đang tải…</p>
+        <HvStateBlock state="loading" compact className="mt-3" title="Đang tải bộ điểm" />
       ) : isError || !scoreSets ? (
-        <p className="mt-3 text-[13px] text-ink-500">Không tải được danh sách bộ điểm.</p>
+        <HvStateBlock
+          state="error"
+          compact
+          className="mt-3"
+          title="Không tải được danh sách bộ điểm."
+        />
       ) : scoreSets.length === 0 ? (
-        <p className="mt-3 text-[13px] text-ink-400">Chưa có bộ điểm nào.</p>
+        <HvStateBlock
+          state="empty"
+          compact
+          className="mt-3"
+          title="Chưa có bộ điểm nào."
+          description="Tạo bộ điểm đầu tiên để gán cho các lớp."
+          action={
+            <HvButton size="sm" variant="secondary" onClick={openCreate}>
+              Tạo bộ điểm
+            </HvButton>
+          }
+        />
       ) : (
-        <ul className="mt-3 flex flex-col gap-2">
+        <ul className="mt-3 flex flex-col gap-3">
           {scoreSets.map((scoreSet) => (
-            <li
+            <ScoreSetCard
               key={scoreSet.id}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-md)] border border-line-200 px-3 py-2.5"
-            >
-              <div>
-                <p className="text-[13.5px] font-bold text-ink-900">{scoreSet.name}</p>
-                <p className="text-[12.5px] text-ink-400">{scoreSet.components.join(", ")}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                {armedDeleteId === scoreSet.id ? (
-                  <>
-                    <span className="text-[12.5px] font-bold text-ink-700">Xóa bộ điểm này?</span>
-                    <HvButton
-                      size="sm"
-                      variant="danger"
-                      disabled={deleteMutation.isPending}
-                      onClick={() => confirmDelete(scoreSet)}
-                    >
-                      {deleteMutation.isPending ? "Đang xóa…" : "Xác nhận xóa"}
-                    </HvButton>
-                    <HvButton
-                      size="sm"
-                      variant="ghost"
-                      disabled={deleteMutation.isPending}
-                      onClick={() => setArmedDeleteId(null)}
-                    >
-                      Hủy
-                    </HvButton>
-                  </>
-                ) : (
-                  <>
-                    <HvButton size="sm" variant="ghost" onClick={() => openEdit(scoreSet)}>
-                      Sửa
-                    </HvButton>
-                    <HvButton
-                      size="sm"
-                      variant="ghost"
-                      className="text-coral-500"
-                      onClick={() => setArmedDeleteId(scoreSet.id)}
-                    >
-                      Xóa
-                    </HvButton>
-                  </>
-                )}
-              </div>
-            </li>
+              scoreSet={scoreSet}
+              onEdit={() => openEdit(scoreSet)}
+              onDelete={() => setDeletingSet(scoreSet)}
+            />
           ))}
         </ul>
       )}
 
       <ScoreSetEditorModal open={editorOpen} onOpenChange={setEditorOpen} scoreSet={editing} />
+      <HvConfirmDialog
+        open={deletingSet !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeletingSet(null);
+        }}
+        title={deletingSet ? `Xóa bộ điểm ${deletingSet.name}?` : "Xóa bộ điểm?"}
+        description="Lớp đang dùng bộ điểm này vẫn giữ nguyên cột điểm đã gán."
+        confirmLabel="Xác nhận xóa"
+        tone="danger"
+        pending={deleteMutation.isPending}
+        onConfirm={confirmDelete}
+      />
     </HvCard>
   );
 }
@@ -151,10 +145,26 @@ function ScoreSetsSection() {
 function ClassAssignmentSection() {
   const { data: classesPage, isPending, isError } = useClassesList({ per_page: 100 });
   const { data: scoreSets } = useScoreSets();
-  const [assigningClass, setAssigningClass] = useState<Class | null>(null);
+  const [assigningClass, setAssigningClass] = useState<ClassScoreSetRow | null>(null);
+  // Classes that answered 409 this page session: reopening the dialog for one
+  // of them locks immediately instead of letting the owner retry into the
+  // same conflict. Cleared on reload; the API has no `has_scores` flag yet.
+  const [lockedClassIds, setLockedClassIds] = useState<ReadonlySet<string>>(() => new Set());
 
-  const classes = classesPage?.items ?? [];
+  const rows: ClassScoreSetRow[] = (classesPage?.items ?? []).map((klass: Class) => ({
+    classId: klass.id,
+    className: klass.name,
+  }));
   const canAssign = Boolean(scoreSets && scoreSets.length > 0);
+
+  function markLocked(classId: string) {
+    setLockedClassIds((prev) => {
+      if (prev.has(classId)) return prev;
+      const next = new Set(prev);
+      next.add(classId);
+      return next;
+    });
+  }
 
   return (
     <HvCard>
@@ -162,42 +172,23 @@ function ClassAssignmentSection() {
       <p className="mt-0.5 text-[12.5px] text-ink-400">
         Lớp đã có điểm được ghi nhận không thể đổi hoặc xóa bộ điểm đang gán.
       </p>
+      {!canAssign ? (
+        <p className="mt-1 text-[12.5px] font-bold text-sun-600">Tạo ít nhất một bộ điểm trước</p>
+      ) : null}
 
       {isPending ? (
-        <p className="mt-3 text-[13px] text-ink-400">Đang tải…</p>
+        <HvStateBlock state="loading" compact className="mt-3" title="Đang tải danh sách lớp" />
       ) : isError ? (
-        <p className="mt-3 text-[13px] text-ink-500">Không tải được danh sách lớp.</p>
-      ) : classes.length === 0 ? (
-        <p className="mt-3 text-[13px] text-ink-400">Chưa có lớp nào.</p>
+        <HvStateBlock
+          state="error"
+          compact
+          className="mt-3"
+          title="Không tải được danh sách lớp."
+        />
+      ) : rows.length === 0 ? (
+        <HvStateBlock state="empty" compact className="mt-3" title="Chưa có lớp nào." />
       ) : (
-        <div className="mt-3 overflow-x-auto">
-          <table className="w-full min-w-[420px] border-collapse text-[13.5px]">
-            <thead>
-              <tr>
-                <th className="py-2 pr-3 text-left font-bold text-ink-500">Lớp</th>
-                <th className="py-2 pr-3 text-right font-bold text-ink-500">Bộ điểm</th>
-              </tr>
-            </thead>
-            <tbody>
-              {classes.map((klass) => (
-                <tr key={klass.id} className="border-t border-line-200">
-                  <td className="py-2 pr-3 text-ink-900">{klass.name}</td>
-                  <td className="py-2 pr-3 text-right">
-                    <HvButton
-                      size="sm"
-                      variant="ghost"
-                      disabled={!canAssign}
-                      title={canAssign ? undefined : "Tạo ít nhất một bộ điểm trước"}
-                      onClick={() => setAssigningClass(klass)}
-                    >
-                      Gán bộ điểm
-                    </HvButton>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ClassScoreSetTable rows={rows} canAssign={canAssign} onAssign={setAssigningClass} />
       )}
 
       {assigningClass ? (
@@ -208,9 +199,11 @@ function ClassAssignmentSection() {
               setAssigningClass(null);
             }
           }}
-          classId={assigningClass.id}
-          className={assigningClass.name}
+          classId={assigningClass.classId}
+          className={assigningClass.className}
           scoreSets={scoreSets ?? []}
+          locked={lockedClassIds.has(assigningClass.classId)}
+          onLocked={() => markLocked(assigningClass.classId)}
         />
       ) : null}
     </HvCard>

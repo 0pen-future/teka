@@ -12,4 +12,12 @@ describe("ProgressBar", () => {
 
     expect(fill).toHaveClass("bg-coral-400");
   });
+
+  it("names the progressbar element from aria-label, not the wrapper", () => {
+    render(<ProgressBar value={50} aria-label="Có mặt 50%" className="w-16" />);
+
+    const track = screen.getByRole("progressbar", { name: "Có mặt 50%" });
+    expect(track).toHaveAttribute("aria-valuenow", "50");
+    expect(track.parentElement).toHaveClass("w-16");
+  });
 });

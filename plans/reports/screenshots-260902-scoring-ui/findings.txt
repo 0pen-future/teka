@@ -1,0 +1,31 @@
+editor@390: body 390/390; horizontal scroll containers: none
+class-config@1080: body 1080/1080; horizontal scroll containers: none
+class-config@390: body 390/390; horizontal scroll containers: none
+classbook: 2 session rows
+classbook: held session with score inputs found = true
+panel@1280: body 1280/1280; horizontal scroll containers: none
+panel@1080: body 1080/1080; horizontal scroll containers: none
+full table: 12 column headers
+table@1280: body 1280/1280; horizontal scroll containers: none
+table@1080: body 1080/1080; horizontal scroll containers: none
+table@390: body 390/390; horizontal scroll containers: none
+guard: not shown
+sheet@390: body 390/390; horizontal scroll containers: none
+
+# Lần chạy 2 (shots2.mjs — guard không resize, 390px mở từ đầu)
+A: held session found = true
+A guard: shown; save disabled=true; focused="Ở lại"; alert="Còn 1 ô không hợp lệ — sửa hoặc xóa nội dung ô trước khi lưu."
+A guard: after "Ở lại" cell value="abc", panel open=true
+A guard(dirty): shown; focused="Lưu và đóng"; save disabled=false
+A guard(dirty): after discard panel open=false
+A table@1280 sticky: header sticky top=0px left=0px; name-header sticky top=0px left=0px; first-col cell sticky top=auto left=0px; header line-clamp=none,2
+B: held session found = true
+B sheet@390: body 390/390; wider-than-client: DIV.font-body.text-ink-700 342/346 overflow-x=visible | SECTION. 342/346 overflow-x=visible | SPAN.sr-only 1/120 overflow-x=hidden
+B: dialogs open = 2
+B: table present = true
+B table@390: body 390/390; wider-than-client: A.sr-only.focus:not-sr-only.focus:absolute.focus:left-4 1/117 overflow-x=hidden | DIV.overflow-x-auto 358/560 overflow-x=auto | SPAN.relative 20/22 overflow-x=visible | DIV.font-body.text-ink-700 342/346 overflow-x=visible | SECTION. 342/346 overflow-x=visible | SPAN.sr-only 1/120 overflow-x=hidden | DIV.font-body.text-ink-700.min-h-0.flex-1 342/972 overflow-x=auto | SPAN.sr-only 1/120 overflow-x=hidden
+B table@390 sticky: header missing; name-header missing; first-col cell missing; header line-clamp=
+B table@390 after scrollLeft=300: name cell left=undefined right=undefined; first score cell left=undefined (sticky first column OK if name left stays ~0 and score cell moved left)
+
+# Ghi chú: 'guard: not shown' và 'table@390' ở lần 1 là do script đổi viewport qua 639px làm panel unmount (mất nháp), không phải lỗi UI — lần 2 xác nhận guard và bảng 390px.
+# 'DIV.overflow-x-auto 358/560' là bảng buổi học của trang classbook (min-w-[560px], có sẵn từ trước, ngoài phạm vi plan).

@@ -10,7 +10,7 @@ interface NextPlanCardProps {
   /** Called with the picked file's name — the UI stores the name only, no upload. */
   onAttachFile: (fileName: string) => void;
   onSubmit: () => void;
-  /** Whether the viewer may edit/submit this giáo án — see `SessionDetailPanel`'s prop of the same name. */
+  /** Whether the viewer may edit/submit this giáo án — see `SessionExpandRow`'s prop of the same name. */
   canWrite: boolean;
 }
 

@@ -20,7 +20,30 @@ export { ProgressBar } from "./progress-bar";
 export type { ProgressBarColor, ProgressBarProps, ProgressBarSize } from "./progress-bar";
 
 export { HvModal } from "./hv-modal";
-export type { HvModalProps } from "./hv-modal";
+export type { HvModalProps, HvModalSize } from "./hv-modal";
+
+export { HvConfirmDialog } from "./hv-confirm-dialog";
+export type { HvConfirmDialogProps, HvConfirmDialogTone } from "./hv-confirm-dialog";
+
+export { HvNotice } from "./hv-notice";
+export type { HvNoticeProps, HvNoticeRole, HvNoticeTone } from "./hv-notice";
+
+export { HvStateBlock } from "./hv-state-block";
+export type { HvStateBlockProps, HvStateBlockState } from "./hv-state-block";
+
+export { HvSegmented } from "./hv-segmented";
+export type { HvSegmentedOption, HvSegmentedProps, HvSegmentedVariant } from "./hv-segmented";
+
+export { HvScoreInput, SCORE_INPUT_ERROR_TEXT } from "./hv-score-input";
+export type {
+  HvScoreInputDirection,
+  HvScoreInputProps,
+  HvScoreInputSize,
+  HvScoreInputState,
+} from "./hv-score-input";
+
+export { parseScoreInput } from "./score-input-parse";
+export type { ParsedScore } from "./score-input-parse";
 
 export { hvToast, useHvToast } from "./hv-toast";
 export type { HvToastOptions, HvToastVariant } from "./hv-toast";

@@ -236,14 +236,99 @@ export function monthlyHeadcount(
   return history;
 }
 
+export interface MonthWindow {
+  /** "YYYY-MM" — the month itself, as carried in `?month=`. */
+  month: string;
+  /** First day of the month, YYYY-MM-DD. */
+  from: string;
+  /** Today for the current month (planned sessions past today stay out), else the last day. */
+  to: string;
+  /** "MM" — kept for the CSV filename (`{class}_ky{MM}.csv`). */
+  label: string;
+}
+
+function localIso(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+    date.getDate(),
+  ).padStart(2, "0")}`;
+}
+
+export function todayIso(): string {
+  return localIso(new Date());
+}
+
+const MONTH_PARAM = /^(\d{4})-(0[1-9]|1[0-2])$/;
+
+/** `?month=` → a valid "YYYY-MM", falling back to `today`'s month. */
+export function parseMonthParam(raw: string | null | undefined, today = todayIso()): string {
+  return raw && MONTH_PARAM.test(raw) ? raw : today.slice(0, 7);
+}
+
+/** "YYYY-MM" moved by `delta` months, crossing years. */
+export function shiftMonth(month: string, delta: number): string {
+  const [year = 0, monthNumber = 1] = month.split("-").map(Number);
+  return localIso(new Date(year, monthNumber - 1 + delta, 1)).slice(0, 7);
+}
+
 /**
- * Prototype score-input semantics: accepts a comma decimal ("7,5"), clamps
- * to 0–10, rounds to the nearest 0.5. Null for anything unparseable.
+ * The sessions-list window for a month. The current month ends today so the
+ * table never lists a planned session that has not happened yet; any other
+ * month spans its full length.
  */
-export function parseScoreInput(raw: string): number | null {
-  const value = Number.parseFloat(raw.replace(",", "."));
-  if (Number.isNaN(value)) {
-    return null;
+export function monthWindow(month: string, today = todayIso()): MonthWindow {
+  const [year = 0, monthNumber = 1] = month.split("-").map(Number);
+  const from = localIso(new Date(year, monthNumber - 1, 1));
+  const last = localIso(new Date(year, monthNumber, 0));
+  const isCurrent = today.slice(0, 7) === month;
+  return {
+    month,
+    from,
+    to: isCurrent ? today : last,
+    label: String(monthNumber).padStart(2, "0"),
+  };
+}
+
+/** Students holding a general score for one session. */
+export function scoredStudentCount(scores: Record<string, number> | undefined): number {
+  return scores ? Object.keys(scores).length : 0;
+}
+
+export type NoteChip = "done" | "missing" | "none";
+export type ScoreChip = "done" | "partial" | "none";
+
+export interface SessionWorkStatus {
+  hasNote: boolean;
+  /** Students with at least one score. */
+  scored: number;
+  /** Students who can be scored — the session's present count. */
+  total: number;
+  noteChip: NoteChip;
+  scoreChip: ScoreChip;
+}
+
+/**
+ * The per-row "what is left to do" language: a held session either has its
+ * whole-class note or not, and has n/N present students scored. Cancelled
+ * and planned sessions carry no work, so both chips are `none`.
+ */
+export function sessionWorkStatus(
+  derived: SessionDerived,
+  noteText: string | undefined,
+  scored: number,
+): SessionWorkStatus {
+  const hasNote = Boolean(noteText?.trim());
+  const total = derived.present ?? 0;
+  if (derived.session.status !== "held") {
+    return { hasNote, scored: 0, total, noteChip: "none", scoreChip: "none" };
   }
-  return Math.min(10, Math.max(0, Math.round(value * 2) / 2));
+  // No roster yet, or nobody present, means nothing to grade — no chip
+  // rather than a misleading "0/0".
+  const scoreChip: ScoreChip =
+    derived.present === null || total === 0 ? "none" : scored >= total ? "done" : "partial";
+  return { hasNote, scored, total, noteChip: hasNote ? "done" : "missing", scoreChip };
+}
+
+/** "7,5" — Vietnamese decimal comma for the ledger's score cells. */
+export function formatLedgerScore(value: number | null): string {
+  return value === null ? "—" : value.toFixed(1).replace(".", ",");
 }
