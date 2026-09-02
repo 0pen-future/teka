@@ -20,7 +20,8 @@ function classLabel(klass: Class, today: string): string {
   return schedule ? `${klass.name} · ${schedule}` : klass.name;
 }
 
-const labelClassName = "font-display text-[15px] font-extrabold";
+const triggerLabelClassName = "font-display text-[15px] font-extrabold";
+const itemLabelClassName = "font-display text-[15px]";
 
 /**
  * The toolbar's class picker: a plain dropdown anchored under the trigger.
@@ -32,7 +33,10 @@ const labelClassName = "font-display text-[15px] font-extrabold";
  * something outside the app toggles the `.dark` class. The hover colours
  * are set by overriding the accent variables on the item: the base item rule
  * paints every descendant `accent-foreground` on focus, and a variable
- * override is the one thing that beats it regardless of CSS order.
+ * override is the one thing that beats it regardless of CSS order. Hover
+ * is solid mint with white text in every theme, and the checked item's
+ * pale tint only shows while it is not hovered, so the highlighted row never
+ * ends up white-on-pale.
  */
 export function ClassSelect({ classes, selected, today, onSelect }: ClassSelectProps) {
   return (
@@ -48,7 +52,9 @@ export function ClassSelect({ classes, selected, today, onSelect }: ClassSelectP
       >
         <SelectValue placeholder="Chọn lớp">
           {selected ? (
-            <span className={`${labelClassName} truncate`}>{classLabel(selected, today)}</span>
+            <span className={`${triggerLabelClassName} truncate`}>
+              {classLabel(selected, today)}
+            </span>
           ) : null}
         </SelectValue>
       </SelectTrigger>
@@ -65,9 +71,9 @@ export function ClassSelect({ classes, selected, today, onSelect }: ClassSelectP
               key={klass.id}
               value={klass.id}
               textValue={label}
-              className="min-h-11 rounded-[var(--radius-sm)] py-2 pl-3 text-ink-900 focus:[--color-accent:var(--color-cream-100)] focus:[--color-accent-foreground:var(--color-ink-900)] data-[state=checked]:bg-mint-50 data-[state=checked]:text-mint-700 [&_svg]:text-mint-600"
+              className="min-h-11 rounded-[var(--radius-sm)] py-2 pl-3 text-ink-900 focus:[--color-accent:var(--color-mint-600)] focus:[--color-accent-foreground:var(--color-white)] data-[state=checked]:not-focus:bg-mint-50 data-[state=checked]:not-focus:text-mint-700 [&_svg]:text-mint-600"
             >
-              <span className={labelClassName}>{label}</span>
+              <span className={itemLabelClassName}>{label}</span>
             </SelectItem>
           );
         })}
