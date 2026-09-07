@@ -118,7 +118,7 @@ function ClassOptionList({ classes, selectedId, listboxId, onPick, ref }: ClassO
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={onSearchKeyDown}
-            className="w-full bg-transparent text-[13.5px] font-bold text-ink-700 outline-none placeholder:text-ink-400 [&::-webkit-search-cancel-button]:appearance-none"
+            className="w-full bg-transparent text-[13.5px] font-bold text-ink-700 outline-none placeholder:text-ink-400 focus:shadow-none [&::-webkit-search-cancel-button]:appearance-none"
           />
         </div>
       ) : null}
