@@ -204,15 +204,28 @@ func (s *Service) ListReadable(ctx context.Context, sc authctx.Scope, filter Lis
 	if err != nil {
 		return nil, nil, 0, err
 	}
-	ids := make([]uuid.UUID, 0, len(rows))
-	for i := range rows {
-		ids = append(ids, rows[i].ID)
-	}
-	roles, err := s.staff.RolesByClass(ctx, sc.TeacherID, sc.CenterID, ids)
+	roles, err := s.staff.RolesByClass(ctx, sc.TeacherID, sc.CenterID, ClassIDs(rows))
 	if err != nil {
 		return nil, nil, 0, err
 	}
 	return rows, roles, total, nil
+}
+
+// ClassIDs collects the ids of a page of classes, in order.
+func ClassIDs(rows []Class) []uuid.UUID {
+	ids := make([]uuid.UUID, 0, len(rows))
+	for i := range rows {
+		ids = append(ids, rows[i].ID)
+	}
+	return ids
+}
+
+// StudentCounts returns the open enrollment count per class id, keyed by id
+// (absent = 0), for classes the caller already read through a readable port.
+// Kept off GetReadableWithRoles/ListReadable so consumers that never render
+// a count (the sessions write probe) do not pay the query.
+func (s *Service) StudentCounts(ctx context.Context, sc authctx.Scope, classIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
+	return s.repo.CountActiveEnrollmentsByClass(ctx, sc, classIDs)
 }
 
 // Update edits the class's own fields; status and schedules have their own

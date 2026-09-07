@@ -10,12 +10,14 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/classes"
 	"teka/apps/api/internal/features/classstaff"
+	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
@@ -253,6 +255,53 @@ func TestDeleteBlockedByOpenEnrollmentThenAllowed(t *testing.T) {
 	).Error)
 	require.NoError(t, svc.Delete(ctx, sc, created.ID))
 }
+
+// StudentCounts must agree with what GET /enrollments?active=true lists for
+// the class — the two feed the same screen — so an ended enrollment drops
+// out of the count and a class with no enrollments reads 0.
+func TestStudentCountsMatchActiveEnrollments(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
+	contact := testutil.Contact(t, db, teacher.ID)
+
+	withStudents, err := svc.Create(ctx, sc, createRequest())
+	require.NoError(t, err)
+	emptyReq := createRequest()
+	emptyReq.Name = "Văn 9"
+	empty, err := svc.Create(ctx, sc, emptyReq)
+	require.NoError(t, err)
+
+	for i, endedOn := range []*time.Time{nil, nil, ptrTime(date("2026-02-01"))} {
+		studentID := id.New()
+		require.NoError(t, db.Exec(
+			"INSERT INTO students (id, teacher_id, center_id, contact_id, full_name) VALUES (?, ?, ?, ?, ?)",
+			studentID, teacher.ID, sc.CenterID, contact.ID, "Bé "+string(rune('A'+i)),
+		).Error)
+		require.NoError(t, db.Exec(
+			"INSERT INTO enrollments (id, teacher_id, center_id, student_id, class_id, unit_price, started_on, ended_on) VALUES (?, ?, ?, ?, ?, 150000, ?, ?)",
+			id.New(), teacher.ID, sc.CenterID, studentID, withStudents.ID, date("2026-01-05"), endedOn,
+		).Error)
+	}
+
+	counts, err := svc.StudentCounts(ctx, sc, []uuid.UUID{withStudents.ID, empty.ID})
+	require.NoError(t, err)
+	require.Equal(t, map[uuid.UUID]int64{withStudents.ID: 2}, counts)
+
+	active := true
+	_, total, err := enrollments.NewRepository(db).List(ctx, sc,
+		enrollments.ListFilter{ClassID: withStudents.ID, Active: &active}, listParams(t))
+	require.NoError(t, err)
+	require.Equal(t, total, counts[withStudents.ID], "count must match the active enrollments list")
+
+	none, err := svc.StudentCounts(ctx, sc, nil)
+	require.NoError(t, err)
+	require.Empty(t, none)
+}
+
+func ptrTime(t time.Time) *time.Time { return &t }
 
 // A teacher from a different center is refused on every operation with 404,
 // never 403 — a 403 would confirm the id exists in another center. Schedule

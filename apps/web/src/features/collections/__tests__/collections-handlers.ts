@@ -35,6 +35,7 @@ export const classMath: Class = {
   schedules: [],
   created_at: "2026-01-01T08:00:00Z",
   my_staff_roles: [],
+  student_count: 0,
 };
 
 export const classEnglish: Class = {
@@ -48,6 +49,7 @@ export const classEnglish: Class = {
   schedules: [],
   created_at: "2026-01-01T08:00:00Z",
   my_staff_roles: [],
+  student_count: 0,
 };
 
 /** No sessions fell in the fixture period — never produces a collections/invoice row. */
@@ -62,6 +64,7 @@ export const classEmpty: Class = {
   schedules: [],
   created_at: "2026-01-01T08:00:00Z",
   my_staff_roles: [],
+  student_count: 0,
 };
 
 // --- Contacts ---

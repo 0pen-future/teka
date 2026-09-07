@@ -679,6 +679,14 @@ definitions:
         type: string
       status:
         type: string
+      student_count:
+        description: |-
+          StudentCount is the number of enrollments still open on the class
+          (ended_on IS NULL, not deleted) — the same predicate GET /enrollments
+          applies for active=true, so a picker showing this count matches the
+          rows that endpoint lists. Like MyStaffRoles it is filled only by the
+          readable GET paths; every other producer leaves it 0.
+        type: integer
       teacher_id:
         type: string
     type: object

@@ -45,6 +45,9 @@ type Repository interface {
 	Archive(ctx context.Context, sc authctx.Scope, id uuid.UUID) error
 	SoftDelete(ctx context.Context, sc authctx.Scope, id uuid.UUID) error
 	CountOpenEnrollments(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (int64, error)
+	// CountActiveEnrollmentsByClass is CountOpenEnrollments over a page of
+	// class ids in one grouped query, keyed by class id (absent key = 0).
+	CountActiveEnrollmentsByClass(ctx context.Context, sc authctx.Scope, classIDs []uuid.UUID) (map[uuid.UUID]int64, error)
 
 	AddSchedule(ctx context.Context, s *Schedule) error
 	GetSchedule(ctx context.Context, sc authctx.Scope, classID, scheduleID uuid.UUID) (*Schedule, error)
@@ -301,6 +304,35 @@ func (r *gormRepository) CountOpenEnrollments(ctx context.Context, sc authctx.Sc
 		Where("center_id = ? AND class_id = ? AND ended_on IS NULL AND deleted_at IS NULL", sc.CenterID, classID).
 		Count(&n).Error
 	return n, err
+}
+
+// CountActiveEnrollmentsByClass applies CountOpenEnrollments' predicate
+// (ended_on IS NULL, not deleted — what GET /enrollments?active=true lists)
+// across every id at once so a class page never counts per row. Center-wide
+// for the same reason as CountOpenEnrollments: the ids were already resolved
+// through a readable port, and a count is not a row read.
+func (r *gormRepository) CountActiveEnrollmentsByClass(ctx context.Context, sc authctx.Scope, classIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
+	counts := make(map[uuid.UUID]int64, len(classIDs))
+	if len(classIDs) == 0 {
+		return counts, nil
+	}
+	var rows []struct {
+		ClassID uuid.UUID
+		N       int64
+	}
+	err := database.FromContext(ctx, r.db).
+		Table("enrollments").
+		Select("class_id, COUNT(*) AS n").
+		Where("center_id = ? AND class_id IN ? AND ended_on IS NULL AND deleted_at IS NULL", sc.CenterID, classIDs).
+		Group("class_id").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		counts[row.ClassID] = row.N
+	}
+	return counts, nil
 }
 
 func (r *gormRepository) AddSchedule(ctx context.Context, s *Schedule) error {

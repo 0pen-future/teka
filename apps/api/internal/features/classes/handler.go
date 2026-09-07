@@ -121,9 +121,16 @@ func (h *Handler) list(c *gin.Context) {
 		response.Err(c, err)
 		return
 	}
+	counts, err := h.svc.StudentCounts(c.Request.Context(), sc, ClassIDs(rows))
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
 	out := make([]ClassResponse, 0, len(rows))
 	for i := range rows {
-		out = append(out, FromModelWithRoles(&rows[i], roles[rows[i].ID]))
+		resp := FromModelWithRoles(&rows[i], roles[rows[i].ID])
+		resp.StudentCount = int(counts[rows[i].ID])
+		out = append(out, resp)
 	}
 	response.List(c, out, params.Meta(total))
 }
@@ -154,7 +161,14 @@ func (h *Handler) get(c *gin.Context) {
 		response.Err(c, err)
 		return
 	}
-	response.OK(c, http.StatusOK, FromModelWithRoles(class, roles))
+	counts, err := h.svc.StudentCounts(c.Request.Context(), sc, []uuid.UUID{classID})
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	resp := FromModelWithRoles(class, roles)
+	resp.StudentCount = int(counts[classID])
+	response.OK(c, http.StatusOK, resp)
 }
 
 // update edits the class's own fields.

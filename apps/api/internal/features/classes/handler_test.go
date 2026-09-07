@@ -308,6 +308,57 @@ func TestDeleteWithOpenEnrollmentsConflicts(t *testing.T) {
 	}
 }
 
+// student_count on list and get reflects the open enrollments per class;
+// a class with none reads 0 rather than being absent from the page.
+func TestListAndGetCarryStudentCount(t *testing.T) {
+	r, repo := newClassesHTTPTest(t)
+	token := mintToken(t, uuid.New())
+
+	create := func(body string) ClassResponse {
+		t.Helper()
+		w, env := do(t, r, http.MethodPost, "/api/v1/classes", body, token)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("create: got %d %+v", w.Code, env)
+		}
+		var created ClassResponse
+		if err := json.Unmarshal(env.Data, &created); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		return created
+	}
+	withStudents := create(validCreateBody)
+	empty := create(strings.Replace(validCreateBody, `"Toán 8"`, `"Văn 9"`, 1))
+	repo.openEnrollments[withStudents.ID] = 2
+
+	w, env := do(t, r, http.MethodGet, "/api/v1/classes", "", token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list: got %d %+v", w.Code, env)
+	}
+	var rows []ClassResponse
+	if err := json.Unmarshal(env.Data, &rows); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	counts := map[uuid.UUID]int{}
+	for _, row := range rows {
+		counts[row.ID] = row.StudentCount
+	}
+	if counts[withStudents.ID] != 2 || counts[empty.ID] != 0 {
+		t.Fatalf("want student_count 2 and 0, got %+v", counts)
+	}
+
+	w, env = do(t, r, http.MethodGet, "/api/v1/classes/"+withStudents.ID.String(), "", token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("get: got %d %+v", w.Code, env)
+	}
+	var got ClassResponse
+	if err := json.Unmarshal(env.Data, &got); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if got.StudentCount != 2 {
+		t.Fatalf("get must carry student_count 2, got %d", got.StudentCount)
+	}
+}
+
 func TestListIsTenantScoped(t *testing.T) {
 	r, _ := newClassesHTTPTest(t)
 	owner := uuid.New()
