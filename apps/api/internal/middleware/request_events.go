@@ -9,6 +9,7 @@ import (
 
 	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/events"
+	"teka/apps/api/internal/shared/routespec"
 )
 
 // RequestCompleted is published on the event bus after a mutating API request
@@ -43,31 +44,24 @@ func (RequestCompleted) EventName() string { return "http.request_completed" }
 // authSessionRoutes are mutating routes the middleware must never publish:
 // login and logout are audited by the auth service's own events (publishing
 // here would double-log them), and refresh is deliberate noise-avoidance —
-// token rotation is not a user action.
-var authSessionRoutes = map[string]bool{
-	"/api/v1/auth/login":   true,
-	"/api/v1/auth/logout":  true,
-	"/api/v1/auth/refresh": true,
-}
+// token rotation is not a user action. Derived from the shared route
+// manifest (routespec.Specs) so this set can never drift from the
+// authorization policy and audit action tables built from the same data.
+var authSessionRoutes = routespec.WithSource(routespec.SourceAuthSession)
 
 // serviceAuditedRoutes are mutating routes whose owning feature publishes its
 // own domain event for the same action — publishing here too would land two
 // audit rows for one request. The service event is the richer of the pair
 // (enrollments.StudentEnrolled carries the class and student ids the request
 // row could not), so the request row is the one that yields.
-var serviceAuditedRoutes = map[string]bool{
-	"/api/v1/enrollments": true,
-}
+var serviceAuditedRoutes = routespec.WithSource(routespec.SourceService)
 
 // anonymousAuditedRoutes are the only unauthenticated mutations worth a row:
 // a password change must never escape the trail even though the caller has
 // no session yet. Every other principal-less mutation (public invitation
 // accept, statement views) is skipped here — the owning feature publishes
 // its own event when the action deserves one.
-var anonymousAuditedRoutes = map[string]bool{
-	"/api/v1/auth/forgot-password": true,
-	"/api/v1/auth/reset-password":  true,
-}
+var anonymousAuditedRoutes = routespec.WithSource(routespec.SourceAnonymous)
 
 // RequestEvents publishes one RequestCompleted event per mutating API request
 // after the handler chain finishes, success or failure alike. It depends only
@@ -95,19 +89,20 @@ func RequestEvents(bus events.Bus) gin.HandlerFunc {
 }
 
 func publishRequest(c *gin.Context, bus events.Bus, status int) {
-	switch c.Request.Method {
-	case "POST", "PUT", "PATCH", "DELETE":
-	default:
+	if !routespec.IsMutating(c.Request.Method) {
 		return
 	}
 	// An empty template means no registered route matched: arbitrary
 	// attacker-chosen 404 paths stay out of the audit table.
 	route := c.FullPath()
-	if route == "" || authSessionRoutes[route] || serviceAuditedRoutes[route] {
+	if _, skip := authSessionRoutes[route]; route == "" || skip {
+		return
+	}
+	if _, skip := serviceAuditedRoutes[route]; skip {
 		return
 	}
 	p, authed := authctx.From(c)
-	if !authed && !anonymousAuditedRoutes[route] {
+	if _, anon := anonymousAuditedRoutes[route]; !authed && !anon {
 		return
 	}
 
