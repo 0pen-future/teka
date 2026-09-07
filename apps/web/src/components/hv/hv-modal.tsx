@@ -130,6 +130,12 @@ export interface HvModalProps {
   className?: string;
   /** Radix open-autofocus hook; call `preventDefault` and focus a ref to pick the initial control. */
   onOpenAutoFocus?: (event: Event) => void;
+  /**
+   * Radix close-autofocus hook. The modal is controlled without a
+   * `Dialog.Trigger`, so by default focus is dropped on close; call
+   * `preventDefault` and focus the control that opened it to hand it back.
+   */
+  onCloseAutoFocus?: (event: Event) => void;
 }
 
 export function HvModal({
@@ -142,6 +148,7 @@ export function HvModal({
   size = "md",
   className,
   onOpenAutoFocus,
+  onCloseAutoFocus,
 }: HvModalProps) {
   const descriptionId = React.useId();
   return (
@@ -151,6 +158,7 @@ export function HvModal({
         className={className}
         aria-describedby={description != null ? descriptionId : undefined}
         onOpenAutoFocus={onOpenAutoFocus}
+        onCloseAutoFocus={onCloseAutoFocus}
       >
         {title != null ? (
           <HvModalTitle className={description != null ? "mb-0.5" : "mb-[var(--space-4)]"}>
