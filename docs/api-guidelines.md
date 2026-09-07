@@ -114,16 +114,29 @@ visibility is granted per resource. `Scope.WriteWide()` (the owner alone) is
 the only write-scoping switch: lock, close, void, cancel, revoke, mark-sent,
 reassign and every other mutation resolve their rows through a `writeScoped`
 port or a `GetXForWrite` getter, so a granted visibility key can never open
-another teacher's row for editing. The guard tests in
-`apps/api/internal/features/scoping_guard_test.go` pin both halves:
-repositories may not branch on `IsOwner`, and `CenterWideFor` may appear only
-inside a read-named function (`readScoped`, `scopedRead`, `readNarrow`,
-`GetPeriodRead`, …). Inline predicates in a read go through a `readNarrow`
-helper for the same reason. The legacy single-axis
-`data.view_center_wide` participates only through alias expansion at
-permission-set build time (a legacy grant/deny expands to every per-resource
-`view_all` key); `Scope.CenterWide()` survives solely for that compatibility
-window and has no production callers.
+another teacher's row for editing. `apps/api/tools/scopelint` — a
+`go/analysis` linter self-enforced under `go test ./tools/...` (and runnable
+directly via `make scopelint`) — pins both halves by type, not by name. Any
+repository method that takes a `Scope`/`Anchor`/`OwnerAnchor` parameter and
+touches a raw `*gorm.DB` root (a `database.FromContext` call or a `*gorm.DB`
+receiver field) must carry a witness: a call to a helper identified by shape —
+an unexported method on the same receiver that returns `*gorm.DB` and takes a
+scope-typed parameter — or a selector reading the `CenterID` field of any
+expression (one pointer level unwrapped) typed `Scope`, `Anchor` or
+`OwnerAnchor` — a parameter, a copy of one, or a field reached through an
+embedded struct. `CenterWideFor` may appear only inside a function whose
+name contains `read` (`readScoped`, `scopedRead`, `readNarrow`,
+`GetPeriodRead`, …), never `IsOwner` directly, and inline predicates in a
+read go through a `readNarrow` helper for the same reason. A method with no
+legitimate witness (a bulk maintenance job, a one-off migration helper) may
+opt out with `//scopelint:unscoped <reason>` directly above it; an empty
+reason is itself flagged. The legacy single-axis `data.view_center_wide`
+participates only through alias expansion at permission-set build time (a
+legacy grant/deny expands to every per-resource `view_all` key). A witness
+proves the scope was mentioned somewhere in the method, not that every query
+chain in it applied it; dataflow through a discarded result or an unused
+reference is an explicit non-goal, and row-level `center_id`/`teacher_id`
+predicates remain the backstop for that residue.
 
 - Writes on class-anchored artifacts resolve through the class-staff
   capability map (see class-staff writes below); the written rows still stamp
@@ -159,12 +172,11 @@ never needs a Scope with `IsOwner: true` asserted by hand. The dashboard's
 "read as teacher T" view is the deliberate exception that stays a Scope
 literal inside the centers feature: it impersonates a rights-less member view
 whose consumed reads are stint-based, which is Scope semantics, not row
-naming. `TestScopeLiteralsOnlyWhereResolved` in
-`apps/api/internal/features/scoping_guard_test.go` pins all of this at the AST
-level: outside `features/centers/`, `middleware/`, `testutil/`, and tests, no
-`authctx.Scope{…}` with fields, no `authctx.OwnerAnchor{…}`, no assignment to
-`IsOwner`/`Perms`/`CanSendReports`, no aliased authctx import, and no
-`MintOwnerAnchor(` call.
+naming. The same `scopelint` analyzer also forbids this outside
+`features/centers/`, `middleware/`, `testutil/`, `authctx/`, `seeds/`, and
+tests: building an `authctx.Scope{…}` literal with fields, assigning into a
+field of a `Scope`-typed value, building an `authctx.OwnerAnchor{…}` literal,
+and calling `MintOwnerAnchor(`.
 
 **Class-staff reads**: `class_staff` is the **sole** source of class
 permissions; `teacher_id` columns are creator/last-writer attribution, never a

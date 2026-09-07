@@ -102,8 +102,8 @@ test asserting the effective set must expect them.
 Only add an implied key for a genuine subset relationship — the source
 permission is meaningless without the read it implies. Implied keys must only
 ever widen `Scope.CenterWideFor` reads, never `Scope.WriteWide` writes; a
-`go vet`-time scoping guard and the parity tests described in
-[step 8](#8-prove-the-policy) hold that line.
+test-time scoping guard (`go test ./tools/...`, also `make scopelint`) and the
+parity tests described in [step 8](#8-prove-the-policy) hold that line.
 
 ## 4. Choose the database rollout policy
 
@@ -166,10 +166,10 @@ predicates always isolate tenants. Read expansion must use
 write reaches another teacher's rows only through `Scope.WriteWide()` (the
 owner alone), so a repository keeps a read port and a write port apart
 (`readScoped` / `writeScoped`, or a `readNarrow` helper for inline
-predicates). The guard tests in `apps/api/internal/features/scoping_guard_test.go`
-enforce this at compile-test time: `CenterWideFor` may appear only inside a
-read-named repository function. Never accept request `center_id` or
-`teacher_id` as authorization context. See
+predicates). `apps/api/tools/scopelint` enforces this at test time:
+`CenterWideFor` may appear only inside a repository function whose name
+contains `read`. Never accept request `center_id` or `teacher_id` as
+authorization context. See
 [Tenancy](./api-guidelines.md#tenancy).
 
 ## 7. Gate the frontend when applicable

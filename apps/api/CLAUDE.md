@@ -33,6 +33,7 @@ Go module `teka/apps/api`. Entrypoint `cmd/api/main.go`; DI wiring in
 
 - `make test-api-unit` — fast unit + HTTP tests, no Docker.
 - `make test-api` — full unit + integration with coverage floor, needs Docker.
+- `make scopelint` — check repository tenancy scoping when touching a repository.
 
 ## Pointers
 

@@ -14,7 +14,8 @@ import (
 
 // Repository is the persistence contract for staff assignments. Every method
 // is center-scoped through the caller's center id only — never the owner flag
-// (the owner gate lives in the service, enforced by scoping_guard_test).
+// (the owner gate lives in the service, enforced by the scopelint analyzer
+// under tools/).
 type Repository interface {
 	// ClassInCenter reports whether a live (non-deleted) class with this id
 	// exists in the caller's center — the existence half of the read gate.

@@ -1600,7 +1600,7 @@ func newReconciliationDeps(t *testing.T) (*billing.Service, *attendance.Service,
 }
 
 // TestAssistantConfirmOnClosedPeriodPostsAdjustmentOnClassTeachersBilling
-// proves the product decision D5 records: a trợ giảng (teaching assistant)
+// proves the accepted product behaviour: a trợ giảng (teaching assistant)
 // holding only an active tro_giang stint — never the class's own giáo viên,
 // never any billing permission of their own — confirms attendance on a
 // session whose date falls inside an already-closed billing period. The
