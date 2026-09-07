@@ -19,6 +19,7 @@ import { useMonthSessions } from "../hooks/use-month-sessions";
 import { parseMonthParam } from "../lib/classbook-stats";
 import { downloadCsv, type CsvCell } from "../lib/csv";
 import { meanScore } from "../lib/classbook-stats";
+import { filterStudentRows } from "../lib/student-search";
 import { aggregateStudent, studentSessionRows, trendOf } from "../lib/student-stats";
 
 /**
@@ -30,6 +31,7 @@ export function RecordsPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeClassId = searchParams.get("class_id") ?? "";
+  const query = searchParams.get("q") ?? "";
 
   const { data: classesPage } = useClassesList({ status: "active", per_page: 100 });
   const classes = classesPage?.items ?? [];
@@ -64,11 +66,16 @@ export function RecordsPage() {
     };
   });
 
+  const filteredRows = filterStudentRows(rows, query);
+
+  // Switching class starts a fresh search: class_id and q change in the same
+  // navigation so history holds one entry, not two.
   function selectClass(classId: string) {
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
         next.set("class_id", classId);
+        next.delete("q");
         return next;
       },
       { replace: true },
@@ -149,7 +156,7 @@ export function RecordsPage() {
         </div>
       ) : (
         <StudentRecordsTable
-          rows={rows}
+          rows={filteredRows}
           onOpen={(studentId) => void navigate(`/records/${studentId}`)}
         />
       )}

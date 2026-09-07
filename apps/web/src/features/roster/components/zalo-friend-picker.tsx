@@ -5,22 +5,9 @@ import { HvButton, HvModal } from "@/components/hv";
 import { Input } from "@/components/ui/input";
 import { useZaloFriends, type ZaloFriend } from "@/features/profile";
 import { ApiError } from "@/lib/api/errors";
+import { foldVietnamese } from "@/lib/utils";
 
 import { useSetContactZaloMapping } from "../hooks/use-contacts";
-
-/**
- * Teachers search friend names with and without diacritics interchangeably,
- * so both sides of the match are folded: NFD strips combining marks, and đ→d
- * is handled separately because NFD does not decompose it.
- */
-function foldVietnamese(value: string): string {
-  return value
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/đ/g, "d")
-    .replace(/Đ/g, "d")
-    .toLowerCase();
-}
 
 /**
  * A Zalo account can hold ~2000 friends; rendering them all (with avatars)
