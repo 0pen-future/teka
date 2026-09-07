@@ -117,7 +117,7 @@ func (f *fakeRepository) GetPeriodStatusRead(_ context.Context, sc authctx.Scope
 	if !ok {
 		return PeriodInfo{}, ErrPeriodNotFound
 	}
-	if !sc.ReportsOversight() && info.TeacherID != sc.TeacherID {
+	if !sc.CenterWideFor(authctx.PermStatementsViewAll) && info.TeacherID != sc.TeacherID {
 		return PeriodInfo{}, ErrPeriodNotFound
 	}
 	return info, nil

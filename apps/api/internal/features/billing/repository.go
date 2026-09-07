@@ -107,9 +107,10 @@ type Repository interface {
 	// visibility key can never open another teacher's period for mutation.
 	GetPeriodForWrite(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*Period, error)
 	// GetPeriodRead / ListPeriodsRead back the period read ENDPOINTS only:
-	// center-scoped with reports oversight (owner or reports.send
-	// holder), joined with the owning teacher's name. Write paths (draft,
-	// close, tally) keep the owner-gated GetPeriodForWrite.
+	// center-scoped by billing.view_all (held by the owner, an explicit
+	// grant, or a reports.send holder through the key it implies), joined
+	// with the owning teacher's name. Write paths (draft, close, tally) keep
+	// the owner-gated GetPeriodForWrite.
 	GetPeriodRead(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*PeriodWithTeacher, error)
 	ListPeriodsRead(ctx context.Context, sc authctx.Scope, p pagination.Params) ([]PeriodWithTeacher, int64, error)
 	// ClassReadable reports whether the caller holds any class_staff stint on
@@ -353,19 +354,6 @@ func (r *gormRepository) readNarrow(q *gorm.DB, sc authctx.Scope, col string) *g
 	return q
 }
 
-// scopedRead is readScoped's oversight-axis sibling: the teacher filter is
-// lifted for anyone with reports oversight (owner or reports.send holder),
-// not just the owner. It backs ONLY the period read endpoints (GetPeriodRead,
-// ListPeriodsRead) — every write keeps writeScoped, so the delegated
-// permission never reaches draft/close/void/adjustment paths.
-func (r *gormRepository) scopedRead(ctx context.Context, sc authctx.Scope) *gorm.DB {
-	q := database.FromContext(ctx, r.db).Where("billing_periods.center_id = ?", sc.CenterID)
-	if !sc.ReportsOversight() {
-		q = q.Where("billing_periods.teacher_id = ?", sc.TeacherID)
-	}
-	return q
-}
-
 // invoiceReadScoped mirrors readScoped for the invoices table.
 func (r *gormRepository) invoiceReadScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("invoices.center_id = ?", sc.CenterID)
@@ -462,7 +450,7 @@ func (r *gormRepository) GetInvoiceForWrite(ctx context.Context, sc authctx.Scop
 
 func (r *gormRepository) GetPeriodRead(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*PeriodWithTeacher, error) {
 	var row PeriodWithTeacher
-	err := r.scopedRead(ctx, sc).Model(&Period{}).
+	err := r.readScoped(ctx, sc).Model(&Period{}).
 		Select("billing_periods.*, teachers.full_name AS teacher_name").
 		Joins("JOIN teachers ON teachers.id = billing_periods.teacher_id").
 		Take(&row, "billing_periods.id = ?", periodID).Error
@@ -476,7 +464,7 @@ func (r *gormRepository) GetPeriodRead(ctx context.Context, sc authctx.Scope, pe
 }
 
 func (r *gormRepository) ListPeriodsRead(ctx context.Context, sc authctx.Scope, p pagination.Params) ([]PeriodWithTeacher, int64, error) {
-	q := r.scopedRead(ctx, sc).Model(&Period{})
+	q := r.readScoped(ctx, sc).Model(&Period{})
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err

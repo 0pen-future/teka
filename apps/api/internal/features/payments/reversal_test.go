@@ -44,7 +44,7 @@ func (f *fakeRepository) LockPayment(ctx context.Context, sc authctx.Scope, paym
 	return f.GetPayment(ctx, sc, paymentID)
 }
 
-func (f *fakeRepository) InvoicesByIDs(_ context.Context, _ authctx.Anchor, ids []uuid.UUID) ([]InvoiceRow, error) {
+func (f *fakeRepository) InvoicesByIDs(_ context.Context, _ authctx.Scope, ids []uuid.UUID) ([]InvoiceRow, error) {
 	meta := invoiceMetaByRepo[f]
 	var rows []InvoiceRow
 	for _, invID := range ids {

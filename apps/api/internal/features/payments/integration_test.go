@@ -79,21 +79,25 @@ func getInvoice(t *testing.T, db *gorm.DB, teacherID, studentID uuid.UUID) billi
 }
 
 // assertLedgerInvariant proves the two independently-maintained views of what
-// a teacher has been paid never drift apart: every invoice's paid_amount
+// a center has been paid never drift apart: every invoice's paid_amount
 // (recomputed by recalcInvoicePaidQuery) must equal the ledger itself — the
 // sum of every non-reversal allocation minus every reversal allocation,
-// across every payment this teacher has ever recorded.
-func assertLedgerInvariant(t *testing.T, db *gorm.DB, teacherID uuid.UUID) {
+// across every payment recorded in the center. Center-level, not per-teacher:
+// a contact's own invoices can carry more than one teacher_id (whoever closed
+// each invoice's billing period), while its payments and allocations always
+// anchor on the contact's owning teacher, so a per-teacher sum would compare
+// two different teachers' rows and never balance.
+func assertLedgerInvariant(t *testing.T, db *gorm.DB, centerID uuid.UUID) {
 	t.Helper()
 	var invoiceTotal int64
 	require.NoError(t, db.Table("invoices").
-		Where("teacher_id = ?", teacherID).
+		Where("center_id = ?", centerID).
 		Select("COALESCE(SUM(paid_amount), 0)").Scan(&invoiceTotal).Error)
 
 	var ledgerTotal int64
 	require.NoError(t, db.Table("payment_allocations AS pa").
 		Joins("JOIN payments p ON p.id = pa.payment_id").
-		Where("pa.teacher_id = ?", teacherID).
+		Where("pa.center_id = ?", centerID).
 		Select("COALESCE(SUM(CASE WHEN p.reverses_payment_id IS NULL THEN pa.amount ELSE -pa.amount END), 0)").
 		Scan(&ledgerTotal).Error)
 
@@ -472,7 +476,7 @@ func TestConcurrentReallocationsOnSameContactDoNotDeadlock(t *testing.T) {
 				"a reallocation must never fail with a deadlock/internal error")
 		}
 	}
-	assertLedgerInvariant(t, db, teacher.ID)
+	assertLedgerInvariant(t, db, teacher.CenterID)
 }
 
 // TestReverseRestoresInvoiceStateAndKeepsBothPaymentRows proves reversing a
@@ -501,7 +505,7 @@ func TestReverseRestoresInvoiceStateAndKeepsBothPaymentRows(t *testing.T) {
 	paid := getInvoice(t, db, teacher.ID, student)
 	require.Equal(t, billing.InvoicePaid, paid.Status)
 	require.EqualValues(t, 100_000, paid.PaidAmount)
-	assertLedgerInvariant(t, db, teacher.ID)
+	assertLedgerInvariant(t, db, teacher.CenterID)
 
 	reversal, err := paymentsSvc.Reverse(ctx, testutil.ScopeFor(t, db, teacher.ID), original.Payment.ID, payments.ReverseRequest{
 		Reason: "recorded against the wrong contact",
@@ -525,7 +529,7 @@ func TestReverseRestoresInvoiceStateAndKeepsBothPaymentRows(t *testing.T) {
 	require.NotNil(t, reversalDetail.Payment.ReversesPaymentID)
 	require.Equal(t, original.Payment.ID, *reversalDetail.Payment.ReversesPaymentID)
 
-	assertLedgerInvariant(t, db, teacher.ID)
+	assertLedgerInvariant(t, db, teacher.CenterID)
 }
 
 // TestReverseTwiceIsConflictAndWritesNoNewRow proves a reversal cannot itself
@@ -564,7 +568,7 @@ func TestReverseTwiceIsConflictAndWritesNoNewRow(t *testing.T) {
 	require.NoError(t, db.Table("payments").Where("contact_id = ?", contact.ID).Count(&countAfter).Error)
 	require.EqualValues(t, countBefore, countAfter, "a rejected second reversal must write no new row")
 
-	assertLedgerInvariant(t, db, teacher.ID)
+	assertLedgerInvariant(t, db, teacher.CenterID)
 }
 
 // TestReallocateRebalancesATwoChildSplitOntoOneInvoice proves the manual
@@ -605,7 +609,7 @@ func TestReallocateRebalancesATwoChildSplitOntoOneInvoice(t *testing.T) {
 	require.EqualValues(t, 100_000, splitEarly.PaidAmount)
 	require.Equal(t, billing.InvoicePartiallyPaid, splitLate.Status)
 	require.EqualValues(t, 30_000, splitLate.PaidAmount)
-	assertLedgerInvariant(t, db, teacher.ID)
+	assertLedgerInvariant(t, db, teacher.CenterID)
 
 	reallocated, err := paymentsSvc.Reallocate(ctx, testutil.ScopeFor(t, db, teacher.ID), detail.Payment.ID, payments.ReallocateRequest{
 		Allocations: []payments.ReallocationLine{{InvoiceID: invLate.ID, Amount: 130_000}},
@@ -623,7 +627,7 @@ func TestReallocateRebalancesATwoChildSplitOntoOneInvoice(t *testing.T) {
 	require.Equal(t, billing.InvoicePartiallyPaid, rebalancedLate.Status)
 	require.EqualValues(t, 130_000, rebalancedLate.PaidAmount)
 
-	assertLedgerInvariant(t, db, teacher.ID)
+	assertLedgerInvariant(t, db, teacher.CenterID)
 }
 
 // TestReallocateToAnotherContactsInvoiceIsRejectedAndWritesNothing proves the
@@ -663,7 +667,7 @@ func TestReallocateToAnotherContactsInvoiceIsRejectedAndWritesNothing(t *testing
 	require.Len(t, unchanged.Allocations, 1, "a rejected reallocation must leave the payment's existing allocation untouched")
 	require.Equal(t, detail.Allocations[0].InvoiceID, unchanged.Allocations[0].InvoiceID)
 
-	assertLedgerInvariant(t, db, teacher.ID)
+	assertLedgerInvariant(t, db, teacher.CenterID)
 }
 
 // TestAutoAllocateRemainderPlacesSurplusOnANewlyIssuedInvoice proves re-running
@@ -691,7 +695,7 @@ func TestAutoAllocateRemainderPlacesSurplusOnANewlyIssuedInvoice(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.EqualValues(t, 50_000, detail.UnallocatedAmount)
-	assertLedgerInvariant(t, db, teacher.ID)
+	assertLedgerInvariant(t, db, teacher.CenterID)
 
 	studentFeb := seedStudentWithSessions(t, db, teacher.ID, contact.ID, "Feb", date("2026-02-01"), 1)
 	periodFeb, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, teacher.ID), 2026, 2)
@@ -717,7 +721,7 @@ func TestAutoAllocateRemainderPlacesSurplusOnANewlyIssuedInvoice(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
 
-	assertLedgerInvariant(t, db, teacher.ID)
+	assertLedgerInvariant(t, db, teacher.CenterID)
 }
 
 // TestOwnerHasFullOversightOfMembersPayments proves an owner can record,
@@ -911,7 +915,7 @@ func TestViewAllWidensPaymentReadsNotWrites(t *testing.T) {
 	untouched, err := paymentsSvc.Get(ctx, scOwner, ownerPayment.Payment.ID)
 	require.NoError(t, err)
 	require.Nil(t, untouched.Payment.ReversedAt, "the owner's payment must stay unreversed")
-	assertLedgerInvariant(t, db, owner.ID)
+	assertLedgerInvariant(t, db, scOwner.CenterID)
 
 	ownContact := testutil.Contact(t, db, member.ID)
 	seedStudentWithSessions(t, db, member.ID, ownContact.ID, "MemberPaid", date("2026-01-01"), 1)
@@ -925,7 +929,7 @@ func TestViewAllWidensPaymentReadsNotWrites(t *testing.T) {
 	require.NoError(t, err)
 	_, err = paymentsSvc.Reverse(ctx, scMember, own.Payment.ID, payments.ReverseRequest{Reason: "ghi nhầm"})
 	require.NoError(t, err, "a member must still reverse their own payment")
-	assertLedgerInvariant(t, db, member.ID)
+	assertLedgerInvariant(t, db, scMember.CenterID)
 }
 
 // Recording a payment is gated by the payments.create route permission, not
@@ -965,5 +969,108 @@ func TestMemberRecordsPaymentForCenterContactWithoutViewAll(t *testing.T) {
 	paid := getInvoice(t, db, owner.ID, student)
 	require.Equal(t, billing.InvoicePaid, paid.Status)
 	require.EqualValues(t, 100_000, paid.PaidAmount)
-	assertLedgerInvariant(t, db, owner.ID)
+	assertLedgerInvariant(t, db, scOwner.CenterID)
+}
+
+// TestRecordReverseAndReallocateSettleInvoicesFromAnotherMembersClosedPeriod
+// proves a payment against one contact settles an invoice regardless of which
+// teacher in the center closed the billing period that produced it. A
+// contact anchors on its own owning teacher (contacts.teacher_id), but each
+// of its invoices carries the teacher_id of whoever closed that invoice's
+// billing period — a different member of the same center is free to run
+// their own billing cycle for a child under someone else's contact. Record,
+// Reverse, and Reallocate must key invoice candidacy, recompute, and lookup
+// by center (plus contact id or invoice id), never by a single teacher, or a
+// payment against such an invoice silently allocates to nothing.
+func TestRecordReverseAndReallocateSettleInvoicesFromAnotherMembersClosedPeriod(t *testing.T) {
+	t.Parallel()
+	paymentsSvc, billingSvc, db := newIntegrationDeps(t)
+	ctx := context.Background()
+
+	owner, _ := testutil.Teacher(t, db)
+	scOwner := testutil.ScopeFor(t, db, owner.ID)
+	member, _ := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, member.ID, scOwner.CenterID)
+	scMember := testutil.ScopeFor(t, db, member.ID)
+	require.False(t, scMember.IsOwner)
+
+	contact := testutil.Contact(t, db, owner.ID)
+	// Both children belong to the owner's contact, but every class, session,
+	// and enrollment below anchors on the member — the member runs their own
+	// billing cycle for these students even though the contact itself was
+	// created under the owner.
+	studentA := seedStudentWithSessions(t, db, member.ID, contact.ID, "First", date("2026-01-01"), 1)
+	studentB := seedStudentWithSessions(t, db, member.ID, contact.ID, "Second", date("2026-01-10"), 1)
+
+	period, err := billingSvc.EnsurePeriod(ctx, scMember, 2026, 1)
+	require.NoError(t, err, "member must be able to open their own billing period")
+	_, err = billingSvc.Close(ctx, scMember, period.ID)
+	require.NoError(t, err, "member must be able to close their own billing period")
+
+	invA := getInvoice(t, db, member.ID, studentA)
+	invB := getInvoice(t, db, member.ID, studentB)
+	require.Equal(t, member.ID, invA.TeacherID, "the invoice must carry the closing member's id, not the contact owner's")
+	require.Equal(t, member.ID, invB.TeacherID, "the invoice must carry the closing member's id, not the contact owner's")
+	require.EqualValues(t, 100_000, invA.TotalDue)
+	require.EqualValues(t, 100_000, invB.TotalDue)
+
+	// (a) the owner records a payment against the owner-anchored contact; D8
+	// settles the earlier-class invoice (invA) first.
+	byOwner, err := paymentsSvc.Record(ctx, scOwner, payments.RecordPaymentRequest{
+		ContactID: contact.ID, Amount: 100_000, Method: payments.MethodCash, ReceivedOn: "2026-01-20",
+	})
+	require.NoError(t, err)
+	require.Len(t, byOwner.Allocations, 1, "the owner's payment must settle the member-closed invoice, not find zero candidates")
+	require.Equal(t, invA.ID, byOwner.Allocations[0].InvoiceID)
+	require.EqualValues(t, 0, byOwner.UnallocatedAmount)
+
+	settledA := getInvoice(t, db, member.ID, studentA)
+	require.Equal(t, billing.InvoicePaid, settledA.Status)
+	require.EqualValues(t, 100_000, settledA.PaidAmount)
+
+	// (b) a member holding only payments.create (no payments.view_all)
+	// records against the same contact; the remaining candidate (invB)
+	// settles.
+	scMember.Perms = authctx.BuildPermSet(nil, []string{authctx.PermPaymentsCreate}, nil)
+	require.False(t, scMember.CenterWideFor(authctx.PermPaymentsViewAll))
+
+	byMember, err := paymentsSvc.Record(ctx, scMember, payments.RecordPaymentRequest{
+		ContactID: contact.ID, Amount: 100_000, Method: payments.MethodCash, ReceivedOn: "2026-01-20",
+	})
+	require.NoError(t, err)
+	require.Len(t, byMember.Allocations, 1, "a payments.create-only member's payment must also settle the member-closed invoice")
+	require.Equal(t, invB.ID, byMember.Allocations[0].InvoiceID)
+	require.EqualValues(t, 0, byMember.UnallocatedAmount)
+
+	settledB := getInvoice(t, db, member.ID, studentB)
+	require.Equal(t, billing.InvoicePaid, settledB.Status)
+	require.EqualValues(t, 100_000, settledB.PaidAmount)
+
+	// (c) the owner reverses the first payment; invA returns to issued.
+	_, err = paymentsSvc.Reverse(ctx, scOwner, byOwner.Payment.ID, payments.ReverseRequest{Reason: "recorded early by mistake"})
+	require.NoError(t, err)
+	reversedA := getInvoice(t, db, member.ID, studentA)
+	require.Equal(t, billing.InvoiceIssued, reversedA.Status)
+	require.EqualValues(t, 0, reversedA.PaidAmount)
+
+	// (d) the owner reallocates the member-recorded payment onto invA, now
+	// that it has room again — this exercises the invoice lookup for an
+	// invoice whose own teacher_id differs from the payment's anchor
+	// (invA.teacher_id = member, the payment's own anchor = owner).
+	reallocated, err := paymentsSvc.Reallocate(ctx, scOwner, byMember.Payment.ID, payments.ReallocateRequest{
+		Allocations: []payments.ReallocationLine{{InvoiceID: invA.ID, Amount: 100_000}},
+	})
+	require.NoError(t, err)
+	require.Len(t, reallocated.Allocations, 1)
+	require.Equal(t, invA.ID, reallocated.Allocations[0].InvoiceID)
+	require.Equal(t, payments.AllocatedManual, reallocated.Allocations[0].AllocatedBy)
+
+	rebalancedA := getInvoice(t, db, member.ID, studentA)
+	rebalancedB := getInvoice(t, db, member.ID, studentB)
+	require.Equal(t, billing.InvoicePaid, rebalancedA.Status)
+	require.EqualValues(t, 100_000, rebalancedA.PaidAmount)
+	require.Equal(t, billing.InvoiceIssued, rebalancedB.Status, "money moved off invB entirely")
+	require.EqualValues(t, 0, rebalancedB.PaidAmount)
+
+	assertLedgerInvariant(t, db, scOwner.CenterID)
 }

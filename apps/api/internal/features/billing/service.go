@@ -107,8 +107,9 @@ func (s *Service) ensurePeriod(ctx context.Context, a authctx.Anchor, year, mont
 }
 
 // ListPeriods returns a page of the tenant's billing periods with each
-// period's owning teacher — center-wide for a reports-oversight caller
-// (owner or reports.send holder), own rows only for a plain member.
+// period's owning teacher — center-wide for a billing.view_all holder (the
+// owner, an explicit grant, or reports.send through the key it implies),
+// own rows only for a plain member.
 func (s *Service) ListPeriods(ctx context.Context, sc authctx.Scope, p pagination.Params) ([]PeriodWithTeacher, int64, error) {
 	return s.repo.ListPeriodsRead(ctx, sc, p)
 }
@@ -128,7 +129,7 @@ func (s *Service) ListPeriodsClass(ctx context.Context, sc authctx.Scope, classI
 	if err != nil {
 		return nil, 0, apperror.Internal(err)
 	}
-	if !readable && !sc.ReportsOversight() {
+	if !readable && !sc.CenterWideFor(authctx.PermBillingViewAll) {
 		return nil, 0, apperror.NotFound("class")
 	}
 	return s.repo.ListPeriodsClassRead(ctx, sc, classID, p)

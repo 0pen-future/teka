@@ -7243,8 +7243,10 @@ paths:
     post:
       consumes:
       - application/json
-      description: 'Idempotent: an id already sent, or not belonging to the caller,
-        is silently skipped rather than erroring.'
+      description: Idempotent for an id already sent — it simply matches nothing on
+        the second call. An id outside the caller's own scope (or another teacher's,
+        for a non-owner) fails the whole call with a 404 instead of silently skipping
+        it.
       parameters:
       - description: notification ids
         in: body
@@ -7259,6 +7261,15 @@ paths:
           description: No Content
         "401":
           description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: an id is not visible to the caller
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'

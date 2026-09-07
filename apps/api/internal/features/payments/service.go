@@ -82,7 +82,7 @@ func (s *Service) Record(ctx context.Context, sc authctx.Scope, req RecordPaymen
 			return err
 		}
 
-		candidates, err := s.repo.CandidateInvoices(txCtx, anchor, req.ContactID)
+		candidates, err := s.repo.CandidateInvoices(txCtx, sc, req.ContactID)
 		if err != nil {
 			return err
 		}
@@ -107,7 +107,7 @@ func (s *Service) Record(ctx context.Context, sc authctx.Scope, req RecordPaymen
 		}
 
 		for _, a := range allocs {
-			if err := s.repo.RecalcInvoicePaid(txCtx, anchor, a.InvoiceID); err != nil {
+			if err := s.repo.RecalcInvoicePaid(txCtx, sc, a.InvoiceID); err != nil {
 				return err
 			}
 		}

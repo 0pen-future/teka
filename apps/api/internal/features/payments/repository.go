@@ -71,18 +71,22 @@ type Repository interface {
 	// CandidateInvoices returns contactID's invoices eligible for payment
 	// (status issued/partially_paid, total_due > paid_amount), locked
 	// FOR UPDATE so two concurrent payments for one contact serialise instead
-	// of both reading the same stale paid_amount. a names the contact's own
-	// owning teacher — Record's contact anchor, or Reallocate/Reverse/
-	// AutoAllocateRemainder's payment anchor — never the caller, so the
-	// candidate set can never widen to another teacher's invoices.
-	CandidateInvoices(ctx context.Context, a authctx.Anchor, contactID uuid.UUID) ([]Candidate, error)
+	// of both reading the same stale paid_amount. Keyed on sc's center plus
+	// contactID only — never a teacher: a contact anchors on its own owning
+	// teacher, but each of its invoices carries the teacher_id of whoever
+	// closed that invoice's billing period, which can be a different member
+	// of the same center. The route permission (payments.create) plus the
+	// caller already having resolved contactID inside their own center is
+	// the gate; see invoiceCenterScoped.
+	CandidateInvoices(ctx context.Context, sc authctx.Scope, contactID uuid.UUID) ([]Candidate, error)
 	// InvoicesByIDs loads every invoice in ids, FOR UPDATE, for Reallocate's
 	// validation and write path — the same lock discipline CandidateInvoices
 	// uses so a reallocation can never race a concurrent payment for the same
 	// contact. Missing ids are simply absent from the result; the caller
-	// decides whether that is a validation failure. a is always the
-	// payment's own owner anchor, never the caller.
-	InvoicesByIDs(ctx context.Context, a authctx.Anchor, ids []uuid.UUID) ([]InvoiceRow, error)
+	// decides whether that is a validation failure. Keyed on sc's center
+	// plus ids only, for the same reason CandidateInvoices is: see
+	// invoiceCenterScoped.
+	InvoicesByIDs(ctx context.Context, sc authctx.Scope, ids []uuid.UUID) ([]InvoiceRow, error)
 	// InsertAllocations bulk-inserts payment_allocations rows, merging into
 	// an existing (payment_id, invoice_id) row by adding to its amount rather
 	// than failing uq_payment_allocations — AutoAllocateRemainder relies on
@@ -113,11 +117,10 @@ type Repository interface {
 	MarkReversed(ctx context.Context, a authctx.Anchor, paymentID uuid.UUID, at time.Time) error
 	// RecalcInvoicePaid re-derives invoiceID's paid_amount and status from the
 	// sum of its non-reversed allocations minus its reversed ones — never an
-	// increment, so it can never drift and re-running it is a no-op. a is
-	// always the touched payment's own owner anchor, never the caller's, so
-	// an owner's oversight recompute never silently widens to another
-	// teacher's invoice.
-	RecalcInvoicePaid(ctx context.Context, a authctx.Anchor, invoiceID uuid.UUID) error
+	// increment, so it can never drift and re-running it is a no-op. Keyed
+	// on sc's center plus invoiceID only, for the same reason
+	// CandidateInvoices is: see invoiceCenterScoped.
+	RecalcInvoicePaid(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID) error
 	// ResolveContactAnchor reports whether contactID belongs to sc's center —
 	// any teacher's contact, because the right to record a payment is the
 	// route permission (payments.create), not contact ownership — regardless
@@ -177,6 +180,26 @@ func (r *gormRepository) writeScoped(ctx context.Context, sc authctx.Scope) *gor
 func (r *gormRepository) allocationAnchored(ctx context.Context, a authctx.Anchor) *gorm.DB {
 	return database.FromContext(ctx, r.db).
 		Where("payment_allocations.center_id = ? AND payment_allocations.teacher_id = ?", a.CenterID, a.TeacherID)
+}
+
+// invoiceCenterScoped binds an invoices query to sc's center only — no
+// teacher filter, no permission check. A payment is center-level money
+// against a contact: the contact itself anchors on its own owning teacher,
+// but each of its invoices carries the teacher_id of whoever closed that
+// invoice's billing period, which can be a different member of the same
+// center. No single teacher anchor can match every invoice a payment might
+// legitimately touch, so CandidateInvoices, InvoicesByIDs, and
+// RecalcInvoicePaid all key on center only. That is safe because none of the
+// three decides who may act: Record's caller already passed the
+// payments.create route permission and had contactID resolved inside their
+// own center by ResolveContactAnchor; Reallocate/Reverse/AutoAllocateRemainder
+// only ever reach an invoice already locked into a payment LockPayment has
+// gated under the caller's own tenancy. InvoicesByIDs is a compiled query and
+// uses this helper directly; CandidateInvoices and RecalcInvoicePaid are raw
+// SQL (a LATERAL join and a single UPDATE respectively) and bind sc.CenterID
+// as a literal parameter instead, but rely on the same invariant.
+func (r *gormRepository) invoiceCenterScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+	return database.FromContext(ctx, r.db).Table("invoices").Where("center_id = ?", sc.CenterID)
 }
 
 // readNarrow appends the own-rows filter on col unless the caller sees
@@ -260,11 +283,9 @@ func (r *gormRepository) ListPayments(ctx context.Context, sc authctx.Scope, fil
 // Postgres's "FOR UPDATE cannot be applied to the nullable side of an outer
 // join" restriction, which only concerns columns from the locked relation.
 //
-// The (? OR i.teacher_id = ?) pair keeps this one raw statement shared with
-// callers that carry no widening authority at all: CandidateInvoices always
-// runs under an Anchor, which has no owner/WriteWide concept, so the method
-// below binds the OR arm's placeholder to a literal false and never widens —
-// the SQL text itself never forks between an owner and a member caller.
+// Keyed on center_id + contact_id only, never a teacher — see
+// invoiceCenterScoped for why a single teacher filter would silently drop
+// invoices from candidacy.
 //
 // Rows are ordered by invoice id, not by the D8 sort keys: the caller re-sorts
 // candidates through the D8 comparator before allocating, so this ORDER BY only
@@ -288,17 +309,17 @@ const candidateInvoicesQuery = `
 	    JOIN classes    cl ON cl.id = e.class_id
 	    WHERE il.invoice_id = i.id
 	) lc ON true
-	WHERE i.center_id = ? AND (? OR i.teacher_id = ?) AND i.contact_id = ?
+	WHERE i.center_id = ? AND i.contact_id = ?
 	  AND i.status IN ('issued', 'partially_paid')
 	  AND i.total_due > i.paid_amount
 	ORDER BY i.id
 	FOR UPDATE OF i
 `
 
-func (r *gormRepository) CandidateInvoices(ctx context.Context, a authctx.Anchor, contactID uuid.UUID) ([]Candidate, error) {
+func (r *gormRepository) CandidateInvoices(ctx context.Context, sc authctx.Scope, contactID uuid.UUID) ([]Candidate, error) {
 	var rows []Candidate
 	err := database.FromContext(ctx, r.db).
-		Raw(candidateInvoicesQuery, a.CenterID, false, a.TeacherID, contactID).
+		Raw(candidateInvoicesQuery, sc.CenterID, contactID).
 		Scan(&rows).Error
 	if err != nil {
 		return nil, err
@@ -328,14 +349,13 @@ func (r *gormRepository) InsertAllocations(ctx context.Context, rows []PaymentAl
 		Create(&rows).Error
 }
 
-func (r *gormRepository) InvoicesByIDs(ctx context.Context, a authctx.Anchor, ids []uuid.UUID) ([]InvoiceRow, error) {
+func (r *gormRepository) InvoicesByIDs(ctx context.Context, sc authctx.Scope, ids []uuid.UUID) ([]InvoiceRow, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	q := database.FromContext(ctx, r.db).
-		Table("invoices").
+	q := r.invoiceCenterScoped(ctx, sc).
 		Select("id, contact_id, status, total_due, paid_amount").
-		Where("center_id = ? AND id IN ? AND teacher_id = ?", a.CenterID, ids, a.TeacherID)
+		Where("id IN ?", ids)
 	var rows []InvoiceRow
 	err := q.Clauses(clause.Locking{Strength: "UPDATE"}).Order("id").Find(&rows).Error
 	return rows, err
@@ -380,9 +400,9 @@ func (r *gormRepository) MarkReversed(ctx context.Context, a authctx.Anchor, pay
 // produces zero rows — exactly the all-allocations-deleted case — the UPDATE
 // silently touches nothing and the invoice is left at its stale status.
 //
-// The trailing (? OR i.teacher_id = ?) mirrors candidateInvoicesQuery's
-// shared-SQL trick: RecalcInvoicePaid always runs under an Anchor, so the Go
-// method binds the OR arm to a literal false and never widens.
+// The trailing i.center_id = ? is keyed the same way candidateInvoicesQuery
+// is — see invoiceCenterScoped — since the invoice this recomputes can carry
+// any teacher_id in the center, not necessarily the payment's own anchor.
 const recalcInvoicePaidQuery = `
 	UPDATE invoices i SET
 	  paid_amount = COALESCE(x.paid, 0),
@@ -402,12 +422,12 @@ const recalcInvoicePaidQuery = `
 	  WHERE pa.invoice_id = ?
 	  GROUP BY pa.invoice_id
 	) x ON x.invoice_id = target.invoice_id
-	WHERE i.id = target.invoice_id AND i.center_id = ? AND (? OR i.teacher_id = ?)
+	WHERE i.id = target.invoice_id AND i.center_id = ?
 `
 
-func (r *gormRepository) RecalcInvoicePaid(ctx context.Context, a authctx.Anchor, invoiceID uuid.UUID) error {
+func (r *gormRepository) RecalcInvoicePaid(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID) error {
 	res := database.FromContext(ctx, r.db).
-		Exec(recalcInvoicePaidQuery, invoiceID, invoiceID, a.CenterID, false, a.TeacherID)
+		Exec(recalcInvoicePaidQuery, invoiceID, invoiceID, sc.CenterID)
 	return res.Error
 }
 

@@ -3,6 +3,7 @@
 package server
 
 import (
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -227,8 +228,8 @@ func TestPolicyHTTPRemovedMembershipLosesAccess(t *testing.T) {
 // widens classes and only classes (students stay narrow), while a stray row
 // for the retired data.view_center_wide key — a code rollback re-writing one
 // after migration 000020 — widens nothing at all. Students is the second
-// probe rather than contacts because contact reads run on the frozen
-// ReportsOversight axis (phone privacy), not on a view_all key.
+// probe; contacts.view_all now widens contact reads the same way (see
+// TestReportsSendImpliedKeysParity), it is simply not this test's concern.
 func TestPolicyHTTPViewAllParity(t *testing.T) {
 	t.Parallel()
 	e := newPolicyEnv(t)
@@ -340,6 +341,149 @@ func TestPolicyHTTPViewAllNeverWidensWrites(t *testing.T) {
 	rec = e.send(t, http.MethodPost, "/api/v1/payments", tok,
 		`{"contact_id":"`+ownerContact.ID.String()+`","amount":50000,"method":"cash","received_on":"2026-03-02"}`)
 	require.Equal(t, http.StatusForbidden, rec.Code, "recording a payment is gated by payments.create")
+}
+
+// A reports.send holder and a holder of exactly the four keys it implies
+// (billing/statements/notifications/contacts view_all, granted directly, no
+// reports.send) see the identical center-wide read surface — contacts with
+// phone, the billing period, statements, and the notification ledger — while
+// a baseline member sees none of it. The two diverge only on send-only
+// surfaces: bulk-sending, previewing, resuming a run, the statement's public
+// link, and mapping a contact's Zalo friend all stay reports.send-only, and
+// marking another teacher's notification sent stays refused for both, since
+// neither the source permission nor its implied keys ever widen a write.
+func TestReportsSendImpliedKeysParity(t *testing.T) {
+	t.Parallel()
+	e := newPolicyEnv(t)
+	ownerAcct, owner := testutil.Teacher(t, e.db)
+	memberAAcct, memberA := testutil.Teacher(t, e.db)
+	memberBAcct, memberB := testutil.Teacher(t, e.db)
+	memberCAcct, memberC := testutil.Teacher(t, e.db)
+	testutil.JoinCenter(t, e.db, memberA.ID, owner.CenterID)
+	testutil.JoinCenter(t, e.db, memberB.ID, owner.CenterID)
+	testutil.JoinCenter(t, e.db, memberC.ID, owner.CenterID)
+	e.giaoVien(t, memberA.ID, owner.CenterID)
+	e.giaoVien(t, memberB.ID, owner.CenterID)
+	e.giaoVien(t, memberC.ID, owner.CenterID)
+
+	e.override(t, memberA.ID, owner.CenterID, authctx.PermReportsSend, true)
+	e.override(t, memberB.ID, owner.CenterID, authctx.PermBillingViewAll, true)
+	e.override(t, memberB.ID, owner.CenterID, authctx.PermStatementsViewAll, true)
+	e.override(t, memberB.ID, owner.CenterID, authctx.PermNotificationsViewAll, true)
+	e.override(t, memberB.ID, owner.CenterID, authctx.PermContactsViewAll, true)
+
+	tokOwner := e.token(t, ownerAcct.ID)
+	tokA := e.token(t, memberAAcct.ID)
+	tokB := e.token(t, memberBAcct.ID)
+	tokC := e.token(t, memberCAcct.ID)
+
+	// Fixture data anchored on the owner: a contact with a billable, attended
+	// child, closed into an invoice, then a generated statement and a queued
+	// notification.
+	ownerContact := testutil.Contact(t, e.db, owner.ID)
+	classStart := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	class := testutil.Class(t, e.db, owner.ID, testutil.WithClassStartDate(classStart))
+	student := testutil.Student(t, e.db, owner.ID, ownerContact.ID)
+	enrollment := testutil.Enrollment(t, e.db, owner.ID, student.ID, class.ID, classStart)
+	session := testutil.Session(t, e.db, owner.ID, class.ID, classStart.AddDate(0, 0, 1),
+		testutil.WithSessionAttendanceConfirmed(time.Now()))
+	testutil.AttendanceRecord(t, e.db, owner.ID, session.ID, student.ID, enrollment.ID)
+
+	rec := e.send(t, http.MethodPost, "/api/v1/billing-periods", tokOwner, `{"year":2026,"month":3}`)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	var period struct {
+		Data struct {
+			ID uuid.UUID `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &period))
+	periodID := period.Data.ID
+	periodPath := "/api/v1/billing-periods/" + periodID.String()
+
+	require.Equal(t, http.StatusOK, e.send(t, http.MethodPost, periodPath+"/close", tokOwner, "").Code)
+	require.Equal(t, http.StatusOK, e.send(t, http.MethodPost, periodPath+"/statements/generate", tokOwner, "").Code)
+	rec = e.send(t, http.MethodPost, periodPath+"/notifications/bulk", tokOwner, `{"purpose":"statement","channel":"zalo_manual"}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	// Read parity: A and B see the whole center on every converted resource;
+	// C, holding neither reports.send nor an implied key, sees none of it.
+	contactPath := "/api/v1/contacts/" + ownerContact.ID.String()
+	for _, tok := range []string{tokA, tokB} {
+		body := e.get(t, contactPath, tok).Body.String()
+		require.Contains(t, body, ownerContact.Phone, "contacts.view_all (direct or implied) must widen contact reads")
+	}
+	require.Equal(t, http.StatusNotFound, e.get(t, contactPath, tokC).Code,
+		"a baseline member must not see another teacher's contact")
+
+	for _, tok := range []string{tokA, tokB} {
+		require.Equal(t, http.StatusOK, e.get(t, periodPath, tok).Code,
+			"billing.view_all (direct or implied) must widen the period read")
+	}
+	require.Equal(t, http.StatusNotFound, e.get(t, periodPath, tokC).Code)
+
+	stmtBodyA := e.get(t, periodPath+"/statements", tokA).Body.String()
+	stmtBodyB := e.get(t, periodPath+"/statements", tokB).Body.String()
+	require.Contains(t, stmtBodyA, `"total_due"`, "statements.view_all (direct or implied) must widen the statement list")
+	require.Contains(t, stmtBodyB, `"total_due"`, "statements.view_all (direct or implied) must widen the statement list")
+	require.Equal(t, http.StatusNotFound, e.get(t, periodPath+"/statements", tokC).Code)
+
+	notifBodyA := e.get(t, periodPath+"/notifications", tokA).Body.String()
+	notifBodyB := e.get(t, periodPath+"/notifications", tokB).Body.String()
+	notifBodyC := e.get(t, periodPath+"/notifications", tokC).Body.String()
+	require.Contains(t, notifBodyA, ownerContact.ID.String(), "notifications.view_all (direct or implied) must widen the notification ledger")
+	require.Contains(t, notifBodyB, ownerContact.ID.String(), "notifications.view_all (direct or implied) must widen the notification ledger")
+	require.NotContains(t, notifBodyC, ownerContact.ID.String(), "a baseline member must not see another teacher's notification ledger")
+
+	// Send-only surfaces stay reports.send-only: B's implied keys read but
+	// never send.
+	require.Equal(t, http.StatusForbidden,
+		e.send(t, http.MethodPost, periodPath+"/notifications/bulk", tokB, `{"purpose":"statement","channel":"zalo_manual"}`).Code,
+		"the implied keys must not widen sending")
+	require.Equal(t, http.StatusOK,
+		e.send(t, http.MethodPost, periodPath+"/notifications/bulk", tokA, `{"purpose":"statement","channel":"zalo_manual"}`).Code,
+		"reports.send itself still sends")
+
+	require.Equal(t, http.StatusForbidden, e.get(t, periodPath+"/notifications/preview", tokB).Code,
+		"the implied notifications.view_all must not widen the send preview")
+
+	// resumeRun checks send-oversight before it ever looks for a run: B is
+	// refused before the lookup, A passes the gate and then gets "no run" —
+	// distinct failures that both refuse the actual resume.
+	recA := e.send(t, http.MethodPost, periodPath+"/notifications/run/resume", tokA, "")
+	require.Equal(t, http.StatusNotFound, recA.Code, "reports.send passes the oversight gate onto a real (absent) run lookup")
+	recB := e.send(t, http.MethodPost, periodPath+"/notifications/run/resume", tokB, "")
+	require.Equal(t, http.StatusForbidden, recB.Code, "the implied keys must not pass the send-oversight gate")
+
+	// The statement's public link is a send-only field: populated for A,
+	// absent for B, on the very same generated statement.
+	require.Contains(t, stmtBodyA, `"url":"`, "reports.send must expose the statement's public link")
+	require.NotContains(t, stmtBodyB, `"url":"`, "the implied statements.view_all must not expose the send-only public link")
+
+	// Mapping a contact to a Zalo friend is send-only: A can, B (view_all
+	// only) and C (baseline) cannot.
+	mapBody := `{"zalo_user_id":"zalo-friend-1","zalo_name":"Bạn Zalo"}`
+	require.Equal(t, http.StatusOK, e.send(t, http.MethodPut, contactPath+"/zalo-mapping", tokA, mapBody).Code)
+	require.Equal(t, http.StatusNotFound,
+		e.send(t, http.MethodPut, contactPath+"/zalo-mapping", tokB, mapBody).Code,
+		"contacts.view_all must not widen the zalo-mapping write")
+	require.Equal(t, http.StatusNotFound,
+		e.send(t, http.MethodPut, contactPath+"/zalo-mapping", tokC, mapBody).Code)
+
+	// Marking another teacher's notification sent stays refused for both A
+	// and B: reports.send only gates creating what a family receives, and the
+	// implied view_all keys are read-only by construction.
+	var notifIDs struct {
+		Data []struct {
+			ID uuid.UUID `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(notifBodyA), &notifIDs))
+	require.NotEmpty(t, notifIDs.Data, "the owner's bulk send must have queued at least one notification")
+	markSentBody := `{"ids":["` + notifIDs.Data[0].ID.String() + `"]}`
+	require.Equal(t, http.StatusNotFound, e.send(t, http.MethodPost, "/api/v1/notifications/mark-sent", tokA, markSentBody).Code,
+		"reports.send must not widen marking another teacher's notification sent")
+	require.Equal(t, http.StatusNotFound, e.send(t, http.MethodPost, "/api/v1/notifications/mark-sent", tokB, markSentBody).Code,
+		"the implied notifications.view_all must not widen marking another teacher's notification sent")
 }
 
 // An unauthenticated probe of a policy-guarded route must never leak whether

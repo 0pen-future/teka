@@ -579,9 +579,11 @@ func (s *Service) SendPreview(ctx context.Context, sc authctx.Scope, periodID uu
 }
 
 // List returns one billing period's notification ledger, optionally narrowed
-// by filter. A reports-oversight caller (owner or reports.send holder)
-// sees any period's ledger in the center; a plain member sees the ledgers of
-// their own periods — delegated rows a secretary sent on them included.
+// by filter. A caller who sees notifications center-wide (the owner, a
+// notifications.view_all holder, or a reports.send holder through the key it
+// implies) sees any period's ledger in the center; a plain member sees the
+// ledgers of their own periods — delegated rows a secretary sent on them
+// included.
 func (s *Service) List(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, filter ListFilter) ([]NotificationResponse, error) {
 	rows, err := s.repo.ListByPeriod(ctx, sc, periodID, filter)
 	if err != nil {
@@ -595,8 +597,9 @@ func (s *Service) List(ctx context.Context, sc authctx.Scope, periodID uuid.UUID
 }
 
 // MarkSent marks every id in ids sent, for ids visible to sc (center-scoped,
-// and teacher-scoped unless sc is the center's owner) and still queued.
-// Idempotent: an id already sent is silently left alone rather than erroring,
+// and teacher-scoped unless sc is the center's owner) and still queued; an id
+// outside that scope fails the whole call with NotFound. Idempotent: an id
+// already sent is silently left alone rather than erroring,
 // so tapping "mark sent" twice never fails the second time.
 func (s *Service) MarkSent(ctx context.Context, sc authctx.Scope, ids []uuid.UUID) error {
 	if err := s.repo.MarkSent(ctx, sc, ids); err != nil {

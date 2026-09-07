@@ -83,18 +83,19 @@ func (r *gormRepository) centerScoped(ctx context.Context, sc authctx.Scope) *go
 	return database.FromContext(ctx, r.db).Where("contacts.center_id = ?", sc.CenterID)
 }
 
-// scopedRead bounds every contact read. Reports oversight (owner or
-// reports.send) and the contacts.view_all grant read the whole center — the
-// widening mirrors Scope.PhoneVisible exactly, because a contact row IS its
-// phone: reach and phone visibility must stay one predicate, so this surface
-// needs no per-row masking. Anyone else reaches exactly what the one phone
-// rule shows them: contacts with a student actively enrolled in a live class
-// the caller holds an ACTIVE hoc_vu stint on. The row's teacher_id
-// deliberately plays no part: contacts are center data, whoever anchored
-// them. Reads only — the zalo-mapping write keeps its own predicate below.
+// scopedRead bounds every contact read. The owner and the contacts.view_all
+// grant (including a reports.send holder, through the key it implies) read
+// the whole center — the widening mirrors Scope.PhoneVisible exactly, because
+// a contact row IS its phone: reach and phone visibility must stay one
+// predicate, so this surface needs no per-row masking. Anyone else reaches
+// exactly what the one phone rule shows them: contacts with a student
+// actively enrolled in a live class the caller holds an ACTIVE hoc_vu stint
+// on. The row's teacher_id deliberately plays no part: contacts are center
+// data, whoever anchored them. Reads only — the zalo-mapping write keeps its
+// own predicate below.
 func (r *gormRepository) scopedRead(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("contacts.center_id = ?", sc.CenterID)
-	if !sc.ReportsOversight() && !sc.CenterWideFor(authctx.PermContactsViewAll) {
+	if !sc.CenterWideFor(authctx.PermContactsViewAll) {
 		frag, _ := classscope.PhoneVisibleViaContact("contacts.id")
 		q = q.Where(frag, sc.TeacherID, sc.CenterID)
 	}

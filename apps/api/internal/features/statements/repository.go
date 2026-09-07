@@ -63,8 +63,9 @@ type Repository interface {
 	// center-scoped by sc with owner oversight — Generate's closed-period
 	// precondition and authorization check.
 	GetPeriodStatus(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (PeriodInfo, error)
-	// GetPeriodStatusRead is GetPeriodStatus with reports oversight instead
-	// of owner oversight: a reports.send holder resolves any center
+	// GetPeriodStatusRead is GetPeriodStatus with statements.view_all reach
+	// instead of owner-only: a statements.view_all holder (including a
+	// reports.send holder, through the key it implies) resolves any center
 	// period, like the owner. Backs read paths (List, PeriodFigures) and the
 	// delegated send's GenerateForSend — never the standalone generate route.
 	GetPeriodStatusRead(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (PeriodInfo, error)
@@ -124,9 +125,9 @@ type Repository interface {
 	UpsertStatement(ctx context.Context, a authctx.Anchor, stmt *Statement) (created, skippedRevoked bool, err error)
 	// ListByPeriod returns a page of one period's FAMILY statements
 	// (class_id IS NULL) with contact display fields, center-scoped by sc
-	// with reports oversight (owner or reports.send holder). Class
-	// copies live under ListByPeriodClass so the family list never doubles
-	// up after a class send.
+	// through statements.view_all (owner, explicit grant, or reports.send
+	// via the key it implies). Class copies live under ListByPeriodClass so
+	// the family list never doubles up after a class send.
 	ListByPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, p pagination.Params) ([]Row, int64, error)
 	// ListByPeriodClass returns a page of one period's statements scoped to
 	// one class copy (statements.class_id = classID). Visibility follows
@@ -135,7 +136,7 @@ type Repository interface {
 	// non-staff caller gets a neutral 404 instead of an empty page.
 	ListByPeriodClass(ctx context.Context, sc authctx.Scope, periodID, classID uuid.UUID, p pagination.Params) ([]Row, int64, error)
 	// GetByID returns one statement with contact display fields,
-	// center-scoped by sc with reports oversight.
+	// center-scoped by sc through statements.view_all (see scopedRead).
 	GetByID(ctx context.Context, sc authctx.Scope, statementID uuid.UUID) (*Row, error)
 	// GetByTokenHash resolves a statement by its token's hash. See the
 	// Repository doc comment: the one method in this package with no scope
@@ -275,15 +276,15 @@ func (r *gormRepository) writeScoped(ctx context.Context, sc authctx.Scope) *gor
 }
 
 // scopedRead is writeScoped's read-only sibling: the teacher filter is lifted
-// for anyone with reports oversight (owner or reports.send holder), not
-// just the owner. A caller without oversight additionally sees a CLASS copy
-// (class_id set) when they hold an active sending-role stint on that class —
-// the copy exists exactly so class staff can work a period they don't own,
-// and hiding it from them would orphan every row their own send created
-// under the period owner's teacher_id. It backs ONLY read paths
-// (ListByPeriod, ListByPeriodClass, GetByID) — writes like Revoke keep
-// writeScoped, so neither the delegated permission nor a class stint gains
-// write reach here.
+// for anyone who sees statements center-wide (the owner, a statements.view_all
+// holder, or a reports.send holder through the key it implies), not just the
+// owner. A caller without that reach additionally sees a CLASS copy (class_id
+// set) when they hold an active sending-role stint on that class — the copy
+// exists exactly so class staff can work a period they don't own, and hiding
+// it from them would orphan every row their own send created under the period
+// owner's teacher_id. It backs ONLY read paths (ListByPeriod, ListByPeriodClass,
+// GetByID) — writes like Revoke keep writeScoped, so neither the widened
+// visibility nor a class stint gains write reach here.
 //
 // The sending-role slice (statementSendRoles, resolved once in the service
 // layer) is bound here rather than threaded through every read call: this is
@@ -291,7 +292,7 @@ func (r *gormRepository) writeScoped(ctx context.Context, sc authctx.Scope) *gor
 // a per-call decision.
 func (r *gormRepository) scopedRead(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Model(&Statement{}).Where("statements.center_id = ?", sc.CenterID)
-	if !sc.ReportsOversight() {
+	if !sc.CenterWideFor(authctx.PermStatementsViewAll) {
 		frag, _ := classscope.WriteExists("statements.class_id")
 		q = q.Where("statements.teacher_id = ? OR (statements.class_id IS NOT NULL AND "+frag+")",
 			sc.TeacherID, sc.TeacherID, sc.CenterID, statementSendRoles)
@@ -319,7 +320,7 @@ func (r *gormRepository) GetPeriodStatus(ctx context.Context, sc authctx.Scope, 
 }
 
 func (r *gormRepository) GetPeriodStatusRead(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (PeriodInfo, error) {
-	return r.periodStatus(ctx, sc, periodID, sc.ReportsOversight())
+	return r.periodStatus(ctx, sc, periodID, sc.CenterWideFor(authctx.PermStatementsViewAll))
 }
 
 func (r *gormRepository) GetPeriodStatusCenter(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (PeriodInfo, error) {

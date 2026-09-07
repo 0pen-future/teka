@@ -76,7 +76,7 @@ func (f *fakeRepository) GetPeriodByYearMonth(_ context.Context, a authctx.Ancho
 
 func (f *fakeRepository) GetPeriodRead(_ context.Context, sc authctx.Scope, periodID uuid.UUID) (*PeriodWithTeacher, error) {
 	p, ok := f.periods[periodID]
-	if !ok || (!sc.ReportsOversight() && p.TeacherID != sc.TeacherID) {
+	if !ok || (!sc.CenterWideFor(authctx.PermBillingViewAll) && p.TeacherID != sc.TeacherID) {
 		return nil, ErrPeriodNotFound
 	}
 	return &PeriodWithTeacher{Period: p}, nil
@@ -85,7 +85,7 @@ func (f *fakeRepository) GetPeriodRead(_ context.Context, sc authctx.Scope, peri
 func (f *fakeRepository) ListPeriodsRead(_ context.Context, sc authctx.Scope, _ pagination.Params) ([]PeriodWithTeacher, int64, error) {
 	var out []PeriodWithTeacher
 	for _, p := range f.periods {
-		if sc.ReportsOversight() || p.TeacherID == sc.TeacherID {
+		if sc.CenterWideFor(authctx.PermBillingViewAll) || p.TeacherID == sc.TeacherID {
 			out = append(out, PeriodWithTeacher{Period: p})
 		}
 	}

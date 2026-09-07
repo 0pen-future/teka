@@ -42,15 +42,16 @@ func (f *fakeRepository) seed(teacherID, centerID uuid.UUID, name, phone string)
 	return c
 }
 
-// visible mirrors scopedRead's oversight arm: the owner or a reports-oversight
-// holder reads the whole center, whoever anchored the row. The hoc_vu reach
-// arm is a SQL EXISTS (classscope.PhoneVisibleViaContact) the fake cannot
-// model; the integration tests own it.
+// visible mirrors scopedRead's center-wide arm: the owner or a
+// contacts.view_all holder (including a reports.send holder, through the key
+// it implies) reads the whole center, whoever anchored the row. The hoc_vu
+// reach arm is a SQL EXISTS (classscope.PhoneVisibleViaContact) the fake
+// cannot model; the integration tests own it.
 func visible(c *fakeContact, sc authctx.Scope) bool {
 	if c.deleted || c.CenterID != sc.CenterID {
 		return false
 	}
-	return sc.ReportsOversight()
+	return sc.CenterWideFor(authctx.PermContactsViewAll)
 }
 
 func (f *fakeRepository) Create(_ context.Context, c *Contact) error {

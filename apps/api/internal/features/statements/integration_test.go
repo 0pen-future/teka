@@ -385,11 +385,10 @@ func TestNoTeacherEndpointLeaksAnotherTeachersStatement(t *testing.T) {
 
 // A member holding statements.view_all cannot generate statements for, or
 // revoke statements of, a period they do not own: the visibility key never
-// widens the write port. Statement reads follow the reports-oversight axis,
-// so the key opens no listing either — there is no route by which such a
-// caller reaches another teacher's statement rows, which is what keeps the
-// phone mask from ever being evaluated for the wrong person. Their own
-// period stays fully writable.
+// widens the write port. Statement reads do widen on the same key — a
+// statements.view_all holder lists another teacher's period center-wide —
+// which is the read/write split this whole axis exists to enforce. Their own
+// period stays fully writable either way.
 func TestViewAllWidensStatementReadsNotWrites(t *testing.T) {
 	t.Parallel()
 	statementsSvc, billingSvc, db := newIntegrationDeps(t)
@@ -416,11 +415,8 @@ func TestViewAllWidensStatementReadsNotWrites(t *testing.T) {
 	var count int64
 	require.NoError(t, db.Table("statements").Where("period_id = ?", ownerPeriod.ID).Count(&count).Error)
 	require.Zero(t, count, "a refused generate must write nothing")
-	// Statement reads still branch on ReportsOversight. When they move to
-	// the visibility-key axis this assertion flips to NoError; the writes
-	// above stay refused either way.
 	_, _, err = statementsSvc.List(ctx, scMember, ownerPeriod.ID, pagination.Params{Page: 1, PerPage: 20})
-	require.Equal(t, 404, apperror.From(err).Status, "statement reads follow reports oversight, not the visibility key")
+	require.NoError(t, err, "statement reads widen on statements.view_all, unlike the write port above")
 
 	first, err := statementsSvc.Generate(ctx, scOwner, ownerPeriod.ID)
 	require.NoError(t, err)

@@ -88,7 +88,7 @@ func (f *fakeRepository) ListPayments(_ context.Context, sc authctx.Scope, filte
 	return out, total, nil
 }
 
-func (f *fakeRepository) CandidateInvoices(_ context.Context, _ authctx.Anchor, contactID uuid.UUID) ([]Candidate, error) {
+func (f *fakeRepository) CandidateInvoices(_ context.Context, _ authctx.Scope, contactID uuid.UUID) ([]Candidate, error) {
 	return f.candidates[contactID], nil
 }
 
@@ -97,7 +97,7 @@ func (f *fakeRepository) InsertAllocations(_ context.Context, rows []PaymentAllo
 	return nil
 }
 
-func (f *fakeRepository) RecalcInvoicePaid(_ context.Context, _ authctx.Anchor, invoiceID uuid.UUID) error {
+func (f *fakeRepository) RecalcInvoicePaid(_ context.Context, _ authctx.Scope, invoiceID uuid.UUID) error {
 	f.recalcCalls = append(f.recalcCalls, invoiceID)
 	inv, ok := f.invoices[invoiceID]
 	if !ok {

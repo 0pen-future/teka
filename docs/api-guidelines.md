@@ -238,7 +238,9 @@ assistants/secretaries write only what their role's capabilities admit.
 center data anchored to the owner — `teacher_id = owner` on every row, seeded,
 imported, or created. Create/update/delete on both is owner-only at the
 service (an honest 403); a plain member's `GET /contacts` returns an empty
-list rather than 403, and reads stay owner + `ReportsOversight()`. Imports
+list rather than 403, and reads stay owner + `CenterWideFor(contacts.view_all)`
+(a direct grant, or the implied key `reports.send` carries — see delegated
+report sending below). Imports
 keep the grantable `imports.run` gate, but every imported contact/student row
 is stamped with the owner anchor server-side regardless of who runs the
 import, and dedupe resolves in owner scope. Recording a payment is gated by
@@ -263,42 +265,58 @@ student records, and a member sees a contact's phone only through the
 phone-privacy rule below.
 
 **Phone privacy**: one rule for every surface, list and detail alike — a
-caller sees a contact's phone iff `IsOwner || ReportsOversight()` or the
-caller holds an active hoc_vu stint on a class where a student of that contact
-is actively enrolled. Repositories compute the per-row arm as a derived
-`phone_visible` column (an EXISTS in the same query — fragments
+caller sees a contact's phone iff `IsOwner || CenterWideFor(contacts.view_all)`
+or the caller holds an active hoc_vu stint on a class where a student of that
+contact is actively enrolled. Repositories compute the per-row arm as a
+derived `phone_visible` column (an EXISTS in the same query — fragments
 `classscope.PhoneVisibleViaStudent` / `PhoneVisibleViaContact`); services
 combine it through `Scope.PhoneVisible(rowVisible)` and null the DTO field —
 `null`, never an empty string. Masked surfaces: student reads, statements
 (including the family statement URL, which is a bearer token and is returned
-only to `ReportsOversight()` callers), the notification ledger, and
-collections. Sending paths (statements, notifications, zalo) read the phone
-server-side, so a sender who cannot see a phone can still send.
+only to `ReportsOversight()` callers — that field stays send-gated, not
+read-gated, since exposing the link is itself a sending act), the notification
+ledger, and collections. Sending paths (statements, notifications, zalo) read
+the phone server-side, so a sender who cannot see a phone can still send.
 `ContactResponse.Phone` stays a non-null string because contact reads are
-already owner/oversight-only. Zalo friend-match and per-contact zalo-mapping
-stay open to assigned hoc_vu — their send path depends on mapping.
+already owner/`contacts.view_all`-only. Zalo friend-match and per-contact
+zalo-mapping stay open to assigned hoc_vu — their send path depends on
+mapping.
 
-**Delegated report sending (`can_send_reports`)**: a boolean permission on the
-member's live `center_members` stint, granted and revoked only by the owner
-(`POST`/`DELETE /centers/me/members/:teacherId/send-reports`). It is a
-capability flag, not a role, and it is member-only — the grant endpoint
-refuses the owner as target, so `IsOwner` and `CanSendReports` never combine.
-`Scope.ReportsOversight()` (`IsOwner || CanSendReports`) is the single helper
-both capabilities branch on:
+**Delegated report sending (`reports.send`, mirrored on the wire as
+`can_send_reports`)**: an ordinary permission-catalog key, granted and revoked
+only by the owner through the member override endpoint (`PUT
+/centers/me/members/:teacherId/overrides`) like any other key. It is
+member-only in practice — the owner sits outside the role/override tables, so
+their authority flows through `IsOwner` instead — `IsOwner` and
+`CanSendReports` never combine. `Scope.ReportsOversight()` (`IsOwner ||
+CanSendReports`) now gates
+**sending only**; the read cluster it used to gate directly is widened through
+`reports.send`'s [implied keys](./adding-permissions.md#3-consider-an-implied-key-instead-of-a-new-grant)
+instead, so the two capabilities are governed by different helpers even though
+one permission still carries both by default:
 
 - **Center-wide read cluster**: billing periods, statements, debt views, the
   contact list (`GET /contacts` — recipient names and phones, needed to
   address a send), and the notification ledger (per-period sends and runs)
-  scope to the whole center for a `ReportsOversight()` caller instead of the
-  member's own rows. Everything else — classes, attendance, payments, single
-  contact reads (`GET /contacts/:id`), and every write — keeps the plain
-  member scoping above.
+  scope to the whole center for a caller holding the matching `view_all` key
+  (`billing.view_all`, `statements.view_all`, `contacts.view_all`,
+  `notifications.view_all`) instead of the member's own rows.
+  `reports.send` carries all four as implied keys, so a delegated sender gets
+  this read cluster without a separate grant; an owner may also widen just the
+  reads — e.g. `contacts.view_all` alone — for a member who should see the
+  center-wide picture but never send. Everything else — classes, attendance,
+  payments, single contact reads (`GET /contacts/:id`), and every write —
+  keeps the plain member scoping above; implied keys widen `CenterWideFor`
+  reads only and never a write.
 - **Send exclusivity**: only `ReportsOversight()` callers may create report
-  sends — bulk send, run resume, and the pre-send preview all refuse everyone
-  else. This 403 is deliberately honest (not the neutral not-found used for
-  cross-tenant probes): the caller can see the period; the missing thing is
-  the permission. Plain teachers provide attendance and remarks input and keep
-  a read-only ledger of what was sent for their periods; they do not send.
+  sends — bulk send, run resume, the pre-send preview, and mapping a contact's
+  Zalo friend all refuse everyone else, including a caller who holds every
+  implied `view_all` key directly but not `reports.send` itself. This 403 (or,
+  for a caller acting on a specific row outside their reach, 404) is
+  deliberately honest, never the silent success a widened read would suggest:
+  the caller can see the period; the missing thing is the permission. Plain
+  teachers provide attendance and remarks input and keep a read-only ledger of
+  what was sent for their periods; they do not send.
 
 *Release note (behavior removal)*: before this permission existed every
 teacher could generate and send statements for their own periods. Now sending
@@ -323,11 +341,13 @@ Developer workflow for adding or reusing a permission on a new endpoint:
   is dropped on read, so rolling the code back never grants or crashes
   anything, and unknown/deprecated/non-grantable keys are rejected (422) on
   write.
-- **Every route is classified** in the route-policy registry
-  (`apps/api/internal/server/route_policy.go`) as public, authenticated-self,
-  owner-only, or permission-gated with its exact catalog key; a registry
-  coverage test fails the build on any unclassified route, so enforcement
-  fails closed. HTTP-level gating lives there — services use
+- **Every route is classified** in the route manifest
+  (`apps/api/internal/shared/routespec/routespec.go`) as public,
+  authenticated-self, owner-only, or permission-gated with its exact catalog
+  key, alongside its audit classification; the server policy, the audit
+  action lookup, and the request-audit skip sets all derive from that one
+  entry, and a coverage test fails the build on any unclassified route, so
+  enforcement fails closed. HTTP-level gating lives there — services use
   `authctx.Require` only for boundaries that bypass HTTP middleware.
 - Effective set = (role permissions ∪ per-member grants) − per-member denies.
   Roles are per-center rows (`center_roles`, three system roles `giao_vien`,
@@ -358,11 +378,12 @@ Developer workflow for adding or reusing a permission on a new endpoint:
   a grantable "manage permissions" key would be one hop from self-escalation.
   Member removal and the send-reports grant stay owner-only for the same
   reason.
-- **Dual life of `reports.send`** (until the flag column is dropped): the
-  `can_send_reports` column stays authoritative; every mutation dual-writes
-  column + override row in one transaction, the role matrix rejects
-  `reports.send` (per-member only), and `ResolveScope` computes
-  `CanSendReports = column OR Has(reports.send)`.
+- **`reports.send` lives solely in the permission tables** (migration
+  000019 dropped the legacy `can_send_reports` column the permission
+  dual-wrote during the migration soak window). The role matrix still rejects
+  it — it stays a per-member override, never a role default — and
+  `ResolveScope` computes `CanSendReports = Has(reports.send)` straight from
+  the effective permission set.
 - Permission mutations are audited twice under the same action name: the
   request middleware row is the HTTP evidence (status, IP, failed attempts)
   and a service-published event row carries the committed before/after diff
