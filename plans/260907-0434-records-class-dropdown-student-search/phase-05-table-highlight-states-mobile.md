@@ -1,7 +1,7 @@
 ---
 phase: 5
 title: "Bảng: tô đậm, trạng thái rỗng/tải, hàng mobile"
-status: todo
+status: completed
 priority: P1
 effort: "4h"
 dependencies: [1, 4]
@@ -55,20 +55,24 @@ Trang (`records-page.tsx`): nhánh `sessionsPending && selectedClassId` render `
 
 ## Todo
 
-- [ ] Keyframe shimmer
-- [ ] `student-records-table.tsx`: highlight, empty, loading, compact
-- [ ] `records-page.tsx`: nhánh loading/empty/table + `onClearSearch`
-- [ ] Test bảng + test cũ xanh
+- [x] Keyframe shimmer
+- [x] `student-records-table.tsx`: highlight, empty, loading, compact
+- [x] `records-page.tsx`: nhánh loading/empty/table + `onClearSearch`
+- [x] Test bảng + test cũ xanh
 
 ## Success Criteria
 
-- [ ] Desktop: DOM/class của header và hàng không đổi ngoài `<mark>`; chụp màn hình 1280px trước/sau trùng nhau khi `q` rỗng.
-- [ ] Rỗng do tìm: đúng 3 phần tử (tiêu đề Baloo 15px ink-700, gợi ý 13.5px ink-400, nút ghost) trong thẻ bảng; lớp rỗng vẫn dùng khối cũ.
-- [ ] Loading: 5 hàng shimmer + status sr-only; `prefers-reduced-motion` tắt animation.
-- [ ] Compact: hàng 2 dòng đúng nội dung `TB 8.6 · ↗ Tăng · vắng 0`, nút "Xem" (aria "Xem hồ sơ"), không tràn ngang ở 375px.
+- [x] Desktop: DOM/class của header và hàng không đổi ngoài `<mark>`; chụp màn hình 1280px trước/sau trùng nhau khi `q` rỗng.
+- [x] Rỗng do tìm: đúng 3 phần tử (tiêu đề Baloo 15px ink-700, gợi ý 13.5px ink-400, nút ghost) trong thẻ bảng; lớp rỗng vẫn dùng khối cũ.
+- [x] Loading: 5 hàng shimmer + status sr-only; `prefers-reduced-motion` tắt animation.
+- [x] Compact: hàng 2 dòng đúng nội dung `TB 8.6 · ↗ Tăng · vắng 0`, nút "Xem" (aria "Xem hồ sơ"), không tràn ngang ở 375px.
 
 ## Risk Assessment
 
 - **`<mark>` mặc định của trình duyệt** (nền vàng, màu đen) đè token → class đã ghi đè `bg-sun-200 text-ink-900`; kiểm tra Firefox áp `color` đúng.
 - **Test cũ `parentElement` của tên** dùng `screen.findByText("Nguyễn Văn An")` → phần tử tên vẫn là `div` chứa text thuần khi `query` rỗng (không bọc `span` thừa) để `.parentElement` vẫn là hàng.
 - **`sessionsPending` dài** làm skeleton xuất hiện nháy khi đổi lớp → chấp nhận theo mockup; nếu phản hồi khó chịu, giữ dữ liệu cũ bằng `keepPreviousData` (đã có ở `useClassesList`, cân nhắc cho `useEnrollmentsList`) ở phase sau, không thuộc scope này.
+
+## Kết quả
+
+Commit `bcc08e3`. Lệch ghi nhận: skeleton compact dùng 2 thanh/hàng (flex) thay vì grid 6 cột để không tràn ngang 375px; nhãn xu hướng thật là "Tiến bộ / Đi xuống / Ổn định / Chưa đủ dữ liệu" (mockup ghi "Tăng"); `ghostButtonClassName` export từ bảng để toolbar/trang dùng chung. Không có ảnh "trước" 1280px — bằng chứng là `DesktopRow` giữ nguyên markup (diff) và test cũ xanh.

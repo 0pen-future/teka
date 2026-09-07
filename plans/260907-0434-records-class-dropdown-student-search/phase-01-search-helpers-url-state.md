@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Fold tiếng Việt, lọc học sinh, ?q= trên URL"
-status: todo
+status: completed
 priority: P1
 effort: "3h"
 dependencies: []
@@ -58,19 +58,23 @@ roster/components/zalo-friend-picker.tsx  teaching/lib/student-search.ts  filter
 
 ## Todo
 
-- [ ] `vietnamese.ts` + test
-- [ ] `zalo-friend-picker.tsx` dùng helper chung, test roster xanh
-- [ ] `student-search.ts` + test
-- [ ] `records-page.tsx` đọc/ghi `?q=` (chưa render UI)
-- [ ] `selectClass` xoá `q` cùng lúc đổi `class_id` (một entry history)
+- [x] `vietnamese.ts` + test
+- [x] `zalo-friend-picker.tsx` dùng helper chung, test roster xanh
+- [x] `student-search.ts` + test
+- [x] `records-page.tsx` đọc/ghi `?q=` (chưa render UI)
+- [x] `selectClass` xoá `q` cùng lúc đổi `class_id` (một entry history)
 
 ## Success Criteria
 
-- [ ] `foldVietnamese("Trần Đức Ánh") === "tran duc anh"`; `findFoldedMatch("Nguyễn Văn An", "nguyen")` → `{start:0,end:6}`; với input NFD `"Nguyẽn"` → end đúng vị trí gốc.
-- [ ] `npx vitest run src/lib src/features/roster src/features/teaching` xanh; `records-pages.test.tsx` không sửa.
-- [ ] Không thay đổi thị giác nào trên `/records` sau phase này.
+- [x] `foldVietnamese("Trần Đức Ánh") === "tran duc anh"`; `findFoldedMatch("Nguyễn Văn An", "nguyen")` → `{start:0,end:6}`; với input NFD `"Nguyẽn"` → end đúng vị trí gốc.
+- [x] `npx vitest run src/lib src/features/roster src/features/teaching` xanh; `records-pages.test.tsx` không sửa.
+- [x] Không thay đổi thị giác nào trên `/records` sau phase này.
 
 ## Risk Assessment
 
 - **Trùng lặp helper** nếu chỉ copy từ zalo-friend-picker → bắt buộc bước 2 (DRY). Tín hiệu: còn 2 định nghĩa `foldVietnamese` trong repo → chưa xong.
 - **`useSearchParams` re-render mỗi phím**: ≤100 dòng/lớp nên chấp nhận; nếu đo được giật (>16ms/phím) thì thêm `useDeferredValue(query)` cho phần lọc, không đổi URL contract.
+
+## Kết quả
+
+Commit `2e39587`. Không lệch.

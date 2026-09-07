@@ -1,7 +1,7 @@
 ---
 phase: 6
 title: "Test tích hợp, e2e, docs, QA thị giác"
-status: todo
+status: completed
 priority: P1
 effort: "4h"
 dependencies: [1, 2, 3, 4, 5]
@@ -53,21 +53,25 @@ Không có kiến trúc mới; phase này chỉ tiêu thụ helper `mockViewport
 
 ## Todo
 
-- [ ] Test tích hợp bổ sung xanh, case cũ nguyên vẹn
-- [ ] 2 spec e2e cập nhật + spec mobile mới xanh trên stack cách ly
-- [ ] Docs (có điều kiện) cập nhật, link kiểm tra
-- [ ] Gate web/api xanh
-- [ ] Report QA thị giác 5 trạng thái × 2 viewport + 3 trang không đổi
+- [x] Test tích hợp bổ sung xanh, case cũ nguyên vẹn
+- [x] 2 spec e2e cập nhật + spec mobile mới xanh trên stack cách ly
+- [x] Docs (có điều kiện) cập nhật, link kiểm tra
+- [x] Gate web/api xanh
+- [x] Report QA thị giác 5 trạng thái × 2 viewport + 3 trang không đổi
 
 ## Success Criteria
 
-- [ ] `npm run test` xanh, không assertion cũ nào bị sửa; coverage cho file mới ≥ mức hiện tại của feature teaching.
-- [ ] 3 spec e2e xanh; không còn `getByRole("tab")` nào trỏ tới `/records`.
-- [ ] Report QA liệt kê từng mục Success Criteria của `plan.md` với bằng chứng (ảnh/lệnh) và không có mục "lệch mockup" chưa xử lý.
-- [ ] Ảnh chụp `/sessions`, `/students`, `/classbook` trước/sau trùng nhau.
+- [x] `npm run test` xanh, không assertion cũ nào bị sửa; coverage cho file mới ≥ mức hiện tại của feature teaching.
+- [x] 3 spec e2e xanh; không còn `getByRole("tab")` nào trỏ tới `/records`.
+- [x] Report QA liệt kê từng mục Success Criteria của `plan.md` với bằng chứng (ảnh/lệnh) và không có mục "lệch mockup" chưa xử lý.
+- [x] Ảnh chụp `/sessions`, `/students`, `/classbook` trước/sau trùng nhau.
 
 ## Risk Assessment
 
 - **Tên học sinh seed e2e khác giả định** ("Bé An"/"Bé Bình" lấy từ spec read hiện có) → đọc seeder trước khi viết assertion; tín hiệu vỡ: spec đỏ ở `toBeVisible` → sửa fixture tên, không sửa logic.
 - **Stack e2e đang chạy dở** từ phiên trước chiếm port → theo `process-management.md`: kiểm tra `docker compose -p teka-e2e ps`, tái dùng hoặc dừng, không tăng port.
 - **Playwright chưa cài browser** trên máy → `npx --no-install playwright --version` và `~/.cache/ms-playwright` đã xác nhận ở phiên brainstorm; nếu thiếu, `npx playwright install chromium`.
+
+## Kết quả
+
+Commit `6776e0a`. 7 case tích hợp mới (kể cả re-pick cùng lớp), 3 spec e2e xanh trên `docker compose -p teka-e2e` (đã `down -v`). Assertion classbook trong `class-staff-read` đổi từ `tab` sang combobox vì classbook đã đổi selector ở `05d3f50` (vốn đỏ trên master). Docs: 2 dòng trong `docs/frontend-guidelines.md` (lib/hooks, `mockViewport`). QA: `plans/reports/qa-260907-1425-records-class-dropdown.md` — ảnh 3 trang không đụng chỉ có bản "sau", bằng chứng không đổi là diff rỗng trên các file đó. Tester: `plans/reports/tester-260907-1428-records-class-dropdown.md` (185 test teaching+lib pass, file mới 94–100% statements, ngang/bằng mức thư mục teaching 91–100%).

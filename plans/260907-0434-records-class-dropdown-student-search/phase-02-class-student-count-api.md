@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "API: student_count trên danh sách lớp"
-status: todo
+status: completed
 priority: P1
 effort: "4h"
 dependencies: []
@@ -54,21 +54,25 @@ Web: `classSchema` thêm `student_count: z.number().int().nonnegative().default(
 
 ## Todo
 
-- [ ] Predicate "đang học" trích từ enrollments repo, ghi vào comment dto
-- [ ] Repo `CountActiveEnrollmentsByClass` + scope + test
-- [ ] Service/handler nối counts, caller compile
-- [ ] Go test + scopelint xanh
-- [ ] Zod `classSchema.student_count` default 0 + fixtures + MSW tính count
-- [ ] Web typecheck/test xanh
+- [x] Predicate "đang học" trích từ enrollments repo, ghi vào comment dto
+- [x] Repo `CountActiveEnrollmentsByClass` + scope + test
+- [x] Service/handler nối counts, caller compile
+- [x] Go test + scopelint xanh
+- [x] Zod `classSchema.student_count` default 0 + fixtures + MSW tính count
+- [x] Web typecheck/test xanh
 
 ## Success Criteria
 
-- [ ] `curl GET /classes` trên dev stack trả `student_count` đúng bằng `GET /enrollments?class_id=…&active=true` `meta.total` cho từng lớp.
-- [ ] Không thay đổi trường nào khác trong `ClassResponse`; dashboard test xanh.
-- [ ] `Class.student_count` có kiểu `number` phía web; không fixture nào thiếu trường (typecheck xanh).
+- [x] `curl GET /classes` trên dev stack trả `student_count` đúng bằng `GET /enrollments?class_id=…&active=true` `meta.total` cho từng lớp.
+- [x] Không thay đổi trường nào khác trong `ClassResponse`; dashboard test xanh.
+- [x] `Class.student_count` có kiểu `number` phía web; không fixture nào thiếu trường (typecheck xanh).
 
 ## Risk Assessment
 
 - **Predicate lệch** giữa count và list → tín hiệu: test integration so sánh 2 endpoint đỏ → sửa predicate, không sửa test.
 - **Chữ ký `ListReadable` đổi** kéo theo caller ngoài feature classes (grep trước khi sửa). Nếu >3 caller, thay bằng helper riêng `StudentCounts(ctx, sc, ids)` gọi từ handler để không đổi chữ ký.
 - **Người dùng chọn D1 = frontend-only** → đánh dấu phase này `skipped` bằng CLI, cập nhật Phase 3 bỏ sĩ số ở mục; sĩ số trigger lấy từ `rows.length`.
+
+## Kết quả
+
+Commit `fa326d1`. Chữ ký Go giữ nguyên, `student_count` additive; swagger regen. Bằng chứng SC1: integration test repo/service + trigger `Toán 8 - Tối Thứ Ba · 2 HS` khớp 2 dòng bảng trên stack e2e cách ly (không curl dev stack). Sau review (commit `a13f07d`): đếm theo đúng bộ lọc đọc của enrollments qua `readScopedEnrollments` thay vì center-wide, có test tích hợp `TestStudentCountsFollowEnrollmentReadScope`.

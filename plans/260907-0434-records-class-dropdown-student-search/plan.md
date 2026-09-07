@@ -1,7 +1,7 @@
 ---
 title: "Hồ sơ học sinh: dropdown chọn lớp + tìm học sinh (Phương án A)"
 description: "Thay dãy pill lớp trên /records bằng thanh bộ lọc: dropdown lớp kèm sĩ số và ô tìm học sinh bỏ dấu, bám 100% mockup Phương án A."
-status: pending
+status: completed
 priority: P1
 effort: "3d"
 tags: [web, teaching, records, ui]
@@ -13,7 +13,7 @@ brainstorm: ../reports/brainstorm-260907-1100-records-class-dropdown-student-sea
 
 # Hồ sơ học sinh: dropdown chọn lớp + tìm học sinh (Phương án A)
 
-Status: pending · Branch: master (tách nhánh `feat/records-class-dropdown-student-search` khi cook) · Nguồn thiết kế: `plans/reports/brainstorm-260907-1100-records-class-dropdown-student-search.html` (Phương án A, artifact <https://claude.ai/code/artifact/acebf215-2b90-4ad0-8cd0-b045d9285821>).
+Status: completed (2026-09-07, cook --auto) · Branch: `feat/records-class-dropdown-student-search` (8 commit `2e39587`…`f1d3515`, gồm 2 commit sửa theo review; chưa push/PR) · Nguồn thiết kế: `plans/reports/brainstorm-260907-1100-records-class-dropdown-student-search.html` (Phương án A, artifact <https://claude.ai/code/artifact/acebf215-2b90-4ad0-8cd0-b045d9285821>).
 
 ## Overview
 
@@ -40,12 +40,12 @@ Trang `/records` (`apps/web/src/features/teaching/pages/records-page.tsx`) hiệ
 
 | # | Phase | Status | Phụ thuộc | Ước lượng |
 |---|-------|--------|-----------|-----------|
-| 1 | [Fold tiếng Việt, lọc học sinh, `?q=` trên URL](./phase-01-search-helpers-url-state.md) | Pending | — | 3h |
-| 2 | [API: `student_count` trên danh sách lớp](./phase-02-class-student-count-api.md) | Pending | — (D1) | 4h |
-| 3 | [`RecordsClassSelect`: popover listbox + bottom sheet](./phase-03-records-class-select.md) | Pending | 2 (kiểu `Class.student_count`), 1 (không bắt buộc) | 6h |
-| 4 | [`RecordsToolbar` + nối vào trang](./phase-04-records-toolbar-page-wiring.md) | Pending | 1, 3 | 4h |
-| 5 | [Bảng: tô đậm, trạng thái rỗng/tải, hàng mobile](./phase-05-table-highlight-states-mobile.md) | Pending | 1, 4 | 4h |
-| 6 | [Test tích hợp, e2e, docs, QA thị giác](./phase-06-tests-e2e-docs-qa.md) | Pending | 1–5 | 4h |
+| 1 | [Fold tiếng Việt, lọc học sinh, `?q=` trên URL](./phase-01-search-helpers-url-state.md) | Done | — | 3h |
+| 2 | [API: `student_count` trên danh sách lớp](./phase-02-class-student-count-api.md) | Done | — (D1) | 4h |
+| 3 | [`RecordsClassSelect`: popover listbox + bottom sheet](./phase-03-records-class-select.md) | Done | 2 (kiểu `Class.student_count`), 1 (không bắt buộc) | 6h |
+| 4 | [`RecordsToolbar` + nối vào trang](./phase-04-records-toolbar-page-wiring.md) | Done | 1, 3 | 4h |
+| 5 | [Bảng: tô đậm, trạng thái rỗng/tải, hàng mobile](./phase-05-table-highlight-states-mobile.md) | Done | 1, 4 | 4h |
+| 6 | [Test tích hợp, e2e, docs, QA thị giác](./phase-06-tests-e2e-docs-qa.md) | Done | 1–5 | 4h |
 
 Phase 1 và 2 độc lập (có thể chạy song song: khác thư mục `apps/web/src/lib` + `teaching/lib` vs `apps/api` + `roster/schemas`). Phase 3–5 tuần tự vì cùng chạm `records-page.tsx` và `student-records-table.tsx`.
 
@@ -57,14 +57,14 @@ Phase 1 và 2 độc lập (có thể chạy song song: khác thư mục `apps/w
 
 ## Success Criteria
 
-- [ ] `/records` không còn `role="tablist"`; thanh bộ lọc trắng bo 20px hiện giữa tiêu đề và bảng với hai nhãn LỚP / TÌM HỌC SINH (và bộ đếm ở desktop) đúng kích thước/token trong mockup.
-- [ ] Trigger lớp hiện `Tên lớp · N HS`, mở popover (≥`sm`) hoặc bottom sheet (<`sm`) với nhóm "LỚP ĐANG DẠY", dấu ✓ mint ở lớp đang chọn, ô "Tìm lớp…" chỉ khi >5 lớp, note `Không có lớp nào khớp "q"` khi không khớp; ↑↓ Enter Esc hoạt động; chọn lớp cập nhật `?class_id=` (replace).
-- [ ] Gõ "nguyen" hiện "Nguyễn Văn An" với phần khớp bọc `<mark>` nền sun-200; bộ đếm `1 / N học sinh` cập nhật `aria-live=polite`; `?q=nguyen` trên URL; `/` focus ô tìm; × xoá query.
-- [ ] Không khớp → trong thẻ bảng hiện tiêu đề Baloo `Không tìm thấy học sinh nào khớp “q”`, dòng gợi ý và nút "Xoá tìm kiếm"; lớp không có học sinh vẫn hiện `Lớp chưa có học sinh đang học.` như cũ.
-- [ ] Đang tải → khung bảng với 5 hàng skeleton shimmer (tôn trọng reduced motion) thay cho dòng chữ; vẫn có status sr-only.
-- [ ] <768px: toolbar xếp dọc (select full-width, ô tìm dưới), bảng ẩn header, mỗi hàng = tên + `TB 8.6 · ↗ Tăng · vắng 0` + nút "Xem" bên phải, không cuộn ngang; bộ đếm + nút "CSV" dưới bảng; nút CSV trên header ẩn.
-- [ ] Tiêu đề, phụ đề, nội dung CSV, cột/màu bảng desktop, trang chi tiết, `sessions-page`, `students-page`, classbook không đổi (test hiện có xanh, chụp màn hình so sánh).
-- [ ] `npm run lint`, `typecheck`, `test`, `build` (apps/web) và `go test ./...` (apps/api, nếu Phase 2) xanh; e2e `class-staff-*.spec.ts` + spec mobile mới xanh trên stack e2e cách ly.
+- [x] `/records` không còn `role="tablist"`; thanh bộ lọc trắng bo 20px hiện giữa tiêu đề và bảng với hai nhãn LỚP / TÌM HỌC SINH (và bộ đếm ở desktop) đúng kích thước/token trong mockup.
+- [x] Trigger lớp hiện `Tên lớp · N HS`, mở popover (≥`sm`) hoặc bottom sheet (<`sm`) với nhóm "LỚP ĐANG DẠY", dấu ✓ mint ở lớp đang chọn, ô "Tìm lớp…" chỉ khi >5 lớp, note `Không có lớp nào khớp "q"` khi không khớp; ↑↓ Enter Esc hoạt động; chọn lớp cập nhật `?class_id=` (replace).
+- [x] Gõ "nguyen" hiện "Nguyễn Văn An" với phần khớp bọc `<mark>` nền sun-200; bộ đếm `1 / N học sinh` cập nhật `aria-live=polite`; `?q=nguyen` trên URL; `/` focus ô tìm; × xoá query.
+- [x] Không khớp → trong thẻ bảng hiện tiêu đề Baloo `Không tìm thấy học sinh nào khớp “q”`, dòng gợi ý và nút "Xoá tìm kiếm"; lớp không có học sinh vẫn hiện `Lớp chưa có học sinh đang học.` như cũ.
+- [x] Đang tải → khung bảng với 5 hàng skeleton shimmer (tôn trọng reduced motion) thay cho dòng chữ; vẫn có status sr-only.
+- [x] <768px: toolbar xếp dọc (select full-width, ô tìm dưới), bảng ẩn header, mỗi hàng = tên + `TB 8.6 · ↗ Tăng · vắng 0` + nút "Xem" bên phải, không cuộn ngang; bộ đếm + nút "CSV" dưới bảng; nút CSV trên header ẩn.
+- [x] Tiêu đề, phụ đề, nội dung CSV, cột/màu bảng desktop, trang chi tiết, `sessions-page`, `students-page`, classbook không đổi (test hiện có xanh, chụp màn hình so sánh).
+- [x] `npm run lint`, `typecheck`, `test`, `build` (apps/web) và `go test ./...` (apps/api, nếu Phase 2) xanh; e2e `class-staff-*.spec.ts` + spec mobile mới xanh trên stack e2e cách ly.
 
 ## Risks
 
@@ -79,3 +79,28 @@ Phase 1 và 2 độc lập (có thể chạy song song: khác thư mục `apps/w
 Mỗi phase là commit riêng, không migration DB (Phase 2 chỉ thêm truy vấn COUNT và trường JSON additive). Revert commit của Phase 4 là trang quay về dãy pill cũ; Phase 2 có thể giữ lại độc lập vì additive.
 
 <!-- slug: records-class-dropdown-student-search -->
+
+## Kết quả thực thi (2026-09-07)
+
+| Gate | Kết quả |
+|---|---|
+| apps/web lint / typecheck / vitest / build | 0 lỗi (5 warning có sẵn) / OK / 84 file, 628 pass, 3 skip / OK |
+| apps/api build / test / scopelint / integration `TestStudentCounts*` | OK / OK / OK / 2 pass (Docker) |
+| e2e (stack cách ly) | class-staff-read 2/2, class-staff-write 2/2, records-search 1/1 |
+| QA thị giác | [qa-260907-1425](../reports/qa-260907-1425-records-class-dropdown.md) |
+
+Lệch so với plan (chi tiết ở mục *Kết quả* từng phase): `HvModal.onCloseAutoFocus` (additive); skeleton compact 2 thanh; nhãn xu hướng thật; chọn lại cùng lớp vẫn ghi `class_id`, chỉ xoá `q` khi đổi lớp; assertion classbook e2e đổi sang combobox (đỏ sẵn trên master).
+
+### Review và sửa sau review
+
+[code-review-260907](../reports/code-review-260907-records-class-dropdown.md): DONE_WITH_CONCERNS, 8 finding. Đã sửa trong 2 commit:
+
+| Finding | Sửa | Commit |
+|---|---|---|
+| F1 `student_count` đếm center-wide, vượt phạm vi đọc enrollments | `readScopedEnrollments` trong repo classes (own + stint + `enrollments.view_all`), test tích hợp member chỉ đếm lớp có stint | `a13f07d` |
+| F2 Space trên option bị nuốt khi >5 lớp | `isPrintableKey` bỏ `" "`, test Space chọn option | `f1d3515` |
+| F3 phím `/` của trang tranh chấp với picker đang mở | `isTypingTarget` bail khi focus trong `[role=listbox]`/`[role=dialog]`, test | `f1d3515` |
+| F4 bộ đếm chỉ chờ sessions | bộ đếm và skeleton chờ cả query enrollments | `f1d3515` |
+
+Chưa sửa (Low/Info, để đợt sau): F5 wording "Lớp chưa có học sinh" khi chưa có lớp nào; F6 `mockViewport` không có reset; F7 hai `role=status` lúc đang tải; F8 chưa thử IME telex trên Android thật.
+Tester: [tester-260907-1428](../reports/tester-260907-1428-records-class-dropdown.md) (trước sửa) và [tester-260907-rerun](../reports/tester-260907-rerun-records-class-dropdown.md) (sau sửa).

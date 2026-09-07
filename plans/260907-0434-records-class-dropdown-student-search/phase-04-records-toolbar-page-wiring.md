@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "RecordsToolbar + nối vào trang"
-status: todo
+status: completed
 priority: P1
 effort: "4h"
 dependencies: [1, 3]
@@ -59,21 +59,25 @@ RecordsPage
 
 ## Todo
 
-- [ ] `RecordsToolbar` + test
-- [ ] `records-page.tsx` nối toolbar, `/`, compact CSV/đếm
-- [ ] `records-pages.test.tsx` thêm `mockViewport(1280)` trong `beforeEach`, test cũ xanh không đổi assertion
-- [ ] Lint/typecheck xanh
+- [x] `RecordsToolbar` + test
+- [x] `records-page.tsx` nối toolbar, `/`, compact CSV/đếm
+- [x] `records-pages.test.tsx` thêm `mockViewport(1280)` trong `beforeEach`, test cũ xanh không đổi assertion
+- [x] Lint/typecheck xanh
 
 ## Success Criteria
 
-- [ ] Không còn `role="tab"` trên `/records`; toolbar đúng token/kích thước mockup ở 1280px và 375px.
-- [ ] Gõ vào ô tìm → URL `?q=` cập nhật (replace), bảng lọc ngay; × xoá và focus lại; `/` focus ô tìm, không ăn phím khi đang gõ ở input khác.
-- [ ] Đổi lớp xoá `q` (ô tìm trống, bộ đếm `N / N`); `class_id` trên URL đổi, chỉ một entry history.
-- [ ] Ở compact: header không có nút CSV, dưới bảng có bộ đếm + nút "CSV" xuất cùng file; chỉ một `role="status"` trong DOM.
-- [ ] Test cũ trong `records-pages.test.tsx` xanh với assertion nguyên vẹn.
+- [x] Không còn `role="tab"` trên `/records`; toolbar đúng token/kích thước mockup ở 1280px và 375px.
+- [x] Gõ vào ô tìm → URL `?q=` cập nhật (replace), bảng lọc ngay; × xoá và focus lại; `/` focus ô tìm, không ăn phím khi đang gõ ở input khác.
+- [x] Đổi lớp xoá `q` (ô tìm trống, bộ đếm `N / N`); `class_id` trên URL đổi, chỉ một entry history.
+- [x] Ở compact: header không có nút CSV, dưới bảng có bộ đếm + nút "CSV" xuất cùng file; chỉ một `role="status"` trong DOM.
+- [x] Test cũ trong `records-pages.test.tsx` xanh với assertion nguyên vẹn.
 
 ## Risk Assessment
 
 - **Bộ đếm `role="status"` bên trong toolbar trước khi có dữ liệu** đọc "0 học sinh" gây nhiễu → chỉ đổi nội dung sau khi enrollments load (`total` = `rows.length` khi `!sessionsPending`), trước đó render rỗng.
 - **`type="search"` hiện nút xoá native trên Safari/Chrome** trùng nút × → đã ẩn bằng `::-webkit-search-cancel-button`; kiểm tra Firefox (không có nút native).
 - **Phím `/` xung đột** với ô lọc lớp trong popover: điều kiện bỏ qua khi `activeElement` là input đã bao trường hợp này.
+
+## Kết quả
+
+Commit `c6f89d7`. `ResultCount` export cùng file toolbar để trang dùng lại ở compact (react-refresh rule tắt). Lúc đang tải có 2 vùng `role=status` (bộ đếm rỗng + sr-only của skeleton); trạng thái đã tải chỉ còn một. Điều chỉnh ở Phase 6 (commit `6776e0a`): chọn lại đúng lớp đang chọn vẫn ghi `class_id` lên URL (giữ hành vi pill cũ) nhưng chỉ xoá `q` khi lớp thực sự đổi. Sau review (commit `f1d3515`): phím `/` nhường cho picker đang mở; bộ đếm và skeleton chờ cả query enrollments.

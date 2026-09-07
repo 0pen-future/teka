@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "RecordsClassSelect: popover listbox + bottom sheet"
-status: todo
+status: completed
 priority: P1
 effort: "6h"
 dependencies: [2]
@@ -66,21 +66,25 @@ RecordsClassSelect
 
 ## Todo
 
-- [ ] `useMediaQuery` + test
-- [ ] `mockViewport` helper
-- [ ] `RecordsClassSelect` (trigger, popover, sheet, list body, phím)
-- [ ] Test component xanh, lint/typecheck xanh
+- [x] `useMediaQuery` + test
+- [x] `mockViewport` helper
+- [x] `RecordsClassSelect` (trigger, popover, sheet, list body, phím)
+- [x] Test component xanh, lint/typecheck xanh
 
 ## Success Criteria
 
-- [ ] Trigger/popover/mục khớp mockup theo từng giá trị: 44/230/14/16/42/11px, line-200→mint-300/400, mint-50/700, ✓ mint-600, `N HS` 12px ink-400.
-- [ ] `classes.length > 5` ⇔ có ô "Tìm lớp…"; note không khớp đúng chuỗi của `useClassSearch`.
-- [ ] Bàn phím ↑↓ Home End Enter Space Esc hoạt động; focus trả về trigger sau khi chọn/đóng.
-- [ ] <640px mở bottom sheet `HvModal`; ≥640px mở popover.
-- [ ] Không file nào ngoài danh sách trên bị sửa; `class-select.tsx` diff rỗng.
+- [x] Trigger/popover/mục khớp mockup theo từng giá trị: 44/230/14/16/42/11px, line-200→mint-300/400, mint-50/700, ✓ mint-600, `N HS` 12px ink-400.
+- [x] `classes.length > 5` ⇔ có ô "Tìm lớp…"; note không khớp đúng chuỗi của `useClassSearch`.
+- [x] Bàn phím ↑↓ Home End Enter Space Esc hoạt động; focus trả về trigger sau khi chọn/đóng.
+- [x] <640px mở bottom sheet `HvModal`; ≥640px mở popover.
+- [x] Không file nào ngoài danh sách trên bị sửa; `class-select.tsx` diff rỗng.
 
 ## Risk Assessment
 
 - **Popover `min-w-(--radix-popover-trigger-width)`** cần Radix Popover đặt CSS var — có sẵn trong `radix-ui` Popover (`--radix-popover-trigger-width`). Tín hiệu vỡ: popover hẹp hơn trigger → dùng `style={{ minWidth: triggerRef.current?.offsetWidth }}`.
 - **Focus trap trong HvModal** + autofocus ô lọc: Dialog tự focus phần tử đầu tiên; đặt `autoFocus` trên ô lọc/option đang chọn qua `onOpenAutoFocus` để không nhảy vào nút đóng.
 - **`aria-labelledby` nối 2 id**: nếu Testing Library tính tên khác kỳ vọng, đổi sang `aria-label={\`Lớp — đang xem ${name}\`}` như classbook (không ảnh hưởng thị giác).
+
+## Kết quả
+
+Commit `bff2b68`. Lệch ghi nhận: thêm prop tuỳ chọn `onCloseAutoFocus` vào `HvModal` để bottom sheet trả focus về trigger (Dialog modal không có `Dialog.Trigger` nên `triggerRef` null); Radix `Popover.Content` mang `role="dialog"` nên test popover chỉ khẳng định không có dialog tên "Chọn lớp". Kích thước/token kiểm bằng class Tailwind, không đo pixel. Sau review (commit `f1d3515`): Space không còn bị đẩy vào ô lọc khi >5 lớp nên option kích hoạt native ở mọi kích thước danh sách.

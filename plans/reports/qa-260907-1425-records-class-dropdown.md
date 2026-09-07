@@ -28,3 +28,16 @@
 
 - Chọn lại đúng lớp đang chọn vẫn ghi `class_id` lên URL (giữ hành vi pill cũ mà e2e dựa vào) nhưng không xoá `q`.
 - Không thấy lỗi console trong lúc chụp.
+
+## Đối chiếu Success Criteria của plan.md
+
+| # | Tiêu chí | Bằng chứng | Kết quả |
+|---|---|---|---|
+| 1 | Không còn `role="tablist"`, toolbar trắng bo 20px, nhãn LỚP / TÌM HỌC SINH, bộ đếm desktop | `desktop-01-default.png`; test `records-pages` (không còn `tab`) | ✅ |
+| 2 | Trigger `Tên lớp · N HS`, popover ≥sm / sheet <sm, nhóm LỚP ĐANG DẠY, ✓ mint, ô lọc chỉ khi >5 lớp, note không khớp, phím, `?class_id=` replace | `desktop-02`, `phone-02`; `records-class-select.test.tsx` 10 case (lọc >5, ArrowDown/Up/Home/End/Enter/Esc) | ✅ |
+| 3 | `<mark>` sun-200, bộ đếm `1 / N` aria-live, `?q=`, `/` focus, × xoá | `desktop-08`, `phone-08`; test toolbar + tích hợp; e2e `records-search` | ✅ |
+| 4 | Card không khớp + nút Xoá tìm kiếm; lớp rỗng giữ khối cũ | `desktop-03/04`, `phone-03/04`; test bảng + tích hợp | ✅ |
+| 5 | 5 hàng shimmer, reduced motion, status sr-only | `desktop-09`, `phone-09`; `motion-reduce:animate-none` + test skeleton | ✅ |
+| 6 | <768: toolbar dọc, hàng 2 dòng, nút Xem, không tràn ngang, đếm + CSV dưới bảng, CSV header ẩn | `phone-01`, `phone-08`; scrollWidth 375; test tích hợp compact; e2e phone | ✅ (nhãn xu hướng thật "Tiến bộ/Đi xuống/Ổn định/Chưa đủ dữ liệu" thay cho "Tăng" trong mockup) |
+| 7 | Tiêu đề, phụ đề, CSV, cột/màu desktop, trang chi tiết, sessions/students/classbook không đổi | `desktop-06-*`; `git diff master...HEAD` không chạm các page đó; test cũ nguyên assertion | ✅ (chỉ có ảnh "sau"; bằng chứng không đổi là diff) |
+| 8 | Gate web/api xanh; 3 spec e2e xanh trên stack cách ly | mục E2E ở trên; lint 0 lỗi, typecheck, 626 test, build, go test, scopelint | ✅ |
