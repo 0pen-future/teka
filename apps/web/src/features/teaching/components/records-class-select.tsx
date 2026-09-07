@@ -202,9 +202,11 @@ export function RecordsClassSelect({
     triggerRef.current?.focus();
   };
 
+  // Re-picking the current class still reports it so the page can pin the
+  // default class into the URL, exactly like the former pills did.
   const pick = (classId: string) => {
     setOpen(false);
-    if (classId !== selectedId) onSelect(classId);
+    onSelect(classId);
   };
 
   const triggerContent = (

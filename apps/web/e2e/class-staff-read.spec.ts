@@ -33,10 +33,11 @@ async function assertStaffReadJourney(page: Page) {
   await expect(page).toHaveURL(/\/$/);
 
   // The member's read surface for the class's students is Hồ sơ học sinh:
-  // the assigned class appears as a picker tab and its active enrollments
-  // are listed.
+  // the assigned class is offered by the class picker and its active
+  // enrollments are listed.
   await page.goto("/records");
-  await page.getByRole("tab", { name: STAFF_CLASS }).click();
+  await page.getByRole("button", { name: /^Lớp/ }).click();
+  await page.getByRole("option", { name: new RegExp(STAFF_CLASS) }).click();
   await expect(page).toHaveURL(/class_id=/);
   await expect(page.getByText("Bé An", { exact: true })).toBeVisible();
   await expect(page.getByText("Bé Bình", { exact: true })).toBeVisible();
@@ -54,7 +55,9 @@ async function assertStaffReadJourney(page: Page) {
   // Classbook: the class is selectable and its teaching data loads, with the
   // curriculum edit link hidden for non-writers.
   await page.goto(`/classbook?class_id=${classId}`);
-  await expect(page.getByRole("tab", { name: STAFF_CLASS })).toBeVisible();
+  await expect(
+    page.getByRole("combobox", { name: new RegExp(`đang xem ${STAFF_CLASS}`) }),
+  ).toBeVisible();
   await page.getByRole("tab", { name: "Chương trình & giáo án" }).click();
   await expect(page.getByText("CHƯƠNG TRÌNH", { exact: true })).toBeVisible();
   await expect(page.getByText(/Sửa chương trình/)).toHaveCount(0);

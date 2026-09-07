@@ -90,7 +90,7 @@ describe("RecordsClassSelect (popover, ≥ sm)", () => {
     expect(screen.getByText('Không có lớp nào khớp "zzz"')).toBeInTheDocument();
   });
 
-  it("selects a class once on click and closes; re-picking the current class is a no-op", async () => {
+  it("selects a class on click and closes; re-picking the current class reports it again", async () => {
     const user = userEvent.setup();
     const { onSelect, trigger } = renderSelect(threeClasses);
     await user.click(trigger);
@@ -103,7 +103,8 @@ describe("RecordsClassSelect (popover, ≥ sm)", () => {
 
     await user.click(trigger);
     await user.click(screen.getByRole("option", { name: /Toán 6A/ }));
-    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onSelect).toHaveBeenCalledTimes(2);
+    expect(onSelect).toHaveBeenLastCalledWith("class-1");
     await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument());
   });
 

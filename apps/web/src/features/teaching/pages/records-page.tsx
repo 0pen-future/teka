@@ -108,13 +108,14 @@ export function RecordsPage() {
   }
 
   // Switching class starts a fresh search: class_id and q change in the same
-  // navigation so history holds one entry, not two.
+  // navigation so history holds one entry, not two. Re-picking the current
+  // class only pins it into the URL and keeps the query.
   function selectClass(classId: string) {
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
+        if (classId !== effectiveClassId) next.delete("q");
         next.set("class_id", classId);
-        next.delete("q");
         return next;
       },
       { replace: true },

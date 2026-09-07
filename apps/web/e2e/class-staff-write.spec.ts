@@ -30,9 +30,10 @@ async function login(page: Page, user: { phone: string; password: string; name: 
  * behind /students is owner-only now), so both the owner and Thầy Minh can
  * use it.
  */
-async function classIdFromRecordsTab(page: Page, className: string): Promise<string> {
+async function classIdFromRecordsPicker(page: Page, className: string): Promise<string> {
   await page.goto("/records");
-  await page.getByRole("tab", { name: className }).click();
+  await page.getByRole("button", { name: /^Lớp/ }).click();
+  await page.getByRole("option", { name: new RegExp(className) }).click();
   await expect(page).toHaveURL(/class_id=/);
   const classId = new URL(page.url()).searchParams.get("class_id");
   expect(classId).toBeTruthy();
@@ -167,7 +168,7 @@ test.afterEach(async ({ browser }, testInfo) => {
   const page = await context.newPage();
   try {
     await login(page, OWNER);
-    const classId = await classIdFromRecordsTab(page, HANDOFF_CLASS);
+    const classId = await classIdFromRecordsPicker(page, HANDOFF_CLASS);
     await ensureClassTeacher(page, classId, TRO_GIANG.name, TRO_GIANG.name);
   } finally {
     await context.close();
@@ -181,7 +182,7 @@ test("a handed-off teacher keeps reading history but loses every write", async (
   const minhContext = await browser.newContext();
   const minh = await minhContext.newPage();
   await login(minh, TRO_GIANG);
-  const classId = await classIdFromRecordsTab(minh, HANDOFF_CLASS);
+  const classId = await classIdFromRecordsPicker(minh, HANDOFF_CLASS);
   const sheetUrl = await openAttendanceSheet(minh, HANDOFF_CLASS);
   await expect(
     minh.getByRole("button", { name: /^(XÁC NHẬN|ĐÃ XÁC NHẬN ✓|LƯU VÀ TẠO ĐIỀU CHỈNH)( · .+)?$/ }),
