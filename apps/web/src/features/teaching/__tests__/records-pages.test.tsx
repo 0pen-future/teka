@@ -11,6 +11,7 @@ import {
 } from "@/features/roster/__tests__/roster-handlers";
 import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
+import { mockViewport } from "@/test/viewport";
 
 import { RecordsPage } from "../pages/records-page";
 import { StudentRecordPage } from "../pages/student-record-page";
@@ -50,6 +51,9 @@ function renderStudentRecordPage() {
 }
 
 beforeEach(() => {
+  // The default matchMedia shim never matches, which would render the
+  // compact (<768px) records layout; these specs describe the desktop one.
+  mockViewport(1280);
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-08-20T10:00:00"));
   resetRosterStore();
