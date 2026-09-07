@@ -25,46 +25,57 @@ const maxReportedErrors = 100
 // (consumer-defined interface; implemented by *centers.Service). Resolving a
 // teacher phone through a directory derived from the caller's own scope is
 // what keeps the import inside one center — there is deliberately no
-// by-id or global-phone lookup on this interface. CenterOwner resolves the
-// caller's center owner, the anchor every imported contact and student is
-// written under regardless of who runs the import.
+// by-id or global-phone lookup on this interface. ResolveOwnerAnchor names
+// the caller's center owner's rows — the anchor every imported contact and
+// student is written under regardless of who runs the import — as a proven
+// authctx.OwnerAnchor rather than a hand-built Scope.
 type MemberDirectory interface {
 	MemberIDsByPhone(ctx context.Context, scope authctx.Scope) (map[string]uuid.UUID, error)
-	CenterOwner(ctx context.Context, teacherID uuid.UUID) (ownerID uuid.UUID, isOwner bool, err error)
+	ResolveOwnerAnchor(ctx context.Context, sc authctx.Scope) (authctx.OwnerAnchor, error)
 }
 
 // The four interfaces below are the slices of the roster features this one
-// drives (consumer-defined, implemented by their *Service types). Every method
-// takes an authctx.Scope, so each call stays inside the same scoped() filter
-// the feature applies to its own HTTP traffic — this feature reaches no table
-// it does not own except through the service that owns it.
+// drives (consumer-defined, implemented by their *Service types). Contact and
+// student writes take a proven authctx.OwnerAnchor — the roster anchors on
+// the owner regardless of who runs the import — while class and enrollment
+// writes take a plain authctx.Anchor resolved from the workbook's own
+// teacher column; dedupe reads take the importing caller's real Scope, so
+// they widen the same way the center-wide dedupe already does for that
+// caller's own HTTP traffic. This feature reaches no table it does not own
+// except through the service that owns it.
 
 // ClassWriter creates classes and their weekly slots, and answers whether
-// either already exists.
+// either already exists — all anchored on the workbook row's own teacher.
 type ClassWriter interface {
-	FindActiveByName(ctx context.Context, sc authctx.Scope, name string) (*classes.Class, bool, error)
-	ScheduleExists(ctx context.Context, sc authctx.Scope, classID uuid.UUID, weekday int16, startTime classes.TimeOfDay, effectiveFrom time.Time) (bool, error)
-	Create(ctx context.Context, sc authctx.Scope, req classes.CreateClassRequest) (*classes.Class, error)
-	AddSchedule(ctx context.Context, sc authctx.Scope, classID uuid.UUID, req classes.ScheduleRequest) (*classes.Schedule, error)
+	FindActiveByName(ctx context.Context, a authctx.Anchor, name string) (*classes.Class, bool, error)
+	ScheduleExists(ctx context.Context, a authctx.Anchor, classID uuid.UUID, weekday int16, startTime classes.TimeOfDay, effectiveFrom time.Time) (bool, error)
+	CreateAnchored(ctx context.Context, a authctx.Anchor, req classes.CreateClassRequest) (*classes.Class, error)
+	AddScheduleAnchored(ctx context.Context, a authctx.Anchor, classID uuid.UUID, startDate time.Time, req classes.ScheduleRequest) (*classes.Schedule, error)
 }
 
-// ContactWriter creates parent contacts and resolves them by phone.
+// ContactWriter creates parent contacts and resolves them by phone. The
+// dedupe read is center-wide under the importing caller's own Scope; the
+// write anchors on the proven owner.
 type ContactWriter interface {
 	FindIDByPhone(ctx context.Context, sc authctx.Scope, phone string) (uuid.UUID, bool, error)
-	Create(ctx context.Context, sc authctx.Scope, req contacts.CreateRequest) (*contacts.Row, error)
+	CreateAnchored(ctx context.Context, a authctx.OwnerAnchor, req contacts.CreateRequest) (*contacts.Row, error)
 }
 
 // StudentWriter creates students and resolves them by contact, name and note.
+// Same split as ContactWriter: center-wide dedupe read under the caller's own
+// Scope, write anchored on the proven owner.
 type StudentWriter interface {
 	FindIDByName(ctx context.Context, sc authctx.Scope, contactID uuid.UUID, fullName string, note *string) (uuid.UUID, bool, error)
-	Create(ctx context.Context, sc authctx.Scope, req students.CreateRequest) (*students.Row, error)
+	CreateAnchored(ctx context.Context, a authctx.OwnerAnchor, req students.CreateRequest) (*students.Row, error)
 }
 
 // EnrollmentWriter creates enrollments and resolves an existing one — open or
-// already ended.
+// already ended — anchored on the referenced class's own teacher. actor is
+// the importing caller, recorded as the event's acting party even though the
+// row itself anchors elsewhere.
 type EnrollmentWriter interface {
-	FindByStudentAndClass(ctx context.Context, sc authctx.Scope, studentID, classID uuid.UUID) (*enrollments.Enrollment, bool, error)
-	Create(ctx context.Context, sc authctx.Scope, req enrollments.CreateRequest) (*enrollments.Row, error)
+	FindByStudentAndClassAnchored(ctx context.Context, a authctx.Anchor, studentID, classID uuid.UUID) (*enrollments.Enrollment, bool, error)
+	CreateAnchored(ctx context.Context, actor authctx.Scope, a authctx.Anchor, req enrollments.CreateRequest) (*enrollments.Row, error)
 }
 
 // Service turns an uploaded workbook into roster rows. It owns no tables of
@@ -142,20 +153,16 @@ func (s *Service) Import(ctx context.Context, scope authctx.Scope, file []byte, 
 	}
 
 	// Contacts and students are center data anchored on the owner, so the
-	// import resolves the owner up front and writes them under a server-side
-	// owner scope — a granted member's run produces exactly the rows the
-	// owner's would. IsOwner true is what lets those writes through the
-	// owner-only service gates and widens their dedupe lookups center-wide.
-	ownerID := scope.TeacherID
-	if !scope.IsOwner {
-		ownerID, _, err = s.members.CenterOwner(ctx, scope.TeacherID)
-		if err != nil {
-			return nil, err
-		}
+	// import resolves the owner up front through centers — the single mint
+	// point for authctx.OwnerAnchor outside authctx itself — and writes them
+	// under that proven anchor: a granted member's run produces exactly the
+	// rows the owner's would.
+	ownerAnchor, err := s.members.ResolveOwnerAnchor(ctx, scope)
+	if err != nil {
+		return nil, err
 	}
-	ownerAnchor := authctx.Scope{TeacherID: ownerID, CenterID: scope.CenterID, IsOwner: true}
 
-	plan, resolveErrs := resolve(wb, dir, ownerID)
+	plan, resolveErrs := resolve(wb, dir, ownerAnchor.TeacherID)
 	rowErrs = append(rowErrs, resolveErrs...)
 	if len(rowErrs) > 0 {
 		return nil, rowErrorsErr(rowErrs)
@@ -186,7 +193,7 @@ func (s *Service) Import(ctx context.Context, scope authctx.Scope, file []byte, 
 		if err := s.locker.SetStatementTimeout(ctx); err != nil {
 			return err
 		}
-		applyErrs, err := s.apply(ctx, ownerAnchor, plan, dryRun, rep)
+		applyErrs, err := s.apply(ctx, scope, ownerAnchor, plan, dryRun, rep)
 		if err != nil {
 			return err
 		}

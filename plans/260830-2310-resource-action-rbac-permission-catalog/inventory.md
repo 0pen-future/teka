@@ -115,6 +115,14 @@ shared class-readable helpers (`classscope.ReadExists*`, `resolveReadable*`),
 which Phase 4 parameterizes per resource key. 12 keys, all risk=high,
 grantable, never default-granted:
 
+> **Superseded on 2026-09-06** by
+> [`260906-0627-authz-write-scope-root-cause`](../260906-0627-authz-write-scope-root-cause/plan.md):
+> the write sites listed below (scoped writes, writeScoped, ClassDefaultPrice,
+> CandidateInvoices, InvoicesByIDs, Revoke, GetPeriodStatus, MarkSent) now
+> widen through `Scope.WriteWide()` only. A `view_all` key widens reads and
+> nothing else; `ResolveContactScope` is center-only. Kept as the historical
+> cutover record.
+
 | Key | CenterWide() branch points today |
 |---|---|
 | classes.view_all | classes scoped/readScoped (List, GetReadable); classstaff readAccess |
@@ -138,10 +146,10 @@ until its own cleanup plan.
 
 Operation-vs-visibility invariant: a policy key answers "may call this
 operation at all" (self-scoped rows), the resource's `view_all` answers "on
-whose rows". Example: any member may `payments.reverse` their own-anchored
-payments today; only `payments.view_all` holders (ex-`data.view_center_wide`)
-reach other teachers' rows. Cutover must preserve both directions per
-resource.
+whose rows" *for reads*. The reverse example that once stood here — a
+`payments.view_all` holder reversing another teacher's payment — was the
+defect the superseding plan removed: writes reach other teachers' rows only
+for the owner (`WriteWide`).
 
 ## 4. Owner-only, non-grantable (frozen — no catalog keys ever)
 

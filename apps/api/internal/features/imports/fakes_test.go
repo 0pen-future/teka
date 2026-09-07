@@ -74,10 +74,14 @@ func (f *fakeRoster) restore(s rosterSnapshot) {
 }
 
 // --- ClassWriter ---
+//
+// Classes anchor on the workbook row's own teacher, never on the importing
+// caller, so every method here is Anchor-based and unconditional — the same
+// shape the real repository's anchored() helper gives it.
 
-func (f *fakeRoster) FindActiveByName(_ context.Context, sc authctx.Scope, name string) (*classes.Class, bool, error) {
+func (f *fakeRoster) FindActiveByName(_ context.Context, a authctx.Anchor, name string) (*classes.Class, bool, error) {
 	for _, c := range f.classRows {
-		if c.TeacherID == sc.TeacherID && c.CenterID == sc.CenterID &&
+		if c.TeacherID == a.TeacherID && c.CenterID == a.CenterID &&
 			c.Name == name && c.Status == classes.StatusActive {
 			return c, true, nil
 		}
@@ -85,10 +89,10 @@ func (f *fakeRoster) FindActiveByName(_ context.Context, sc authctx.Scope, name 
 	return nil, false, nil
 }
 
-func (f *fakeRoster) ScheduleExists(_ context.Context, sc authctx.Scope, classID uuid.UUID,
+func (f *fakeRoster) ScheduleExists(_ context.Context, a authctx.Anchor, classID uuid.UUID,
 	weekday int16, startTime classes.TimeOfDay, effectiveFrom time.Time) (bool, error) {
 	for _, s := range f.scheduleRows {
-		if s.classID == classID && s.teacherID == sc.TeacherID && s.centerID == sc.CenterID &&
+		if s.classID == classID && s.teacherID == a.TeacherID && s.centerID == a.CenterID &&
 			s.weekday == weekday && s.startTime == startTime && s.effectiveFrom.Equal(effectiveFrom) {
 			return true, nil
 		}
@@ -96,7 +100,7 @@ func (f *fakeRoster) ScheduleExists(_ context.Context, sc authctx.Scope, classID
 	return false, nil
 }
 
-func (f *fakeRoster) Create(_ context.Context, sc authctx.Scope, req classes.CreateClassRequest) (*classes.Class, error) {
+func (f *fakeRoster) CreateAnchored(_ context.Context, a authctx.Anchor, req classes.CreateClassRequest) (*classes.Class, error) {
 	if err := f.record("classes.Create"); err != nil {
 		return nil, err
 	}
@@ -114,8 +118,8 @@ func (f *fakeRoster) Create(_ context.Context, sc authctx.Scope, req classes.Cre
 	}
 	row := &classes.Class{
 		ID:               uuid.New(),
-		TeacherID:        sc.TeacherID,
-		CenterID:         sc.CenterID,
+		TeacherID:        a.TeacherID,
+		CenterID:         a.CenterID,
 		Name:             req.Name,
 		StartDate:        start,
 		EndDate:          end,
@@ -124,15 +128,15 @@ func (f *fakeRoster) Create(_ context.Context, sc authctx.Scope, req classes.Cre
 	}
 	f.classRows = append(f.classRows, row)
 	for _, s := range req.Schedules {
-		if _, err := f.AddSchedule(context.Background(), sc, row.ID, s); err != nil {
+		if _, err := f.AddScheduleAnchored(context.Background(), a, row.ID, row.StartDate, s); err != nil {
 			return nil, err
 		}
 	}
 	return row, nil
 }
 
-func (f *fakeRoster) AddSchedule(_ context.Context, sc authctx.Scope, classID uuid.UUID,
-	req classes.ScheduleRequest) (*classes.Schedule, error) {
+func (f *fakeRoster) AddScheduleAnchored(_ context.Context, a authctx.Anchor, classID uuid.UUID,
+	_ time.Time, req classes.ScheduleRequest) (*classes.Schedule, error) {
 	if err := f.record("classes.AddSchedule"); err != nil {
 		return nil, err
 	}
@@ -142,8 +146,8 @@ func (f *fakeRoster) AddSchedule(_ context.Context, sc authctx.Scope, classID uu
 	}
 	f.scheduleRows = append(f.scheduleRows, fakeSchedule{
 		classID:       classID,
-		teacherID:     sc.TeacherID,
-		centerID:      sc.CenterID,
+		teacherID:     a.TeacherID,
+		centerID:      a.CenterID,
 		weekday:       *req.Weekday,
 		startTime:     classes.TimeOfDay(req.StartTime),
 		effectiveFrom: from,
@@ -152,6 +156,9 @@ func (f *fakeRoster) AddSchedule(_ context.Context, sc authctx.Scope, classID uu
 }
 
 // --- ContactWriter ---
+//
+// The dedupe read stays Scope-based and center-wide for an owner, matching
+// the real repository's centerScoped; the write anchors on the proven owner.
 
 func (f *fakeRoster) FindIDByPhone(_ context.Context, sc authctx.Scope, phone string) (uuid.UUID, bool, error) {
 	for _, c := range f.contactRows {
@@ -165,14 +172,14 @@ func (f *fakeRoster) FindIDByPhone(_ context.Context, sc authctx.Scope, phone st
 	return uuid.Nil, false, nil
 }
 
-func (f *fakeRoster) CreateContact(_ context.Context, sc authctx.Scope, req contacts.CreateRequest) (*contacts.Row, error) {
+func (f *fakeRoster) CreateContactAnchored(_ context.Context, a authctx.OwnerAnchor, req contacts.CreateRequest) (*contacts.Row, error) {
 	if err := f.record("contacts.Create"); err != nil {
 		return nil, err
 	}
 	row := &contacts.Contact{
 		ID:        uuid.New(),
-		TeacherID: sc.TeacherID,
-		CenterID:  sc.CenterID,
+		TeacherID: a.TeacherID,
+		CenterID:  a.CenterID,
 		FullName:  req.FullName,
 		Phone:     req.Phone,
 	}
@@ -181,6 +188,9 @@ func (f *fakeRoster) CreateContact(_ context.Context, sc authctx.Scope, req cont
 }
 
 // --- StudentWriter ---
+//
+// Same split as ContactWriter: Scope-based center-wide dedupe read, write
+// anchored on the proven owner.
 
 func (f *fakeRoster) FindIDByName(_ context.Context, sc authctx.Scope, contactID uuid.UUID,
 	fullName string, note *string) (uuid.UUID, bool, error) {
@@ -194,7 +204,7 @@ func (f *fakeRoster) FindIDByName(_ context.Context, sc authctx.Scope, contactID
 	return uuid.Nil, false, nil
 }
 
-func (f *fakeRoster) CreateStudent(_ context.Context, sc authctx.Scope, req students.CreateRequest) (*students.Row, error) {
+func (f *fakeRoster) CreateStudentAnchored(_ context.Context, a authctx.OwnerAnchor, req students.CreateRequest) (*students.Row, error) {
 	if err := f.record("students.Create"); err != nil {
 		return nil, err
 	}
@@ -204,8 +214,8 @@ func (f *fakeRoster) CreateStudent(_ context.Context, sc authctx.Scope, req stud
 	}
 	row := &students.Student{
 		ID:          uuid.New(),
-		TeacherID:   sc.TeacherID,
-		CenterID:    sc.CenterID,
+		TeacherID:   a.TeacherID,
+		CenterID:    a.CenterID,
 		ContactID:   req.ContactID,
 		FullName:    req.FullName,
 		DisplayNote: note,
@@ -215,11 +225,14 @@ func (f *fakeRoster) CreateStudent(_ context.Context, sc authctx.Scope, req stud
 }
 
 // --- EnrollmentWriter ---
+//
+// Enrollments anchor on the referenced class's own teacher, like classes;
+// actor rides along only to record who is credited as the acting party.
 
-func (f *fakeRoster) FindByStudentAndClass(_ context.Context, sc authctx.Scope,
+func (f *fakeRoster) FindByStudentAndClassAnchored(_ context.Context, a authctx.Anchor,
 	studentID, classID uuid.UUID) (*enrollments.Enrollment, bool, error) {
 	for _, e := range f.enrollRows {
-		if e.TeacherID == sc.TeacherID && e.CenterID == sc.CenterID &&
+		if e.TeacherID == a.TeacherID && e.CenterID == a.CenterID &&
 			e.StudentID == studentID && e.ClassID == classID {
 			return e, true, nil
 		}
@@ -227,7 +240,7 @@ func (f *fakeRoster) FindByStudentAndClass(_ context.Context, sc authctx.Scope,
 	return nil, false, nil
 }
 
-func (f *fakeRoster) CreateEnrollment(_ context.Context, sc authctx.Scope,
+func (f *fakeRoster) CreateEnrollmentAnchored(_ context.Context, _ authctx.Scope, a authctx.Anchor,
 	req enrollments.CreateRequest) (*enrollments.Row, error) {
 	if err := f.record("enrollments.Create"); err != nil {
 		return nil, err
@@ -238,8 +251,8 @@ func (f *fakeRoster) CreateEnrollment(_ context.Context, sc authctx.Scope,
 	}
 	row := &enrollments.Enrollment{
 		ID:        uuid.New(),
-		TeacherID: sc.TeacherID,
-		CenterID:  sc.CenterID,
+		TeacherID: a.TeacherID,
+		CenterID:  a.CenterID,
 		StudentID: req.StudentID,
 		ClassID:   req.ClassID,
 		StartedOn: started,
@@ -261,25 +274,26 @@ func samePtr(a, b *string) bool {
 	}
 }
 
-// The four writer interfaces all name their creator Create, so one struct
-// cannot implement them directly. These adapters give each interface its own
-// receiver over the same store.
+// The four writer interfaces all name their creator CreateAnchored, so one
+// struct cannot implement them directly (fakeRoster's own CreateAnchored
+// already serves ClassWriter). These adapters give each of the other three
+// interfaces its own receiver over the same store.
 type contactWriter struct{ *fakeRoster }
 
-func (w contactWriter) Create(ctx context.Context, sc authctx.Scope, req contacts.CreateRequest) (*contacts.Row, error) {
-	return w.CreateContact(ctx, sc, req)
+func (w contactWriter) CreateAnchored(ctx context.Context, a authctx.OwnerAnchor, req contacts.CreateRequest) (*contacts.Row, error) {
+	return w.CreateContactAnchored(ctx, a, req)
 }
 
 type studentWriter struct{ *fakeRoster }
 
-func (w studentWriter) Create(ctx context.Context, sc authctx.Scope, req students.CreateRequest) (*students.Row, error) {
-	return w.CreateStudent(ctx, sc, req)
+func (w studentWriter) CreateAnchored(ctx context.Context, a authctx.OwnerAnchor, req students.CreateRequest) (*students.Row, error) {
+	return w.CreateStudentAnchored(ctx, a, req)
 }
 
 type enrollmentWriter struct{ *fakeRoster }
 
-func (w enrollmentWriter) Create(ctx context.Context, sc authctx.Scope, req enrollments.CreateRequest) (*enrollments.Row, error) {
-	return w.CreateEnrollment(ctx, sc, req)
+func (w enrollmentWriter) CreateAnchored(ctx context.Context, actor authctx.Scope, a authctx.Anchor, req enrollments.CreateRequest) (*enrollments.Row, error) {
+	return w.CreateEnrollmentAnchored(ctx, actor, a, req)
 }
 
 // rollbackTxManager reproduces the one transaction property these tests depend

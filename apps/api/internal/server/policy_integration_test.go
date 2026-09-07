@@ -88,6 +88,19 @@ func (e *policyEnv) get(t *testing.T, path, token string) *httptest.ResponseReco
 	return rec
 }
 
+// send issues a JSON request with a body — the write-side counterpart of get.
+func (e *policyEnv) send(t *testing.T, method, path, token, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	rec := httptest.NewRecorder()
+	e.router.ServeHTTP(rec, req)
+	return rec
+}
+
 // giaoVien puts the member on the center's giao_vien system role, which the
 // fixtures seed with the operational baseline (DefaultRoleKeys) — the same
 // born-with-defaults invariant production centers carry.
@@ -263,6 +276,70 @@ func TestPolicyHTTPViewAllParity(t *testing.T) {
 	body = e.get(t, "/api/v1/students", tokB).Body.String()
 	require.NotContains(t, body, ownerStudent.ID.String(),
 		"the retired center-wide key must not widen students")
+}
+
+// A <resource>.view_all key widens what a member can SEE and nothing they can
+// change: with the key the owner's session and class read fine, yet cancelling
+// the session is refused for lack of a class role and editing the class is
+// not even found on the write scope. Recording a payment for the owner's
+// contact needs no key at all — the route permission admits the collector
+// and the payment anchors on the contact's own teacher.
+func TestPolicyHTTPViewAllNeverWidensWrites(t *testing.T) {
+	t.Parallel()
+	e := newPolicyEnv(t)
+	_, owner := testutil.Teacher(t, e.db)
+	memberAcct, member := testutil.Teacher(t, e.db)
+	testutil.JoinCenter(t, e.db, member.ID, owner.CenterID)
+	e.giaoVien(t, member.ID, owner.CenterID)
+	tok := e.token(t, memberAcct.ID)
+
+	ownerContact := testutil.Contact(t, e.db, owner.ID)
+	ownerClass := testutil.Class(t, e.db, owner.ID)
+	ownerSession := testutil.Session(t, e.db, owner.ID, ownerClass.ID, time.Now().AddDate(0, 0, 7))
+	sessionPath := "/api/v1/sessions/" + ownerSession.ID.String()
+	classPath := "/api/v1/classes/" + ownerClass.ID.String()
+
+	// Without keys the owner's rows are invisible on read and write alike.
+	require.Equal(t, http.StatusNotFound, e.get(t, sessionPath, tok).Code)
+	require.Equal(t, http.StatusNotFound, e.send(t, http.MethodPost, sessionPath+"/cancel", tok, `{"reason":"thử"}`).Code)
+
+	e.override(t, member.ID, owner.CenterID, authctx.PermSessionsViewAll, true)
+	e.override(t, member.ID, owner.CenterID, authctx.PermClassesViewAll, true)
+
+	require.Equal(t, http.StatusOK, e.get(t, sessionPath, tok).Code,
+		"sessions.view_all must open the owner's session for reading")
+	require.Equal(t, http.StatusOK, e.get(t, classPath, tok).Code,
+		"classes.view_all must open the owner's class for reading")
+
+	rec := e.send(t, http.MethodPost, sessionPath+"/cancel", tok, `{"reason":"thử huỷ"}`)
+	require.Equal(t, http.StatusForbidden, rec.Code, "a visibility key must not widen cancelling a session")
+	require.Contains(t, rec.Body.String(), "your role on this class",
+		"the refusal must come from the class write gate, not the route policy")
+	var status string
+	require.NoError(t, e.db.Raw("SELECT status FROM class_sessions WHERE id = ?", ownerSession.ID).Scan(&status).Error)
+	require.Equal(t, "planned", status, "the owner's session must be untouched")
+
+	rec = e.send(t, http.MethodPut, classPath, tok,
+		`{"name":"Lớp Sửa Trộm","start_date":"2026-01-05","default_unit_price":1}`)
+	require.Equal(t, http.StatusNotFound, rec.Code, "a visibility key must not widen editing a class")
+	var name string
+	require.NoError(t, e.db.Raw("SELECT name FROM classes WHERE id = ?", ownerClass.ID).Scan(&name).Error)
+	require.Equal(t, ownerClass.Name, name, "the owner's class must be untouched")
+
+	// payments.create alone lets the member collect for the owner's contact;
+	// the row belongs to the contact's teacher, not the collector.
+	rec = e.send(t, http.MethodPost, "/api/v1/payments", tok,
+		`{"contact_id":"`+ownerContact.ID.String()+`","amount":50000,"method":"cash","received_on":"2026-03-01"}`)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	var payment struct{ TeacherID uuid.UUID }
+	require.NoError(t, e.db.Raw("SELECT teacher_id FROM payments WHERE contact_id = ?", ownerContact.ID).Scan(&payment).Error)
+	require.Equal(t, owner.ID, payment.TeacherID, "the payment must anchor on the contact's own teacher")
+
+	// Without payments.create the route policy stops the same request.
+	e.override(t, member.ID, owner.CenterID, authctx.PermPaymentsCreate, false)
+	rec = e.send(t, http.MethodPost, "/api/v1/payments", tok,
+		`{"contact_id":"`+ownerContact.ID.String()+`","amount":50000,"method":"cash","received_on":"2026-03-02"}`)
+	require.Equal(t, http.StatusForbidden, rec.Code, "recording a payment is gated by payments.create")
 }
 
 // An unauthenticated probe of a policy-guarded route must never leak whether

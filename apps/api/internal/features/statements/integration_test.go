@@ -23,6 +23,7 @@ import (
 	"teka/apps/api/internal/features/statements"
 	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/pagination"
 	"teka/apps/api/internal/testutil"
 )
@@ -66,8 +67,9 @@ func newIntegrationDeps(t *testing.T) (*statements.Service, *billing.Service, *g
 }
 
 // seededChild is one class+student+enrollment fixture with sessionCount
-// held+confirmed sessions (100 000 đồng each) under contactID.
-func seedChild(t *testing.T, db *gorm.DB, teacherID, contactID uuid.UUID, name string, classStart time.Time, sessionCount int) {
+// held+confirmed sessions (100 000 đồng each) under contactID. It returns the
+// class so a test can hang staff stints on it.
+func seedChild(t *testing.T, db *gorm.DB, teacherID, contactID uuid.UUID, name string, classStart time.Time, sessionCount int) *classes.Class {
 	t.Helper()
 	class := testutil.Class(t, db, teacherID, testutil.WithClassName(name), testutil.WithClassStartDate(classStart))
 	student := testutil.Student(t, db, teacherID, contactID, testutil.WithStudentFullName(name+"-student"))
@@ -77,6 +79,7 @@ func seedChild(t *testing.T, db *gorm.DB, teacherID, contactID uuid.UUID, name s
 			testutil.WithSessionAttendanceConfirmed(time.Now()))
 		testutil.AttendanceRecord(t, db, teacherID, sess.ID, student.ID, enrollment.ID)
 	}
+	return class
 }
 
 // hashOf mirrors this package's own token->hash digest so tests can assert
@@ -378,4 +381,62 @@ func TestNoTeacherEndpointLeaksAnotherTeachersStatement(t *testing.T) {
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
 
 	require.Error(t, statementsSvc.Revoke(ctx, testutil.ScopeFor(t, db, teacherB.ID), statementID))
+}
+
+// A member holding statements.view_all cannot generate statements for, or
+// revoke statements of, a period they do not own: the visibility key never
+// widens the write port. Statement reads follow the reports-oversight axis,
+// so the key opens no listing either — there is no route by which such a
+// caller reaches another teacher's statement rows, which is what keeps the
+// phone mask from ever being evaluated for the wrong person. Their own
+// period stays fully writable.
+func TestViewAllWidensStatementReadsNotWrites(t *testing.T) {
+	t.Parallel()
+	statementsSvc, billingSvc, db := newIntegrationDeps(t)
+	ctx := context.Background()
+
+	owner, _ := testutil.Teacher(t, db)
+	scOwner := testutil.ScopeFor(t, db, owner.ID)
+	member, _ := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, member.ID, scOwner.CenterID)
+
+	ownerContact := testutil.Contact(t, db, owner.ID)
+	seedChild(t, db, owner.ID, ownerContact.ID, "OwnerStmt", date("2026-07-01"), 1)
+	ownerPeriod, err := billingSvc.EnsurePeriod(ctx, scOwner, 2026, 7)
+	require.NoError(t, err)
+	_, err = billingSvc.Close(ctx, scOwner, ownerPeriod.ID)
+	require.NoError(t, err)
+
+	scMember := testutil.ScopeFor(t, db, member.ID)
+	scMember.Perms = authctx.BuildPermSet(nil, []string{authctx.PermStatementsViewAll}, nil)
+	require.True(t, scMember.CenterWideFor(authctx.PermStatementsViewAll))
+
+	_, err = statementsSvc.Generate(ctx, scMember, ownerPeriod.ID)
+	require.Equal(t, 404, apperror.From(err).Status, "a visibility key must not widen generating statements")
+	var count int64
+	require.NoError(t, db.Table("statements").Where("period_id = ?", ownerPeriod.ID).Count(&count).Error)
+	require.Zero(t, count, "a refused generate must write nothing")
+	// Statement reads still branch on ReportsOversight. When they move to
+	// the visibility-key axis this assertion flips to NoError; the writes
+	// above stay refused either way.
+	_, _, err = statementsSvc.List(ctx, scMember, ownerPeriod.ID, pagination.Params{Page: 1, PerPage: 20})
+	require.Equal(t, 404, apperror.From(err).Status, "statement reads follow reports oversight, not the visibility key")
+
+	first, err := statementsSvc.Generate(ctx, scOwner, ownerPeriod.ID)
+	require.NoError(t, err)
+	statementID := first.Statements[0].ID
+	require.Equal(t, 404, apperror.From(statementsSvc.Revoke(ctx, scMember, statementID)).Status,
+		"a visibility key must not widen revocation")
+	row := loadStatement(t, db, owner.ID, ownerContact.ID, ownerPeriod.ID)
+	require.Nil(t, row.RevokedAt, "the owner's statement must stay live")
+
+	ownContact := testutil.Contact(t, db, member.ID)
+	seedChild(t, db, member.ID, ownContact.ID, "MemberStmt", date("2026-07-01"), 1)
+	ownPeriod, err := billingSvc.EnsurePeriod(ctx, scMember, 2026, 7)
+	require.NoError(t, err)
+	_, err = billingSvc.Close(ctx, scMember, ownPeriod.ID)
+	require.NoError(t, err)
+	own, err := statementsSvc.Generate(ctx, scMember, ownPeriod.ID)
+	require.NoError(t, err, "a member must still generate their own statements")
+	require.NoError(t, statementsSvc.Revoke(ctx, scMember, own.Statements[0].ID))
 }

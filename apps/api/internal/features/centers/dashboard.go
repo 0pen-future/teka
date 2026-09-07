@@ -76,10 +76,10 @@ func (d *Dashboard) requireCenterTeacher(ctx context.Context, sc authctx.Scope, 
 	return nil
 }
 
-// targetScope is the strict per-teacher scope drill-down reads run under:
-// exactly the viewed teacher's rows in the owner's center, never owner-wide,
-// so the consumed features scope precisely like the teacher themselves would.
-func targetScope(sc authctx.Scope, teacherID uuid.UUID) authctx.Scope {
+// viewAs is the strict per-teacher scope drill-down reads run under: exactly
+// the viewed teacher's rows in the owner's center, never owner-wide, so the
+// consumed features scope precisely like the teacher themselves would.
+func viewAs(sc authctx.Scope, teacherID uuid.UUID) authctx.Scope {
 	return authctx.Scope{TeacherID: teacherID, CenterID: sc.CenterID}
 }
 
@@ -200,7 +200,7 @@ func (d *Dashboard) TeacherClasses(ctx context.Context, sc authctx.Scope, teache
 	if err := d.requireCenterTeacher(ctx, sc, teacherID); err != nil {
 		return nil, 0, err
 	}
-	return d.classes.List(ctx, targetScope(sc, teacherID), filter, p)
+	return d.classes.List(ctx, viewAs(sc, teacherID), filter, p)
 }
 
 // ClassSessions lists one class's materialised sessions in [from, to] with
@@ -212,7 +212,7 @@ func (d *Dashboard) ClassSessions(ctx context.Context, sc authctx.Scope, teacher
 	if err := d.requireCenterTeacher(ctx, sc, teacherID); err != nil {
 		return nil, err
 	}
-	target := targetScope(sc, teacherID)
+	target := viewAs(sc, teacherID)
 	if _, err := d.classes.Get(ctx, target, classID); err != nil {
 		return nil, forbiddenOnNotFound(err)
 	}
@@ -255,7 +255,7 @@ func (d *Dashboard) Session(ctx context.Context, sc authctx.Scope, sessionID uui
 	}
 	// The sheet resolves the roster through the session teacher's own strict
 	// scope: their enrollments are theirs, not the owner's.
-	sheet, err := d.attendance.Get(ctx, targetScope(sc, det.TeacherID), sessionID)
+	sheet, err := d.attendance.Get(ctx, viewAs(sc, det.TeacherID), sessionID)
 	if err != nil {
 		return nil, err
 	}

@@ -21,6 +21,7 @@ import (
 	"teka/apps/api/internal/features/sessions"
 	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/testutil"
 )
 
@@ -805,4 +806,117 @@ func TestHandoffMovesSessionWriteRights(t *testing.T) {
 	// The new GV writes the pre-handoff session they never created.
 	_, err = svc.Cancel(ctx, newSc, past.ID, "dồn lớp")
 	require.NoError(t, err, "new GV writes pre-handoff sessions")
+}
+
+// A member holding sessions.view_all reads any session in the center but
+// cannot mutate one they hold no stint on: the visibility key never widens
+// the write port. Their own sessions stay writable.
+func TestViewAllWidensSessionReadsNotWrites(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+
+	owner, _ := testutil.Teacher(t, db)
+	scOwner := testutil.ScopeFor(t, db, owner.ID)
+	member, _ := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, member.ID, scOwner.CenterID)
+
+	ownerClass := testutil.Class(t, db, owner.ID, testutil.WithClassStartDate(date("2026-01-01")))
+	ownerSession := testutil.Session(t, db, owner.ID, ownerClass.ID, date("2026-01-06"))
+
+	scMember := testutil.ScopeFor(t, db, member.ID)
+	scMember.Perms = authctx.BuildPermSet(nil, []string{authctx.PermSessionsViewAll, authctx.PermClassesViewAll}, nil)
+	require.True(t, scMember.CenterWideFor(authctx.PermSessionsViewAll))
+
+	got, err := svc.GetReadable(ctx, scMember, ownerSession.ID)
+	require.NoError(t, err)
+	require.Equal(t, ownerSession.ID, got.ID)
+	feed, err := svc.ListUnconfirmedInWindow(ctx, scMember, nil, nil, date("2026-01-07"), 10)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, feed.Total, "a visibility key widens the pending feed like any other read")
+
+	// The feed carries no stint branch: billing's period-close gate runs the
+	// same predicate anchored on the period teacher, and a stint they hold on
+	// someone else's class must not pull that class's sessions into the
+	// blocking set.
+	staff, _ := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, staff.ID, scOwner.CenterID)
+	testutil.StaffAssignment(t, db, ownerClass, staff.ID, "tro_giang")
+	staffFeed, err := svc.ListUnconfirmedInWindow(ctx, testutil.ScopeFor(t, db, staff.ID), nil, nil, date("2026-01-07"), 10)
+	require.NoError(t, err)
+	require.Zero(t, staffFeed.Total, "a stint alone does not widen the pending feed")
+
+	// The class is readable through the key but carries no write role, so the
+	// class write gate answers Forbidden rather than hiding the class.
+	_, err = svc.Cancel(ctx, scMember, ownerSession.ID, "trộm huỷ")
+	require.Equal(t, 403, apperror.From(err).Status, "a visibility key must not widen cancel")
+	_, err = svc.Hold(ctx, scMember, ownerSession.ID)
+	require.Equal(t, 403, apperror.From(err).Status, "a visibility key must not widen hold")
+	require.Equal(t, 403, apperror.From(svc.Delete(ctx, scMember, ownerSession.ID)).Status,
+		"a visibility key must not widen deletion")
+
+	var status string
+	require.NoError(t, db.Table("class_sessions").Select("status").
+		Where("id = ?", ownerSession.ID).Scan(&status).Error)
+	require.Equal(t, sessions.StatusPlanned, status, "the owner's row must be untouched")
+
+	ownClass := testutil.Class(t, db, member.ID, testutil.WithClassStartDate(date("2026-01-01")))
+	ownSession := testutil.Session(t, db, member.ID, ownClass.ID, date("2026-01-07"))
+	cancelled, err := svc.Cancel(ctx, scMember, ownSession.ID, "nghỉ lễ")
+	require.NoError(t, err)
+	require.Equal(t, sessions.StatusCancelled, cancelled.Status)
+}
+
+// Materialising a class's planned sessions is a derived-data cache fill, not a
+// write the caller owns: every generated row carries the CLASS's teacher. A
+// sessions.view_all member browsing a week that is not yet materialised must
+// therefore produce byte-identical rows to what the owner would have produced.
+func TestViewAllMaterialisesSessionsExactlyAsOwnerWould(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+
+	owner, _ := testutil.Teacher(t, db)
+	scOwner := testutil.ScopeFor(t, db, owner.ID)
+	member, _ := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, member.ID, scOwner.CenterID)
+	scMember := testutil.ScopeFor(t, db, member.ID)
+	scMember.Perms = authctx.BuildPermSet(nil, []string{authctx.PermSessionsViewAll, authctx.PermClassesViewAll}, nil)
+
+	byMember := testutil.Class(t, db, owner.ID, testutil.WithClassName("Gen-member"), testutil.WithClassStartDate(date("2026-01-01")))
+	testutil.Schedule(t, db, byMember, 2, "18:00")
+	byOwner := testutil.Class(t, db, owner.ID, testutil.WithClassName("Gen-owner"), testutil.WithClassStartDate(date("2026-01-01")))
+	testutil.Schedule(t, db, byOwner, 2, "18:00")
+
+	memberRows, err := svc.ListRangeReadable(ctx, scMember, byMember.ID, date("2026-01-01"), date("2026-01-31"))
+	require.NoError(t, err)
+	ownerRows, err := svc.ListRangeReadable(ctx, scOwner, byOwner.ID, date("2026-01-01"), date("2026-01-31"))
+	require.NoError(t, err)
+	require.Len(t, memberRows, 4, "the member's browse must materialise the same Tuesdays")
+	require.Len(t, ownerRows, 4)
+
+	type stored struct {
+		TeacherID   uuid.UUID
+		CenterID    uuid.UUID
+		Status      string
+		SessionDate time.Time
+	}
+	load := func(classID uuid.UUID) []stored {
+		var rows []stored
+		require.NoError(t, db.Table("class_sessions").
+			Select("teacher_id, center_id, status, session_date").
+			Where("class_id = ? AND deleted_at IS NULL", classID).
+			Order("session_date").Scan(&rows).Error)
+		return rows
+	}
+	memberStored, ownerStored := load(byMember.ID), load(byOwner.ID)
+	require.Len(t, memberStored, len(ownerStored))
+	for i := range ownerStored {
+		require.Equal(t, owner.ID, memberStored[i].TeacherID,
+			"a row materialised by a viewer must carry the class's teacher, never the viewer")
+		require.Equal(t, ownerStored[i].TeacherID, memberStored[i].TeacherID)
+		require.Equal(t, ownerStored[i].CenterID, memberStored[i].CenterID)
+		require.Equal(t, ownerStored[i].Status, memberStored[i].Status)
+		require.True(t, ownerStored[i].SessionDate.Equal(memberStored[i].SessionDate))
+	}
 }

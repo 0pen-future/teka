@@ -41,12 +41,19 @@ func NewService(repo Repository, tx database.TxManager, staff StaffSeeder) *Serv
 	return &Service{repo: repo, tx: tx, staff: staff}
 }
 
-// Create inserts the class and its schedule rows in one transaction — a
-// failing schedule insert leaves no class row. Schedules with no
-// effective_from inherit the class start date. The class is always stamped as
-// the caller's own — including an owner, who creates rows as themselves,
-// never on behalf of another teacher.
+// Create inserts the class and its schedule rows as the caller's own —
+// including an owner, who creates rows as themselves, never on behalf of
+// another teacher.
 func (s *Service) Create(ctx context.Context, sc authctx.Scope, req CreateClassRequest) (*Class, error) {
+	return s.CreateAnchored(ctx, sc.Self(), req)
+}
+
+// CreateAnchored inserts the class and its schedule rows in one transaction
+// anchored on a — a failing schedule insert leaves no class row. Schedules
+// with no effective_from inherit the class start date. It exists for the
+// roster import: each class anchors to the teacher its own workbook row
+// names, via a resolved from that name, not from the importing caller.
+func (s *Service) CreateAnchored(ctx context.Context, a authctx.Anchor, req CreateClassRequest) (*Class, error) {
 	startDate, err := parseDate("start_date", req.StartDate)
 	if err != nil {
 		return nil, err
@@ -58,8 +65,8 @@ func (s *Service) Create(ctx context.Context, sc authctx.Scope, req CreateClassR
 
 	class := &Class{
 		ID:               id.New(),
-		TeacherID:        sc.TeacherID,
-		CenterID:         sc.CenterID,
+		TeacherID:        a.TeacherID,
+		CenterID:         a.CenterID,
 		Name:             req.Name,
 		StartDate:        startDate,
 		EndDate:          endDate,
@@ -68,7 +75,7 @@ func (s *Service) Create(ctx context.Context, sc authctx.Scope, req CreateClassR
 	}
 	schedules := make([]Schedule, len(req.Schedules))
 	for i, sr := range req.Schedules {
-		schedule, err := scheduleFromRequest(sc.TeacherID, sc.CenterID, class.ID, startDate, sr)
+		schedule, err := scheduleFromRequest(a.TeacherID, a.CenterID, class.ID, startDate, sr)
 		if err != nil {
 			return nil, err
 		}
@@ -262,6 +269,20 @@ func (s *Service) Delete(ctx context.Context, sc authctx.Scope, classID uuid.UUI
 	return translate(s.repo.SoftDelete(ctx, sc, classID))
 }
 
+// addSchedule is the shared core behind AddSchedule and AddScheduleAnchored:
+// it builds one schedule row anchored on a — startDate defaults a blank
+// effective_from — and inserts it.
+func (s *Service) addSchedule(ctx context.Context, a authctx.Anchor, classID uuid.UUID, startDate time.Time, req ScheduleRequest) (*Schedule, error) {
+	schedule, err := scheduleFromRequest(a.TeacherID, a.CenterID, classID, startDate, req)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.AddSchedule(ctx, schedule); err != nil {
+		return nil, err
+	}
+	return schedule, nil
+}
+
 // AddSchedule appends a timetable row to the class — the second half of the
 // close-and-replace flow for changing a weekly slot. The new row inherits the
 // parent class's own teacher and center, not the caller's scope: an owner
@@ -272,14 +293,15 @@ func (s *Service) AddSchedule(ctx context.Context, sc authctx.Scope, classID uui
 	if err != nil {
 		return nil, translate(err)
 	}
-	schedule, err := scheduleFromRequest(class.TeacherID, class.CenterID, classID, class.StartDate, req)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.repo.AddSchedule(ctx, schedule); err != nil {
-		return nil, err
-	}
-	return schedule, nil
+	return s.addSchedule(ctx, authctx.Anchor{TeacherID: class.TeacherID, CenterID: class.CenterID}, classID, class.StartDate, req)
+}
+
+// AddScheduleAnchored is AddSchedule's import counterpart: the caller already
+// resolved the class (FindActiveByName) and holds its own anchor and start
+// date directly, so this skips the GetByID re-fetch AddSchedule needs to
+// learn them.
+func (s *Service) AddScheduleAnchored(ctx context.Context, a authctx.Anchor, classID uuid.UUID, startDate time.Time, req ScheduleRequest) (*Schedule, error) {
+	return s.addSchedule(ctx, a, classID, startDate, req)
 }
 
 // UpdateSchedule edits one row in place — for correcting a mistake or closing
@@ -315,9 +337,10 @@ func (s *Service) DeleteSchedule(ctx context.Context, sc authctx.Scope, classID,
 }
 
 // ListEffectiveSchedules exposes the session-generation contract: rows whose
-// effective range intersects [from, to].
+// effective range intersects [from, to]. It is a read, resolved through the
+// read port: whoever may see the class may see its timetable.
 func (s *Service) ListEffectiveSchedules(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]Schedule, error) {
-	if _, err := s.repo.GetByID(ctx, sc, classID); err != nil {
+	if _, err := s.repo.GetReadableByID(ctx, sc, classID); err != nil {
 		return nil, translate(err)
 	}
 	return s.repo.ListEffectiveSchedules(ctx, sc, classID, from, to)
@@ -338,15 +361,16 @@ func translate(err error) error {
 	}
 }
 
-// FindActiveByName resolves a live, active class by its exact name inside the
-// scope. It is the create-or-reuse seam for bulk flows; classes.name carries
-// no unique index, so this is a lookup and the caller decides what a hit means.
+// FindActiveByName resolves a live, active class by its exact name under one
+// anchor. It is the roster import's create-or-reuse seam; classes.name
+// carries no unique index, so this is a lookup and the caller decides what a
+// hit means. Import-only — see Repository.FindActiveByName's doc comment.
 //
 // An archived class is deliberately not a hit: it still has deleted_at IS NULL,
 // so a name-only match would enrol this year's students into a class the
 // teacher closed last term.
-func (s *Service) FindActiveByName(ctx context.Context, sc authctx.Scope, name string) (*Class, bool, error) {
-	class, err := s.repo.FindActiveByName(ctx, sc, name)
+func (s *Service) FindActiveByName(ctx context.Context, a authctx.Anchor, name string) (*Class, bool, error) {
+	class, err := s.repo.FindActiveByName(ctx, a, name)
 	if errors.Is(err, ErrNotFound) {
 		return nil, false, nil
 	}
@@ -366,11 +390,11 @@ func (s *Service) ReassignTeacher(ctx context.Context, sc authctx.Scope, classID
 }
 
 // ScheduleExists reports whether the class already carries this exact weekly
-// slot. Callers must pass the same effective_from they intend to write:
-// AddSchedule defaults a blank one to the stored class's start_date, so a
-// caller that checked with one date and wrote with another would append a
-// duplicate slot on every run, and class_schedules has no unique index to
-// stop it.
-func (s *Service) ScheduleExists(ctx context.Context, sc authctx.Scope, classID uuid.UUID, weekday int16, startTime TimeOfDay, effectiveFrom time.Time) (bool, error) {
-	return s.repo.ScheduleExists(ctx, sc, classID, weekday, startTime, effectiveFrom)
+// slot. Import-only — see Repository.ScheduleExists's doc comment. Callers
+// must pass the same effective_from they intend to write: AddScheduleAnchored
+// defaults a blank one to the stored class's start_date, so a caller that
+// checked with one date and wrote with another would append a duplicate slot
+// on every run, and class_schedules has no unique index to stop it.
+func (s *Service) ScheduleExists(ctx context.Context, a authctx.Anchor, classID uuid.UUID, weekday int16, startTime TimeOfDay, effectiveFrom time.Time) (bool, error) {
+	return s.repo.ScheduleExists(ctx, a, classID, weekday, startTime, effectiveFrom)
 }

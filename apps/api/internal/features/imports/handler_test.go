@@ -42,6 +42,10 @@ func (fakeScopeResolver) ResolveScope(_ context.Context, teacherID uuid.UUID) (a
 type countingDirectory struct {
 	calls int
 	dir   map[string]uuid.UUID
+	// ownerTeacherID overrides the resolved owner. Zero means "the caller is
+	// the owner", the shape every fixture but a member-grant test needs;
+	// setting it proves a member's import still anchors on someone else.
+	ownerTeacherID uuid.UUID
 }
 
 func (d *countingDirectory) MemberIDsByPhone(_ context.Context, _ authctx.Scope) (map[string]uuid.UUID, error) {
@@ -49,11 +53,16 @@ func (d *countingDirectory) MemberIDsByPhone(_ context.Context, _ authctx.Scope)
 	return d.dir, nil
 }
 
-// CenterOwner is only consulted for a non-owner caller; the unit fixtures run
-// as the owner, so a test that gets here is exercising the member-grant path
-// and any teacher id serves as "the owner".
-func (d *countingDirectory) CenterOwner(_ context.Context, _ uuid.UUID) (uuid.UUID, bool, error) {
-	return uuid.New(), false, nil
+// ResolveOwnerAnchor stands in for centers.Service.ResolveOwnerAnchor: by
+// default it anchors on the caller itself, matching every fixture that runs
+// as the owner; a test proving the member-grant path sets ownerTeacherID to a
+// different teacher.
+func (d *countingDirectory) ResolveOwnerAnchor(_ context.Context, sc authctx.Scope) (authctx.OwnerAnchor, error) {
+	owner := sc.TeacherID
+	if d.ownerTeacherID != uuid.Nil {
+		owner = d.ownerTeacherID
+	}
+	return authctx.MintOwnerAnchor(owner, sc.CenterID), nil
 }
 
 func newHTTPTest(t *testing.T) (*gin.Engine, *countingDirectory) {

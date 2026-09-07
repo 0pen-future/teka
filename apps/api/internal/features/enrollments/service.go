@@ -29,27 +29,32 @@ func NewService(repo Repository, bus events.Bus) *Service {
 	return &Service{repo: repo, bus: bus}
 }
 
-// Create enrolls a student, copying unit_price from the class's current
-// default. The two lookups exist to produce clean 422s and to read the price;
-// the composite FKs are what actually prevent cross-center stitching, and
+// create is the shared core behind Create and CreateAnchored: it inserts the
+// enrollment anchored on a, publishes StudentEnrolled with actor as the
+// acting party — the two differ for the roster import, where a member drives
+// writes onto a class's own teacher — and reads the row back through an
+// anchored lookup, since actor and a can name different teachers and the
+// own-rows/WriteWide filter behind GetByID cannot be relied on to see it.
+//
+// The two pre-checks exist to produce clean 422s and to read the price; the
+// composite FKs are what actually prevent cross-center stitching, and
 // uq_enrollments_active — not a pre-check — is what refuses a duplicate open
-// enrollment. The enrollment is always stamped as the caller's own, so the
-// CLASS check runs with owner rights stripped: a row created against a
-// member's class would carry the owner's anchor while living in the member's
-// roster — invisible to the member's own attendance and billing, and
-// unrepeatable for them under uq_enrollments_active. The STUDENT check is
-// center-scoped instead: students anchor to the owner, so requiring the
-// caller's own teacher_id would refuse every legitimate reference.
-func (s *Service) Create(ctx context.Context, sc authctx.Scope, req CreateRequest) (*Row, error) {
-	ownScope := authctx.Scope{TeacherID: sc.TeacherID, CenterID: sc.CenterID}
-	price, err := s.repo.ClassDefaultPrice(ctx, ownScope, req.ClassID)
+// enrollment. The CLASS check runs against a with no owner bypass (an Anchor
+// carries none): a row written against a class a does not itself own would
+// carry a foreign anchor while living outside that class's own roster —
+// invisible to its real teacher's attendance and billing, and unrepeatable
+// under uq_enrollments_active. The STUDENT check is center-scoped instead:
+// students anchor to the owner, so requiring a's own teacher_id would refuse
+// every legitimate reference.
+func (s *Service) create(ctx context.Context, actor authctx.Scope, a authctx.Anchor, req CreateRequest) (*Row, error) {
+	price, err := s.repo.ClassDefaultPrice(ctx, a, req.ClassID)
 	if errors.Is(err, ErrClassNotFound) {
 		return nil, refInvalid("class_id", "must reference one of your classes", err)
 	}
 	if err != nil {
 		return nil, err
 	}
-	ok, err := s.repo.StudentExists(ctx, ownScope, req.StudentID)
+	ok, err := s.repo.StudentExists(ctx, actor, req.StudentID)
 	if err != nil {
 		return nil, err
 	}
@@ -67,8 +72,8 @@ func (s *Service) Create(ctx context.Context, sc authctx.Scope, req CreateReques
 
 	e := &Enrollment{
 		ID:        id.New(),
-		TeacherID: sc.TeacherID,
-		CenterID:  sc.CenterID,
+		TeacherID: a.TeacherID,
+		CenterID:  a.CenterID,
 		StudentID: req.StudentID,
 		ClassID:   req.ClassID,
 		StartedOn: startedOn,
@@ -78,19 +83,34 @@ func (s *Service) Create(ctx context.Context, sc authctx.Scope, req CreateReques
 		return nil, translate(err)
 	}
 	if s.bus != nil {
-		// Enrolling widens what the creating teacher can read and feeds the
-		// next billing close, so every successful create leaves an event for
-		// the audit trail.
+		// Enrolling widens what the row's teacher can read and feeds the next
+		// billing close, so every successful create leaves an event for the
+		// audit trail. ActorID is who acted, not who the row is anchored to.
 		s.bus.Publish(StudentEnrolled{
 			OccurredAt:   time.Now().UTC(),
-			CenterID:     sc.CenterID,
-			ActorID:      sc.TeacherID,
+			CenterID:     a.CenterID,
+			ActorID:      actor.TeacherID,
 			EnrollmentID: e.ID,
 			ClassID:      e.ClassID,
 			StudentID:    e.StudentID,
 		})
 	}
-	return s.repo.GetByID(ctx, sc, e.ID)
+	return s.repo.GetByIDAnchored(ctx, a, e.ID)
+}
+
+// Create enrolls a student under the caller's own anchor: actor and anchor
+// name the same party, so this is Create's pre-migration behavior exactly.
+func (s *Service) Create(ctx context.Context, sc authctx.Scope, req CreateRequest) (*Row, error) {
+	return s.create(ctx, sc, sc.Self(), req)
+}
+
+// CreateAnchored enrolls a student on a proven anchor that may differ from
+// the caller: the roster import writes each enrollment onto its class's own
+// teacher (a) while the importing member or owner (actor) is who the audit
+// event attributes the action to. a carries no owner authority of its own —
+// the caller resolved it from the class row itself, not from an OwnerAnchor.
+func (s *Service) CreateAnchored(ctx context.Context, actor authctx.Scope, a authctx.Anchor, req CreateRequest) (*Row, error) {
+	return s.create(ctx, actor, a, req)
 }
 
 // pickerLimit caps the enrollable-student picker: it is an autocomplete for
@@ -218,6 +238,14 @@ func (s *Service) ActiveOn(ctx context.Context, sc authctx.Scope, classID uuid.U
 	return s.repo.ActiveOn(ctx, sc, classID, on)
 }
 
+// ActiveOnClass is ActiveOn's center-scoped sibling: billing.EnrollmentSource
+// calls it from post-close reconciliation so a confirming caller with no
+// stint or ownership on the session's class (a teaching assistant, most
+// commonly) still resolves that class's real roster instead of an empty one.
+func (s *Service) ActiveOnClass(ctx context.Context, sc authctx.Scope, classID uuid.UUID, on time.Time) ([]Enrollment, error) {
+	return s.repo.ActiveOnClass(ctx, sc, classID, on)
+}
+
 // EndOpenEnrollments satisfies students.EnrollmentEnder: the students feature
 // calls it inside the delete transaction while anonymising a student.
 func (s *Service) EndOpenEnrollments(ctx context.Context, sc authctx.Scope, studentID uuid.UUID, on time.Time) error {
@@ -260,13 +288,9 @@ func translate(err error) error {
 	}
 }
 
-// FindByStudentAndClass returns this student's enrollment in this class, open
-// or already ended, so a bulk caller can tell "never enrolled" from "left".
-// uq_enrollments_active only covers open rows, so an ended enrollment is
-// invisible to the database constraint and re-creating one would backdate a
-// departed student onto every session since the class began.
-func (s *Service) FindByStudentAndClass(ctx context.Context, sc authctx.Scope, studentID, classID uuid.UUID) (*Enrollment, bool, error) {
-	e, err := s.repo.FindByStudentAndClass(ctx, sc, studentID, classID)
+// foundOrNot is the shared tail behind FindByStudentAndClass and its anchored
+// sibling: ErrNotFound becomes found=false, any other error propagates.
+func foundOrNot(e *Enrollment, err error) (*Enrollment, bool, error) {
 	if errors.Is(err, ErrNotFound) {
 		return nil, false, nil
 	}
@@ -274,4 +298,21 @@ func (s *Service) FindByStudentAndClass(ctx context.Context, sc authctx.Scope, s
 		return nil, false, err
 	}
 	return e, true, nil
+}
+
+// FindByStudentAndClass returns this student's enrollment in this class, open
+// or already ended, so a bulk caller can tell "never enrolled" from "left".
+// uq_enrollments_active only covers open rows, so an ended enrollment is
+// invisible to the database constraint and re-creating one would backdate a
+// departed student onto every session since the class began. Scoped to the
+// caller's own rows (WriteWide-aware) — the direct-write path's own gate.
+func (s *Service) FindByStudentAndClass(ctx context.Context, sc authctx.Scope, studentID, classID uuid.UUID) (*Enrollment, bool, error) {
+	return foundOrNot(s.repo.FindByStudentAndClass(ctx, sc, studentID, classID))
+}
+
+// FindByStudentAndClassAnchored is FindByStudentAndClass's unconditional
+// sibling for the roster import: a is the class's own teacher anchor, already
+// resolved by the caller, not the importing caller's own rows.
+func (s *Service) FindByStudentAndClassAnchored(ctx context.Context, a authctx.Anchor, studentID, classID uuid.UUID) (*Enrollment, bool, error) {
+	return foundOrNot(s.repo.FindByStudentAndClassAnchored(ctx, a, studentID, classID))
 }

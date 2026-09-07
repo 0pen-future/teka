@@ -60,11 +60,12 @@ type RunItem struct {
 // RunStore is the slice of Repository a run needs to record progress. Tests
 // supply a fake; *gormRepository satisfies it. Every method is the strict,
 // never-owner-bypassed run-occupancy write: a background run only ever
-// touches the rows of the teacher whose Zalo session it is sending through.
+// touches the rows of the teacher whose Zalo session it is sending through —
+// an Anchor, since the run manager has no caller scope of its own to widen.
 type RunStore interface {
-	MarkOutcome(ctx context.Context, sc authctx.Scope, id uuid.UUID, status string, providerMsgID, errorMessage *string) error
-	FailQueuedInRun(ctx context.Context, sc authctx.Scope, runID uuid.UUID, reason string) error
-	UpdateRunStatus(ctx context.Context, sc authctx.Scope, runID uuid.UUID, status string) error
+	MarkOutcome(ctx context.Context, a authctx.Anchor, id uuid.UUID, status string, providerMsgID, errorMessage *string) error
+	FailQueuedInRun(ctx context.Context, a authctx.Anchor, runID uuid.UUID, reason string) error
+	UpdateRunStatus(ctx context.Context, a authctx.Anchor, runID uuid.UUID, status string) error
 	// CanSendReports is the delegated run's per-item permission probe:
 	// revoking the reports.send permission cannot reach into a goroutine
 	// holding its items in memory, so the loop asks before every send instead.
@@ -112,10 +113,10 @@ type runJob struct {
 	done   chan struct{}
 }
 
-// scope is job's owning teacher/center, the strict (never owner-bypassed)
-// scope every RunStore write is made under.
-func (j *runJob) scope() authctx.Scope {
-	return authctx.Scope{TeacherID: j.teacherID, CenterID: j.centerID}
+// anchor is job's owning teacher/center — the run manager has no caller
+// scope in hand, only the row identity every RunStore write must land on.
+func (j *runJob) anchor() authctx.Anchor {
+	return authctx.Anchor{TeacherID: j.teacherID, CenterID: j.centerID}
 }
 
 // RunManager drives paced background sending passes. One run per teacher is
@@ -353,7 +354,7 @@ func (m *RunManager) gap() time.Duration {
 func (m *RunManager) markOutcome(ctx context.Context, job *runJob, id uuid.UUID, status string, providerMsgID, errorMessage *string) {
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runWriteTimeout)
 	defer cancel()
-	if err := m.store.MarkOutcome(writeCtx, job.scope(), id, status, providerMsgID, errorMessage); err != nil {
+	if err := m.store.MarkOutcome(writeCtx, job.anchor(), id, status, providerMsgID, errorMessage); err != nil {
 		m.log.Error("notification run: recording outcome failed",
 			"teacher_id", job.teacherID, "notification_id", id, "error", err)
 	}
@@ -394,11 +395,11 @@ func (m *RunManager) revokeRun(ctx context.Context, job *runJob) {
 	defer cancel()
 	m.log.Warn("notification run: stopping, send-reports permission revoked",
 		"teacher_id", job.teacherID, "run_id", job.runID)
-	if err := m.store.FailQueuedInRun(writeCtx, job.scope(), job.runID, runRevokedFailureMessage); err != nil {
+	if err := m.store.FailQueuedInRun(writeCtx, job.anchor(), job.runID, runRevokedFailureMessage); err != nil {
 		m.log.Error("notification run: sweeping rows after permission revocation failed",
 			"teacher_id", job.teacherID, "run_id", job.runID, "error", err)
 	}
-	if err := m.store.UpdateRunStatus(writeCtx, job.scope(), job.runID, RunStatusInterrupted); err != nil {
+	if err := m.store.UpdateRunStatus(writeCtx, job.anchor(), job.runID, RunStatusInterrupted); err != nil {
 		m.log.Error("notification run: marking revoked run interrupted failed",
 			"teacher_id", job.teacherID, "run_id", job.runID, "error", err)
 	}
@@ -410,11 +411,11 @@ func (m *RunManager) revokeRun(ctx context.Context, job *runJob) {
 func (m *RunManager) expireRun(ctx context.Context, job *runJob) {
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runWriteTimeout)
 	defer cancel()
-	if err := m.store.FailQueuedInRun(writeCtx, job.scope(), job.runID, runExpiredFailureMessage); err != nil {
+	if err := m.store.FailQueuedInRun(writeCtx, job.anchor(), job.runID, runExpiredFailureMessage); err != nil {
 		m.log.Error("notification run: sweeping rows after session expiry failed",
 			"teacher_id", job.teacherID, "run_id", job.runID, "error", err)
 	}
-	if err := m.store.UpdateRunStatus(writeCtx, job.scope(), job.runID, RunStatusExpired); err != nil {
+	if err := m.store.UpdateRunStatus(writeCtx, job.anchor(), job.runID, RunStatusExpired); err != nil {
 		m.log.Error("notification run: marking run expired failed",
 			"teacher_id", job.teacherID, "run_id", job.runID, "error", err)
 	}
@@ -423,7 +424,7 @@ func (m *RunManager) expireRun(ctx context.Context, job *runJob) {
 func (m *RunManager) finishRun(ctx context.Context, job *runJob, status string) {
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runWriteTimeout)
 	defer cancel()
-	if err := m.store.UpdateRunStatus(writeCtx, job.scope(), job.runID, status); err != nil {
+	if err := m.store.UpdateRunStatus(writeCtx, job.anchor(), job.runID, status); err != nil {
 		m.log.Error("notification run: marking run finished failed",
 			"teacher_id", job.teacherID, "run_id", job.runID, "error", err)
 	}

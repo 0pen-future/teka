@@ -38,11 +38,20 @@ func newPreviewFakeRepository() *previewFakeRepository {
 	}
 }
 
-func (f *previewFakeRepository) TallyAttendance(_ context.Context, _ authctx.Scope, periodID uuid.UUID) ([]AttendanceTally, error) {
-	return f.tallies[periodID], nil
+// TallyAttendance is keyed by period id in this fake's fixtures, but the
+// real Repository takes the period's own start/end directly (no periodID) —
+// tests always seed exactly one period per start/end pair, so resolving the
+// id from f.periods first reproduces the same lookup.
+func (f *previewFakeRepository) TallyAttendance(_ context.Context, _ authctx.Anchor, periodStart, periodEnd time.Time) ([]AttendanceTally, error) {
+	for _, p := range f.periods {
+		if p.PeriodStart.Equal(periodStart) && p.PeriodEnd.Equal(periodEnd) {
+			return f.tallies[p.ID], nil
+		}
+	}
+	return nil, nil
 }
 
-func (f *previewFakeRepository) OpeningBalances(_ context.Context, _ authctx.Scope, _ uuid.UUID, studentIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
+func (f *previewFakeRepository) OpeningBalances(_ context.Context, _ authctx.Anchor, _ uuid.UUID, studentIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
 	out := map[uuid.UUID]int64{}
 	for _, sid := range studentIDs {
 		if v, ok := f.openingBalances[sid]; ok {
@@ -52,7 +61,7 @@ func (f *previewFakeRepository) OpeningBalances(_ context.Context, _ authctx.Sco
 	return out, nil
 }
 
-func (f *previewFakeRepository) AdjustmentTotals(_ context.Context, _ authctx.Scope, periodID uuid.UUID) (map[uuid.UUID]int64, error) {
+func (f *previewFakeRepository) AdjustmentTotals(_ context.Context, _ authctx.Anchor, periodID uuid.UUID) (map[uuid.UUID]int64, error) {
 	out := map[uuid.UUID]int64{}
 	for _, inv := range f.invoices {
 		if inv.PeriodID != periodID {
@@ -65,7 +74,7 @@ func (f *previewFakeRepository) AdjustmentTotals(_ context.Context, _ authctx.Sc
 	return out, nil
 }
 
-func (f *previewFakeRepository) CarriedDebtStudents(_ context.Context, _ authctx.Scope, prevPeriodID uuid.UUID) ([]CarriedDebtStudent, error) {
+func (f *previewFakeRepository) CarriedDebtStudents(_ context.Context, _ authctx.Anchor, prevPeriodID uuid.UUID) ([]CarriedDebtStudent, error) {
 	return f.carriedDebt[prevPeriodID], nil
 }
 
@@ -104,7 +113,7 @@ func (f *previewFakeRepository) UpsertInvoiceLine(_ context.Context, line *Invoi
 	return nil
 }
 
-func (f *previewFakeRepository) ZeroUnmatchedLines(_ context.Context, _ authctx.Scope, invoiceID uuid.UUID, keepEnrollmentIDs []uuid.UUID) error {
+func (f *previewFakeRepository) ZeroUnmatchedLines(_ context.Context, _ authctx.Anchor, invoiceID uuid.UUID, keepEnrollmentIDs []uuid.UUID) error {
 	keep := make(map[uuid.UUID]bool, len(keepEnrollmentIDs))
 	for _, eid := range keepEnrollmentIDs {
 		keep[eid] = true
@@ -118,7 +127,7 @@ func (f *previewFakeRepository) ZeroUnmatchedLines(_ context.Context, _ authctx.
 	return nil
 }
 
-func (f *previewFakeRepository) ListInvoices(_ context.Context, _ authctx.Scope, periodID uuid.UUID) ([]Invoice, error) {
+func (f *previewFakeRepository) ListInvoices(_ context.Context, _ authctx.Anchor, periodID uuid.UUID) ([]Invoice, error) {
 	var out []Invoice
 	for _, inv := range f.invoices {
 		if inv.PeriodID == periodID {
@@ -128,7 +137,7 @@ func (f *previewFakeRepository) ListInvoices(_ context.Context, _ authctx.Scope,
 	return out, nil
 }
 
-func (f *previewFakeRepository) GetInvoiceWithLines(_ context.Context, _ authctx.Scope, invoiceID uuid.UUID) (*Invoice, []InvoiceLine, error) {
+func (f *previewFakeRepository) GetInvoiceWithLines(_ context.Context, _ authctx.Anchor, invoiceID uuid.UUID) (*Invoice, []InvoiceLine, error) {
 	inv, ok := f.invoices[invoiceID]
 	if !ok {
 		return nil, nil, ErrInvoiceNotFound

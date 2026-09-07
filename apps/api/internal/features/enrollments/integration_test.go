@@ -556,3 +556,59 @@ func TestEnrollableStudentPicker(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rows, 20)
 }
+
+// A member holding enrollments.view_all reads any enrollment in the center but
+// cannot end, delete, or add one on a class they hold no stint on: the
+// visibility key never widens the write port. Their own rows stay writable.
+func TestViewAllWidensEnrollmentReadsNotWrites(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+
+	owner, _ := testutil.Teacher(t, db)
+	scOwner := testutil.ScopeFor(t, db, owner.ID)
+	member, _ := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, member.ID, scOwner.CenterID)
+
+	contact := testutil.Contact(t, db, owner.ID)
+	ownerClass := testutil.Class(t, db, owner.ID, testutil.WithClassStartDate(date("2026-01-01")))
+	student := testutil.Student(t, db, owner.ID, contact.ID)
+	ownerEnrollment := testutil.Enrollment(t, db, owner.ID, student.ID, ownerClass.ID, date("2026-01-05"))
+	secondStudent := testutil.Student(t, db, owner.ID, contact.ID)
+
+	scMember := testutil.ScopeFor(t, db, member.ID)
+	scMember.Perms = authctx.BuildPermSet(nil, []string{authctx.PermEnrollmentsViewAll, authctx.PermStudentsViewAll}, nil)
+	require.True(t, scMember.CenterWideFor(authctx.PermEnrollmentsViewAll))
+
+	got, err := svc.Get(ctx, scMember, ownerEnrollment.ID)
+	require.NoError(t, err)
+	require.Equal(t, ownerEnrollment.ID, got.ID)
+
+	// The class is readable through the key but carries no write role, so the
+	// class write gate answers Forbidden rather than hiding the class.
+	_, err = svc.End(ctx, scMember, ownerEnrollment.ID, enrollments.EndRequest{EndedOn: "2026-02-01"})
+	require.Equal(t, 403, apperror.From(err).Status, "a visibility key must not widen ending an enrollment")
+	require.Equal(t, 403, apperror.From(svc.Delete(ctx, scMember, ownerEnrollment.ID)).Status,
+		"a visibility key must not widen deletion")
+	_, err = svc.Create(ctx, scMember, enrollments.CreateRequest{
+		StudentID: secondStudent.ID, ClassID: ownerClass.ID, StartedOn: "2026-01-05",
+	})
+	// Enrolling validates class_id against the caller's own classes and
+	// reports a reference error, the same answer a plain member gets.
+	require.Equal(t, 422, apperror.From(err).Status, "a visibility key must not widen roster additions")
+
+	stillOpen, err := svc.Get(ctx, scOwner, ownerEnrollment.ID)
+	require.NoError(t, err)
+	require.Nil(t, stillOpen.EndedOn, "the owner's enrollment must be untouched")
+
+	ownContact := testutil.Contact(t, db, member.ID)
+	ownClass := testutil.Class(t, db, member.ID, testutil.WithClassStartDate(date("2026-01-01")))
+	ownStudent := testutil.Student(t, db, member.ID, ownContact.ID)
+	own, err := svc.Create(ctx, scMember, enrollments.CreateRequest{
+		StudentID: ownStudent.ID, ClassID: ownClass.ID, StartedOn: "2026-01-05",
+	})
+	require.NoError(t, err)
+	ended, err := svc.End(ctx, scMember, own.ID, enrollments.EndRequest{EndedOn: "2026-02-01"})
+	require.NoError(t, err)
+	require.NotNil(t, ended.EndedOn)
+}

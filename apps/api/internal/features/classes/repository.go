@@ -55,13 +55,17 @@ type Repository interface {
 	// NULL effective_to as open-ended. This is the contract session
 	// generation (plan 03) consumes.
 	ListEffectiveSchedules(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]Schedule, error)
-	// FindActiveByName resolves a live, active class by its exact name within
-	// the scope. Bulk flows need it to decide create-or-reuse; there is no
-	// unique index on classes.name, so this is a lookup, not a constraint.
-	FindActiveByName(ctx context.Context, sc authctx.Scope, name string) (*Class, error)
+	// FindActiveByName resolves a live, active class by its exact name under
+	// one anchor. Import-only: the roster import already resolved which
+	// teacher a class row belongs to (the workbook names it directly), so
+	// this takes an Anchor rather than a Scope — there is no caller-scoped
+	// route handler for it to serve. There is no unique index on
+	// classes.name, so this is a lookup, not a constraint.
+	FindActiveByName(ctx context.Context, a authctx.Anchor, name string) (*Class, error)
 	// ScheduleExists reports whether the class already carries this exact
-	// weekly slot, including its effective_from.
-	ScheduleExists(ctx context.Context, sc authctx.Scope, classID uuid.UUID, weekday int16, startTime TimeOfDay, effectiveFrom time.Time) (bool, error)
+	// weekly slot, including its effective_from. Import-only, like
+	// FindActiveByName — see its doc comment.
+	ScheduleExists(ctx context.Context, a authctx.Anchor, classID uuid.UUID, weekday int16, startTime TimeOfDay, effectiveFrom time.Time) (bool, error)
 	// ReassignTeacher moves the class and every one of its schedule rows to
 	// newTeacherID within the scope, on the context's transaction. Both tables
 	// are owned by classes, so the class-handoff feature moves them only
@@ -78,16 +82,28 @@ func NewRepository(db *gorm.DB) Repository {
 	return &gormRepository{db: db}
 }
 
-// scoped returns a classes query bound to one center. An owner sees every
-// class in their center; a member sees only the rows they created themselves.
-// Composite FKs stop cross-center writes; only this filter stops cross-tenant
-// reads.
+// scoped returns the own-rows classes query bound to one center: the owner
+// reaches every class in their center, a member only the rows anchored to
+// them. It doubles as the settings write gate (Update, Archive, SoftDelete,
+// ReassignTeacher) and as the own-rows lookup other features pass an anchor
+// scope to, so a visibility key never widens it — readScoped is the port that
+// widens. Composite FKs stop cross-center writes; only this filter stops
+// cross-tenant reads.
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("classes.center_id = ?", sc.CenterID)
-	if !sc.CenterWideFor(authctx.PermClassesViewAll) {
+	if !sc.WriteWide() {
 		q = q.Where("classes.teacher_id = ?", sc.TeacherID)
 	}
 	return q
+}
+
+// anchored is the unconditional two-column filter behind FindActiveByName and
+// ScheduleExists: the roster import already resolved which teacher a class
+// row belongs to, so no WriteWide branch applies — unlike scoped, an Anchor
+// carries no owner bypass to check.
+func (r *gormRepository) anchored(ctx context.Context, a authctx.Anchor) *gorm.DB {
+	return database.FromContext(ctx, r.db).
+		Where("classes.center_id = ? AND classes.teacher_id = ?", a.CenterID, a.TeacherID)
 }
 
 // readScoped is the stint read filter: a member sees exactly the classes they
@@ -98,7 +114,9 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 // holder left the center — so the pointer can never reach a row the stint
 // filter misses. That is also why ReadExists deliberately ignores ended_at:
 // filtering to ACTIVE would strand departed-and-returned teachers off their
-// own classes. Write paths must keep using scoped.
+// own classes. classes.view_all widens this port and only this port: write
+// paths resolve through scoped or writeScoped, which a visibility key never
+// widens.
 func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("classes.center_id = ?", sc.CenterID)
 	if !sc.CenterWideFor(authctx.PermClassesViewAll) {
@@ -112,23 +130,47 @@ func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm
 // through an ACTIVE class_staff stint whose role is in roles — REPLACING the
 // creator (teacher_id) filter, not OR-ing it, so a teacher whose stint ended
 // (handoff) loses writes even on rows still anchored to them. roles comes from
-// the service's capability-map lookup; this method only binds it.
+// the service's capability-map lookup; this method only binds it. Only the
+// owner bypasses the stint filter (WriteWide): classes.view_all is a
+// visibility key and must never reach a write.
 func (r *gormRepository) writeScoped(ctx context.Context, sc authctx.Scope, roles []string) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("classes.center_id = ?", sc.CenterID)
-	if !sc.CenterWideFor(authctx.PermClassesViewAll) {
+	if !sc.WriteWide() {
 		frag, _ := classscope.WriteExists("classes.id")
 		q = q.Where(frag, sc.TeacherID, sc.CenterID, roles)
 	}
 	return q
 }
 
-// scopedSchedules is scoped's counterpart for the class_schedules table.
-func (r *gormRepository) scopedSchedules(ctx context.Context, sc authctx.Scope) *gorm.DB {
+// readScopedSchedules is the READ port for the class_schedules table: own
+// rows, plus every row in the center under classes.view_all. Session
+// generation consumes it, so a viewer allowed to materialise a class's
+// sessions sees the same timetable the class's teacher does.
+func (r *gormRepository) readScopedSchedules(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("class_schedules.center_id = ?", sc.CenterID)
 	if !sc.CenterWideFor(authctx.PermClassesViewAll) {
 		q = q.Where("class_schedules.teacher_id = ?", sc.TeacherID)
 	}
 	return q
+}
+
+// writeScopedSchedules is scoped's counterpart for the class_schedules table:
+// the owner reaches every row, a member only the rows anchored to them. A
+// visibility key never widens it.
+func (r *gormRepository) writeScopedSchedules(ctx context.Context, sc authctx.Scope) *gorm.DB {
+	q := database.FromContext(ctx, r.db).Where("class_schedules.center_id = ?", sc.CenterID)
+	if !sc.WriteWide() {
+		q = q.Where("class_schedules.teacher_id = ?", sc.TeacherID)
+	}
+	return q
+}
+
+// anchoredSchedules is anchored's class_schedules counterpart, behind
+// ScheduleExists: the unconditional two-column filter for the roster import,
+// which already resolved the class's own teacher.
+func (r *gormRepository) anchoredSchedules(ctx context.Context, a authctx.Anchor) *gorm.DB {
+	return database.FromContext(ctx, r.db).
+		Where("class_schedules.center_id = ? AND class_schedules.teacher_id = ?", a.CenterID, a.TeacherID)
 }
 
 // preloadSchedules orders schedule rows deterministically for display.
@@ -267,7 +309,7 @@ func (r *gormRepository) AddSchedule(ctx context.Context, s *Schedule) error {
 
 func (r *gormRepository) GetSchedule(ctx context.Context, sc authctx.Scope, classID, scheduleID uuid.UUID) (*Schedule, error) {
 	var s Schedule
-	err := r.scopedSchedules(ctx, sc).
+	err := r.writeScopedSchedules(ctx, sc).
 		Take(&s, "class_schedules.id = ? AND class_schedules.class_id = ?", scheduleID, classID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrScheduleNotFound
@@ -283,7 +325,7 @@ func (r *gormRepository) UpdateSchedule(ctx context.Context, s *Schedule) error 
 }
 
 func (r *gormRepository) SoftDeleteSchedule(ctx context.Context, sc authctx.Scope, classID, scheduleID uuid.UUID) error {
-	res := r.scopedSchedules(ctx, sc).
+	res := r.writeScopedSchedules(ctx, sc).
 		Where("class_schedules.id = ? AND class_schedules.class_id = ?", scheduleID, classID).
 		Delete(&Schedule{})
 	if res.Error != nil {
@@ -297,7 +339,7 @@ func (r *gormRepository) SoftDeleteSchedule(ctx context.Context, sc authctx.Scop
 
 func (r *gormRepository) ListEffectiveSchedules(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]Schedule, error) {
 	var rows []Schedule
-	err := r.scopedSchedules(ctx, sc).
+	err := r.readScopedSchedules(ctx, sc).
 		Where("class_schedules.class_id = ?", classID).
 		Where("class_schedules.effective_from <= ? AND (class_schedules.effective_to IS NULL OR class_schedules.effective_to >= ?)", to, from).
 		Order("effective_from, weekday, start_time").
@@ -305,13 +347,13 @@ func (r *gormRepository) ListEffectiveSchedules(ctx context.Context, sc authctx.
 	return rows, err
 }
 
-// FindActiveByName resolves a class by exact name inside the scope. status is
+// FindActiveByName resolves a class by exact name under one anchor. status is
 // part of the match: an archived class still has deleted_at IS NULL, so a
 // name-only lookup would hand a bulk importer a class the teacher closed last
 // term and quietly enrol this year's students into it.
-func (r *gormRepository) FindActiveByName(ctx context.Context, sc authctx.Scope, name string) (*Class, error) {
+func (r *gormRepository) FindActiveByName(ctx context.Context, a authctx.Anchor, name string) (*Class, error) {
 	var class Class
-	err := r.scoped(ctx, sc).
+	err := r.anchored(ctx, a).
 		Where("classes.name = ? AND classes.status = ?", name, StatusActive).
 		Take(&class).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -340,7 +382,7 @@ func (r *gormRepository) ReassignTeacher(ctx context.Context, sc authctx.Scope, 
 	if res.RowsAffected == 0 {
 		return ErrNotFound
 	}
-	return r.scopedSchedules(ctx, sc).
+	return r.writeScopedSchedules(ctx, sc).
 		Model(&Schedule{}).
 		Where("class_schedules.class_id = ?", classID).
 		Update("teacher_id", newTeacherID).Error
@@ -349,9 +391,9 @@ func (r *gormRepository) ReassignTeacher(ctx context.Context, sc authctx.Scope, 
 // ScheduleExists reports whether an identical live slot is already on the
 // class. effective_from is part of the identity because the same weekday and
 // time can legitimately recur after a timetable change closes the old row.
-func (r *gormRepository) ScheduleExists(ctx context.Context, sc authctx.Scope, classID uuid.UUID, weekday int16, startTime TimeOfDay, effectiveFrom time.Time) (bool, error) {
+func (r *gormRepository) ScheduleExists(ctx context.Context, a authctx.Anchor, classID uuid.UUID, weekday int16, startTime TimeOfDay, effectiveFrom time.Time) (bool, error) {
 	var count int64
-	err := r.scopedSchedules(ctx, sc).Model(&Schedule{}).
+	err := r.anchoredSchedules(ctx, a).Model(&Schedule{}).
 		Where("class_schedules.class_id = ? AND class_schedules.weekday = ?", classID, weekday).
 		Where("class_schedules.start_time = ? AND class_schedules.effective_from = ?", startTime, effectiveFrom).
 		Count(&count).Error

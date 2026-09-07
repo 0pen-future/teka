@@ -24,6 +24,7 @@ import (
 	"teka/apps/api/internal/features/students"
 	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/shared/authctx"
+	"teka/apps/api/internal/shared/events"
 	"teka/apps/api/internal/testutil"
 )
 
@@ -44,6 +45,10 @@ type roster struct {
 	otherCenter authctx.Scope
 	classesSvc  *classes.Service
 	centersSvc  *centers.Service
+	// enrolled captures every StudentEnrolled event published during the
+	// test, delivered synchronously so a test can assert on it right after
+	// the Import call returns.
+	enrolled *[]enrollments.StudentEnrolled
 }
 
 func newRoster(t *testing.T) roster {
@@ -51,10 +56,18 @@ func newRoster(t *testing.T) roster {
 	db := testutil.StartPostgres(t)
 	txMgr := database.NewTxManager(db)
 
+	bus := events.NewSync()
+	enrolled := &[]enrollments.StudentEnrolled{}
+	bus.Subscribe("test", 0, func(_ context.Context, e events.Event) {
+		if se, ok := e.(enrollments.StudentEnrolled); ok {
+			*enrolled = append(*enrolled, se)
+		}
+	})
+
 	centersSvc := centers.NewService(centers.NewRepository(db), txMgr, nil)
 	classesSvc := classes.NewService(classes.NewRepository(db), txMgr, classstaff.NewRepository(db))
 	contactsSvc := contacts.NewService(contacts.NewRepository(db))
-	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db), nil)
+	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db), bus)
 	studentsSvc := students.NewService(students.NewRepository(db), enrollmentsSvc, txMgr)
 
 	_, ownerTeacher := testutil.Teacher(t, db)
@@ -78,6 +91,7 @@ func newRoster(t *testing.T) roster {
 		otherCenter: testutil.ScopeFor(t, db, stranger.ID),
 		classesSvc:  classesSvc,
 		centersSvc:  centersSvc,
+		enrolled:    enrolled,
 	}
 }
 
@@ -342,9 +356,11 @@ func TestClassWithNoTeacherIsAnchoredOnTheOwner(t *testing.T) {
 // TestGrantedMemberImportAnchorsEverythingOnTheOwner runs the import as a
 // member holding the imports.run grant: the run succeeds, yet every contact
 // and student row still anchors on the center OWNER — the anchor comes from
-// ownership resolution, never from the caller. A member without the grant is
-// refused outright, and an owner re-import of the same file finds everything
-// already in place.
+// ownership resolution, never from the caller. Classes and enrollments stay
+// anchored on their own workbook teacher regardless of who runs the import,
+// and the StudentEnrolled audit event still credits the importing member, not
+// the owner. A member without the grant is refused outright, and an owner
+// re-import of the same file finds everything already in place.
 func TestGrantedMemberImportAnchorsEverythingOnTheOwner(t *testing.T) {
 	t.Parallel()
 	r := newRoster(t)
@@ -377,6 +393,40 @@ func TestGrantedMemberImportAnchorsEverythingOnTheOwner(t *testing.T) {
 		r.owner.CenterID, r.owner.CenterID).Scan(&anchors).Error)
 	require.Len(t, anchors, 1, "one anchor for every contact and student row")
 	require.Equal(t, r.owner.TeacherID, anchors[0].TeacherID)
+
+	// Classes stay anchored on their own workbook teacher — nam ran the
+	// import, but Toán 9A is nam's class and Văn 8 is lan's.
+	var classAnchors []struct {
+		Name      string
+		TeacherID uuid.UUID
+	}
+	require.NoError(t, r.db.Raw(
+		"SELECT name, teacher_id FROM classes WHERE center_id = ? ORDER BY name", r.owner.CenterID,
+	).Scan(&classAnchors).Error)
+	require.Len(t, classAnchors, 2)
+	require.Equal(t, "Toán 9A", classAnchors[0].Name)
+	require.Equal(t, r.nam, classAnchors[0].TeacherID)
+	require.Equal(t, "Văn 8", classAnchors[1].Name)
+	require.Equal(t, r.lan, classAnchors[1].TeacherID)
+
+	// Enrollments follow the class, not the importing member: every row
+	// carries its own class's teacher.
+	var enrollAnchors []struct{ TeacherID uuid.UUID }
+	require.NoError(t, r.db.Raw(
+		"SELECT teacher_id FROM enrollments WHERE center_id = ? ORDER BY teacher_id", r.owner.CenterID,
+	).Scan(&enrollAnchors).Error)
+	require.Len(t, enrollAnchors, 3)
+	for _, e := range enrollAnchors {
+		require.Contains(t, []uuid.UUID{r.nam, r.lan}, e.TeacherID, "each row stays with its own class's teacher")
+	}
+
+	// The audit trail still credits nam, the importing member, as the actor —
+	// including for the enrollment under lan's own class, which nam never
+	// teaches.
+	require.Len(t, *r.enrolled, 3)
+	for _, e := range *r.enrolled {
+		require.Equal(t, r.nam, e.ActorID, "the importing member is the acting party, not the row's anchor")
+	}
 
 	// The owner re-importing the member's file must reuse, not duplicate —
 	// both runs resolve the same owner anchor.

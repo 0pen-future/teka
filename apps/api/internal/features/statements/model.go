@@ -21,10 +21,10 @@ type Statement struct {
 	ID        uuid.UUID `gorm:"primaryKey"`
 	TeacherID uuid.UUID
 	// CenterID is inherited from the statement's billing period at creation
-	// (see Service.Generate's periodScope anchor), never the acting caller's
-	// — the public, unauthenticated view derives its own read scope straight
-	// from this row's TeacherID/CenterID, so a forged or guessed token can
-	// never reach past its own family's own tenancy.
+	// (see Service.generate's periodAnchor), never the acting caller's — the
+	// public, unauthenticated view derives its own read anchor straight from
+	// this row's TeacherID/CenterID, so a forged or guessed token can never
+	// reach past its own family's own tenancy.
 	CenterID  uuid.UUID
 	ContactID uuid.UUID
 	PeriodID  uuid.UUID

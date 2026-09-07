@@ -58,9 +58,15 @@ func (f *fakeRepository) GetPeriod(_ context.Context, sc authctx.Scope, periodID
 	return &cp, nil
 }
 
-func (f *fakeRepository) GetPeriodByYearMonth(_ context.Context, sc authctx.Scope, year, month int16) (*Period, error) {
+// GetPeriodForWrite mirrors GetPeriod: the fakes model a single teacher's
+// own rows, where read and write scope coincide.
+func (f *fakeRepository) GetPeriodForWrite(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*Period, error) {
+	return f.GetPeriod(ctx, sc, periodID)
+}
+
+func (f *fakeRepository) GetPeriodByYearMonth(_ context.Context, a authctx.Anchor, year, month int16) (*Period, error) {
 	for _, p := range f.periods {
-		if p.TeacherID == sc.TeacherID && p.Year == year && p.Month == month {
+		if p.TeacherID == a.TeacherID && p.Year == year && p.Month == month {
 			cp := p
 			return &cp, nil
 		}
@@ -95,11 +101,11 @@ func (f *fakeRepository) ListPeriodsClassRead(_ context.Context, _ authctx.Scope
 	return nil, 0, nil
 }
 
-func (f *fakeRepository) PreviousClosedPeriod(_ context.Context, sc authctx.Scope, before time.Time) (*Period, error) {
+func (f *fakeRepository) PreviousClosedPeriod(_ context.Context, a authctx.Anchor, before time.Time) (*Period, error) {
 	var best *Period
 	for _, p := range f.periods {
 		row := p
-		if row.TeacherID != sc.TeacherID || row.Status != PeriodClosed || !row.PeriodEnd.Before(before) {
+		if row.TeacherID != a.TeacherID || row.Status != PeriodClosed || !row.PeriodEnd.Before(before) {
 			continue
 		}
 		if best == nil || row.PeriodEnd.After(best.PeriodEnd) {
@@ -109,11 +115,11 @@ func (f *fakeRepository) PreviousClosedPeriod(_ context.Context, sc authctx.Scop
 	return best, nil
 }
 
-func (f *fakeRepository) TallyAttendance(_ context.Context, _ authctx.Scope, _ uuid.UUID) ([]AttendanceTally, error) {
+func (f *fakeRepository) TallyAttendance(_ context.Context, _ authctx.Anchor, _, _ time.Time) ([]AttendanceTally, error) {
 	return nil, nil
 }
 
-func (f *fakeRepository) OpeningBalances(_ context.Context, _ authctx.Scope, _ uuid.UUID, _ []uuid.UUID) (map[uuid.UUID]int64, error) {
+func (f *fakeRepository) OpeningBalances(_ context.Context, _ authctx.Anchor, _ uuid.UUID, _ []uuid.UUID) (map[uuid.UUID]int64, error) {
 	return map[uuid.UUID]int64{}, nil
 }
 
@@ -130,11 +136,11 @@ func (f *fakeRepository) TeacherTimezone(_ context.Context, teacherID uuid.UUID)
 // defines a richer fake (previewFakeRepository, embedding this one) for the
 // Preview/Draft behaviour these stubs deliberately do not model.
 
-func (f *fakeRepository) AdjustmentTotals(_ context.Context, _ authctx.Scope, _ uuid.UUID) (map[uuid.UUID]int64, error) {
+func (f *fakeRepository) AdjustmentTotals(_ context.Context, _ authctx.Anchor, _ uuid.UUID) (map[uuid.UUID]int64, error) {
 	return map[uuid.UUID]int64{}, nil
 }
 
-func (f *fakeRepository) CarriedDebtStudents(_ context.Context, _ authctx.Scope, _ uuid.UUID) ([]CarriedDebtStudent, error) {
+func (f *fakeRepository) CarriedDebtStudents(_ context.Context, _ authctx.Anchor, _ uuid.UUID) ([]CarriedDebtStudent, error) {
 	return nil, nil
 }
 
@@ -142,15 +148,15 @@ func (f *fakeRepository) UpsertInvoice(_ context.Context, _ *Invoice) error { re
 
 func (f *fakeRepository) UpsertInvoiceLine(_ context.Context, _ *InvoiceLine) error { return nil }
 
-func (f *fakeRepository) ZeroUnmatchedLines(_ context.Context, _ authctx.Scope, _ uuid.UUID, _ []uuid.UUID) error {
+func (f *fakeRepository) ZeroUnmatchedLines(_ context.Context, _ authctx.Anchor, _ uuid.UUID, _ []uuid.UUID) error {
 	return nil
 }
 
-func (f *fakeRepository) ListInvoices(_ context.Context, _ authctx.Scope, _ uuid.UUID) ([]Invoice, error) {
+func (f *fakeRepository) ListInvoices(_ context.Context, _ authctx.Anchor, _ uuid.UUID) ([]Invoice, error) {
 	return nil, nil
 }
 
-func (f *fakeRepository) GetInvoiceWithLines(_ context.Context, _ authctx.Scope, _ uuid.UUID) (*Invoice, []InvoiceLine, error) {
+func (f *fakeRepository) GetInvoiceWithLines(_ context.Context, _ authctx.Anchor, _ uuid.UUID) (*Invoice, []InvoiceLine, error) {
 	return nil, nil, ErrInvoiceNotFound
 }
 
@@ -163,17 +169,17 @@ func (f *fakeRepository) LockPeriod(ctx context.Context, sc authctx.Scope, perio
 	return f.GetPeriod(ctx, sc, periodID)
 }
 
-func (f *fakeRepository) IssueDraftInvoices(_ context.Context, _ authctx.Scope, _ uuid.UUID) (int64, error) {
+func (f *fakeRepository) IssueDraftInvoices(_ context.Context, _ authctx.Anchor, _ uuid.UUID) (int64, error) {
 	return 0, nil
 }
 
-func (f *fakeRepository) VoidInvoices(_ context.Context, _ authctx.Scope, _ uuid.UUID) (int64, error) {
+func (f *fakeRepository) VoidInvoices(_ context.Context, _ authctx.Anchor, _ uuid.UUID) (int64, error) {
 	return 0, nil
 }
 
-func (f *fakeRepository) ClosePeriod(_ context.Context, sc authctx.Scope, periodID uuid.UUID, closedAt time.Time) error {
+func (f *fakeRepository) ClosePeriod(_ context.Context, a authctx.Anchor, periodID uuid.UUID, closedAt time.Time) error {
 	p, ok := f.periods[periodID]
-	if !ok || p.TeacherID != sc.TeacherID || p.Status != PeriodOpen {
+	if !ok || p.TeacherID != a.TeacherID || p.Status != PeriodOpen {
 		return errPeriodStatusChanged
 	}
 	p.Status = PeriodClosed
@@ -186,7 +192,11 @@ func (f *fakeRepository) GetInvoice(_ context.Context, _ authctx.Scope, _ uuid.U
 	return nil, ErrInvoiceNotFound
 }
 
-func (f *fakeRepository) LockInvoice(_ context.Context, _ authctx.Scope, _ uuid.UUID) (*Invoice, error) {
+func (f *fakeRepository) GetInvoiceForWrite(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID) (*Invoice, error) {
+	return f.GetInvoice(ctx, sc, invoiceID)
+}
+
+func (f *fakeRepository) LockInvoice(_ context.Context, _ authctx.Anchor, _ uuid.UUID) (*Invoice, error) {
 	return nil, ErrInvoiceNotFound
 }
 
@@ -205,19 +215,19 @@ func (f *fakeRepository) ListAdjustments(_ context.Context, _ authctx.Scope, _ u
 	return nil, nil
 }
 
-func (f *fakeRepository) AdjustmentsBySourcePeriod(_ context.Context, _ authctx.Scope, _, _ uuid.UUID) (int64, error) {
+func (f *fakeRepository) AdjustmentsBySourcePeriod(_ context.Context, _ authctx.Anchor, _, _ uuid.UUID) (int64, error) {
 	return 0, nil
 }
 
-func (f *fakeRepository) RecalcInvoiceTotals(_ context.Context, _ authctx.Scope, _ uuid.UUID) error {
+func (f *fakeRepository) RecalcInvoiceTotals(_ context.Context, _ authctx.Anchor, _ uuid.UUID) error {
 	return ErrInvoiceNotFound
 }
 
-func (f *fakeRepository) PeriodContainingDate(_ context.Context, _ authctx.Scope, _ time.Time) (*Period, error) {
+func (f *fakeRepository) PeriodContainingDate(_ context.Context, _ authctx.Anchor, _ time.Time) (*Period, error) {
 	return nil, nil
 }
 
-func (f *fakeRepository) NextOpenPeriod(_ context.Context, _ authctx.Scope, _ time.Time) (*Period, error) {
+func (f *fakeRepository) NextOpenPeriod(_ context.Context, _ authctx.Anchor, _ time.Time) (*Period, error) {
 	return nil, nil
 }
 
@@ -225,11 +235,11 @@ func (f *fakeRepository) LiveBillableCounts(_ context.Context, _ []uuid.UUID, _ 
 	return map[uuid.UUID]int{}, nil
 }
 
-func (f *fakeRepository) SessionMeta(_ context.Context, _ authctx.Scope, _ uuid.UUID) (uuid.UUID, string, time.Time, authctx.Scope, error) {
-	return uuid.UUID{}, "", time.Time{}, authctx.Scope{}, ErrSessionNotFound
+func (f *fakeRepository) SessionMeta(_ context.Context, _ authctx.Scope, _ uuid.UUID) (uuid.UUID, string, time.Time, authctx.Anchor, error) {
+	return uuid.UUID{}, "", time.Time{}, authctx.Anchor{}, ErrSessionNotFound
 }
 
-func (f *fakeRepository) StudentSnapshot(_ context.Context, _ authctx.Scope, _ uuid.UUID) (uuid.UUID, string, string, error) {
+func (f *fakeRepository) StudentSnapshot(_ context.Context, _ authctx.Anchor, _ uuid.UUID) (uuid.UUID, string, string, error) {
 	return uuid.UUID{}, "", "", ErrStudentNotFound
 }
 
@@ -254,7 +264,7 @@ type fakePendingSource struct {
 	respond func(from, to *time.Time, before time.Time) (*sessions.PendingResponse, error)
 }
 
-func (f *fakePendingSource) ListUnconfirmedInWindow(_ context.Context, _ authctx.Scope, from, to *time.Time, before time.Time, _ int) (*sessions.PendingResponse, error) {
+func (f *fakePendingSource) ListUnconfirmedInWindowAnchored(_ context.Context, _ authctx.Anchor, from, to *time.Time, before time.Time, _ int) (*sessions.PendingResponse, error) {
 	if f.respond == nil {
 		return &sessions.PendingResponse{}, nil
 	}

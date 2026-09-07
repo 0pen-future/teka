@@ -115,9 +115,15 @@ not answer **which tenant or rows may they access?**
 For this example, `students.export` permits export,
 `students.view_all` may widen the read set, and repository `center_id`
 predicates always isolate tenants. Read expansion must use
-`Scope.CenterWideFor(<resource>.view_all)`; it must never widen writes.
-Never accept request `center_id` or `teacher_id` as authorization context.
-See [Tenancy](./api-guidelines.md#tenancy).
+`Scope.CenterWideFor(<resource>.view_all)`; it must never widen writes. A
+write reaches another teacher's rows only through `Scope.WriteWide()` (the
+owner alone), so a repository keeps a read port and a write port apart
+(`readScoped` / `writeScoped`, or a `readNarrow` helper for inline
+predicates). The guard tests in `apps/api/internal/features/scoping_guard_test.go`
+enforce this at compile-test time: `CenterWideFor` may appear only inside a
+read-named repository function. Never accept request `center_id` or
+`teacher_id` as authorization context. See
+[Tenancy](./api-guidelines.md#tenancy).
 
 ## 6. Gate the frontend when applicable
 

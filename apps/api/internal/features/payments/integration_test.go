@@ -22,6 +22,7 @@ import (
 	"teka/apps/api/internal/features/sessions"
 	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/pagination"
 	"teka/apps/api/internal/testutil"
 )
@@ -136,6 +137,54 @@ func TestRecordExactPaymentAcrossTwoChildrenBothPaid(t *testing.T) {
 	require.Equal(t, billing.InvoicePaid, reloadedA.Status)
 	require.EqualValues(t, reloadedB.TotalDue, reloadedB.PaidAmount)
 	require.Equal(t, billing.InvoicePaid, reloadedB.Status)
+}
+
+// TestRecordByMemberWithOnlyPaymentsCreateReturnsAllocationsAnchoredOnOwner
+// pins Record's contact-anchor read-back: a member holding only
+// payments.create (no payments.view_all) records a payment for a contact
+// owned by the center owner, and the response's allocation breakdown must
+// still come back populated from the owner's own rows — the read-back is
+// anchored on the contact's owning teacher, never narrowed to the recording
+// member's own (empty) visibility.
+func TestRecordByMemberWithOnlyPaymentsCreateReturnsAllocationsAnchoredOnOwner(t *testing.T) {
+	t.Parallel()
+	paymentsSvc, billingSvc, db := newIntegrationDeps(t)
+	ctx := context.Background()
+	_, owner := testutil.Teacher(t, db)
+	_, member := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, member.ID, owner.CenterID)
+	require.NoError(t, db.Exec(
+		"INSERT INTO center_member_permissions (teacher_id, center_id, permission_key, allowed) VALUES (?, ?, ?, TRUE)",
+		member.ID, owner.CenterID, authctx.PermPaymentsCreate).Error)
+
+	contact := testutil.Contact(t, db, owner.ID)
+	student := seedStudentWithSessions(t, db, owner.ID, contact.ID, "Owned", date("2026-01-01"), 1)
+
+	period, err := billingSvc.EnsurePeriod(ctx, testutil.ScopeFor(t, db, owner.ID), 2026, 1)
+	require.NoError(t, err)
+	_, err = billingSvc.Close(ctx, testutil.ScopeFor(t, db, owner.ID), period.ID)
+	require.NoError(t, err)
+
+	invoice := getInvoice(t, db, owner.ID, student)
+	require.EqualValues(t, 100_000, invoice.TotalDue)
+
+	memberScope := testutil.ScopeFor(t, db, member.ID)
+	require.False(t, memberScope.IsOwner)
+	require.True(t, memberScope.Has(authctx.PermPaymentsCreate))
+	require.False(t, memberScope.Has(authctx.PermPaymentsViewAll))
+
+	detail, err := paymentsSvc.Record(ctx, memberScope, payments.RecordPaymentRequest{
+		ContactID: contact.ID, Amount: 100_000, Method: payments.MethodCash, ReceivedOn: "2026-01-20",
+	})
+	require.NoError(t, err)
+	require.Equal(t, owner.ID, detail.Payment.TeacherID, "the payment must anchor on the contact's own owning teacher, not the recording member")
+	require.Len(t, detail.Allocations, 1, "the response must carry the owner's own allocation, not come back empty from the member's narrower visibility")
+	alloc := detail.Allocations[0]
+	require.Equal(t, student, alloc.StudentID)
+	require.NotEmpty(t, alloc.StudentName)
+	require.EqualValues(t, 100_000, alloc.TotalDue)
+	require.EqualValues(t, 100_000, alloc.PaidAmount)
+	require.EqualValues(t, 0, detail.UnallocatedAmount)
 }
 
 // TestRecordUnderpaymentSettlesEarlierClassStartInvoiceFirst proves D8's
@@ -816,4 +865,105 @@ func TestCrossCenterPaymentsAreNotFound(t *testing.T) {
 	_, err = paymentsSvc.Reverse(ctx, scopeB, detail.Payment.ID, payments.ReverseRequest{Reason: "cross-center attempt"})
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+}
+
+// A member holding payments.view_all reads any payment in the center but
+// cannot reverse or reallocate one anchored on another teacher: the visibility
+// key never widens the write port. Their own payments stay writable.
+func TestViewAllWidensPaymentReadsNotWrites(t *testing.T) {
+	t.Parallel()
+	paymentsSvc, billingSvc, db := newIntegrationDeps(t)
+	ctx := context.Background()
+
+	owner, _ := testutil.Teacher(t, db)
+	scOwner := testutil.ScopeFor(t, db, owner.ID)
+	member, _ := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, member.ID, scOwner.CenterID)
+
+	ownerContact := testutil.Contact(t, db, owner.ID)
+	seedStudentWithSessions(t, db, owner.ID, ownerContact.ID, "OwnerPaid", date("2026-01-01"), 1)
+	ownerPeriod, err := billingSvc.EnsurePeriod(ctx, scOwner, 2026, 1)
+	require.NoError(t, err)
+	_, err = billingSvc.Close(ctx, scOwner, ownerPeriod.ID)
+	require.NoError(t, err)
+	ownerPayment, err := paymentsSvc.Record(ctx, scOwner, payments.RecordPaymentRequest{
+		ContactID: ownerContact.ID, Amount: 100_000, Method: payments.MethodCash, ReceivedOn: "2026-01-20",
+	})
+	require.NoError(t, err)
+
+	scMember := testutil.ScopeFor(t, db, member.ID)
+	scMember.Perms = authctx.BuildPermSet(nil, []string{authctx.PermPaymentsViewAll}, nil)
+	require.True(t, scMember.CenterWideFor(authctx.PermPaymentsViewAll))
+
+	got, err := paymentsSvc.Get(ctx, scMember, ownerPayment.Payment.ID)
+	require.NoError(t, err, "payments.view_all must open the owner's payment for reading")
+	require.Equal(t, ownerPayment.Payment.ID, got.Payment.ID)
+
+	_, err = paymentsSvc.Reverse(ctx, scMember, ownerPayment.Payment.ID, payments.ReverseRequest{Reason: "trộm hoàn tiền"})
+	require.Equal(t, 404, apperror.From(err).Status, "a visibility key must not widen reversal")
+	_, err = paymentsSvc.AutoAllocateRemainder(ctx, scMember, ownerPayment.Payment.ID)
+	require.Equal(t, 404, apperror.From(err).Status, "a visibility key must not widen reallocation")
+	_, err = paymentsSvc.Reallocate(ctx, scMember, ownerPayment.Payment.ID, payments.ReallocateRequest{
+		Allocations: []payments.ReallocationLine{{InvoiceID: uuid.New(), Amount: 1}},
+	})
+	require.Equal(t, 404, apperror.From(err).Status, "a visibility key must not widen manual reallocation")
+
+	untouched, err := paymentsSvc.Get(ctx, scOwner, ownerPayment.Payment.ID)
+	require.NoError(t, err)
+	require.Nil(t, untouched.Payment.ReversedAt, "the owner's payment must stay unreversed")
+	assertLedgerInvariant(t, db, owner.ID)
+
+	ownContact := testutil.Contact(t, db, member.ID)
+	seedStudentWithSessions(t, db, member.ID, ownContact.ID, "MemberPaid", date("2026-01-01"), 1)
+	ownPeriod, err := billingSvc.EnsurePeriod(ctx, scMember, 2026, 1)
+	require.NoError(t, err)
+	_, err = billingSvc.Close(ctx, scMember, ownPeriod.ID)
+	require.NoError(t, err)
+	own, err := paymentsSvc.Record(ctx, scMember, payments.RecordPaymentRequest{
+		ContactID: ownContact.ID, Amount: 100_000, Method: payments.MethodCash, ReceivedOn: "2026-01-20",
+	})
+	require.NoError(t, err)
+	_, err = paymentsSvc.Reverse(ctx, scMember, own.Payment.ID, payments.ReverseRequest{Reason: "ghi nhầm"})
+	require.NoError(t, err, "a member must still reverse their own payment")
+	assertLedgerInvariant(t, db, member.ID)
+}
+
+// Recording a payment is gated by the payments.create route permission, not
+// by a visibility key: a member without payments.view_all records against any
+// contact of the center, and the payment anchors on the contact's own owner so
+// its allocations land on that owner's invoices.
+func TestMemberRecordsPaymentForCenterContactWithoutViewAll(t *testing.T) {
+	t.Parallel()
+	paymentsSvc, billingSvc, db := newIntegrationDeps(t)
+	ctx := context.Background()
+
+	owner, _ := testutil.Teacher(t, db)
+	scOwner := testutil.ScopeFor(t, db, owner.ID)
+	member, _ := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, member.ID, scOwner.CenterID)
+
+	contact := testutil.Contact(t, db, owner.ID)
+	student := seedStudentWithSessions(t, db, owner.ID, contact.ID, "CenterChild", date("2026-01-01"), 1)
+	period, err := billingSvc.EnsurePeriod(ctx, scOwner, 2026, 1)
+	require.NoError(t, err)
+	_, err = billingSvc.Close(ctx, scOwner, period.ID)
+	require.NoError(t, err)
+
+	scMember := testutil.ScopeFor(t, db, member.ID)
+	scMember.Perms = authctx.BuildPermSet(nil, []string{authctx.PermPaymentsCreate}, nil)
+	require.False(t, scMember.CenterWideFor(authctx.PermPaymentsViewAll))
+
+	detail, err := paymentsSvc.Record(ctx, scMember, payments.RecordPaymentRequest{
+		ContactID: contact.ID, Amount: 100_000, Method: payments.MethodCash, ReceivedOn: "2026-01-20",
+	})
+	require.NoError(t, err, "a payments.create holder must record against a center contact")
+	require.Equal(t, owner.ID, detail.Payment.TeacherID,
+		"the payment must anchor on the contact's owner, never the recording member")
+	require.Equal(t, scOwner.CenterID, detail.Payment.CenterID)
+	require.Len(t, detail.Allocations, 1, "the payment must allocate onto the contact owner's invoice")
+
+	paid := getInvoice(t, db, owner.ID, student)
+	require.Equal(t, billing.InvoicePaid, paid.Status)
+	require.EqualValues(t, 100_000, paid.PaidAmount)
+	assertLedgerInvariant(t, db, owner.ID)
 }

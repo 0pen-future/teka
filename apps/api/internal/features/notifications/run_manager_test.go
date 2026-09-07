@@ -63,21 +63,21 @@ func (s *fakeRunStore) ClassSendAllowed(_ context.Context, _, _, _ uuid.UUID) (b
 	return probe(call)
 }
 
-func (s *fakeRunStore) MarkOutcome(_ context.Context, _ authctx.Scope, id uuid.UUID, status string, providerMsgID, errorMessage *string) error {
+func (s *fakeRunStore) MarkOutcome(_ context.Context, _ authctx.Anchor, id uuid.UUID, status string, providerMsgID, errorMessage *string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.outcomes = append(s.outcomes, outcomeCall{id, status, providerMsgID, errorMessage})
 	return nil
 }
 
-func (s *fakeRunStore) FailQueuedInRun(_ context.Context, _ authctx.Scope, _ uuid.UUID, reason string) error {
+func (s *fakeRunStore) FailQueuedInRun(_ context.Context, _ authctx.Anchor, _ uuid.UUID, reason string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.failed = append(s.failed, reason)
 	return nil
 }
 
-func (s *fakeRunStore) UpdateRunStatus(_ context.Context, _ authctx.Scope, _ uuid.UUID, status string) error {
+func (s *fakeRunStore) UpdateRunStatus(_ context.Context, _ authctx.Anchor, _ uuid.UUID, status string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.statuses = append(s.statuses, status)

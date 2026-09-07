@@ -47,6 +47,15 @@ type Repository interface {
 	// ListBySession returns the non-deleted attendance rows already recorded
 	// for a session — empty for a session never confirmed.
 	ListBySession(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) ([]Record, error)
+	// ListBySessionCenter returns the same rows for a session the caller has
+	// already been authorised to act on (billing's post-close reconciliation,
+	// after the confirming caller's own session write gate settled it). It is
+	// center-keyed, not anchored: attendance_records.teacher_id is last-writer
+	// attribution, so a stand-in's confirmation must still be visible to the
+	// class teacher's reconciliation, and no teacher matches every row.
+	// session_id already pins the exact row set; center_id is a
+	// defence-in-depth tenant check.
+	ListBySessionCenter(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) ([]Record, error)
 	// SoftDeleteMissing soft-deletes a session's records for students not in
 	// keepStudentIDs — the one legitimate soft delete this package performs
 	// (a student removed from the roster since the last confirmation).
@@ -62,10 +71,11 @@ type Repository interface {
 	// TallyByEnrollment groups non-deleted attendance rows by enrollment for
 	// every session within [from, to] whose attendance was actually
 	// confirmed — one grouped query, center-scoped — into billable, absent,
-	// and present counts. This is plan 04's sole entry point for pricing a
-	// billing period: billing calls this once per period and joins its own
-	// metadata on the result; it never aggregates attendance_records itself.
-	TallyByEnrollment(ctx context.Context, sc authctx.Scope, from, to time.Time) ([]EnrollmentTally, error)
+	// and present counts. This is billing's sole entry point for pricing a
+	// period: billing calls this once per period, anchored on the period's
+	// own teacher, and joins its own metadata on the result; it never
+	// aggregates attendance_records itself.
+	TallyByEnrollment(ctx context.Context, a authctx.Anchor, from, to time.Time) ([]EnrollmentTally, error)
 }
 
 type gormRepository struct {
@@ -133,6 +143,22 @@ func (r *gormRepository) ListBySession(ctx context.Context, sc authctx.Scope, se
 	return records, err
 }
 
+// centerScoped binds a query to the caller's center and nothing else. Only
+// session-keyed reads whose access the service's session write gate has
+// already settled may use it; it never widens a read that is still deciding
+// who may see what.
+func (r *gormRepository) centerScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+	return database.FromContext(ctx, r.db).Where("attendance_records.center_id = ?", sc.CenterID)
+}
+
+func (r *gormRepository) ListBySessionCenter(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) ([]Record, error) {
+	var records []Record
+	err := r.centerScoped(ctx, sc).
+		Where("attendance_records.session_id = ?", sessionID).
+		Find(&records).Error
+	return records, err
+}
+
 func (r *gormRepository) SoftDeleteMissing(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID, keepStudentIDs []uuid.UUID) error {
 	// Rows are selected by (center, session) alone — never by who recorded
 	// them. The permission to touch this session's sheet was already settled
@@ -167,15 +193,7 @@ func (r *gormRepository) StudentNames(ctx context.Context, sc authctx.Scope, stu
 		Table("students").
 		Select("id, full_name, display_note").
 		Where("center_id = ? AND id IN ?", sc.CenterID, studentIDs)
-	if !sc.CenterWideFor(authctx.PermAttendanceViewAll) {
-		// Own students, plus students enrolled in a class the caller holds a
-		// class_staff stint on (ended included): a handoff moves the class but
-		// not the student rows, and the staff sheet must still show names. The
-		// enrollment may be ended — history stays readable — but never
-		// soft-deleted.
-		frag, _ := classscope.ReadExistsViaEnrollment("students.id")
-		q = q.Where("(teacher_id = ? OR "+frag+")", sc.TeacherID, sc.TeacherID, sc.CenterID)
-	}
+	q = r.readNarrowNames(q, sc)
 	if err := q.Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -185,16 +203,35 @@ func (r *gormRepository) StudentNames(ctx context.Context, sc authctx.Scope, stu
 	return out, nil
 }
 
-func (r *gormRepository) TallyByEnrollment(ctx context.Context, sc authctx.Scope, from, to time.Time) ([]EnrollmentTally, error) {
+// readNarrowNames narrows a students query for StudentNames unless the
+// caller sees attendance center-wide: own students, plus students enrolled
+// in a class the caller holds a class_staff stint on (ended included) — a
+// handoff moves the class but not the student rows, and the staff sheet must
+// still show names. The enrollment may be ended (history stays readable) but
+// never soft-deleted. A read narrowing only: no write consults it.
+func (r *gormRepository) readNarrowNames(q *gorm.DB, sc authctx.Scope) *gorm.DB {
+	if !sc.CenterWideFor(authctx.PermAttendanceViewAll) {
+		frag, _ := classscope.ReadExistsViaEnrollment("students.id")
+		q = q.Where("(teacher_id = ? OR "+frag+")", sc.TeacherID, sc.TeacherID, sc.CenterID)
+	}
+	return q
+}
+
+// anchoredTally narrows the attendance tally to the anchor's own
+// enrollments — the enrollment join, never attendance_records.teacher_id
+// (last-writer attribution, not ownership: filtering on it would drop
+// assistant-recorded rows from the teacher's invoice). Unconditional, no
+// permission branch: the caller already decided whose rows to price.
+func (r *gormRepository) anchoredTally(q *gorm.DB, a authctx.Anchor) *gorm.DB {
+	return q.Joins("JOIN enrollments ON enrollments.id = attendance_records.enrollment_id AND enrollments.center_id = attendance_records.center_id").
+		Where("enrollments.teacher_id = ?", a.TeacherID)
+}
+
+func (r *gormRepository) TallyByEnrollment(ctx context.Context, a authctx.Anchor, from, to time.Time) ([]EnrollmentTally, error) {
 	var rows []EnrollmentTally
-	// A member scope means "this teacher's enrollments" — billing passes the
-	// period teacher here — resolved through the enrollment join, NEVER
-	// through attendance_records.teacher_id: that column is last-writer
-	// attribution, and filtering on it would drop assistant-recorded rows
-	// from the teacher's invoice.
 	q := database.FromContext(ctx, r.db).
 		Model(&Record{}).
-		Where("attendance_records.center_id = ?", sc.CenterID).
+		Where("attendance_records.center_id = ?", a.CenterID).
 		Select(`attendance_records.enrollment_id AS enrollment_id,
 			COUNT(*) FILTER (WHERE attendance_records.billable = true) AS billable_count,
 			COUNT(*) FILTER (WHERE attendance_records.status IN ('absent', 'excused')) AS absent_count,
@@ -204,10 +241,7 @@ func (r *gormRepository) TallyByEnrollment(ctx context.Context, sc authctx.Scope
 		Where("class_sessions.status = 'held'").
 		Where("class_sessions.attendance_confirmed_at IS NOT NULL").
 		Where("class_sessions.session_date BETWEEN ? AND ?", from, to)
-	if !sc.CenterWideFor(authctx.PermAttendanceViewAll) {
-		q = q.Joins("JOIN enrollments ON enrollments.id = attendance_records.enrollment_id AND enrollments.center_id = attendance_records.center_id").
-			Where("enrollments.teacher_id = ?", sc.TeacherID)
-	}
+	q = r.anchoredTally(q, a)
 	err := q.Group("attendance_records.enrollment_id").
 		Find(&rows).Error
 	return rows, err

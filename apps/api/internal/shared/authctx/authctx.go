@@ -113,3 +113,44 @@ func ScopeFrom(c *gin.Context) (Scope, bool) {
 	s, ok := v.(Scope)
 	return s, ok
 }
+
+// Anchor names whose rows a service acts on: the teacher that owns them and
+// the center they sit in. A service passes one down when it works on another
+// teacher's data on the caller's behalf — closing a colleague's billing
+// period, targeting the owner's statements, replaying a roster import — after
+// the caller's Scope has already authorised the action. An Anchor carries no
+// authority: repositories that take one filter by exactly these two columns
+// and never widen, so nothing below the service can be handed borrowed rights
+// through a hand-built Scope.
+type Anchor struct {
+	TeacherID uuid.UUID
+	CenterID  uuid.UUID
+}
+
+// AnchorTo names teacherID's rows inside the caller's center. The caller's
+// Scope must already have authorised acting on that teacher; this only carries
+// the identity down to the repository.
+func (s Scope) AnchorTo(teacherID uuid.UUID) Anchor {
+	return Anchor{TeacherID: teacherID, CenterID: s.CenterID}
+}
+
+// Self names the caller's own rows.
+func (s Scope) Self() Anchor {
+	return s.AnchorTo(s.TeacherID)
+}
+
+// OwnerAnchor is an Anchor proven to name the center owner's rows. It embeds
+// Anchor so anchored repository helpers accept it unchanged, while a plain
+// Anchor can never stand in where an OwnerAnchor is required. Only the
+// centers service mints one, after reading the owner off the center row, so a
+// feature that must write into the owner's data asks centers for the proof
+// instead of asserting ownership itself.
+type OwnerAnchor struct {
+	Anchor
+}
+
+// MintOwnerAnchor is the single constructor for OwnerAnchor; the scoping guard
+// keeps its callers inside the centers feature.
+func MintOwnerAnchor(ownerID, centerID uuid.UUID) OwnerAnchor {
+	return OwnerAnchor{Anchor{TeacherID: ownerID, CenterID: centerID}}
+}

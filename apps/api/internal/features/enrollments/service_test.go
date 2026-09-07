@@ -103,15 +103,6 @@ func visibleEnrollment(e *fakeEnrollment, sc authctx.Scope) bool {
 	return sc.IsOwner || e.TeacherID == sc.TeacherID
 }
 
-// visibleClass is visibleEnrollment's counterpart for the class lookups
-// ClassDefaultPrice performs.
-func visibleClass(c fakeClass, sc authctx.Scope) bool {
-	if c.centerID != sc.CenterID {
-		return false
-	}
-	return sc.IsOwner || c.teacherID == sc.TeacherID
-}
-
 // visibleStudent mirrors the real StudentExists: center-only. Students anchor
 // on the center owner, so a per-teacher filter would refuse every legitimate
 // reference; the class check is what stays per-teacher.
@@ -143,6 +134,22 @@ func (f *fakeRepository) GetByID(_ context.Context, sc authctx.Scope, id uuid.UU
 // class_staff table; the capability gate is integration-tested.
 func (f *fakeRepository) GetWritableByID(ctx context.Context, sc authctx.Scope, id uuid.UUID, _ []string) (*Row, error) {
 	return f.GetByID(ctx, sc, id)
+}
+
+// anchoredEnrollment mirrors the real anchored() predicate: exact center and
+// teacher match, soft-deleted rows excluded — no WriteWide branch, since an
+// Anchor carries no owner bypass to check.
+func anchoredEnrollment(e *fakeEnrollment, a authctx.Anchor) bool {
+	return !e.deleted && e.CenterID == a.CenterID && e.TeacherID == a.TeacherID
+}
+
+func (f *fakeRepository) GetByIDAnchored(_ context.Context, a authctx.Anchor, id uuid.UUID) (*Row, error) {
+	e, ok := f.rows[id]
+	if !ok || !anchoredEnrollment(e, a) {
+		return nil, ErrNotFound
+	}
+	row := f.row(e)
+	return &row, nil
 }
 
 func (f *fakeRepository) List(_ context.Context, sc authctx.Scope, filter ListFilter, _ pagination.Params) ([]Row, int64, error) {
@@ -206,6 +213,27 @@ func (f *fakeRepository) ActiveOn(_ context.Context, sc authctx.Scope, classID u
 	return out, nil
 }
 
+// ActiveOnClass mirrors ActiveOn but center-only, matching the real
+// repository's centerScoped port: no teacher filter, so a caller with no
+// stint on the class (a teaching assistant, in billing's reconciliation
+// tests) still resolves the class's real roster.
+func (f *fakeRepository) ActiveOnClass(_ context.Context, sc authctx.Scope, classID uuid.UUID, on time.Time) ([]Enrollment, error) {
+	var out []Enrollment
+	for _, e := range f.rows {
+		if e.deleted || e.CenterID != sc.CenterID || e.ClassID != classID {
+			continue
+		}
+		if e.StartedOn.After(on) {
+			continue
+		}
+		if e.EndedOn != nil && e.EndedOn.Before(on) {
+			continue
+		}
+		out = append(out, e.Enrollment)
+	}
+	return out, nil
+}
+
 func (f *fakeRepository) EndOpenEnrollments(_ context.Context, sc authctx.Scope, studentID uuid.UUID, on time.Time) error {
 	for _, e := range f.rows {
 		if visibleEnrollment(e, sc) && e.StudentID == studentID && e.EndedOn == nil {
@@ -216,9 +244,9 @@ func (f *fakeRepository) EndOpenEnrollments(_ context.Context, sc authctx.Scope,
 	return nil
 }
 
-func (f *fakeRepository) ClassDefaultPrice(_ context.Context, sc authctx.Scope, classID uuid.UUID) (int64, error) {
+func (f *fakeRepository) ClassDefaultPrice(_ context.Context, a authctx.Anchor, classID uuid.UUID) (int64, error) {
 	c, ok := f.classes[classID]
-	if !ok || !visibleClass(c, sc) {
+	if !ok || c.centerID != a.CenterID || c.teacherID != a.TeacherID {
 		return 0, ErrClassNotFound
 	}
 	return c.price, nil
@@ -563,6 +591,26 @@ func (f *fakeRepository) FindByStudentAndClass(_ context.Context, sc authctx.Sco
 	var newest *fakeEnrollment
 	for _, e := range f.rows {
 		if !visibleEnrollment(e, sc) || e.StudentID != studentID || e.ClassID != classID {
+			continue
+		}
+		if newest == nil || e.StartedOn.After(newest.StartedOn) {
+			newest = e
+		}
+	}
+	if newest == nil {
+		return nil, ErrNotFound
+	}
+	out := newest.Enrollment
+	return &out, nil
+}
+
+// FindByStudentAndClassAnchored is FindByStudentAndClass's unconditional
+// sibling: the roster import already resolved the class's own teacher as a,
+// not the importing caller's own rows.
+func (f *fakeRepository) FindByStudentAndClassAnchored(_ context.Context, a authctx.Anchor, studentID, classID uuid.UUID) (*Enrollment, error) {
+	var newest *fakeEnrollment
+	for _, e := range f.rows {
+		if !anchoredEnrollment(e, a) || e.StudentID != studentID || e.ClassID != classID {
 			continue
 		}
 		if newest == nil || e.StartedOn.After(newest.StartedOn) {

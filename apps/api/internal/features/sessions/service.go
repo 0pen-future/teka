@@ -107,6 +107,17 @@ func (s *Service) ListRange(ctx context.Context, sc authctx.Scope, classID uuid.
 	if err != nil {
 		return nil, err
 	}
+	return s.materialiseRange(ctx, sc, class, from, to)
+}
+
+// materialiseRange fills in the class's missing sessions over [from, to] from
+// its timetable and returns the listing. Every generated row is derived data —
+// its anchors come from the class, its dates from the schedule, nothing from
+// the caller — so callers gate it however their port requires (the sessions
+// write capability for ListRange, the classbook's read admission for
+// ListRangeReadable) and this helper only trusts the class they resolved.
+func (s *Service) materialiseRange(ctx context.Context, sc authctx.Scope, class *classes.Class, from, to time.Time) ([]Detail, error) {
+	classID := class.ID
 	schedules, err := s.classes.ListEffectiveSchedules(ctx, sc, classID, from, to)
 	if err != nil {
 		return nil, err
@@ -182,10 +193,21 @@ func (s *Service) ListRange(ctx context.Context, sc authctx.Scope, classID uuid.
 // holds any other stint — a different role, or an ended one — gets the
 // already-materialised sessions read-only: staff reads must never insert rows.
 func (s *Service) ListRangeReadable(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]Detail, error) {
-	_, roles, err := s.classes.GetReadableWithRoles(ctx, sc, classID)
+	if err := validateRange(from, to); err != nil {
+		return nil, err
+	}
+	class, roles, err := s.classes.GetReadableWithRoles(ctx, sc, classID)
 	if err != nil {
 		return nil, err
 	}
+	// sessions.view_all is a visibility key and widens no write — except this
+	// one, deliberately: materialising is a cache fill of derived data. The
+	// rows it inserts carry the class's own teacher and center and dates
+	// computed from the timetable, so a viewer produces exactly the rows the
+	// class's teacher would, and refusing them would make a view_all reader
+	// see an empty week nobody has opened yet. Every other write on a session
+	// (cancel, hold, delete, attendance) still resolves through the write
+	// port, which the key never widens.
 	canGenerate := sc.CenterWideFor(authctx.PermSessionsViewAll)
 	for _, role := range roles {
 		if authctx.StaffRoleCan(role, authctx.CapSessionsWrite) {
@@ -193,10 +215,7 @@ func (s *Service) ListRangeReadable(ctx context.Context, sc authctx.Scope, class
 		}
 	}
 	if canGenerate {
-		return s.ListRange(ctx, sc, classID, from, to)
-	}
-	if err := validateRange(from, to); err != nil {
-		return nil, err
+		return s.materialiseRange(ctx, sc, class, from, to)
 	}
 	listed, err := s.repo.ListByClassAndRangeReadable(ctx, sc, classID, from, to)
 	if err != nil {
@@ -260,22 +279,52 @@ func (s *Service) ListPending(ctx context.Context, sc authctx.Scope, from, to *t
 // unset (zero or negative) and is capped at maxPendingLimit; total always
 // reflects the unlimited count.
 func (s *Service) ListUnconfirmedInWindow(ctx context.Context, sc authctx.Scope, from, to *time.Time, before time.Time, limit int) (*PendingResponse, error) {
-	switch {
-	case limit <= 0:
-		limit = defaultPendingLimit
-	case limit > maxPendingLimit:
-		limit = maxPendingLimit
-	}
-
-	rows, total, err := s.repo.ListPending(ctx, sc, before, from, to, limit)
+	rows, total, err := s.repo.ListPending(ctx, sc, before, from, to, clampPendingLimit(limit))
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
+	return buildPendingResponse(rows, total, before), nil
+}
+
+// ListUnconfirmedInWindowAnchored is ListUnconfirmedInWindow's Anchor
+// sibling: plan 04's period-closing gate calls it anchored on the period's
+// own teacher, never the acting caller's, so an owner closing a member's
+// period only ever blocks on that member's own unconfirmed sessions. Shares
+// every predicate and the limit/response-building rules with
+// ListUnconfirmedInWindow; only the scoping differs. It skips
+// teacherLocation on purpose — an Anchor carries no "resolve the caller's own
+// timezone" step, since `before` here always arrives already resolved by the
+// caller (see billing's Close, which resolves it from the period's own
+// teacher).
+func (s *Service) ListUnconfirmedInWindowAnchored(ctx context.Context, a authctx.Anchor, from, to *time.Time, before time.Time, limit int) (*PendingResponse, error) {
+	rows, total, err := s.repo.ListPendingAnchored(ctx, a, before, from, to, clampPendingLimit(limit))
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+	return buildPendingResponse(rows, total, before), nil
+}
+
+// clampPendingLimit is ListUnconfirmedInWindow/ListUnconfirmedInWindowAnchored's
+// shared limit rule: defaultPendingLimit when unset (zero or negative),
+// capped at maxPendingLimit.
+func clampPendingLimit(limit int) int {
+	switch {
+	case limit <= 0:
+		return defaultPendingLimit
+	case limit > maxPendingLimit:
+		return maxPendingLimit
+	}
+	return limit
+}
+
+// buildPendingResponse maps repo rows onto the wire response, shared by
+// ListUnconfirmedInWindow and its Anchor sibling.
+func buildPendingResponse(rows []PendingRow, total int64, before time.Time) *PendingResponse {
 	items := make([]PendingSessionResponse, 0, len(rows))
 	for i := range rows {
 		items = append(items, fromPendingRow(&rows[i], before))
 	}
-	return &PendingResponse{Total: total, Items: items}, nil
+	return &PendingResponse{Total: total, Items: items}
 }
 
 // CreateAdHoc adds a single session outside any schedule — a make-up class

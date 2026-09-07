@@ -61,16 +61,26 @@ func NewRepository(db *gorm.DB) Repository {
 }
 
 // scoped returns a query bound to one center. It backs the write paths, whose
-// services all gate on ownership first, plus FindIDByPhone. Writes never widen
-// via scope keys — contacts.view_all is a visibility grant, so letting it
-// reach delete or identity-lookup would be an escalation; a non-owner scope
-// that survived the service gates still narrows to its own rows.
+// services all gate on ownership first. Writes never widen via scope keys —
+// contacts.view_all is a visibility grant, so letting it reach delete would be
+// an escalation; a non-owner scope that survived the service gates still
+// narrows to its own rows.
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("contacts.center_id = ?", sc.CenterID)
 	if !sc.WriteWide() {
 		q = q.Where("contacts.teacher_id = ?", sc.TeacherID)
 	}
 	return q
+}
+
+// centerScoped returns a query bound to one center only, no teacher_id
+// branch. Contacts anchor to the center's owner regardless of who is asking,
+// so dedupe-by-phone (FindIDByPhone, the bulk-import matcher) must resolve
+// identically for the owner and for a member running an import on the
+// owner's behalf — narrowing to the caller's own teacher_id would miss every
+// existing contact and duplicate the whole book on re-import.
+func (r *gormRepository) centerScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+	return database.FromContext(ctx, r.db).Where("contacts.center_id = ?", sc.CenterID)
 }
 
 // scopedRead bounds every contact read. Reports oversight (owner or
@@ -237,16 +247,17 @@ func translateError(err error) error {
 	return ErrDuplicatePhone
 }
 
-// FindIDByPhone resolves a contact by exact phone. It is deliberately not the
-// Query filter on List, which is an ILIKE '%...%' search built for a person
-// typing into a search box: as an identity lookup that would match any contact
-// whose number merely contains this one.
+// FindIDByPhone resolves a contact by exact phone, center-wide — see
+// centerScoped. It is deliberately not the Query filter on List, which is an
+// ILIKE '%...%' search built for a person typing into a search box: as an
+// identity lookup that would match any contact whose number merely contains
+// this one.
 func (r *gormRepository) FindIDByPhone(ctx context.Context, sc authctx.Scope, phone string) (uuid.UUID, bool, error) {
 	// Scanning into a bare uuid.UUID would skip its sql.Scanner and hit
 	// GORM's element-wise array path ([16]byte); the id has to land in a
 	// struct field.
 	var row struct{ ID uuid.UUID }
-	err := r.scoped(ctx, sc).Model(&Contact{}).
+	err := r.centerScoped(ctx, sc).Model(&Contact{}).
 		Where("contacts.phone = ?", phone).
 		Limit(1).
 		Select("contacts.id").

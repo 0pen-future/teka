@@ -73,7 +73,7 @@ func TestSecretaryReadsCenterWideButCannotWriteBilling(t *testing.T) {
 	closeResp, err := svc.Close(ctx, memberScope, period.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, closeResp.IssuedCount)
-	invoices, err := repo.ListInvoices(ctx, memberScope, period.ID)
+	invoices, err := repo.ListInvoices(ctx, memberScope.Self(), period.ID)
 	require.NoError(t, err)
 	require.Len(t, invoices, 1)
 

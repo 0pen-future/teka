@@ -129,8 +129,8 @@ func (h *PublicHandler) qrImage(c *gin.Context) {
 // counter must never cost a parent their page, so a failure here is logged
 // and nothing else.
 func (h *PublicHandler) touchView(c *gin.Context, stmt *Statement) {
-	scope := authctx.Scope{TeacherID: stmt.TeacherID, CenterID: stmt.CenterID}
-	if err := h.svc.TouchView(c.Request.Context(), scope, stmt.ID); err != nil {
+	anchor := authctx.Anchor{TeacherID: stmt.TeacherID, CenterID: stmt.CenterID}
+	if err := h.svc.TouchView(c.Request.Context(), anchor, stmt.ID); err != nil {
 		logger.FromContext(c.Request.Context()).Error("statement view tracking failed",
 			"statement_id", stmt.ID, "error", err)
 	}

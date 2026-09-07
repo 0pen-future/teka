@@ -74,6 +74,12 @@ type Repository interface {
 	// student count comes from one grouped join over enrollments, never a
 	// per-row lookup — see pending.go.
 	ListPending(ctx context.Context, sc authctx.Scope, before time.Time, from, to *time.Time, limit int) ([]PendingRow, int64, error)
+	// ListPendingAnchored is ListPending's Anchor sibling for a caller-independent
+	// gate — billing's period close runs it anchored on the period's own
+	// teacher, never the acting caller's, so an owner closing a member's period
+	// only ever blocks on that member's own unconfirmed sessions. Shares
+	// ListPending's predicate and query builder; only the scoping differs.
+	ListPendingAnchored(ctx context.Context, a authctx.Anchor, before time.Time, from, to *time.Time, limit int) ([]PendingRow, int64, error)
 	// ReassignPlanned moves this class's future planned sessions to newTeacherID
 	// on the context's transaction and returns how many moved. Only
 	// status='planned' rows dated on or after notBefore move; held and cancelled
@@ -95,24 +101,28 @@ func NewRepository(db *gorm.DB) Repository {
 	return &gormRepository{db: db}
 }
 
-// scoped returns a session query bound to one center. An owner sees every
-// session in their center; a member sees only the rows they teach themselves.
+// scoped returns the own-rows session query bound to one center: the owner
+// reaches every session in their center, a member only the rows they teach
+// themselves. It is the anchor-based write filter (handoff's ReassignPlanned)
+// and the viewer-independent listing dashboard drives with a target scope, so
+// a visibility key never widens it — readScoped is the port that widens.
 // Composite FKs stop cross-center writes; only this filter stops cross-tenant
 // reads. The center_id column is qualified because list queries join classes,
 // which carries the same column name.
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("class_sessions.center_id = ?", sc.CenterID)
-	if !sc.CenterWideFor(authctx.PermSessionsViewAll) {
+	if !sc.WriteWide() {
 		q = q.Where("class_sessions.teacher_id = ?", sc.TeacherID)
 	}
 	return q
 }
 
-// readScoped additionally lets a member read sessions of classes they hold a
-// class_staff stint on, ended stints included. Reads only: lifecycle writes
-// (cancel, hold, delete) go through writeScoped's active-stint capability
-// filter; handoff's ReassignPlanned keeps scoped because it runs under the
-// owner-driven handoff flow.
+// readScoped is the READ port: own rows, sessions of classes the member holds
+// a class_staff stint on (ended stints included), and every session in the
+// center under sessions.view_all — the only place that key applies. Reads
+// only: lifecycle writes (cancel, hold, delete) go through writeScoped's
+// active-stint capability filter and handoff's ReassignPlanned through the
+// own-rows scoped; a visibility key widens neither.
 func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("class_sessions.center_id = ?", sc.CenterID)
 	if !sc.CenterWideFor(authctx.PermSessionsViewAll) {
@@ -123,14 +133,41 @@ func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm
 	return q
 }
 
+// readScopedFeed is the pending-attendance feed's READ port: own rows,
+// widened to the whole center under sessions.view_all. Unlike readScoped it
+// deliberately carries no stint branch, because the same predicate backs
+// billing's period-close gate, which runs it anchored on the period teacher
+// — a stint that teacher holds on someone else's class must not pull that
+// class's sessions into the blocking set.
+func (r *gormRepository) readScopedFeed(ctx context.Context, sc authctx.Scope) *gorm.DB {
+	q := database.FromContext(ctx, r.db).Where("class_sessions.center_id = ?", sc.CenterID)
+	if !sc.CenterWideFor(authctx.PermSessionsViewAll) {
+		q = q.Where("class_sessions.teacher_id = ?", sc.TeacherID)
+	}
+	return q
+}
+
+// anchoredFeed is readScopedFeed's Anchor sibling: an unconditional
+// teacher+center filter, no permission branch. Billing's period-close gate
+// calls it anchored on the period's own teacher, never the acting caller's —
+// a visibility key or a stint the anchor's teacher holds on someone else's
+// class must never widen what the pending-attendance feed reports as
+// blocking a close.
+func (r *gormRepository) anchoredFeed(ctx context.Context, a authctx.Anchor) *gorm.DB {
+	return database.FromContext(ctx, r.db).
+		Where("class_sessions.center_id = ? AND class_sessions.teacher_id = ?", a.CenterID, a.TeacherID)
+}
+
 // writeScoped is the capability write filter: a member reaches a session only
 // through an ACTIVE stint on its class whose role is in roles — REPLACING the
 // teacher_id filter, not OR-ing it, so an ended-stint teacher keeps history
 // reads but loses every write, even on sessions still anchored to them. roles
 // comes from the service's capability-map lookup; this method only binds it.
+// Only the owner bypasses the stint filter (WriteWide): sessions.view_all is a
+// visibility key and must never reach a write.
 func (r *gormRepository) writeScoped(ctx context.Context, sc authctx.Scope, roles []string) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("class_sessions.center_id = ?", sc.CenterID)
-	if !sc.CenterWideFor(authctx.PermSessionsViewAll) {
+	if !sc.WriteWide() {
 		frag, _ := classscope.WriteExists("class_sessions.class_id")
 		q = q.Where(frag, sc.TeacherID, sc.CenterID, roles)
 	}

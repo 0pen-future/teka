@@ -159,6 +159,17 @@ func (f *fakeRepository) ListBySession(_ context.Context, sc authctx.Scope, sess
 	return out, nil
 }
 
+func (f *fakeRepository) ListBySessionCenter(_ context.Context, sc authctx.Scope, sessionID uuid.UUID) ([]Record, error) {
+	var out []Record
+	for _, r := range f.rows {
+		if r.deleted || r.CenterID != sc.CenterID || r.SessionID != sessionID {
+			continue
+		}
+		out = append(out, r.Record)
+	}
+	return out, nil
+}
+
 func (f *fakeRepository) SoftDeleteMissing(_ context.Context, sc authctx.Scope, sessionID uuid.UUID, keepStudentIDs []uuid.UUID) error {
 	keep := make(map[uuid.UUID]bool, len(keepStudentIDs))
 	for _, sid := range keepStudentIDs {
@@ -183,10 +194,10 @@ func (f *fakeRepository) StudentNames(_ context.Context, _ authctx.Scope, studen
 	return out, nil
 }
 
-func (f *fakeRepository) TallyByEnrollment(_ context.Context, sc authctx.Scope, _, _ time.Time) ([]EnrollmentTally, error) {
+func (f *fakeRepository) TallyByEnrollment(_ context.Context, a authctx.Anchor, _, _ time.Time) ([]EnrollmentTally, error) {
 	byEnrollment := map[uuid.UUID]*EnrollmentTally{}
 	for _, r := range f.rows {
-		if r.deleted || !visibleRecord(sc, r) {
+		if r.deleted || r.CenterID != a.CenterID || r.TeacherID != a.TeacherID {
 			continue
 		}
 		t, ok := byEnrollment[r.EnrollmentID]

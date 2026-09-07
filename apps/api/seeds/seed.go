@@ -276,7 +276,7 @@ func seedClassStaff(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authc
 	classesSvc := classes.NewService(classes.NewRepository(db), txMgr, staffRepo)
 	staffSvc := classstaff.NewService(staffRepo, centers.NewService(centers.NewRepository(db), txMgr, nil))
 
-	class, found, err := classesSvc.FindActiveByName(ctx, sc, className)
+	class, found, err := classesSvc.FindActiveByName(ctx, sc.Self(), className)
 	if err != nil {
 		return fmt.Errorf("seed: find class %q: %w", className, err)
 	}

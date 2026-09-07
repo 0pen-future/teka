@@ -149,28 +149,29 @@ type Repository interface {
 	// UpdateRunStatus moves a run to status. A terminal status stamps
 	// finished_at; moving back to RunStatusRunning (manual resume) clears it,
 	// so finished_at is always "when this run last stopped", never a stale
-	// leftover. Never owner-bypassed: only the run's own teacher may move it.
-	UpdateRunStatus(ctx context.Context, sc authctx.Scope, runID uuid.UUID, status string) error
+	// leftover. Never owner-bypassed: only the run's own teacher may move it —
+	// a is that teacher/center, not necessarily the requesting caller's own.
+	UpdateRunStatus(ctx context.Context, a authctx.Anchor, runID uuid.UUID, status string) error
 	// RunCounts derives a run's progress by counting its rows. Counters are
 	// deliberately never stored on the run record — a COUNT cannot drift from
-	// the rows the way an incremented column can after a crash. Callers pass
-	// the run's own owning scope (not necessarily the requesting caller's),
-	// since this call is never owner-bypassed.
-	RunCounts(ctx context.Context, sc authctx.Scope, runID uuid.UUID) (RunCounts, error)
+	// the rows the way an incremented column can after a crash. a anchors on
+	// the run's own owning teacher/center (not necessarily the requesting
+	// caller's), since this call is never owner-bypassed.
+	RunCounts(ctx context.Context, a authctx.Anchor, runID uuid.UUID) (RunCounts, error)
 	// MarkOutcome records one row's final verdict. Only a row still queued
-	// (and visible to sc) moves: a sent row is final, so a late or duplicate
+	// (and visible to a) moves: a sent row is final, so a late or duplicate
 	// outcome is silently skipped, mirroring MarkSent's idempotency. Never
 	// owner-bypassed. StatusSent stamps sent_at; any outcome may carry a
 	// provider message id or an error message.
-	MarkOutcome(ctx context.Context, sc authctx.Scope, id uuid.UUID, status string, providerMsgID, errorMessage *string) error
+	MarkOutcome(ctx context.Context, a authctx.Anchor, id uuid.UUID, status string, providerMsgID, errorMessage *string) error
 	// FailQueuedInRun fails every still-queued row of the run with reason —
 	// the expired-mid-run sweep. Rows already sent or failed keep their
 	// verdicts. Never owner-bypassed.
-	FailQueuedInRun(ctx context.Context, sc authctx.Scope, runID uuid.UUID, reason string) error
+	FailQueuedInRun(ctx context.Context, a authctx.Anchor, runID uuid.UUID, reason string) error
 	// QueuedRunRows lists the run's still-queued rows oldest-first, each with
 	// its statement and contact, so a resume can re-render exactly the
 	// messages that never went out. Never owner-bypassed.
-	QueuedRunRows(ctx context.Context, sc authctx.Scope, runID uuid.UUID) ([]QueuedRunRow, error)
+	QueuedRunRows(ctx context.Context, a authctx.Anchor, runID uuid.UUID) ([]QueuedRunRow, error)
 	// ZaloMappings returns contactID -> zalo_user_id for the given contacts,
 	// covering live (non-deleted) contacts sc's own teacher owns — widened to
 	// the whole center when sc holds reports oversight, so a delegated sender
@@ -204,12 +205,13 @@ func NewRepository(db *gorm.DB) Repository {
 	return &gormRepository{db: db}
 }
 
-// scoped binds a notifications-table query to sc's center, further narrowed
-// to sc's own rows unless sc sees center-wide data — the standard
-// owner-oversight template for the plain reads (List, MarkSent).
-func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+// writeScoped binds a notifications-table WRITE query to sc's center,
+// further narrowed to sc's own rows unless sc is the owner. It backs
+// MarkSent; the listing reads take the reports-oversight axis in ListByPeriod,
+// and notifications.view_all — a visibility key — never widens a write.
+func (r *gormRepository) writeScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("notifications.center_id = ?", sc.CenterID)
-	if !sc.CenterWideFor(authctx.PermNotificationsViewAll) {
+	if !sc.WriteWide() {
 		q = q.Where("notifications.teacher_id = ?", sc.TeacherID)
 	}
 	return q
@@ -230,17 +232,17 @@ func (r *gormRepository) runsPeriodScoped(ctx context.Context, sc authctx.Scope)
 	return q
 }
 
-// runsOwnScoped binds strictly to sc's own center and teacher, ignoring
-// IsOwner entirely. A run's zalo_personal send slot, its occupancy checks,
-// and the row-level writes that drive it belong to the acting teacher's own
-// Zalo session — an owner has no bypass here, only over the read-only
-// progress snapshot (runsScoped). The same unqualified center_id/teacher_id
+// anchored binds strictly to a's own center and teacher, ignoring IsOwner
+// entirely. A run's zalo_personal send slot, its occupancy checks, and the
+// row-level writes that drive it belong to the acting teacher's own Zalo
+// session — an owner has no bypass here, only over the read-only progress
+// snapshot (runsPeriodScoped). The same unqualified center_id/teacher_id
 // predicate is reused for both the notification_runs table and the
 // notifications table: every caller of this helper chains a single-table
 // Model/Table with no join, so the column names never collide.
-func (r *gormRepository) runsOwnScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+func (r *gormRepository) anchored(ctx context.Context, a authctx.Anchor) *gorm.DB {
 	return database.FromContext(ctx, r.db).
-		Where("center_id = ? AND teacher_id = ?", sc.CenterID, sc.TeacherID)
+		Where("center_id = ? AND teacher_id = ?", a.CenterID, a.TeacherID)
 }
 
 func (r *gormRepository) InsertBatch(ctx context.Context, rows []*Notification) error {
@@ -292,7 +294,7 @@ func (r *gormRepository) MarkSent(ctx context.Context, sc authctx.Scope, ids []u
 	if len(ids) == 0 {
 		return nil
 	}
-	return r.scoped(ctx, sc).
+	return r.writeScoped(ctx, sc).
 		Model(&Notification{}).
 		Where("notifications.id IN ? AND notifications.status = ? AND notifications.deleted_at IS NULL", ids, StatusQueued).
 		Updates(map[string]any{
@@ -308,7 +310,7 @@ func (r *gormRepository) CreateRun(ctx context.Context, run *Run) error {
 
 func (r *gormRepository) HasActiveRun(ctx context.Context, sc authctx.Scope) (bool, error) {
 	var count int64
-	err := r.runsOwnScoped(ctx, sc).
+	err := r.anchored(ctx, sc.Self()).
 		Model(&Run{}).
 		Where("status = ?", RunStatusRunning).
 		Count(&count).Error
@@ -348,7 +350,7 @@ func (r *gormRepository) LatestRunByPeriod(ctx context.Context, sc authctx.Scope
 
 func (r *gormRepository) LatestOwnRunByPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, classID *uuid.UUID) (*Run, error) {
 	var run Run
-	err := runClassDimension(r.runsOwnScoped(ctx, sc), classID).
+	err := runClassDimension(r.anchored(ctx, sc.Self()), classID).
 		Where("billing_period_id = ?", periodID).
 		Order("created_at DESC").
 		First(&run).Error
@@ -458,12 +460,12 @@ func (r *gormRepository) CanSendReports(ctx context.Context, centerID, teacherID
 	return can, err
 }
 
-func (r *gormRepository) UpdateRunStatus(ctx context.Context, sc authctx.Scope, runID uuid.UUID, status string) error {
+func (r *gormRepository) UpdateRunStatus(ctx context.Context, a authctx.Anchor, runID uuid.UUID, status string) error {
 	finishedAt := any(gorm.Expr("now()"))
 	if status == RunStatusRunning {
 		finishedAt = nil
 	}
-	return translateRunError(r.runsOwnScoped(ctx, sc).
+	return translateRunError(r.anchored(ctx, a).
 		Model(&Run{}).
 		Where("id = ?", runID).
 		Updates(map[string]any{
@@ -484,7 +486,7 @@ func translateRunError(err error) error {
 	return err
 }
 
-func (r *gormRepository) RunCounts(ctx context.Context, sc authctx.Scope, runID uuid.UUID) (RunCounts, error) {
+func (r *gormRepository) RunCounts(ctx context.Context, a authctx.Anchor, runID uuid.UUID) (RunCounts, error) {
 	var counts RunCounts
 	err := database.FromContext(ctx, r.db).
 		Raw(`SELECT count(*) AS total,
@@ -492,12 +494,12 @@ func (r *gormRepository) RunCounts(ctx context.Context, sc authctx.Scope, runID 
 		            count(*) FILTER (WHERE status = ?) AS failed
 		     FROM notifications
 		     WHERE run_id = ? AND center_id = ? AND teacher_id = ? AND deleted_at IS NULL`,
-			StatusSent, StatusFailed, runID, sc.CenterID, sc.TeacherID).
+			StatusSent, StatusFailed, runID, a.CenterID, a.TeacherID).
 		Scan(&counts).Error
 	return counts, err
 }
 
-func (r *gormRepository) MarkOutcome(ctx context.Context, sc authctx.Scope, id uuid.UUID, status string, providerMsgID, errorMessage *string) error {
+func (r *gormRepository) MarkOutcome(ctx context.Context, a authctx.Anchor, id uuid.UUID, status string, providerMsgID, errorMessage *string) error {
 	updates := map[string]any{
 		"status":          status,
 		"provider_msg_id": providerMsgID,
@@ -507,14 +509,14 @@ func (r *gormRepository) MarkOutcome(ctx context.Context, sc authctx.Scope, id u
 	if status == StatusSent {
 		updates["sent_at"] = gorm.Expr("now()")
 	}
-	return r.runsOwnScoped(ctx, sc).
+	return r.anchored(ctx, a).
 		Model(&Notification{}).
 		Where("id = ? AND status = ? AND deleted_at IS NULL", id, StatusQueued).
 		Updates(updates).Error
 }
 
-func (r *gormRepository) FailQueuedInRun(ctx context.Context, sc authctx.Scope, runID uuid.UUID, reason string) error {
-	return r.runsOwnScoped(ctx, sc).
+func (r *gormRepository) FailQueuedInRun(ctx context.Context, a authctx.Anchor, runID uuid.UUID, reason string) error {
+	return r.anchored(ctx, a).
 		Model(&Notification{}).
 		Where("run_id = ? AND status = ? AND deleted_at IS NULL", runID, StatusQueued).
 		Updates(map[string]any{
@@ -532,10 +534,10 @@ const queuedRunRowsQuery = `
 	ORDER BY n.created_at, n.id
 `
 
-func (r *gormRepository) QueuedRunRows(ctx context.Context, sc authctx.Scope, runID uuid.UUID) ([]QueuedRunRow, error) {
+func (r *gormRepository) QueuedRunRows(ctx context.Context, a authctx.Anchor, runID uuid.UUID) ([]QueuedRunRow, error) {
 	var rows []QueuedRunRow
 	err := database.FromContext(ctx, r.db).
-		Raw(queuedRunRowsQuery, runID, sc.CenterID, sc.TeacherID, StatusQueued).
+		Raw(queuedRunRowsQuery, runID, a.CenterID, a.TeacherID, StatusQueued).
 		Scan(&rows).Error
 	return rows, err
 }

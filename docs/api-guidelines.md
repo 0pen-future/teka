@@ -78,17 +78,28 @@ without exception:
   fresh from the database on every request by `middleware.ResolveScope` and
   never cached in the JWT, so a membership or permission change (kick, leave,
   join, grant, revoke, role edit) takes effect on the very next request.
-- Every repository over a tenant table funnels reads through a `scoped`
+- Every repository over a tenant table funnels queries through a scoped
   helper: always filter by center; callers without center-wide data access
-  additionally filter by their own `teacher_id` (reference implementation:
-  `apps/api/internal/features/students/repository.go`):
+  additionally filter by their own `teacher_id`. Reads and writes are two
+  ports, because a `<resource>.view_all` key is a **visibility** key — it
+  widens what the caller sees and never what they may change (reference
+  implementation: `apps/api/internal/features/students/repository.go`):
 
 ```go
-// scoped returns a query bound to one center. An owner sees every student in
-// their center; a member sees only the rows they created themselves.
-func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+// readScoped: an owner or a students.view_all holder sees every student in
+// the center; a member sees only the rows they created themselves.
+func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
     q := database.FromContext(ctx, r.db).Where("students.center_id = ?", sc.CenterID)
     if !sc.CenterWideFor(authctx.PermStudentsViewAll) {
+        q = q.Where("students.teacher_id = ?", sc.TeacherID)
+    }
+    return q
+}
+
+// writeScoped: only the owner reaches another teacher's rows for a mutation.
+func (r *gormRepository) writeScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+    q := database.FromContext(ctx, r.db).Where("students.center_id = ?", sc.CenterID)
+    if !sc.WriteWide() {
         q = q.Where("students.teacher_id = ?", sc.TeacherID)
     }
     return q
@@ -96,10 +107,19 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 ```
 
 `Scope.CenterWideFor(<resource>.view_all key)` (`IsOwner || HasKey(key)`) is
-the **only** data-scoping switch repositories may branch on — never `IsOwner`
+the **only** read-scoping switch repositories may branch on — never `IsOwner`
 directly, and each repository passes its own resource's `view_all` scope key
 (`authctx.PermStudentsViewAll`, `PermContactsViewAll`, …), so center-wide
-visibility is granted per resource. The legacy single-axis
+visibility is granted per resource. `Scope.WriteWide()` (the owner alone) is
+the only write-scoping switch: lock, close, void, cancel, revoke, mark-sent,
+reassign and every other mutation resolve their rows through a `writeScoped`
+port or a `GetXForWrite` getter, so a granted visibility key can never open
+another teacher's row for editing. The guard tests in
+`apps/api/internal/features/scoping_guard_test.go` pin both halves:
+repositories may not branch on `IsOwner`, and `CenterWideFor` may appear only
+inside a read-named function (`readScoped`, `scopedRead`, `readNarrow`,
+`GetPeriodRead`, …). Inline predicates in a read go through a `readNarrow`
+helper for the same reason. The legacy single-axis
 `data.view_center_wide` participates only through alias expansion at
 permission-set build time (a legacy grant/deny expands to every per-resource
 `view_all` key); `Scope.CenterWide()` survives solely for that compatibility
@@ -110,6 +130,41 @@ window and has no production callers.
   `teacher_id = $self` as last-writer attribution, and owners may write on
   behalf of any teacher in their center. Contacts and students are the
   exception: they anchor to the owner (see contact-book ownership below).
+
+**Scope vs Anchor**: a `Scope` is the caller and is resolved only by
+`middleware.ResolveScope` (and the centers feature that backs it) — nothing
+else builds one. When a service has to act on *another teacher's rows* after
+it has already authorised the action (closing a colleague's billing period,
+targeting the owner's statements for a delegated send, replaying a roster
+import into the owner's contact book, a background notification run), it names
+those rows with `authctx.Anchor{TeacherID, CenterID}` — `sc.AnchorTo(row.TeacherID)`
+when a caller is in hand, `sc.Self()` for the caller's own rows, a plain literal
+where there is no caller (a public statement token, a run job). An Anchor
+carries no authority: it has no `IsOwner`, no `Perms`, no widening helpers, and
+no path back to `Scope`, so a repository method that takes one filters by
+exactly `center_id = a.CenterID AND teacher_id = a.TeacherID` through an
+`anchored(ctx, a)` helper and never widens. Reading a signature therefore tells
+you whether widening may apply: `sc Scope` means "the caller; `view_all`,
+stints, or ownership may widen this", `a Anchor` means "these rows, no
+widening, ever". A method with both is the exemplar of the split —
+`statements.TargetContacts(ctx, a Anchor, viewer Scope, periodID)` takes the
+rows from the anchored period while judging `phone_visible` for the viewer.
+Where the teacher is irrelevant (dedupe of contacts/students by center, the
+roster of a class for reconciliation) the query is center-keyed through a
+`centerScoped(ctx, sc)` helper with the real caller's scope rather than an
+Anchor. `authctx.OwnerAnchor` is an Anchor *proven* to name the owner's rows:
+only `centers.Service.ResolveOwnerAnchor` mints it, and `CreateAnchored`
+entry points on contacts/students accept nothing else, so the import path
+never needs a Scope with `IsOwner: true` asserted by hand. The dashboard's
+"read as teacher T" view is the deliberate exception that stays a Scope
+literal inside the centers feature: it impersonates a rights-less member view
+whose consumed reads are stint-based, which is Scope semantics, not row
+naming. `TestScopeLiteralsOnlyWhereResolved` in
+`apps/api/internal/features/scoping_guard_test.go` pins all of this at the AST
+level: outside `features/centers/`, `middleware/`, `testutil/`, and tests, no
+`authctx.Scope{…}` with fields, no `authctx.OwnerAnchor{…}`, no assignment to
+`IsOwner`/`Perms`/`CanSendReports`, no aliased authctx import, and no
+`MintOwnerAnchor(` call.
 
 **Class-staff reads**: `class_staff` is the **sole** source of class
 permissions; `teacher_id` columns are creator/last-writer attribution, never a
@@ -186,7 +241,10 @@ service (an honest 403); a plain member's `GET /contacts` returns an empty
 list rather than 403, and reads stay owner + `ReportsOversight()`. Imports
 keep the grantable `imports.run` gate, but every imported contact/student row
 is stamped with the owner anchor server-side regardless of who runs the
-import, and dedupe resolves in owner scope. Migration 000016 merged duplicate
+import, and dedupe resolves in owner scope. Recording a payment is gated by
+the route permission alone (`payments.create`): a holder may collect for any
+contact in the center, and the payment row anchors on the contact's own
+teacher, never on the collector. Migration 000016 merged duplicate
 contacts per `(center_id, phone)` (earliest row survives), re-keyed the unique
 indexes from per-teacher to `(center_id, phone)` / `(center_id,
 zalo_user_id)`, then re-anchored existing rows — journaling every change in
@@ -290,7 +348,8 @@ Developer workflow for adding or reusing a permission on a new endpoint:
   holds no role row, `Scope.Has(key)` is unconditionally true for them, and
   member-targeted permission endpoints refuse the owner as target (404, the
   `SetSendReports` precedent). Repositories branch only on
-  `Scope.CenterWideFor(<resource>.view_all)` as above.
+  `Scope.CenterWideFor(<resource>.view_all)` for reads and `Scope.WriteWide()`
+  for writes, as above.
 - **Owner-only by design, not by catalog key**: the permission-management
   endpoints themselves (`GET /centers/me/permissions`, `PUT
   /centers/me/roles/:roleId/permissions`, `PUT

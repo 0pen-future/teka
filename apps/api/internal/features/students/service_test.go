@@ -405,10 +405,12 @@ func TestPeerScopeCannotSeeAnotherMembersStudent(t *testing.T) {
 
 // FindIDByName mirrors the SQL predicate, including the NULL-safe note
 // comparison: display_note is NULL when unset, so a plain equality test would
-// miss every student without a distinguishing note.
+// miss every student without a distinguishing note. Center-wide, like the
+// real centerScoped-backed query: students anchor to the owner regardless of
+// caller, so the teacher_id column plays no part here.
 func (f *fakeRepository) FindIDByName(_ context.Context, sc authctx.Scope, contactID uuid.UUID, fullName string, note *string) (uuid.UUID, bool, error) {
 	for _, s := range f.rows {
-		if !visible(s, sc) || s.ContactID != contactID || s.FullName != fullName {
+		if s.deleted || s.CenterID != sc.CenterID || s.ContactID != contactID || s.FullName != fullName {
 			continue
 		}
 		if sameNote(s.DisplayNote, note) {
@@ -416,6 +418,24 @@ func (f *fakeRepository) FindIDByName(_ context.Context, sc authctx.Scope, conta
 		}
 	}
 	return uuid.Nil, false, nil
+}
+
+// GetByIDAnchored mirrors GetByID but bound unconditionally to a — no scope
+// branching, matching the real repository's anchored() predicate.
+func (f *fakeRepository) GetByIDAnchored(_ context.Context, a authctx.Anchor, studentID uuid.UUID) (*Row, error) {
+	s, ok := f.rows[studentID]
+	if !ok || s.deleted || s.CenterID != a.CenterID || s.TeacherID != a.TeacherID {
+		return nil, ErrNotFound
+	}
+	row := f.row(s)
+	return &row, nil
+}
+
+// ContactExistsAnchored mirrors ContactExists but requires an exact anchor
+// match, matching the real repository's anchored contact check.
+func (f *fakeRepository) ContactExistsAnchored(_ context.Context, a authctx.Anchor, contactID uuid.UUID) (bool, error) {
+	c, ok := f.contacts[contactID]
+	return ok && c.centerID == a.CenterID && c.teacherID == a.TeacherID, nil
 }
 
 // sameNote is SQL's IS NOT DISTINCT FROM for a nullable text column.
@@ -487,7 +507,11 @@ func TestFindIDByNameDistinguishesNamesakesByNote(t *testing.T) {
 	}
 }
 
-func TestFindIDByNameStaysWithinTheAnchorTeacher(t *testing.T) {
+// FindIDByName dedupes center-wide, not per-creator: students anchor to the
+// owner regardless of who created them, so the bulk-import matcher must find
+// an existing student under any teacher in the caller's own center, while
+// staying blind to a same-named student in a different center entirely.
+func TestFindIDByNameDedupesCenterWide(t *testing.T) {
 	svc, repo, _ := newTestService()
 	center := id.New()
 	authorID := id.New()
@@ -495,7 +519,21 @@ func TestFindIDByNameStaysWithinTheAnchorTeacher(t *testing.T) {
 	contactID := repo.addContactIn(authorID, center)
 	repo.addStudent(authorID, center, contactID, "Bé An")
 
-	if _, found, err := svc.FindIDByName(context.Background(), peer, contactID, "Bé An", nil); err != nil || found {
-		t.Fatalf("another teacher's student must not be found, got found=%v err=%v", found, err)
+	if _, found, err := svc.FindIDByName(context.Background(), peer, contactID, "Bé An", nil); err != nil || !found {
+		t.Fatalf("a center peer must find a student anchored to a different teacher, got found=%v err=%v", found, err)
+	}
+
+	stranger := authctx.Scope{TeacherID: id.New(), CenterID: id.New(), IsOwner: false}
+	if _, found, err := svc.FindIDByName(context.Background(), stranger, contactID, "Bé An", nil); err != nil || found {
+		t.Fatalf("a different center must not find this student, got found=%v err=%v", found, err)
 	}
 }
+
+// Compile-time proof: the interface assertion below fails to build
+// the moment CreateAnchored's second parameter is loosened from a proven
+// authctx.OwnerAnchor to a plain authctx.Anchor, which carries no proof of
+// ownership at all. A reviewer or the AST guard could miss that regression;
+// the compiler cannot.
+var _ interface {
+	CreateAnchored(context.Context, authctx.OwnerAnchor, CreateRequest) (*Row, error)
+} = (*Service)(nil)

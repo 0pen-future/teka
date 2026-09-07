@@ -9,8 +9,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"teka/apps/api/internal/features/statements"
 	"teka/apps/api/internal/shared/apperror"
-	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/pagination"
 	"teka/apps/api/internal/testutil"
 )
@@ -113,67 +113,56 @@ func TestStatementPhoneAndURLFollowTheOnePhoneRule(t *testing.T) {
 	require.Nil(t, viaHocVu.URL, "hoc_vu never receives the family URL — only owner/oversight do")
 }
 
-// A member granted statements.view_all (no reports oversight, no hoc_vu
-// stint) can reach Generate on another teacher's period through the
-// center-wide period lookup. The phone mask must be derived for THAT caller —
-// deriving it for the period's own teacher would hand the wide reader a phone
-// the period teacher may see but the caller may not.
-func TestGenerateMasksPhoneForCenterWideReader(t *testing.T) {
+// TargetContacts takes two scopes on purpose: the rows come from the period
+// anchor (whose invoices are targeted) while phone_visible is judged for the
+// viewer (who is looking). The row-level bit is only the viewer's active
+// hoc_vu stint; owner and oversight widening happens above the repository
+// through Scope.PhoneVisible. Pin both halves here so a refactor that folds
+// the two scopes into one fails at the repository rather than in a send path.
+func TestTargetContactsRowsByAnchorPhoneByViewer(t *testing.T) {
 	t.Parallel()
-	statementsSvc, billingSvc, db := newIntegrationDeps(t)
+	_, billingSvc, db := newIntegrationDeps(t)
+	repo := statements.NewRepository(db)
 	ctx := context.Background()
 
 	owner, _ := testutil.Teacher(t, db)
 	member, _ := testutil.Teacher(t, db)
-	memberB, _ := testutil.Teacher(t, db)
-	wideReader, _ := testutil.Teacher(t, db)
+	bystander, _ := testutil.Teacher(t, db)
 	ownerScope := testutil.ScopeFor(t, db, owner.ID)
-	center := ownerScope.CenterID
-	testutil.JoinCenter(t, db, member.ID, center)
-	testutil.JoinCenter(t, db, memberB.ID, center)
-	testutil.JoinCenter(t, db, wideReader.ID, center)
+	testutil.JoinCenter(t, db, member.ID, ownerScope.CenterID)
+	testutil.JoinCenter(t, db, bystander.ID, ownerScope.CenterID)
 	memberScope := testutil.ScopeFor(t, db, member.ID)
+	bystanderScope := testutil.ScopeFor(t, db, bystander.ID)
 
-	contact := testutil.Contact(t, db, member.ID, testutil.WithContactPhone("+84903335555"))
-	classStart := date("2026-03-01")
-	class := testutil.Class(t, db, member.ID, testutil.WithClassName("WideA"), testutil.WithClassStartDate(classStart))
-	student := testutil.Student(t, db, member.ID, contact.ID, testutil.WithStudentFullName("Wide-student"))
-	enrollment := testutil.Enrollment(t, db, member.ID, student.ID, class.ID, classStart)
-	sess := testutil.Session(t, db, member.ID, class.ID, classStart.AddDate(0, 0, 1),
-		testutil.WithSessionAttendanceConfirmed(time.Now()))
-	testutil.AttendanceRecord(t, db, member.ID, sess.ID, student.ID, enrollment.ID)
-
-	// The period teacher personally holds an unlocking stint elsewhere — the
-	// exact shape where a mask evaluated on the period teacher's scope, not
-	// the caller's, would visibly leak.
-	classB := testutil.Class(t, db, memberB.ID, testutil.WithClassName("WideB"), testutil.WithClassStartDate(classStart))
-	testutil.Enrollment(t, db, memberB.ID, student.ID, classB.ID, classStart)
-	testutil.StaffAssignment(t, db, classB, member.ID, "hoc_vu")
-
-	period, err := billingSvc.EnsurePeriod(ctx, memberScope, 2026, 3)
+	contact := testutil.Contact(t, db, member.ID, testutil.WithContactPhone("+84901234567"))
+	class := seedChild(t, db, member.ID, contact.ID, "Anchor", date("2026-08-01"), 1)
+	period, err := billingSvc.EnsurePeriod(ctx, memberScope, 2026, 8)
 	require.NoError(t, err)
 	_, err = billingSvc.Close(ctx, memberScope, period.ID)
 	require.NoError(t, err)
 
-	// Sanity: the period teacher's own Generate response does carry the phone
-	// (their hoc_vu stint over the student grants it).
-	gen, err := statementsSvc.Generate(ctx, memberScope, period.ID)
+	rows, err := repo.TargetContacts(ctx, memberScope.Self(), ownerScope, period.ID)
 	require.NoError(t, err)
-	require.Len(t, gen.Statements, 1)
-	teacherResp := statementsSvc.ToResponse(memberScope, gen.Statements[0])
-	require.NotNil(t, teacherResp.Phone, "the period teacher's stint unlocks their own view")
+	require.Len(t, rows, 1)
+	require.Equal(t, contact.ID, rows[0].ContactID)
+	require.False(t, rows[0].PhoneVisible, "the row bit is the viewer's stint alone, even for the owner")
+	require.True(t, ownerScope.PhoneVisible(rows[0].PhoneVisible), "the owner is widened above the row")
 
-	wideScope := testutil.ScopeFor(t, db, wideReader.ID)
-	wideScope.Perms = authctx.BuildPermSet(nil, []string{authctx.PermStatementsViewAll}, nil)
-	require.True(t, wideScope.CenterWideFor(authctx.PermStatementsViewAll))
-	require.False(t, wideScope.ReportsOversight())
+	rows, err = repo.TargetContacts(ctx, memberScope.Self(), bystanderScope, period.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "rows follow the anchor, not the viewer")
+	require.Equal(t, contact.ID, rows[0].ContactID)
+	require.False(t, rows[0].PhoneVisible)
+	require.False(t, bystanderScope.PhoneVisible(rows[0].PhoneVisible),
+		"a member with neither oversight nor a stint never sees another teacher's contact phone")
 
-	genWide, err := statementsSvc.Generate(ctx, wideScope, period.ID)
-	require.NoError(t, err, "a center-wide reader may reach Generate on another teacher's period")
-	require.Len(t, genWide.Statements, 1)
-	require.False(t, genWide.Statements[0].PhoneVisible,
-		"phone_visible must be derived for the caller, not the period teacher")
-	wideResp := statementsSvc.ToResponse(wideScope, genWide.Statements[0])
-	require.Nil(t, wideResp.Phone, "no stint and no oversight: the wide reader sees no phone")
-	require.Nil(t, wideResp.URL, "the family URL stays owner/oversight-only")
+	testutil.StaffAssignment(t, db, class, bystander.ID, "hoc_vu")
+	rows, err = repo.TargetContacts(ctx, memberScope.Self(), bystanderScope, period.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.True(t, rows[0].PhoneVisible, "an active hoc_vu stint on the anchor's class opens the phone for that viewer")
+
+	rows, err = repo.TargetContacts(ctx, ownerScope.Self(), ownerScope, period.ID)
+	require.NoError(t, err)
+	require.Empty(t, rows, "the anchor decides whose invoices are targeted")
 }
