@@ -185,6 +185,8 @@ export const classSchema = z.object({
   schedules: z.array(scheduleSchema),
   created_at: z.string(),
   my_staff_roles: z.array(z.string()).default([]),
+  /** Open enrollments on the class — what `GET /enrollments?active=true` lists. */
+  student_count: z.number().int().nonnegative().default(0),
 });
 
 export type Class = z.infer<typeof classSchema>;

@@ -13404,6 +13404,10 @@ const docTemplate = `{
                 "status": {
                     "type": "string"
                 },
+                "student_count": {
+                    "description": "StudentCount is the number of enrollments still open on the class\n(ended_on IS NULL, not deleted) — the same predicate GET /enrollments\napplies for active=true, so a picker showing this count matches the\nrows that endpoint lists. Like MyStaffRoles it is filled only by the\nreadable GET paths; every other producer leaves it 0.",
+                    "type": "integer"
+                },
                 "teacher_id": {
                     "type": "string"
                 }

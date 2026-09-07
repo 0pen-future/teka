@@ -121,7 +121,11 @@ Two layers, two runners:
   `scrollIntoView`, pointer capture). Render through `renderWithProviders`
   from `src/test/utils.tsx` — it wires a fresh QueryClient, theme provider,
   memory router, and toaster; `signInAs(testAdmin | testUser)` seeds the auth
-  store. List pages must cover the loading/empty/error/data quartet.
+  store. List pages must cover the loading/empty/error/data quartet. The
+  setup shim answers every `matchMedia` query with `matches: false`; call
+  `mockViewport(width)` from `src/test/viewport.ts` when a test needs a
+  `useMediaQuery` breakpoint (phone sheet vs. popover, compact rows) to
+  resolve for a given width.
 - **End-to-end tests** — Playwright against a running stack
   (`make e2e` / `npm run e2e`), specs in `e2e/*.spec.ts`. Expects the app on
   localhost:5173 (override with `E2E_BASE_URL`) backed by the API with seeded

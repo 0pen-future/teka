@@ -198,6 +198,16 @@ func (f *fakeRepository) CountOpenEnrollments(_ context.Context, _ authctx.Scope
 	return f.openEnrollments[classID], nil
 }
 
+func (f *fakeRepository) CountActiveEnrollmentsByClass(_ context.Context, _ authctx.Scope, classIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
+	out := map[uuid.UUID]int64{}
+	for _, classID := range classIDs {
+		if n := f.openEnrollments[classID]; n > 0 {
+			out[classID] = n
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeRepository) AddSchedule(_ context.Context, s *Schedule) error {
 	f.schedules[s.ID] = &fakeSchedule{Schedule: *s}
 	return nil

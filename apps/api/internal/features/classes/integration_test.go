@@ -10,12 +10,14 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/classes"
 	"teka/apps/api/internal/features/classstaff"
+	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
@@ -252,6 +254,92 @@ func TestDeleteBlockedByOpenEnrollmentThenAllowed(t *testing.T) {
 		"UPDATE enrollments SET ended_on = ? WHERE id = ?", date("2026-02-01"), enrollmentID,
 	).Error)
 	require.NoError(t, svc.Delete(ctx, sc, created.ID))
+}
+
+// StudentCounts must agree with what GET /enrollments?active=true lists for
+// the class — the two feed the same screen — so an ended enrollment drops
+// out of the count and a class with no enrollments reads 0.
+func TestStudentCountsMatchActiveEnrollments(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
+	contact := testutil.Contact(t, db, teacher.ID)
+
+	withStudents, err := svc.Create(ctx, sc, createRequest())
+	require.NoError(t, err)
+	emptyReq := createRequest()
+	emptyReq.Name = "Văn 9"
+	empty, err := svc.Create(ctx, sc, emptyReq)
+	require.NoError(t, err)
+
+	for i, endedOn := range []*time.Time{nil, nil, ptrTime(date("2026-02-01"))} {
+		studentID := id.New()
+		require.NoError(t, db.Exec(
+			"INSERT INTO students (id, teacher_id, center_id, contact_id, full_name) VALUES (?, ?, ?, ?, ?)",
+			studentID, teacher.ID, sc.CenterID, contact.ID, "Bé "+string(rune('A'+i)),
+		).Error)
+		require.NoError(t, db.Exec(
+			"INSERT INTO enrollments (id, teacher_id, center_id, student_id, class_id, unit_price, started_on, ended_on) VALUES (?, ?, ?, ?, ?, 150000, ?, ?)",
+			id.New(), teacher.ID, sc.CenterID, studentID, withStudents.ID, date("2026-01-05"), endedOn,
+		).Error)
+	}
+
+	counts, err := svc.StudentCounts(ctx, sc, []uuid.UUID{withStudents.ID, empty.ID})
+	require.NoError(t, err)
+	require.Equal(t, map[uuid.UUID]int64{withStudents.ID: 2}, counts)
+
+	active := true
+	_, total, err := enrollments.NewRepository(db).List(ctx, sc,
+		enrollments.ListFilter{ClassID: withStudents.ID, Active: &active}, listParams(t))
+	require.NoError(t, err)
+	require.Equal(t, total, counts[withStudents.ID], "count must match the active enrollments list")
+
+	none, err := svc.StudentCounts(ctx, sc, nil)
+	require.NoError(t, err)
+	require.Empty(t, none)
+}
+
+func ptrTime(t time.Time) *time.Time { return &t }
+
+// The count reaches the client, so it follows the enrollments read filter: a
+// member only counts classes they hold a stint on, and enrollments.view_all
+// widens the count exactly as it widens the roster list.
+func TestStudentCountsFollowEnrollmentReadScope(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, db)
+	scOwner := testutil.ScopeFor(t, db, owner.ID)
+	contact := testutil.Contact(t, db, owner.ID)
+
+	staffed := testutil.Class(t, db, owner.ID, testutil.WithClassName("Toán 9"))
+	other := testutil.Class(t, db, owner.ID, testutil.WithClassName("Văn 9"))
+	for _, classID := range []uuid.UUID{staffed.ID, other.ID} {
+		student := testutil.Student(t, db, owner.ID, contact.ID)
+		testutil.Enrollment(t, db, owner.ID, student.ID, classID, date("2026-01-05"))
+	}
+
+	member, _ := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, member.ID, scOwner.CenterID)
+	testutil.StaffAssignment(t, db, staffed, member.ID, "tro_giang")
+	ids := []uuid.UUID{staffed.ID, other.ID}
+
+	scMember := testutil.ScopeFor(t, db, member.ID)
+	counts, err := svc.StudentCounts(ctx, scMember, ids)
+	require.NoError(t, err)
+	require.Equal(t, map[uuid.UUID]int64{staffed.ID: 1}, counts,
+		"a member must not learn the headcount of a class they cannot list")
+
+	scMember.Perms = authctx.BuildPermSet(nil, []string{authctx.PermEnrollmentsViewAll}, nil)
+	widened, err := svc.StudentCounts(ctx, scMember, ids)
+	require.NoError(t, err)
+	require.Equal(t, map[uuid.UUID]int64{staffed.ID: 1, other.ID: 1}, widened)
+
+	all, err := svc.StudentCounts(ctx, scOwner, ids)
+	require.NoError(t, err)
+	require.Equal(t, widened, all)
 }
 
 // A teacher from a different center is refused on every operation with 404,

@@ -45,6 +45,10 @@ type Repository interface {
 	Archive(ctx context.Context, sc authctx.Scope, id uuid.UUID) error
 	SoftDelete(ctx context.Context, sc authctx.Scope, id uuid.UUID) error
 	CountOpenEnrollments(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (int64, error)
+	// CountActiveEnrollmentsByClass is CountOpenEnrollments over a page of
+	// class ids in one grouped query, keyed by class id (absent key = 0),
+	// narrowed to the enrollments the caller could list.
+	CountActiveEnrollmentsByClass(ctx context.Context, sc authctx.Scope, classIDs []uuid.UUID) (map[uuid.UUID]int64, error)
 
 	AddSchedule(ctx context.Context, s *Schedule) error
 	GetSchedule(ctx context.Context, sc authctx.Scope, classID, scheduleID uuid.UUID) (*Schedule, error)
@@ -157,6 +161,21 @@ func (r *gormRepository) readScopedSchedules(ctx context.Context, sc authctx.Sco
 // writeScopedSchedules is scoped's counterpart for the class_schedules table:
 // the owner reaches every row, a member only the rows anchored to them. A
 // visibility key never widens it.
+// readScopedEnrollments mirrors the enrollments feature's read port — own
+// rows, rows on any class the caller holds a class_staff stint on, and the
+// whole center under enrollments.view_all — so a headcount surfaced from this
+// feature never exceeds what the roster list would show the same caller.
+func (r *gormRepository) readScopedEnrollments(ctx context.Context, sc authctx.Scope) *gorm.DB {
+	q := database.FromContext(ctx, r.db).Table("enrollments").
+		Where("enrollments.center_id = ?", sc.CenterID)
+	if !sc.CenterWideFor(authctx.PermEnrollmentsViewAll) {
+		frag, _ := classscope.ReadExists("enrollments.class_id")
+		q = q.Where("(enrollments.teacher_id = ? OR "+frag+")",
+			sc.TeacherID, sc.TeacherID, sc.CenterID)
+	}
+	return q
+}
+
 func (r *gormRepository) writeScopedSchedules(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("class_schedules.center_id = ?", sc.CenterID)
 	if !sc.WriteWide() {
@@ -301,6 +320,36 @@ func (r *gormRepository) CountOpenEnrollments(ctx context.Context, sc authctx.Sc
 		Where("center_id = ? AND class_id = ? AND ended_on IS NULL AND deleted_at IS NULL", sc.CenterID, classID).
 		Count(&n).Error
 	return n, err
+}
+
+// CountActiveEnrollmentsByClass applies CountOpenEnrollments' predicate
+// (ended_on IS NULL, not deleted — what GET /enrollments?active=true lists)
+// across every id at once so a class page never counts per row. The count
+// is returned to the client, so unlike CountOpenEnrollments it follows the
+// enrollments read filter: a member without enrollments.view_all only counts
+// rows they own or hold a class_staff stint on, and never learns a headcount
+// they could not list.
+func (r *gormRepository) CountActiveEnrollmentsByClass(ctx context.Context, sc authctx.Scope, classIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
+	counts := make(map[uuid.UUID]int64, len(classIDs))
+	if len(classIDs) == 0 {
+		return counts, nil
+	}
+	var rows []struct {
+		ClassID uuid.UUID
+		N       int64
+	}
+	err := r.readScopedEnrollments(ctx, sc).
+		Select("enrollments.class_id, COUNT(*) AS n").
+		Where("enrollments.class_id IN ? AND enrollments.ended_on IS NULL AND enrollments.deleted_at IS NULL", classIDs).
+		Group("enrollments.class_id").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		counts[row.ClassID] = row.N
+	}
+	return counts, nil
 }
 
 func (r *gormRepository) AddSchedule(ctx context.Context, s *Schedule) error {

@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chọn lớp & tìm học sinh</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* ---- design tokens (mirrors apps/web/src/styles/tokens) ---- */
+:root{
+  --cream-50:#fbfdfb;--cream-100:#f4f8f3;--cream-200:#eaf1ea;--cream-300:#dfe9df;
+  --ink-900:#1c3a31;--ink-700:#27433b;--ink-500:#5b756c;--ink-400:#86998f;--ink-300:#aab9b1;--white:#fff;
+  --mint-50:#e9f7f1;--mint-100:#d3efe3;--mint-200:#a9e0cb;--mint-300:#7fd2b4;--mint-400:#5cc9a7;--mint-500:#3fa888;--mint-600:#2e8d6e;--mint-700:#1f6b53;
+  --sky-50:#eaf5fb;--sky-100:#d6ecf7;--sky-300:#7fc8e8;--sky-500:#2d7aa0;
+  --sun-100:#fff4d6;--sun-200:#ffe6a3;--sun-400:#ffc83d;--sun-600:#b87d00;
+  --coral-100:#ffe7e1;--coral-400:#ff7a66;--coral-600:#b23a28;
+  --line-100:#eef4ee;--line-200:#e2ece2;--line-300:#cfe0d4;
+  --r-xs:8px;--r-sm:12px;--r-md:16px;--r-lg:20px;--r-xl:24px;--r-pill:999px;
+  --sh-sm:0 2px 6px rgba(28,58,49,.08);--sh-md:0 8px 20px -8px rgba(28,58,49,.18);--sh-lg:0 18px 40px -18px rgba(28,58,49,.28);
+  --press-mint:0 5px 0 var(--mint-500);--press-line:0 4px 0 var(--line-300);
+  --font-display:"Baloo 2",system-ui,sans-serif;--font-body:"Nunito",system-ui,sans-serif;
+  --dur:180ms;--ease:cubic-bezier(.2,.8,.2,1);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--cream-100);color:var(--ink-700);font:16px/1.5 var(--font-body)}
+h1,h2,h3,h4{font-family:var(--font-display);color:var(--ink-900);margin:0;line-height:1.2}
+button{font:inherit;cursor:pointer;touch-action:manipulation}
+input{font:inherit}
+:focus-visible{outline:none;box-shadow:0 0 0 4px var(--mint-200)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* ---- brief chrome ---- */
+.wrap{max-width:1180px;margin:0 auto;padding:28px 20px 80px}
+.brief-head{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;justify-content:space-between;margin-bottom:22px}
+.brief-head h1{font-size:30px;font-weight:800}
+.brief-head p{margin:6px 0 0;color:var(--ink-500);max-width:720px}
+.tag{display:inline-block;padding:4px 10px;border-radius:var(--r-pill);font-size:12px;font-weight:800;letter-spacing:.3px;text-transform:uppercase}
+.tag.mint{background:var(--mint-100);color:var(--mint-700)}.tag.sky{background:var(--sky-100);color:var(--sky-500)}.tag.sun{background:var(--sun-100);color:var(--sun-600)}
+.contract{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin:0 0 26px}
+.contract .c{background:#fff;border-radius:var(--r-lg);padding:16px 18px;box-shadow:var(--sh-sm)}
+.contract h3{font-size:12.5px;letter-spacing:.4px;text-transform:uppercase;color:var(--ink-400);margin-bottom:8px}
+.contract ul{margin:0;padding-left:18px;font-size:14px}
+.contract li{margin:3px 0}
+.section{margin-top:36px}
+.section>h2{font-size:24px;font-weight:800;margin-bottom:6px}
+.section>.lead{color:var(--ink-500);margin:0 0 16px;font-size:15px}
+.opt-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0 20px}
+.opt-tab{min-height:44px;padding:0 18px;border:0;border-radius:var(--r-pill);background:#fff;color:var(--ink-500);font-family:var(--font-display);font-weight:800;font-size:14.5px;box-shadow:var(--sh-sm);transition:background var(--dur),color var(--dur),box-shadow var(--dur)}
+.opt-tab[aria-selected=true]{background:var(--mint-400);color:#fff;box-shadow:var(--press-mint)}
+.opt-tab:hover:not([aria-selected=true]){background:var(--cream-100)}
+.panel[hidden]{display:none}
+.states{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px;align-items:center}
+.states span.lbl{font-size:12.5px;font-weight:800;color:var(--ink-400);letter-spacing:.3px;text-transform:uppercase;margin-right:4px}
+.state{min-height:36px;padding:0 12px;border:2px solid var(--line-200);border-radius:var(--r-pill);background:#fff;font-size:13px;font-weight:800;color:var(--ink-500)}
+.state[aria-pressed=true]{border-color:var(--mint-400);color:var(--mint-600);background:var(--mint-50)}
+.stage{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:22px;align-items:start}
+@media (max-width:980px){.stage{grid-template-columns:1fr}}
+.frame{background:var(--cream-100);border:1px solid var(--line-300);border-radius:var(--r-xl);padding:22px;position:relative;overflow:visible;box-shadow:inset 0 0 0 1px #fff}
+.frame-title{position:absolute;top:-11px;left:18px;background:var(--ink-900);color:#fff;font-size:11.5px;font-weight:800;letter-spacing:.4px;padding:3px 10px;border-radius:var(--r-pill)}
+.notes{background:#fff;border-radius:var(--r-lg);padding:16px 18px;box-shadow:var(--sh-sm);position:sticky;top:16px}
+.notes h3{font-size:15px;margin-bottom:10px}
+.notes ol{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:9px}
+.notes li{display:flex;gap:10px;font-size:13.5px;line-height:1.45}
+.notes li b{color:var(--ink-900)}
+.callout,.pin{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;flex:0 0 22px;border-radius:50%;background:var(--sun-400);color:var(--ink-900);font:800 12px/1 var(--font-display)}
+.pin{position:absolute;z-index:5;box-shadow:0 0 0 3px #fff,var(--sh-md);pointer-events:none}
+.mobile-wrap{margin-top:22px;display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start}
+.phone{width:375px;max-width:100%;background:var(--cream-100);border:10px solid var(--ink-900);border-radius:38px;padding:14px 12px 20px;box-shadow:var(--sh-lg)}
+.phone .app{display:flex;flex-direction:column;gap:12px}
+.cmp{width:100%;border-collapse:separate;border-spacing:0;background:#fff;border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--sh-sm);font-size:14px}
+.cmp th,.cmp td{padding:11px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line-100)}
+.cmp th{font-size:12px;letter-spacing:.3px;text-transform:uppercase;color:var(--ink-400);background:var(--cream-50)}
+.cmp td:first-child{font-weight:800;color:var(--ink-900);width:190px}
+.cmp tr:last-child td{border-bottom:0}
+.good{color:var(--mint-600);font-weight:800}.bad{color:var(--coral-600);font-weight:800}.meh{color:var(--sun-600);font-weight:800}
+.reco{background:#fff;border-left:6px solid var(--mint-400);border-radius:var(--r-lg);padding:18px 20px;box-shadow:var(--sh-sm)}
+.reco h3{font-size:18px;margin-bottom:8px}
+code{font:600 13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--cream-200);padding:1px 6px;border-radius:6px;color:var(--ink-900)}
+.flow{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:12px}
+.flow .step{background:#fff;border:2px solid var(--line-200);border-radius:var(--r-md);padding:10px 14px;font-size:13.5px;box-shadow:var(--sh-sm);min-width:150px}
+.flow .step b{display:block;font-family:var(--font-display);color:var(--ink-900);font-size:14px}
+.flow .arr{color:var(--ink-300);font-size:20px}
+
+/* ---- app-like mockup pieces (share hv kit vocabulary) ---- */
+.pg{display:flex;flex-direction:column;gap:14px;font-family:var(--font-body)}
+.pg-head{display:flex;flex-wrap:wrap;align-items:flex-start;gap:12px}
+.pg-head .t{flex:1;min-width:220px}
+.pg-head h1{font-size:26px;font-weight:800}
+.pg-head p{margin:4px 0 0;font-size:14px;color:var(--ink-500)}
+.btn-ghost{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 16px;border:2px solid var(--line-200);border-radius:14px;background:#fff;font-size:13px;font-weight:800;color:var(--ink-700);transition:border-color var(--dur),color var(--dur)}
+.btn-ghost:hover{border-color:var(--mint-400);color:var(--mint-600)}
+.btn-ghost svg{width:16px;height:16px}
+.card{background:#fff;border-radius:var(--r-xl);box-shadow:var(--sh-md);overflow:hidden}
+.table-head,.row{display:grid;grid-template-columns:1fr 100px 80px 110px 70px 96px;gap:8px;align-items:center;padding:9px 20px;border-bottom:1px solid var(--line-100)}
+.table-head{padding:12px 20px;font-size:11.5px;font-weight:800;letter-spacing:.3px;color:var(--ink-400);border-bottom:1.5px solid var(--line-200)}
+.row{font-size:13px;color:var(--ink-500);transition:background var(--dur)}
+.row:hover{background:var(--cream-100)}
+.row .nm{font-size:14px;font-weight:800;color:var(--ink-900)}
+.row .nm mark{background:var(--sun-200);color:var(--ink-900);border-radius:4px;padding:0 1px}
+.row .avg{font-weight:800;color:var(--ink-900)}.row .avg.up{color:var(--mint-600)}.row .avg.dn{color:var(--coral-600)}
+.row .tr{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700}
+.row .tr i{font-style:normal;font-size:16px;font-weight:900}
+.row .tr.up i{color:var(--mint-600)}.row .tr.dn i{color:var(--coral-600)}.row .tr.fl i{color:var(--ink-400)}
+.row .act{justify-self:end;border:2px solid var(--line-200);border-radius:12px;background:#fff;padding:5px 10px;font-size:12.5px;font-weight:800;color:var(--ink-500)}
+.row .act:hover{border-color:var(--mint-400);color:var(--mint-600)}
+.rows{max-height:330px;overflow:auto}
+.empty{padding:30px 20px;text-align:center;color:var(--ink-400);font-size:13.5px}
+.empty b{display:block;color:var(--ink-700);font-size:15px;margin-bottom:6px;font-family:var(--font-display)}
+.empty button{margin-top:10px}
+.skel{height:14px;border-radius:6px;background:linear-gradient(90deg,var(--cream-200),var(--cream-300),var(--cream-200));background-size:200% 100%;animation:sh 1.2s linear infinite}
+@keyframes sh{to{background-position:-200% 0}}
+
+/* field: label above control (visible label, not placeholder-only) */
+.field{display:flex;flex-direction:column;gap:5px}
+.field>label{font-size:11.5px;font-weight:800;letter-spacing:.35px;text-transform:uppercase;color:var(--ink-400)}
+/* Select trigger — mirrors components/ui/select.tsx */
+.sel{position:relative}
+.sel-trig{display:inline-flex;align-items:center;justify-content:space-between;gap:10px;min-height:44px;min-width:230px;padding:0 10px 0 14px;border:2px solid var(--line-200);border-radius:14px;background:#fff;font-size:14.5px;font-weight:800;color:var(--ink-900);transition:border-color var(--dur)}
+.sel-trig:hover{border-color:var(--mint-300)}
+.sel-trig[aria-expanded=true]{border-color:var(--mint-400)}
+.sel-trig .cnt{font-weight:700;color:var(--ink-400);font-size:12.5px;margin-left:2px}
+.sel-trig svg{width:16px;height:16px;color:var(--ink-400);transition:transform var(--dur) var(--ease)}
+.sel-trig[aria-expanded=true] svg{transform:rotate(180deg)}
+.pop{position:absolute;z-index:20;top:calc(100% + 6px);left:0;min-width:100%;width:max-content;max-width:320px;background:#fff;border:2px solid var(--line-200);border-radius:16px;box-shadow:var(--sh-lg);padding:6px;transform-origin:top left;animation:pop var(--dur) var(--ease)}
+@keyframes pop{from{opacity:0;transform:scale(.96) translateY(-4px)}}
+.pop .pf{display:flex;align-items:center;gap:8px;margin:2px 2px 6px;padding:0 10px;min-height:38px;border:2px solid var(--line-200);border-radius:12px;background:var(--cream-50)}
+.pop .pf input{border:0;background:transparent;outline:none;width:100%;font-size:13.5px;font-weight:700;color:var(--ink-700)}
+.pop .pf input::placeholder{color:var(--ink-400)}
+.pop .pf svg{width:14px;height:14px;color:var(--ink-400);flex:0 0 auto}
+.pop .grp{padding:6px 12px 2px;font-size:11px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;color:var(--ink-400)}
+.opt{display:flex;align-items:center;gap:10px;width:100%;min-height:42px;padding:0 12px;border:0;border-radius:11px;background:transparent;text-align:left;font-size:14px;font-weight:700;color:var(--ink-700)}
+.opt:hover,.opt[data-active]{background:var(--cream-100)}
+.opt[aria-selected=true]{color:var(--mint-700);background:var(--mint-50)}
+.opt .ck{width:16px;height:16px;color:var(--mint-600);visibility:hidden;flex:0 0 auto}
+.opt[aria-selected=true] .ck{visibility:visible}
+.opt .n{flex:1}
+.opt .c{font-size:12px;color:var(--ink-400);font-weight:700}
+.pop .none{padding:10px 12px;font-size:13px;color:var(--ink-400);font-weight:700}
+/* search input */
+.search{position:relative;display:flex;align-items:center;min-height:44px;border:2px solid var(--line-200);border-radius:14px;background:#fff;padding:0 8px 0 12px;gap:8px;transition:border-color var(--dur)}
+.search:focus-within{border-color:var(--mint-400)}
+.search svg.ic{width:16px;height:16px;color:var(--ink-400);flex:0 0 auto}
+.search input{flex:1;min-width:0;border:0;outline:none;background:transparent;font-size:14.5px;font-weight:700;color:var(--ink-900)}
+.search input::placeholder{color:var(--ink-400);font-weight:600}
+.search input:focus{box-shadow:none}
+.search .kbd{font:700 11px/1 ui-monospace,monospace;color:var(--ink-400);border:1.5px solid var(--line-200);border-radius:6px;padding:4px 6px;background:var(--cream-50)}
+.search .clr{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border:0;border-radius:10px;background:var(--cream-200);color:var(--ink-500)}
+.search .clr:hover{background:var(--cream-300);color:var(--ink-900)}
+.search .clr svg{width:14px;height:14px}
+.count{font-size:13px;font-weight:800;color:var(--ink-500);white-space:nowrap}
+.count b{color:var(--ink-900)}
+/* toolbar (option A) */
+.toolbar{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px;padding:14px 16px;background:#fff;border-radius:var(--r-lg);box-shadow:var(--sh-sm)}
+.toolbar .field.grow{flex:1 1 260px}
+.toolbar .field.grow .search{width:100%}
+/* option B pieces */
+.switcher{position:relative;display:inline-block}
+.sw-trig{display:inline-flex;align-items:center;gap:10px;min-height:48px;padding:0 14px 0 16px;border:0;border-radius:16px;background:var(--mint-400);color:#fff;font-family:var(--font-display);font-size:18px;font-weight:800;box-shadow:var(--press-mint);transition:transform var(--dur),box-shadow var(--dur)}
+.sw-trig:active,.sw-trig[aria-expanded=true]{transform:translateY(3px);box-shadow:0 2px 0 var(--mint-500)}
+.sw-trig .cnt{font-family:var(--font-body);font-size:12.5px;font-weight:800;background:rgba(255,255,255,.22);padding:3px 8px;border-radius:var(--r-pill)}
+.sw-trig svg{width:18px;height:18px}
+.card-bar{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:12px 16px;border-bottom:1.5px solid var(--line-200);background:var(--cream-50)}
+.card-bar .search{flex:1 1 240px;min-height:40px;border-radius:12px}
+.card-bar .ttl{font-family:var(--font-display);font-size:15px;font-weight:800;color:var(--ink-900)}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{min-height:32px;padding:0 12px;border:0;border-radius:var(--r-pill);background:var(--cream-200);color:var(--ink-500);font-size:12.5px;font-weight:800}
+.chip[aria-pressed=true]{background:var(--mint-100);color:var(--mint-700)}
+/* mobile overrides inside phone */
+.phone .table-head{display:none}
+.phone .row{grid-template-columns:1fr auto;padding:10px 14px;row-gap:2px}
+.phone .row .nm{grid-column:1;grid-row:1}
+.phone .row .sub{grid-column:1;grid-row:2;font-size:12px;color:var(--ink-500)}
+.phone .row .act{grid-column:2;grid-row:1/span 2;align-self:center}
+.phone .toolbar{padding:12px}
+.phone .sel-trig{width:100%}
+.phone .sw-trig{width:100%;justify-content:space-between}
+.phone .pg-head h1{font-size:22px}
+.phone .card-bar{padding:10px 12px}
+.phone .rows{max-height:260px}
+.dim{opacity:.35;pointer-events:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="brief-head">
+    <div>
+      <span class="tag mint">Brainstorm · UI options</span>
+      <h1 style="margin-top:8px">Hồ sơ học sinh — chọn lớp bằng dropdown, tìm học sinh</h1>
+      <p>Hai phương án bố cục cho thanh chọn lớp và ô tìm học sinh trên trang <b>Hồ sơ học sinh</b> (<code>/records</code>). Mockup dùng đúng token của hv kit: nền cream, thẻ trắng bo 24px, mint làm primary, Baloo 2 / Nunito. Bấm thử: dropdown mở/đóng, ô tìm lọc bảng ngay, không dấu vẫn khớp có dấu.</p>
+    </div>
+    <div style="font-size:12.5px;color:var(--ink-400);text-align:right">plans/reports · 2026-09-07<br>Tệp tĩnh, không cần build</div>
+  </header>
+
+  <section class="contract" aria-label="Brainstorm contract">
+    <div class="c"><h3>Outcome</h3><ul><li>Hàng pill lớp được thay bằng <b>một dropdown chọn lớp</b> (luôn hiện, kể cả ≤5 lớp).</li><li>Có <b>ô tìm học sinh</b> lọc bảng theo tên ngay khi gõ.</li></ul></div>
+    <div class="c"><h3>Constraints</h3><ul><li>Giữ <code>?class_id=</code> trên URL; thêm <code>?q=</code> để deep-link / back giữ trạng thái.</li><li>Tái dùng <code>Select</code> (Radix) trong <code>components/ui</code> và hv kit; không thêm thư viện.</li><li>Lọc client-side trên danh sách đã tải (≤100 học sinh/lớp).</li></ul></div>
+    <div class="c"><h3>Non-goals</h3><ul><li>Không đổi cột bảng, CSV, hay trang chi tiết <code>/records/:id</code>.</li><li>Không tìm học sinh xuyên lớp (search toàn trung tâm).</li><li>Không đụng Điểm danh / Lớp &amp; học sinh (vẫn dùng pill).</li></ul></div>
+    <div class="c"><h3>Acceptance</h3><ul><li>Chọn lớp trong dropdown → bảng đổi, URL cập nhật, bàn phím ↑↓ Enter Esc hoạt động.</li><li>Gõ "nguyen" khớp "Nguyễn"; có trạng thái rỗng kèm nút xoá tìm kiếm.</li><li>Mobile 375px không tràn ngang, mọi target ≥44px.</li></ul></div>
+  </section>
+
+  <section class="section">
+    <h2>Hai phương án</h2>
+    <p class="lead">Cùng dữ liệu, cùng hành vi lọc — khác ở <b>vị trí và trọng lượng thị giác</b> của hai control. Đổi trạng thái để xem dropdown mở, đang tìm, không có kết quả, đang tải.</p>
+    <div class="opt-tabs" role="tablist" aria-label="Phương án">
+      <button class="opt-tab" role="tab" aria-selected="true" data-opt="a">A · Thanh bộ lọc (Toolbar)</button>
+      <button class="opt-tab" role="tab" aria-selected="false" data-opt="b">B · Bộ chuyển lớp trên tiêu đề</button>
+    </div>
+
+    <!-- ================= OPTION A ================= -->
+    <div class="panel" id="panel-a" role="tabpanel">
+      <div class="states" data-for="a"><span class="lbl">Trạng thái</span>
+        <button class="state" aria-pressed="true" data-state="default">Mặc định</button>
+        <button class="state" aria-pressed="false" data-state="open">Dropdown mở</button>
+        <button class="state" aria-pressed="false" data-state="typing">Đang tìm "ng"</button>
+        <button class="state" aria-pressed="false" data-state="empty">Không có kết quả</button>
+        <button class="state" aria-pressed="false" data-state="loading">Đang tải lớp</button>
+      </div>
+      <div class="stage">
+        <div class="frame" id="frame-a"><span class="frame-title">DESKTOP ≥1024 · vùng nội dung</span>
+          <div class="pg" data-mock="a"></div>
+        </div>
+        <aside class="notes">
+          <h3>Ghi chú thiết kế · A</h3>
+          <ol>
+            <li><span class="callout">1</span><div><b>Thanh bộ lọc riêng</b> nằm giữa tiêu đề và bảng: một hàng, nhãn hiện rõ (LỚP / TÌM HỌC SINH), không dùng placeholder làm nhãn.</div></li>
+            <li><span class="callout">2</span><div><b>Dropdown lớp</b> = <code>Select</code> Radix hiện có (trigger 44px, bo 14px, viền line-200 → mint-400 khi mở). Mỗi mục kèm sĩ số; dấu ✓ mint cho lớp đang chọn.</div></li>
+            <li><span class="callout">3</span><div><b>Ô lọc lớp trong popover</b> chỉ xuất hiện khi &gt;5 lớp — giữ nguyên ngưỡng của <code>useClassSearch</code>, chỉ đổi chỗ đứng.</div></li>
+            <li><span class="callout">4</span><div><b>Ô tìm học sinh</b> chiếm phần còn lại, có icon kính lúp, phím tắt <code>/</code>, nút × xoá. Lọc ngay khi gõ (không cần Enter), bỏ dấu tiếng Việt khi so khớp.</div></li>
+            <li><span class="callout">5</span><div><b>Bộ đếm "12 / 28"</b> cập nhật live (aria-live=polite), tô đậm phần trùng trong tên bằng sun-200.</div></li>
+            <li><span class="callout">6</span><div><b>Trạng thái rỗng</b> nêu rõ nguyên nhân + lối thoát ("Xoá tìm kiếm"), phân biệt với "Lớp chưa có học sinh".</div></li>
+          </ol>
+        </aside>
+      </div>
+      <div class="mobile-wrap">
+        <div class="phone"><div class="app pg" data-mock="a-mobile"></div></div>
+        <div class="notes" style="position:static;max-width:420px">
+          <h3>Mobile &lt;768</h3>
+          <ol>
+            <li><span class="callout">7</span><div>Toolbar xếp dọc: dropdown full-width trên, ô tìm dưới. Không cần thu gọn vì chỉ có 2 control.</div></li>
+            <li><span class="callout">8</span><div>Popover chọn lớp thành <b>bottom sheet</b> (như <code>HvModal</code> dưới <code>sm</code>) để danh sách dài cuộn thoải mái.</div></li>
+            <li><span class="callout">9</span><div>Hàng học sinh gộp thành 2 dòng: tên + "TB 8.2 · ↑ Tăng · vắng 1", nút "Xem" bên phải — không cuộn ngang.</div></li>
+          </ol>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= OPTION B ================= -->
+    <div class="panel" id="panel-b" role="tabpanel" hidden>
+      <div class="states" data-for="b"><span class="lbl">Trạng thái</span>
+        <button class="state" aria-pressed="true" data-state="default">Mặc định</button>
+        <button class="state" aria-pressed="false" data-state="open">Dropdown mở</button>
+        <button class="state" aria-pressed="false" data-state="typing">Đang tìm "ng"</button>
+        <button class="state" aria-pressed="false" data-state="empty">Không có kết quả</button>
+        <button class="state" aria-pressed="false" data-state="loading">Đang tải lớp</button>
+      </div>
+      <div class="stage">
+        <div class="frame" id="frame-b"><span class="frame-title">DESKTOP ≥1024 · vùng nội dung</span>
+          <div class="pg" data-mock="b"></div>
+        </div>
+        <aside class="notes">
+          <h3>Ghi chú thiết kế · B</h3>
+          <ol>
+            <li><span class="callout">1</span><div><b>Lớp là ngữ cảnh của cả trang</b>, nên bộ chuyển lớp đứng cạnh tiêu đề như một nút mint "press" (kiểu <code>HvButton primary</code>): tên lớp to, sĩ số dạng badge, mũi tên ▾.</div></li>
+            <li><span class="callout">2</span><div><b>Popover</b> giống A (Radix Select, ô lọc khi &gt;5 lớp) nhưng nhóm theo khối: "Đang dạy" / "Lớp khác" nếu sau này cần.</div></li>
+            <li><span class="callout">3</span><div><b>Ô tìm nằm trong header của thẻ bảng</b>, cùng hàng với "Danh sách · 28 học sinh" — control gắn thẳng với dữ liệu nó lọc, không có thanh trung gian.</div></li>
+            <li><span class="callout">4</span><div><b>Chip lọc nhanh</b> (Tất cả / Cần lưu ý / Vắng nhiều) đứng cạnh ô tìm — <em>tuỳ chọn</em>, ngoài scope hiện tại nhưng bố cục đã chừa chỗ.</div></li>
+            <li><span class="callout">5</span><div>Tiêu đề trang hạ xuống 1 dòng mô tả; nút CSV giữ nguyên bên phải nhưng không còn cạnh tranh với control chính.</div></li>
+            <li><span class="callout">6</span><div><b>Đổi lớp</b> làm cả header thẻ và bộ đếm đổi theo; ô tìm được giữ nguyên query (URL <code>?q=</code>) để so sánh cùng tên qua các lớp.</div></li>
+          </ol>
+        </aside>
+      </div>
+      <div class="mobile-wrap">
+        <div class="phone"><div class="app pg" data-mock="b-mobile"></div></div>
+        <div class="notes" style="position:static;max-width:420px">
+          <h3>Mobile &lt;768</h3>
+          <ol>
+            <li><span class="callout">7</span><div>Nút chuyển lớp full-width ngay dưới tiêu đề — ngón cái với tới, đây là thao tác đầu tiên mỗi lần vào trang.</div></li>
+            <li><span class="callout">8</span><div>Ô tìm dính vào đầu thẻ bảng (sticky khi cuộn danh sách dài), chip lọc nhanh ẩn dưới 375px.</div></li>
+            <li><span class="callout">9</span><div>Nút CSV rơi xuống dưới bảng dưới dạng ghost button — xuất file là việc hiếm trên điện thoại.</div></li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>So sánh</h2>
+    <p class="lead">Chấm theo trường hợp xấu nhất chứ không chỉ tình huống đẹp.</p>
+    <div style="overflow-x:auto">
+    <table class="cmp">
+      <thead><tr><th>Tiêu chí</th><th>A · Toolbar</th><th>B · Bộ chuyển lớp trên tiêu đề</th></tr></thead>
+      <tbody>
+        <tr><td>Nhận ra ngay "đang xem lớp nào"</td><td class="meh">Khá — trigger nhỏ, cùng cỡ với ô tìm</td><td class="good">Rất rõ — tên lớp to cạnh tiêu đề, không nhầm</td></tr>
+        <tr><td>Nhất quán với Điểm danh / Lớp &amp; học sinh (vẫn dùng pill)</td><td class="good">Gần hơn: control chuẩn, cùng hàng như hàng pill cũ</td><td class="meh">Lệch pattern: 1 trang có "switcher" riêng — cần lý do rõ</td></tr>
+        <tr><td>Khả năng tái dùng</td><td class="good">Toolbar + Select có thể copy sang Sổ điểm, Điểm danh khi số lớp lớn</td><td class="meh">Switcher trên tiêu đề khó chuyển sang trang có nhiều bộ lọc</td></tr>
+        <tr><td>Mở rộng thêm bộ lọc (trạng thái, xu hướng, sort)</td><td class="good">Thêm field vào toolbar, tự xuống dòng</td><td class="good">Chip trong header thẻ; đã chừa chỗ</td></tr>
+        <tr><td>Số lớp lớn (&gt;20)</td><td class="good">Ô lọc trong popover</td><td class="good">Ô lọc trong popover</td></tr>
+        <tr><td>Mobile — số lần chạm để đổi lớp và tìm</td><td class="good">2 control xếp dọc, không cuộn</td><td class="good">Nút to, ô tìm sticky theo bảng</td></tr>
+        <tr><td>Nguy cơ thất bại sớm nhất</td><td>Toolbar thêm 1 lớp thẻ trắng → trang "3 tầng thẻ", hơi nặng nếu bảng ngắn</td><td>Nút mint press cạnh h1 lấn vai trò CTA chính; CSV và Xem hồ sơ bị chìm</td></tr>
+        <tr><td>Chi phí triển khai</td><td class="good">Thấp — Select + input + hook lọc</td><td class="meh">Thấp-vừa — thêm biến thể trigger (mint, badge), header thẻ mới</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="reco">
+      <h3>Đề xuất: đi với A, mượn một chi tiết của B</h3>
+      <p style="margin:0 0 8px">A là phương án nhỏ nhất thoả contract và dễ chuyển sang trang khác khi số lớp tăng. Chi tiết nên mượn từ B: <b>hiện sĩ số trong trigger</b> ("Lớp 3A · 28 HS") để người dùng nhận ra ngữ cảnh mà không cần mở dropdown. Nếu sau khi dùng thử thấy giáo viên hay nhầm lớp, nâng cấp trigger lên biến thể B mà không đổi cấu trúc trang.</p>
+      <p style="margin:0;color:var(--ink-500);font-size:14px">Giả định nặng nhất: lọc client-side là đủ vì mỗi lớp ≤100 học sinh (<code>per_page: 100</code>). Nếu sau này có lớp vượt ngưỡng, ô tìm chuyển sang gọi API với debounce — bố cục không đổi.</p>
+    </div>
+    <h3 style="margin-top:22px;font-size:17px">Luồng triển khai (chung cho A và B)</h3>
+    <div class="flow">
+      <div class="step"><b>1 · Hook lọc</b>useStudentSearch(rows, q) — normalize NFD, bỏ dấu, lowercase; dùng chung normalizeVi với useClassSearch</div><span class="arr">→</span>
+      <div class="step"><b>2 · URL state</b>?class_id= (đã có) + ?q= với replace:true; back/forward giữ nguyên bộ lọc</div><span class="arr">→</span>
+      <div class="step"><b>3 · ClassSelect</b>bọc Select Radix: item = tên + sĩ số, ô lọc khi &gt;5 lớp, bottom sheet dưới sm</div><span class="arr">→</span>
+      <div class="step"><b>4 · RecordsToolbar</b>(A) hoặc RecordsCardBar (B) trong features/teaching/components</div><span class="arr">→</span>
+      <div class="step"><b>5 · Bảng</b>nhận rows đã lọc + query để &lt;mark&gt;; 2 empty state riêng</div><span class="arr">→</span>
+      <div class="step"><b>6 · Test</b>records-pages.test.tsx: chọn lớp đổi URL; "nguyen" khớp "Nguyễn"; empty + clear; e2e mobile 375</div>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>Câu hỏi còn mở</h2>
+    <ul style="font-size:15px;line-height:1.6">
+      <li>Dropdown có nên <b>thay pill ở cả Điểm danh và Lớp &amp; học sinh</b> để đồng bộ, hay chỉ trang này (như yêu cầu)? Đề xuất: chỉ trang này trước, đo lại.</li>
+      <li>Chip lọc nhanh (Cần lưu ý / Vắng nhiều) ở B có đáng đưa vào scope lần này không? Mặc định: không.</li>
+      <li>Khi đổi lớp có <b>giữ query tìm kiếm</b> hay xoá? Mockup giữ (hữu ích khi tìm một em học 2 lớp); có thể đổi ở 1 dòng.</li>
+    </ul>
+  </section>
+</div>
+
+<script>
+(function(){
+  var CLASSES=[
+    {id:'c1',name:'Lớp 3A',count:28},{id:'c2',name:'Lớp 3B',count:25},{id:'c3',name:'Lớp 4A',count:30},
+    {id:'c4',name:'Lớp 5A',count:22},{id:'c5',name:'Lớp 5B',count:19},{id:'c6',name:'Toán nâng cao',count:12},{id:'c7',name:'Tiếng Anh 1',count:16}
+  ];
+  var STUDENTS=[
+    ['Nguyễn Minh Anh',8.6,'up','Tăng',0],['Trần Gia Bảo',7.2,'fl','Ổn định',1],['Lê Ngọc Châu',9.1,'up','Tăng',0],
+    ['Phạm Đức Duy',6.1,'dn','Giảm',3],['Hoàng Thu Hà',8.0,'fl','Ổn định',0],['Vũ Quang Huy',5.8,'dn','Giảm',2],
+    ['Đặng Khánh Linh',8.9,'up','Tăng',0],['Bùi Nhật Nam',7.5,'up','Tăng',1],['Ngô Bảo Ngọc',null,'fl','Chưa có điểm',0],
+    ['Đỗ Thanh Phong',6.9,'fl','Ổn định',0],['Lý Phương Quỳnh',9.4,'up','Tăng',0],['Mai Tuấn Sơn',6.4,'dn','Giảm',4]
+  ];
+  var ICON={
+    chev:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',
+    check:'<svg class="ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
+    search:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>',
+    x:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+    dl:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>'
+  };
+  function norm(s){return s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').replace(/Đ/g,'D').toLowerCase();}
+  function esc(s){return s.replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
+  function hl(name,q){
+    if(!q) return esc(name);
+    var n=norm(name), i=n.indexOf(norm(q));
+    if(i<0) return esc(name);
+    return esc(name.slice(0,i))+'<mark>'+esc(name.slice(i,i+q.length))+'</mark>'+esc(name.slice(i+q.length));
+  }
+  function rowsHtml(q,mobile){
+    var list=STUDENTS.filter(function(s){return !q||norm(s[0]).indexOf(norm(q))>=0;});
+    if(!list.length){
+      return {n:0,html:'<div class="empty"><b>Không tìm thấy học sinh nào khớp “'+esc(q)+'”</b>Thử gõ ít ký tự hơn hoặc kiểm tra lại họ tên.<br><button class="btn-ghost" data-clear>'+ICON.x.replace('<svg','<svg style="width:14px;height:14px"')+' Xoá tìm kiếm</button></div>'};
+    }
+    var h=list.map(function(s){
+      var avg=s[1]===null?'—':s[1].toFixed(1), cls=s[1]===null?'':(s[1]>=8?'up':(s[1]<6.5?'dn':''));
+      var arr=s[2]==='up'?'↗':(s[2]==='dn'?'↘':'→');
+      if(mobile){
+        return '<div class="row"><div class="nm">'+hl(s[0],q)+'</div><button class="act">Xem</button><div class="sub">TB <b class="avg '+cls+'">'+avg+'</b> · '+arr+' '+s[3]+' · vắng '+s[4]+'</div></div>';
+      }
+      return '<div class="row"><div class="nm">'+hl(s[0],q)+'</div><div>—</div><div class="avg '+cls+'">'+avg+'</div><div class="tr '+s[2]+'"><i>'+arr+'</i>'+s[3]+'</div><div>'+(s[4]>0?s[4]+' buổi':'0')+'</div><button class="act">Xem hồ sơ</button></div>';
+    }).join('');
+    return {n:list.length,html:h};
+  }
+  function popHtml(sel,filter,showFilter){
+    var f=filter||'';
+    var items=CLASSES.filter(function(c){return !f||norm(c.name).indexOf(norm(f))>=0;});
+    var h='';
+    if(showFilter) h+='<div class="pf">'+ICON.search.replace('class="ic"','')+'<input type="search" placeholder="Tìm lớp…" aria-label="Tìm lớp" value="'+esc(f)+'" data-pf></div>';
+    h+='<div class="grp">Lớp đang dạy</div>';
+    if(!items.length) h+='<div class="none">Không có lớp nào khớp “'+esc(f)+'”</div>';
+    h+=items.map(function(c){return '<button class="opt" role="option" aria-selected="'+(c.id===sel)+'" data-id="'+c.id+'">'+ICON.check+'<span class="n">'+esc(c.name)+'</span><span class="c">'+c.count+' HS</span></button>';}).join('');
+    return h;
+  }
+  function searchHtml(q,ph){
+    return ICON.search+'<input type="search" aria-label="Tìm học sinh" placeholder="'+ph+'" value="'+esc(q)+'" data-q>'+(q?'<button class="clr" aria-label="Xoá tìm kiếm" data-clear>'+ICON.x+'</button>':'<span class="kbd">/</span>');
+  }
+  function tableHtml(q,mobile,loading){
+    if(loading){
+      var sk='';for(var i=0;i<5;i++){sk+='<div class="row"><div class="skel" style="width:'+(120+i*17)+'px"></div><div class="skel" style="width:30px"></div><div class="skel" style="width:34px"></div><div class="skel" style="width:70px"></div><div class="skel" style="width:24px"></div><div></div></div>';}
+      return {n:0,html:(mobile?'':'<div class="table-head"><div>HỌC SINH</div><div>NGÀY SINH</div><div>ĐIỂM TB</div><div>XU HƯỚNG</div><div>VẮNG</div><div></div></div>')+'<div class="rows">'+sk+'</div>'};
+    }
+    var r=rowsHtml(q,mobile);
+    return {n:r.n,html:(mobile?'':'<div class="table-head"><div>HỌC SINH</div><div>NGÀY SINH</div><div>ĐIỂM TB</div><div>XU HƯỚNG</div><div>VẮNG</div><div></div></div>')+'<div class="rows">'+r.html+'</div>'};
+  }
+  var TOTAL=STUDENTS.length;
+
+  function makeMock(root,variant,mobile){
+    var st={sel:'c1',q:'',open:false,pf:'',loading:false};
+    function cur(){for(var i=0;i<CLASSES.length;i++)if(CLASSES[i].id===st.sel)return CLASSES[i];}
+    function render(){
+      var t=tableHtml(st.q,mobile,st.loading), c=cur();
+      var count='<span class="count" aria-live="polite">'+(st.q?'<b>'+t.n+'</b> / '+TOTAL:'<b>'+TOTAL+'</b>')+' học sinh</span>';
+      var h='';
+      if(variant==='a'){
+        h+='<div class="pg-head"><div class="t"><h1>Hồ sơ học sinh</h1><p>Điểm từng buổi và xu hướng — bằng chứng để trao đổi với phụ huynh.</p></div>'+(mobile?'':'<button class="btn-ghost">'+ICON.dl+' Tải danh sách (CSV)</button>')+'</div>';
+        h+='<div class="toolbar" style="position:relative">'+(mobile?'':'<span class="pin" style="left:-11px;top:-11px">1</span><span class="pin" style="left:150px;top:-11px">2</span><span class="pin" style="right:-11px;top:-11px">4</span>')+
+           '<div class="field" style="'+(mobile?'width:100%':'')+'"><label>Lớp</label><div class="sel">'+
+           '<button class="sel-trig" aria-haspopup="listbox" aria-expanded="'+st.open+'" data-trig><span>'+esc(c.name)+' <span class="cnt">· '+c.count+' HS</span></span>'+ICON.chev+'</button>'+
+           (st.open?'<div class="pop" role="listbox" aria-label="Chọn lớp">'+(mobile?'':'<span class="pin" style="right:-11px;top:8px">3</span>')+popHtml(st.sel,st.pf,CLASSES.length>5)+'</div>':'')+
+           '</div></div>'+
+           '<div class="field grow"><label>Tìm học sinh</label><div class="search">'+searchHtml(st.q,'Gõ tên học sinh…')+'</div></div>'+
+           (mobile?'':'<div class="field" style="position:relative"><label>&nbsp;</label><div style="min-height:44px;display:flex;align-items:center">'+count+'<span class="pin" style="right:-16px;top:6px">5</span></div></div>')+
+           '</div>';
+        h+='<div class="card" style="position:relative">'+(!mobile&&t.n===0&&!st.loading?'<span class="pin" style="left:50%;top:58px">6</span>':'')+t.html+'</div>';
+        if(mobile) h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:0 4px">'+count+'<button class="btn-ghost" style="min-height:40px">'+ICON.dl+' CSV</button></div>';
+      } else {
+        h+='<div class="pg-head" style="position:relative">'+(mobile?'':'<span class="pin" style="right:-11px;top:-11px">5</span>')+
+           '<div class="t"><h1>Hồ sơ học sinh</h1><p>Điểm từng buổi và xu hướng — bằng chứng để trao đổi với phụ huynh.</p></div>'+
+           (mobile?'':'<button class="btn-ghost">'+ICON.dl+' Tải danh sách (CSV)</button>')+'</div>';
+        h+='<div class="switcher" style="'+(mobile?'width:100%':'')+'">'+(mobile?'':'<span class="pin" style="left:-11px;top:-11px">1</span>')+
+           '<button class="sw-trig" aria-haspopup="listbox" aria-expanded="'+st.open+'" data-trig><span style="font-family:var(--font-body);font-size:12px;font-weight:800;opacity:.85;letter-spacing:.3px">LỚP</span><span>'+esc(c.name)+'</span><span class="cnt">'+c.count+' HS</span>'+ICON.chev+'</button>'+
+           (st.open?'<div class="pop" role="listbox" aria-label="Chọn lớp" style="min-width:280px">'+(mobile?'':'<span class="pin" style="right:-11px;top:8px">2</span>')+popHtml(st.sel,st.pf,CLASSES.length>5)+'</div>':'')+
+           '</div>';
+        h+='<div class="card" style="position:relative">'+
+           '<div class="card-bar">'+(mobile?'':'<span class="pin" style="left:-11px;top:-11px">3</span><span class="pin" style="right:-11px;top:-11px">4</span>')+
+           '<span class="ttl">Danh sách</span>'+count+
+           '<div class="search">'+searchHtml(st.q,'Tìm học sinh…')+'</div>'+
+           (mobile?'':'<div class="chips" aria-label="Lọc nhanh (tuỳ chọn)"><button class="chip" aria-pressed="true">Tất cả</button><button class="chip" aria-pressed="false">Cần lưu ý</button><button class="chip" aria-pressed="false">Vắng nhiều</button></div>')+
+           '</div>'+(!mobile&&st.q?'<span class="pin" style="left:50%;top:70px">6</span>':'')+t.html+'</div>';
+        if(mobile) h+='<button class="btn-ghost" style="align-self:flex-start;min-height:40px">'+ICON.dl+' Tải CSV</button>';
+      }
+      root.innerHTML=h;
+      var trig=root.querySelector('[data-trig]');
+      if(trig) trig.addEventListener('click',function(){st.open=!st.open;st.pf='';render();if(st.open){var pf=root.querySelector('[data-pf]');if(pf)pf.focus();}});
+      root.querySelectorAll('.opt').forEach(function(o){o.addEventListener('click',function(){st.sel=o.getAttribute('data-id');st.open=false;render();});});
+      var pf=root.querySelector('[data-pf]');
+      if(pf) pf.addEventListener('input',function(e){st.pf=e.target.value;var pos=e.target.selectionStart;render();var n=root.querySelector('[data-pf]');if(n){n.focus();n.setSelectionRange(pos,pos);}});
+      var qi=root.querySelector('[data-q]');
+      if(qi) qi.addEventListener('input',function(e){st.q=e.target.value;var pos=e.target.selectionStart;render();var n=root.querySelector('[data-q]');if(n){n.focus();n.setSelectionRange(pos,pos);}});
+      root.querySelectorAll('[data-clear]').forEach(function(b){b.addEventListener('click',function(){st.q='';render();var n=root.querySelector('[data-q]');if(n)n.focus();});});
+    }
+    root.addEventListener('keydown',function(e){if(e.key==='Escape'&&st.open){st.open=false;render();}});
+    render();
+    return {set:function(s){st.open=s==='open';st.q=s==='typing'?'ng':(s==='empty'?'Trương':'');st.loading=s==='loading';st.pf='';render();}};
+  }
+
+  var mocks={};
+  document.querySelectorAll('[data-mock]').forEach(function(el){
+    var k=el.getAttribute('data-mock');mocks[k]=makeMock(el,k.charAt(0),/mobile/.test(k));
+  });
+  document.querySelectorAll('.opt-tab').forEach(function(t){t.addEventListener('click',function(){
+    document.querySelectorAll('.opt-tab').forEach(function(x){x.setAttribute('aria-selected',x===t);});
+    document.getElementById('panel-a').hidden=t.getAttribute('data-opt')!=='a';
+    document.getElementById('panel-b').hidden=t.getAttribute('data-opt')!=='b';
+  });});
+  document.querySelectorAll('.states').forEach(function(g){
+    var v=g.getAttribute('data-for');
+    g.querySelectorAll('.state').forEach(function(b){b.addEventListener('click',function(){
+      g.querySelectorAll('.state').forEach(function(x){x.setAttribute('aria-pressed',x===b);});
+      mocks[v].set(b.getAttribute('data-state'));mocks[v+'-mobile'].set(b.getAttribute('data-state'));
+    });});
+  });
+  document.addEventListener('keydown',function(e){
+    if(e.key==='/'&&!/input|textarea/i.test(document.activeElement.tagName)){var vis=document.querySelector('.panel:not([hidden]) [data-q]');if(vis){e.preventDefault();vis.focus();}}
+  });
+})();
+</script>
+</body>
+</html>

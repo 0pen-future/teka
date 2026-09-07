@@ -84,6 +84,7 @@ export const classWithSchedule: Class = {
   schedules: [classSchedule],
   created_at: "2026-01-01T08:00:00Z",
   my_staff_roles: [],
+  student_count: 0,
 };
 
 /**
@@ -222,6 +223,19 @@ function orToday(value: string | undefined): string {
     return new Date().toISOString().slice(0, 10);
   }
   return value;
+}
+
+/**
+ * Mirrors the API: student_count is derived at read time from the open
+ * enrollments (same predicate as `GET /enrollments?active=true` below).
+ */
+function withStudentCount(klass: Class): Class {
+  return {
+    ...klass,
+    student_count: store.enrollments.filter(
+      (enrollment) => enrollment.class_id === klass.id && !enrollment.ended_on,
+    ).length,
+  };
 }
 
 export const rosterHandlers = [
@@ -376,10 +390,12 @@ export const rosterHandlers = [
   http.get(`${API_URL}/classes`, ({ request }) => {
     const url = new URL(request.url);
     const status = url.searchParams.get("status");
-    const items = store.classes.filter((klass) => {
-      if (!status || status === "all") return true;
-      return klass.status === status;
-    });
+    const items = store.classes
+      .filter((klass) => {
+        if (!status || status === "all") return true;
+        return klass.status === status;
+      })
+      .map(withStudentCount);
     return HttpResponse.json(ok(items, listMeta(items.length)));
   }),
   http.get(`${API_URL}/classes/:id`, ({ params }) => {
@@ -387,7 +403,7 @@ export const rosterHandlers = [
     if (!klass) {
       return HttpResponse.json(fail("NOT_FOUND", "class not found"), { status: 404 });
     }
-    return HttpResponse.json(ok(klass));
+    return HttpResponse.json(ok(withStudentCount(klass)));
   }),
   http.post(`${API_URL}/classes`, async ({ request }) => {
     const body = (await request.json()) as Omit<
@@ -413,6 +429,7 @@ export const rosterHandlers = [
       })),
       created_at: new Date().toISOString(),
       my_staff_roles: [],
+      student_count: 0,
     };
     store.classes.push(klass);
     return HttpResponse.json(ok(klass), { status: 201 });

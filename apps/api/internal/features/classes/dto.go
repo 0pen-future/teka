@@ -81,7 +81,13 @@ type ClassResponse struct {
 	// class — per-caller data, so only the readable GET paths fill it (via
 	// FromModelWithRoles); every other producer, the dashboard included,
 	// leaves it empty.
-	MyStaffRoles []string  `json:"my_staff_roles"`
+	MyStaffRoles []string `json:"my_staff_roles"`
+	// StudentCount is the number of enrollments still open on the class
+	// (ended_on IS NULL, not deleted) — the same predicate GET /enrollments
+	// applies for active=true, so a picker showing this count matches the
+	// rows that endpoint lists. Like MyStaffRoles it is filled only by the
+	// readable GET paths; every other producer leaves it 0.
+	StudentCount int       `json:"student_count"`
 	CreatedAt    time.Time `json:"created_at"`
 }
 

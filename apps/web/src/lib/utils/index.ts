@@ -8,3 +8,5 @@ export {
   formatSessionDate,
   nameInitial,
 } from "./format";
+export { findFoldedMatch, foldVietnamese } from "./vietnamese";
+export type { FoldedMatch } from "./vietnamese";

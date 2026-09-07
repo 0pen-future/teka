@@ -4,13 +4,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
 import {
+  classWithSchedule,
+  enrollmentActive,
   getRosterStore,
   resetRosterStore,
   rosterHandlers,
+  studentOnlyChild,
   studentSiblingOne,
 } from "@/features/roster/__tests__/roster-handlers";
 import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
+import { mockViewport } from "@/test/viewport";
 
 import { RecordsPage } from "../pages/records-page";
 import { StudentRecordPage } from "../pages/student-record-page";
@@ -50,6 +54,9 @@ function renderStudentRecordPage() {
 }
 
 beforeEach(() => {
+  // The default matchMedia shim never matches, which would render the
+  // compact (<768px) records layout; these specs describe the desktop one.
+  mockViewport(1280);
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-08-20T10:00:00"));
   resetRosterStore();
@@ -194,5 +201,168 @@ describe("StudentRecordPage", () => {
     expect(text.startsWith('"Buổi";"Bài học";"Trạng thái";"Điểm";"Nhận xét"')).toBe(true);
     expect(text).toContain('"Th 4, 05/08";"Bài 1";"Có mặt";"8.5";"Cần luyện thêm"');
     expect(text).toContain('"Bài 2";"Có mặt";""');
+  });
+});
+
+/** A second active class with one enrolled student, for class-switch cases. */
+function seedSecondClass() {
+  const store = getRosterStore();
+  const klass = {
+    ...classWithSchedule,
+    id: "40000000-0000-4000-8000-000000000002",
+    name: "Văn 7B",
+    schedules: [...classWithSchedule.schedules],
+  };
+  store.classes.push(klass);
+  store.enrollments.push({
+    ...enrollmentActive,
+    id: "80000000-0000-4000-8000-000000000009",
+    student_id: studentOnlyChild.id,
+    student_name: studentOnlyChild.full_name,
+    class_id: klass.id,
+    class_name: klass.name,
+  });
+  return klass;
+}
+
+/** Enrols Trần Minh Khôi in Toán 6A so a search has something to filter out. */
+function seedSecondStudent() {
+  getRosterStore().enrollments.push({
+    ...enrollmentActive,
+    id: "80000000-0000-4000-8000-000000000008",
+    student_id: studentOnlyChild.id,
+    student_name: studentOnlyChild.full_name,
+  });
+}
+
+describe("RecordsPage student search and class picker", () => {
+  it("filters live, marks the match, counts matches and mirrors the query to ?q=", async () => {
+    seedSecondStudent();
+    const user = userEvent.setup();
+    const { router } = renderRecordsPage();
+    await screen.findByText("Nguyễn Văn An");
+    expect(screen.getByRole("status")).toHaveTextContent(/^2 học sinh$/);
+
+    await user.type(screen.getByLabelText("Tìm học sinh"), "nguyen");
+    expect(screen.queryByText("Trần Minh Khôi")).not.toBeInTheDocument();
+    const mark = document.querySelector("mark");
+    expect(mark).toHaveTextContent("Nguyễn");
+    expect(mark?.closest("div")).toHaveTextContent("Nguyễn Văn An");
+    expect(screen.getByRole("status")).toHaveTextContent("1 / 2 học sinh");
+    expect(router.state.location.search).toBe("?q=nguyen");
+  });
+
+  it("applies a ?q= present on arrival", async () => {
+    seedSecondStudent();
+    signInAs(testPrimaryTeacher);
+    renderWithProviders(<RecordsPage />, { route: "/records?q=nguyen", path: "/records" });
+
+    expect(await screen.findByText(/Văn An/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Tìm học sinh")).toHaveValue("nguyen");
+    expect(screen.queryByText("Trần Minh Khôi")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("1 / 2 học sinh");
+  });
+
+  it("shows the no-match state and clears it back to the full list", async () => {
+    const user = userEvent.setup();
+    const { router } = renderRecordsPage();
+    await screen.findByText("Nguyễn Văn An");
+
+    const search = screen.getByLabelText("Tìm học sinh");
+    await user.type(search, "Trương");
+    const emptyState = screen.getByText("Không tìm thấy học sinh nào khớp “Trương”").parentElement!;
+    expect(screen.getByRole("status")).toHaveTextContent("0 / 1 học sinh");
+
+    // The toolbar × carries the same accessible name; this is the in-card one.
+    await user.click(within(emptyState).getByRole("button", { name: "Xoá tìm kiếm" }));
+    expect(await screen.findByText("Nguyễn Văn An")).toBeInTheDocument();
+    expect(search).toHaveValue("");
+    expect(router.state.location.search).toBe("");
+  });
+
+  it("focuses the search on / from the page, but lets / type inside the field", async () => {
+    const user = userEvent.setup();
+    renderRecordsPage();
+    await screen.findByText("Nguyễn Văn An");
+    const search = screen.getByLabelText("Tìm học sinh");
+    expect(search).not.toHaveFocus();
+
+    await user.keyboard("/");
+    expect(search).toHaveFocus();
+    expect(search).toHaveValue("");
+
+    await user.keyboard("a/");
+    expect(search).toHaveValue("a/");
+  });
+
+  it("leaves / to the open class picker instead of stealing focus", async () => {
+    const user = userEvent.setup();
+    renderRecordsPage();
+    await screen.findByText("Nguyễn Văn An");
+    await user.click(screen.getByRole("button", { name: /^Lớp/ }));
+    const option = screen.getByRole("option", { name: /Toán 6A/ });
+    expect(option).toHaveFocus();
+
+    await user.keyboard("/");
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    expect(screen.getByLabelText("Tìm học sinh")).not.toHaveFocus();
+    expect(option).toHaveFocus();
+  });
+
+  it("switching class drops the query from the URL and resets the search", async () => {
+    const second = seedSecondClass();
+    const user = userEvent.setup();
+    const { router } = renderRecordsPage();
+    await screen.findByText("Nguyễn Văn An");
+    const search = screen.getByLabelText("Tìm học sinh");
+    await user.type(search, "nguyen");
+    expect(router.state.location.search).toBe("?q=nguyen");
+
+    await user.click(screen.getByRole("button", { name: /^Lớp/ }));
+    await user.click(screen.getByRole("option", { name: /Văn 7B/ }));
+
+    expect(await screen.findByText("Trần Minh Khôi")).toBeInTheDocument();
+    expect(screen.queryByText("Nguyễn Văn An")).not.toBeInTheDocument();
+    expect(search).toHaveValue("");
+    expect(router.state.location.search).toBe(`?class_id=${second.id}`);
+    expect(screen.getByRole("status")).toHaveTextContent(/^1 học sinh$/);
+    expect(screen.getByRole("button", { name: /^Lớp/ })).toHaveAccessibleName("Lớp Văn 7B · 1 HS");
+  });
+
+  it("re-picking the current class pins class_id into the URL and keeps the query", async () => {
+    const user = userEvent.setup();
+    const { router } = renderRecordsPage();
+    await screen.findByText("Nguyễn Văn An");
+    const search = screen.getByLabelText("Tìm học sinh");
+    await user.type(search, "nguyen");
+    expect(router.state.location.search).toBe("?q=nguyen");
+
+    await user.click(screen.getByRole("button", { name: /^Lớp/ }));
+    await user.click(screen.getByRole("option", { name: /Toán 6A/ }));
+
+    expect(search).toHaveValue("nguyen");
+    expect(router.state.location.search).toBe(`?q=nguyen&class_id=${classWithSchedule.id}`);
+    expect(screen.getByText("Nguyễn", { selector: "mark" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/^1 \/ 1 học sinh$/);
+  });
+
+  it("collapses to the phone layout below md with the counter and CSV under the table", async () => {
+    mockViewport(375);
+    const createObjectURL = vi.fn<(blob: Blob) => string>(() => "blob:records");
+    Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() });
+    const user = userEvent.setup();
+    renderRecordsPage();
+    await screen.findByText("Nguyễn Văn An");
+
+    expect(screen.queryByText("NGÀY SINH")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(screen.getByRole("status")).toHaveTextContent(/^1 học sinh$/);
+    const csv = screen.getByRole("button", { name: "Tải danh sách (CSV)" });
+    expect(csv).toHaveTextContent(/^CSV$/);
+    await user.click(csv);
+    expect(await screen.findByText("Đã tải HocSinh_Toán_6A.csv")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^Lớp/ }));
+    expect(screen.getByRole("dialog", { name: "Chọn lớp" })).toBeInTheDocument();
   });
 });

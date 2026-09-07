@@ -38,6 +38,7 @@ export const fixtureClass: Class = {
   schedules: [],
   created_at: "2026-01-01T08:00:00Z",
   my_staff_roles: [],
+  student_count: 0,
 };
 
 function buildRosterTemplate(): AttendanceRow[] {
