@@ -295,6 +295,20 @@ describe("RecordsPage student search and class picker", () => {
     expect(search).toHaveValue("a/");
   });
 
+  it("leaves / to the open class picker instead of stealing focus", async () => {
+    const user = userEvent.setup();
+    renderRecordsPage();
+    await screen.findByText("Nguyễn Văn An");
+    await user.click(screen.getByRole("button", { name: /^Lớp/ }));
+    const option = screen.getByRole("option", { name: /Toán 6A/ });
+    expect(option).toHaveFocus();
+
+    await user.keyboard("/");
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    expect(screen.getByLabelText("Tìm học sinh")).not.toHaveFocus();
+    expect(option).toHaveFocus();
+  });
+
   it("switching class drops the query from the URL and resets the search", async () => {
     const second = seedSecondClass();
     const user = userEvent.setup();

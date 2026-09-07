@@ -144,6 +144,18 @@ describe("RecordsClassSelect (popover, ≥ sm)", () => {
     expect(search).toHaveValue("v");
     expect(screen.getAllByRole("option")).toHaveLength(1);
   });
+
+  it("lets Space activate the focused option even while the filter is shown", async () => {
+    const user = userEvent.setup();
+    const { onSelect, trigger } = renderSelect(sevenClasses);
+    await user.click(trigger);
+    await user.keyboard("{ArrowDown}{ArrowDown}");
+    expect(screen.getByRole("option", { name: /Văn 7B/ })).toHaveFocus();
+
+    await user.keyboard(" ");
+    expect(onSelect).toHaveBeenCalledWith("class-2");
+    await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument());
+  });
 });
 
 describe("RecordsClassSelect (bottom sheet, < sm)", () => {

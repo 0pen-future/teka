@@ -31,8 +31,11 @@ const optionClassName = cn(
 
 const OPTION_SELECTOR = '[role="option"]';
 
+// Space is left to the option button so it activates natively at any list size.
 function isPrintableKey(event: React.KeyboardEvent): boolean {
-  return event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey;
+  return (
+    event.key.length === 1 && event.key !== " " && !event.ctrlKey && !event.metaKey && !event.altKey
+  );
 }
 
 interface ClassOptionListProps {

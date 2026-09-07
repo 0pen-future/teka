@@ -21,14 +21,18 @@ import { meanScore } from "../lib/classbook-stats";
 import { filterStudentRows } from "../lib/student-search";
 import { aggregateStudent, studentSessionRows, trendOf } from "../lib/student-stats";
 
-/** True while the user is typing somewhere a "/" keystroke belongs to. */
+/**
+ * True while a "/" keystroke belongs somewhere else: a field the user is
+ * typing in, or an open picker (listbox or dialog) that owns the keyboard.
+ */
 function isTypingTarget(element: Element | null): boolean {
   if (!(element instanceof HTMLElement)) return false;
   return (
     element instanceof HTMLInputElement ||
     element instanceof HTMLTextAreaElement ||
     element instanceof HTMLSelectElement ||
-    element.isContentEditable
+    element.isContentEditable ||
+    element.closest('[role="listbox"],[role="dialog"]') !== null
   );
 }
 
@@ -57,7 +61,7 @@ export function RecordsPage() {
   );
   const { sessionScores } = useClassMarks(selectedClassId, month.from.slice(0, 7));
 
-  const { data: enrollmentsPage } = useEnrollmentsList(
+  const { data: enrollmentsPage, isPending: enrollmentsPending } = useEnrollmentsList(
     { class_id: selectedClassId, active: true, per_page: 100 },
     { enabled: Boolean(selectedClassId) },
   );
@@ -78,7 +82,10 @@ export function RecordsPage() {
   });
 
   const filteredRows = filterStudentRows(rows, query);
-  const total = sessionsPending && selectedClassId ? null : rows.length;
+  // The counter waits for both feeds so it never flashes "0 học sinh" while
+  // the roster is still loading behind an already-resolved month.
+  const loading = Boolean(selectedClassId) && (sessionsPending || enrollmentsPending);
+  const total = loading ? null : rows.length;
 
   // "/" jumps to the student search from anywhere on the page, except while
   // typing in another field (the class filter inside the picker included).
@@ -173,7 +180,7 @@ export function RecordsPage() {
         compact={!wide}
       />
 
-      {sessionsPending && selectedClassId ? (
+      {loading ? (
         <StudentRecordsTable
           rows={[]}
           onOpen={() => undefined}
