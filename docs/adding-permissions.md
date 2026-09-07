@@ -6,7 +6,7 @@ while PostgreSQL stores only role and member assignments. A new key therefore
 takes effect only after the API version containing it is deployed.
 
 If an endpoint fits an existing permission, reuse that key and start at
-[step 4](#4-classify-the-route). Do not create one permission per endpoint
+[step 5](#5-classify-the-route). Do not create one permission per endpoint
 when multiple endpoints represent the same user capability.
 
 Executable owners:
@@ -14,9 +14,10 @@ Executable owners:
 - [catalog.go](../apps/api/internal/shared/authctx/catalog.go) owns definitions
   and [permissions.go](../apps/api/internal/shared/authctx/permissions.go) owns
   effective-set behavior.
-- [route_policy.go](../apps/api/internal/server/route_policy.go) owns HTTP
-  classifications; [route_policy_enforce.go](../apps/api/internal/server/route_policy_enforce.go)
-  enforces them.
+- [routespec.go](../apps/api/internal/shared/routespec/routespec.go) owns
+  every route's HTTP classification together with its audit classification;
+  [route_policy_enforce.go](../apps/api/internal/server/route_policy_enforce.go)
+  enforces the policy half.
 - [the centers feature](../apps/api/internal/features/centers) owns assignment.
 - [use-center-context.ts](../apps/web/src/features/teaching/hooks/use-center-context.ts)
   owns frontend permission lookup.
@@ -69,7 +70,42 @@ fixture in [web test handlers](../apps/web/src/test/msw/handlers.ts).
 Do not define the key in a database table or duplicate its label in TypeScript.
 The API catalog is authoritative.
 
-## 3. Choose the database rollout policy
+## 3. Consider an implied key instead of a new grant
+
+Some capabilities already carry a read entitlement by construction. A member
+trusted to send a family a statement or notification necessarily needs to see
+the billing, statement, contact, and notification data that message is built
+from — granting the send permission without also widening those reads would
+just force an owner to hand out four more keys alongside it.
+
+[`impliedKeys`](../apps/api/internal/shared/authctx/catalog.go) maps a special
+key to the `<resource>.view_all` keys it carries for reads only:
+
+```go
+var impliedKeys = map[string][]string{
+	PermReportsSend: {
+		PermBillingViewAll,
+		PermStatementsViewAll,
+		PermNotificationsViewAll,
+		PermContactsViewAll,
+	},
+}
+```
+
+`BuildPermSet` in [permissions.go](../apps/api/internal/shared/authctx/permissions.go)
+applies implied keys after role and grant/deny resolution, so they are never
+stored as their own row and never removable by denying the source key alone —
+deny the source key itself to remove both. They appear in `EffectiveKeys()`
+and the member's `permissions` list exactly like a direct grant, so a UI or
+test asserting the effective set must expect them.
+
+Only add an implied key for a genuine subset relationship — the source
+permission is meaningless without the read it implies. Implied keys must only
+ever widen `Scope.CenterWideFor` reads, never `Scope.WriteWide` writes; a
+test-time scoping guard (`go test ./tools/...`, also `make scopelint`) and the
+parity tests described in [step 8](#8-prove-the-policy) hold that line.
+
+## 4. Choose the database rollout policy
 
 An opt-in permission needs no migration. After the API deploys, an owner
 assigns it through the permission UI or API. This preserves validation,
@@ -87,27 +123,38 @@ If existing roles must receive it automatically:
 Treat backfilling as a security decision. Sensitive new capabilities should
 normally fail closed and remain unassigned.
 
-## 4. Classify the route
+## 5. Classify the route
 
-After registering the endpoint in its feature module, add its exact method and
-Gin route template to `routePolicies`:
+After registering the endpoint in its feature module, add exactly one entry
+for its method and Gin route template to `Specs` in
+`internal/shared/routespec/routespec.go`. The entry carries both decisions
+for the route: its authorization `Kind` (and `Key` for permission-gated
+routes) and its `Audit` classification (`Source`, plus `Action`,
+`EntityType`, `IDParam` for `SourceRequest` or `SourceAnonymous` mutations
+worth a trail row):
 
 ```go
-perm(
-	"GET",
-	"/api/v1/students/export",
-	authctx.PermStudentsExport,
-),
+perm("GET", "/api/v1/students/export", authctx.PermStudentsExport, none()),
+perm("POST", "/api/v1/students", authctx.PermStudentsCreate,
+	req("student.create", "student", "")),
 ```
 
-The shared middleware checks `Scope` before the handler. Owners pass
-implicitly; members need the effective key. Route-policy tests reject missing
-routes and unknown keys.
+That entry is the only place the decision lives: `internal/server`'s route
+policy, `internal/features/audit`'s action lookup, and `internal/middleware`'s
+request-audit skip sets all derive from it, so there is nothing else to
+update. The shared middleware checks `Scope` before the handler. Owners pass
+implicitly; members need the effective key. The manifest tests fail closed: a
+registered route missing from `Specs` fails
+`TestRoutePolicyCoversEveryRegisteredRoute`, a mutating route with no audit
+source fails `TestMutatingRoutesHaveAnAuditSource` unless it is on the
+documented `SourceNone` allowlist, a `SourceRequest` entry with no `Action`
+fails `TestRequestSourceRoutesHaveAnAction`, and a skip source sharing a path
+with an audited route fails `TestSkipSourceNeverSharesPathWithAuditedRoute`.
 
 Use `authctx.Require(scope, key)` at a service boundary only when the
 operation can bypass HTTP middleware. Do not scatter duplicate checks.
 
-## 5. Preserve data scope
+## 6. Preserve data scope
 
 A route permission answers **may the caller perform the capability?** It does
 not answer **which tenant or rows may they access?**
@@ -115,11 +162,17 @@ not answer **which tenant or rows may they access?**
 For this example, `students.export` permits export,
 `students.view_all` may widen the read set, and repository `center_id`
 predicates always isolate tenants. Read expansion must use
-`Scope.CenterWideFor(<resource>.view_all)`; it must never widen writes.
-Never accept request `center_id` or `teacher_id` as authorization context.
-See [Tenancy](./api-guidelines.md#tenancy).
+`Scope.CenterWideFor(<resource>.view_all)`; it must never widen writes. A
+write reaches another teacher's rows only through `Scope.WriteWide()` (the
+owner alone), so a repository keeps a read port and a write port apart
+(`readScoped` / `writeScoped`, or a `readNarrow` helper for inline
+predicates). `apps/api/tools/scopelint` enforces this at test time:
+`CenterWideFor` may appear only inside a repository function whose name
+contains `read`. Never accept request `center_id` or `teacher_id` as
+authorization context. See
+[Tenancy](./api-guidelines.md#tenancy).
 
-## 6. Gate the frontend when applicable
+## 7. Gate the frontend when applicable
 
 The API remains the security boundary. Use the effective set:
 
@@ -132,7 +185,7 @@ Use the same key for navigation/actions, deep-link guards, and
 permission-dependent queries. Do not duplicate labels in TypeScript. See
 [Permission gating](./frontend-guidelines.md#permission-gating).
 
-## 7. Prove the policy
+## 8. Prove the policy
 
 Add focused tests beside the catalog, route policy, affected feature, and UI.
 
@@ -155,7 +208,7 @@ Run `make test-api` for migrations or database behavior. Run
 `make api-docs` when endpoint annotations change; never edit generated
 OpenAPI files manually.
 
-## 8. Deploy and assign
+## 9. Deploy and assign
 
 1. Deploy every API instance containing the catalog entry and route policy.
 2. Apply the migration if an existing-role backfill is intentional.
@@ -173,6 +226,7 @@ request because permissions are resolved from PostgreSQL, not the JWT.
 - [ ] Reused an existing capability when its meaning matches.
 - [ ] Selected `permission` versus `owner_only` intentionally.
 - [ ] Declared the key and incremented `CatalogVersion`.
+- [ ] Considered whether the capability implies a read it should carry.
 - [ ] Chose opt-in versus existing-role backfill explicitly.
 - [ ] Classified every new authenticated route.
 - [ ] Preserved tenant, object, and class-staff scoping.

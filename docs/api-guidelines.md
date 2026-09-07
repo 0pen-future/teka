@@ -78,17 +78,28 @@ without exception:
   fresh from the database on every request by `middleware.ResolveScope` and
   never cached in the JWT, so a membership or permission change (kick, leave,
   join, grant, revoke, role edit) takes effect on the very next request.
-- Every repository over a tenant table funnels reads through a `scoped`
+- Every repository over a tenant table funnels queries through a scoped
   helper: always filter by center; callers without center-wide data access
-  additionally filter by their own `teacher_id` (reference implementation:
-  `apps/api/internal/features/students/repository.go`):
+  additionally filter by their own `teacher_id`. Reads and writes are two
+  ports, because a `<resource>.view_all` key is a **visibility** key — it
+  widens what the caller sees and never what they may change (reference
+  implementation: `apps/api/internal/features/students/repository.go`):
 
 ```go
-// scoped returns a query bound to one center. An owner sees every student in
-// their center; a member sees only the rows they created themselves.
-func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+// readScoped: an owner or a students.view_all holder sees every student in
+// the center; a member sees only the rows they created themselves.
+func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
     q := database.FromContext(ctx, r.db).Where("students.center_id = ?", sc.CenterID)
     if !sc.CenterWideFor(authctx.PermStudentsViewAll) {
+        q = q.Where("students.teacher_id = ?", sc.TeacherID)
+    }
+    return q
+}
+
+// writeScoped: only the owner reaches another teacher's rows for a mutation.
+func (r *gormRepository) writeScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+    q := database.FromContext(ctx, r.db).Where("students.center_id = ?", sc.CenterID)
+    if !sc.WriteWide() {
         q = q.Where("students.teacher_id = ?", sc.TeacherID)
     }
     return q
@@ -96,20 +107,76 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 ```
 
 `Scope.CenterWideFor(<resource>.view_all key)` (`IsOwner || HasKey(key)`) is
-the **only** data-scoping switch repositories may branch on — never `IsOwner`
+the **only** read-scoping switch repositories may branch on — never `IsOwner`
 directly, and each repository passes its own resource's `view_all` scope key
 (`authctx.PermStudentsViewAll`, `PermContactsViewAll`, …), so center-wide
-visibility is granted per resource. The legacy single-axis
-`data.view_center_wide` participates only through alias expansion at
-permission-set build time (a legacy grant/deny expands to every per-resource
-`view_all` key); `Scope.CenterWide()` survives solely for that compatibility
-window and has no production callers.
+visibility is granted per resource. `Scope.WriteWide()` (the owner alone) is
+the only write-scoping switch: lock, close, void, cancel, revoke, mark-sent,
+reassign and every other mutation resolve their rows through a `writeScoped`
+port or a `GetXForWrite` getter, so a granted visibility key can never open
+another teacher's row for editing. `apps/api/tools/scopelint` — a
+`go/analysis` linter self-enforced under `go test ./tools/...` (and runnable
+directly via `make scopelint`) — pins both halves by type, not by name. Any
+repository method that takes a `Scope`/`Anchor`/`OwnerAnchor` parameter and
+touches a raw `*gorm.DB` root (a `database.FromContext` call or a `*gorm.DB`
+receiver field) must carry a witness: a call to a helper identified by shape —
+an unexported method on the same receiver that returns `*gorm.DB` and takes a
+scope-typed parameter — or a selector reading the `CenterID` field of any
+expression (one pointer level unwrapped) typed `Scope`, `Anchor` or
+`OwnerAnchor` — a parameter, a copy of one, or a field reached through an
+embedded struct. `CenterWideFor` may appear only inside a function whose
+name contains `read` (`readScoped`, `scopedRead`, `readNarrow`,
+`GetPeriodRead`, …), never `IsOwner` directly, and inline predicates in a
+read go through a `readNarrow` helper for the same reason. A method with no
+legitimate witness (a bulk maintenance job, a one-off migration helper) may
+opt out with `//scopelint:unscoped <reason>` directly above it; an empty
+reason is itself flagged. The legacy single-axis `data.view_center_wide`
+participates only through alias expansion at permission-set build time (a
+legacy grant/deny expands to every per-resource `view_all` key). A witness
+proves the scope was mentioned somewhere in the method, not that every query
+chain in it applied it; dataflow through a discarded result or an unused
+reference is an explicit non-goal, and row-level `center_id`/`teacher_id`
+predicates remain the backstop for that residue.
 
 - Writes on class-anchored artifacts resolve through the class-staff
   capability map (see class-staff writes below); the written rows still stamp
   `teacher_id = $self` as last-writer attribution, and owners may write on
   behalf of any teacher in their center. Contacts and students are the
   exception: they anchor to the owner (see contact-book ownership below).
+
+**Scope vs Anchor**: a `Scope` is the caller and is resolved only by
+`middleware.ResolveScope` (and the centers feature that backs it) — nothing
+else builds one. When a service has to act on *another teacher's rows* after
+it has already authorised the action (closing a colleague's billing period,
+targeting the owner's statements for a delegated send, replaying a roster
+import into the owner's contact book, a background notification run), it names
+those rows with `authctx.Anchor{TeacherID, CenterID}` — `sc.AnchorTo(row.TeacherID)`
+when a caller is in hand, `sc.Self()` for the caller's own rows, a plain literal
+where there is no caller (a public statement token, a run job). An Anchor
+carries no authority: it has no `IsOwner`, no `Perms`, no widening helpers, and
+no path back to `Scope`, so a repository method that takes one filters by
+exactly `center_id = a.CenterID AND teacher_id = a.TeacherID` through an
+`anchored(ctx, a)` helper and never widens. Reading a signature therefore tells
+you whether widening may apply: `sc Scope` means "the caller; `view_all`,
+stints, or ownership may widen this", `a Anchor` means "these rows, no
+widening, ever". A method with both is the exemplar of the split —
+`statements.TargetContacts(ctx, a Anchor, viewer Scope, periodID)` takes the
+rows from the anchored period while judging `phone_visible` for the viewer.
+Where the teacher is irrelevant (dedupe of contacts/students by center, the
+roster of a class for reconciliation) the query is center-keyed through a
+`centerScoped(ctx, sc)` helper with the real caller's scope rather than an
+Anchor. `authctx.OwnerAnchor` is an Anchor *proven* to name the owner's rows:
+only `centers.Service.ResolveOwnerAnchor` mints it, and `CreateAnchored`
+entry points on contacts/students accept nothing else, so the import path
+never needs a Scope with `IsOwner: true` asserted by hand. The dashboard's
+"read as teacher T" view is the deliberate exception that stays a Scope
+literal inside the centers feature: it impersonates a rights-less member view
+whose consumed reads are stint-based, which is Scope semantics, not row
+naming. The same `scopelint` analyzer also forbids this outside
+`features/centers/`, `middleware/`, `testutil/`, `authctx/`, `seeds/`, and
+tests: building an `authctx.Scope{…}` literal with fields, assigning into a
+field of a `Scope`-typed value, building an `authctx.OwnerAnchor{…}` literal,
+and calling `MintOwnerAnchor(`.
 
 **Class-staff reads**: `class_staff` is the **sole** source of class
 permissions; `teacher_id` columns are creator/last-writer attribution, never a
@@ -183,10 +250,15 @@ assistants/secretaries write only what their role's capabilities admit.
 center data anchored to the owner — `teacher_id = owner` on every row, seeded,
 imported, or created. Create/update/delete on both is owner-only at the
 service (an honest 403); a plain member's `GET /contacts` returns an empty
-list rather than 403, and reads stay owner + `ReportsOversight()`. Imports
+list rather than 403, and reads stay owner + `CenterWideFor(contacts.view_all)`
+(a direct grant, or the implied key `reports.send` carries — see delegated
+report sending below). Imports
 keep the grantable `imports.run` gate, but every imported contact/student row
 is stamped with the owner anchor server-side regardless of who runs the
-import, and dedupe resolves in owner scope. Migration 000016 merged duplicate
+import, and dedupe resolves in owner scope. Recording a payment is gated by
+the route permission alone (`payments.create`): a holder may collect for any
+contact in the center, and the payment row anchors on the contact's own
+teacher, never on the collector. Migration 000016 merged duplicate
 contacts per `(center_id, phone)` (earliest row survives), re-keyed the unique
 indexes from per-teacher to `(center_id, phone)` / `(center_id,
 zalo_user_id)`, then re-anchored existing rows — journaling every change in
@@ -205,42 +277,58 @@ student records, and a member sees a contact's phone only through the
 phone-privacy rule below.
 
 **Phone privacy**: one rule for every surface, list and detail alike — a
-caller sees a contact's phone iff `IsOwner || ReportsOversight()` or the
-caller holds an active hoc_vu stint on a class where a student of that contact
-is actively enrolled. Repositories compute the per-row arm as a derived
-`phone_visible` column (an EXISTS in the same query — fragments
+caller sees a contact's phone iff `IsOwner || CenterWideFor(contacts.view_all)`
+or the caller holds an active hoc_vu stint on a class where a student of that
+contact is actively enrolled. Repositories compute the per-row arm as a
+derived `phone_visible` column (an EXISTS in the same query — fragments
 `classscope.PhoneVisibleViaStudent` / `PhoneVisibleViaContact`); services
 combine it through `Scope.PhoneVisible(rowVisible)` and null the DTO field —
 `null`, never an empty string. Masked surfaces: student reads, statements
 (including the family statement URL, which is a bearer token and is returned
-only to `ReportsOversight()` callers), the notification ledger, and
-collections. Sending paths (statements, notifications, zalo) read the phone
-server-side, so a sender who cannot see a phone can still send.
+only to `ReportsOversight()` callers — that field stays send-gated, not
+read-gated, since exposing the link is itself a sending act), the notification
+ledger, and collections. Sending paths (statements, notifications, zalo) read
+the phone server-side, so a sender who cannot see a phone can still send.
 `ContactResponse.Phone` stays a non-null string because contact reads are
-already owner/oversight-only. Zalo friend-match and per-contact zalo-mapping
-stay open to assigned hoc_vu — their send path depends on mapping.
+already owner/`contacts.view_all`-only. Zalo friend-match and per-contact
+zalo-mapping stay open to assigned hoc_vu — their send path depends on
+mapping.
 
-**Delegated report sending (`can_send_reports`)**: a boolean permission on the
-member's live `center_members` stint, granted and revoked only by the owner
-(`POST`/`DELETE /centers/me/members/:teacherId/send-reports`). It is a
-capability flag, not a role, and it is member-only — the grant endpoint
-refuses the owner as target, so `IsOwner` and `CanSendReports` never combine.
-`Scope.ReportsOversight()` (`IsOwner || CanSendReports`) is the single helper
-both capabilities branch on:
+**Delegated report sending (`reports.send`, mirrored on the wire as
+`can_send_reports`)**: an ordinary permission-catalog key, granted and revoked
+only by the owner through the member override endpoint (`PUT
+/centers/me/members/:teacherId/overrides`) like any other key. It is
+member-only in practice — the owner sits outside the role/override tables, so
+their authority flows through `IsOwner` instead — `IsOwner` and
+`CanSendReports` never combine. `Scope.ReportsOversight()` (`IsOwner ||
+CanSendReports`) now gates
+**sending only**; the read cluster it used to gate directly is widened through
+`reports.send`'s [implied keys](./adding-permissions.md#3-consider-an-implied-key-instead-of-a-new-grant)
+instead, so the two capabilities are governed by different helpers even though
+one permission still carries both by default:
 
 - **Center-wide read cluster**: billing periods, statements, debt views, the
   contact list (`GET /contacts` — recipient names and phones, needed to
   address a send), and the notification ledger (per-period sends and runs)
-  scope to the whole center for a `ReportsOversight()` caller instead of the
-  member's own rows. Everything else — classes, attendance, payments, single
-  contact reads (`GET /contacts/:id`), and every write — keeps the plain
-  member scoping above.
+  scope to the whole center for a caller holding the matching `view_all` key
+  (`billing.view_all`, `statements.view_all`, `contacts.view_all`,
+  `notifications.view_all`) instead of the member's own rows.
+  `reports.send` carries all four as implied keys, so a delegated sender gets
+  this read cluster without a separate grant; an owner may also widen just the
+  reads — e.g. `contacts.view_all` alone — for a member who should see the
+  center-wide picture but never send. Everything else — classes, attendance,
+  payments, single contact reads (`GET /contacts/:id`), and every write —
+  keeps the plain member scoping above; implied keys widen `CenterWideFor`
+  reads only and never a write.
 - **Send exclusivity**: only `ReportsOversight()` callers may create report
-  sends — bulk send, run resume, and the pre-send preview all refuse everyone
-  else. This 403 is deliberately honest (not the neutral not-found used for
-  cross-tenant probes): the caller can see the period; the missing thing is
-  the permission. Plain teachers provide attendance and remarks input and keep
-  a read-only ledger of what was sent for their periods; they do not send.
+  sends — bulk send, run resume, the pre-send preview, and mapping a contact's
+  Zalo friend all refuse everyone else, including a caller who holds every
+  implied `view_all` key directly but not `reports.send` itself. This 403 (or,
+  for a caller acting on a specific row outside their reach, 404) is
+  deliberately honest, never the silent success a widened read would suggest:
+  the caller can see the period; the missing thing is the permission. Plain
+  teachers provide attendance and remarks input and keep a read-only ledger of
+  what was sent for their periods; they do not send.
 
 *Release note (behavior removal)*: before this permission existed every
 teacher could generate and send statements for their own periods. Now sending
@@ -265,11 +353,13 @@ Developer workflow for adding or reusing a permission on a new endpoint:
   is dropped on read, so rolling the code back never grants or crashes
   anything, and unknown/deprecated/non-grantable keys are rejected (422) on
   write.
-- **Every route is classified** in the route-policy registry
-  (`apps/api/internal/server/route_policy.go`) as public, authenticated-self,
-  owner-only, or permission-gated with its exact catalog key; a registry
-  coverage test fails the build on any unclassified route, so enforcement
-  fails closed. HTTP-level gating lives there — services use
+- **Every route is classified** in the route manifest
+  (`apps/api/internal/shared/routespec/routespec.go`) as public,
+  authenticated-self, owner-only, or permission-gated with its exact catalog
+  key, alongside its audit classification; the server policy, the audit
+  action lookup, and the request-audit skip sets all derive from that one
+  entry, and a coverage test fails the build on any unclassified route, so
+  enforcement fails closed. HTTP-level gating lives there — services use
   `authctx.Require` only for boundaries that bypass HTTP middleware.
 - Effective set = (role permissions ∪ per-member grants) − per-member denies.
   Roles are per-center rows (`center_roles`, three system roles `giao_vien`,
@@ -290,7 +380,8 @@ Developer workflow for adding or reusing a permission on a new endpoint:
   holds no role row, `Scope.Has(key)` is unconditionally true for them, and
   member-targeted permission endpoints refuse the owner as target (404, the
   `SetSendReports` precedent). Repositories branch only on
-  `Scope.CenterWideFor(<resource>.view_all)` as above.
+  `Scope.CenterWideFor(<resource>.view_all)` for reads and `Scope.WriteWide()`
+  for writes, as above.
 - **Owner-only by design, not by catalog key**: the permission-management
   endpoints themselves (`GET /centers/me/permissions`, `PUT
   /centers/me/roles/:roleId/permissions`, `PUT
@@ -299,11 +390,12 @@ Developer workflow for adding or reusing a permission on a new endpoint:
   a grantable "manage permissions" key would be one hop from self-escalation.
   Member removal and the send-reports grant stay owner-only for the same
   reason.
-- **Dual life of `reports.send`** (until the flag column is dropped): the
-  `can_send_reports` column stays authoritative; every mutation dual-writes
-  column + override row in one transaction, the role matrix rejects
-  `reports.send` (per-member only), and `ResolveScope` computes
-  `CanSendReports = column OR Has(reports.send)`.
+- **`reports.send` lives solely in the permission tables** (migration
+  000019 dropped the legacy `can_send_reports` column the permission
+  dual-wrote during the migration soak window). The role matrix still rejects
+  it — it stays a per-member override, never a role default — and
+  `ResolveScope` computes `CanSendReports = Has(reports.send)` straight from
+  the effective permission set.
 - Permission mutations are audited twice under the same action name: the
   request middleware row is the HTTP evidence (status, IP, failed attempts)
   and a service-published event row carries the committed before/after diff

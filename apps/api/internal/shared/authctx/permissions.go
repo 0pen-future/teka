@@ -64,10 +64,15 @@ func KnownPerm(key string) bool {
 type PermSet map[string]struct{}
 
 // BuildPermSet combines role permissions with member overrides into the
-// effective set: (role ∪ grants) − denies. Keys outside the registry are
-// dropped — the database may hold assignments for keys a code rollback no
-// longer defines, and rows for retired keys (the pre-catalog
-// data.view_center_wide axis) fall out the same way.
+// effective set: (role ∪ grants) − denies, then plus the keys implied by
+// whatever survived (see impliedKeys). Implied keys are added after the deny
+// step on purpose: denying billing.view_all to a member who holds
+// reports.send does nothing, because sending a report is impossible without
+// reading the figures it carries — only denying reports.send itself narrows
+// them. Keys outside the registry are dropped — the database may hold
+// assignments for keys a code rollback no longer defines, and rows for
+// retired keys (the pre-catalog data.view_center_wide axis) fall out the
+// same way.
 func BuildPermSet(rolePerms, grants, denies []string) PermSet {
 	set := make(PermSet, len(rolePerms)+len(grants))
 	add := func(key string) {
@@ -83,6 +88,14 @@ func BuildPermSet(rolePerms, grants, denies []string) PermSet {
 	}
 	for _, key := range denies {
 		delete(set, key)
+	}
+	for source, implied := range impliedKeys {
+		if _, ok := set[source]; !ok {
+			continue
+		}
+		for _, key := range implied {
+			set[key] = struct{}{}
+		}
 	}
 	return set
 }

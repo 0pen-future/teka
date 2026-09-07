@@ -74,12 +74,15 @@ type CarriedDebtStudent struct {
 // upstream dependencies — so billing depends on attendance's public service
 // contract, never its repository type.
 type AttendanceSource interface {
-	TallyByEnrollment(ctx context.Context, sc authctx.Scope, from, to time.Time) ([]attendance.EnrollmentTally, error)
+	TallyByEnrollment(ctx context.Context, a authctx.Anchor, from, to time.Time) ([]attendance.EnrollmentTally, error)
 	// SessionAttendance returns the attendance rows already recorded for one
 	// session — plan 04's entry point for discovering which students a
 	// post-close reconciliation must consider. It performs no aggregation;
 	// LiveBillableCounts (built on TallyByEnrollment) remains the sole
-	// counting query.
+	// counting query. It is center-keyed on the reconciling caller: the rows
+	// carry last-writer attribution (a teaching assistant confirming another
+	// teacher's class), so no single teacher anchor matches them all, and the
+	// caller's session write gate has already settled access.
 	SessionAttendance(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) ([]attendance.Record, error)
 }
 
@@ -96,11 +99,18 @@ type PeriodWithTeacher struct {
 // tests supply a fake.
 type Repository interface {
 	CreatePeriod(ctx context.Context, p *Period) error
+	// GetPeriod resolves a period for a READ (preview, compute): own rows,
+	// widened to the center for the owner or a billing.view_all holder.
 	GetPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*Period, error)
+	// GetPeriodForWrite is GetPeriod's WRITE sibling — own rows, widened only
+	// for the owner. Draft and close resolve their period through it so a
+	// visibility key can never open another teacher's period for mutation.
+	GetPeriodForWrite(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*Period, error)
 	// GetPeriodRead / ListPeriodsRead back the period read ENDPOINTS only:
-	// center-scoped with reports oversight (owner or reports.send
-	// holder), joined with the owning teacher's name. Write paths (draft,
-	// close, tally) keep the owner-gated GetPeriod.
+	// center-scoped by billing.view_all (held by the owner, an explicit
+	// grant, or a reports.send holder through the key it implies), joined
+	// with the owning teacher's name. Write paths (draft, close, tally) keep
+	// the owner-gated GetPeriodForWrite.
 	GetPeriodRead(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*PeriodWithTeacher, error)
 	ListPeriodsRead(ctx context.Context, sc authctx.Scope, p pagination.Params) ([]PeriodWithTeacher, int64, error)
 	// ClassReadable reports whether the caller holds any class_staff stint on
@@ -115,25 +125,32 @@ type Repository interface {
 	// caller's stint on the class (checked by the service via ClassReadable)
 	// that entitles the read.
 	ListPeriodsClassRead(ctx context.Context, sc authctx.Scope, classID uuid.UUID, p pagination.Params) ([]PeriodWithTeacher, int64, error)
-	GetPeriodByYearMonth(ctx context.Context, sc authctx.Scope, year, month int16) (*Period, error)
+	// GetPeriodByYearMonth resolves a's own period for a month — the
+	// (teacher_id, year, month) unique index's conflict target, so the
+	// existing row is by definition a's own. Unconditional teacher+center
+	// filter: a center holding several teachers' periods for the same month
+	// must never resolve to an arbitrary one.
+	GetPeriodByYearMonth(ctx context.Context, a authctx.Anchor, year, month int16) (*Period, error)
 	// PreviousClosedPeriod returns the most recently closed period whose
 	// period_end is strictly before `before` — the R3 carry-over source. A
 	// nil result with a nil error means there is no such period: the
 	// student's very first billing cycle, where opening_balance is
 	// legitimately zero, not a lookup failure.
-	PreviousClosedPeriod(ctx context.Context, sc authctx.Scope, before time.Time) (*Period, error)
-	// TallyAttendance assembles []AttendanceTally for one period: one call
-	// into attendance.Service.TallyByEnrollment for the counts, zipped on
-	// enrollment_id with billing's own enrollment/student/contact/class
+	PreviousClosedPeriod(ctx context.Context, a authctx.Anchor, before time.Time) (*Period, error)
+	// TallyAttendance assembles []AttendanceTally for one period window: one
+	// call into attendance.Service.TallyByEnrollment for the counts, zipped
+	// on enrollment_id with billing's own enrollment/student/contact/class
 	// metadata join. It writes no aggregate over attendance_records and adds
 	// no enrollment date-range filter of its own — the counting and
-	// roster-membership rules belong to plan 03, not here.
-	TallyAttendance(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) ([]AttendanceTally, error)
+	// roster-membership rules belong to plan 03, not here. Takes the
+	// period's own start/end directly rather than a periodID: every caller
+	// already holds the period row, so this never re-fetches it.
+	TallyAttendance(ctx context.Context, a authctx.Anchor, periodStart, periodEnd time.Time) ([]AttendanceTally, error)
 	// OpeningBalances reads the outstanding (total_due - paid_amount, clamped
 	// to 0) of each student's non-void invoice in prevPeriodID. A student
 	// with no invoice there is simply absent from the returned map — the
 	// caller treats a missing entry as zero.
-	OpeningBalances(ctx context.Context, sc authctx.Scope, prevPeriodID uuid.UUID, studentIDs []uuid.UUID) (map[uuid.UUID]int64, error)
+	OpeningBalances(ctx context.Context, a authctx.Anchor, prevPeriodID uuid.UUID, studentIDs []uuid.UUID) (map[uuid.UUID]int64, error)
 	// TeacherTimezone reads the IANA zone EnsurePeriod resolves
 	// period_start/period_end in. Keyed by a raw teacher id, not a scope: it
 	// is a direct FK lookup on an id the caller already resolved (self, or a
@@ -142,12 +159,12 @@ type Repository interface {
 	// AdjustmentTotals sums invoice_adjustments.amount (deleted_at IS NULL)
 	// per invoice for every invoice in periodID, keyed by invoice_id. An
 	// invoice absent from the result has no adjustments.
-	AdjustmentTotals(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (map[uuid.UUID]int64, error)
+	AdjustmentTotals(ctx context.Context, a authctx.Anchor, periodID uuid.UUID) (map[uuid.UUID]int64, error)
 	// CarriedDebtStudents returns every student with outstanding debt
 	// (total_due - paid_amount > 0) on a non-void invoice in prevPeriodID —
 	// the set ComputePeriod must fold into Compute's input even when
 	// TallyAttendance has no row for them.
-	CarriedDebtStudents(ctx context.Context, sc authctx.Scope, prevPeriodID uuid.UUID) ([]CarriedDebtStudent, error)
+	CarriedDebtStudents(ctx context.Context, a authctx.Anchor, prevPeriodID uuid.UUID) ([]CarriedDebtStudent, error)
 	// UpsertInvoice writes one row on the natural key uq_invoices
 	// (period_id, student_id): inserts when absent, refreshes the
 	// contact/name snapshots and money columns when the existing row is
@@ -166,43 +183,53 @@ type Repository interface {
 	// ZeroUnmatchedLines sets billable_count=0, absent_count=0, amount=0 on
 	// every line of invoiceID whose enrollment_id is not in
 	// keepEnrollmentIDs — the row survives so the invoice total always
-	// reconciles against its own detail (schema note (i)).
-	ZeroUnmatchedLines(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID, keepEnrollmentIDs []uuid.UUID) error
+	// reconciles against its own detail (schema note (i)). a is the
+	// invoice's own anchor (DraftPeriod's caller), never a caller scope.
+	ZeroUnmatchedLines(ctx context.Context, a authctx.Anchor, invoiceID uuid.UUID, keepEnrollmentIDs []uuid.UUID) error
 	// ListInvoices returns every invoice already stored for periodID.
-	ListInvoices(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) ([]Invoice, error)
+	ListInvoices(ctx context.Context, a authctx.Anchor, periodID uuid.UUID) ([]Invoice, error)
 	// GetInvoiceWithLines returns one invoice and its lines. Reserved for a
 	// later phase's detail endpoint; not called by Preview or Draft, which
 	// build their response from the in-memory compute result instead (the
-	// bare rows here carry no class_id or present_count).
-	GetInvoiceWithLines(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID) (*Invoice, []InvoiceLine, error)
+	// bare rows here carry no class_id or present_count). a is the invoice's
+	// own anchor — reconcileStudent's only caller already settled the write
+	// gate via LockInvoice before reaching here.
+	GetInvoiceWithLines(ctx context.Context, a authctx.Anchor, invoiceID uuid.UUID) (*Invoice, []InvoiceLine, error)
 	// LockPeriod issues SELECT ... FOR UPDATE on billing_periods, center-scoped.
 	// Close calls it first so two concurrent close requests for the same period
 	// serialise instead of double-issuing invoices.
 	LockPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*Period, error)
 	// IssueDraftInvoices bulk-updates every remaining status='draft' invoice of
 	// periodID to status='issued', returning the number of rows changed. One
-	// statement regardless of student count.
-	IssueDraftInvoices(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (int64, error)
+	// statement regardless of student count. a must be the period's own
+	// anchor — Close's only caller already settled the write gate with
+	// LockPeriod before reaching here, so this never re-checks WriteWide.
+	IssueDraftInvoices(ctx context.Context, a authctx.Anchor, periodID uuid.UUID) (int64, error)
 	// VoidInvoices bulk-updates every status='draft' invoice of periodID whose
 	// current_charge, opening_balance, and adjustment_total are all zero to
 	// status='void' with a fixed void_reason and voided_at=now(), returning the
 	// number of rows changed. Must run before IssueDraftInvoices, whose blanket
-	// WHERE status='draft' would otherwise also issue these.
-	VoidInvoices(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (int64, error)
+	// WHERE status='draft' would otherwise also issue these. a must be the
+	// period's own anchor, for the same reason as IssueDraftInvoices.
+	VoidInvoices(ctx context.Context, a authctx.Anchor, periodID uuid.UUID) (int64, error)
 	// ClosePeriod sets status='closed', closed_at, updated_at, guarded by
 	// WHERE status='open'. Returns errPeriodStatusChanged if RowsAffected != 1 —
 	// the LockPeriod row lock should make this unreachable in normal operation.
-	ClosePeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, closedAt time.Time) error
-	// GetInvoice returns one bare invoice row (no lines).
+	// a must be the period's own anchor, for the same reason as IssueDraftInvoices.
+	ClosePeriod(ctx context.Context, a authctx.Anchor, periodID uuid.UUID, closedAt time.Time) error
+	// GetInvoice returns one bare invoice row (no lines) for a READ.
 	GetInvoice(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID) (*Invoice, error)
-	// LockInvoice issues SELECT ... FOR UPDATE on one invoice row,
-	// center-scoped, returning the freshly-read row. A post-close
-	// reconciliation locks the closed-period invoice — the natural key for one
-	// (student, period) pair — before it reads the already-carried adjustment
-	// total, so two reconciliations of the same student's closed period
-	// serialise instead of both computing the same carry against a stale
-	// already_adj and double-posting it.
-	LockInvoice(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID) (*Invoice, error)
+	// GetInvoiceForWrite is GetInvoice on the write scope: own rows, widened
+	// only for the owner. Adjustment and void resolve their invoice through it.
+	GetInvoiceForWrite(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID) (*Invoice, error)
+	// LockInvoice issues SELECT ... FOR UPDATE on one invoice row, anchored to
+	// a. A post-close reconciliation locks the closed-period invoice — the
+	// natural key for one (student, period) pair — before it reads the
+	// already-carried adjustment total, so two reconciliations of the same
+	// student's closed period serialise instead of both computing the same
+	// carry against a stale already_adj and double-posting it. a is the
+	// period's own anchor, never the reconciling caller's.
+	LockInvoice(ctx context.Context, a authctx.Anchor, invoiceID uuid.UUID) (*Invoice, error)
 	// VoidInvoice sets status='void', voided_at, void_reason on one invoice
 	// currently status IN (issued, partially_paid). Returns ErrInvoiceNotFound
 	// if no such row (missing, wrong tenant, or not in a voidable status).
@@ -223,54 +250,63 @@ type Repository interface {
 	// each adjustment actually landed on. This is the already_adj term that
 	// stops a second attendance edit on the same closed period from
 	// double-counting the first edit's carry.
-	AdjustmentsBySourcePeriod(ctx context.Context, sc authctx.Scope, studentID, periodID uuid.UUID) (int64, error)
+	// a is the closed period's own anchor, never the reconciling caller's.
+	AdjustmentsBySourcePeriod(ctx context.Context, a authctx.Anchor, studentID, periodID uuid.UUID) (int64, error)
 	// RecalcInvoiceTotals re-derives adjustment_total, total_due, and status
 	// from invoiceID's own current_charge/opening_balance/paid_amount plus a
 	// fresh SUM over its non-deleted adjustments, in one UPDATE ... FROM so
 	// the total_due CHECK can never observe a partial write. status only ever
 	// moves among issued/partially_paid/paid here — draft and void are left
-	// untouched, owned by Draft and VoidInvoice respectively.
-	RecalcInvoiceTotals(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID) error
+	// untouched, owned by Draft and VoidInvoice respectively. a is the
+	// invoice's own anchor — AddAdjustment already settled the write gate via
+	// GetInvoiceForWrite before calling this, so an owner adjusting a
+	// member's invoice recalculates the member's own row, never the owner's.
+	RecalcInvoiceTotals(ctx context.Context, a authctx.Anchor, invoiceID uuid.UUID) error
 	// PeriodContainingDate returns the closed billing period whose window
 	// contains `on`, or nil (not an error) when none is closed yet — the
-	// signal ReconcileSession uses to no-op for a still-open period. sc must
-	// be the session's own owner scope, never the acting caller's — this is
+	// signal ReconcileSession uses to no-op for a still-open period. a must
+	// be the session's own anchor, never the acting caller's — this is
 	// a date-range search with no id anchor.
-	PeriodContainingDate(ctx context.Context, sc authctx.Scope, on time.Time) (*Period, error)
+	PeriodContainingDate(ctx context.Context, a authctx.Anchor, on time.Time) (*Period, error)
 	// NextOpenPeriod returns the earliest open period whose period_start is
 	// strictly after afterPeriodEnd, or nil (not an error) when none exists —
-	// ensureAdjustmentTarget's first resolution step. sc must be the closed
-	// period's own owner scope, never the acting caller's.
-	NextOpenPeriod(ctx context.Context, sc authctx.Scope, afterPeriodEnd time.Time) (*Period, error)
+	// ensureAdjustmentTarget's first resolution step. a must be the closed
+	// period's own anchor, never the acting caller's.
+	NextOpenPeriod(ctx context.Context, a authctx.Anchor, afterPeriodEnd time.Time) (*Period, error)
 	// LiveBillableCounts filters attendance's batched per-enrollment tally for
 	// period's window down to enrollmentIDs, keyed by enrollment id. An
 	// enrollment id with no confirmed billable attendance in the window is
 	// simply absent from the result — callers treat a missing entry as zero.
-	// Scope is derived internally from period's own TeacherID/CenterID, never
-	// taken as a parameter — period already carries the only anchor this
-	// lookup may use. Gap: plan 03 exposes no per-enrollment single-count
+	// The anchor is derived internally from period's own TeacherID/CenterID,
+	// never taken as a parameter — period already carries the only anchor
+	// this lookup may use. Gap: plan 03 exposes no per-enrollment single-count
 	// method, only the batched tally, so this wraps it rather than
 	// re-querying attendance_records — the one counting query a
 	// reconciliation and a draft/close alike ultimately share.
 	LiveBillableCounts(ctx context.Context, enrollmentIDs []uuid.UUID, period *Period) (map[uuid.UUID]int, error)
 	// SessionMeta resolves one class_sessions row's class_id, class name,
-	// session_date, and its own owner scope directly against the table — the
-	// same direct-table-read precedent TallyAttendance and CarriedDebtStudents
-	// already use for another feature's metadata, kept out of a
-	// sessions.Service dependency so this package's constructor signature
-	// does not grow for one lookup. sessionScope is the session's own
-	// TeacherID/CenterID, needed by ReconcileSession to search
-	// PeriodContainingDate under the session's own tenancy rather than the
-	// acting caller's.
-	SessionMeta(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (classID uuid.UUID, className string, sessionDate time.Time, sessionScope authctx.Scope, err error)
+	// session_date, and the class's own anchor directly against the table —
+	// the same direct-table-read precedent TallyAttendance and
+	// CarriedDebtStudents already use for another feature's metadata, kept
+	// out of a sessions.Service dependency so this package's constructor
+	// signature does not grow for one lookup. Center-scoped only, with no
+	// teacher_id filter: the confirming caller's write gate (settled in
+	// attendance's Confirm) is what already authorises this read, and that
+	// caller may be a teaching assistant whose own teacher_id differs from
+	// the class's — the returned anchor must carry the class's real teacher
+	// so a post-close reconciliation posts the adjustment on the class
+	// teacher's billing, never the assistant's.
+	SessionMeta(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (classID uuid.UUID, className string, sessionDate time.Time, sessionAnchor authctx.Anchor, err error)
 	// StudentSnapshot resolves one student's live contact id and
 	// student/contact display names — the same students+contacts join
 	// CarriedDebtStudents already performs, reused by ensureAdjustmentTarget
-	// to seed a brand-new draft invoice's name snapshots.
-	StudentSnapshot(ctx context.Context, sc authctx.Scope, studentID uuid.UUID) (contactID uuid.UUID, studentName, contactName string, err error)
+	// to seed a brand-new draft invoice's name snapshots. a is the target
+	// period's own anchor, never the reconciling caller's.
+	StudentSnapshot(ctx context.Context, a authctx.Anchor, studentID uuid.UUID) (contactID uuid.UUID, studentName, contactName string, err error)
 	// SessionAttendance passes through AttendanceSource.SessionAttendance —
 	// plan 04's entry point for discovering which students a post-close
-	// reconciliation must consider.
+	// reconciliation must consider. Center-keyed on the reconciling caller,
+	// like SessionMeta.
 	SessionAttendance(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) ([]attendance.Record, error)
 }
 
@@ -286,46 +322,83 @@ func NewRepository(db *gorm.DB, attendanceSvc AttendanceSource) Repository {
 	return &gormRepository{db: db, attendance: attendanceSvc}
 }
 
-// scoped returns a billing_periods query bound to one center, further
-// narrowed to one teacher's own rows unless the caller is the center's
-// owner. Columns are table-qualified because callers join enrollments,
-// students, contacts, and classes, which carry the same
-// center_id/teacher_id column names.
-func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+// readScoped returns a billing_periods READ query bound to one center,
+// further narrowed to one teacher's own rows unless the caller sees billing
+// center-wide (the owner, or a billing.view_all holder). Columns are
+// table-qualified because callers join enrollments, students, contacts, and
+// classes, which carry the same center_id/teacher_id column names.
+func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("billing_periods.center_id = ?", sc.CenterID)
+	return r.readNarrow(q, sc, "billing_periods.teacher_id")
+}
+
+// writeScoped is readScoped's WRITE sibling: only the owner reaches another
+// teacher's period. billing.view_all is a visibility key — it widens reads
+// and nothing else — so lock, close, draft, and void resolve through here.
+func (r *gormRepository) writeScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+	q := database.FromContext(ctx, r.db).Where("billing_periods.center_id = ?", sc.CenterID)
+	if !sc.WriteWide() {
+		q = q.Where("billing_periods.teacher_id = ?", sc.TeacherID)
+	}
+	return q
+}
+
+// readNarrow appends the own-rows filter on col unless the caller sees
+// billing center-wide. It is the READ template for every query on a billing
+// side table (invoices, lines, adjustments, and the enrollment/session/
+// student joins); writes narrow on WriteWide instead and never call it.
+func (r *gormRepository) readNarrow(q *gorm.DB, sc authctx.Scope, col string) *gorm.DB {
 	if !sc.CenterWideFor(authctx.PermBillingViewAll) {
-		q = q.Where("billing_periods.teacher_id = ?", sc.TeacherID)
+		q = q.Where(col+" = ?", sc.TeacherID)
 	}
 	return q
 }
 
-// scopedRead is scoped()'s read-only sibling: the teacher filter is lifted
-// for anyone with reports oversight (owner or reports.send holder), not
-// just the owner. It backs ONLY the period read endpoints (GetPeriodRead,
-// ListPeriodsRead) — every write keeps scoped(), so the delegated permission
-// never reaches draft/close/void/adjustment paths.
-func (r *gormRepository) scopedRead(ctx context.Context, sc authctx.Scope) *gorm.DB {
-	q := database.FromContext(ctx, r.db).Where("billing_periods.center_id = ?", sc.CenterID)
-	if !sc.ReportsOversight() {
-		q = q.Where("billing_periods.teacher_id = ?", sc.TeacherID)
-	}
-	return q
-}
-
-// invoiceScoped mirrors scoped for the invoices table.
-func (r *gormRepository) invoiceScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+// invoiceReadScoped mirrors readScoped for the invoices table.
+func (r *gormRepository) invoiceReadScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("invoices.center_id = ?", sc.CenterID)
-	if !sc.CenterWideFor(authctx.PermBillingViewAll) {
+	return r.readNarrow(q, sc, "invoices.teacher_id")
+}
+
+// invoiceWriteScoped mirrors writeScoped for the invoices table.
+func (r *gormRepository) invoiceWriteScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+	q := database.FromContext(ctx, r.db).Where("invoices.center_id = ?", sc.CenterID)
+	if !sc.WriteWide() {
 		q = q.Where("invoices.teacher_id = ?", sc.TeacherID)
 	}
 	return q
+}
+
+// anchored returns a billing_periods query unconditionally filtered to a —
+// no permission branch, since the caller has already resolved whose rows to
+// touch (their own via sc.Self(), a target row's teacher via sc.AnchorTo, or
+// a plain Anchor literal when there is no caller scope in hand).
+func (r *gormRepository) anchored(ctx context.Context, a authctx.Anchor) *gorm.DB {
+	return database.FromContext(ctx, r.db).
+		Where("billing_periods.center_id = ? AND billing_periods.teacher_id = ?", a.CenterID, a.TeacherID)
+}
+
+// invoiceAnchored mirrors anchored for the invoices table.
+func (r *gormRepository) invoiceAnchored(ctx context.Context, a authctx.Anchor) *gorm.DB {
+	return database.FromContext(ctx, r.db).
+		Table("invoices").
+		Where("invoices.center_id = ? AND invoices.teacher_id = ?", a.CenterID, a.TeacherID)
+}
+
+// centerScoped appends the center filter on col with no teacher narrowing —
+// used where the row's own teacher is irrelevant to authorization because a
+// write gate settled elsewhere already allows the read (SessionMeta: the
+// confirming caller's session write gate, not a teacher-ownership check on
+// this query).
+func (r *gormRepository) centerScoped(q *gorm.DB, sc authctx.Scope, col string) *gorm.DB {
+	return q.Where(col+" = ?", sc.CenterID)
 }
 
 // getInvoiceRow is the shared bare-invoice read GetInvoice and
 // GetInvoiceWithLines both need.
 func (r *gormRepository) getInvoiceRow(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID) (*Invoice, error) {
 	var inv Invoice
-	err := r.invoiceScoped(ctx, sc).Where("invoices.id = ?", invoiceID).Take(&inv).Error
+	err := r.invoiceReadScoped(ctx, sc).Where("invoices.id = ?", invoiceID).Take(&inv).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrInvoiceNotFound
 	}
@@ -344,8 +417,16 @@ func (r *gormRepository) CreatePeriod(ctx context.Context, p *Period) error {
 }
 
 func (r *gormRepository) GetPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*Period, error) {
+	return r.getPeriodRow(r.readScoped(ctx, sc), periodID)
+}
+
+func (r *gormRepository) GetPeriodForWrite(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*Period, error) {
+	return r.getPeriodRow(r.writeScoped(ctx, sc), periodID)
+}
+
+func (r *gormRepository) getPeriodRow(q *gorm.DB, periodID uuid.UUID) (*Period, error) {
 	var p Period
-	err := r.scoped(ctx, sc).Take(&p, "billing_periods.id = ?", periodID).Error
+	err := q.Take(&p, "billing_periods.id = ?", periodID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrPeriodNotFound
 	}
@@ -355,9 +436,21 @@ func (r *gormRepository) GetPeriod(ctx context.Context, sc authctx.Scope, period
 	return &p, nil
 }
 
+func (r *gormRepository) GetInvoiceForWrite(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID) (*Invoice, error) {
+	var inv Invoice
+	err := r.invoiceWriteScoped(ctx, sc).Where("invoices.id = ?", invoiceID).Take(&inv).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrInvoiceNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &inv, nil
+}
+
 func (r *gormRepository) GetPeriodRead(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*PeriodWithTeacher, error) {
 	var row PeriodWithTeacher
-	err := r.scopedRead(ctx, sc).Model(&Period{}).
+	err := r.readScoped(ctx, sc).Model(&Period{}).
 		Select("billing_periods.*, teachers.full_name AS teacher_name").
 		Joins("JOIN teachers ON teachers.id = billing_periods.teacher_id").
 		Take(&row, "billing_periods.id = ?", periodID).Error
@@ -371,7 +464,7 @@ func (r *gormRepository) GetPeriodRead(ctx context.Context, sc authctx.Scope, pe
 }
 
 func (r *gormRepository) ListPeriodsRead(ctx context.Context, sc authctx.Scope, p pagination.Params) ([]PeriodWithTeacher, int64, error) {
-	q := r.scopedRead(ctx, sc).Model(&Period{})
+	q := r.readScoped(ctx, sc).Model(&Period{})
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -441,18 +534,13 @@ func (r *gormRepository) ListPeriodsClassRead(ctx context.Context, sc authctx.Sc
 	return rows, total, nil
 }
 
-// GetPeriodByYearMonth resolves the CALLER'S OWN period for a month. It backs
+// GetPeriodByYearMonth resolves a's own period for a month. It backs
 // EnsurePeriod's duplicate branch, where the conflict comes from the
 // (teacher_id, year, month) unique index — so the existing row is by
-// definition the caller's own. The teacher filter is pinned unconditionally:
-// scoped() would lift it for an owner, and in a center holding several
-// teachers' periods for the same month the owner would get an arbitrary
-// teacher's period back instead of their own.
-func (r *gormRepository) GetPeriodByYearMonth(ctx context.Context, sc authctx.Scope, year, month int16) (*Period, error) {
+// definition a's own.
+func (r *gormRepository) GetPeriodByYearMonth(ctx context.Context, a authctx.Anchor, year, month int16) (*Period, error) {
 	var p Period
-	err := database.FromContext(ctx, r.db).
-		Where("billing_periods.center_id = ?", sc.CenterID).
-		Where("billing_periods.teacher_id = ?", sc.TeacherID).
+	err := r.anchored(ctx, a).
 		Take(&p, "billing_periods.year = ? AND billing_periods.month = ?", year, month).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrPeriodNotFound
@@ -463,9 +551,9 @@ func (r *gormRepository) GetPeriodByYearMonth(ctx context.Context, sc authctx.Sc
 	return &p, nil
 }
 
-func (r *gormRepository) PreviousClosedPeriod(ctx context.Context, sc authctx.Scope, before time.Time) (*Period, error) {
+func (r *gormRepository) PreviousClosedPeriod(ctx context.Context, a authctx.Anchor, before time.Time) (*Period, error) {
 	var p Period
-	err := r.scoped(ctx, sc).
+	err := r.anchored(ctx, a).
 		Where("billing_periods.status = ?", PeriodClosed).
 		Where("billing_periods.period_end < ?", before).
 		Order("billing_periods.period_end DESC").
@@ -494,13 +582,8 @@ type tallyMetadataRow struct {
 	UnitPrice      int64
 }
 
-func (r *gormRepository) TallyAttendance(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) ([]AttendanceTally, error) {
-	period, err := r.GetPeriod(ctx, sc, periodID)
-	if err != nil {
-		return nil, err
-	}
-
-	counts, err := r.attendance.TallyByEnrollment(ctx, sc, period.PeriodStart, period.PeriodEnd)
+func (r *gormRepository) TallyAttendance(ctx context.Context, a authctx.Anchor, periodStart, periodEnd time.Time) ([]AttendanceTally, error) {
+	counts, err := r.attendance.TallyByEnrollment(ctx, a, periodStart, periodEnd)
 	if err != nil {
 		return nil, err
 	}
@@ -535,10 +618,8 @@ func (r *gormRepository) TallyAttendance(ctx context.Context, sc authctx.Scope, 
 		Joins("JOIN students ON students.id = enrollments.student_id AND students.center_id = enrollments.center_id").
 		Joins("JOIN contacts ON contacts.id = students.contact_id AND contacts.center_id = students.center_id").
 		Joins("JOIN classes ON classes.id = enrollments.class_id AND classes.center_id = enrollments.center_id").
-		Where("enrollments.center_id = ? AND enrollments.id IN ?", sc.CenterID, enrollmentIDs)
-	if !sc.CenterWideFor(authctx.PermBillingViewAll) {
-		q = q.Where("enrollments.teacher_id = ?", sc.TeacherID)
-	}
+		Where("enrollments.center_id = ? AND enrollments.id IN ?", a.CenterID, enrollmentIDs).
+		Where("enrollments.teacher_id = ?", a.TeacherID)
 	var meta []tallyMetadataRow
 	err = q.Find(&meta).Error
 	if err != nil {
@@ -566,7 +647,7 @@ func (r *gormRepository) TallyAttendance(ctx context.Context, sc authctx.Scope, 
 	return tallies, nil
 }
 
-func (r *gormRepository) OpeningBalances(ctx context.Context, sc authctx.Scope, prevPeriodID uuid.UUID, studentIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
+func (r *gormRepository) OpeningBalances(ctx context.Context, a authctx.Anchor, prevPeriodID uuid.UUID, studentIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
 	out := make(map[uuid.UUID]int64, len(studentIDs))
 	if len(studentIDs) == 0 {
 		return out, nil
@@ -576,13 +657,9 @@ func (r *gormRepository) OpeningBalances(ctx context.Context, sc authctx.Scope, 
 		TotalDue   int64
 		PaidAmount int64
 	}
-	q := database.FromContext(ctx, r.db).
-		Table("invoices").
+	q := r.invoiceAnchored(ctx, a).
 		Select("student_id, total_due, paid_amount").
-		Where("center_id = ? AND period_id = ? AND student_id IN ? AND status <> ?", sc.CenterID, prevPeriodID, studentIDs, InvoiceVoid)
-	if !sc.CenterWideFor(authctx.PermBillingViewAll) {
-		q = q.Where("teacher_id = ?", sc.TeacherID)
-	}
+		Where("period_id = ? AND student_id IN ? AND status <> ?", prevPeriodID, studentIDs, InvoiceVoid)
 	var rows []row
 	if err := q.Find(&rows).Error; err != nil {
 		return nil, err
@@ -612,7 +689,7 @@ func (r *gormRepository) TeacherTimezone(ctx context.Context, teacherID uuid.UUI
 	return timezones[0], nil
 }
 
-func (r *gormRepository) AdjustmentTotals(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (map[uuid.UUID]int64, error) {
+func (r *gormRepository) AdjustmentTotals(ctx context.Context, a authctx.Anchor, periodID uuid.UUID) (map[uuid.UUID]int64, error) {
 	type row struct {
 		InvoiceID uuid.UUID
 		Total     int64
@@ -621,10 +698,8 @@ func (r *gormRepository) AdjustmentTotals(ctx context.Context, sc authctx.Scope,
 		Table("invoice_adjustments").
 		Select("invoice_adjustments.invoice_id AS invoice_id, SUM(invoice_adjustments.amount) AS total").
 		Joins("JOIN invoices ON invoices.id = invoice_adjustments.invoice_id AND invoices.center_id = invoice_adjustments.center_id").
-		Where("invoice_adjustments.center_id = ? AND invoices.period_id = ? AND invoice_adjustments.deleted_at IS NULL", sc.CenterID, periodID)
-	if !sc.CenterWideFor(authctx.PermBillingViewAll) {
-		q = q.Where("invoice_adjustments.teacher_id = ?", sc.TeacherID)
-	}
+		Where("invoice_adjustments.center_id = ? AND invoices.period_id = ? AND invoice_adjustments.deleted_at IS NULL", a.CenterID, periodID).
+		Where("invoice_adjustments.teacher_id = ?", a.TeacherID)
 	var rows []row
 	if err := q.Group("invoice_adjustments.invoice_id").Find(&rows).Error; err != nil {
 		return nil, err
@@ -636,13 +711,12 @@ func (r *gormRepository) AdjustmentTotals(ctx context.Context, sc authctx.Scope,
 	return out, nil
 }
 
-func (r *gormRepository) CarriedDebtStudents(ctx context.Context, sc authctx.Scope, prevPeriodID uuid.UUID) ([]CarriedDebtStudent, error) {
+func (r *gormRepository) CarriedDebtStudents(ctx context.Context, a authctx.Anchor, prevPeriodID uuid.UUID) ([]CarriedDebtStudent, error) {
 	// Joins to students/contacts (not invoices.contact_id/student_name) so
 	// the carried balance follows the student's live contact, matching the
 	// documented draft-time behaviour: only an issued invoice freezes the
 	// contact snapshot.
-	q := database.FromContext(ctx, r.db).
-		Table("invoices").
+	q := r.invoiceAnchored(ctx, a).
 		Select(`invoices.student_id AS student_id,
 			students.contact_id AS contact_id,
 			students.full_name AS student_name,
@@ -650,11 +724,8 @@ func (r *gormRepository) CarriedDebtStudents(ctx context.Context, sc authctx.Sco
 			(invoices.total_due - invoices.paid_amount) AS outstanding`).
 		Joins("JOIN students ON students.id = invoices.student_id AND students.center_id = invoices.center_id").
 		Joins("JOIN contacts ON contacts.id = students.contact_id AND contacts.center_id = students.center_id").
-		Where("invoices.center_id = ? AND invoices.period_id = ? AND invoices.status <> ? AND (invoices.total_due - invoices.paid_amount) > 0",
-			sc.CenterID, prevPeriodID, InvoiceVoid)
-	if !sc.CenterWideFor(authctx.PermBillingViewAll) {
-		q = q.Where("invoices.teacher_id = ?", sc.TeacherID)
-	}
+		Where("invoices.period_id = ? AND invoices.status <> ? AND (invoices.total_due - invoices.paid_amount) > 0",
+			prevPeriodID, InvoiceVoid)
 	var rows []CarriedDebtStudent
 	err := q.Find(&rows).Error
 	return rows, err
@@ -724,32 +795,29 @@ func (r *gormRepository) UpsertInvoiceLine(ctx context.Context, line *InvoiceLin
 	return res.Error
 }
 
-func (r *gormRepository) ZeroUnmatchedLines(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID, keepEnrollmentIDs []uuid.UUID) error {
+func (r *gormRepository) ZeroUnmatchedLines(ctx context.Context, a authctx.Anchor, invoiceID uuid.UUID, keepEnrollmentIDs []uuid.UUID) error {
 	q := database.FromContext(ctx, r.db).
 		Model(&InvoiceLine{}).
-		Where("center_id = ? AND invoice_id = ?", sc.CenterID, invoiceID)
-	if !sc.CenterWideFor(authctx.PermBillingViewAll) {
-		q = q.Where("teacher_id = ?", sc.TeacherID)
-	}
+		Where("center_id = ? AND invoice_id = ? AND teacher_id = ?", a.CenterID, invoiceID, a.TeacherID)
 	if len(keepEnrollmentIDs) > 0 {
 		q = q.Where("enrollment_id NOT IN ?", keepEnrollmentIDs)
 	}
 	return q.Updates(map[string]any{"billable_count": 0, "absent_count": 0, "amount": 0}).Error
 }
 
-func (r *gormRepository) ListInvoices(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) ([]Invoice, error) {
-	q := database.FromContext(ctx, r.db).
-		Where("center_id = ? AND period_id = ?", sc.CenterID, periodID)
-	if !sc.CenterWideFor(authctx.PermBillingViewAll) {
-		q = q.Where("teacher_id = ?", sc.TeacherID)
-	}
+func (r *gormRepository) ListInvoices(ctx context.Context, a authctx.Anchor, periodID uuid.UUID) ([]Invoice, error) {
+	q := r.invoiceAnchored(ctx, a).Where("invoices.period_id = ?", periodID)
 	var rows []Invoice
 	err := q.Find(&rows).Error
 	return rows, err
 }
 
-func (r *gormRepository) GetInvoiceWithLines(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID) (*Invoice, []InvoiceLine, error) {
-	inv, err := r.getInvoiceRow(ctx, sc, invoiceID)
+func (r *gormRepository) GetInvoiceWithLines(ctx context.Context, a authctx.Anchor, invoiceID uuid.UUID) (*Invoice, []InvoiceLine, error) {
+	var inv Invoice
+	err := r.invoiceAnchored(ctx, a).Where("invoices.id = ?", invoiceID).Take(&inv).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil, ErrInvoiceNotFound
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -764,12 +832,12 @@ func (r *gormRepository) GetInvoiceWithLines(ctx context.Context, sc authctx.Sco
 	if err != nil {
 		return nil, nil, err
 	}
-	return inv, lines, nil
+	return &inv, lines, nil
 }
 
 func (r *gormRepository) LockPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*Period, error) {
 	var p Period
-	err := r.scoped(ctx, sc).
+	err := r.writeScoped(ctx, sc).
 		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Take(&p, "billing_periods.id = ?", periodID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -781,14 +849,11 @@ func (r *gormRepository) LockPeriod(ctx context.Context, sc authctx.Scope, perio
 	return &p, nil
 }
 
-func (r *gormRepository) IssueDraftInvoices(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (int64, error) {
-	q := database.FromContext(ctx, r.db).
+func (r *gormRepository) IssueDraftInvoices(ctx context.Context, a authctx.Anchor, periodID uuid.UUID) (int64, error) {
+	res := database.FromContext(ctx, r.db).
 		Model(&Invoice{}).
-		Where("center_id = ? AND period_id = ? AND status = ?", sc.CenterID, periodID, InvoiceDraft)
-	if !sc.CenterWideFor(authctx.PermBillingViewAll) {
-		q = q.Where("teacher_id = ?", sc.TeacherID)
-	}
-	res := q.Updates(map[string]any{"status": InvoiceIssued, "updated_at": gorm.Expr("now()")})
+		Where("center_id = ? AND teacher_id = ? AND period_id = ? AND status = ?", a.CenterID, a.TeacherID, periodID, InvoiceDraft).
+		Updates(map[string]any{"status": InvoiceIssued, "updated_at": gorm.Expr("now()")})
 	return res.RowsAffected, res.Error
 }
 
@@ -798,25 +863,22 @@ func (r *gormRepository) IssueDraftInvoices(ctx context.Context, sc authctx.Scop
 // carried debt (PRD §5).
 const emptyInvoiceVoidReason = "no charges or carried debt for this period"
 
-func (r *gormRepository) VoidInvoices(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (int64, error) {
-	q := database.FromContext(ctx, r.db).
+func (r *gormRepository) VoidInvoices(ctx context.Context, a authctx.Anchor, periodID uuid.UUID) (int64, error) {
+	res := database.FromContext(ctx, r.db).
 		Model(&Invoice{}).
-		Where("center_id = ? AND period_id = ? AND status = ? AND current_charge = 0 AND opening_balance = 0 AND adjustment_total = 0",
-			sc.CenterID, periodID, InvoiceDraft)
-	if !sc.CenterWideFor(authctx.PermBillingViewAll) {
-		q = q.Where("teacher_id = ?", sc.TeacherID)
-	}
-	res := q.Updates(map[string]any{
-		"status":      InvoiceVoid,
-		"void_reason": emptyInvoiceVoidReason,
-		"voided_at":   gorm.Expr("now()"),
-		"updated_at":  gorm.Expr("now()"),
-	})
+		Where("center_id = ? AND teacher_id = ? AND period_id = ? AND status = ? AND current_charge = 0 AND opening_balance = 0 AND adjustment_total = 0",
+			a.CenterID, a.TeacherID, periodID, InvoiceDraft).
+		Updates(map[string]any{
+			"status":      InvoiceVoid,
+			"void_reason": emptyInvoiceVoidReason,
+			"voided_at":   gorm.Expr("now()"),
+			"updated_at":  gorm.Expr("now()"),
+		})
 	return res.RowsAffected, res.Error
 }
 
-func (r *gormRepository) ClosePeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, closedAt time.Time) error {
-	res := r.scoped(ctx, sc).
+func (r *gormRepository) ClosePeriod(ctx context.Context, a authctx.Anchor, periodID uuid.UUID, closedAt time.Time) error {
+	res := r.anchored(ctx, a).
 		Model(&Period{}).
 		Where("billing_periods.id = ? AND billing_periods.status = ?", periodID, PeriodOpen).
 		Updates(map[string]any{"status": PeriodClosed, "closed_at": closedAt, "updated_at": gorm.Expr("now()")})
@@ -833,9 +895,9 @@ func (r *gormRepository) GetInvoice(ctx context.Context, sc authctx.Scope, invoi
 	return r.getInvoiceRow(ctx, sc, invoiceID)
 }
 
-func (r *gormRepository) LockInvoice(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID) (*Invoice, error) {
+func (r *gormRepository) LockInvoice(ctx context.Context, a authctx.Anchor, invoiceID uuid.UUID) (*Invoice, error) {
 	var inv Invoice
-	err := r.invoiceScoped(ctx, sc).
+	err := r.invoiceAnchored(ctx, a).
 		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("invoices.id = ?", invoiceID).
 		Take(&inv).Error
@@ -849,7 +911,7 @@ func (r *gormRepository) LockInvoice(ctx context.Context, sc authctx.Scope, invo
 }
 
 func (r *gormRepository) VoidInvoice(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID, reason string, at time.Time) error {
-	res := r.invoiceScoped(ctx, sc).
+	res := r.invoiceWriteScoped(ctx, sc).
 		Model(&Invoice{}).
 		Where("invoices.id = ? AND invoices.status IN ?", invoiceID, []string{InvoiceIssued, InvoicePartiallyPaid}).
 		Updates(map[string]any{
@@ -874,26 +936,22 @@ func (r *gormRepository) CreateAdjustment(ctx context.Context, adj *InvoiceAdjus
 func (r *gormRepository) ListAdjustments(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID) ([]InvoiceAdjustment, error) {
 	q := database.FromContext(ctx, r.db).
 		Where("center_id = ? AND invoice_id = ? AND deleted_at IS NULL", sc.CenterID, invoiceID)
-	if !sc.CenterWideFor(authctx.PermBillingViewAll) {
-		q = q.Where("teacher_id = ?", sc.TeacherID)
-	}
+	q = r.readNarrow(q, sc, "teacher_id")
 	var rows []InvoiceAdjustment
 	err := q.Order("created_at").Find(&rows).Error
 	return rows, err
 }
 
-func (r *gormRepository) AdjustmentsBySourcePeriod(ctx context.Context, sc authctx.Scope, studentID, periodID uuid.UUID) (int64, error) {
+func (r *gormRepository) AdjustmentsBySourcePeriod(ctx context.Context, a authctx.Anchor, studentID, periodID uuid.UUID) (int64, error) {
 	q := database.FromContext(ctx, r.db).
 		Table("invoice_adjustments").
 		Select("COALESCE(SUM(invoice_adjustments.amount), 0)").
 		Joins("JOIN invoices ON invoices.id = invoice_adjustments.invoice_id AND invoices.center_id = invoice_adjustments.center_id").
 		Joins("JOIN class_sessions ON class_sessions.id = invoice_adjustments.source_session_id AND class_sessions.center_id = invoice_adjustments.center_id").
 		Joins("JOIN billing_periods ON billing_periods.id = ? AND billing_periods.center_id = invoice_adjustments.center_id", periodID).
-		Where("invoice_adjustments.center_id = ? AND invoices.student_id = ? AND invoice_adjustments.deleted_at IS NULL", sc.CenterID, studentID).
+		Where("invoice_adjustments.center_id = ? AND invoices.student_id = ? AND invoice_adjustments.deleted_at IS NULL", a.CenterID, studentID).
+		Where("invoice_adjustments.teacher_id = ?", a.TeacherID).
 		Where("class_sessions.session_date BETWEEN billing_periods.period_start AND billing_periods.period_end")
-	if !sc.CenterWideFor(authctx.PermBillingViewAll) {
-		q = q.Where("invoice_adjustments.teacher_id = ?", sc.TeacherID)
-	}
 	var total int64
 	row := q.Row()
 	if err := row.Scan(&total); err != nil {
@@ -902,10 +960,10 @@ func (r *gormRepository) AdjustmentsBySourcePeriod(ctx context.Context, sc authc
 	return total, nil
 }
 
-func (r *gormRepository) RecalcInvoiceTotals(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID) error {
-	// The trailing (? OR invoices.teacher_id = ?) lets an owner's sc.CenterWideFor(authctx.PermBillingViewAll)
-	// short-circuit the teacher_id check via SQL OR, mirroring scoped()'s Go
-	// conditional in a statement that must stay one atomic UPDATE.
+func (r *gormRepository) RecalcInvoiceTotals(ctx context.Context, a authctx.Anchor, invoiceID uuid.UUID) error {
+	// Unconditional teacher_id filter: the write gate is already settled by
+	// the caller's prior GetInvoiceForWrite/LockInvoice, so no WriteWide
+	// short-circuit is needed here — a is already the invoice's own anchor.
 	res := database.FromContext(ctx, r.db).Exec(`
 		UPDATE invoices
 		SET adjustment_total = adj.total,
@@ -922,11 +980,11 @@ func (r *gormRepository) RecalcInvoiceTotals(ctx context.Context, sc authctx.Sco
 		    FROM invoice_adjustments
 		    WHERE invoice_id = ? AND center_id = ? AND deleted_at IS NULL
 		) adj
-		WHERE invoices.id = ? AND invoices.center_id = ? AND (? OR invoices.teacher_id = ?)
+		WHERE invoices.id = ? AND invoices.center_id = ? AND invoices.teacher_id = ?
 	`,
 		InvoiceDraft, InvoiceVoid, InvoiceIssued, InvoicePartiallyPaid, InvoicePaid,
-		invoiceID, sc.CenterID,
-		invoiceID, sc.CenterID, sc.CenterWideFor(authctx.PermBillingViewAll), sc.TeacherID,
+		invoiceID, a.CenterID,
+		invoiceID, a.CenterID, a.TeacherID,
 	)
 	if res.Error != nil {
 		return res.Error
@@ -937,9 +995,9 @@ func (r *gormRepository) RecalcInvoiceTotals(ctx context.Context, sc authctx.Sco
 	return nil
 }
 
-func (r *gormRepository) PeriodContainingDate(ctx context.Context, sc authctx.Scope, on time.Time) (*Period, error) {
+func (r *gormRepository) PeriodContainingDate(ctx context.Context, a authctx.Anchor, on time.Time) (*Period, error) {
 	var p Period
-	err := r.scoped(ctx, sc).
+	err := r.anchored(ctx, a).
 		Where("billing_periods.status = ?", PeriodClosed).
 		Where("billing_periods.period_start <= ? AND billing_periods.period_end >= ?", on, on).
 		Take(&p).Error
@@ -952,9 +1010,9 @@ func (r *gormRepository) PeriodContainingDate(ctx context.Context, sc authctx.Sc
 	return &p, nil
 }
 
-func (r *gormRepository) NextOpenPeriod(ctx context.Context, sc authctx.Scope, afterPeriodEnd time.Time) (*Period, error) {
+func (r *gormRepository) NextOpenPeriod(ctx context.Context, a authctx.Anchor, afterPeriodEnd time.Time) (*Period, error) {
 	var p Period
-	err := r.scoped(ctx, sc).
+	err := r.anchored(ctx, a).
 		Where("billing_periods.status = ?", PeriodOpen).
 		Where("billing_periods.period_start > ?", afterPeriodEnd).
 		Order("billing_periods.period_start ASC").
@@ -977,11 +1035,11 @@ func (r *gormRepository) LiveBillableCounts(ctx context.Context, enrollmentIDs [
 	for _, eid := range enrollmentIDs {
 		want[eid] = true
 	}
-	// period's own anchors, never a caller-supplied scope: an owner
+	// period's own anchor, never a caller-supplied scope: an owner
 	// recomputing one member's closed period must see only that member's
 	// attendance, not the whole center's.
-	periodScope := authctx.Scope{TeacherID: period.TeacherID, CenterID: period.CenterID}
-	tallies, err := r.attendance.TallyByEnrollment(ctx, periodScope, period.PeriodStart, period.PeriodEnd)
+	a := authctx.Anchor{TeacherID: period.TeacherID, CenterID: period.CenterID}
+	tallies, err := r.attendance.TallyByEnrollment(ctx, a, period.PeriodStart, period.PeriodEnd)
 	if err != nil {
 		return nil, err
 	}
@@ -993,7 +1051,7 @@ func (r *gormRepository) LiveBillableCounts(ctx context.Context, enrollmentIDs [
 	return out, nil
 }
 
-func (r *gormRepository) SessionMeta(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (uuid.UUID, string, time.Time, authctx.Scope, error) {
+func (r *gormRepository) SessionMeta(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) (uuid.UUID, string, time.Time, authctx.Anchor, error) {
 	type row struct {
 		ClassID     uuid.UUID
 		ClassName   string
@@ -1009,23 +1067,21 @@ func (r *gormRepository) SessionMeta(ctx context.Context, sc authctx.Scope, sess
 			class_sessions.teacher_id AS teacher_id,
 			class_sessions.center_id AS center_id`).
 		Joins("JOIN classes ON classes.id = class_sessions.class_id AND classes.center_id = class_sessions.center_id").
-		Where("class_sessions.center_id = ? AND class_sessions.id = ? AND class_sessions.deleted_at IS NULL", sc.CenterID, sessionID)
-	if !sc.CenterWideFor(authctx.PermBillingViewAll) {
-		q = q.Where("class_sessions.teacher_id = ?", sc.TeacherID)
-	}
+		Where("class_sessions.id = ? AND class_sessions.deleted_at IS NULL", sessionID)
+	q = r.centerScoped(q, sc, "class_sessions.center_id")
 	var rows []row
 	err := q.Find(&rows).Error
 	if err != nil {
-		return uuid.UUID{}, "", time.Time{}, authctx.Scope{}, err
+		return uuid.UUID{}, "", time.Time{}, authctx.Anchor{}, err
 	}
 	if len(rows) == 0 {
-		return uuid.UUID{}, "", time.Time{}, authctx.Scope{}, ErrSessionNotFound
+		return uuid.UUID{}, "", time.Time{}, authctx.Anchor{}, ErrSessionNotFound
 	}
-	sessionScope := authctx.Scope{TeacherID: rows[0].TeacherID, CenterID: rows[0].CenterID}
-	return rows[0].ClassID, rows[0].ClassName, rows[0].SessionDate, sessionScope, nil
+	sessionAnchor := authctx.Anchor{TeacherID: rows[0].TeacherID, CenterID: rows[0].CenterID}
+	return rows[0].ClassID, rows[0].ClassName, rows[0].SessionDate, sessionAnchor, nil
 }
 
-func (r *gormRepository) StudentSnapshot(ctx context.Context, sc authctx.Scope, studentID uuid.UUID) (uuid.UUID, string, string, error) {
+func (r *gormRepository) StudentSnapshot(ctx context.Context, a authctx.Anchor, studentID uuid.UUID) (uuid.UUID, string, string, error) {
 	type row struct {
 		ContactID   uuid.UUID
 		StudentName string
@@ -1035,10 +1091,7 @@ func (r *gormRepository) StudentSnapshot(ctx context.Context, sc authctx.Scope, 
 		Table("students").
 		Select("students.contact_id AS contact_id, students.full_name AS student_name, contacts.full_name AS contact_name").
 		Joins("JOIN contacts ON contacts.id = students.contact_id AND contacts.center_id = students.center_id").
-		Where("students.center_id = ? AND students.id = ?", sc.CenterID, studentID)
-	if !sc.CenterWideFor(authctx.PermBillingViewAll) {
-		q = q.Where("students.teacher_id = ?", sc.TeacherID)
-	}
+		Where("students.center_id = ? AND students.id = ? AND students.teacher_id = ?", a.CenterID, studentID, a.TeacherID)
 	var rows []row
 	err := q.Find(&rows).Error
 	if err != nil {

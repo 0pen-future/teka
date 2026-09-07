@@ -58,31 +58,31 @@ func (f *fakeRepository) InvoicesByIDs(_ context.Context, _ authctx.Scope, ids [
 	return rows, nil
 }
 
-func (f *fakeRepository) DeleteAllocations(_ context.Context, sc authctx.Scope, paymentID uuid.UUID) error {
+func (f *fakeRepository) DeleteAllocations(_ context.Context, a authctx.Anchor, paymentID uuid.UUID) error {
 	out := f.allocations[:0:0]
-	for _, a := range f.allocations {
-		if a.TeacherID == sc.TeacherID && a.PaymentID == paymentID {
+	for _, al := range f.allocations {
+		if al.TeacherID == a.TeacherID && al.PaymentID == paymentID {
 			continue
 		}
-		out = append(out, a)
+		out = append(out, al)
 	}
 	f.allocations = out
 	return nil
 }
 
-func (f *fakeRepository) AllocationsByPayment(_ context.Context, sc authctx.Scope, paymentID uuid.UUID) ([]PaymentAllocation, error) {
+func (f *fakeRepository) AllocationsByPayment(_ context.Context, a authctx.Anchor, paymentID uuid.UUID) ([]PaymentAllocation, error) {
 	var out []PaymentAllocation
-	for _, a := range f.allocations {
-		if a.TeacherID == sc.TeacherID && a.PaymentID == paymentID {
-			out = append(out, a)
+	for _, al := range f.allocations {
+		if al.TeacherID == a.TeacherID && al.PaymentID == paymentID {
+			out = append(out, al)
 		}
 	}
 	return out, nil
 }
 
-func (f *fakeRepository) MarkReversed(_ context.Context, sc authctx.Scope, paymentID uuid.UUID, at time.Time) error {
+func (f *fakeRepository) MarkReversed(_ context.Context, a authctx.Anchor, paymentID uuid.UUID, at time.Time) error {
 	p, ok := f.payments[paymentID]
-	if !ok || p.TeacherID != sc.TeacherID {
+	if !ok || p.TeacherID != a.TeacherID {
 		return ErrPaymentNotFound
 	}
 	p.ReversedAt = &at

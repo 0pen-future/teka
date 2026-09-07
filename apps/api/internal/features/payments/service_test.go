@@ -118,20 +118,20 @@ func (f *fakeRepository) RecalcInvoicePaid(_ context.Context, _ authctx.Scope, i
 	return nil
 }
 
-// ResolveContactScope mirrors the real repository's contract: a non-owner sc
+// ResolveContactAnchor mirrors the real repository's contract: a non-owner sc
 // only resolves its own contact, an owner sc resolves any contact in the
 // fake's namespace — and it always returns the contact's own owning
 // teacherID, never sc's, so Record's anchor-stamping twist can be exercised
 // without a database.
-func (f *fakeRepository) ResolveContactScope(_ context.Context, sc authctx.Scope, contactID uuid.UUID) (authctx.Scope, bool, error) {
+func (f *fakeRepository) ResolveContactAnchor(_ context.Context, sc authctx.Scope, contactID uuid.UUID) (authctx.Anchor, bool, error) {
 	owner, ok := f.contacts[contactID]
 	if !ok {
-		return authctx.Scope{}, false, nil
+		return authctx.Anchor{}, false, nil
 	}
 	if !sc.IsOwner && owner != sc.TeacherID {
-		return authctx.Scope{}, false, nil
+		return authctx.Anchor{}, false, nil
 	}
-	return authctx.Scope{TeacherID: owner, CenterID: sc.CenterID}, true, nil
+	return authctx.Anchor{TeacherID: owner, CenterID: sc.CenterID}, true, nil
 }
 
 func (f *fakeRepository) ListAllocations(_ context.Context, sc authctx.Scope, paymentID uuid.UUID) ([]AllocationRow, error) {
@@ -141,6 +141,17 @@ func (f *fakeRepository) ListAllocations(_ context.Context, sc authctx.Scope, pa
 			continue
 		}
 		out = append(out, f.rowFor(a))
+	}
+	return out, nil
+}
+
+func (f *fakeRepository) AllocationsOf(_ context.Context, a authctx.Anchor, paymentID uuid.UUID) ([]AllocationRow, error) {
+	var out []AllocationRow
+	for _, al := range f.allocations {
+		if al.TeacherID != a.TeacherID || al.PaymentID != paymentID {
+			continue
+		}
+		out = append(out, f.rowFor(al))
 	}
 	return out, nil
 }

@@ -35,6 +35,12 @@ func (f statementFixture) scope() authctx.Scope {
 	return authctx.Scope{TeacherID: f.teacherID, CenterID: f.centerID}
 }
 
+// anchor is the fixture's own teacher/center as an Anchor, for the run-store
+// writes that never owner-bypass and so never need a caller Scope at all.
+func (f statementFixture) anchor() authctx.Anchor {
+	return authctx.Anchor{TeacherID: f.teacherID, CenterID: f.centerID}
+}
+
 func seedStatement(t *testing.T, db *gorm.DB) statementFixture {
 	t.Helper()
 	_, teacher := testutil.Teacher(t, db)
@@ -144,14 +150,14 @@ func TestRunLifecycleIsDBBacked(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, active)
 
-	require.NoError(t, repo.MarkOutcome(ctx, sc, rowSent, notifications.StatusSent, strPtr("msg-1"), nil))
-	require.NoError(t, repo.MarkOutcome(ctx, sc, rowFailed, notifications.StatusFailed, nil, strPtr("friend refused")))
+	require.NoError(t, repo.MarkOutcome(ctx, f.anchor(), rowSent, notifications.StatusSent, strPtr("msg-1"), nil))
+	require.NoError(t, repo.MarkOutcome(ctx, f.anchor(), rowFailed, notifications.StatusFailed, nil, strPtr("friend refused")))
 
-	counts, err := repo.RunCounts(ctx, sc, run.ID)
+	counts, err := repo.RunCounts(ctx, f.anchor(), run.ID)
 	require.NoError(t, err)
 	require.Equal(t, notifications.RunCounts{Total: 3, Sent: 1, Failed: 1}, counts)
 
-	require.NoError(t, repo.UpdateRunStatus(ctx, sc, run.ID, notifications.RunStatusCompleted))
+	require.NoError(t, repo.UpdateRunStatus(ctx, f.anchor(), run.ID, notifications.RunStatusCompleted))
 	active, err = repo.HasActiveRun(ctx, sc)
 	require.NoError(t, err)
 	require.False(t, active, "a completed run is no longer active")
@@ -163,7 +169,7 @@ func TestRunLifecycleIsDBBacked(t *testing.T) {
 	require.NotNil(t, got.FinishedAt, "a terminal status must stamp finished_at")
 
 	// Reopening the run (manual resume) clears the finish stamp.
-	require.NoError(t, repo.UpdateRunStatus(ctx, sc, run.ID, notifications.RunStatusRunning))
+	require.NoError(t, repo.UpdateRunStatus(ctx, f.anchor(), run.ID, notifications.RunStatusRunning))
 	got, err = repo.LatestRunByPeriod(ctx, sc, f.periodID, nil)
 	require.NoError(t, err)
 	require.Nil(t, got.FinishedAt)
@@ -184,12 +190,12 @@ func TestMarkOutcomeOnlyMovesQueuedRowsOfTheirOwnTeacher(t *testing.T) {
 
 	// Another teacher marking this row must change nothing.
 	other := seedStatement(t, db)
-	require.NoError(t, repo.MarkOutcome(ctx, other.scope(), rowID, notifications.StatusSent, strPtr("stolen"), nil))
+	require.NoError(t, repo.MarkOutcome(ctx, other.anchor(), rowID, notifications.StatusSent, strPtr("stolen"), nil))
 	var status string
 	require.NoError(t, db.Table("notifications").Select("status").Where("id = ?", rowID).Take(&status).Error)
 	require.Equal(t, notifications.StatusQueued, status)
 
-	require.NoError(t, repo.MarkOutcome(ctx, f.scope(), rowID, notifications.StatusSent, strPtr("msg-9"), nil))
+	require.NoError(t, repo.MarkOutcome(ctx, f.anchor(), rowID, notifications.StatusSent, strPtr("msg-9"), nil))
 	var row struct {
 		Status        string
 		ProviderMsgID *string
@@ -205,7 +211,7 @@ func TestMarkOutcomeOnlyMovesQueuedRowsOfTheirOwnTeacher(t *testing.T) {
 	require.NotNil(t, row.SentAt, "a sent outcome must stamp sent_at")
 
 	// A row already sent is final: a late failed outcome must not rewrite it.
-	require.NoError(t, repo.MarkOutcome(ctx, f.scope(), rowID, notifications.StatusFailed, nil, strPtr("late error")))
+	require.NoError(t, repo.MarkOutcome(ctx, f.anchor(), rowID, notifications.StatusFailed, nil, strPtr("late error")))
 	require.NoError(t, db.Table("notifications").Select("status").Where("id = ?", rowID).Take(&status).Error)
 	require.Equal(t, notifications.StatusSent, status)
 }
@@ -219,17 +225,17 @@ func TestFailQueuedInRunSparesFinishedRowsAndOtherRuns(t *testing.T) {
 	run := seedRun(t, repo, f)
 	sentRow := seedRunRow(t, repo, f, run.ID)
 	queuedRow := seedRunRow(t, repo, f, run.ID)
-	require.NoError(t, repo.MarkOutcome(ctx, f.scope(), sentRow, notifications.StatusSent, nil, nil))
+	require.NoError(t, repo.MarkOutcome(ctx, f.anchor(), sentRow, notifications.StatusSent, nil, nil))
 
 	// A second run of the SAME teacher keeps its queued rows — the sweep is
 	// scoped by run, not by teacher. The first run steps aside (only one may
 	// be running per teacher) but its queued rows stay swept-able.
-	require.NoError(t, repo.UpdateRunStatus(ctx, f.scope(), run.ID, notifications.RunStatusInterrupted))
+	require.NoError(t, repo.UpdateRunStatus(ctx, f.anchor(), run.ID, notifications.RunStatusInterrupted))
 	otherPeriod := seedSecondPeriodStatement(t, db, f)
 	otherRun := seedRun(t, repo, otherPeriod)
 	otherRow := seedRunRow(t, repo, otherPeriod, otherRun.ID)
 
-	require.NoError(t, repo.FailQueuedInRun(ctx, f.scope(), run.ID, "phiên Zalo hết hạn"))
+	require.NoError(t, repo.FailQueuedInRun(ctx, f.anchor(), run.ID, "phiên Zalo hết hạn"))
 
 	var got struct {
 		Status       string
@@ -268,9 +274,9 @@ func TestQueuedRunRowsReturnsOnlyTheRunsQueuedRows(t *testing.T) {
 	run := seedRun(t, repo, f)
 	queuedRow := seedRunRow(t, repo, f, run.ID)
 	sentRow := seedRunRow(t, repo, f, run.ID)
-	require.NoError(t, repo.MarkOutcome(ctx, f.scope(), sentRow, notifications.StatusSent, nil, nil))
+	require.NoError(t, repo.MarkOutcome(ctx, f.anchor(), sentRow, notifications.StatusSent, nil, nil))
 
-	rows, err := repo.QueuedRunRows(ctx, f.scope(), run.ID)
+	rows, err := repo.QueuedRunRows(ctx, f.anchor(), run.ID)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Equal(t, queuedRow, rows[0].NotificationID)
@@ -326,10 +332,10 @@ func TestRunWritesSurfaceTheActiveRunConflict(t *testing.T) {
 
 	// Reopening an interrupted run while another run is live must refuse the
 	// same way — that is resume racing a fresh bulk send across processes.
-	require.NoError(t, repo.UpdateRunStatus(ctx, f.scope(), first.ID, notifications.RunStatusInterrupted))
+	require.NoError(t, repo.UpdateRunStatus(ctx, f.anchor(), first.ID, notifications.RunStatusInterrupted))
 	otherPeriod := seedSecondPeriodStatement(t, db, f)
 	seedRun(t, repo, otherPeriod)
-	require.ErrorIs(t, repo.UpdateRunStatus(ctx, f.scope(), first.ID, notifications.RunStatusRunning),
+	require.ErrorIs(t, repo.UpdateRunStatus(ctx, f.anchor(), first.ID, notifications.RunStatusRunning),
 		notifications.ErrRunActive)
 }
 
@@ -345,7 +351,7 @@ func TestMarkInterruptedReconcilesEveryRunningRun(t *testing.T) {
 
 	finished := seedStatement(t, db)
 	finishedRun := seedRun(t, repo, finished)
-	require.NoError(t, repo.UpdateRunStatus(ctx, finished.scope(), finishedRun.ID, notifications.RunStatusCompleted))
+	require.NoError(t, repo.UpdateRunStatus(ctx, finished.anchor(), finishedRun.ID, notifications.RunStatusCompleted))
 
 	n, err := repo.MarkInterrupted(ctx)
 	require.NoError(t, err)

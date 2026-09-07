@@ -216,11 +216,10 @@ func (s *Service) BulkSend(ctx context.Context, sc authctx.Scope, periodID uuid.
 		// period (a secretary interrupted then revoked, or the reverse): its
 		// still-queued rows would otherwise sit "queued" forever, since only
 		// the run's own teacher can resume and this caller is not them. Fail
-		// them out with a reason, anchored on the stale run's own scope.
+		// them out with a reason, anchored on the stale run's own teacher.
 		if stale, err := s.repo.LatestRunByPeriod(ctx, sc, periodID, classID); err == nil {
 			if stale.Status != RunStatusRunning && stale.TeacherID != sc.TeacherID {
-				staleScope := authctx.Scope{TeacherID: stale.TeacherID, CenterID: sc.CenterID}
-				if err := s.repo.FailQueuedInRun(ctx, staleScope, stale.ID, orphanedRunFailureMessage); err != nil {
+				if err := s.repo.FailQueuedInRun(ctx, sc.AnchorTo(stale.TeacherID), stale.ID, orphanedRunFailureMessage); err != nil {
 					return apperror.From(err)
 				}
 			}
@@ -580,9 +579,11 @@ func (s *Service) SendPreview(ctx context.Context, sc authctx.Scope, periodID uu
 }
 
 // List returns one billing period's notification ledger, optionally narrowed
-// by filter. A reports-oversight caller (owner or reports.send holder)
-// sees any period's ledger in the center; a plain member sees the ledgers of
-// their own periods — delegated rows a secretary sent on them included.
+// by filter. A caller who sees notifications center-wide (the owner, a
+// notifications.view_all holder, or a reports.send holder through the key it
+// implies) sees any period's ledger in the center; a plain member sees the
+// ledgers of their own periods — delegated rows a secretary sent on them
+// included.
 func (s *Service) List(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, filter ListFilter) ([]NotificationResponse, error) {
 	rows, err := s.repo.ListByPeriod(ctx, sc, periodID, filter)
 	if err != nil {
@@ -596,8 +597,9 @@ func (s *Service) List(ctx context.Context, sc authctx.Scope, periodID uuid.UUID
 }
 
 // MarkSent marks every id in ids sent, for ids visible to sc (center-scoped,
-// and teacher-scoped unless sc is the center's owner) and still queued.
-// Idempotent: an id already sent is silently left alone rather than erroring,
+// and teacher-scoped unless sc is the center's owner) and still queued; an id
+// outside that scope fails the whole call with NotFound. Idempotent: an id
+// already sent is silently left alone rather than erroring,
 // so tapping "mark sent" twice never fails the second time.
 func (s *Service) MarkSent(ctx context.Context, sc authctx.Scope, ids []uuid.UUID) error {
 	if err := s.repo.MarkSent(ctx, sc, ids); err != nil {
@@ -629,11 +631,10 @@ func (s *Service) RunSnapshot(ctx context.Context, sc authctx.Scope, periodID uu
 	if err != nil {
 		return nil, apperror.From(err)
 	}
-	// runScope anchors on the run's own sender, not necessarily sc's own
+	// The anchor binds to the run's own sender, not necessarily sc's own
 	// teacher — an owner may be viewing a member's run — so the row count
 	// still matches exactly this run regardless of who is asking.
-	runScope := authctx.Scope{TeacherID: run.TeacherID, CenterID: sc.CenterID}
-	counts, err := s.repo.RunCounts(ctx, runScope, run.ID)
+	counts, err := s.repo.RunCounts(ctx, sc.AnchorTo(run.TeacherID), run.ID)
 	if err != nil {
 		return nil, apperror.From(err)
 	}
@@ -735,7 +736,7 @@ func (s *Service) ResumeRun(ctx context.Context, sc authctx.Scope, periodID uuid
 		if err != nil {
 			return err
 		}
-		queued, err := s.repo.QueuedRunRows(ctx, sc, run.ID)
+		queued, err := s.repo.QueuedRunRows(ctx, sc.Self(), run.ID)
 		if err != nil {
 			return apperror.From(err)
 		}
@@ -760,7 +761,7 @@ func (s *Service) ResumeRun(ctx context.Context, sc authctx.Scope, periodID uuid
 
 		for _, row := range queued {
 			fail := func(reason string) error {
-				return s.repo.MarkOutcome(ctx, sc, row.NotificationID, StatusFailed, nil, ptr(reason))
+				return s.repo.MarkOutcome(ctx, sc.Self(), row.NotificationID, StatusFailed, nil, ptr(reason))
 			}
 			uid, mapped := mappings[row.ContactID]
 			if !mapped {
@@ -793,7 +794,7 @@ func (s *Service) ResumeRun(ctx context.Context, sc authctx.Scope, periodID uuid
 		if len(items) == 0 {
 			status = RunStatusCompleted
 		}
-		if err := s.repo.UpdateRunStatus(ctx, sc, run.ID, status); err != nil {
+		if err := s.repo.UpdateRunStatus(ctx, sc.Self(), run.ID, status); err != nil {
 			if errors.Is(err, ErrRunActive) {
 				return apperror.Conflict("a zalo_personal run is already sending; wait for it to finish")
 			}

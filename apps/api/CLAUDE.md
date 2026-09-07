@@ -13,6 +13,11 @@ Go module `teka/apps/api`. Entrypoint `cmd/api/main.go`; DI wiring in
 - `internal/shared/` — cross-feature utilities (apperror, authctx, events, id,
   logger, pagination, response, secrets, token, validation). Check here before
   writing a new helper.
+- `internal/shared/routespec/` — the manifest of every registered route's
+  authorization policy and audit classification. `internal/server`'s route
+  policy, `internal/features/audit`'s action lookup, and
+  `internal/middleware`'s request-audit skip sets all derive from it; add a
+  new route's classification there, not in any of its three consumers.
 - `internal/testutil/` — test helpers; reuse for integration tests.
 
 ## Constraints
@@ -28,6 +33,7 @@ Go module `teka/apps/api`. Entrypoint `cmd/api/main.go`; DI wiring in
 
 - `make test-api-unit` — fast unit + HTTP tests, no Docker.
 - `make test-api` — full unit + integration with coverage floor, needs Docker.
+- `make scopelint` — check repository tenancy scoping when touching a repository.
 
 ## Pointers
 

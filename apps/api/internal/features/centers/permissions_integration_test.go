@@ -426,6 +426,70 @@ func TestMeReturnsEffectivePermissions(t *testing.T) {
 		"effective permissions come back in registry order")
 }
 
+// reports.send implies the four view_all keys a send touches (billing,
+// statements, notifications, contacts): granting it alone must surface all
+// five in the member's effective set and in /centers/me, and denying one of
+// the implied keys on top must not narrow it back out — the deny only bites
+// the source key it names. Denying reports.send itself, by contrast, takes
+// every implied key down with it.
+func TestReportsSendImpliesViewAllKeys(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := context.Background()
+
+	owner, _ := testutil.Teacher(t, e.db)
+	member, _ := testutil.Teacher(t, e.db)
+	e.join(t, member.ID, owner.ID)
+	ownerScope := e.scope(t, owner.ID)
+
+	require.NoError(t, e.centersSvc.ReplaceMemberOverrides(ctx, ownerScope, member.ID,
+		centers.MemberOverridesRequest{Grants: []string{authctx.PermReportsSend}}))
+
+	wantImplied := []string{
+		authctx.PermReportsSend,
+		authctx.PermBillingViewAll,
+		authctx.PermStatementsViewAll,
+		authctx.PermNotificationsViewAll,
+		authctx.PermContactsViewAll,
+	}
+	sc := e.scope(t, member.ID)
+	for _, key := range wantImplied {
+		require.Truef(t, sc.Has(key), "reports.send must imply %s in EffectiveKeys", key)
+	}
+	require.ElementsMatch(t, wantImplied, sc.EffectiveKeys(),
+		"the implied keys must appear in the resolved scope alongside their source")
+
+	memberMe, err := e.centersSvc.Me(ctx, e.scope(t, member.ID))
+	require.NoError(t, err)
+	require.ElementsMatch(t, wantImplied, memberMe.(*centers.MemberMeResponse).Permissions,
+		"/centers/me must expose the implied keys, not just the stored grant")
+
+	// Denying an implied key directly must not narrow it: an implied key is
+	// never a stored row, so there is nothing for a deny naming it to remove.
+	require.NoError(t, e.centersSvc.ReplaceMemberOverrides(ctx, ownerScope, member.ID,
+		centers.MemberOverridesRequest{
+			Grants: []string{authctx.PermReportsSend},
+			Denies: []string{authctx.PermBillingViewAll},
+		}))
+	sc = e.scope(t, member.ID)
+	require.True(t, sc.Has(authctx.PermReportsSend))
+	require.True(t, sc.Has(authctx.PermBillingViewAll),
+		"denying an implied key must not narrow it — only denying the source key does")
+	require.True(t, sc.Has(authctx.PermStatementsViewAll))
+	require.True(t, sc.Has(authctx.PermNotificationsViewAll))
+	require.True(t, sc.Has(authctx.PermContactsViewAll))
+
+	// Denying the source key takes every key it implied down with it.
+	require.NoError(t, e.centersSvc.ReplaceMemberOverrides(ctx, ownerScope, member.ID,
+		centers.MemberOverridesRequest{Denies: []string{authctx.PermReportsSend}}))
+	sc = e.scope(t, member.ID)
+	require.False(t, sc.Has(authctx.PermReportsSend))
+	require.False(t, sc.Has(authctx.PermBillingViewAll))
+	require.False(t, sc.Has(authctx.PermStatementsViewAll))
+	require.False(t, sc.Has(authctx.PermNotificationsViewAll))
+	require.False(t, sc.Has(authctx.PermContactsViewAll))
+}
+
 // Every center-creation path seeds the system roles with the centralized
 // default baseline: membership alone granted all operational access before
 // the catalog, so a role born empty would silently revoke it at cutover.

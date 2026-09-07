@@ -60,13 +60,18 @@ its batch with an error log. Owners read the trail through
 ### Action map convention
 
 [`features/audit/action.go`](../apps/api/internal/features/audit/action.go)
-maps `METHOD /route/template` to a dot-namespaced action
-(`class.create`, `contact.update`, …) plus entity type and id parameter.
-**When adding a mutating route, add its entry to the action map** — an
-unmapped route still produces a row, but with a fallback action derived from
-the raw route instead of a stable name the web UI can filter on. The web
-filter groups (`apps/web/src/features/audit/components/audit-filters.tsx`)
-key off these prefixes.
+resolves `METHOD /route/template` to a dot-namespaced action
+(`class.create`, `contact.update`, …) plus entity type and id parameter by
+looking the route up in the route manifest
+([`shared/routespec/routespec.go`](../apps/api/internal/shared/routespec/routespec.go)),
+where each route's `Audit` field sits next to its authorization policy.
+**When adding a mutating route, give its manifest entry an audit
+`Source` and, for request-sourced rows, an `Action`** — the manifest tests
+fail on a mutating route with no source or a request-sourced route with no
+action, so the raw-route fallback in the subscriber is a safety net, not a
+path new routes may take. The web filter groups
+(`apps/web/src/features/audit/components/audit-filters.tsx`) key off these
+action prefixes.
 
 ### Known blind spots
 

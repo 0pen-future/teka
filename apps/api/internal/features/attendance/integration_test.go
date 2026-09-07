@@ -22,6 +22,7 @@ import (
 	"teka/apps/api/internal/features/sessions"
 	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/testutil"
 )
@@ -478,7 +479,7 @@ func TestFourStatusConfirmPersistsAndKeepsBillableTally(t *testing.T) {
 	require.Equal(t, []string{"excused", "late", "present"}, billableStatuses,
 		"every status must persist as a billable row")
 
-	tallies, err := svc.TallyByEnrollment(ctx, sc, date("2026-01-01"), date("2026-01-31"))
+	tallies, err := svc.TallyByEnrollment(ctx, sc.Self(), date("2026-01-01"), date("2026-01-31"))
 	require.NoError(t, err)
 	require.Len(t, tallies, 3)
 	// Attendance semantics on the reporting counts: late is present (the
@@ -737,7 +738,7 @@ func TestConfirmCapabilityGateAndAttribution(t *testing.T) {
 
 	// Billing keys on the enrollment, not the record's writer: the roster
 	// owner's tally counts the assistant/GV-recorded session.
-	tallies, err := svc.TallyByEnrollment(ctx, ownerSc, date("2026-01-01"), date("2026-01-31"))
+	tallies, err := svc.TallyByEnrollment(ctx, ownerSc.Self(), date("2026-01-01"), date("2026-01-31"))
 	require.NoError(t, err)
 	found := false
 	for _, tl := range tallies {
@@ -803,7 +804,7 @@ func TestHandoffReconfirmDoesNotDuplicateBillableRows(t *testing.T) {
 		session.ID).Scan(&writer).Error)
 	require.Equal(t, newGV.ID.String(), writer)
 
-	tallies, err := svc.TallyByEnrollment(ctx, ownerSc, date("2026-01-01"), date("2026-01-31"))
+	tallies, err := svc.TallyByEnrollment(ctx, ownerSc.Self(), date("2026-01-01"), date("2026-01-31"))
 	require.NoError(t, err)
 	var billable, absent int
 	for _, tl := range tallies {
@@ -812,4 +813,59 @@ func TestHandoffReconfirmDoesNotDuplicateBillableRows(t *testing.T) {
 	}
 	require.Equal(t, 1, billable, "one session, one billable unit — regardless of who recorded it")
 	require.Equal(t, 1, absent, "the re-confirm's absent flag replaced the old present flag")
+}
+
+// A member holding the visibility keys reads any attendance sheet in the
+// center but cannot confirm a session they hold no stint on: the keys never
+// widen the write port, so the owner's recorded rows are never replaced by
+// the viewer's empty sheet. Their own sessions stay confirmable.
+func TestViewAllWidensAttendanceReadsNotWrites(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+
+	owner, _ := testutil.Teacher(t, db)
+	scOwner := testutil.ScopeFor(t, db, owner.ID)
+	member, _ := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, member.ID, scOwner.CenterID)
+
+	contact := testutil.Contact(t, db, owner.ID)
+	class := testutil.Class(t, db, owner.ID, testutil.WithClassStartDate(date("2026-01-01")))
+	session := testutil.Session(t, db, owner.ID, class.ID, date("2026-01-06"))
+	student := testutil.Student(t, db, owner.ID, contact.ID)
+	enrollment := testutil.Enrollment(t, db, owner.ID, student.ID, class.ID, date("2026-01-01"))
+	testutil.AttendanceRecord(t, db, owner.ID, session.ID, student.ID, enrollment.ID)
+
+	scMember := testutil.ScopeFor(t, db, member.ID)
+	scMember.Perms = authctx.BuildPermSet(nil, []string{
+		authctx.PermAttendanceViewAll, authctx.PermSessionsViewAll, authctx.PermClassesViewAll,
+		authctx.PermEnrollmentsViewAll, authctx.PermStudentsViewAll,
+	}, nil)
+	require.True(t, scMember.CenterWideFor(authctx.PermAttendanceViewAll))
+
+	got, err := svc.Get(ctx, scMember, session.ID)
+	require.NoError(t, err, "the visibility keys must open the owner's sheet for reading")
+	require.Len(t, got.Rows, 1)
+
+	// The class is readable through the keys but carries no write role, so
+	// the class write gate answers Forbidden rather than hiding the class.
+	_, err = svc.Confirm(ctx, scMember, session.ID, attendance.ConfirmRequest{})
+	require.Equal(t, 403, apperror.From(err).Status, "a visibility key must not widen confirming attendance")
+
+	var live int64
+	require.NoError(t, db.Table("attendance_records").
+		Where("session_id = ? AND deleted_at IS NULL", session.ID).Count(&live).Error)
+	require.EqualValues(t, 1, live, "the owner's recorded rows must survive the refused confirm")
+	var status string
+	require.NoError(t, db.Table("class_sessions").Select("status").Where("id = ?", session.ID).Scan(&status).Error)
+	require.Equal(t, sessions.StatusPlanned, status, "the owner's session must stay planned")
+
+	ownContact := testutil.Contact(t, db, member.ID)
+	ownClass := testutil.Class(t, db, member.ID, testutil.WithClassStartDate(date("2026-01-01")))
+	ownSession := testutil.Session(t, db, member.ID, ownClass.ID, date("2026-01-07"))
+	ownStudent := testutil.Student(t, db, member.ID, ownContact.ID)
+	testutil.Enrollment(t, db, member.ID, ownStudent.ID, ownClass.ID, date("2026-01-01"))
+	out, err := svc.Confirm(ctx, scMember, ownSession.ID, attendance.ConfirmRequest{})
+	require.NoError(t, err, "a member must still confirm their own session")
+	require.Equal(t, sessions.StatusHeld, out.Status)
 }

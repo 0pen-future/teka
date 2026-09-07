@@ -17,7 +17,7 @@ import (
 //
 // Every method is center-scoped through the caller's center id only — never
 // the owner flag or a permission check (the owner gate lives in the service,
-// enforced by scoping_guard_test).
+// enforced by the scopelint analyzer under tools/).
 type Repository interface {
 	// ListSets returns the center's live (non-deleted) score sets, name order.
 	ListSets(ctx context.Context, sc authctx.Scope) ([]ScoreSet, error)

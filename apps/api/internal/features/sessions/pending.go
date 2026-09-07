@@ -77,8 +77,9 @@ func fromPendingRow(row *PendingRow, today time.Time) PendingSessionResponse {
 	}
 }
 
-// ListPending implements the pending-attendance predicate: center-scoped
-// (narrowed to the caller's own rows when not an owner), session_date <
+// ListPending implements the pending-attendance predicate: the caller's own
+// rows, or the whole center under sessions.view_all (readScopedFeed),
+// session_date <
 // before, attendance_confirmed_at IS NULL, status IN ('held','planned'),
 // deleted_at IS NULL. from/to (both inclusive) narrow the range when set —
 // the same predicate plan 04's period-closing gate reuses.
@@ -89,8 +90,26 @@ func fromPendingRow(row *PendingRow, today time.Time) PendingSessionResponse {
 // whole feed at two statements regardless of result size — never a per-row
 // roster lookup.
 func (r *gormRepository) ListPending(ctx context.Context, sc authctx.Scope, before time.Time, from, to *time.Time, limit int) ([]PendingRow, int64, error) {
+	return r.listPending(func() *gorm.DB { return r.readScopedFeed(ctx, sc) }, before, from, to, limit)
+}
+
+// ListPendingAnchored is ListPending's Anchor sibling: an unconditional
+// teacher+center filter (anchoredFeed), no permission branch. Billing's
+// period-close gate calls it anchored on the period's own teacher, never the
+// acting caller's — a visibility key or a stint the anchor's teacher holds
+// on someone else's class must never widen what this reports as blocking.
+func (r *gormRepository) ListPendingAnchored(ctx context.Context, a authctx.Anchor, before time.Time, from, to *time.Time, limit int) ([]PendingRow, int64, error) {
+	return r.listPending(func() *gorm.DB { return r.anchoredFeed(ctx, a) }, before, from, to, limit)
+}
+
+// listPending is ListPending/ListPendingAnchored's shared query builder and
+// execution. scopeFn must return a fresh, unexecuted query on every call
+// (never a memoized *gorm.DB) — base() below invokes it twice, once for
+// Count and once for Find, and reusing one built query across both would
+// accumulate the second call's joins onto the first.
+func (r *gormRepository) listPending(scopeFn func() *gorm.DB, before time.Time, from, to *time.Time, limit int) ([]PendingRow, int64, error) {
 	base := func() *gorm.DB {
-		q := r.scoped(ctx, sc).Model(&Session{}).
+		q := scopeFn().Model(&Session{}).
 			Where("class_sessions.session_date < ?", before).
 			Where("class_sessions.attendance_confirmed_at IS NULL").
 			Where("class_sessions.status IN ?", []string{StatusHeld, StatusPlanned})

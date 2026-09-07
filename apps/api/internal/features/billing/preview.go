@@ -29,17 +29,23 @@ type PeriodCompute struct {
 // + carried debt + adjustments in, one ComputedInvoice per student out. It is
 // read-only — no repository method it calls writes anything — so Preview
 // calls it directly and Draft calls it before opening its transaction. sc
-// authorizes the initial GetPeriod; every subsequent repository call uses
-// the period's own derived scope, so an owner computing a member's period
-// never aggregates across the whole center.
+// authorizes the initial GetPeriod; every subsequent repository call is
+// anchored on the period's own teacher, so an owner computing a member's
+// period never aggregates across the whole center.
 func ComputePeriod(ctx context.Context, repo Repository, sc authctx.Scope, periodID uuid.UUID) (*PeriodCompute, error) {
 	period, err := repo.GetPeriod(ctx, sc, periodID)
 	if err != nil {
 		return nil, err
 	}
-	periodScope := authctx.Scope{TeacherID: period.TeacherID, CenterID: period.CenterID}
+	return computePeriod(ctx, repo, sc.AnchorTo(period.TeacherID), period)
+}
 
-	tallies, err := repo.TallyAttendance(ctx, periodScope, periodID)
+// computePeriod is ComputePeriod's core, taking an already-resolved period
+// and its anchor directly — Close reuses it against the period LockPeriod
+// just locked, without a second read of the same row.
+func computePeriod(ctx context.Context, repo Repository, a authctx.Anchor, period *Period) (*PeriodCompute, error) {
+	periodID := period.ID
+	tallies, err := repo.TallyAttendance(ctx, a, period.PeriodStart, period.PeriodEnd)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +54,7 @@ func ComputePeriod(ctx context.Context, repo Repository, sc authctx.Scope, perio
 		talliesByEnrollment[t.EnrollmentID] = t
 	}
 
-	prevPeriod, err := repo.PreviousClosedPeriod(ctx, periodScope, period.PeriodStart)
+	prevPeriod, err := repo.PreviousClosedPeriod(ctx, a, period.PeriodStart)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +62,7 @@ func ComputePeriod(ctx context.Context, repo Repository, sc authctx.Scope, perio
 	var carriedDebt []CarriedDebtStudent
 	openingBalances := map[uuid.UUID]int64{}
 	if prevPeriod != nil {
-		carriedDebt, err = repo.CarriedDebtStudents(ctx, periodScope, prevPeriod.ID)
+		carriedDebt, err = repo.CarriedDebtStudents(ctx, a, prevPeriod.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -77,13 +83,13 @@ func ComputePeriod(ctx context.Context, repo Repository, sc authctx.Scope, perio
 			studentIDs = append(studentIDs, sid)
 		}
 
-		openingBalances, err = repo.OpeningBalances(ctx, periodScope, prevPeriod.ID, studentIDs)
+		openingBalances, err = repo.OpeningBalances(ctx, a, prevPeriod.ID, studentIDs)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	existingInvoices, err := repo.ListInvoices(ctx, periodScope, periodID)
+	existingInvoices, err := repo.ListInvoices(ctx, a, periodID)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +104,7 @@ func ComputePeriod(ctx context.Context, repo Repository, sc authctx.Scope, perio
 	// data is keyed by invoice_id. Remap through this period's own invoices
 	// (empty on a first-ever preview/draft, so adjustmentsByStudent is empty
 	// too — adjustment_total stays 0 until phase 4 attaches one).
-	adjustmentsByInvoice, err := repo.AdjustmentTotals(ctx, periodScope, periodID)
+	adjustmentsByInvoice, err := repo.AdjustmentTotals(ctx, a, periodID)
 	if err != nil {
 		return nil, err
 	}
@@ -183,12 +189,12 @@ func ComputePeriod(ctx context.Context, repo Repository, sc authctx.Scope, perio
 // targeted invoice turns out not to be a draft — nothing after that point
 // has been written, and the transaction rolls back everything before it too.
 //
-// periodScope must already be the period's own derived owner scope (never
-// the acting caller's) — every invoice and invoice_line this writes inherits
-// it, so an owner drafting a member's period writes rows owned by the
-// member, not by the owner.
-func DraftPeriod(ctx context.Context, repo Repository, periodScope authctx.Scope, periodID uuid.UUID, compute *PeriodCompute) (map[uuid.UUID]uuid.UUID, error) {
-	existingInvoices, err := repo.ListInvoices(ctx, periodScope, periodID)
+// a must already be the period's own anchor (never the acting caller's) —
+// every invoice and invoice_line this writes inherits it, so an owner
+// drafting a member's period writes rows owned by the member, not by the
+// owner.
+func DraftPeriod(ctx context.Context, repo Repository, a authctx.Anchor, periodID uuid.UUID, compute *PeriodCompute) (map[uuid.UUID]uuid.UUID, error) {
+	existingInvoices, err := repo.ListInvoices(ctx, a, periodID)
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +209,7 @@ func DraftPeriod(ctx context.Context, repo Repository, periodScope authctx.Scope
 		}
 	}
 
-	adjustmentsByInvoice, err := repo.AdjustmentTotals(ctx, periodScope, periodID)
+	adjustmentsByInvoice, err := repo.AdjustmentTotals(ctx, a, periodID)
 	if err != nil {
 		return nil, err
 	}
@@ -221,8 +227,8 @@ func DraftPeriod(ctx context.Context, repo Repository, periodScope authctx.Scope
 
 		inv := &Invoice{
 			ID:              invoiceID,
-			TeacherID:       periodScope.TeacherID,
-			CenterID:        periodScope.CenterID,
+			TeacherID:       a.TeacherID,
+			CenterID:        a.CenterID,
 			PeriodID:        periodID,
 			StudentID:       ci.StudentID,
 			ContactID:       ci.ContactID,
@@ -244,8 +250,8 @@ func DraftPeriod(ctx context.Context, repo Repository, periodScope authctx.Scope
 			keepEnrollmentIDs = append(keepEnrollmentIDs, line.EnrollmentID)
 			invLine := &InvoiceLine{
 				ID:            id.New(),
-				TeacherID:     periodScope.TeacherID,
-				CenterID:      periodScope.CenterID,
+				TeacherID:     a.TeacherID,
+				CenterID:      a.CenterID,
 				InvoiceID:     inv.ID,
 				EnrollmentID:  line.EnrollmentID,
 				ClassName:     line.ClassName,
@@ -258,7 +264,7 @@ func DraftPeriod(ctx context.Context, repo Repository, periodScope authctx.Scope
 				return nil, err
 			}
 		}
-		if err := repo.ZeroUnmatchedLines(ctx, periodScope, inv.ID, keepEnrollmentIDs); err != nil {
+		if err := repo.ZeroUnmatchedLines(ctx, a, inv.ID, keepEnrollmentIDs); err != nil {
 			return nil, err
 		}
 	}

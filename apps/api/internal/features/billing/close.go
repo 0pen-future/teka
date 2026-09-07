@@ -23,12 +23,13 @@ const closeFeedLimit = 1000
 
 // PendingSource is the slice of the sessions feature billing's period close
 // needs: the unconfirmed-sessions predicate with an explicit `before`
-// cutoff. *sessions.Service satisfies this. Declared here — a
+// cutoff, anchored on the period's own teacher rather than the acting
+// caller's. *sessions.Service satisfies this. Declared here — a
 // consumer-defined interface, the same pattern billing uses for
 // AttendanceSource — so billing depends on sessions' public service
 // contract, never its repository or a session-scanning query of its own.
 type PendingSource interface {
-	ListUnconfirmedInWindow(ctx context.Context, sc authctx.Scope, from, to *time.Time, before time.Time, limit int) (*sessions.PendingResponse, error)
+	ListUnconfirmedInWindowAnchored(ctx context.Context, a authctx.Anchor, from, to *time.Time, before time.Time, limit int) (*sessions.PendingResponse, error)
 }
 
 // ErrUnconfirmedSessions is Close's blocking error (R4): the period has at
@@ -72,17 +73,17 @@ func mapUnconfirmedSessions(resp *sessions.PendingResponse) []UnconfirmedSession
 // ListPending resolves for the dashboard) so this call is byte-identical to
 // what the dashboard's own feed would return over the same from/to window;
 // that agreement is what plan 03's contract promises and this package's
-// integration tests assert. periodScope must be the period's own owner
-// scope, never the acting caller's — this is a date-range search with no id
-// anchor, so an owner's caller scope would otherwise widen it to every
-// unconfirmed session in the center.
-func blockingSessions(ctx context.Context, pending PendingSource, periodScope authctx.Scope, period *Period, today time.Time) ([]UnconfirmedSession, error) {
+// integration tests assert. a must be the period's own anchor, never the
+// acting caller's — this is a date-range search with no id anchor, so an
+// owner's caller scope would otherwise widen it to every unconfirmed session
+// in the center.
+func blockingSessions(ctx context.Context, pending PendingSource, a authctx.Anchor, period *Period, today time.Time) ([]UnconfirmedSession, error) {
 	from := period.PeriodStart
 	to := period.PeriodEnd
 	if today.Before(to) {
 		to = today
 	}
-	resp, err := pending.ListUnconfirmedInWindow(ctx, periodScope, &from, &to, today, closeFeedLimit)
+	resp, err := pending.ListUnconfirmedInWindowAnchored(ctx, a, &from, &to, today, closeFeedLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -96,9 +97,9 @@ func blockingSessions(ctx context.Context, pending PendingSource, periodScope au
 // still inside the period without confirmed attendance — informational only
 // (Close does not block on these). before=period_end+1 day so a session
 // dated exactly on the period's last day is included (session_date < before
-// == session_date <= period_end). periodScope must be the period's own owner
-// scope, for the same reason blockingSessions requires it.
-func futureUnconfirmedSessions(ctx context.Context, pending PendingSource, periodScope authctx.Scope, period *Period, today time.Time) ([]UnconfirmedSession, error) {
+// == session_date <= period_end). a must be the period's own anchor, for the
+// same reason blockingSessions requires it.
+func futureUnconfirmedSessions(ctx context.Context, pending PendingSource, a authctx.Anchor, period *Period, today time.Time) ([]UnconfirmedSession, error) {
 	from := today.AddDate(0, 0, 1)
 	if from.After(period.PeriodEnd) {
 		// Non-nil so the JSON stays [] — clients parse the documented array,
@@ -108,7 +109,7 @@ func futureUnconfirmedSessions(ctx context.Context, pending PendingSource, perio
 	}
 	to := period.PeriodEnd
 	before := period.PeriodEnd.AddDate(0, 0, 1)
-	resp, err := pending.ListUnconfirmedInWindow(ctx, periodScope, &from, &to, before, closeFeedLimit)
+	resp, err := pending.ListUnconfirmedInWindowAnchored(ctx, a, &from, &to, before, closeFeedLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +131,7 @@ func (s *Service) Close(ctx context.Context, sc authctx.Scope, periodID uuid.UUI
 	// every downstream write must use the PERIOD's own teacher, not
 	// necessarily the caller's, so an owner closing a member's period
 	// resolves "today" in the member's timezone.
-	period0, err := s.repo.GetPeriod(ctx, sc, periodID)
+	period0, err := s.repo.GetPeriodForWrite(ctx, sc, periodID)
 	if errors.Is(err, ErrPeriodNotFound) {
 		return nil, apperror.NotFound("billing period")
 	}
@@ -161,9 +162,12 @@ func (s *Service) Close(ctx context.Context, sc authctx.Scope, periodID uuid.UUI
 			return apperror.Conflict("period is not open")
 		}
 		period = locked
-		periodScope := authctx.Scope{TeacherID: period.TeacherID, CenterID: period.CenterID}
+		// Every step below inherits the period's own anchor, never the acting
+		// caller's — LockPeriod (above) already settled the write gate against
+		// the real sc, so nothing past this point re-checks WriteWide.
+		a := sc.AnchorTo(period.TeacherID)
 
-		blocked, blockErr := blockingSessions(txCtx, s.pending, periodScope, period, today)
+		blocked, blockErr := blockingSessions(txCtx, s.pending, a, period, today)
 		if blockErr != nil {
 			return blockErr
 		}
@@ -171,30 +175,30 @@ func (s *Service) Close(ctx context.Context, sc authctx.Scope, periodID uuid.UUI
 			return &ErrUnconfirmedSessions{Sessions: blocked}
 		}
 
-		compute, computeErr := ComputePeriod(txCtx, s.repo, periodScope, periodID)
+		compute, computeErr := computePeriod(txCtx, s.repo, a, period)
 		if computeErr != nil {
 			return computeErr
 		}
-		if _, draftErr := DraftPeriod(txCtx, s.repo, periodScope, periodID, compute); draftErr != nil {
+		if _, draftErr := DraftPeriod(txCtx, s.repo, a, periodID, compute); draftErr != nil {
 			return draftErr
 		}
 
-		voidedCount, err = s.repo.VoidInvoices(txCtx, periodScope, periodID)
+		voidedCount, err = s.repo.VoidInvoices(txCtx, a, periodID)
 		if err != nil {
 			return err
 		}
-		issuedCount, err = s.repo.IssueDraftInvoices(txCtx, periodScope, periodID)
+		issuedCount, err = s.repo.IssueDraftInvoices(txCtx, a, periodID)
 		if err != nil {
 			return err
 		}
 
-		if closeErr := s.repo.ClosePeriod(txCtx, periodScope, periodID, closedAt); closeErr != nil {
+		if closeErr := s.repo.ClosePeriod(txCtx, a, periodID, closedAt); closeErr != nil {
 			return closeErr
 		}
 		period.Status = PeriodClosed
 		period.ClosedAt = &closedAt
 
-		invoices, listErr := s.repo.ListInvoices(txCtx, periodScope, periodID)
+		invoices, listErr := s.repo.ListInvoices(txCtx, a, periodID)
 		if listErr != nil {
 			return listErr
 		}
@@ -205,7 +209,7 @@ func (s *Service) Close(ctx context.Context, sc authctx.Scope, periodID uuid.UUI
 		}
 
 		var warnErr error
-		warnings, warnErr = futureUnconfirmedSessions(txCtx, s.pending, periodScope, period, today)
+		warnings, warnErr = futureUnconfirmedSessions(txCtx, s.pending, a, period, today)
 		return warnErr
 	})
 
@@ -246,7 +250,7 @@ func (s *Service) VoidInvoice(ctx context.Context, sc authctx.Scope, invoiceID u
 		return nil, err
 	}
 
-	inv, err := s.repo.GetInvoice(ctx, sc, invoiceID)
+	inv, err := s.repo.GetInvoiceForWrite(ctx, sc, invoiceID)
 	if errors.Is(err, ErrInvoiceNotFound) {
 		return nil, apperror.NotFound("invoice")
 	}

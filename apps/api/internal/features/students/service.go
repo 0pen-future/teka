@@ -35,6 +35,27 @@ func NewService(repo Repository, ender EnrollmentEnder, tx database.TxManager) *
 	return &Service{repo: repo, ender: ender, tx: tx}
 }
 
+// create inserts a student anchored on a and reads it back through
+// GetByIDAnchored. It is the shared core behind Create and CreateAnchored:
+// the two differ only in which contact-visibility check runs before it
+// (checkContact's caller-scoped view vs checkContactAnchored's exact match),
+// since that check — not this insert — is where the two entry points'
+// authority genuinely diverges.
+func (s *Service) create(ctx context.Context, a authctx.Anchor, req CreateRequest) (*Row, error) {
+	student := &Student{
+		ID:          id.New(),
+		TeacherID:   a.TeacherID,
+		CenterID:    a.CenterID,
+		ContactID:   req.ContactID,
+		FullName:    req.FullName,
+		DisplayNote: notePtr(req.DisplayNote),
+	}
+	if err := s.repo.Create(ctx, student); err != nil {
+		return nil, translate(err)
+	}
+	return s.repo.GetByIDAnchored(ctx, a, student.ID)
+}
+
 // Create inserts a student anchored to its creator — the route policy
 // (students.create) decides who may call this; rows a member creates stay
 // inside their own visibility unless a view_all grant widens it. The contact
@@ -44,19 +65,21 @@ func (s *Service) Create(ctx context.Context, sc authctx.Scope, req CreateReques
 	if err := s.checkContact(ctx, sc, req.ContactID); err != nil {
 		return nil, err
 	}
-	student := &Student{
-		ID:          id.New(),
-		TeacherID:   sc.TeacherID,
-		CenterID:    sc.CenterID,
-		ContactID:   req.ContactID,
-		FullName:    req.FullName,
-		DisplayNote: notePtr(req.DisplayNote),
-	}
-	if err := s.repo.Create(ctx, student); err != nil {
-		return nil, translate(err)
-	}
-	row, err := s.repo.GetByID(ctx, sc, student.ID)
+	row, err := s.create(ctx, sc.Self(), req)
 	return maskPhone(sc, row), err
+}
+
+// CreateAnchored inserts a student on a proven owner anchor. It exists for
+// the roster import: a member running an import writes students onto the
+// center owner, never onto themselves, matching where CreateAnchored anchors
+// their contact. The contact check is checkContactAnchored, not checkContact:
+// the referenced contact must anchor to this same owner, not merely be
+// visible to the importing member under their own grants.
+func (s *Service) CreateAnchored(ctx context.Context, a authctx.OwnerAnchor, req CreateRequest) (*Row, error) {
+	if err := s.checkContactAnchored(ctx, a.Anchor, req.ContactID); err != nil {
+		return nil, err
+	}
+	return s.create(ctx, a.Anchor, req)
 }
 
 // Get returns one student with its contact details.
@@ -155,6 +178,20 @@ func contactInvalid() error {
 	return appErr
 }
 
+// checkContactAnchored is checkContact's exact-match sibling for
+// CreateAnchored: the contact must anchor to the same party as the student
+// being created, not merely be visible to the importing member.
+func (s *Service) checkContactAnchored(ctx context.Context, a authctx.Anchor, contactID uuid.UUID) error {
+	ok, err := s.repo.ContactExistsAnchored(ctx, a, contactID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return contactInvalid()
+	}
+	return nil
+}
+
 // translate maps domain errors onto the API error contract, keeping the domain
 // error as the cause so errors.Is still works.
 func translate(err error) error {
@@ -170,10 +207,12 @@ func translate(err error) error {
 	}
 }
 
-// FindIDByName resolves a live student by their identity within one contact:
-// exact name plus the note that distinguishes same-named siblings. note is a
-// pointer, and nil means "no note" rather than "any note" — display_note is
-// NULL when unset, which is the common case.
+// FindIDByName resolves a live student by their identity within one contact,
+// center-wide: exact name plus the note that distinguishes same-named
+// siblings. note is a pointer, and nil means "no note" rather than "any
+// note" — display_note is NULL when unset, which is the common case.
+// Students anchor to the owner regardless of caller, so this deliberately
+// ignores sc.TeacherID; see repository.centerScoped.
 func (s *Service) FindIDByName(ctx context.Context, sc authctx.Scope, contactID uuid.UUID, fullName string, note *string) (uuid.UUID, bool, error) {
 	return s.repo.FindIDByName(ctx, sc, contactID, fullName, note)
 }

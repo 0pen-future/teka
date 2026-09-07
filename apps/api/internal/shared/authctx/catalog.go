@@ -308,6 +308,17 @@ var legacyIdentitySet = map[string]bool{
 	PermTeachingReviewQueue: true,
 }
 
+// impliedKeys maps a special key to the scope keys it carries for READS
+// only. They live in the effective PermSet (so EffectiveKeys exposes them to
+// clients and CenterWideFor honours them) but are never written to the
+// database: a role that stores reports.send stores exactly that. Sending a
+// report to every family in the center means reading every family's phone,
+// invoices, statements and send history, so reports.send is the read reach
+// of those four resources; it implies no write key and no payments.view_all.
+var impliedKeys = map[string][]string{
+	PermReportsSend: {PermBillingViewAll, PermStatementsViewAll, PermNotificationsViewAll, PermContactsViewAll},
+}
+
 // DefaultRoleKeys returns the baseline permission set every system role (and,
 // via member grants, every role-less legacy stint) receives in the
 // compatibility backfill, in catalog order. Before the catalog, membership

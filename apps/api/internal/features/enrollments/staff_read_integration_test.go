@@ -125,3 +125,56 @@ func TestTroGiangCannotManageEnrollments(t *testing.T) {
 	require.Equal(t, 403, apperror.From(err).Status)
 	require.Equal(t, 403, apperror.From(svc.Delete(ctx, scTG, enrollment.ID)).Status)
 }
+
+// TestActiveOnClassIsCenterKeyedAcrossHandoffAndNeverCrossesCenters proves
+// ActiveOnClass's port contract: a class's roster resolves for ANY caller
+// scoped to the class's own center — including one holding no stint on the
+// class at all, the exact situation billing's post-close reconciliation
+// calls it under when a teaching assistant triggered the edit — and stays
+// unaffected by which teacher currently holds the giao_vien stint. It never
+// resolves for a caller scoped to a different center, even when passed that
+// other center's real class id.
+func TestActiveOnClassIsCenterKeyedAcrossHandoffAndNeverCrossesCenters(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+
+	_, owner := testutil.Teacher(t, db)
+	scOwner := testutil.ScopeFor(t, db, owner.ID)
+	_, oldGV := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, oldGV.ID, scOwner.CenterID)
+	_, newGV := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, newGV.ID, scOwner.CenterID)
+	_, bystander := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, bystander.ID, scOwner.CenterID)
+	scBystander := testutil.ScopeFor(t, db, bystander.ID)
+
+	class := testutil.Class(t, db, oldGV.ID, testutil.WithClassStartDate(date("2026-01-01")))
+	contact := testutil.Contact(t, db, oldGV.ID)
+	student := testutil.Student(t, db, oldGV.ID, contact.ID)
+	enrollment := testutil.Enrollment(t, db, oldGV.ID, student.ID, class.ID, date("2026-01-01"))
+
+	// Hand the class over: end oldGV's stint, start newGV's — mirroring a real
+	// handoff (the Class fixture only ever stamps the creating teacher's own
+	// stint).
+	require.NoError(t, db.Exec(
+		"UPDATE class_staff SET ended_at = now() WHERE class_id = ? AND teacher_id = ?",
+		class.ID, oldGV.ID).Error)
+	testutil.StaffAssignment(t, db, class, newGV.ID, authctx.StaffRoleGiaoVien)
+
+	// bystander holds no stint on the class at all, yet still resolves the
+	// full roster: the port is center-keyed, not stint-keyed.
+	roster, err := svc.ActiveOnClass(ctx, scBystander, class.ID, date("2026-01-10"))
+	require.NoError(t, err)
+	require.Len(t, roster, 1)
+	require.Equal(t, enrollment.ID, roster[0].ID)
+
+	// A caller scoped to a different center must never see this class's
+	// roster, even though it passes the real class id.
+	_, stranger := testutil.Teacher(t, db)
+	scStranger := testutil.ScopeFor(t, db, stranger.ID)
+	require.NotEqual(t, scOwner.CenterID, scStranger.CenterID)
+	crossCenterRoster, err := svc.ActiveOnClass(ctx, scStranger, class.ID, date("2026-01-10"))
+	require.NoError(t, err)
+	require.Empty(t, crossCenterRoster, "a different center's caller must never see this class's roster")
+}

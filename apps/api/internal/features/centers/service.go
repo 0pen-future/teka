@@ -109,6 +109,23 @@ func (s *Service) CenterOwner(ctx context.Context, teacherID uuid.UUID) (ownerID
 	return row.OwnerID, row.IsOwner, nil
 }
 
+// ResolveOwnerAnchor names the caller's center owner's rows: sc itself when
+// the caller already is the owner, otherwise a lookup of the current owner.
+// It is the single mint point outside authctx for authctx.OwnerAnchor — a
+// feature that must write into or dedupe against the owner's data (the roster
+// import, chiefly) asks centers for the proof instead of asserting ownership
+// itself.
+func (s *Service) ResolveOwnerAnchor(ctx context.Context, sc authctx.Scope) (authctx.OwnerAnchor, error) {
+	if sc.IsOwner {
+		return authctx.MintOwnerAnchor(sc.TeacherID, sc.CenterID), nil
+	}
+	ownerID, _, err := s.CenterOwner(ctx, sc.TeacherID)
+	if err != nil {
+		return authctx.OwnerAnchor{}, err
+	}
+	return authctx.MintOwnerAnchor(ownerID, sc.CenterID), nil
+}
+
 // OpenMembership records a live membership stint for a teacher in a center;
 // it satisfies invitations.MembershipOpener for both the new-account and the
 // reactivate branches of the accept flow.

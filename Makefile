@@ -65,8 +65,12 @@ test-api: ## Run backend unit + integration tests; fails under the coverage floo
 		| awk -v floor=$(API_COVERAGE_FLOOR) '{c=$$3+0; printf "total coverage: %.1f%% (floor %d%%)\n", c, floor; exit c<floor}'
 
 .PHONY: test-api-unit
-test-api-unit: ## Run backend unit + HTTP tests only (fast, no Docker)
+test-api-unit: scopelint ## Run backend unit + HTTP tests only (fast, no Docker)
 	@cd $(API_DIR) && go test -short ./...
+
+.PHONY: scopelint
+scopelint: ## Check repository tenancy scoping (also self-enforced under go test ./tools/...)
+	@cd $(API_DIR) && go run ./tools/scopelint ./internal/...
 
 .PHONY: coverage-api
 coverage-api: ## Open the HTML coverage report from the last test-api run
@@ -88,7 +92,7 @@ e2e: ## Run Playwright end-to-end tests (expects 'make dev' stack with seeded us
 lint: lint-api lint-web ## Lint both apps
 
 .PHONY: lint-api
-lint-api: ## Lint backend (golangci-lint)
+lint-api: scopelint ## Lint backend (golangci-lint)
 	@cd $(API_DIR) && golangci-lint run
 
 .PHONY: lint-web

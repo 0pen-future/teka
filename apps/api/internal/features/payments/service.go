@@ -44,13 +44,14 @@ func NewService(repo Repository, tx database.TxManager) *Service {
 // any step leaves zero rows written.
 //
 // The payment is anchored on the CONTACT's own owning teacher and center,
-// not necessarily sc: an owner recording a member's payment must not
-// silently reassign it to the owner (the same parent-anchor precedent
-// billing's periodScope and attendance's roster checks apply). For a
-// non-owner sc these are always the same value — ResolveContactScope already
-// refuses a contact outside sc's own tenancy in that case.
+// never sc: whoever holds payments.create may collect for any contact in the
+// center, and the row must not be reassigned to the collector (the same
+// parent-anchor precedent billing's periodScope and attendance's roster
+// checks apply). Every allocation write below therefore runs under that
+// anchor scope, whose WriteWide is always false, so nothing here depends on
+// the caller's keys once the route has admitted them.
 func (s *Service) Record(ctx context.Context, sc authctx.Scope, req RecordPaymentRequest) (*PaymentDetail, error) {
-	ownerScope, ok, err := s.repo.ResolveContactScope(ctx, sc, req.ContactID)
+	anchor, ok, err := s.repo.ResolveContactAnchor(ctx, sc, req.ContactID)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
@@ -65,8 +66,8 @@ func (s *Service) Record(ctx context.Context, sc authctx.Scope, req RecordPaymen
 
 	payment := &Payment{
 		ID:            id.New(),
-		TeacherID:     ownerScope.TeacherID,
-		CenterID:      ownerScope.CenterID,
+		TeacherID:     anchor.TeacherID,
+		CenterID:      anchor.CenterID,
 		ContactID:     req.ContactID,
 		Amount:        req.Amount,
 		Method:        req.Method,
@@ -81,7 +82,7 @@ func (s *Service) Record(ctx context.Context, sc authctx.Scope, req RecordPaymen
 			return err
 		}
 
-		candidates, err := s.repo.CandidateInvoices(txCtx, ownerScope, req.ContactID)
+		candidates, err := s.repo.CandidateInvoices(txCtx, sc, req.ContactID)
 		if err != nil {
 			return err
 		}
@@ -93,8 +94,8 @@ func (s *Service) Record(ctx context.Context, sc authctx.Scope, req RecordPaymen
 		for _, a := range allocs {
 			rows = append(rows, PaymentAllocation{
 				ID:          id.New(),
-				TeacherID:   ownerScope.TeacherID,
-				CenterID:    ownerScope.CenterID,
+				TeacherID:   anchor.TeacherID,
+				CenterID:    anchor.CenterID,
 				PaymentID:   payment.ID,
 				InvoiceID:   a.InvoiceID,
 				Amount:      a.Amount,
@@ -106,7 +107,7 @@ func (s *Service) Record(ctx context.Context, sc authctx.Scope, req RecordPaymen
 		}
 
 		for _, a := range allocs {
-			if err := s.repo.RecalcInvoicePaid(txCtx, ownerScope, a.InvoiceID); err != nil {
+			if err := s.repo.RecalcInvoicePaid(txCtx, sc, a.InvoiceID); err != nil {
 				return err
 			}
 		}
@@ -116,7 +117,7 @@ func (s *Service) Record(ctx context.Context, sc authctx.Scope, req RecordPaymen
 		return nil, translate(err)
 	}
 
-	allocRows, err := s.repo.ListAllocations(ctx, ownerScope, payment.ID)
+	allocRows, err := s.repo.AllocationsOf(ctx, anchor, payment.ID)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}

@@ -117,7 +117,7 @@ func (f *fakeRepository) GetPeriodStatusRead(_ context.Context, sc authctx.Scope
 	if !ok {
 		return PeriodInfo{}, ErrPeriodNotFound
 	}
-	if !sc.ReportsOversight() && info.TeacherID != sc.TeacherID {
+	if !sc.CenterWideFor(authctx.PermStatementsViewAll) && info.TeacherID != sc.TeacherID {
 		return PeriodInfo{}, ErrPeriodNotFound
 	}
 	return info, nil
@@ -139,25 +139,25 @@ func (f *fakeRepository) ClassSendAccess(_ context.Context, _ authctx.Scope, cla
 	return entry.sendable, entry.readable, nil
 }
 
-func (f *fakeRepository) TargetContacts(_ context.Context, _, _ authctx.Scope, periodID uuid.UUID) ([]TargetContact, error) {
+func (f *fakeRepository) TargetContacts(_ context.Context, _ authctx.Anchor, _ authctx.Scope, periodID uuid.UUID) ([]TargetContact, error) {
 	return f.targets[periodID], nil
 }
 
-func (f *fakeRepository) TargetContactsClass(_ context.Context, _, _ authctx.Scope, periodID, classID uuid.UUID) ([]TargetContact, error) {
+func (f *fakeRepository) TargetContactsClass(_ context.Context, _ authctx.Anchor, _ authctx.Scope, periodID, classID uuid.UUID) ([]TargetContact, error) {
 	return f.classTargets[classPeriodKey{periodID: periodID, classID: classID}], nil
 }
 
-func (f *fakeRepository) ContactClassTotals(_ context.Context, _ authctx.Scope, periodID, classID uuid.UUID) (map[uuid.UUID]int64, error) {
+func (f *fakeRepository) ContactClassTotals(_ context.Context, _ authctx.Anchor, periodID, classID uuid.UUID) (map[uuid.UUID]int64, error) {
 	return f.classTotals[classPeriodKey{periodID: periodID, classID: classID}], nil
 }
 
-func (f *fakeRepository) ContactTotals(_ context.Context, _ authctx.Scope, periodID uuid.UUID) (map[uuid.UUID]int64, error) {
+func (f *fakeRepository) ContactTotals(_ context.Context, _ authctx.Anchor, periodID uuid.UUID) (map[uuid.UUID]int64, error) {
 	return f.totals[periodID], nil
 }
 
-func (f *fakeRepository) UpsertStatement(_ context.Context, sc authctx.Scope, stmt *Statement) (created, skippedRevoked bool, err error) {
-	stmt.TeacherID = sc.TeacherID
-	stmt.CenterID = sc.CenterID
+func (f *fakeRepository) UpsertStatement(_ context.Context, a authctx.Anchor, stmt *Statement) (created, skippedRevoked bool, err error) {
+	stmt.TeacherID = a.TeacherID
+	stmt.CenterID = a.CenterID
 	key := statementKey{contactID: stmt.ContactID, periodID: stmt.PeriodID}
 	if stmt.ClassID != nil {
 		key.classID = *stmt.ClassID
@@ -231,30 +231,30 @@ func (f *fakeRepository) Revoke(_ context.Context, sc authctx.Scope, statementID
 	return nil
 }
 
-func (f *fakeRepository) InvoicesWithLines(_ context.Context, _ authctx.Scope, contactID, periodID uuid.UUID) ([]InvoiceLineRow, error) {
+func (f *fakeRepository) InvoicesWithLines(_ context.Context, _ authctx.Anchor, contactID, periodID uuid.UUID) ([]InvoiceLineRow, error) {
 	return f.invoiceLines[statementKey{contactID: contactID, periodID: periodID}], nil
 }
 
-func (f *fakeRepository) PeriodInvoiceLines(_ context.Context, _ authctx.Scope, periodID uuid.UUID) ([]InvoiceLineRow, error) {
+func (f *fakeRepository) PeriodInvoiceLines(_ context.Context, _ authctx.Anchor, periodID uuid.UUID) ([]InvoiceLineRow, error) {
 	return f.periodInvoiceLines[periodID], nil
 }
 
-func (f *fakeRepository) PeriodClassInvoiceLines(_ context.Context, _ authctx.Scope, periodID, classID uuid.UUID) ([]InvoiceLineRow, error) {
+func (f *fakeRepository) PeriodClassInvoiceLines(_ context.Context, _ authctx.Anchor, periodID, classID uuid.UUID) ([]InvoiceLineRow, error) {
 	return f.classPeriodInvoiceRows[classPeriodKey{periodID: periodID, classID: classID}], nil
 }
 
-func (f *fakeRepository) LiveSessions(_ context.Context, _ authctx.Scope, contactID, periodID uuid.UUID) ([]LiveSessionRow, error) {
+func (f *fakeRepository) LiveSessions(_ context.Context, _ authctx.Anchor, contactID, periodID uuid.UUID) ([]LiveSessionRow, error) {
 	return f.liveSessions[statementKey{contactID: contactID, periodID: periodID}], nil
 }
 
-func (f *fakeRepository) Adjustments(_ context.Context, _ authctx.Scope, contactID, periodID uuid.UUID) ([]AdjustmentRow, error) {
+func (f *fakeRepository) Adjustments(_ context.Context, _ authctx.Anchor, contactID, periodID uuid.UUID) ([]AdjustmentRow, error) {
 	return f.adjustments[statementKey{contactID: contactID, periodID: periodID}], nil
 }
 
-func (f *fakeRepository) TouchView(_ context.Context, sc authctx.Scope, statementID uuid.UUID) error {
+func (f *fakeRepository) TouchView(_ context.Context, a authctx.Anchor, statementID uuid.UUID) error {
 	f.viewTouches++
 	s, ok := f.byID[statementID]
-	if !ok || (!sc.IsOwner && s.TeacherID != sc.TeacherID) {
+	if !ok || s.TeacherID != a.TeacherID {
 		return nil
 	}
 	now := time.Now()

@@ -30,19 +30,18 @@ func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
 }
 
-// Create inserts a contact with a normalised E.164 phone. Duplicate phones are
-// detected by the partial unique index, never by a pre-check SELECT.
-// Owner-only: contacts anchor to the center's owner, so no member creates
-// them — the import path reaches this same service under a server-side owner
-// scope, never through a widened gate.
-func (s *Service) Create(ctx context.Context, sc authctx.Scope, req CreateRequest) (*Row, error) {
-	if !sc.IsOwner {
-		return nil, apperror.Forbidden("chỉ chủ trung tâm quản lý danh bạ phụ huynh")
-	}
+// create inserts a contact anchored on a, with a normalised E.164 phone.
+// Duplicate phones are detected by the partial unique index, never by a
+// pre-check SELECT. It is the shared core behind Create and CreateAnchored:
+// Create anchors on the caller's own rows after an ownership gate, while
+// CreateAnchored anchors on a proven OwnerAnchor — the roster import's write
+// path — with no gate of its own, since minting that anchor already proved
+// the caller may write there.
+func (s *Service) create(ctx context.Context, a authctx.Anchor, req CreateRequest) (*Row, error) {
 	c := &Contact{
 		ID:        id.New(),
-		TeacherID: sc.TeacherID,
-		CenterID:  sc.CenterID,
+		TeacherID: a.TeacherID,
+		CenterID:  a.CenterID,
 		FullName:  req.FullName,
 		Phone:     validation.NormalizePhone(req.Phone),
 	}
@@ -51,6 +50,23 @@ func (s *Service) Create(ctx context.Context, sc authctx.Scope, req CreateReques
 	}
 	// A contact fresh out of Create cannot have students yet.
 	return &Row{Contact: *c}, nil
+}
+
+// Create inserts a contact as the caller's own. Owner-only: contacts anchor
+// to the center's owner, so no member creates them directly.
+func (s *Service) Create(ctx context.Context, sc authctx.Scope, req CreateRequest) (*Row, error) {
+	if !sc.IsOwner {
+		return nil, apperror.Forbidden("chỉ chủ trung tâm quản lý danh bạ phụ huynh")
+	}
+	return s.create(ctx, sc.Self(), req)
+}
+
+// CreateAnchored inserts a contact on a proven owner anchor. It exists for
+// the roster import: a member running an import writes contacts onto the
+// center owner, never onto themselves, and the OwnerAnchor — mintable only by
+// centers.Service.ResolveOwnerAnchor — is the proof that anchor is correct.
+func (s *Service) CreateAnchored(ctx context.Context, a authctx.OwnerAnchor, req CreateRequest) (*Row, error) {
+	return s.create(ctx, a.Anchor, req)
 }
 
 // Get returns one contact with its live-student count.
@@ -180,9 +196,10 @@ func translate(err error) error {
 	}
 }
 
-// FindIDByPhone resolves a live contact by its exact E.164 phone inside the
-// scope — the create-or-reuse seam for bulk flows, matching the shape of
-// uq_contacts_phone(teacher_id, phone).
+// FindIDByPhone resolves a live contact by its exact E.164 phone, center-wide
+// — the create-or-reuse seam for bulk flows. Contacts anchor to the owner
+// regardless of caller, so this deliberately ignores sc.TeacherID; see
+// repository.centerScoped.
 func (s *Service) FindIDByPhone(ctx context.Context, sc authctx.Scope, phone string) (uuid.UUID, bool, error) {
 	return s.repo.FindIDByPhone(ctx, sc, validation.NormalizePhone(phone))
 }

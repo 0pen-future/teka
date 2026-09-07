@@ -53,6 +53,36 @@ func TestBuildPermSet(t *testing.T) {
 	}
 }
 
+func TestBuildPermSetImpliesReadKeysForReportsSend(t *testing.T) {
+	implied := []string{PermBillingViewAll, PermStatementsViewAll, PermNotificationsViewAll, PermContactsViewAll}
+
+	set := BuildPermSet([]string{PermReportsSend}, nil, []string{PermBillingViewAll})
+	if !set.HasKey(PermReportsSend) {
+		t.Fatal("reports.send itself must survive")
+	}
+	for _, key := range implied {
+		if !set.HasKey(key) {
+			t.Errorf("reports.send must imply %s even when that key is denied", key)
+		}
+	}
+	if set.HasKey(PermPaymentsViewAll) {
+		t.Error("reports.send must not imply payments.view_all")
+	}
+	if len(set) != 1+len(implied) {
+		t.Errorf("want reports.send plus %d implied keys, got %v", len(implied), set)
+	}
+
+	denied := BuildPermSet(nil, []string{PermReportsSend}, []string{PermReportsSend})
+	if len(denied) != 0 {
+		t.Errorf("denying reports.send must drop it and everything it implies, got %v", denied)
+	}
+
+	explicit := BuildPermSet(nil, implied, nil)
+	if explicit.HasKey(PermReportsSend) {
+		t.Error("the four read keys must not imply reports.send in reverse")
+	}
+}
+
 func TestHasAndCenterWideFor(t *testing.T) {
 	owner := Scope{IsOwner: true}
 	if !owner.Has("anything.at.all") || !owner.CenterWideFor(PermClassesViewAll) || !owner.WriteWide() {

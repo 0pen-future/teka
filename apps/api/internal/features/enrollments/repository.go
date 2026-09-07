@@ -50,6 +50,16 @@ type Repository interface {
 	// invisible to uq_enrollments_active, so a caller that only looked for
 	// open rows would silently re-enrol a student who left.
 	FindByStudentAndClass(ctx context.Context, sc authctx.Scope, studentID, classID uuid.UUID) (*Enrollment, error)
+	// FindByStudentAndClassAnchored is FindByStudentAndClass's unconditional
+	// sibling: the roster import already resolved the class's own teacher as
+	// a, so the lookup runs against that anchor directly instead of the
+	// importing caller's own rows.
+	FindByStudentAndClassAnchored(ctx context.Context, a authctx.Anchor, studentID, classID uuid.UUID) (*Enrollment, error)
+	// GetByIDAnchored is GetByID's unconditional sibling: the read-back after
+	// CreateAnchored, where the caller who wrote the row (a) and the caller
+	// asking about it (actor) can differ, so the own-rows/WriteWide filter in
+	// GetByID cannot be relied on to see it.
+	GetByIDAnchored(ctx context.Context, a authctx.Anchor, id uuid.UUID) (*Row, error)
 	// End stamps ended_on on one open enrollment; the row survives. Bounded
 	// by the write gate: roles is the set of class_staff roles whose active
 	// stint on the enrollment's class permits managing its roster.
@@ -68,9 +78,19 @@ type Repository interface {
 	EndOpenEnrollments(ctx context.Context, sc authctx.Scope, studentID uuid.UUID, on time.Time) error
 	// ClassDefaultPrice reads the class's default_unit_price — the value
 	// copied onto new enrollments — returning ErrClassNotFound for a missing
-	// or foreign class.
-	ClassDefaultPrice(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (int64, error)
+	// or foreign class. a is always the caller's own anchor (Create strips
+	// owner bypass rights here: see Service.Create's doc comment) — an Anchor
+	// makes that structural rather than a WriteWide check on a hand-built
+	// zero-rights Scope.
+	ClassDefaultPrice(ctx context.Context, a authctx.Anchor, classID uuid.UUID) (int64, error)
 	StudentExists(ctx context.Context, sc authctx.Scope, studentID uuid.UUID) (bool, error)
+	// ActiveOnClass is ActiveOn's center-scoped sibling: no teacher_id filter,
+	// no permission branch — a class's roster is a center-keyed fact billing's
+	// post-close reconciliation must resolve the same way regardless of which
+	// caller's attendance edit triggered it (a teaching assistant with no
+	// stint or ownership on the class included). Shares ActiveOn's predicate
+	// and query shape; only the scoping differs.
+	ActiveOnClass(ctx context.Context, sc authctx.Scope, classID uuid.UUID, on time.Time) ([]Enrollment, error)
 	// ClassInCenter reports whether the class exists live in the caller's
 	// center, regardless of who holds it — the existence gate that decides
 	// 404 versus 403 for the picker.
@@ -95,14 +115,16 @@ func NewRepository(db *gorm.DB) Repository {
 	return &gormRepository{db: db}
 }
 
-// scoped returns an enrollments query bound to one center. An owner sees
-// every enrollment in their center; a member sees only the rows they created
-// themselves. Composite FKs stop cross-center writes; only this filter stops
-// cross-tenant reads. The center_id column is qualified because list queries
-// join students and classes, which carry the same column name.
+// scoped returns the own-rows enrollments query bound to one center: the
+// owner reaches every enrollment in their center, a member only the rows
+// anchored to them. It backs the anchor-based lookups (EndOpenEnrollments,
+// FindByStudentAndClass), so a visibility key never widens it — readScoped is
+// the port that widens. Composite FKs stop cross-center writes; only this
+// filter stops cross-tenant reads. The center_id column is qualified because
+// list queries join students and classes, which carry the same column name.
 func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("enrollments.center_id = ?", sc.CenterID)
-	if !sc.CenterWideFor(authctx.PermEnrollmentsViewAll) {
+	if !sc.WriteWide() {
 		q = q.Where("enrollments.teacher_id = ?", sc.TeacherID)
 	}
 	return q
@@ -110,8 +132,10 @@ func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB 
 
 // readScoped additionally lets a member read enrollments of classes they hold
 // a class_staff stint on — the current teacher after a handoff (rows never
-// move), and any other staff assignment, ended ones included. Reads only:
-// managing an enrollment (end, delete) resolves through writeScoped.
+// move), and any other staff assignment, ended ones included — and, under
+// enrollments.view_all, every enrollment in the center. Reads only: managing
+// an enrollment (end, delete) resolves through writeScoped, which a
+// visibility key never widens.
 func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("enrollments.center_id = ?", sc.CenterID)
 	if !sc.CenterWideFor(authctx.PermEnrollmentsViewAll) {
@@ -126,14 +150,25 @@ func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm
 // center-wide, a member only through an ACTIVE class_staff stint on the
 // enrollment's class whose role is in roles. The creator's teacher_id anchor
 // grants nothing here — after a handoff the class's current giáo viên manages
-// the roster, the creator does not.
+// the roster, the creator does not. Only the owner bypasses the stint filter
+// (WriteWide): enrollments.view_all is a visibility key and must never reach
+// a write.
 func (r *gormRepository) writeScoped(ctx context.Context, sc authctx.Scope, roles []string) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("enrollments.center_id = ?", sc.CenterID)
-	if !sc.CenterWideFor(authctx.PermEnrollmentsViewAll) {
+	if !sc.WriteWide() {
 		frag, _ := classscope.WriteExists("enrollments.class_id")
 		q = q.Where(frag, sc.TeacherID, sc.CenterID, roles)
 	}
 	return q
+}
+
+// anchored is the unconditional two-column filter behind the Anchored
+// variants: the caller already resolved whose rows to touch (the class's own
+// teacher, for the roster import), so no WriteWide branch applies — unlike
+// scoped, an Anchor carries no owner bypass to check.
+func (r *gormRepository) anchored(ctx context.Context, a authctx.Anchor) *gorm.DB {
+	return database.FromContext(ctx, r.db).
+		Where("enrollments.center_id = ? AND enrollments.teacher_id = ?", a.CenterID, a.TeacherID)
 }
 
 // withNames joins the display names onto an enrollment query. Same-center
@@ -196,6 +231,20 @@ func (r *gormRepository) List(ctx context.Context, sc authctx.Scope, filter List
 	return rows, total, nil
 }
 
+func (r *gormRepository) GetByIDAnchored(ctx context.Context, a authctx.Anchor, id uuid.UUID) (*Row, error) {
+	var row Row
+	err := withNames(r.anchored(ctx, a).Model(&Enrollment{})).
+		Where("enrollments.id = ?", id).
+		Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
 func (r *gormRepository) GetWritableByID(ctx context.Context, sc authctx.Scope, id uuid.UUID, roles []string) (*Row, error) {
 	var row Row
 	err := withNames(r.writeScoped(ctx, sc, roles).Model(&Enrollment{})).
@@ -250,8 +299,29 @@ func (r *gormRepository) SoftDelete(ctx context.Context, sc authctx.Scope, roles
 }
 
 func (r *gormRepository) ActiveOn(ctx context.Context, sc authctx.Scope, classID uuid.UUID, on time.Time) ([]Enrollment, error) {
+	return r.activeOn(r.readScoped(ctx, sc), classID, on)
+}
+
+// centerScoped is ActiveOnClass's center-only filter: no teacher_id branch,
+// no permission check — the port ActiveOnClass uses instead of readScoped so
+// a class's roster resolves identically no matter which caller's action
+// triggered the read.
+func (r *gormRepository) centerScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+	return database.FromContext(ctx, r.db).Where("enrollments.center_id = ?", sc.CenterID)
+}
+
+func (r *gormRepository) ActiveOnClass(ctx context.Context, sc authctx.Scope, classID uuid.UUID, on time.Time) ([]Enrollment, error) {
+	return r.activeOn(r.centerScoped(ctx, sc), classID, on)
+}
+
+// activeOn is ActiveOn/ActiveOnClass's shared query builder: started on or
+// before `on`, not ended before it (both boundaries inclusive — a student
+// whose started_on equals the date attends that session, and a student whose
+// ended_on equals it attends their last one; an exclusive boundary would
+// silently lose one session of revenue per student per departure).
+func (r *gormRepository) activeOn(q *gorm.DB, classID uuid.UUID, on time.Time) ([]Enrollment, error) {
 	var rows []Enrollment
-	err := r.readScoped(ctx, sc).
+	err := q.
 		Where("enrollments.class_id = ?", classID).
 		Where("enrollments.started_on <= ? AND (enrollments.ended_on IS NULL OR enrollments.ended_on >= ?)", on, on).
 		Order("enrollments.started_on, enrollments.id").
@@ -269,25 +339,25 @@ func (r *gormRepository) EndOpenEnrollments(ctx context.Context, sc authctx.Scop
 		Update("ended_on", on).Error
 }
 
-func (r *gormRepository) ClassDefaultPrice(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (int64, error) {
+func (r *gormRepository) ClassDefaultPrice(ctx context.Context, a authctx.Anchor, classID uuid.UUID) (int64, error) {
 	var prices []int64
-	q := database.FromContext(ctx, r.db).
+	// Enrolling is a write on the class, so the caller's anchor must own it
+	// outright — no owner bypass here, by construction (an Anchor carries no
+	// IsOwner). The class anchor and the active giao_vien stint name the same
+	// teacher whenever handoff has run cleanly; checking both states the
+	// actual rule — the class's current teacher enrolls — and keeps the gate
+	// correct if anchor and stint ever diverge.
+	err := database.FromContext(ctx, r.db).
 		Table("classes").
-		Where("id = ? AND center_id = ? AND deleted_at IS NULL", classID, sc.CenterID)
-	if !sc.CenterWideFor(authctx.PermEnrollmentsViewAll) {
-		// The class anchor and the active giao_vien stint name the same
-		// teacher whenever handoff has run cleanly; checking both states the
-		// actual rule — the class's current teacher enrolls — and keeps the
-		// gate correct if anchor and stint ever diverge.
-		q = q.Where(`(teacher_id = ? OR EXISTS (
+		Where("id = ? AND center_id = ? AND deleted_at IS NULL", classID, a.CenterID).
+		Where(`(teacher_id = ? OR EXISTS (
 			SELECT 1 FROM class_staff cs
 			WHERE cs.class_id = classes.id
 			  AND cs.center_id = classes.center_id
 			  AND cs.teacher_id = ?
 			  AND cs.role_key = 'giao_vien'
-			  AND cs.ended_at IS NULL))`, sc.TeacherID, sc.TeacherID)
-	}
-	err := q.Pluck("default_unit_price", &prices).Error
+			  AND cs.ended_at IS NULL))`, a.TeacherID, a.TeacherID).
+		Pluck("default_unit_price", &prices).Error
 	if err != nil {
 		return 0, err
 	}
@@ -356,12 +426,13 @@ func (r *gormRepository) SearchEnrollableStudents(ctx context.Context, sc authct
 	return rows, err
 }
 
-// FindByStudentAndClass returns the newest enrollment for the pair regardless
+// findByStudentAndClass is the shared query behind FindByStudentAndClass and
+// FindByStudentAndClassAnchored: the newest enrollment for the pair regardless
 // of whether it is still open. Ordering is explicit so a student who left and
 // was re-admitted resolves to their current row rather than an arbitrary one.
-func (r *gormRepository) FindByStudentAndClass(ctx context.Context, sc authctx.Scope, studentID, classID uuid.UUID) (*Enrollment, error) {
+func (r *gormRepository) findByStudentAndClass(q *gorm.DB, studentID, classID uuid.UUID) (*Enrollment, error) {
 	var e Enrollment
-	err := r.scoped(ctx, sc).
+	err := q.
 		Where("enrollments.student_id = ? AND enrollments.class_id = ?", studentID, classID).
 		Order("enrollments.started_on DESC, enrollments.id DESC").
 		Take(&e).Error
@@ -372,4 +443,17 @@ func (r *gormRepository) FindByStudentAndClass(ctx context.Context, sc authctx.S
 		return nil, err
 	}
 	return &e, nil
+}
+
+// FindByStudentAndClass returns the newest enrollment for the pair, scoped to
+// the caller's own rows (WriteWide-aware) — the direct-write path's own gate.
+func (r *gormRepository) FindByStudentAndClass(ctx context.Context, sc authctx.Scope, studentID, classID uuid.UUID) (*Enrollment, error) {
+	return r.findByStudentAndClass(r.scoped(ctx, sc), studentID, classID)
+}
+
+// FindByStudentAndClassAnchored is FindByStudentAndClass's unconditional
+// sibling: the roster import already resolved the class's own teacher as a,
+// so the query runs against that anchor directly.
+func (r *gormRepository) FindByStudentAndClassAnchored(ctx context.Context, a authctx.Anchor, studentID, classID uuid.UUID) (*Enrollment, error) {
+	return r.findByStudentAndClass(r.anchored(ctx, a), studentID, classID)
 }

@@ -481,15 +481,16 @@ func (s *Service) MatchFriends(ctx context.Context, teacherID uuid.UUID, phones 
 }
 
 // MatchFriendsScoped is MatchFriends behind the phone-privacy gate. Matching
-// sends phones to Zalo, a third party, so it follows the one phone rule:
-// owner/oversight match anything; an active hoc_vu matches only the contacts
-// their stints already make phone-visible — anything else is answered
-// matched=false locally, without the phone ever leaving this system; everyone
-// else is refused outright. Phones are compared in normalizePhone's local 0…
-// form, since contacts store the +84… storage form while requests usually
-// carry the local one.
+// sends phones to Zalo, a third party, so it follows the one phone rule: the
+// owner or a contacts.view_all holder (including a reports.send holder,
+// through the key it implies) matches anything; an active hoc_vu matches only
+// the contacts their stints already make phone-visible — anything else is
+// answered matched=false locally, without the phone ever leaving this system;
+// everyone else is refused outright. Phones are compared in normalizePhone's
+// local 0… form, since contacts store the +84… storage form while requests
+// usually carry the local one.
 func (s *Service) MatchFriendsScoped(ctx context.Context, sc authctx.Scope, phones []string) ([]FriendMatch, error) {
-	if sc.ReportsOversight() {
+	if sc.CenterWideFor(authctx.PermContactsViewAll) {
 		return s.MatchFriends(ctx, sc.TeacherID, phones)
 	}
 	hocVu, err := s.repo.HasActiveHocVu(ctx, sc.TeacherID, sc.CenterID)

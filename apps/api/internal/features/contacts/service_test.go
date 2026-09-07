@@ -42,15 +42,16 @@ func (f *fakeRepository) seed(teacherID, centerID uuid.UUID, name, phone string)
 	return c
 }
 
-// visible mirrors scopedRead's oversight arm: the owner or a reports-oversight
-// holder reads the whole center, whoever anchored the row. The hoc_vu reach
-// arm is a SQL EXISTS (classscope.PhoneVisibleViaContact) the fake cannot
-// model; the integration tests own it.
+// visible mirrors scopedRead's center-wide arm: the owner or a
+// contacts.view_all holder (including a reports.send holder, through the key
+// it implies) reads the whole center, whoever anchored the row. The hoc_vu
+// reach arm is a SQL EXISTS (classscope.PhoneVisibleViaContact) the fake
+// cannot model; the integration tests own it.
 func visible(c *fakeContact, sc authctx.Scope) bool {
 	if c.deleted || c.CenterID != sc.CenterID {
 		return false
 	}
-	return sc.ReportsOversight()
+	return sc.CenterWideFor(authctx.PermContactsViewAll)
 }
 
 func (f *fakeRepository) Create(_ context.Context, c *Contact) error {
@@ -486,12 +487,14 @@ func TestClearZaloMappingUnknownContactIsNotFound(t *testing.T) {
 	}
 }
 
-// FindIDByPhone mirrors the SQL predicate: scope-visible, not soft-deleted,
-// exact phone. Under owner-anchored contacts the visible set for an owner is
-// the whole center, so the lookup is center-wide by phone.
+// FindIDByPhone mirrors the SQL predicate: same center, not soft-deleted,
+// exact phone — center-wide for every caller, not just the owner. Contacts
+// anchor to the owner regardless of who created them, so the bulk-import
+// matcher must resolve identically whether the owner or a granted member
+// runs the import; see repository.centerScoped.
 func (f *fakeRepository) FindIDByPhone(_ context.Context, sc authctx.Scope, phone string) (uuid.UUID, bool, error) {
 	for _, c := range f.rows {
-		if visible(c, sc) && c.Phone == phone {
+		if !c.deleted && c.CenterID == sc.CenterID && c.Phone == phone {
 			return c.ID, true, nil
 		}
 	}
@@ -520,7 +523,11 @@ func TestFindIDByPhoneNormalisesLikeCreate(t *testing.T) {
 	}
 }
 
-func TestFindIDByPhoneIsCenterWideForTheOwner(t *testing.T) {
+// FindIDByPhone dedupes center-wide for every caller, owner or granted
+// member alike: a roster import run by a member must find an existing
+// contact regardless of which teacher it is anchored to, or a re-import would
+// duplicate the whole parent book.
+func TestFindIDByPhoneIsCenterWideForEveryCaller(t *testing.T) {
 	repo := newFakeRepository()
 	svc := NewService(repo)
 	center := id.New()
@@ -528,18 +535,22 @@ func TestFindIDByPhoneIsCenterWideForTheOwner(t *testing.T) {
 	owner := authctx.Scope{TeacherID: id.New(), CenterID: center, IsOwner: true}
 
 	// A member-anchored row left over from before the ownership migration: one
-	// phone is one parent center-wide, so the owner's import lookup must find
-	// it rather than plan a duplicate.
+	// phone is one parent center-wide, so any center caller's import lookup
+	// must find it rather than plan a duplicate.
 	row := repo.seed(member.TeacherID, center, "Phạm Văn Hùng", "+84901234567")
 
 	got, found, err := svc.FindIDByPhone(context.Background(), owner, "0901234567")
 	if err != nil || !found || got != row.ID {
 		t.Fatalf("owner must find the member-anchored contact, got id=%v found=%v err=%v", got, found, err)
 	}
+	got, found, err = svc.FindIDByPhone(context.Background(), member, "0901234567")
+	if err != nil || !found || got != row.ID {
+		t.Fatalf("a member running the import must find it too, got id=%v found=%v err=%v", got, found, err)
+	}
 
-	// A plain member has no oversight, so the same lookup misses.
-	if _, found, err := svc.FindIDByPhone(context.Background(), member, "0901234567"); err != nil || found {
-		t.Fatalf("a member without oversight must not find contacts, got found=%v err=%v", found, err)
+	stranger := authctx.Scope{TeacherID: id.New(), CenterID: id.New(), IsOwner: false}
+	if _, found, err := svc.FindIDByPhone(context.Background(), stranger, "0901234567"); err != nil || found {
+		t.Fatalf("a different center must not find this contact, got found=%v err=%v", found, err)
 	}
 }
 
@@ -563,3 +574,12 @@ func TestFindIDByPhoneIgnoresDeletedContacts(t *testing.T) {
 		t.Fatalf("a deleted contact must not be found, got found=%v err=%v", found, err)
 	}
 }
+
+// Compile-time proof: the interface assertion below fails to build
+// the moment CreateAnchored's second parameter is loosened from a proven
+// authctx.OwnerAnchor to a plain authctx.Anchor, which carries no proof of
+// ownership at all. A reviewer or the AST guard could miss that regression;
+// the compiler cannot.
+var _ interface {
+	CreateAnchored(context.Context, authctx.OwnerAnchor, CreateRequest) (*Row, error)
+} = (*Service)(nil)

@@ -28,10 +28,10 @@ func newCloseFakeRepository() *closeFakeRepository {
 	return &closeFakeRepository{previewFakeRepository: newPreviewFakeRepository()}
 }
 
-func (f *closeFakeRepository) IssueDraftInvoices(_ context.Context, sc authctx.Scope, periodID uuid.UUID) (int64, error) {
+func (f *closeFakeRepository) IssueDraftInvoices(_ context.Context, a authctx.Anchor, periodID uuid.UUID) (int64, error) {
 	var n int64
 	for _, inv := range f.invoices {
-		if inv.TeacherID != sc.TeacherID || inv.PeriodID != periodID || inv.Status != InvoiceDraft {
+		if inv.TeacherID != a.TeacherID || inv.PeriodID != periodID || inv.Status != InvoiceDraft {
 			continue
 		}
 		inv.Status = InvoiceIssued
@@ -40,11 +40,11 @@ func (f *closeFakeRepository) IssueDraftInvoices(_ context.Context, sc authctx.S
 	return n, nil
 }
 
-func (f *closeFakeRepository) VoidInvoices(_ context.Context, sc authctx.Scope, periodID uuid.UUID) (int64, error) {
+func (f *closeFakeRepository) VoidInvoices(_ context.Context, a authctx.Anchor, periodID uuid.UUID) (int64, error) {
 	var n int64
 	now := time.Now()
 	for _, inv := range f.invoices {
-		if inv.TeacherID != sc.TeacherID || inv.PeriodID != periodID || inv.Status != InvoiceDraft {
+		if inv.TeacherID != a.TeacherID || inv.PeriodID != periodID || inv.Status != InvoiceDraft {
 			continue
 		}
 		if inv.CurrentCharge != 0 || inv.OpeningBalance != 0 || inv.AdjustmentTotal != 0 {
@@ -68,9 +68,13 @@ func (f *closeFakeRepository) GetInvoice(_ context.Context, sc authctx.Scope, in
 	return &cp, nil
 }
 
-func (f *closeFakeRepository) LockInvoice(_ context.Context, sc authctx.Scope, invoiceID uuid.UUID) (*Invoice, error) {
+func (f *closeFakeRepository) GetInvoiceForWrite(ctx context.Context, sc authctx.Scope, invoiceID uuid.UUID) (*Invoice, error) {
+	return f.GetInvoice(ctx, sc, invoiceID)
+}
+
+func (f *closeFakeRepository) LockInvoice(_ context.Context, a authctx.Anchor, invoiceID uuid.UUID) (*Invoice, error) {
 	inv, ok := f.invoices[invoiceID]
-	if !ok || inv.TeacherID != sc.TeacherID {
+	if !ok || inv.TeacherID != a.TeacherID {
 		return nil, ErrInvoiceNotFound
 	}
 	cp := *inv
@@ -145,7 +149,7 @@ func TestCloseVoidsEmptyDraftsAndIssuesChargedOnes(t *testing.T) {
 		t.Fatalf("period.status = %s, want closed", resp.Period.Status)
 	}
 
-	invoices, err := repo.ListInvoices(ctx, sc, period.ID)
+	invoices, err := repo.ListInvoices(ctx, sc.Self(), period.ID)
 	if err != nil {
 		t.Fatalf("list invoices: %v", err)
 	}

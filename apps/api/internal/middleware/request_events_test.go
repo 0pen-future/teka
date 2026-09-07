@@ -245,3 +245,38 @@ func TestNilBusDisablesCapture(t *testing.T) {
 		t.Fatalf("status = %d, want 201", w.Code)
 	}
 }
+
+// TestSkipMapsUnchanged pins the exact contents of the three package-level
+// skip sets, now derived from the shared route manifest. A change here must
+// be justified by an intentional decision to start or stop skipping a route,
+// not by a refactor accidentally dropping or adding one.
+func TestSkipMapsUnchanged(t *testing.T) {
+	want := map[string][]string{
+		"authSessionRoutes": {
+			"/api/v1/auth/login", "/api/v1/auth/logout", "/api/v1/auth/refresh",
+		},
+		"serviceAuditedRoutes": {
+			"/api/v1/enrollments",
+		},
+		"anonymousAuditedRoutes": {
+			"/api/v1/auth/forgot-password", "/api/v1/auth/reset-password",
+		},
+	}
+	got := map[string]map[string]struct{}{
+		"authSessionRoutes":      authSessionRoutes,
+		"serviceAuditedRoutes":   serviceAuditedRoutes,
+		"anonymousAuditedRoutes": anonymousAuditedRoutes,
+	}
+	for name, w := range want {
+		g := got[name]
+		if len(g) != len(w) {
+			t.Errorf("%s has %d entries, want %d", name, len(g), len(w))
+			continue
+		}
+		for _, route := range w {
+			if _, ok := g[route]; !ok {
+				t.Errorf("%s is missing expected route %q", name, route)
+			}
+		}
+	}
+}

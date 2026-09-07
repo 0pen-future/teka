@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"teka/apps/api/internal/database"
+	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/classscope"
 )
@@ -72,8 +73,9 @@ type Repository interface {
 	// CenterID.
 	InsertBatch(ctx context.Context, rows []*Notification) error
 	// ListByPeriod returns one billing period's notification ledger, scoped
-	// to sc's center and to periods sc's own teacher owns unless sc holds
-	// reports oversight (owner or reports.send). Period ownership, not
+	// to sc's center and to periods sc's own teacher owns unless sc reads
+	// notifications center-wide (notifications.view_all: owner, explicit
+	// grant, or reports.send via the key it implies). Period ownership, not
 	// row ownership, is what gates visibility: after a delegated send the
 	// period's own teacher must see the secretary's rows in their ledger, or
 	// they would resend and double-DM every parent. Joined with contact
@@ -82,10 +84,12 @@ type Repository interface {
 	ListByPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, filter ListFilter) ([]ListRow, error)
 	// MarkSent sets status=sent and sent_at=now() for every id in ids that is
 	// visible to sc (center-scoped, and teacher-scoped unless sc is the
-	// center's owner) and still queued. An id already sent, unknown, or out
-	// of scope is silently skipped — the caller cannot distinguish "already
-	// sent" from "not found" from this call alone, which is what makes
-	// repeated calls idempotent rather than erroring on the second attempt.
+	// center's owner) and still queued. Every id must be visible to sc or the
+	// call fails with NotFound — a sender naming a row outside their scope
+	// gets an explicit error instead of a silent no-op. An id that is visible
+	// but already sent is not an error: it simply matches nothing in the
+	// status-gated update, which is what makes repeated calls on the same,
+	// already-sent id idempotent rather than erroring on the second attempt.
 	MarkSent(ctx context.Context, sc authctx.Scope, ids []uuid.UUID) error
 
 	// CreateRun inserts one notification_runs record. Called inside the same
@@ -100,7 +104,7 @@ type Repository interface {
 	// LatestRunByPeriod returns the period's most recently created run in one
 	// dimension: classID nil resolves the latest FAMILY run (class_id IS
 	// NULL), scoped to sc's center and to periods sc's own teacher owns
-	// unless sc holds reports oversight — period ownership, like
+	// unless sc reads notifications center-wide — period ownership, like
 	// ListByPeriod, so the period's teacher can watch a delegated run on
 	// their own period. classID set resolves the latest run for that class
 	// copy, center-scoped only: the caller has already passed the class-send
@@ -149,32 +153,37 @@ type Repository interface {
 	// UpdateRunStatus moves a run to status. A terminal status stamps
 	// finished_at; moving back to RunStatusRunning (manual resume) clears it,
 	// so finished_at is always "when this run last stopped", never a stale
-	// leftover. Never owner-bypassed: only the run's own teacher may move it.
-	UpdateRunStatus(ctx context.Context, sc authctx.Scope, runID uuid.UUID, status string) error
+	// leftover. Never owner-bypassed: only the run's own teacher may move it —
+	// a is that teacher/center, not necessarily the requesting caller's own.
+	UpdateRunStatus(ctx context.Context, a authctx.Anchor, runID uuid.UUID, status string) error
 	// RunCounts derives a run's progress by counting its rows. Counters are
 	// deliberately never stored on the run record — a COUNT cannot drift from
-	// the rows the way an incremented column can after a crash. Callers pass
-	// the run's own owning scope (not necessarily the requesting caller's),
-	// since this call is never owner-bypassed.
-	RunCounts(ctx context.Context, sc authctx.Scope, runID uuid.UUID) (RunCounts, error)
+	// the rows the way an incremented column can after a crash. a anchors on
+	// the run's own owning teacher/center (not necessarily the requesting
+	// caller's), since this call is never owner-bypassed.
+	RunCounts(ctx context.Context, a authctx.Anchor, runID uuid.UUID) (RunCounts, error)
 	// MarkOutcome records one row's final verdict. Only a row still queued
-	// (and visible to sc) moves: a sent row is final, so a late or duplicate
+	// (and visible to a) moves: a sent row is final, so a late or duplicate
 	// outcome is silently skipped, mirroring MarkSent's idempotency. Never
 	// owner-bypassed. StatusSent stamps sent_at; any outcome may carry a
 	// provider message id or an error message.
-	MarkOutcome(ctx context.Context, sc authctx.Scope, id uuid.UUID, status string, providerMsgID, errorMessage *string) error
+	MarkOutcome(ctx context.Context, a authctx.Anchor, id uuid.UUID, status string, providerMsgID, errorMessage *string) error
 	// FailQueuedInRun fails every still-queued row of the run with reason —
 	// the expired-mid-run sweep. Rows already sent or failed keep their
 	// verdicts. Never owner-bypassed.
-	FailQueuedInRun(ctx context.Context, sc authctx.Scope, runID uuid.UUID, reason string) error
+	FailQueuedInRun(ctx context.Context, a authctx.Anchor, runID uuid.UUID, reason string) error
 	// QueuedRunRows lists the run's still-queued rows oldest-first, each with
 	// its statement and contact, so a resume can re-render exactly the
 	// messages that never went out. Never owner-bypassed.
-	QueuedRunRows(ctx context.Context, sc authctx.Scope, runID uuid.UUID) ([]QueuedRunRow, error)
+	QueuedRunRows(ctx context.Context, a authctx.Anchor, runID uuid.UUID) ([]QueuedRunRow, error)
 	// ZaloMappings returns contactID -> zalo_user_id for the given contacts,
-	// covering live (non-deleted) contacts sc's own teacher owns — widened to
-	// the whole center when sc holds reports oversight, so a delegated sender
-	// can resolve the period teacher's mappings. The mapping stays the period
+	// covering live (non-deleted) contacts in sc's center that sc may read:
+	// every contact when sc holds contacts.view_all (owner, explicit grant,
+	// or reports.send via the key it implies), otherwise only contacts whose
+	// student sc is currently assigned to as hoc_vu. Contacts anchor to the
+	// owner, so there is no "own contacts" arm. Every current caller sits
+	// behind the send gate and therefore takes the center-wide arm; the
+	// stint arm is defence in depth for a future caller. The mapping stays the period
 	// owner's consent artifact: this read never rewrites it. A contact absent
 	// from the result is unmapped (or out of scope) and falls back to the
 	// manual channel. An owner sending a member's period never reaches here
@@ -204,43 +213,61 @@ func NewRepository(db *gorm.DB) Repository {
 	return &gormRepository{db: db}
 }
 
-// scoped binds a notifications-table query to sc's center, further narrowed
-// to sc's own rows unless sc sees center-wide data — the standard
-// owner-oversight template for the plain reads (List, MarkSent).
-func (r *gormRepository) scoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+// writeScoped binds a notifications-table WRITE query to sc's center,
+// further narrowed to sc's own rows unless sc is the owner. It backs
+// MarkSent; the listing reads widen through readWide, and
+// notifications.view_all — a visibility key — never widens a write.
+func (r *gormRepository) writeScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("notifications.center_id = ?", sc.CenterID)
-	if !sc.CenterWideFor(authctx.PermNotificationsViewAll) {
+	if !sc.WriteWide() {
 		q = q.Where("notifications.teacher_id = ?", sc.TeacherID)
 	}
 	return q
 }
 
+// readWide reports whether the caller reads notification runs and items
+// center-wide: the owner and a notifications.view_all holder (including a
+// reports.send holder, through the key it implies). It widens reads only;
+// MarkSent and the other writes go through writeScoped.
+func readWide(sc authctx.Scope) bool {
+	return sc.CenterWideFor(authctx.PermNotificationsViewAll)
+}
+
+// contactsReadWide is the contact-book visibility rule ZaloMappings needs:
+// a mapping row is a contact's phone-adjacent identity, so it follows
+// contacts.view_all (implied by reports.send), not the notifications key.
+func contactsReadWide(sc authctx.Scope) bool {
+	return sc.CenterWideFor(authctx.PermContactsViewAll)
+}
+
 // runsPeriodScoped binds a notification_runs-table query to sc's center,
-// further narrowed to runs on periods sc's own teacher owns unless sc holds
-// reports oversight. The run's own teacher_id is deliberately NOT the filter:
-// a delegated run carries the secretary's teacher_id on the period teacher's
-// period, and the period teacher must still see it (RunSnapshot) or they
-// would judge the period unsent and resend.
+// further narrowed to runs on periods sc's own teacher owns unless sc sees
+// notifications center-wide (the owner, a notifications.view_all holder, or a
+// reports.send holder through the key it implies). The run's own teacher_id
+// is deliberately NOT the filter: a delegated run carries the secretary's
+// teacher_id on the period teacher's period, and the period teacher must
+// still see it (RunSnapshot) or they would judge the period unsent and
+// resend.
 func (r *gormRepository) runsPeriodScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("notification_runs.center_id = ?", sc.CenterID)
-	if !sc.ReportsOversight() {
+	if !readWide(sc) {
 		q = q.Where("notification_runs.billing_period_id IN (SELECT id FROM billing_periods WHERE teacher_id = ? AND center_id = ?)",
 			sc.TeacherID, sc.CenterID)
 	}
 	return q
 }
 
-// runsOwnScoped binds strictly to sc's own center and teacher, ignoring
-// IsOwner entirely. A run's zalo_personal send slot, its occupancy checks,
-// and the row-level writes that drive it belong to the acting teacher's own
-// Zalo session — an owner has no bypass here, only over the read-only
-// progress snapshot (runsScoped). The same unqualified center_id/teacher_id
+// anchored binds strictly to a's own center and teacher, ignoring IsOwner
+// entirely. A run's zalo_personal send slot, its occupancy checks, and the
+// row-level writes that drive it belong to the acting teacher's own Zalo
+// session — an owner has no bypass here, only over the read-only progress
+// snapshot (runsPeriodScoped). The same unqualified center_id/teacher_id
 // predicate is reused for both the notification_runs table and the
 // notifications table: every caller of this helper chains a single-table
 // Model/Table with no join, so the column names never collide.
-func (r *gormRepository) runsOwnScoped(ctx context.Context, sc authctx.Scope) *gorm.DB {
+func (r *gormRepository) anchored(ctx context.Context, a authctx.Anchor) *gorm.DB {
 	return database.FromContext(ctx, r.db).
-		Where("center_id = ? AND teacher_id = ?", sc.CenterID, sc.TeacherID)
+		Where("center_id = ? AND teacher_id = ?", a.CenterID, a.TeacherID)
 }
 
 func (r *gormRepository) InsertBatch(ctx context.Context, rows []*Notification) error {
@@ -258,8 +285,10 @@ func (r *gormRepository) InsertBatch(ctx context.Context, rows []*Notification) 
 // s.teacher_id is the period teacher's id (statements are always anchored on
 // the period's own teacher), so the (? OR s.teacher_id = ?) pair — the same
 // SQL-OR short-circuit trick payments/repository.go's CandidateInvoices uses
-// — shows a period's full ledger to its own teacher and to reports-oversight
-// callers, delegated rows included, and nothing to anyone else.
+// — shows a period's full ledger to its own teacher and to callers who see
+// notifications center-wide (the owner, a notifications.view_all holder, or a
+// reports.send holder through the key it implies), delegated rows included,
+// and nothing to anyone else.
 const listByPeriodQuery = `
 	SELECT n.id AS id, n.statement_id AS statement_id, s.contact_id AS contact_id,
 	       c.full_name AS contact_name, c.phone AS phone, %s AS phone_visible,
@@ -283,16 +312,39 @@ func (r *gormRepository) ListByPeriod(ctx context.Context, sc authctx.Scope, per
 	err := database.FromContext(ctx, r.db).
 		Raw(fmt.Sprintf(listByPeriodQuery, frag),
 			sc.TeacherID, sc.CenterID,
-			sc.CenterID, sc.ReportsOversight(), sc.TeacherID, periodID, filter.Purpose, filter.Purpose, filter.Status, filter.Status).
+			sc.CenterID, readWide(sc), sc.TeacherID, periodID, filter.Purpose, filter.Purpose, filter.Status, filter.Status).
 		Scan(&rows).Error
 	return rows, err
 }
 
+// MarkSent flips the given notification ids to sent, scoped through
+// writeScoped (own rows only, unless sc is the owner). It first confirms every
+// id is reachable in that scope at all — regardless of status — so a sender
+// naming rows they do not own gets an explicit NotFound instead of a silent
+// no-op update; an id that is reachable but already sent still passes that
+// check and simply matches zero rows in the status-gated update below,
+// keeping a repeated mark-sent call on the same id a no-op, not an error.
 func (r *gormRepository) MarkSent(ctx context.Context, sc authctx.Scope, ids []uuid.UUID) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	return r.scoped(ctx, sc).
+	// Every id must be a live row the caller may write; a repeated id in the
+	// request is the same row, not a missing one.
+	distinct := make(map[uuid.UUID]struct{}, len(ids))
+	for _, id := range ids {
+		distinct[id] = struct{}{}
+	}
+	var reachable int64
+	if err := r.writeScoped(ctx, sc).
+		Model(&Notification{}).
+		Where("notifications.id IN ? AND notifications.deleted_at IS NULL", ids).
+		Count(&reachable).Error; err != nil {
+		return err
+	}
+	if reachable != int64(len(distinct)) {
+		return apperror.NotFound("notification")
+	}
+	return r.writeScoped(ctx, sc).
 		Model(&Notification{}).
 		Where("notifications.id IN ? AND notifications.status = ? AND notifications.deleted_at IS NULL", ids, StatusQueued).
 		Updates(map[string]any{
@@ -308,7 +360,7 @@ func (r *gormRepository) CreateRun(ctx context.Context, run *Run) error {
 
 func (r *gormRepository) HasActiveRun(ctx context.Context, sc authctx.Scope) (bool, error) {
 	var count int64
-	err := r.runsOwnScoped(ctx, sc).
+	err := r.anchored(ctx, sc.Self()).
 		Model(&Run{}).
 		Where("status = ?", RunStatusRunning).
 		Count(&count).Error
@@ -348,7 +400,7 @@ func (r *gormRepository) LatestRunByPeriod(ctx context.Context, sc authctx.Scope
 
 func (r *gormRepository) LatestOwnRunByPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, classID *uuid.UUID) (*Run, error) {
 	var run Run
-	err := runClassDimension(r.runsOwnScoped(ctx, sc), classID).
+	err := runClassDimension(r.anchored(ctx, sc.Self()), classID).
 		Where("billing_period_id = ?", periodID).
 		Order("created_at DESC").
 		First(&run).Error
@@ -458,12 +510,12 @@ func (r *gormRepository) CanSendReports(ctx context.Context, centerID, teacherID
 	return can, err
 }
 
-func (r *gormRepository) UpdateRunStatus(ctx context.Context, sc authctx.Scope, runID uuid.UUID, status string) error {
+func (r *gormRepository) UpdateRunStatus(ctx context.Context, a authctx.Anchor, runID uuid.UUID, status string) error {
 	finishedAt := any(gorm.Expr("now()"))
 	if status == RunStatusRunning {
 		finishedAt = nil
 	}
-	return translateRunError(r.runsOwnScoped(ctx, sc).
+	return translateRunError(r.anchored(ctx, a).
 		Model(&Run{}).
 		Where("id = ?", runID).
 		Updates(map[string]any{
@@ -484,7 +536,7 @@ func translateRunError(err error) error {
 	return err
 }
 
-func (r *gormRepository) RunCounts(ctx context.Context, sc authctx.Scope, runID uuid.UUID) (RunCounts, error) {
+func (r *gormRepository) RunCounts(ctx context.Context, a authctx.Anchor, runID uuid.UUID) (RunCounts, error) {
 	var counts RunCounts
 	err := database.FromContext(ctx, r.db).
 		Raw(`SELECT count(*) AS total,
@@ -492,12 +544,12 @@ func (r *gormRepository) RunCounts(ctx context.Context, sc authctx.Scope, runID 
 		            count(*) FILTER (WHERE status = ?) AS failed
 		     FROM notifications
 		     WHERE run_id = ? AND center_id = ? AND teacher_id = ? AND deleted_at IS NULL`,
-			StatusSent, StatusFailed, runID, sc.CenterID, sc.TeacherID).
+			StatusSent, StatusFailed, runID, a.CenterID, a.TeacherID).
 		Scan(&counts).Error
 	return counts, err
 }
 
-func (r *gormRepository) MarkOutcome(ctx context.Context, sc authctx.Scope, id uuid.UUID, status string, providerMsgID, errorMessage *string) error {
+func (r *gormRepository) MarkOutcome(ctx context.Context, a authctx.Anchor, id uuid.UUID, status string, providerMsgID, errorMessage *string) error {
 	updates := map[string]any{
 		"status":          status,
 		"provider_msg_id": providerMsgID,
@@ -507,14 +559,14 @@ func (r *gormRepository) MarkOutcome(ctx context.Context, sc authctx.Scope, id u
 	if status == StatusSent {
 		updates["sent_at"] = gorm.Expr("now()")
 	}
-	return r.runsOwnScoped(ctx, sc).
+	return r.anchored(ctx, a).
 		Model(&Notification{}).
 		Where("id = ? AND status = ? AND deleted_at IS NULL", id, StatusQueued).
 		Updates(updates).Error
 }
 
-func (r *gormRepository) FailQueuedInRun(ctx context.Context, sc authctx.Scope, runID uuid.UUID, reason string) error {
-	return r.runsOwnScoped(ctx, sc).
+func (r *gormRepository) FailQueuedInRun(ctx context.Context, a authctx.Anchor, runID uuid.UUID, reason string) error {
+	return r.anchored(ctx, a).
 		Model(&Notification{}).
 		Where("run_id = ? AND status = ? AND deleted_at IS NULL", runID, StatusQueued).
 		Updates(map[string]any{
@@ -532,14 +584,21 @@ const queuedRunRowsQuery = `
 	ORDER BY n.created_at, n.id
 `
 
-func (r *gormRepository) QueuedRunRows(ctx context.Context, sc authctx.Scope, runID uuid.UUID) ([]QueuedRunRow, error) {
+func (r *gormRepository) QueuedRunRows(ctx context.Context, a authctx.Anchor, runID uuid.UUID) ([]QueuedRunRow, error) {
 	var rows []QueuedRunRow
 	err := database.FromContext(ctx, r.db).
-		Raw(queuedRunRowsQuery, runID, sc.CenterID, sc.TeacherID, StatusQueued).
+		Raw(queuedRunRowsQuery, runID, a.CenterID, a.TeacherID, StatusQueued).
 		Scan(&rows).Error
 	return rows, err
 }
 
+// ZaloMappings resolves the zalo_user_id of every contact in contactIDs that
+// sc may reach. Contacts anchor to the center's owner regardless of who is
+// asking (migration 000016), so a plain member's own teacher_id never matches
+// a contact row — the caller's reach here is center + (contacts.view_all,
+// including a reports.send holder through the key it implies, OR the same
+// ACTIVE hoc_vu stint arm contacts/repository.go's scopedRead uses), never a
+// teacher_id filter.
 func (r *gormRepository) ZaloMappings(ctx context.Context, sc authctx.Scope, contactIDs []uuid.UUID) (map[uuid.UUID]string, error) {
 	if len(contactIDs) == 0 {
 		return map[uuid.UUID]string{}, nil
@@ -553,8 +612,9 @@ func (r *gormRepository) ZaloMappings(ctx context.Context, sc authctx.Scope, con
 		Select("id, zalo_user_id").
 		Where("center_id = ? AND id IN ? AND zalo_user_id IS NOT NULL AND deleted_at IS NULL",
 			sc.CenterID, contactIDs)
-	if !sc.ReportsOversight() {
-		q = q.Where("teacher_id = ?", sc.TeacherID)
+	if !contactsReadWide(sc) {
+		frag, _ := classscope.PhoneVisibleViaContact("contacts.id")
+		q = q.Where(frag, sc.TeacherID, sc.CenterID)
 	}
 	err := q.Scan(&rows).Error
 	if err != nil {

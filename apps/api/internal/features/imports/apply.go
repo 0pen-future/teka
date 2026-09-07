@@ -29,14 +29,19 @@ const (
 //
 // Two anchors are in play, matching who owns what:
 //
-//   - Contacts and students are center data: every lookup and write runs
-//     under owner — the caller's center owner with IsOwner true, built by
-//     Import — so the rows anchor on the owner and dedupe center-wide no
-//     matter which teacher's class a child appears under.
+//   - Contacts and students are center data: every write runs under owner —
+//     the proven authctx.OwnerAnchor Import resolved through centers — so the
+//     rows anchor on the owner regardless of which teacher's class a child
+//     appears under. Their dedupe reads run under actor, the importing
+//     caller's own Scope, matching how those lookups already widen
+//     center-wide for that caller's own HTTP traffic.
 //   - Classes and their enrollments are pedagogical data: they anchor on the
-//     class's teacher via anchorFor, whose IsOwner stays false so each class
-//     reference check stays narrowed to that teacher's own rows.
-func (s *Service) apply(ctx context.Context, owner authctx.Scope, plan *resolvedPlan, dryRun bool, rep *Report) ([]RowError, error) {
+//     class's own teacher via anchorFor, a plain Anchor carrying no owner
+//     bypass, so each class reference check stays narrowed to that teacher's
+//     own rows. actor is still threaded through for enrollments, whose
+//     StudentEnrolled event must attribute the importing caller, not the
+//     class's teacher.
+func (s *Service) apply(ctx context.Context, actor authctx.Scope, owner authctx.OwnerAnchor, plan *resolvedPlan, dryRun bool, rep *Report) ([]RowError, error) {
 	var rowErrs []RowError
 	classIDs := make(map[classKey]uuid.UUID, len(plan.classes))
 
@@ -61,7 +66,7 @@ func (s *Service) apply(ctx context.Context, owner authctx.Scope, plan *resolved
 	planned := newPlannedRows()
 	for _, st := range plan.students {
 		enrollAnchor := anchorFor(st.teacherID, owner.CenterID)
-		errs, err := s.applyStudent(ctx, owner, enrollAnchor, st, classIDs[st.class], dryRun, planned, rep)
+		errs, err := s.applyStudent(ctx, actor, owner, enrollAnchor, st, classIDs[st.class], dryRun, planned, rep)
 		if err != nil {
 			return nil, err
 		}
@@ -114,14 +119,16 @@ func (p *plannedRows) markStudent(k plannedStudentKey) bool {
 	return seen
 }
 
-// anchorFor builds the scope a row is written under. IsOwner stays false — see
-// apply's doc comment.
-func anchorFor(teacherID, centerID uuid.UUID) authctx.Scope {
-	return authctx.Scope{TeacherID: teacherID, CenterID: centerID}
+// anchorFor names the rows a class and its enrollments write under — the
+// workbook row's own teacher, not the caller. A plain Anchor carries no
+// authority of its own, so it needs no owner check the way an
+// authctx.OwnerAnchor would.
+func anchorFor(teacherID, centerID uuid.UUID) authctx.Anchor {
+	return authctx.Anchor{TeacherID: teacherID, CenterID: centerID}
 }
 
 // applyClass creates or reuses one class and tops up its missing slots.
-func (s *Service) applyClass(ctx context.Context, anchor authctx.Scope, c *resolvedClass, dryRun bool, rep *Report) (uuid.UUID, []RowError, error) {
+func (s *Service) applyClass(ctx context.Context, anchor authctx.Anchor, c *resolvedClass, dryRun bool, rep *Report) (uuid.UUID, []RowError, error) {
 	existing, found, err := s.classes.FindActiveByName(ctx, anchor, c.key.name)
 	if err != nil {
 		return uuid.Nil, nil, err
@@ -133,7 +140,7 @@ func (s *Service) applyClass(ctx context.Context, anchor authctx.Scope, c *resol
 		if dryRun {
 			return uuid.Nil, nil, nil
 		}
-		created, err := s.classes.Create(ctx, anchor, classRequest(c))
+		created, err := s.classes.CreateAnchored(ctx, anchor, classRequest(c))
 		if err != nil {
 			return uuid.Nil, nil, err
 		}
@@ -164,7 +171,7 @@ func (s *Service) applyClass(ctx context.Context, anchor authctx.Scope, c *resol
 		if dryRun {
 			continue
 		}
-		if _, err := s.classes.AddSchedule(ctx, anchor, existing.ID, scheduleRequest(sl, c.startDate)); err != nil {
+		if _, err := s.classes.AddScheduleAnchored(ctx, anchor, existing.ID, existing.StartDate, scheduleRequest(sl, c.startDate)); err != nil {
 			return uuid.Nil, nil, err
 		}
 	}
@@ -172,11 +179,13 @@ func (s *Service) applyClass(ctx context.Context, anchor authctx.Scope, c *resol
 }
 
 // applyStudent creates or reuses the contact, the student, and the enrollment
-// behind one HocSinh row. Contact and student calls run under owner; only the
-// enrollment (and the class it references) carries enrollAnchor, the class
-// teacher's scope.
-func (s *Service) applyStudent(ctx context.Context, owner, enrollAnchor authctx.Scope, st resolvedStudent, classID uuid.UUID, dryRun bool, planned *plannedRows, rep *Report) ([]RowError, error) {
-	contactID, found, err := s.contacts.FindIDByPhone(ctx, owner, st.contactPhone)
+// behind one HocSinh row. Contact and student dedupe reads run under actor,
+// the importing caller's own Scope; their writes anchor on owner, the proven
+// center owner. The enrollment (and the class it references) carries
+// enrollAnchor, the class's own teacher, with actor still recorded as the
+// event's acting party.
+func (s *Service) applyStudent(ctx context.Context, actor authctx.Scope, owner authctx.OwnerAnchor, enrollAnchor authctx.Anchor, st resolvedStudent, classID uuid.UUID, dryRun bool, planned *plannedRows, rep *Report) ([]RowError, error) {
+	contactID, found, err := s.contacts.FindIDByPhone(ctx, actor, st.contactPhone)
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +199,7 @@ func (s *Service) applyStudent(ctx context.Context, owner, enrollAnchor authctx.
 	default:
 		rep.Contacts.Created++
 		if !dryRun {
-			row, err := s.contacts.Create(ctx, owner, contacts.CreateRequest{
+			row, err := s.contacts.CreateAnchored(ctx, owner, contacts.CreateRequest{
 				FullName: st.contactName,
 				Phone:    st.contactPhone,
 			})
@@ -208,7 +217,7 @@ func (s *Service) applyStudent(ctx context.Context, owner, enrollAnchor authctx.
 
 	studentID := uuid.Nil
 	if contactID != uuid.Nil {
-		studentID, found, err = s.students.FindIDByName(ctx, owner, contactID, st.studentName, note)
+		studentID, found, err = s.students.FindIDByName(ctx, actor, contactID, st.studentName, note)
 		if err != nil {
 			return nil, err
 		}
@@ -231,7 +240,7 @@ func (s *Service) applyStudent(ctx context.Context, owner, enrollAnchor authctx.
 	default:
 		rep.Students.Created++
 		if !dryRun {
-			row, err := s.students.Create(ctx, owner, students.CreateRequest{
+			row, err := s.students.CreateAnchored(ctx, owner, students.CreateRequest{
 				FullName:    st.studentName,
 				ContactID:   contactID,
 				DisplayNote: st.displayNote,
@@ -249,7 +258,7 @@ func (s *Service) applyStudent(ctx context.Context, owner, enrollAnchor authctx.
 		return nil, nil
 	}
 
-	existing, found, err := s.enrollments.FindByStudentAndClass(ctx, enrollAnchor, studentID, classID)
+	existing, found, err := s.enrollments.FindByStudentAndClassAnchored(ctx, enrollAnchor, studentID, classID)
 	if err != nil {
 		return nil, err
 	}
@@ -273,7 +282,7 @@ func (s *Service) applyStudent(ctx context.Context, owner, enrollAnchor authctx.
 	if dryRun {
 		return nil, nil
 	}
-	_, err = s.enrollments.Create(ctx, enrollAnchor, enrollments.CreateRequest{
+	_, err = s.enrollments.CreateAnchored(ctx, actor, enrollAnchor, enrollments.CreateRequest{
 		StudentID: studentID,
 		ClassID:   classID,
 		StartedOn: st.startedOn.Format(dateWireLayout),

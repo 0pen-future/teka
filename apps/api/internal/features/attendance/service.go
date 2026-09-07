@@ -95,18 +95,20 @@ func (s *Service) SetReconciler(r BillingReconciler) {
 }
 
 // TallyByEnrollment passes through the repository's batched attendance tally
-// for a date window. This is the one entry point plan 04's billing package
-// uses to price a period — it never re-aggregates attendance_records itself.
-func (s *Service) TallyByEnrollment(ctx context.Context, sc authctx.Scope, from, to time.Time) ([]EnrollmentTally, error) {
-	return s.repo.TallyByEnrollment(ctx, sc, from, to)
+// for a date window, anchored on the period's own teacher. This is the one
+// entry point billing uses to price a period — it never re-aggregates
+// attendance_records itself.
+func (s *Service) TallyByEnrollment(ctx context.Context, a authctx.Anchor, from, to time.Time) ([]EnrollmentTally, error) {
+	return s.repo.TallyByEnrollment(ctx, a, from, to)
 }
 
 // SessionAttendance passes through the repository's already-recorded rows
-// for one session. This is plan 04's entry point for discovering which
-// students a post-close reconciliation must consider — it never scans
-// attendance_records by anything but session_id.
+// for one session, keyed on the caller's center. This is billing's entry
+// point for discovering which students a post-close reconciliation must
+// consider — it never scans attendance_records by anything but session_id,
+// and the caller's session write gate has already settled access.
 func (s *Service) SessionAttendance(ctx context.Context, sc authctx.Scope, sessionID uuid.UUID) ([]Record, error) {
-	return s.repo.ListBySession(ctx, sc, sessionID)
+	return s.repo.ListBySessionCenter(ctx, sc, sessionID)
 }
 
 // Get returns the attendance sheet for a session: one row per student

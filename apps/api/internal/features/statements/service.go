@@ -79,7 +79,7 @@ type GenerateResult struct {
 //
 // sc authorizes the call (owner may act on any teacher's period in the
 // center; a member only on their own), but every write is anchored on
-// periodScope — the period's own owning teacher, not necessarily sc's —
+// periodAnchor — the period's own owning teacher, not necessarily sc's —
 // so an owner generating a member's statements never reassigns them to
 // itself.
 func (s *Service) Generate(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*GenerateResult, error) {
@@ -140,13 +140,13 @@ func (s *Service) GenerateForSendClass(ctx context.Context, sc authctx.Scope, pe
 		if info.Status != periodStatusClosed {
 			return apperror.Conflict("period is not closed")
 		}
-		periodScope := authctx.Scope{TeacherID: info.TeacherID, CenterID: sc.CenterID}
+		periodAnchor := sc.AnchorTo(info.TeacherID)
 
-		targets, err := s.repo.TargetContactsClass(ctx, periodScope, sc, periodID, classID)
+		targets, err := s.repo.TargetContactsClass(ctx, periodAnchor, sc, periodID, classID)
 		if err != nil {
 			return apperror.From(err)
 		}
-		totals, err := s.repo.ContactClassTotals(ctx, periodScope, periodID, classID)
+		totals, err := s.repo.ContactClassTotals(ctx, periodAnchor, periodID, classID)
 		if err != nil {
 			return apperror.From(err)
 		}
@@ -166,7 +166,7 @@ func (s *Service) GenerateForSendClass(ctx context.Context, sc authctx.Scope, pe
 				TotalDue:  totals[target.ContactID],
 			}
 
-			created, skippedRevoked, err := s.repo.UpsertStatement(ctx, periodScope, candidate)
+			created, skippedRevoked, err := s.repo.UpsertStatement(ctx, periodAnchor, candidate)
 			if err != nil {
 				return apperror.From(err)
 			}
@@ -209,13 +209,13 @@ func (s *Service) generate(ctx context.Context, sc authctx.Scope, periodID uuid.
 		if info.Status != periodStatusClosed {
 			return apperror.Conflict("period is not closed")
 		}
-		periodScope := authctx.Scope{TeacherID: info.TeacherID, CenterID: sc.CenterID}
+		periodAnchor := sc.AnchorTo(info.TeacherID)
 
-		targets, err := s.repo.TargetContacts(ctx, periodScope, sc, periodID)
+		targets, err := s.repo.TargetContacts(ctx, periodAnchor, sc, periodID)
 		if err != nil {
 			return apperror.From(err)
 		}
-		totals, err := s.repo.ContactTotals(ctx, periodScope, periodID)
+		totals, err := s.repo.ContactTotals(ctx, periodAnchor, periodID)
 		if err != nil {
 			return apperror.From(err)
 		}
@@ -235,7 +235,7 @@ func (s *Service) generate(ctx context.Context, sc authctx.Scope, periodID uuid.
 				TotalDue:  totals[target.ContactID],
 			}
 
-			created, skippedRevoked, err := s.repo.UpsertStatement(ctx, periodScope, candidate)
+			created, skippedRevoked, err := s.repo.UpsertStatement(ctx, periodAnchor, candidate)
 			if err != nil {
 				return apperror.From(err)
 			}
@@ -408,7 +408,7 @@ func (s *Service) LookupPublic(ctx context.Context, token string) (*Statement, e
 }
 
 // RenderPublic assembles a resolved statement's parent-facing payload. Every
-// read is scoped by a scope derived straight from stmt's own
+// read is scoped by an anchor derived straight from stmt's own
 // TeacherID/CenterID/ContactID/PeriodID — never anything the HTTP caller
 // supplies directly — so a forged or guessed path can never pull another
 // family's data, and there is no owner bypass on this path. Returns
@@ -419,9 +419,9 @@ func (s *Service) LookupPublic(ctx context.Context, token string) (*Statement, e
 // VietQR payload string for the qr.png route to render; it is empty exactly
 // when PublicStatement.QR is nil.
 func (s *Service) RenderPublic(ctx context.Context, stmt *Statement) (*PublicStatement, string, error) {
-	scope := authctx.Scope{TeacherID: stmt.TeacherID, CenterID: stmt.CenterID}
+	anchor := authctx.Anchor{TeacherID: stmt.TeacherID, CenterID: stmt.CenterID}
 
-	invoiceRows, err := s.repo.InvoicesWithLines(ctx, scope, stmt.ContactID, stmt.PeriodID)
+	invoiceRows, err := s.repo.InvoicesWithLines(ctx, anchor, stmt.ContactID, stmt.PeriodID)
 	if err != nil {
 		return nil, "", apperror.Internal(err)
 	}
@@ -429,7 +429,7 @@ func (s *Service) RenderPublic(ctx context.Context, stmt *Statement) (*PublicSta
 		return nil, "", ErrNotFound
 	}
 
-	sessionRows, err := s.repo.LiveSessions(ctx, scope, stmt.ContactID, stmt.PeriodID)
+	sessionRows, err := s.repo.LiveSessions(ctx, anchor, stmt.ContactID, stmt.PeriodID)
 	if err != nil {
 		return nil, "", apperror.Internal(err)
 	}
@@ -448,7 +448,7 @@ func (s *Service) RenderPublic(ctx context.Context, stmt *Statement) (*PublicSta
 			return nil, "", ErrNotFound
 		}
 	} else {
-		adjustmentRows, err := s.repo.Adjustments(ctx, scope, stmt.ContactID, stmt.PeriodID)
+		adjustmentRows, err := s.repo.Adjustments(ctx, anchor, stmt.ContactID, stmt.PeriodID)
 		if err != nil {
 			return nil, "", apperror.Internal(err)
 		}
@@ -472,11 +472,11 @@ func (s *Service) RenderQR(payload string) ([]byte, error) {
 // TouchView records one open of a statement's public link. Called after the
 // response has already been written; the caller is expected to log a
 // failure rather than let a view counter's own error affect what a parent
-// sees. sc must be derived from the resolved statement row, never the
+// sees. a must be derived from the resolved statement row, never the
 // (absent) caller's — this is reached only from the unauthenticated public
 // path.
-func (s *Service) TouchView(ctx context.Context, sc authctx.Scope, statementID uuid.UUID) error {
-	return s.repo.TouchView(ctx, sc, statementID)
+func (s *Service) TouchView(ctx context.Context, a authctx.Anchor, statementID uuid.UUID) error {
+	return s.repo.TouchView(ctx, a, statementID)
 }
 
 // ChildFigures is one child's session/amount summary for one period — the
@@ -519,7 +519,7 @@ type ContactFigures struct {
 //
 // sc authorizes the call with reports oversight (owner or reports.send
 // holder may act on any teacher's period in the center; a plain member only
-// on their own), then the read is derived from periodScope — the period's
+// on their own), then the read is derived from periodAnchor — the period's
 // own owning teacher — so an oversight caller's bulk send over a member's
 // period reads exactly that member's figures.
 func (s *Service) PeriodFigures(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (map[uuid.UUID]ContactFigures, error) {
@@ -527,9 +527,9 @@ func (s *Service) PeriodFigures(ctx context.Context, sc authctx.Scope, periodID 
 	if err != nil {
 		return nil, s.translate(err)
 	}
-	periodScope := authctx.Scope{TeacherID: info.TeacherID, CenterID: sc.CenterID}
+	periodAnchor := sc.AnchorTo(info.TeacherID)
 
-	rows, err := s.repo.PeriodInvoiceLines(ctx, periodScope, periodID)
+	rows, err := s.repo.PeriodInvoiceLines(ctx, periodAnchor, periodID)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
@@ -606,9 +606,9 @@ func (s *Service) PeriodFiguresClass(ctx context.Context, sc authctx.Scope, peri
 	if err != nil {
 		return nil, s.translate(err)
 	}
-	periodScope := authctx.Scope{TeacherID: info.TeacherID, CenterID: sc.CenterID}
+	periodAnchor := sc.AnchorTo(info.TeacherID)
 
-	rows, err := s.repo.PeriodClassInvoiceLines(ctx, periodScope, periodID, classID)
+	rows, err := s.repo.PeriodClassInvoiceLines(ctx, periodAnchor, periodID, classID)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}

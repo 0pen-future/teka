@@ -94,7 +94,9 @@ func TestOwnerHasOversightReadAndSendsAsSelfOnMembersPeriod(t *testing.T) {
 // TestPeerInSameCenterCannotReadOrActOnAnotherMembersNotifications proves
 // center membership grants the owner oversight, not peer-to-peer access: two
 // non-owning members in the same center stay fully isolated from each
-// other's notification ledger and run state.
+// other's notification ledger and run state. Reads stay neutral (empty, not
+// an error); mark-sent, like every other write in this file, refuses loudly
+// instead of silently matching nothing.
 func TestPeerInSameCenterCannotReadOrActOnAnotherMembersNotifications(t *testing.T) {
 	t.Parallel()
 	fake := &fakeZaloSender{}
@@ -140,19 +142,26 @@ func TestPeerInSameCenterCannotReadOrActOnAnotherMembersNotifications(t *testing
 	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code,
 		"a member without the send-reports permission must get an explicit 403")
 
-	// A peer cannot mark another member's notification sent either.
-	require.NoError(t, d.notifications.MarkSent(ctx, scopeB, []uuid.UUID{resp.Rows[0].NotificationID}))
+	// A peer cannot mark another member's notification sent either — naming a
+	// row outside the caller's write scope fails loudly, matching the
+	// explicit refusal BulkSend and ResumeRun already give above, rather than
+	// silently matching nothing.
+	err = d.notifications.MarkSent(ctx, scopeB, []uuid.UUID{resp.Rows[0].NotificationID})
+	require.Error(t, err)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
+		"a peer must not be able to tell mark-sent apart from a missing id")
 	var status string
 	require.NoError(t, d.db.Table("notifications").Select("status").
 		Where("id = ?", resp.Rows[0].NotificationID).Take(&status).Error)
-	require.Equal(t, notifications.StatusSent, status,
-		"the row was already sent by the run; a peer's no-op mark-sent must not touch it")
+	require.Equal(t, notifications.StatusSent, status, "the peer's refused call must not touch the row")
 }
 
 // TestCrossCenterNotificationsAreInvisible proves a teacher in a different
 // center gets the same neutral not-found/empty behavior as a missing
 // resource on every notifications path — never a 403, and never a peek into
-// another center's ledger.
+// another center's ledger: reads answer empty, and every write (BulkSend,
+// ResumeRun, MarkSent alike) answers the one honest NotFound rather than
+// leaking whether the id belongs to someone else.
 func TestCrossCenterNotificationsAreInvisible(t *testing.T) {
 	t.Parallel()
 	fake := &fakeZaloSender{}
@@ -194,10 +203,12 @@ func TestCrossCenterNotificationsAreInvisible(t *testing.T) {
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
 		"another center cannot resume a run it cannot even see")
 
-	require.NoError(t, d.notifications.MarkSent(ctx, scopeB, []uuid.UUID{resp.Rows[0].NotificationID}))
+	err = d.notifications.MarkSent(ctx, scopeB, []uuid.UUID{resp.Rows[0].NotificationID})
+	require.Error(t, err)
+	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
+		"another center cannot mark-sent a run it cannot even see, the same explicit refusal as resuming it")
 	var status string
 	require.NoError(t, d.db.Table("notifications").Select("status").
 		Where("id = ?", resp.Rows[0].NotificationID).Take(&status).Error)
-	require.Equal(t, notifications.StatusSent, status,
-		"the row was already sent by the run; a cross-center no-op mark-sent must not touch it")
+	require.Equal(t, notifications.StatusSent, status, "the cross-center refused call must not touch the row")
 }

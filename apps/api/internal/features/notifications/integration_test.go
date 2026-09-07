@@ -31,6 +31,7 @@ import (
 	"teka/apps/api/internal/features/statements"
 	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/testutil"
 )
 
@@ -311,8 +312,9 @@ func TestBulkSendStatementsTargetsUnpaidPaidAndOldDebtButSkipsVoided(t *testing.
 	require.False(t, reminderContacts[contactB.ID])
 
 	// Mark-sent is idempotent: a second call on an already-sent id changes
-	// nothing.
-	require.NoError(t, d.notifications.MarkSent(ctx, sc, []uuid.UUID{rowA.NotificationID}))
+	// nothing, and a repeated id in one request is the same row rather than
+	// a missing one.
+	require.NoError(t, d.notifications.MarkSent(ctx, sc, []uuid.UUID{rowA.NotificationID, rowA.NotificationID}))
 	firstSentAt := sentAtOf(t, d.db, rowA.NotificationID)
 	require.NotNil(t, firstSentAt)
 
@@ -462,4 +464,55 @@ func TestBulkSendScalesToFiftyContactsUnderThreeSeconds(t *testing.T) {
 	// queries the rest of the call issues.
 	bound := int64(contactCount)*3 + 20
 	require.Lessf(t, got, bound, "query count %d must stay roughly linear in contact count (50), not grow with the 80 students/children", got)
+}
+
+// A member holding notifications.view_all cannot mark another teacher's queued
+// notification sent: the visibility key never widens the write port. Naming a
+// row outside the caller's write scope now fails loudly instead of silently
+// matching nothing, so the member's call errors and the row stays unsent.
+// Their own ledger stays writable.
+func TestViewAllWidensNotificationReadsNotWrites(t *testing.T) {
+	t.Parallel()
+	d := newDeps(t)
+	ctx := context.Background()
+
+	owner, _ := testutil.Teacher(t, d.db)
+	scOwner := testutil.ScopeFor(t, d.db, owner.ID)
+	member, _ := testutil.Teacher(t, d.db)
+	testutil.JoinCenter(t, d.db, member.ID, scOwner.CenterID)
+
+	queue := func(sc authctx.Scope, teacherID uuid.UUID, name string) uuid.UUID {
+		contact := testutil.Contact(t, d.db, teacherID)
+		seedChild(t, d.db, teacherID, contact.ID, name, date("2026-03-01"), 1)
+		period, err := d.billing.EnsurePeriod(ctx, sc, 2026, 3)
+		require.NoError(t, err)
+		_, err = d.billing.Close(ctx, sc, period.ID)
+		require.NoError(t, err)
+		resp, err := d.notifications.BulkSend(ctx, sc, period.ID, notifications.BulkSendRequest{Purpose: "statement"})
+		require.NoError(t, err)
+		require.Len(t, resp.Rows, 1)
+		return resp.Rows[0].NotificationID
+	}
+	ownerNotification := queue(scOwner, owner.ID, "OwnerNotif")
+
+	scMember := testutil.ScopeFor(t, d.db, member.ID)
+	scMember.Perms = authctx.BuildPermSet(nil, []string{authctx.PermNotificationsViewAll}, nil)
+	require.True(t, scMember.CenterWideFor(authctx.PermNotificationsViewAll))
+
+	err := d.notifications.MarkSent(ctx, scMember, []uuid.UUID{ownerNotification})
+	require.Error(t, err, "a visibility key must not widen marking another teacher's notification sent")
+	appErr := apperror.From(err)
+	require.Equal(t, http.StatusNotFound, appErr.Status)
+	require.Nil(t, sentAtOf(t, d.db, ownerNotification))
+
+	require.NoError(t, d.notifications.MarkSent(ctx, scOwner, []uuid.UUID{ownerNotification}))
+	require.NotNil(t, sentAtOf(t, d.db, ownerNotification))
+
+	// Queueing needs the send-reports permission even on one's own period;
+	// marking sent afterwards is exercised with the visibility key alone.
+	testutil.GrantSendReports(t, d.db, member.ID, true)
+	scMemberSend := testutil.ScopeFor(t, d.db, member.ID)
+	ownNotification := queue(scMemberSend, member.ID, "MemberNotif")
+	require.NoError(t, d.notifications.MarkSent(ctx, scMember, []uuid.UUID{ownNotification}))
+	require.NotNil(t, sentAtOf(t, d.db, ownNotification), "a member must still mark their own notification sent")
 }

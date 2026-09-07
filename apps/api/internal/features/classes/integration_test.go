@@ -535,3 +535,67 @@ func TestGetWritableCapabilityGate(t *testing.T) {
 	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code,
 		"an ended stint reads history but never writes — creator rows grant nothing")
 }
+
+// A member holding classes.view_all reads any class in the center but cannot
+// edit, archive, delete, or retime one they hold no stint on: the visibility
+// key never widens the write port. Their own classes stay writable.
+func TestViewAllWidensClassReadsNotWrites(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+
+	owner, _ := testutil.Teacher(t, db)
+	scOwner := testutil.ScopeFor(t, db, owner.ID)
+	member, _ := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, member.ID, scOwner.CenterID)
+
+	ownerClass := testutil.Class(t, db, owner.ID, testutil.WithClassStartDate(date("2026-01-01")))
+	ownerSchedule := testutil.Schedule(t, db, ownerClass, 2, "18:00")
+
+	scMember := testutil.ScopeFor(t, db, member.ID)
+	scMember.Perms = authctx.BuildPermSet(nil, []string{authctx.PermClassesViewAll}, nil)
+	require.True(t, scMember.CenterWideFor(authctx.PermClassesViewAll))
+
+	got, err := svc.GetReadable(ctx, scMember, ownerClass.ID)
+	require.NoError(t, err)
+	require.Equal(t, ownerClass.ID, got.ID)
+
+	_, err = svc.Update(ctx, scMember, ownerClass.ID, classes.UpdateClassRequest{
+		Name: "Lớp Sửa Trộm", StartDate: "2026-01-01", DefaultUnitPrice: int64Ptr(1),
+	})
+	require.Equal(t, 404, apperror.From(err).Status, "a visibility key must not widen edits")
+	_, err = svc.Archive(ctx, scMember, ownerClass.ID)
+	require.Equal(t, 404, apperror.From(err).Status, "a visibility key must not widen archiving")
+	require.Equal(t, 404, apperror.From(svc.Delete(ctx, scMember, ownerClass.ID)).Status,
+		"a visibility key must not widen deletion")
+	_, err = svc.AddSchedule(ctx, scMember, ownerClass.ID, classes.ScheduleRequest{
+		Weekday: int16Ptr(4), StartTime: "19:00", DurationMin: 60,
+	})
+	require.Equal(t, 404, apperror.From(err).Status, "a visibility key must not widen schedule creation")
+	_, err = svc.UpdateSchedule(ctx, scMember, ownerClass.ID, ownerSchedule.ID, classes.UpdateScheduleRequest{
+		Weekday: int16Ptr(5), StartTime: "19:00", DurationMin: 60, EffectiveFrom: "2026-01-01",
+	})
+	require.Equal(t, 404, apperror.From(err).Status, "a visibility key must not widen schedule edits")
+	require.Equal(t, 404, apperror.From(svc.DeleteSchedule(ctx, scMember, ownerClass.ID, ownerSchedule.ID)).Status,
+		"a visibility key must not widen schedule deletion")
+
+	unchanged, err := svc.Get(ctx, scOwner, ownerClass.ID)
+	require.NoError(t, err)
+	require.Equal(t, ownerClass.Name, unchanged.Name)
+	require.Equal(t, classes.StatusActive, unchanged.Status)
+	require.Len(t, unchanged.Schedules, 1)
+	require.EqualValues(t, 2, unchanged.Schedules[0].Weekday)
+
+	ownClass := testutil.Class(t, db, member.ID, testutil.WithClassStartDate(date("2026-01-01")))
+	updated, err := svc.Update(ctx, scMember, ownClass.ID, classes.UpdateClassRequest{
+		Name: "Lớp Nhà Mình", StartDate: "2026-01-01", DefaultUnitPrice: int64Ptr(150_000),
+	})
+	require.NoError(t, err)
+	require.Equal(t, "Lớp Nhà Mình", updated.Name)
+	_, err = svc.AddSchedule(ctx, scMember, ownClass.ID, classes.ScheduleRequest{
+		Weekday: int16Ptr(4), StartTime: "19:00", DurationMin: 60,
+	})
+	require.NoError(t, err)
+	_, err = svc.Archive(ctx, scMember, ownClass.ID)
+	require.NoError(t, err)
+}

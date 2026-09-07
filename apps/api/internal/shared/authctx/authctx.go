@@ -53,28 +53,32 @@ type Scope struct {
 	Perms PermSet
 }
 
-// ReportsOversight reports whether the caller may read billing
-// periods/statements/debt center-wide AND create report sends — the owner or
-// a member holding the delegated send-reports permission. Read paths and the
-// send-creation gate both branch on this one helper so the two capabilities
-// can never drift apart.
+// ReportsOversight reports whether the caller may CREATE a report send — bulk
+// send, send preview, resume, the class-send gate's oversight arm, and the
+// zalo-mapping rewrite that redirects where a family's messages land: the
+// owner, or a member holding the delegated reports.send permission. It is no
+// longer a read gate: reading the billing/statements/notifications/contacts
+// data a send touches goes through CenterWideFor(<resource>.view_all)
+// instead, because reports.send implies those four view_all keys (see
+// impliedKeys in catalog.go) — a send-reports holder already reads
+// everything a send needs, without this helper's involvement. Keeping the
+// send-creation gate on this single helper, separate from the read keys it
+// implies, is what lets a role hold billing.view_all/statements.view_all/
+// notifications.view_all/contacts.view_all for reading without ever gaining
+// the ability to send.
 func (s Scope) ReportsOversight() bool {
 	return s.IsOwner || s.CanSendReports
 }
 
 // PhoneVisible is the single phone-privacy rule for every surface that could
-// carry a contact's phone: the owner, reports oversight, and the explicit
-// contacts.view_all grant always see it; anyone else only when the row itself
-// grants it (rowVisible — a repo-derived phone_visible column, true when the
-// caller holds an ACTIVE hoc_vu stint on a class where one of the contact's
-// students is actively enrolled). contacts.view_all sits here rather than in
-// per-surface checks because a contact row IS its phone — granting "Xem mọi
-// liên hệ" without the phones would be an empty grant. Services null the phone
-// field when this returns false; there is deliberately no per-surface
-// variation, so the same contact can never show a phone in one list and hide
-// it in another.
+// carry a contact's phone: whoever reads contacts center-wide sees it (the
+// owner, an explicit contacts.view_all grant, or reports.send through the
+// keys it implies); anyone else only when the row itself is visible to them
+// (their own contact, or a student they are assigned to as hoc_vu). Surfaces
+// pass their own row-visibility verdict in; nothing else may decide phone
+// privacy on its own.
 func (s Scope) PhoneVisible(rowVisible bool) bool {
-	return s.ReportsOversight() || s.CenterWideFor(PermContactsViewAll) || rowVisible
+	return s.CenterWideFor(PermContactsViewAll) || rowVisible
 }
 
 const (
@@ -112,4 +116,45 @@ func ScopeFrom(c *gin.Context) (Scope, bool) {
 	}
 	s, ok := v.(Scope)
 	return s, ok
+}
+
+// Anchor names whose rows a service acts on: the teacher that owns them and
+// the center they sit in. A service passes one down when it works on another
+// teacher's data on the caller's behalf — closing a colleague's billing
+// period, targeting the owner's statements, replaying a roster import — after
+// the caller's Scope has already authorised the action. An Anchor carries no
+// authority: repositories that take one filter by exactly these two columns
+// and never widen, so nothing below the service can be handed borrowed rights
+// through a hand-built Scope.
+type Anchor struct {
+	TeacherID uuid.UUID
+	CenterID  uuid.UUID
+}
+
+// AnchorTo names teacherID's rows inside the caller's center. The caller's
+// Scope must already have authorised acting on that teacher; this only carries
+// the identity down to the repository.
+func (s Scope) AnchorTo(teacherID uuid.UUID) Anchor {
+	return Anchor{TeacherID: teacherID, CenterID: s.CenterID}
+}
+
+// Self names the caller's own rows.
+func (s Scope) Self() Anchor {
+	return s.AnchorTo(s.TeacherID)
+}
+
+// OwnerAnchor is an Anchor proven to name the center owner's rows. It embeds
+// Anchor so anchored repository helpers accept it unchanged, while a plain
+// Anchor can never stand in where an OwnerAnchor is required. Only the
+// centers service mints one, after reading the owner off the center row, so a
+// feature that must write into the owner's data asks centers for the proof
+// instead of asserting ownership itself.
+type OwnerAnchor struct {
+	Anchor
+}
+
+// MintOwnerAnchor is the single constructor for OwnerAnchor; the scoping guard
+// keeps its callers inside the centers feature.
+func MintOwnerAnchor(ownerID, centerID uuid.UUID) OwnerAnchor {
+	return OwnerAnchor{Anchor{TeacherID: ownerID, CenterID: centerID}}
 }

@@ -89,7 +89,7 @@ func TestOwnerHasFullOversightOfMembersBillingPeriods(t *testing.T) {
 	require.NoError(t, err, "owner must close a member's billing period")
 	require.EqualValues(t, 1, resp.IssuedCount)
 
-	invoices, err := repo.ListInvoices(ctx, memberScope, period.ID)
+	invoices, err := repo.ListInvoices(ctx, memberScope.Self(), period.ID)
 	require.NoError(t, err)
 	require.Len(t, invoices, 1)
 	require.Equal(t, member.ID, invoices[0].TeacherID,
@@ -203,7 +203,7 @@ func TestTallyAttendancePlan03ContractExclusions(t *testing.T) {
 	period, err := svc.EnsurePeriod(ctx, sc, 2026, 1)
 	require.NoError(t, err)
 
-	tallies, err := repo.TallyAttendance(ctx, sc, period.ID)
+	tallies, err := repo.TallyAttendance(ctx, sc.Self(), period.PeriodStart, period.PeriodEnd)
 	require.NoError(t, err)
 	require.Len(t, tallies, 1, "one enrollment must produce exactly one tally row")
 
@@ -254,7 +254,7 @@ func TestMidPeriodJoinerNeedsNoRosterDateFilter(t *testing.T) {
 
 	period, err := svc.EnsurePeriod(ctx, sc, 2026, 1)
 	require.NoError(t, err)
-	tallies, err := repo.TallyAttendance(ctx, sc, period.ID)
+	tallies, err := repo.TallyAttendance(ctx, sc.Self(), period.PeriodStart, period.PeriodEnd)
 	require.NoError(t, err)
 	require.Len(t, tallies, 1)
 	require.Equal(t, 1, tallies[0].BillableCount,
@@ -753,7 +753,7 @@ func TestCloseVariesTotalDuePerStudentAndClassWithNoSessionsAddsNoLine(t *testin
 	require.EqualValues(t, 0, resp.VoidedCount)
 	require.EqualValues(t, 600_000, resp.TotalDue)
 
-	invoices, err := repo.ListInvoices(ctx, sc, period.ID)
+	invoices, err := repo.ListInvoices(ctx, sc.Self(), period.ID)
 	require.NoError(t, err)
 	byStudent := make(map[uuid.UUID]billing.Invoice, len(invoices))
 	for _, inv := range invoices {
@@ -763,7 +763,7 @@ func TestCloseVariesTotalDuePerStudentAndClassWithNoSessionsAddsNoLine(t *testin
 	require.EqualValues(t, 200_000, byStudent[student2ID].TotalDue)
 	require.EqualValues(t, 300_000, byStudent[student3ID].TotalDue)
 
-	_, lines, err := repo.GetInvoiceWithLines(ctx, sc, byStudent[student3ID].ID)
+	_, lines, err := repo.GetInvoiceWithLines(ctx, sc.Self(), byStudent[student3ID].ID)
 	require.NoError(t, err)
 	require.Len(t, lines, 1, "the class with zero sessions this period must not add a second line")
 	require.Equal(t, "student3-class", lines[0].ClassName)
@@ -800,11 +800,11 @@ func TestCloseStudentInTwoClassesProducesOneInvoiceWithTwoLines(t *testing.T) {
 	require.EqualValues(t, 1, resp.IssuedCount)
 	require.EqualValues(t, 200_000, resp.TotalDue)
 
-	invoices, err := repo.ListInvoices(ctx, sc, period.ID)
+	invoices, err := repo.ListInvoices(ctx, sc.Self(), period.ID)
 	require.NoError(t, err)
 	require.Len(t, invoices, 1, "one student must produce exactly one invoice, never one per class")
 
-	_, lines, err := repo.GetInvoiceWithLines(ctx, sc, invoices[0].ID)
+	_, lines, err := repo.GetInvoiceWithLines(ctx, sc.Self(), invoices[0].ID)
 	require.NoError(t, err)
 	require.Len(t, lines, 2)
 	require.ElementsMatch(t, []string{"A", "B"}, []string{lines[0].ClassName, lines[1].ClassName})
@@ -846,7 +846,7 @@ func TestCloseVoidsInvoiceThatBecomesEmptyAfterAttendanceCorrection(t *testing.T
 	require.EqualValues(t, 1, resp.VoidedCount)
 	require.EqualValues(t, 0, resp.TotalDue)
 
-	voided, _, err := repo.GetInvoiceWithLines(ctx, sc, invoiceID)
+	voided, _, err := repo.GetInvoiceWithLines(ctx, sc.Self(), invoiceID)
 	require.NoError(t, err)
 	require.Equal(t, billing.InvoiceVoid, voided.Status)
 	require.NotNil(t, voided.VoidReason)
@@ -888,7 +888,7 @@ func TestCloseCarriesForwardOpeningBalanceFromPriorClosedPeriod(t *testing.T) {
 	require.EqualValues(t, 0, febClose.VoidedCount)
 	require.EqualValues(t, 100_000, febClose.TotalDue)
 
-	febInvoices, err := repo.ListInvoices(ctx, sc, febPeriod.ID)
+	febInvoices, err := repo.ListInvoices(ctx, sc.Self(), febPeriod.ID)
 	require.NoError(t, err)
 	require.Len(t, febInvoices, 1)
 	require.EqualValues(t, 100_000, febInvoices[0].OpeningBalance)
@@ -980,7 +980,7 @@ func TestVoidInvoiceExcludedFromContactBalanceView(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 1, resp.IssuedCount)
 
-	invoices, err := repo.ListInvoices(ctx, fx.scope, fx.period.ID)
+	invoices, err := repo.ListInvoices(ctx, fx.scope.Self(), fx.period.ID)
 	require.NoError(t, err)
 	require.Len(t, invoices, 1)
 	invoiceID := invoices[0].ID
@@ -1017,7 +1017,7 @@ func TestVoidInvoiceWithPaidAmountIsConflict(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 1, resp.IssuedCount)
 
-	invoices, err := repo.ListInvoices(ctx, fx.scope, fx.period.ID)
+	invoices, err := repo.ListInvoices(ctx, fx.scope.Self(), fx.period.ID)
 	require.NoError(t, err)
 	require.Len(t, invoices, 1)
 	invoiceID := invoices[0].ID
@@ -1144,7 +1144,7 @@ func TestReconcileSessionBillableFlipToFalsePostsNegativeDeltaWithSourceSessionI
 	require.EqualValues(t, -100_000, result.Adjustments[0].Amount)
 
 	year, month := currentCalendarPeriod(t)
-	targetPeriod, err := repo.GetPeriodByYearMonth(ctx, fx.scope, int16(year), int16(month)) //nolint:gosec // calendar year/month, always in range
+	targetPeriod, err := repo.GetPeriodByYearMonth(ctx, fx.scope.Self(), int16(year), int16(month)) //nolint:gosec // calendar year/month, always in range
 	require.NoError(t, err)
 	require.NotNil(t, targetPeriod, "the current calendar month's period must have been auto-created")
 	require.Equal(t, targetPeriod.ID, result.Adjustments[0].PeriodID)
@@ -1156,7 +1156,7 @@ func TestReconcileSessionBillableFlipToFalsePostsNegativeDeltaWithSourceSessionI
 	require.Equal(t, fx.session1.ID, *adj.SourceSessionID)
 	require.NotEmpty(t, adj.Reason)
 
-	targetInvoice, _, err := repo.GetInvoiceWithLines(ctx, fx.scope, result.Adjustments[0].InvoiceID)
+	targetInvoice, _, err := repo.GetInvoiceWithLines(ctx, fx.scope.Self(), result.Adjustments[0].InvoiceID)
 	require.NoError(t, err)
 	require.EqualValues(t, -100_000, targetInvoice.AdjustmentTotal)
 	require.EqualValues(t, targetInvoice.OpeningBalance+targetInvoice.CurrentCharge+targetInvoice.AdjustmentTotal, targetInvoice.TotalDue)
@@ -1244,7 +1244,7 @@ func TestReconcileSessionRepeatedEditsDoNotDoubleCount(t *testing.T) {
 	require.Len(t, trail, 2)
 	require.False(t, trail[1].CreatedAt.Before(trail[0].CreatedAt), "the audit trail must be ordered oldest first")
 
-	targetInvoice, _, err := repo.GetInvoiceWithLines(ctx, fx.scope, first.Adjustments[0].InvoiceID)
+	targetInvoice, _, err := repo.GetInvoiceWithLines(ctx, fx.scope.Self(), first.Adjustments[0].InvoiceID)
 	require.NoError(t, err)
 	require.EqualValues(t, 0, targetInvoice.AdjustmentTotal, "the two adjustments must net to zero on the target invoice")
 }
@@ -1306,7 +1306,7 @@ func TestConcurrentReconcileSameStudentDoesNotDoubleCount(t *testing.T) {
 	}
 	require.EqualValues(t, -200_000, sum, "the concurrent carry must net to a single -200_000, never -400_000")
 
-	targetInvoice, _, err := repo.GetInvoiceWithLines(ctx, fx.scope, targetInvoiceID)
+	targetInvoice, _, err := repo.GetInvoiceWithLines(ctx, fx.scope.Self(), targetInvoiceID)
 	require.NoError(t, err)
 	require.EqualValues(t, -200_000, targetInvoice.AdjustmentTotal, "the target invoice's adjustment_total must reflect a single carry")
 }
@@ -1334,7 +1334,7 @@ func TestReconcileSessionCreatesNextPeriodAndDraftInvoiceThenCloseKeepsAdjustmen
 	require.Len(t, result.Adjustments, 1)
 
 	year, month := currentCalendarPeriod(t)
-	targetPeriod, err := repo.GetPeriodByYearMonth(ctx, fx.scope, int16(year), int16(month)) //nolint:gosec // calendar year/month, always in range
+	targetPeriod, err := repo.GetPeriodByYearMonth(ctx, fx.scope.Self(), int16(year), int16(month)) //nolint:gosec // calendar year/month, always in range
 	require.NoError(t, err)
 	require.NotNil(t, targetPeriod, "the current calendar month's period must have been auto-created")
 	require.Equal(t, billing.PeriodOpen, targetPeriod.Status)
@@ -1344,7 +1344,7 @@ func TestReconcileSessionCreatesNextPeriodAndDraftInvoiceThenCloseKeepsAdjustmen
 	require.EqualValues(t, 1, closeResp.IssuedCount,
 		"January's carried debt alone keeps the target invoice non-empty, so it must issue, not void")
 
-	invoices, err := repo.ListInvoices(ctx, fx.scope, targetPeriod.ID)
+	invoices, err := repo.ListInvoices(ctx, fx.scope.Self(), targetPeriod.ID)
 	require.NoError(t, err)
 	require.Len(t, invoices, 1)
 	inv := invoices[0]
@@ -1384,7 +1384,7 @@ func TestManualAdjustmentSurvivesCloseTimeRecomputeAndFoldsIntoTotalDue(t *testi
 	require.EqualValues(t, 1, closeResp.IssuedCount)
 	require.EqualValues(t, 170_000, closeResp.TotalDue, "the manual adjustment must be folded exactly once into the close totals")
 
-	invoices, err := repo.ListInvoices(ctx, fx.scope, fx.period.ID)
+	invoices, err := repo.ListInvoices(ctx, fx.scope.Self(), fx.period.ID)
 	require.NoError(t, err)
 	require.Len(t, invoices, 1)
 	require.EqualValues(t, invoiceID, invoices[0].ID)
@@ -1409,7 +1409,7 @@ func TestAddAdjustmentOnVoidInvoiceIsConflict(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 1, resp.IssuedCount)
 
-	invoices, err := repo.ListInvoices(ctx, fx.scope, fx.period.ID)
+	invoices, err := repo.ListInvoices(ctx, fx.scope.Self(), fx.period.ID)
 	require.NoError(t, err)
 	invoiceID := invoices[0].ID
 
@@ -1438,7 +1438,7 @@ func TestAddAdjustmentOnPaidInvoiceIsConflict(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 1, resp.IssuedCount)
 
-	invoices, err := repo.ListInvoices(ctx, fx.scope, fx.period.ID)
+	invoices, err := repo.ListInvoices(ctx, fx.scope.Self(), fx.period.ID)
 	require.NoError(t, err)
 	invoiceID := invoices[0].ID
 
@@ -1513,4 +1513,146 @@ func TestReconcileSessionIsNoOpWhenStudentHasNoInvoiceInClosedPeriod(t *testing.
 	var periodCount int64
 	require.NoError(t, db.Table("billing_periods").Where("teacher_id = ?", fx.teacher.ID).Count(&periodCount).Error)
 	require.EqualValues(t, 1, periodCount, "skipping must never create a target period")
+}
+
+// A member holding billing.view_all reads and previews any period in the
+// center but cannot close it, adjust its invoices, or void them: the
+// visibility key never widens the write port. Their own period stays closable.
+func TestViewAllWidensBillingReadsNotWrites(t *testing.T) {
+	t.Parallel()
+	svc, _, _, _, db := newIntegrationDeps(t)
+	ctx := context.Background()
+
+	owner, _ := testutil.Teacher(t, db)
+	scOwner := testutil.ScopeFor(t, db, owner.ID)
+	member, _ := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, member.ID, scOwner.CenterID)
+
+	seed := func(teacherID uuid.UUID) {
+		contact := testutil.Contact(t, db, teacherID)
+		class := testutil.Class(t, db, teacherID, testutil.WithClassStartDate(date("2026-01-01")))
+		student := testutil.Student(t, db, teacherID, contact.ID)
+		enrollment := testutil.Enrollment(t, db, teacherID, student.ID, class.ID, date("2026-01-01"))
+		sess := testutil.Session(t, db, teacherID, class.ID, date("2026-01-06"),
+			testutil.WithSessionAttendanceConfirmed(time.Now()))
+		testutil.AttendanceRecord(t, db, teacherID, sess.ID, student.ID, enrollment.ID)
+	}
+	seed(owner.ID)
+	ownerPeriod, err := svc.EnsurePeriod(ctx, scOwner, 2026, 1)
+	require.NoError(t, err)
+
+	scMember := testutil.ScopeFor(t, db, member.ID)
+	scMember.Perms = authctx.BuildPermSet(nil, []string{authctx.PermBillingViewAll}, nil)
+	require.True(t, scMember.CenterWideFor(authctx.PermBillingViewAll))
+
+	// GetPeriod is on the reports-oversight axis, so the visibility key is
+	// exercised through Preview, the billing.view_all read.
+	preview, err := svc.Preview(ctx, scMember, ownerPeriod.ID)
+	require.NoError(t, err, "billing.view_all must open the owner's period preview")
+	require.NotEmpty(t, preview.Invoices)
+
+	_, err = svc.Close(ctx, scMember, ownerPeriod.ID)
+	require.Equal(t, 404, apperror.From(err).Status, "a visibility key must not widen closing a period")
+	stillOpen, err := svc.GetPeriod(ctx, scOwner, ownerPeriod.ID)
+	require.NoError(t, err)
+	require.Equal(t, billing.PeriodOpen, stillOpen.Status, "the owner's period must stay open")
+
+	_, err = svc.Close(ctx, scOwner, ownerPeriod.ID)
+	require.NoError(t, err)
+	var inv billing.Invoice
+	require.NoError(t, db.Where("period_id = ?", ownerPeriod.ID).Take(&inv).Error)
+
+	_, _, err = svc.AddAdjustment(ctx, scMember, inv.ID, -10_000, "trộm giảm giá")
+	require.Equal(t, 404, apperror.From(err).Status, "a visibility key must not widen invoice adjustments")
+	_, err = svc.VoidInvoice(ctx, scMember, inv.ID, "trộm huỷ")
+	require.Equal(t, 404, apperror.From(err).Status, "a visibility key must not widen voiding an invoice")
+	var after billing.Invoice
+	require.NoError(t, db.Where("id = ?", inv.ID).Take(&after).Error)
+	require.Equal(t, billing.InvoiceIssued, after.Status)
+	require.Equal(t, inv.TotalDue, after.TotalDue, "the owner's invoice must be untouched")
+
+	seed(member.ID)
+	ownPeriod, err := svc.EnsurePeriod(ctx, scMember, 2026, 1)
+	require.NoError(t, err)
+	resp, err := svc.Close(ctx, scMember, ownPeriod.ID)
+	require.NoError(t, err, "a member must still close their own period")
+	require.EqualValues(t, 1, resp.IssuedCount)
+}
+
+// newReconciliationDeps mirrors newIntegrationDeps but also wires
+// attendance.Service's BillingReconciler to the same billing.Service
+// instance — the real router.go wiring — so a test can drive the whole
+// pipeline through attendance.Confirm and observe billing's post-close
+// reconciliation fire, rather than calling ReconcileSession directly.
+func newReconciliationDeps(t *testing.T) (*billing.Service, *attendance.Service, *gorm.DB) {
+	t.Helper()
+	db := testutil.StartPostgres(t)
+	txMgr := database.NewTxManager(db)
+	classesSvc := classes.NewService(classes.NewRepository(db), txMgr, classstaff.NewRepository(db))
+	teachersSvc := teachers.NewService(teachers.NewRepository(db))
+	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db), nil)
+	sessionsSvc := sessions.NewService(sessions.NewRepository(db), classesSvc, teachersSvc, enrollmentsSvc)
+	attendanceSvc := attendance.NewService(attendance.NewRepository(db), enrollmentsSvc, sessionsSvc, txMgr)
+	billingRepo := billing.NewRepository(db, attendanceSvc)
+	billingSvc := billing.NewService(billingRepo, txMgr, sessionsSvc, enrollmentsSvc)
+	attendanceSvc.SetReconciler(billingSvc)
+	return billingSvc, attendanceSvc, db
+}
+
+// TestAssistantConfirmOnClosedPeriodPostsAdjustmentOnClassTeachersBilling
+// proves the accepted product behaviour: a trợ giảng (teaching assistant)
+// holding only an active tro_giang stint — never the class's own giáo viên,
+// never any billing permission of their own — confirms attendance on a
+// session whose date falls inside an already-closed billing period. The
+// resulting post-close reconciliation must carry the delta onto the CLASS
+// TEACHER's billing (invoice_adjustments.teacher_id), never the confirming
+// assistant's, and Confirm's response must carry no reconciliation warning.
+func TestAssistantConfirmOnClosedPeriodPostsAdjustmentOnClassTeachersBilling(t *testing.T) {
+	t.Parallel()
+	billingSvc, attendanceSvc, db := newReconciliationDeps(t)
+	ctx := context.Background()
+
+	owner, _ := testutil.Teacher(t, db)
+	ownerCenter := testutil.ScopeFor(t, db, owner.ID).CenterID
+	_, gv := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, gv.ID, ownerCenter)
+	_, tg := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, tg.ID, ownerCenter)
+	gvSc := testutil.ScopeFor(t, db, gv.ID)
+	tgSc := testutil.ScopeFor(t, db, tg.ID)
+
+	class := testutil.Class(t, db, gv.ID, testutil.WithClassStartDate(date("2026-01-01")))
+	testutil.StaffAssignment(t, db, class, tg.ID, authctx.StaffRoleTroGiang)
+	contact := testutil.Contact(t, db, gv.ID)
+	student := testutil.Student(t, db, gv.ID, contact.ID)
+	enrollment := testutil.Enrollment(t, db, gv.ID, student.ID, class.ID, date("2026-01-01"))
+
+	// One session already confirmed and billed before close.
+	billedSession := testutil.Session(t, db, gv.ID, class.ID, date("2026-01-06"),
+		testutil.WithSessionAttendanceConfirmed(time.Now()))
+	testutil.AttendanceRecord(t, db, gv.ID, billedSession.ID, student.ID, enrollment.ID)
+
+	period, err := billingSvc.EnsurePeriod(ctx, gvSc, 2026, 1)
+	require.NoError(t, err)
+	closeResp, err := billingSvc.Close(ctx, gvSc, period.ID)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, closeResp.IssuedCount)
+	require.EqualValues(t, 100_000, closeResp.TotalDue)
+
+	// A second session for the same class, entered into the system only
+	// after January already closed — the assistant discovers it later and
+	// confirms it herself. No billing permission, no giao_vien stint.
+	lateSession := testutil.Session(t, db, gv.ID, class.ID, date("2026-01-13"))
+	resp, err := attendanceSvc.Confirm(ctx, tgSc, lateSession.ID, attendance.ConfirmRequest{})
+	require.NoError(t, err)
+	require.Nil(t, resp.Warning, "the assistant's confirm must trigger a real reconciliation, not a swallowed failure")
+
+	var adjustments []billing.InvoiceAdjustment
+	require.NoError(t, db.Where("source_session_id = ?", lateSession.ID).Find(&adjustments).Error)
+	require.Len(t, adjustments, 1, "the newly-billable session must post exactly one carried adjustment")
+	adj := adjustments[0]
+	require.Equal(t, gv.ID, adj.TeacherID,
+		"the adjustment must land on the class teacher's billing, never the confirming assistant's")
+	require.Equal(t, ownerCenter, adj.CenterID)
+	require.EqualValues(t, 100_000, adj.Amount, "one newly-billable session at the enrollment's unit price")
 }

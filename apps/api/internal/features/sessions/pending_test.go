@@ -45,6 +45,9 @@ func (f *fakePendingRepo) ListPending(_ context.Context, sc authctx.Scope, befor
 }
 
 // The remaining Repository methods are unused by ListPending tests.
+func (f *fakePendingRepo) ListPendingAnchored(context.Context, authctx.Anchor, time.Time, *time.Time, *time.Time, int) ([]PendingRow, int64, error) {
+	return nil, 0, nil
+}
 func (f *fakePendingRepo) BulkInsertIgnoreConflicts(context.Context, []Session) error { return nil }
 func (f *fakePendingRepo) Create(context.Context, *Session) error                     { return nil }
 func (f *fakePendingRepo) ListByClassAndRange(context.Context, authctx.Scope, uuid.UUID, time.Time, time.Time) ([]Row, error) {
@@ -109,6 +112,14 @@ func (f *fakeRepository) ListPending(_ context.Context, sc authctx.Scope, before
 		out = out[:limit]
 	}
 	return out, total, nil
+}
+
+// ListPendingAnchored on fakeRepository exists solely so that type still
+// satisfies the Repository interface; unused by this package's own tests
+// (its behaviour is proven against real Postgres in
+// billing/integration_test.go, the anchored gate's real caller).
+func (f *fakeRepository) ListPendingAnchored(context.Context, authctx.Anchor, time.Time, *time.Time, *time.Time, int) ([]PendingRow, int64, error) {
+	return nil, 0, nil
 }
 
 // newPendingTestService builds a Service directly (bypassing NewService, but

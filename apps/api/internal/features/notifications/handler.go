@@ -213,13 +213,14 @@ func (h *Handler) resumeRun(c *gin.Context) {
 // markSent marks the given notification ids as sent.
 //
 //	@Summary		Mark notifications sent
-//	@Description	Idempotent: an id already sent, or not belonging to the caller, is silently skipped rather than erroring.
+//	@Description	Idempotent for an id already sent — it simply matches nothing on the second call. An id outside the caller's own scope (or another teacher's, for a non-owner) fails the whole call with a 404 instead of silently skipping it.
 //	@Tags			notifications
 //	@Accept			json
 //	@Produce		json
 //	@Param			request	body	MarkSentRequest	true	"notification ids"
 //	@Success		204
 //	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}	"an id is not visible to the caller"
 //	@Failure		422	{object}	response.Envelope{error=response.ErrorBody}	"validation failed"
 //	@Security		BearerAuth
 //	@Router			/notifications/mark-sent [post]
