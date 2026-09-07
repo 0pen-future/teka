@@ -303,6 +303,45 @@ func TestStudentCountsMatchActiveEnrollments(t *testing.T) {
 
 func ptrTime(t time.Time) *time.Time { return &t }
 
+// The count reaches the client, so it follows the enrollments read filter: a
+// member only counts classes they hold a stint on, and enrollments.view_all
+// widens the count exactly as it widens the roster list.
+func TestStudentCountsFollowEnrollmentReadScope(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, db)
+	scOwner := testutil.ScopeFor(t, db, owner.ID)
+	contact := testutil.Contact(t, db, owner.ID)
+
+	staffed := testutil.Class(t, db, owner.ID, testutil.WithClassName("Toán 9"))
+	other := testutil.Class(t, db, owner.ID, testutil.WithClassName("Văn 9"))
+	for _, classID := range []uuid.UUID{staffed.ID, other.ID} {
+		student := testutil.Student(t, db, owner.ID, contact.ID)
+		testutil.Enrollment(t, db, owner.ID, student.ID, classID, date("2026-01-05"))
+	}
+
+	member, _ := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, member.ID, scOwner.CenterID)
+	testutil.StaffAssignment(t, db, staffed, member.ID, "tro_giang")
+	ids := []uuid.UUID{staffed.ID, other.ID}
+
+	scMember := testutil.ScopeFor(t, db, member.ID)
+	counts, err := svc.StudentCounts(ctx, scMember, ids)
+	require.NoError(t, err)
+	require.Equal(t, map[uuid.UUID]int64{staffed.ID: 1}, counts,
+		"a member must not learn the headcount of a class they cannot list")
+
+	scMember.Perms = authctx.BuildPermSet(nil, []string{authctx.PermEnrollmentsViewAll}, nil)
+	widened, err := svc.StudentCounts(ctx, scMember, ids)
+	require.NoError(t, err)
+	require.Equal(t, map[uuid.UUID]int64{staffed.ID: 1, other.ID: 1}, widened)
+
+	all, err := svc.StudentCounts(ctx, scOwner, ids)
+	require.NoError(t, err)
+	require.Equal(t, widened, all)
+}
+
 // A teacher from a different center is refused on every operation with 404,
 // never 403 — a 403 would confirm the id exists in another center. Schedule
 // sub-resources are refused the same way, and the stranger's list stays
