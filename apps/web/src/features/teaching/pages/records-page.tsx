@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 
 import { RecordsToolbar, ResultCount } from "../components/records-toolbar";
 import {
+  ghostButtonClassName,
   StudentRecordsTable,
   type StudentRecordSummary,
 } from "../components/student-records-table";
@@ -19,9 +20,6 @@ import { downloadCsv, type CsvCell } from "../lib/csv";
 import { meanScore } from "../lib/classbook-stats";
 import { filterStudentRows } from "../lib/student-search";
 import { aggregateStudent, studentSessionRows, trendOf } from "../lib/student-stats";
-
-const csvButtonClassName =
-  "flex items-center gap-2 rounded-[14px] border-2 border-line-200 bg-white px-4 py-[9px] text-[13px] font-extrabold text-ink-700 transition-colors hover:border-mint-400 hover:text-mint-600 focus-visible:ring-4 focus-visible:outline-none";
 
 /** True while the user is typing somewhere a "/" keystroke belongs to. */
 function isTypingTarget(element: Element | null): boolean {
@@ -155,7 +153,7 @@ export function RecordsPage() {
           </p>
         </div>
         {wide ? (
-          <button type="button" onClick={exportCsv} className={csvButtonClassName}>
+          <button type="button" onClick={exportCsv} className={ghostButtonClassName}>
             <Download className="size-4" aria-hidden="true" />
             Tải danh sách (CSV)
           </button>
@@ -175,7 +173,13 @@ export function RecordsPage() {
       />
 
       {sessionsPending && selectedClassId ? (
-        <p className="text-[13px] text-ink-400">Đang tải dữ liệu tháng {Number(month.label)}…</p>
+        <StudentRecordsTable
+          rows={[]}
+          onOpen={() => undefined}
+          loading
+          loadingLabel={`Đang tải dữ liệu tháng ${Number(month.label)}…`}
+          compact={!wide}
+        />
       ) : rows.length === 0 ? (
         <div className="rounded-[24px] bg-white p-6 text-center text-[13px] text-ink-400 shadow-soft-md">
           Lớp chưa có học sinh đang học.
@@ -183,6 +187,9 @@ export function RecordsPage() {
       ) : (
         <StudentRecordsTable
           rows={filteredRows}
+          query={query}
+          onClearSearch={() => setQuery("")}
+          compact={!wide}
           onOpen={(studentId) => void navigate(`/records/${studentId}`)}
         />
       )}
@@ -194,7 +201,7 @@ export function RecordsPage() {
             type="button"
             onClick={exportCsv}
             aria-label="Tải danh sách (CSV)"
-            className={cn(csvButtonClassName, "min-h-10")}
+            className={cn(ghostButtonClassName, "min-h-10")}
           >
             <Download className="size-4" aria-hidden="true" />
             CSV
