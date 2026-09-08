@@ -303,9 +303,6 @@ func (s *Service) reuseAfterRotation(ctx context.Context, t *RefreshToken, now t
 	return nil, invalid
 }
 
-// activeProfile loads the account behind a refresh token and rejects any
-// that is not active: a disabled account keeps its unexpired refresh tokens,
-// and they must stop working the moment the account is disabled.
 // isUnauthorized reports whether err is a 401 from activeProfile, as opposed
 // to a transient failure that must surface as 500.
 func isUnauthorized(err error) bool {
@@ -313,6 +310,9 @@ func isUnauthorized(err error) bool {
 	return errors.As(err, &appErr) && appErr.Code == apperror.CodeUnauthorized
 }
 
+// activeProfile loads the account behind a refresh token and rejects any
+// that is not active: a disabled account keeps its unexpired refresh tokens,
+// and they must stop working the moment the account is disabled.
 func (s *Service) activeProfile(ctx context.Context, userID uuid.UUID) (*teachers.Profile, error) {
 	p, err := s.accounts.GetByID(ctx, userID)
 	if err != nil {

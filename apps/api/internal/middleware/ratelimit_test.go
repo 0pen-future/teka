@@ -235,8 +235,16 @@ func TestJSONBodyKeyMatchesFieldLikeStructBinding(t *testing.T) {
 	if got := keyFor(`{"Phone":"0901234567"}`); got != "0901234567" {
 		t.Fatalf("capitalized field: key = %q, want the bound value", got)
 	}
+	// Duplicate keys: encoding/json keeps the last one it sees regardless of
+	// spelling, so the limiter must too, in both orders.
 	if got := keyFor(`{"PHONE":"a","phone":"b"}`); got != "b" {
-		t.Fatalf("exact match must win over a case-insensitive one, got %q", got)
+		t.Fatalf("last duplicate must win (exact last): got %q", got)
+	}
+	if got := keyFor(`{"phone":"a","PHONE":"b"}`); got != "b" {
+		t.Fatalf("last duplicate must win (exact first): got %q", got)
+	}
+	if got := keyFor(`{"phone":123}`); got != "" {
+		t.Fatalf("non-string value must not produce a key, got %q", got)
 	}
 }
 

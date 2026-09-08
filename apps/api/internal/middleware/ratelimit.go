@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -115,7 +116,18 @@ func RateLimit(keyFn KeyFunc, limit int, period time.Duration) gin.HandlerFunc {
 // sees the full body. Returns "" (no limiting) when the body is absent,
 // unreadable, not JSON, or missing the field — those requests fail binding
 // on their own.
+//
+// The value is decoded through encoding/json into a struct tagged with the
+// field name, so the limiter sees exactly what the handler's DTO will bind:
+// case-insensitive key matching, last duplicate key wins. Reimplementing
+// those rules over a map is how a caller gets to spell the field so that
+// the handler acts on one value while the limiter buckets another.
 func JSONBodyKey(field string) KeyFunc {
+	probe := reflect.StructOf([]reflect.StructField{{
+		Name: "Value",
+		Type: reflect.TypeOf(""),
+		Tag:  reflect.StructTag(`json:"` + field + `"`),
+	}})
 	return func(c *gin.Context) string {
 		if c.Request.Body == nil {
 			return ""
@@ -130,29 +142,12 @@ func JSONBodyKey(field string) KeyFunc {
 		}
 		c.Request.Body = io.NopCloser(bytes.NewReader(raw))
 
-		var payload map[string]any
-		if err := json.Unmarshal(raw, &payload); err != nil {
+		v := reflect.New(probe)
+		if err := json.Unmarshal(raw, v.Interface()); err != nil {
 			return ""
 		}
-		v, _ := bodyField(payload, field).(string)
-		return v
+		return v.Elem().Field(0).String()
 	}
-}
-
-// bodyField resolves field the way encoding/json binds it into a struct: an
-// exact match wins, otherwise the first case-insensitive match. Anything
-// less would let a caller spell the field differently to slip past the
-// limiter while the handler still binds and acts on the value.
-func bodyField(payload map[string]any, field string) any {
-	if v, ok := payload[field]; ok {
-		return v
-	}
-	for k, v := range payload {
-		if strings.EqualFold(k, field) {
-			return v
-		}
-	}
-	return nil
 }
 
 // PhoneKey rate-limits on a phone field of the JSON body, normalized so the
