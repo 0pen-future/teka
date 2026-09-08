@@ -39,6 +39,9 @@ const (
 // HTTPConfig configures the HTTP listener.
 type HTTPConfig struct {
 	Port int `env:"HTTP_PORT" envDefault:"8080"`
+	// MaxBodyBytes caps every request body server-wide (default 1 MiB); the
+	// roster import route is exempt and enforces its own upload cap.
+	MaxBodyBytes int64 `env:"HTTP_MAX_BODY_BYTES" envDefault:"1048576"`
 }
 
 // DatabaseConfig configures the PostgreSQL connection and pool.
@@ -224,6 +227,9 @@ func (c *Config) validate() error {
 	}
 	if len(c.JWT.Secret) < minJWTSecretLen {
 		return fmt.Errorf("API_JWT_SECRET must be at least %d characters", minJWTSecretLen)
+	}
+	if c.HTTP.MaxBodyBytes <= 0 {
+		return fmt.Errorf("API_HTTP_MAX_BODY_BYTES must be positive, got %d", c.HTTP.MaxBodyBytes)
 	}
 	if c.JWT.RefreshReuseGrace < 0 {
 		return fmt.Errorf("API_JWT_REFRESH_REUSE_GRACE must not be negative, got %v", c.JWT.RefreshReuseGrace)

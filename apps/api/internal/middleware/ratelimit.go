@@ -118,6 +118,10 @@ func JSONBodyKey(field string) KeyFunc {
 		}
 		raw, err := io.ReadAll(c.Request.Body)
 		if err != nil {
+			// The body is consumed, so hand downstream a reader that fails
+			// the same way: a MaxBytesReader cut-off must still surface as
+			// 413 from binding instead of an empty-body 400.
+			c.Request.Body = io.NopCloser(errReader{err})
 			return ""
 		}
 		c.Request.Body = io.NopCloser(bytes.NewReader(raw))
@@ -130,6 +134,11 @@ func JSONBodyKey(field string) KeyFunc {
 		return v
 	}
 }
+
+// errReader replays one read error on every Read.
+type errReader struct{ err error }
+
+func (r errReader) Read([]byte) (int, error) { return 0, r.err }
 
 // TeacherKey rate-limits on the authenticated caller's teacher id. Use it on
 // authenticated routes whose cost is high enough that one account's retry loop

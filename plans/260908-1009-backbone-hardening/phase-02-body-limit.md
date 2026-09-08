@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "API: cap body toàn server + 413"
-status: pending
+status: completed
 priority: P1
 effort: "0.5d"
 dependencies: []
@@ -85,11 +85,11 @@ Gin resolve route trước khi chạy chain nên `c.FullPath()` đã có giá tr
 
 ## Success Criteria
 
-- [ ] `POST /api/v1/auth/forgot-password` với `Content-Length: 104857600` → 413 `PAYLOAD_TOO_LARGE`, handler không chạy.
-- [ ] Body chunked vượt cap → 413 (qua `JSONBodyKey` lẫn qua handler thường), không phải 400.
-- [ ] `POST /api/v1/imports/roster` với file 1.5 MiB vẫn qua cap toàn server; `TestOversizeUploadIsRejected` không đổi.
-- [ ] `API_HTTP_MAX_BODY_BYTES` mặc định 1 MiB, `<= 0` lỗi khởi động.
-- [ ] Docs kiến trúc + API guidelines cập nhật; `make test-api-unit`, `make lint-api` xanh.
+- [x] `POST /api/v1/auth/forgot-password` với `Content-Length: 104857600` → 413 `PAYLOAD_TOO_LARGE`, handler không chạy.
+- [x] Body chunked vượt cap → 413 (qua `JSONBodyKey` lẫn qua handler thường), không phải 400.
+- [x] `POST /api/v1/imports/roster` với file 1.5 MiB vẫn qua cap toàn server; `TestOversizeUploadIsRejected` không đổi.
+- [x] `API_HTTP_MAX_BODY_BYTES` mặc định 1 MiB, `<= 0` lỗi khởi động.
+- [x] Docs kiến trúc + API guidelines cập nhật; `make test-api-unit`, `make lint-api` xanh.
 
 ## Risk Assessment
 

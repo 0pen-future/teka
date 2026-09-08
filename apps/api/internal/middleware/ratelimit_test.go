@@ -9,6 +9,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"teka/apps/api/internal/shared/response"
+	"teka/apps/api/internal/shared/validation"
 )
 
 func TestLimiterAllowsUpToLimitWithinWindow(t *testing.T) {
@@ -159,6 +162,41 @@ func TestJSONBodyKeyPreservesBodyForDownstreamBinding(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), `"abc"`) {
 		t.Fatalf("downstream binding must still see the full body, got %s", w.Body.String())
+	}
+}
+
+// An oversized body hits the MaxBytesReader cut-off inside JSONBodyKey's
+// read; that must still reach the client as 413, not a silent 400, and must
+// not spend the caller's bucket.
+func TestJSONBodyKeyOversizedBodySurfacesAsPayloadTooLarge(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(BodyLimit(32), RateLimit(JSONBodyKey("phone"), 1, time.Minute))
+	r.POST("/x", func(c *gin.Context) {
+		var body struct {
+			Phone string `json:"phone"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			response.Err(c, validation.BindError(err))
+			return
+		}
+		c.Status(http.StatusOK)
+	})
+
+	send := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.ContentLength = -1
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	if w := send(`{"phone":"0901234567","pad":"` + strings.Repeat("x", 64) + `"}`); w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("want 413 for an oversized body, got %d %s", w.Code, w.Body.String())
+	}
+	if w := send(`{"phone":"0901234567"}`); w.Code != http.StatusOK {
+		t.Fatalf("the refused request must not consume the bucket, got %d %s", w.Code, w.Body.String())
 	}
 }
 

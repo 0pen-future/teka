@@ -30,6 +30,7 @@ become a generic 500 — the cause is logged, never sent to clients.
 | `Forbidden` | `FORBIDDEN` | 403 |
 | `NotFound` | `NOT_FOUND` | 404 |
 | `Conflict` | `CONFLICT` | 409 |
+| `PayloadTooLarge` | `PAYLOAD_TOO_LARGE` | 413 |
 | `Invalid` | `VALIDATION_ERROR` | 422 (with `fields`) |
 | `Internal` | `INTERNAL_ERROR` | 500 (generic message) |
 

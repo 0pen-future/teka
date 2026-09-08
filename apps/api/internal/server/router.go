@@ -66,6 +66,9 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *gorm.DB, zaloSvc *zalo.
 		middleware.Logger(log),
 		middleware.Recovery(),
 		middleware.CORS(cfg),
+		// Roster import streams a multipart upload with a 2 MiB cap of its
+		// own (imports.Handler), so the JSON-sized cap must not apply there.
+		middleware.BodyLimit(cfg.HTTP.MaxBodyBytes, "/api/v1/imports/roster"),
 	)
 
 	registerHealth(r, db)

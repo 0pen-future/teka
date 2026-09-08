@@ -6,6 +6,7 @@ package validation
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"reflect"
 	"regexp"
 	"strings"
@@ -70,6 +71,13 @@ func BindError(err error) *apperror.AppError {
 			fields[fieldName(fe)] = message(fe)
 		}
 		return apperror.Invalid("validation failed", fields)
+	}
+	// The body-limit middleware wraps every body in http.MaxBytesReader;
+	// json.Decoder hands its read error back unwrapped, so an oversized body
+	// surfaces here rather than as a generic malformed-body 400.
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		return apperror.PayloadTooLarge("request body too large")
 	}
 	return apperror.BadRequest("invalid request body")
 }

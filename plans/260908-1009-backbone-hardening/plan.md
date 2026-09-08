@@ -49,7 +49,7 @@ Năm lỗi độc lập nhau, cùng thuộc nhóm "backbone / vận hành / web 
 | # | Phase | Status | Phụ thuộc | Ước lượng |
 |---|-------|--------|-----------|-----------|
 | 1 | [API: refresh reuse grace window](./phase-01-refresh-reuse-grace.md) | Completed | — | 1d |
-| 2 | [API: cap body toàn server + 413](./phase-02-body-limit.md) | Pending | — | 0.5d |
+| 2 | [API: cap body toàn server + 413](./phase-02-body-limit.md) | Completed | — | 0.5d |
 | 3 | [API: login rate limit + bcrypt gate + trusted proxies opt-in](./phase-03-login-rate-limit-bcrypt-gate.md) | Pending | 2 (cùng sửa `ratelimit.go`) | 1d |
 | 4 | [Web: xoá query cache tại ranh giới phiên](./phase-04-web-session-cache-reset.md) | Completed | — | 0.5d |
 | 5 | [Web: ghi danh invalidate roster điểm danh](./phase-05-enrollment-roster-invalidation.md) | Completed | — | 0.5d |

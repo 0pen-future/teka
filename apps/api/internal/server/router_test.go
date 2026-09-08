@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,7 +37,7 @@ func newTestRouterEnv(t *testing.T, env string) http.Handler {
 		Env:         env,
 		LogLevel:    "info",
 		CORSOrigins: []string{"http://localhost:5173"},
-		HTTP:        config.HTTPConfig{Port: 0},
+		HTTP:        config.HTTPConfig{Port: 0, MaxBodyBytes: 1 << 20},
 		Database:    config.DatabaseConfig{ConnMaxLifetime: time.Minute},
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -135,6 +136,24 @@ func TestSwaggerServedOutsideProductionOnly(t *testing.T) {
 		httptest.NewRequest(http.MethodGet, "/swagger/index.html", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("swagger in production: want 404, got %d", rec.Code)
+	}
+}
+
+// The body cap is enforced by the global chain, so a public route whose
+// limiter reads the JSON body must refuse an oversized declared length
+// before that read ever happens.
+func TestOversizedBodyIsRefusedBeforeHandlers(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/forgot-password", strings.NewReader(`{"phone":"0901234567"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.ContentLength = 100 << 20
+	rec := httptest.NewRecorder()
+	newTestRouter(t).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"PAYLOAD_TOO_LARGE"`) {
+		t.Fatalf("body = %s, want PAYLOAD_TOO_LARGE envelope", rec.Body.String())
 	}
 }
 

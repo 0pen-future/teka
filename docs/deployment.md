@@ -142,7 +142,9 @@ The API is configured entirely through `API_*` environment variables:
 | `API_JWT_SECRET` | yes | High-entropy secret; rotating it invalidates all sessions |
 | `API_ZALO_CRED_KEY` | yes | Encrypts linked Zalo session credentials; min 32 bytes, hex or base64, generate with `openssl rand -base64 32`. Missing or too short is fatal on startup; rotating or losing it permanently orphans every already-linked account (every teacher must re-scan a QR code) — treat it as permanent, like `API_JWT_SECRET`. See [`.env.production.example`](../.env.production.example) |
 | `API_HTTP_PORT` | no | Defaults to 8080 |
+| `API_HTTP_MAX_BODY_BYTES` | no | Server-wide request body cap, default 1 MiB; roster import is exempt with its own 2 MiB cap |
 | `API_JWT_ACCESS_TTL` / `API_JWT_REFRESH_TTL` | no | Default 15m / 720h |
+| `API_JWT_REFRESH_REUSE_GRACE` | no | Default 15s; window in which a rotated-away refresh token still counts as a concurrent tab, `0` for strict revocation |
 | `API_LOG_LEVEL` | no | Use `info` in production |
 | `API_CORS_ORIGINS` | no | Only for split-origin topologies |
 | `API_AUDIT_BUFFER_SIZE` / `API_AUDIT_BATCH_SIZE` / `API_AUDIT_FLUSH_INTERVAL` / `API_AUDIT_DRAIN_TIMEOUT` | no | Audit capture tuning (defaults 1024 / 100 / 1s / 5s); see [`docs/event-bus.md`](./event-bus.md) |
