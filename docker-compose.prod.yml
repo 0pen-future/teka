@@ -41,6 +41,9 @@ services:
     environment:
       API_ENV: production
       API_HTTP_PORT: 8080
+      # Proxies (IPs/CIDRs) whose X-Forwarded-For is believed; empty trusts
+      # none and leaves the per-IP login limiter off. See docs/deployment.md.
+      API_HTTP_TRUSTED_PROXIES: ${API_HTTP_TRUSTED_PROXIES:-}
       API_DATABASE_URL: ${API_DATABASE_URL:?postgres connection string}
       API_JWT_SECRET: ${API_JWT_SECRET:?}
       API_JWT_ACCESS_TTL: ${API_JWT_ACCESS_TTL:-15m}
