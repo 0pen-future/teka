@@ -1,7 +1,7 @@
 ---
 phase: 5
 title: "Web: ghi danh invalidate roster điểm danh"
-status: pending
+status: completed
 priority: P2
 effort: "0.5d"
 dependencies: []
@@ -54,9 +54,9 @@ Dùng `sessionsKeys.all` thay vì ba key con (`rosters()`, `lists()`, `details()
 
 ## Success Criteria
 
-- [ ] Sau mỗi mutation ghi danh (5 đường), `sessionsKeys.roster(id)` và `sessionsKeys.detail(id)` ở trạng thái invalidated.
-- [ ] Không thay đổi key factory nào; import qua barrel; lint/typecheck/test xanh.
-- [ ] Comment tại helper mô tả phụ thuộc thay vì tham chiếu tới doc không tồn tại.
+- [x] Sau mỗi mutation ghi danh (5 đường), `sessionsKeys.roster(id)` và `sessionsKeys.detail(id)` ở trạng thái invalidated.
+- [x] Không thay đổi key factory nào; import qua barrel; lint/typecheck/test xanh.
+- [x] Comment tại helper mô tả phụ thuộc thay vì tham chiếu tới doc không tồn tại.
 
 ## Risk Assessment
 
