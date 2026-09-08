@@ -226,6 +226,7 @@ export function RecordPaymentDialog({
             <HvSelect
               id="payment-method"
               sheetTitle="Hình thức"
+              searchNoun="hình thức"
               className="w-full"
               options={methodOptions}
               value={method}

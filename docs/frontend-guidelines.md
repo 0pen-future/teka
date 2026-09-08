@@ -52,7 +52,11 @@ Feature UI reaches for these before raw shadcn or one-off markup:
   (segmented radio group, or `variant="tabs"` with real tab semantics),
   `HvScoreInput` + `parseScoreInput` for score cells (`type="text"
   inputmode="decimal"`, accepts "7,5", exposes `data-state`
-  idle/dirty/saved/invalid), `HvBadge`, `HvIcon`.
+  idle/dirty/saved/invalid), `HvSelect` (the select-style dropdown: a `combobox`
+  trigger opening a `listbox` with roving focus — popover from `sm` up, bottom
+  sheet below, a filter box once the list passes `searchThreshold`; read the
+  value from the trigger text or `data-value`, width comes from the consumer's
+  `className`), `HvBadge`, `HvIcon`.
 
 New shared primitives belong here, with a test under `components/hv/__tests__`;
 feature-specific composition stays in the feature folder.
@@ -134,7 +138,9 @@ Two layers, two runners:
   setup shim answers every `matchMedia` query with `matches: false`; call
   `mockViewport(width)` from `src/test/viewport.ts` when a test needs a
   `useMediaQuery` breakpoint (phone sheet vs. popover, compact rows) to
-  resolve for a given width.
+  resolve for a given width. Dropdowns are driven by clicking the `combobox`
+  and then the `option` (`pickOption` in `src/test/pick-option.ts`); pass
+  `mockViewport(1024)` so the popover branch runs instead of the sheet.
 - **End-to-end tests** — Playwright against a running stack
   (`make e2e` / `npm run e2e`), specs in `e2e/*.spec.ts`. Expects the app on
   localhost:5173 (override with `E2E_BASE_URL`) backed by the API with seeded

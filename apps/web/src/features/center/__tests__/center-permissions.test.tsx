@@ -338,7 +338,7 @@ describe("MemberPermissionsDialog", () => {
     expect(screen.queryByText("Đã đổi vai trò")).not.toBeInTheDocument();
   });
 
-  it("keeps the form clean when re-picking a permission's current override mode (D7)", async () => {
+  it("keeps the form clean when re-picking a permission's current override mode", async () => {
     mockInvites([]);
     const memberA = makeMember({ full_name: "Giáo Viên A" });
     mockCenterMe(makeCenterMeOwner({ members: [ownerSelf(), memberA] }));

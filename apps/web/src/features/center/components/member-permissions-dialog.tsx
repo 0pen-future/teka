@@ -174,6 +174,7 @@ export function MemberPermissionsDialog({
           // one-way, so the placeholder shows but no option can re-select it.
           placeholder="Giáo viên (mặc định)"
           disabled={assignRole.isPending}
+          searchNoun="vai trò"
           sheetTitle="Vai trò"
           className="w-full"
         />
@@ -218,12 +219,10 @@ export function MemberPermissionsDialog({
                     aria-label={`Quyền ${permission.label}`}
                     options={OVERRIDE_MODE_OPTIONS}
                     value={mode}
-                    onValueChange={(next) => {
-                      if (next === mode) {
-                        return;
-                      }
-                      setModes({ ...draft, [permission.key]: next as OverrideMode });
-                    }}
+                    onValueChange={(next) =>
+                      setModes({ ...draft, [permission.key]: next as OverrideMode })
+                    }
+                    searchNoun="chế độ"
                     sheetTitle={permission.label}
                     className="w-[150px] shrink-0"
                   />
