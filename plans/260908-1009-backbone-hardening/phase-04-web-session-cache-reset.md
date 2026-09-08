@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Web: xoá query cache tại ranh giới phiên"
-status: pending
+status: completed
 priority: P1
 effort: "0.5d"
 dependencies: []
@@ -64,10 +64,10 @@ Nguồn sự thật cho "ranh giới phiên" là store zustand đã có (`setSes
 
 ## Success Criteria
 
-- [ ] Cache rỗng sau `clearSession()` (logout và refresh chết) và sau đổi user; không rỗng khi rotation token hoặc cập nhật profile cùng id.
-- [ ] `queryClient.clear()` chỉ tồn tại ở một nơi trong `apps/web/src`.
-- [ ] `renderWithProviders` mount component; toàn bộ test web pass; typecheck + lint xanh.
-- [ ] `docs/frontend-guidelines.md` mô tả ranh giới cache.
+- [x] Cache rỗng sau `clearSession()` (logout và refresh chết) và sau đổi user; không rỗng khi rotation token hoặc cập nhật profile cùng id.
+- [x] `queryClient.clear()` chỉ tồn tại ở một nơi trong `apps/web/src`.
+- [x] `renderWithProviders` mount component; toàn bộ test web pass; typecheck + lint xanh.
+- [x] `docs/frontend-guidelines.md` mô tả ranh giới cache.
 
 ## Risk Assessment
 

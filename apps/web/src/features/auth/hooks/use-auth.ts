@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 
 import { forgotPassword, login, logout, resetPassword } from "../api/auth-api";
 import type { Session } from "../schemas/auth-schemas";
@@ -26,14 +26,13 @@ export function useResetPassword() {
 }
 
 export function useLogout() {
-  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: logout,
     // Even if revocation fails (network down, cookie already gone) the local
-    // session ends: clear the store and drop every cached server response.
+    // session ends: clear the store. SessionCacheReset observes the store
+    // and drops every cached server response once the user id goes to null.
     onSettled: () => {
       useAuthStore.getState().clearSession();
-      queryClient.clear();
     },
   });
 }

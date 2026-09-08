@@ -5,7 +5,7 @@ import { createMemoryRouter, RouterProvider, type RouteObject } from "react-rout
 
 import { ThemeProvider } from "@/components/shared/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
-import { useAuthStore, type Teacher } from "@/features/auth";
+import { SessionCacheReset, useAuthStore, type Teacher } from "@/features/auth";
 
 import { primaryTeacher, secondaryTeacher } from "./msw/handlers";
 
@@ -42,6 +42,7 @@ export function renderWithProviders(
   });
   const result = render(
     <QueryClientProvider client={queryClient}>
+      <SessionCacheReset />
       <ThemeProvider>
         <RouterProvider router={router} />
         <Toaster />
