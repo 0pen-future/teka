@@ -246,6 +246,11 @@ func TestJSONBodyKeyMatchesFieldLikeStructBinding(t *testing.T) {
 	if got := keyFor(`{"phone":123}`); got != "" {
 		t.Fatalf("non-string value must not produce a key, got %q", got)
 	}
+	// gin binds with a json.Decoder, which stops after the first value, so
+	// trailing bytes reach the handler and must reach the bucket as well.
+	if got := keyFor(`{"phone":"0901234567"}{}`); got != "0901234567" {
+		t.Fatalf("trailing bytes: key = %q, want the value the handler binds", got)
+	}
 }
 
 func TestPhoneKeyNormalizesLocalAndInternationalForms(t *testing.T) {

@@ -142,8 +142,11 @@ func JSONBodyKey(field string) KeyFunc {
 		}
 		c.Request.Body = io.NopCloser(bytes.NewReader(raw))
 
+		// Decode the way gin's ShouldBindJSON does: a Decoder reads one
+		// value and ignores trailing bytes, whereas Unmarshal rejects them,
+		// and a request the handler accepts must never escape the bucket.
 		v := reflect.New(probe)
-		if err := json.Unmarshal(raw, v.Interface()); err != nil {
+		if err := json.NewDecoder(bytes.NewReader(raw)).Decode(v.Interface()); err != nil {
 			return ""
 		}
 		return v.Elem().Field(0).String()
