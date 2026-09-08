@@ -2,16 +2,9 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useEffect, useRef, useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 
-import { HvButton, HvModal, hvToast } from "@/components/hv";
+import { HvButton, HvModal, HvSelect, type HvSelectOption, hvToast } from "@/components/hv";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { useApiFormErrors } from "@/lib/forms/use-api-form-errors";
 import { formatMoney } from "@/lib/utils";
 
@@ -38,6 +31,10 @@ const methodLabels: Record<PaymentMethod, string> = {
   transfer: "Chuyển khoản",
   other: "Khác",
 };
+
+const methodOptions: HvSelectOption[] = (Object.keys(methodLabels) as PaymentMethod[]).map(
+  (method) => ({ value: method, label: methodLabels[method] }),
+);
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -226,27 +223,17 @@ export function RecordPaymentDialog({
           </Field>
           <Field data-invalid={Boolean(errors.method)}>
             <FieldLabel htmlFor="payment-method">Hình thức</FieldLabel>
-            <Select
+            <HvSelect
+              id="payment-method"
+              sheetTitle="Hình thức"
+              className="w-full"
+              options={methodOptions}
               value={method}
               onValueChange={(value) =>
                 form.setValue("method", value as PaymentMethod, { shouldValidate: true })
               }
-            >
-              <SelectTrigger
-                id="payment-method"
-                className="w-full"
-                aria-invalid={Boolean(errors.method)}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(Object.keys(methodLabels) as PaymentMethod[]).map((m) => (
-                  <SelectItem key={m} value={m}>
-                    {methodLabels[m]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              aria-invalid={Boolean(errors.method)}
+            />
             <FieldError errors={[errors.method]} />
           </Field>
           <Field data-invalid={Boolean(errors.received_on)}>

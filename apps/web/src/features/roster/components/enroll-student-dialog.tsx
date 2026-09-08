@@ -1,15 +1,8 @@
 import { useState, type FormEvent } from "react";
 
-import { HvButton, HvModal, hvToast } from "@/components/hv";
+import { HvButton, HvModal, HvSelect, type HvSelectOption, hvToast } from "@/components/hv";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { formatMoney } from "@/lib/utils";
 
 import { useClassesList } from "../hooks/use-classes";
@@ -86,6 +79,11 @@ export function EnrollStudentDialog(props: EnrollStudentDialogProps) {
   const fixedStudent = useStudent(studentId);
   const classSearch = useClassesList({ status: "active" });
   const classOptions = classSearch.data?.items ?? [];
+  const classSelectOptions: HvSelectOption[] = classOptions.map((klass) => ({
+    value: klass.id,
+    label: klass.name,
+    meta: `${formatScheduleSummary(klass.schedules, today())} · ${formatMoney(klass.default_unit_price)}/buổi`,
+  }));
 
   const createMutation = useCreateEnrollment();
 
@@ -167,25 +165,18 @@ export function EnrollStudentDialog(props: EnrollStudentDialogProps) {
           {fixedStudent.data ? <StudentChip student={fixedStudent.data} /> : null}
           <Field>
             <FieldLabel htmlFor="enroll-class">Lớp</FieldLabel>
-            <Select
+            <HvSelect
+              id="enroll-class"
+              sheetTitle="Chọn lớp"
+              placeholder="Chọn lớp…"
+              searchNoun="lớp"
+              className="w-full"
+              options={classSelectOptions}
               value={pickedClass?.id ?? ""}
               onValueChange={(value) =>
                 setPickedClass(classOptions.find((klass) => klass.id === value))
               }
-            >
-              <SelectTrigger id="enroll-class" className="w-full">
-                <SelectValue placeholder="Chọn lớp…" />
-              </SelectTrigger>
-              <SelectContent>
-                {classOptions.map((klass) => (
-                  <SelectItem key={klass.id} value={klass.id}>
-                    {klass.name} — {formatScheduleSummary(klass.schedules, today())} ·{" "}
-                    {formatMoney(klass.default_unit_price)}
-                    /buổi
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            />
           </Field>
           <Field>
             <FieldLabel htmlFor="enroll-started-on">Ngày bắt đầu</FieldLabel>

@@ -1,10 +1,13 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
+import { API_URL, fail } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
+import { mockViewport } from "@/test/viewport";
 
 import { RecordPaymentDialog } from "../components/record-payment-dialog";
 import {
@@ -30,6 +33,7 @@ function renderDialog() {
 }
 
 beforeEach(() => {
+  mockViewport(1024);
   resetCollectionsStore();
   server.use(...collectionsHandlers);
 });
@@ -82,5 +86,28 @@ describe("RecordPaymentDialog", () => {
 
     // The reallocation write lands and the dialog reflects the confirmed split.
     await waitFor(() => expect(screen.getByRole("button", { name: "Xong" })).toBeInTheDocument());
+  });
+
+  it("names the payment method combobox via the field label and flags it invalid on a server field error", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post(`${API_URL}/payments`, () =>
+        HttpResponse.json(
+          fail("VALIDATION_ERROR", "Hình thức không hợp lệ", { method: "Chọn hình thức" }),
+          { status: 422 },
+        ),
+      ),
+    );
+    renderDialog();
+
+    const combobox = screen.getByRole("combobox", { name: "Hình thức" });
+    expect(combobox).not.toHaveAttribute("aria-invalid", "true");
+
+    const amountInput = screen.getByLabelText("Số tiền");
+    await user.click(amountInput);
+    await user.type(amountInput, "950000");
+    await user.click(screen.getByRole("button", { name: "Ghi nhận" }));
+
+    await waitFor(() => expect(combobox).toHaveAttribute("aria-invalid", "true"));
   });
 });

@@ -5,11 +5,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { useAuthStore } from "@/features/auth";
 import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
+import { mockViewport } from "@/test/viewport";
 
 import { EnrollStudentDialog } from "../components/enroll-student-dialog";
 import { resetRosterStore, rosterHandlers, studentOnlyChild } from "./roster-handlers";
 
 beforeEach(() => {
+  mockViewport(1024);
   resetRosterStore();
   server.use(...rosterHandlers);
   signInAs(testPrimaryTeacher);
