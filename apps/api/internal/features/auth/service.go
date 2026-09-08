@@ -127,7 +127,7 @@ func NewService(accounts AccountService, repo Repository, issuer *TokenIssuer, t
 		resetCooldown: cfg.ResetCooldown,
 		publicBaseURL: publicBaseURL,
 		bus:           bus,
-		gate:          newBcryptGate(max(1, runtime.GOMAXPROCS(0)), bcryptGateWait),
+		gate:          newBcryptGate(runtime.GOMAXPROCS(0), bcryptGateWait),
 		now:           time.Now,
 	}
 }
@@ -182,11 +182,9 @@ func (s *Service) Login(ctx context.Context, req LoginRequest, meta ClientMeta) 
 		matched = bcrypt.CompareHashAndPassword([]byte(*hash), []byte(req.Password)) == nil
 	}); err != nil {
 		// No verdict was reached, so no LoginFailed event: the credentials
-		// were never examined.
-		if errors.Is(err, errBcryptBusy) {
-			return nil, apperror.TooManyRequests("server busy, try again later")
-		}
-		return nil, err
+		// were never examined. A caller that gave up while waiting ends the
+		// same way; answering 429 keeps it out of the error log.
+		return nil, apperror.TooManyRequests("server busy, try again later")
 	}
 	if !matched {
 		return rejected()
@@ -228,14 +226,15 @@ func (s *Service) Refresh(ctx context.Context, plaintext string) (*Session, erro
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
-	if t.Expired(now) {
-		return nil, invalid
-	}
 	// Already rotated away when read: either replay, or the second of two
 	// tabs refreshing the same cookie. The reuse-grace window tells them
-	// apart; outside it the whole family dies.
+	// apart; outside it the whole family dies. This runs before the expiry
+	// check so that replaying an old token still kills the family.
 	if t.Revoked() {
 		return s.reuseAfterRotation(ctx, t, now, true)
+	}
+	if t.Expired(now) {
+		return nil, invalid
 	}
 	p, err := s.activeProfile(ctx, t.UserID)
 	if err != nil {
@@ -287,11 +286,15 @@ func (s *Service) reuseAfterRotation(ctx context.Context, t *RefreshToken, now t
 		}
 		if alive {
 			p, err := s.activeProfile(ctx, t.UserID)
-			if err != nil {
+			if err == nil {
+				slog.Info("refresh reuse within grace", "family_id", t.FamilyID)
+				return s.issueSession(ctx, p, t.FamilyID)
+			}
+			if !isUnauthorized(err) {
 				return nil, err
 			}
-			slog.Info("refresh reuse within grace", "family_id", t.FamilyID)
-			return s.issueSession(ctx, p, t.FamilyID)
+			// The account is gone or no longer active: nothing in this
+			// family may live on, so fall through to the revocation.
 		}
 	}
 	if err := s.repo.RevokeFamily(ctx, t.FamilyID, now); err != nil {
@@ -303,6 +306,13 @@ func (s *Service) reuseAfterRotation(ctx context.Context, t *RefreshToken, now t
 // activeProfile loads the account behind a refresh token and rejects any
 // that is not active: a disabled account keeps its unexpired refresh tokens,
 // and they must stop working the moment the account is disabled.
+// isUnauthorized reports whether err is a 401 from activeProfile, as opposed
+// to a transient failure that must surface as 500.
+func isUnauthorized(err error) bool {
+	var appErr *apperror.AppError
+	return errors.As(err, &appErr) && appErr.Code == apperror.CodeUnauthorized
+}
+
 func (s *Service) activeProfile(ctx context.Context, userID uuid.UUID) (*teachers.Profile, error) {
 	p, err := s.accounts.GetByID(ctx, userID)
 	if err != nil {

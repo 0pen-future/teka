@@ -204,6 +204,24 @@ func TestLoginIPLimiterOnlyMountedWithTrustedProxies(t *testing.T) {
 	}
 }
 
+// TestRosterImportIsExemptFromGlobalBodyCap pins the exemption to the real
+// route: a body over the server-wide cap must reach the roster import chain
+// (and fail on authentication there) rather than be refused with 413.
+func TestRosterImportIsExemptFromGlobalBodyCap(t *testing.T) {
+	body := strings.Repeat("a", (1<<20)+1)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/imports/roster", strings.NewReader(body))
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=x")
+	rec := httptest.NewRecorder()
+	newTestRouter(t).ServeHTTP(rec, req)
+
+	if rec.Code == http.StatusRequestEntityTooLarge {
+		t.Fatalf("roster import must not be capped by the global body limit: %s", rec.Body.String())
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 from the auth chain: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestRequestIDGeneratedAndEchoed(t *testing.T) {
 	r := newTestRouter(t)
 

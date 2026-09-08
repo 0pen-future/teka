@@ -26,17 +26,17 @@ Khi một refresh token vừa bị revoke bởi rotation trong vòng `RefreshReu
 
 ## Architecture
 
-Luồng `Refresh` sau khi sửa (giữ thứ tự hiện tại, chỉ chèn nhánh cứu):
+Luồng `Refresh` sau khi sửa (giữ thứ tự `Revoked()` trước `Expired()` như master để replay token cũ đã hết hạn vẫn giết family; chỉ chèn nhánh cứu):
 
 ```text
 GetByHash(hash)
 ├─ not found → 401
-├─ Expired(now) → 401
 ├─ Revoked()
 │    └─ recoverRotationRace(t, checkAge=true)
 │         ├─ grace>0 && now-revoked_at<=grace && FamilyHasLive(family) && account active
 │         │     → issueSession(profile, family)  (sibling)  → 200
-│         └─ else → RevokeFamily(family) → 401
+│         └─ else (kể cả account không active / không tồn tại) → RevokeFamily(family) → 401
+├─ Expired(now) → 401
 ├─ profile / status checks → 401
 └─ WithinTx { Revoke(id) ; issueSession(profile, family) }
      └─ ErrTokenAlreadyRevoked → recoverRotationRace(t, checkAge=false)
@@ -104,6 +104,8 @@ Cấu hình đi qua `TokenIssuer` (đã nhận `config.JWTConfig`) để **khôn
 - [x] `docs/api-guidelines.md` mô tả grace; `make lint-api` xanh.
 
 ## Risk Assessment
+
+- **Số token anh em sinh trong grace không có trần** (quyết định sau review): chấp nhận. Cửa sổ chỉ 15s, người trình token đã bị rotate phải đang giữ một token từng sống, và mọi token anh em cùng family nên logout/disable/reuse-detect giết tất cả cùng lúc. Tín hiệu cần xem lại: log `refresh reuse within grace` lặp nhiều lần cho cùng `family_id` trong một cửa sổ → thêm trần đếm token sống per family hoặc limiter theo cookie hash trên `/auth/refresh`.
 
 - **Nới lỏng phát hiện replay trong grace.** Kẻ có cookie trộm và replay trong 15s nhận token sống thay vì kích hoạt kill-family. Giảm thiểu: cửa sổ ngắn, cấu hình về 0 cho môi trường nhạy cảm; access TTL 15m vẫn giới hạn thiệt hại; phát hiện replay ngoài grace không đổi. Tín hiệu: log `refresh reuse within grace` xuất hiện với family có > 2 token sống lặp lại → hạ grace / tắt.
 - **TOCTOU giữa `FamilyHasLive` và `Create` sibling** khi logout chạy chen giữa (mili-giây): sibling sống sót sau logout của chính user. Chấp nhận (yêu cầu vừa có token cũ vừa trúng cửa sổ ms); đường nâng cấp nếu cần: `pg_advisory_xact_lock(hashtext(family_id))` trong cả nhánh cứu và `RevokeFamily` (repo imports đã có mẫu advisory lock). Không làm trong phase này.

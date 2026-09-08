@@ -47,6 +47,7 @@ func clientMeta(c *gin.Context) ClientMeta {
 //	@Success		200		{object}	response.Envelope{data=TokenResponse}
 //	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}	"invalid phone or password"
 //	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		429		{object}	response.Envelope{error=response.ErrorBody}	"too many attempts for this phone, or the server is busy"
 //	@Router			/auth/login [post]
 func (h *Handler) login(c *gin.Context) {
 	var req LoginRequest

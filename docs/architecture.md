@@ -34,7 +34,7 @@ features decoupled from bootstrap. Adopt `google/wire` only if wiring exceeds
 
 ```
 client → http.Server (timeouts: read-header 5s / read 10s / write 30s / idle 120s)
-       → gin engine (no trusted proxies)
+       → gin engine (trusted proxies from API_HTTP_TRUSTED_PROXIES; default none)
        → request-id → logger → recovery → CORS → body-limit (1 MiB default;
                                                   roster import exempt, own 2 MiB cap)
        → /healthz | /readyz | /api/v1/<feature routes>

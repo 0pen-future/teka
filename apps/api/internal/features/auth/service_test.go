@@ -419,6 +419,39 @@ func TestLoginRefusesWhileBcryptGateIsBusy(t *testing.T) {
 	}
 }
 
+// TestLoginRefusesWhenCallerLeavesWhileWaitingForBcrypt proves a caller
+// whose context ends while queued for a slot gets the same 429 as a busy
+// gate, not a 500, and still no LoginFailed.
+func TestLoginRefusesWhenCallerLeavesWhileWaitingForBcrypt(t *testing.T) {
+	rec := &busRecorder{}
+	svc, accounts, _ := newTestAuthService(t)
+	svc.bus = rec.bus()
+	svc.gate = newBcryptGate(1, time.Minute)
+	accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
+
+	release := make(chan struct{})
+	holding := make(chan struct{})
+	go func() {
+		_ = svc.gate.run(context.Background(), func() {
+			close(holding)
+			<-release
+		})
+	}()
+	<-holding
+	defer close(release)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"}, testMeta)
+	var appErr *apperror.AppError
+	if !errors.As(err, &appErr) || appErr.Code != apperror.CodeTooManyReqs {
+		t.Fatalf("want TOO_MANY_REQUESTS for a caller that left, got %v", err)
+	}
+	if len(rec.events) != 0 {
+		t.Fatalf("events = %v, want none", rec.events)
+	}
+}
+
 func TestLoginRejectsDisabledAccount(t *testing.T) {
 	svc, accounts, _ := newTestAuthService(t)
 	accounts.add(t, "+84901234567", "correct-password", teachers.StatusDisabled)
@@ -596,7 +629,7 @@ func TestRefreshReuseWithinGraceAfterLogoutRejects(t *testing.T) {
 }
 
 func TestRefreshReuseWithinGraceRejectsDisabledAccount(t *testing.T) {
-	svc, accounts, _ := newTestAuthService(t)
+	svc, accounts, repo := newTestAuthService(t)
 	p := accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
 	ctx := context.Background()
 
@@ -613,6 +646,35 @@ func TestRefreshReuseWithinGraceRejectsDisabledAccount(t *testing.T) {
 
 	_, err = svc.Refresh(ctx, sess.RefreshToken)
 	wantUnauthorized(t, err)
+	family := repo.byHash[HashToken(sess.RefreshToken)].FamilyID
+	if n := repo.liveInFamily(family); n != 0 {
+		t.Fatalf("live tokens in family = %d, want 0: a disabled account keeps nothing alive", n)
+	}
+}
+
+// TestRefreshReplayOfExpiredRotatedTokenRevokesFamily proves replay
+// detection still fires for a rotated-away token that has since expired:
+// the presenter proved possession of an old token, so the family dies.
+func TestRefreshReplayOfExpiredRotatedTokenRevokesFamily(t *testing.T) {
+	svc, accounts, repo := newTestAuthService(t)
+	accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
+	ctx := context.Background()
+
+	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"}, ClientMeta{})
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if _, err := svc.Refresh(ctx, sess.RefreshToken); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+
+	svc.now = func() time.Time { return time.Now().Add(721 * time.Hour) }
+	_, err = svc.Refresh(ctx, sess.RefreshToken)
+	wantUnauthorized(t, err)
+	family := repo.byHash[HashToken(sess.RefreshToken)].FamilyID
+	if n := repo.liveInFamily(family); n != 0 {
+		t.Fatalf("live tokens in family = %d, want 0 after replaying an expired token", n)
+	}
 }
 
 func TestRefreshReuseGraceDisabledKeepsStrictRevocation(t *testing.T) {

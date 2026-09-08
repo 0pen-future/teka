@@ -220,6 +220,26 @@ func TestRateLimitSkipsEmptyKey(t *testing.T) {
 	}
 }
 
+// TestJSONBodyKeyMatchesFieldLikeStructBinding proves the limiter sees the
+// same value the handler will bind: encoding/json matches struct fields
+// case-insensitively, so a differently cased key must not yield an empty
+// (unlimited) bucket.
+func TestJSONBodyKeyMatchesFieldLikeStructBinding(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	key := JSONBodyKey("phone")
+	keyFor := func(body string) string {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(body))
+		return key(c)
+	}
+	if got := keyFor(`{"Phone":"0901234567"}`); got != "0901234567" {
+		t.Fatalf("capitalized field: key = %q, want the bound value", got)
+	}
+	if got := keyFor(`{"PHONE":"a","phone":"b"}`); got != "b" {
+		t.Fatalf("exact match must win over a case-insensitive one, got %q", got)
+	}
+}
+
 func TestPhoneKeyNormalizesLocalAndInternationalForms(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	key := PhoneKey("phone")

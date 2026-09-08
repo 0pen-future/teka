@@ -304,6 +304,24 @@ const docTemplate = `{
                                 }
                             ]
                         }
+                    },
+                    "429": {
+                        "description": "too many attempts for this phone, or the server is busy",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
                     }
                 }
             }

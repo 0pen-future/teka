@@ -134,9 +134,25 @@ func JSONBodyKey(field string) KeyFunc {
 		if err := json.Unmarshal(raw, &payload); err != nil {
 			return ""
 		}
-		v, _ := payload[field].(string)
+		v, _ := bodyField(payload, field).(string)
 		return v
 	}
+}
+
+// bodyField resolves field the way encoding/json binds it into a struct: an
+// exact match wins, otherwise the first case-insensitive match. Anything
+// less would let a caller spell the field differently to slip past the
+// limiter while the handler still binds and acts on the value.
+func bodyField(payload map[string]any, field string) any {
+	if v, ok := payload[field]; ok {
+		return v
+	}
+	for k, v := range payload {
+		if strings.EqualFold(k, field) {
+			return v
+		}
+	}
+	return nil
 }
 
 // PhoneKey rate-limits on a phone field of the JSON body, normalized so the
