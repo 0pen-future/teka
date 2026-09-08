@@ -1,5 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { sessionsKeys } from "@/features/attendance";
+
 import {
   anonymizeStudent,
   createStudent,
@@ -75,6 +77,9 @@ export function useAnonymizeStudent() {
       void queryClient.invalidateQueries({ queryKey: studentsKeys.detail(id) });
       void queryClient.invalidateQueries({ queryKey: contactsKeys.all });
       void queryClient.invalidateQueries({ queryKey: enrollmentsKeys.all });
+      // Ending the student's enrollments changes the session roster and
+      // student_count they fed.
+      void queryClient.invalidateQueries({ queryKey: sessionsKeys.all });
     },
   });
 }

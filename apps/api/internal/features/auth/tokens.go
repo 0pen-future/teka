@@ -49,6 +49,10 @@ func (i *TokenIssuer) AccessTTL() time.Duration { return i.cfg.AccessTTL }
 // RefreshTTL exposes the configured refresh-token lifetime.
 func (i *TokenIssuer) RefreshTTL() time.Duration { return i.cfg.RefreshTTL }
 
+// RefreshReuseGrace is the window after rotation during which reuse of the
+// old token is treated as a concurrent rotation; zero means strict.
+func (i *TokenIssuer) RefreshReuseGrace() time.Duration { return i.cfg.RefreshReuseGrace }
+
 // NewRefreshToken mints a 256-bit opaque token, returning the plaintext
 // (sent to the client once) and its sha256 hex hash (stored at rest).
 func (i *TokenIssuer) NewRefreshToken() (plaintext, hash string, err error) {

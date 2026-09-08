@@ -30,6 +30,7 @@ become a generic 500 — the cause is logged, never sent to clients.
 | `Forbidden` | `FORBIDDEN` | 403 |
 | `NotFound` | `NOT_FOUND` | 404 |
 | `Conflict` | `CONFLICT` | 409 |
+| `PayloadTooLarge` | `PAYLOAD_TOO_LARGE` | 413 |
 | `Invalid` | `VALIDATION_ERROR` | 422 (with `fields`) |
 | `Internal` | `INTERNAL_ERROR` | 500 (generic message) |
 
@@ -449,12 +450,26 @@ per-field messages, anything else (malformed JSON) becomes a 400.
   delivered in an httpOnly `SameSite=Lax` cookie scoped to `/api/v1/auth`.
   `Secure` is set in production only — Safari drops Secure cookies on
   `http://localhost`, which would break local development. Every refresh
-  rotates the token within its family; presenting an already-rotated token
-  revokes the whole family (replay defense). Logout revokes the family and is
-  idempotent.
+  rotates the token within its family. Presenting an already-rotated token
+  within `API_JWT_REFRESH_REUSE_GRACE` (default 15s) while the family still
+  has a live token is treated as a concurrent tab refreshing the same cookie
+  and yields a sibling token in the same family; outside that window, or
+  once the family has no live token (logout, disable), it is replay and
+  revokes the whole family. Set the grace to `0` for strict revocation.
+  Logout revokes the family and is idempotent.
 - **Passwords**: bcrypt cost 12. Login responds identically (401) for unknown
   phone, disabled account, passwordless account, and wrong password, with a
   dummy bcrypt comparison on the non-compare paths to keep timing comparable.
+- **Login throttling**: `POST /auth/login` is limited to 10 attempts per
+  minute per phone, keyed on the normalized number so `0…` and `+84…` share
+  one bucket (`middleware.PhoneKey`). Every bcrypt comparison, dummy or real,
+  runs through a gate of one slot per CPU; a login that cannot get a slot
+  within 2s is refused with 429 `TOO_MANY_REQUESTS` ("server busy") before
+  the credentials are judged, so it emits no `LoginFailed` and looks the same
+  for known and unknown phones. A per-IP limiter (60/min) is mounted only
+  when `API_HTTP_TRUSTED_PROXIES` names the proxies whose `X-Forwarded-For`
+  may be believed; without it the client IP is the proxy's socket address and
+  the limiter would put every caller in one bucket.
 - **Roles**: `teachers`, `parent`, `students` (mirroring the
   `user_accounts.role` CHECK constraint). V1 only issues teacher accounts;
   registration hard-codes the role server-side. `middleware.RequireRole`
@@ -476,7 +491,8 @@ per-field messages, anything else (malformed JSON) becomes a 400.
 sha256 digest stored at rest. Invitations stay acceptable for `API_INVITE_TTL`
 (default 72h); reset links expire after `API_RESET_TTL` (default 48h) and are
 rate-limited by `API_RESET_COOLDOWN` (default 15m, one live token per
-account). Both tokens are single-use and travel in the request body, never a
+account); `forgot-password` is also limited to 5 requests per minute per
+normalized phone, the same key as login. Both tokens are single-use and travel in the request body, never a
 path segment, so they never land in an access log. Owners are excluded from
 `forgot-password` by design — their phone gets the same generic response as
 any other request, no token minted, no DM sent; their only recovery path is

@@ -159,6 +159,20 @@ func (r *fakeTokenRepository) RevokeFamily(_ context.Context, familyID uuid.UUID
 	return nil
 }
 
+func (r *fakeTokenRepository) FamilyHasLive(_ context.Context, familyID uuid.UUID) (bool, error) {
+	return r.liveInFamily(familyID) > 0, nil
+}
+
+func (r *fakeTokenRepository) liveInFamily(familyID uuid.UUID) int {
+	n := 0
+	for _, t := range r.byHash {
+		if t.FamilyID == familyID && t.RevokedAt == nil {
+			n++
+		}
+	}
+	return n
+}
+
 func (r *fakeTokenRepository) RevokeAllForUser(_ context.Context, userID uuid.UUID, at time.Time) error {
 	for _, t := range r.byHash {
 		if t.UserID == userID && t.RevokedAt == nil {
@@ -310,18 +324,29 @@ func testResetConfig() config.OnboardingConfig {
 // newTestAuthService builds a Service for the login/refresh/logout/disable
 // tests below, which never touch ForgotPassword/ResetPassword — fresh no-op
 // owner/DM fakes are enough to satisfy the constructor.
+const testReuseGrace = 15 * time.Second
+
 func newTestAuthService(t *testing.T) (*Service, *fakeAccountService, *fakeTokenRepository) {
 	t.Helper()
-	accounts := newFakeAccountService()
 	repo := newFakeTokenRepository()
+	svc, accounts := newTestAuthServiceWith(t, repo, testReuseGrace)
+	return svc, accounts, repo
+}
+
+// newTestAuthServiceWith builds the service over an arbitrary token
+// repository with the given refresh reuse grace (0 = strict revocation).
+func newTestAuthServiceWith(t *testing.T, repo Repository, grace time.Duration) (*Service, *fakeAccountService) {
+	t.Helper()
+	accounts := newFakeAccountService()
 	issuer := NewTokenIssuer(config.JWTConfig{
-		Secret:     "test-secret-at-least-32-characters!!",
-		AccessTTL:  15 * time.Minute,
-		RefreshTTL: 720 * time.Hour,
+		Secret:            "test-secret-at-least-32-characters!!",
+		AccessTTL:         15 * time.Minute,
+		RefreshTTL:        720 * time.Hour,
+		RefreshReuseGrace: grace,
 	})
 	svc := NewService(accounts, repo, issuer, noopTxManager{},
 		newFakeOwnerResolver(), &fakeResetDMSender{}, testResetConfig(), "https://app.example.com", nil)
-	return svc, accounts, repo
+	return svc, accounts
 }
 
 // newResetTestService builds a Service for the ForgotPassword/ResetPassword
@@ -358,6 +383,73 @@ func TestLoginRejectsBadCredentials(t *testing.T) {
 
 	_, err = svc.Login(context.Background(), LoginRequest{Phone: "+84909999999", Password: "whatever-123"}, ClientMeta{})
 	wantUnauthorized(t, err)
+}
+
+// TestLoginRefusesWhileBcryptGateIsBusy proves a login that cannot get a
+// bcrypt slot in time is turned away with 429 before the credentials are
+// judged: no LoginFailed is published, and a known phone is refused exactly
+// like an unknown one so the busy path leaks nothing about the account.
+func TestLoginRefusesWhileBcryptGateIsBusy(t *testing.T) {
+	rec := &busRecorder{}
+	svc, accounts, _ := newTestAuthService(t)
+	svc.bus = rec.bus()
+	svc.gate = newBcryptGate(1, 10*time.Millisecond)
+	accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
+
+	release := make(chan struct{})
+	holding := make(chan struct{})
+	go func() {
+		_ = svc.gate.run(context.Background(), func() {
+			close(holding)
+			<-release
+		})
+	}()
+	<-holding
+	defer close(release)
+
+	for _, phone := range []string{"+84901234567", "+84909999999"} {
+		_, err := svc.Login(context.Background(), LoginRequest{Phone: phone, Password: "correct-password"}, testMeta)
+		var appErr *apperror.AppError
+		if !errors.As(err, &appErr) || appErr.Code != apperror.CodeTooManyReqs {
+			t.Fatalf("phone %s: want TOO_MANY_REQUESTS while the gate is busy, got %v", phone, err)
+		}
+	}
+	if len(rec.events) != 0 {
+		t.Fatalf("events = %v, want none: a busy gate never judged the credentials", rec.events)
+	}
+}
+
+// TestLoginRefusesWhenCallerLeavesWhileWaitingForBcrypt proves a caller
+// whose context ends while queued for a slot gets the same 429 as a busy
+// gate, not a 500, and still no LoginFailed.
+func TestLoginRefusesWhenCallerLeavesWhileWaitingForBcrypt(t *testing.T) {
+	rec := &busRecorder{}
+	svc, accounts, _ := newTestAuthService(t)
+	svc.bus = rec.bus()
+	svc.gate = newBcryptGate(1, time.Minute)
+	accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
+
+	release := make(chan struct{})
+	holding := make(chan struct{})
+	go func() {
+		_ = svc.gate.run(context.Background(), func() {
+			close(holding)
+			<-release
+		})
+	}()
+	<-holding
+	defer close(release)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"}, testMeta)
+	var appErr *apperror.AppError
+	if !errors.As(err, &appErr) || appErr.Code != apperror.CodeTooManyReqs {
+		t.Fatalf("want TOO_MANY_REQUESTS for a caller that left, got %v", err)
+	}
+	if len(rec.events) != 0 {
+		t.Fatalf("events = %v, want none", rec.events)
+	}
 }
 
 func TestLoginRejectsDisabledAccount(t *testing.T) {
@@ -454,7 +546,9 @@ func TestRefreshReuseRevokesFamily(t *testing.T) {
 		t.Fatalf("refresh: %v", err)
 	}
 
-	// Replaying the rotated-away token is reuse: the whole family dies.
+	// Replaying the rotated-away token once the reuse grace has passed is
+	// reuse: the whole family dies.
+	svc.now = func() time.Time { return time.Now().Add(testReuseGrace + time.Second) }
 	_, err = svc.Refresh(ctx, sess.RefreshToken)
 	wantUnauthorized(t, err)
 	if repo.byHash[HashToken(rotated.RefreshToken)].RevokedAt == nil {
@@ -463,6 +557,146 @@ func TestRefreshReuseRevokesFamily(t *testing.T) {
 
 	_, err = svc.Refresh(ctx, rotated.RefreshToken)
 	wantUnauthorized(t, err)
+}
+
+func TestRefreshReuseWithinGraceIssuesSiblingToken(t *testing.T) {
+	svc, accounts, repo := newTestAuthService(t)
+	accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
+	ctx := context.Background()
+
+	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"}, ClientMeta{})
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	first, err := svc.Refresh(ctx, sess.RefreshToken)
+	if err != nil {
+		t.Fatalf("first refresh: %v", err)
+	}
+
+	// A second tab presenting the same cookie moments later is a concurrent
+	// rotation, not replay: it gets its own token in the same family.
+	second, err := svc.Refresh(ctx, sess.RefreshToken)
+	if err != nil {
+		t.Fatalf("refresh within grace: %v", err)
+	}
+	if second.RefreshToken == first.RefreshToken {
+		t.Fatal("the sibling must be a distinct token")
+	}
+	family := repo.byHash[HashToken(first.RefreshToken)].FamilyID
+	if got := repo.byHash[HashToken(second.RefreshToken)].FamilyID; got != family {
+		t.Fatalf("sibling family = %s, want %s", got, family)
+	}
+	if n := repo.liveInFamily(family); n != 2 {
+		t.Fatalf("live tokens in family = %d, want 2", n)
+	}
+
+	// Past the grace the same old token is replay and takes both siblings
+	// down with it.
+	svc.now = func() time.Time { return time.Now().Add(testReuseGrace + time.Second) }
+	_, err = svc.Refresh(ctx, sess.RefreshToken)
+	wantUnauthorized(t, err)
+	if n := repo.liveInFamily(family); n != 0 {
+		t.Fatalf("live tokens after replay = %d, want 0", n)
+	}
+	_, err = svc.Refresh(ctx, second.RefreshToken)
+	wantUnauthorized(t, err)
+}
+
+func TestRefreshReuseWithinGraceAfterLogoutRejects(t *testing.T) {
+	svc, accounts, repo := newTestAuthService(t)
+	accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
+	ctx := context.Background()
+
+	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"}, ClientMeta{})
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	rotated, err := svc.Refresh(ctx, sess.RefreshToken)
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	if err := svc.Logout(ctx, rotated.RefreshToken, ClientMeta{}); err != nil {
+		t.Fatalf("logout: %v", err)
+	}
+
+	// The family has no live member, so the old token is not a concurrent
+	// tab — it is stale, whatever its age.
+	_, err = svc.Refresh(ctx, sess.RefreshToken)
+	wantUnauthorized(t, err)
+	if n := repo.liveInFamily(repo.byHash[HashToken(rotated.RefreshToken)].FamilyID); n != 0 {
+		t.Fatalf("live tokens after logout = %d, want 0", n)
+	}
+}
+
+func TestRefreshReuseWithinGraceRejectsDisabledAccount(t *testing.T) {
+	svc, accounts, repo := newTestAuthService(t)
+	p := accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
+	ctx := context.Background()
+
+	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"}, ClientMeta{})
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if _, err := svc.Refresh(ctx, sess.RefreshToken); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	if err := accounts.Disable(ctx, p.Account.ID); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+
+	_, err = svc.Refresh(ctx, sess.RefreshToken)
+	wantUnauthorized(t, err)
+	family := repo.byHash[HashToken(sess.RefreshToken)].FamilyID
+	if n := repo.liveInFamily(family); n != 0 {
+		t.Fatalf("live tokens in family = %d, want 0: a disabled account keeps nothing alive", n)
+	}
+}
+
+// TestRefreshReplayOfExpiredRotatedTokenRevokesFamily proves replay
+// detection still fires for a rotated-away token that has since expired:
+// the presenter proved possession of an old token, so the family dies.
+func TestRefreshReplayOfExpiredRotatedTokenRevokesFamily(t *testing.T) {
+	svc, accounts, repo := newTestAuthService(t)
+	accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
+	ctx := context.Background()
+
+	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"}, ClientMeta{})
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if _, err := svc.Refresh(ctx, sess.RefreshToken); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+
+	svc.now = func() time.Time { return time.Now().Add(721 * time.Hour) }
+	_, err = svc.Refresh(ctx, sess.RefreshToken)
+	wantUnauthorized(t, err)
+	family := repo.byHash[HashToken(sess.RefreshToken)].FamilyID
+	if n := repo.liveInFamily(family); n != 0 {
+		t.Fatalf("live tokens in family = %d, want 0 after replaying an expired token", n)
+	}
+}
+
+func TestRefreshReuseGraceDisabledKeepsStrictRevocation(t *testing.T) {
+	repo := newFakeTokenRepository()
+	svc, accounts := newTestAuthServiceWith(t, repo, 0)
+	accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
+	ctx := context.Background()
+
+	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"}, ClientMeta{})
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	rotated, err := svc.Refresh(ctx, sess.RefreshToken)
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+
+	_, err = svc.Refresh(ctx, sess.RefreshToken)
+	wantUnauthorized(t, err)
+	if repo.byHash[HashToken(rotated.RefreshToken)].RevokedAt == nil {
+		t.Fatal("with no grace, immediate reuse must revoke the family")
+	}
 }
 
 // staleReadRepository simulates the rotation race: GetByHash returns a
@@ -481,36 +715,58 @@ func (r *staleReadRepository) GetByHash(ctx context.Context, hash string) (*Refr
 	return t, nil
 }
 
-func TestRefreshConcurrentRotationRevokesFamily(t *testing.T) {
-	accounts := newFakeAccountService()
-	repo := newFakeTokenRepository()
-	issuer := NewTokenIssuer(config.JWTConfig{
-		Secret:     "test-secret-at-least-32-characters!!",
-		AccessTTL:  15 * time.Minute,
-		RefreshTTL: 720 * time.Hour,
+// TestRefreshLostRotationRace covers the second of two concurrent refreshes
+// of the same token: it reads a stale unrevoked snapshot, so its Revoke hits
+// zero rows. Within the reuse grace that is a concurrent tab and gets a
+// sibling token; with the grace disabled it is reuse and the family dies.
+func TestRefreshLostRotationRace(t *testing.T) {
+	t.Run("grace issues sibling", func(t *testing.T) {
+		repo := newFakeTokenRepository()
+		svc, accounts := newTestAuthServiceWith(t, &staleReadRepository{repo}, testReuseGrace)
+		accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
+		ctx := context.Background()
+
+		sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"}, ClientMeta{})
+		if err != nil {
+			t.Fatalf("login: %v", err)
+		}
+		winner, err := svc.Refresh(ctx, sess.RefreshToken)
+		if err != nil {
+			t.Fatalf("first refresh: %v", err)
+		}
+		loser, err := svc.Refresh(ctx, sess.RefreshToken)
+		if err != nil {
+			t.Fatalf("second refresh: %v", err)
+		}
+		if loser.RefreshToken == winner.RefreshToken {
+			t.Fatal("loser must get its own token")
+		}
+		family := repo.byHash[HashToken(winner.RefreshToken)].FamilyID
+		if n := repo.liveInFamily(family); n != 2 {
+			t.Fatalf("live tokens in family = %d, want 2", n)
+		}
 	})
-	svc := NewService(accounts, &staleReadRepository{repo}, issuer, noopTxManager{},
-		newFakeOwnerResolver(), &fakeResetDMSender{}, testResetConfig(), "https://app.example.com", nil)
-	accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
-	ctx := context.Background()
 
-	sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"}, ClientMeta{})
-	if err != nil {
-		t.Fatalf("login: %v", err)
-	}
-	// First refresh wins the race and rotates normally.
-	rotated, err := svc.Refresh(ctx, sess.RefreshToken)
-	if err != nil {
-		t.Fatalf("first refresh: %v", err)
-	}
+	t.Run("strict revokes family", func(t *testing.T) {
+		repo := newFakeTokenRepository()
+		svc, accounts := newTestAuthServiceWith(t, &staleReadRepository{repo}, 0)
+		accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
+		ctx := context.Background()
 
-	// Second refresh of the SAME token reads a stale unrevoked snapshot, so
-	// its Revoke hits zero rows — that loss must revoke the whole family.
-	_, err = svc.Refresh(ctx, sess.RefreshToken)
-	wantUnauthorized(t, err)
-	if repo.byHash[HashToken(rotated.RefreshToken)].RevokedAt == nil {
-		t.Fatal("losing the rotation race must revoke the family")
-	}
+		sess, err := svc.Login(ctx, LoginRequest{Phone: "+84901234567", Password: "correct-password"}, ClientMeta{})
+		if err != nil {
+			t.Fatalf("login: %v", err)
+		}
+		rotated, err := svc.Refresh(ctx, sess.RefreshToken)
+		if err != nil {
+			t.Fatalf("first refresh: %v", err)
+		}
+		_, err = svc.Refresh(ctx, sess.RefreshToken)
+		wantUnauthorized(t, err)
+		if repo.byHash[HashToken(rotated.RefreshToken)].RevokedAt == nil {
+			t.Fatal("losing the rotation race must revoke the family")
+		}
+	})
 }
 
 func TestRefreshRejectsExpiredAndUnknown(t *testing.T) {

@@ -9,9 +9,13 @@ import (
 // token, so no auth route needs requireAuth; the profile lives at /me on the
 // teachers feature. Account creation is invite-only now (see
 // features/invitations) — there is no public self-registration route.
-func RegisterRoutes(rg *gin.RouterGroup, h *Handler) {
+// loginLimits are the rate limiters the router mounts in front of login
+// (per normalized phone, and per client IP when proxies are trusted).
+func RegisterRoutes(rg *gin.RouterGroup, h *Handler, loginLimits ...gin.HandlerFunc) {
 	g := rg.Group("/auth")
-	g.POST("/login", h.login)
+	login := make([]gin.HandlerFunc, 0, len(loginLimits)+1)
+	login = append(login, loginLimits...)
+	g.POST("/login", append(login, h.login)...)
 	g.POST("/refresh", h.refresh)
 	g.POST("/logout", h.logout)
 }

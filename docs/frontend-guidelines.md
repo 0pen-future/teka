@@ -67,6 +67,15 @@ feature-specific composition stays in the feature folder.
   render-scoped concerns (theme).
 - The access token is kept in memory only (Zustand), never in localStorage; the
   refresh token stays in an httpOnly cookie managed by the API.
+- Query keys carry no user or center id on purpose. Instead, `SessionCacheReset`
+  (`features/auth`, mounted once in `Providers`, and again per test in
+  `renderWithProviders`) watches the signed-in user id from `useAuthStore` and
+  calls `queryClient.clear()` whenever a session ends (id → `null`, e.g.
+  logout or a dead refresh) or the signed-in identity changes on the same tab
+  (id A → id B). Mounting while already signed in, a token rotation, or a
+  profile edit under the same id must not clear. This is a single state-based
+  boundary instead of a per-call-site one, so any future way a session ends
+  is covered without remembering to call `queryClient.clear()` there too.
 
 ## API access and error handling
 

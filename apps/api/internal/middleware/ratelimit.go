@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,12 +14,15 @@ import (
 	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/response"
+	"teka/apps/api/internal/shared/validation"
 )
 
-// KeyFunc extracts the rate-limit bucket key for a request. Keys must be a
-// business identity (an invite/reset token, a phone number) — never
-// c.ClientIP(): the API runs behind Traefik with SetTrustedProxies(nil), so
-// ClientIP() collapses every caller into one shared bucket.
+// KeyFunc extracts the rate-limit bucket key for a request. Keys are a
+// business identity (an invite/reset token, a phone number). ClientIPKey is
+// the one exception and is only mounted when the router has been told which
+// proxies to trust: behind Traefik with SetTrustedProxies(nil), ClientIP()
+// is the proxy's socket address and would collapse every caller into one
+// shared bucket.
 type KeyFunc func(c *gin.Context) string
 
 // window is one fixed-window counter for a single key.
@@ -111,25 +116,66 @@ func RateLimit(keyFn KeyFunc, limit int, period time.Duration) gin.HandlerFunc {
 // sees the full body. Returns "" (no limiting) when the body is absent,
 // unreadable, not JSON, or missing the field — those requests fail binding
 // on their own.
+//
+// The value is decoded through encoding/json into a struct tagged with the
+// field name, so the limiter sees exactly what the handler's DTO will bind:
+// case-insensitive key matching, last duplicate key wins. Reimplementing
+// those rules over a map is how a caller gets to spell the field so that
+// the handler acts on one value while the limiter buckets another.
 func JSONBodyKey(field string) KeyFunc {
+	probe := reflect.StructOf([]reflect.StructField{{
+		Name: "Value",
+		Type: reflect.TypeOf(""),
+		Tag:  reflect.StructTag(`json:"` + field + `"`),
+	}})
 	return func(c *gin.Context) string {
 		if c.Request.Body == nil {
 			return ""
 		}
 		raw, err := io.ReadAll(c.Request.Body)
 		if err != nil {
+			// The body is consumed, so hand downstream a reader that fails
+			// the same way: a MaxBytesReader cut-off must still surface as
+			// 413 from binding instead of an empty-body 400.
+			c.Request.Body = io.NopCloser(errReader{err})
 			return ""
 		}
 		c.Request.Body = io.NopCloser(bytes.NewReader(raw))
 
-		var payload map[string]any
-		if err := json.Unmarshal(raw, &payload); err != nil {
+		// Decode the way gin's ShouldBindJSON does: a Decoder reads one
+		// value and ignores trailing bytes, whereas Unmarshal rejects them,
+		// and a request the handler accepts must never escape the bucket.
+		v := reflect.New(probe)
+		if err := json.NewDecoder(bytes.NewReader(raw)).Decode(v.Interface()); err != nil {
 			return ""
 		}
-		v, _ := payload[field].(string)
-		return v
+		return v.Elem().Field(0).String()
 	}
 }
+
+// PhoneKey rate-limits on a phone field of the JSON body, normalized so the
+// local (0…) and E.164 (+84…) spellings of one number share a bucket. A
+// value that is not a Vietnamese number is still limited on its trimmed raw
+// form, so a caller cannot dodge the bucket with a malformed spelling; only
+// an absent field yields "" (binding rejects that request on its own).
+func PhoneKey(field string) KeyFunc {
+	raw := JSONBodyKey(field)
+	return func(c *gin.Context) string {
+		return validation.NormalizePhone(strings.TrimSpace(raw(c)))
+	}
+}
+
+// ClientIPKey rate-limits on the caller's IP as gin resolves it. Mount it
+// only when the router has SetTrustedProxies from configuration, so
+// X-Forwarded-For is honoured from the real proxy and from nobody else.
+func ClientIPKey() KeyFunc {
+	return func(c *gin.Context) string { return c.ClientIP() }
+}
+
+// errReader replays one read error on every Read.
+type errReader struct{ err error }
+
+func (r errReader) Read([]byte) (int, error) { return 0, r.err }
 
 // TeacherKey rate-limits on the authenticated caller's teacher id. Use it on
 // authenticated routes whose cost is high enough that one account's retry loop

@@ -1,5 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
+import { sessionsKeys } from "@/features/attendance";
+
 import { downloadTemplate, importRoster, type ImportRosterInput } from "../api/imports-api";
 import { classesKeys, contactsKeys, enrollmentsKeys, studentsKeys } from "./roster-keys";
 
@@ -30,7 +32,9 @@ export function useDownloadTemplate() {
  * Runs one workbook, as a check or for real. A committed import creates rows
  * across all four roster entities, so it invalidates all four — the class
  * list and the student list are the two screens the operator lands on next.
- * A check writes nothing and therefore invalidates nothing.
+ * The new enrollments also feed session rosters and `student_count`, so
+ * sessions are invalidated alongside them. A check writes nothing and
+ * therefore invalidates nothing.
  */
 export function useImportRoster() {
   const queryClient = useQueryClient();
@@ -40,7 +44,7 @@ export function useImportRoster() {
       if (!report.committed) {
         return;
       }
-      for (const keys of [classesKeys, studentsKeys, contactsKeys, enrollmentsKeys]) {
+      for (const keys of [classesKeys, studentsKeys, contactsKeys, enrollmentsKeys, sessionsKeys]) {
         void queryClient.invalidateQueries({ queryKey: keys.all });
       }
     },

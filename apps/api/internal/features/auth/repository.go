@@ -35,9 +35,15 @@ type Repository interface {
 	Create(ctx context.Context, t *RefreshToken) error
 	GetByHash(ctx context.Context, hash string) (*RefreshToken, error)
 	// Revoke invalidates one live token; ErrTokenAlreadyRevoked when it lost
-	// a race with another revocation.
+	// a race with another revocation. Rotation is the only caller that
+	// revokes a single token: every other path (logout, disable, reset,
+	// reuse detection) revokes the whole family. Refresh relies on that to
+	// tell a lost rotation race from replay — a token revoked moments ago
+	// whose family still has a live member was rotated, not stolen.
 	Revoke(ctx context.Context, id uuid.UUID, at time.Time) error
 	RevokeFamily(ctx context.Context, familyID uuid.UUID, at time.Time) error
+	// FamilyHasLive reports whether any token in the family is unrevoked.
+	FamilyHasLive(ctx context.Context, familyID uuid.UUID) (bool, error)
 	// RevokeAllForUser invalidates every live refresh token across every
 	// family for one account — account-wide, unlike RevokeFamily. Used when
 	// an account is disabled or its password is reset, so every outstanding
@@ -116,6 +122,16 @@ func (r *gormRepository) RevokeFamily(ctx context.Context, familyID uuid.UUID, a
 		Model(&RefreshToken{}).
 		Where("family_id = ? AND revoked_at IS NULL", familyID).
 		Update("revoked_at", at).Error
+}
+
+func (r *gormRepository) FamilyHasLive(ctx context.Context, familyID uuid.UUID) (bool, error) {
+	var n int64
+	err := database.FromContext(ctx, r.db).
+		Model(&RefreshToken{}).
+		Where("family_id = ? AND revoked_at IS NULL", familyID).
+		Limit(1).
+		Count(&n).Error
+	return n > 0, err
 }
 
 func (r *gormRepository) RevokeAllForUser(ctx context.Context, userID uuid.UUID, at time.Time) error {

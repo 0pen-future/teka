@@ -11,14 +11,15 @@ import (
 
 // Stable machine-readable error codes exposed in the API error envelope.
 const (
-	CodeBadRequest   = "BAD_REQUEST"
-	CodeValidation   = "VALIDATION_ERROR"
-	CodeUnauthorized = "UNAUTHORIZED"
-	CodeForbidden    = "FORBIDDEN"
-	CodeNotFound     = "NOT_FOUND"
-	CodeConflict     = "CONFLICT"
-	CodeInternal     = "INTERNAL_ERROR"
-	CodeTooManyReqs  = "TOO_MANY_REQUESTS"
+	CodeBadRequest      = "BAD_REQUEST"
+	CodeValidation      = "VALIDATION_ERROR"
+	CodeUnauthorized    = "UNAUTHORIZED"
+	CodeForbidden       = "FORBIDDEN"
+	CodeNotFound        = "NOT_FOUND"
+	CodeConflict        = "CONFLICT"
+	CodeInternal        = "INTERNAL_ERROR"
+	CodeTooManyReqs     = "TOO_MANY_REQUESTS"
+	CodePayloadTooLarge = "PAYLOAD_TOO_LARGE"
 )
 
 // AppError carries an error code, HTTP status, and client-safe message across
@@ -82,6 +83,11 @@ func Conflict(message string) *AppError {
 // TooManyRequests is a 429 for a caller that tripped a rate limit.
 func TooManyRequests(message string) *AppError {
 	return New(CodeTooManyReqs, http.StatusTooManyRequests, message)
+}
+
+// PayloadTooLarge is a 413 for a request body over the server's byte cap.
+func PayloadTooLarge(message string) *AppError {
+	return New(CodePayloadTooLarge, http.StatusRequestEntityTooLarge, message)
 }
 
 // Internal is a 500 that keeps the cause for logs and hides it from clients.

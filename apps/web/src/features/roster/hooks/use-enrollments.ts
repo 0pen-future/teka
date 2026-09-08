@@ -1,5 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { sessionsKeys } from "@/features/attendance";
+
 import {
   createEnrollment,
   deleteEnrollment,
@@ -52,10 +54,11 @@ export function useEnrollableStudents(classId: string | undefined, q: string) {
 /**
  * Create and end both touch the same surfaces: the class's enrollment
  * list, the enrolled student's detail (its enrollment list refetches), the
- * class detail — per the Architecture's cache invalidation graph — and every
- * students list, whose class/unenrolled filters are derived from enrollments
- * (the app-wide 30s staleTime would otherwise keep a just-enrolled student
- * off the class tab it navigates to).
+ * class detail, and every students list, whose class/unenrolled filters are
+ * derived from enrollments (the app-wide 30s staleTime would otherwise keep
+ * a just-enrolled student off the class tab it navigates to). Sessions carry
+ * their own roster and `student_count`, both derived from enrollments, so an
+ * open attendance sheet or session list must refetch too.
  */
 function invalidateEnrollmentSurfaces(
   queryClient: ReturnType<typeof useQueryClient>,
@@ -66,6 +69,7 @@ function invalidateEnrollmentSurfaces(
   void queryClient.invalidateQueries({ queryKey: studentsKeys.lists() });
   void queryClient.invalidateQueries({ queryKey: studentsKeys.detail(studentId) });
   void queryClient.invalidateQueries({ queryKey: classesKeys.detail(classId) });
+  void queryClient.invalidateQueries({ queryKey: sessionsKeys.all });
 }
 
 export function useCreateEnrollment() {
@@ -97,6 +101,9 @@ export function useDeleteEnrollment() {
       void queryClient.invalidateQueries({ queryKey: enrollmentsKeys.all });
       void queryClient.invalidateQueries({ queryKey: studentsKeys.details() });
       void queryClient.invalidateQueries({ queryKey: classesKeys.details() });
+      // Removing the enrollment record changes the session roster and
+      // student_count it fed.
+      void queryClient.invalidateQueries({ queryKey: sessionsKeys.all });
     },
   });
 }

@@ -95,4 +95,23 @@ describe("LoginPage", () => {
     expect(await screen.findByText("invalid phone or password")).toBeInTheDocument();
     expect(useAuthStore.getState().user).toBeNull();
   });
+
+  it("shows the server message when the login is rate limited", async () => {
+    server.use(
+      http.post(`${API_URL}/auth/login`, () =>
+        HttpResponse.json(fail("TOO_MANY_REQUESTS", "too many requests, try again later"), {
+          status: 429,
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderLogin();
+
+    await user.type(screen.getByLabelText("Số điện thoại"), "0901000001");
+    await user.type(screen.getByLabelText("Mật khẩu"), "lan-password");
+    await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
+
+    expect(await screen.findByText("too many requests, try again later")).toBeInTheDocument();
+    expect(useAuthStore.getState().user).toBeNull();
+  });
 });

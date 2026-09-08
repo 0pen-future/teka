@@ -45,8 +45,11 @@ func newPolicyEnv(t *testing.T) *policyEnv {
 		Env:         config.EnvTest,
 		LogLevel:    "info",
 		CORSOrigins: []string{"http://localhost:5173"},
-		JWT:         config.JWTConfig{Secret: testutil.JWTSecret, AccessTTL: 15 * time.Minute, RefreshTTL: time.Hour},
-		Database:    config.DatabaseConfig{ConnMaxLifetime: time.Minute},
+		// Load() guarantees a positive body cap; a hand-built config must
+		// set it too or BodyLimit refuses every request with a body.
+		HTTP:     config.HTTPConfig{MaxBodyBytes: 1 << 20},
+		JWT:      config.JWTConfig{Secret: testutil.JWTSecret, AccessTTL: 15 * time.Minute, RefreshTTL: time.Hour},
+		Database: config.DatabaseConfig{ConnMaxLifetime: time.Minute},
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	zaloSvc := newTestZaloService(t)

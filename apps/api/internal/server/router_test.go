@@ -2,10 +2,12 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,12 +33,18 @@ func newTestRouter(t *testing.T) http.Handler {
 }
 
 func newTestRouterEnv(t *testing.T, env string) http.Handler {
+	return newTestRouterWith(t, env, nil)
+}
+
+// newTestRouterWith builds the router for env with the given trusted proxy
+// list (nil trusts none, the production default).
+func newTestRouterWith(t *testing.T, env string, trustedProxies []string) http.Handler {
 	t.Helper()
 	cfg := &config.Config{
 		Env:         env,
 		LogLevel:    "info",
 		CORSOrigins: []string{"http://localhost:5173"},
-		HTTP:        config.HTTPConfig{Port: 0},
+		HTTP:        config.HTTPConfig{Port: 0, MaxBodyBytes: 1 << 20, TrustedProxies: trustedProxies},
 		Database:    config.DatabaseConfig{ConnMaxLifetime: time.Minute},
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -135,6 +143,82 @@ func TestSwaggerServedOutsideProductionOnly(t *testing.T) {
 		httptest.NewRequest(http.MethodGet, "/swagger/index.html", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("swagger in production: want 404, got %d", rec.Code)
+	}
+}
+
+// The body cap is enforced by the global chain, so a public route whose
+// limiter reads the JSON body must refuse an oversized declared length
+// before that read ever happens.
+func TestOversizedBodyIsRefusedBeforeHandlers(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/forgot-password", strings.NewReader(`{"phone":"0901234567"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.ContentLength = 100 << 20
+	rec := httptest.NewRecorder()
+	newTestRouter(t).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"PAYLOAD_TOO_LARGE"`) {
+		t.Fatalf("body = %s, want PAYLOAD_TOO_LARGE envelope", rec.Body.String())
+	}
+}
+
+// loginFromDistinctPhones posts n login attempts from one socket address,
+// each with a different phone and no password, so the per-phone limiter
+// never trips and only a per-IP limiter could answer 429. Binding rejects
+// each attempt before any service call, so no database is touched.
+func loginFromDistinctPhones(t *testing.T, h http.Handler, n int, remoteAddr string) (last int) {
+	t.Helper()
+	for i := range n {
+		body := fmt.Sprintf(`{"phone":"+849%08d"}`, i)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = remoteAddr
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		last = rec.Code
+		if last == http.StatusTooManyRequests {
+			return last
+		}
+	}
+	return last
+}
+
+// TestLoginIPLimiterOnlyMountedWithTrustedProxies proves the per-IP login
+// limiter is absent by default (every caller would share Traefik's address)
+// and present once trusted proxies are configured.
+func TestLoginIPLimiterOnlyMountedWithTrustedProxies(t *testing.T) {
+	const perIPPerMinute = 60
+
+	if code := loginFromDistinctPhones(t, newTestRouter(t), perIPPerMinute+1, "10.0.0.1:4000"); code == http.StatusTooManyRequests {
+		t.Fatal("without trusted proxies no per-IP limiter may run")
+	}
+
+	trusted := newTestRouterWith(t, config.EnvTest, []string{"10.0.0.0/8"})
+	if code := loginFromDistinctPhones(t, trusted, perIPPerMinute, "10.0.0.1:4000"); code == http.StatusTooManyRequests {
+		t.Fatalf("request %d from one IP must still pass", perIPPerMinute)
+	}
+	if code := loginFromDistinctPhones(t, trusted, 1, "10.0.0.1:4000"); code != http.StatusTooManyRequests {
+		t.Fatalf("request %d from one IP: status = %d, want 429", perIPPerMinute+1, code)
+	}
+}
+
+// TestRosterImportIsExemptFromGlobalBodyCap pins the exemption to the real
+// route: a body over the server-wide cap must reach the roster import chain
+// (and fail on authentication there) rather than be refused with 413.
+func TestRosterImportIsExemptFromGlobalBodyCap(t *testing.T) {
+	body := strings.Repeat("a", (1<<20)+1)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/imports/roster", strings.NewReader(body))
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=x")
+	rec := httptest.NewRecorder()
+	newTestRouter(t).ServeHTTP(rec, req)
+
+	if rec.Code == http.StatusRequestEntityTooLarge {
+		t.Fatalf("roster import must not be capped by the global body limit: %s", rec.Body.String())
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 from the auth chain: %s", rec.Code, rec.Body.String())
 	}
 }
 

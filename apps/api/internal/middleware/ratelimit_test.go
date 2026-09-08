@@ -9,6 +9,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"teka/apps/api/internal/shared/response"
+	"teka/apps/api/internal/shared/validation"
 )
 
 func TestLimiterAllowsUpToLimitWithinWindow(t *testing.T) {
@@ -162,6 +165,41 @@ func TestJSONBodyKeyPreservesBodyForDownstreamBinding(t *testing.T) {
 	}
 }
 
+// An oversized body hits the MaxBytesReader cut-off inside JSONBodyKey's
+// read; that must still reach the client as 413, not a silent 400, and must
+// not spend the caller's bucket.
+func TestJSONBodyKeyOversizedBodySurfacesAsPayloadTooLarge(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(BodyLimit(32), RateLimit(JSONBodyKey("phone"), 1, time.Minute))
+	r.POST("/x", func(c *gin.Context) {
+		var body struct {
+			Phone string `json:"phone"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			response.Err(c, validation.BindError(err))
+			return
+		}
+		c.Status(http.StatusOK)
+	})
+
+	send := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.ContentLength = -1
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	if w := send(`{"phone":"0901234567","pad":"` + strings.Repeat("x", 64) + `"}`); w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("want 413 for an oversized body, got %d %s", w.Code, w.Body.String())
+	}
+	if w := send(`{"phone":"0901234567"}`); w.Code != http.StatusOK {
+		t.Fatalf("the refused request must not consume the bucket, got %d %s", w.Code, w.Body.String())
+	}
+}
+
 // TestRateLimitSkipsEmptyKey proves a request that carries no usable key
 // (malformed/absent body) is never limited, since binding will reject it on
 // its own.
@@ -179,5 +217,84 @@ func TestRateLimitSkipsEmptyKey(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("request with an unusable key must never be limited, got %d", w.Code)
 		}
+	}
+}
+
+// TestJSONBodyKeyMatchesFieldLikeStructBinding proves the limiter sees the
+// same value the handler will bind: encoding/json matches struct fields
+// case-insensitively, so a differently cased key must not yield an empty
+// (unlimited) bucket.
+func TestJSONBodyKeyMatchesFieldLikeStructBinding(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	key := JSONBodyKey("phone")
+	keyFor := func(body string) string {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(body))
+		return key(c)
+	}
+	if got := keyFor(`{"Phone":"0901234567"}`); got != "0901234567" {
+		t.Fatalf("capitalized field: key = %q, want the bound value", got)
+	}
+	// Duplicate keys: encoding/json keeps the last one it sees regardless of
+	// spelling, so the limiter must too, in both orders.
+	if got := keyFor(`{"PHONE":"a","phone":"b"}`); got != "b" {
+		t.Fatalf("last duplicate must win (exact last): got %q", got)
+	}
+	if got := keyFor(`{"phone":"a","PHONE":"b"}`); got != "b" {
+		t.Fatalf("last duplicate must win (exact first): got %q", got)
+	}
+	if got := keyFor(`{"phone":123}`); got != "" {
+		t.Fatalf("non-string value must not produce a key, got %q", got)
+	}
+	// gin binds with a json.Decoder, which stops after the first value, so
+	// trailing bytes reach the handler and must reach the bucket as well.
+	if got := keyFor(`{"phone":"0901234567"}{}`); got != "0901234567" {
+		t.Fatalf("trailing bytes: key = %q, want the value the handler binds", got)
+	}
+}
+
+func TestPhoneKeyNormalizesLocalAndInternationalForms(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	key := PhoneKey("phone")
+	keyFor := func(body string) string {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(body))
+		c.Request.Header.Set("Content-Type", "application/json")
+		return key(c)
+	}
+
+	local, intl := keyFor(`{"phone":" 0901234567 "}`), keyFor(`{"phone":"+84901234567"}`)
+	if local != "+84901234567" || local != intl {
+		t.Fatalf("local = %q, international = %q, want both +84901234567", local, intl)
+	}
+	if got := keyFor(`{"phone":"not-a-phone"}`); got != "not-a-phone" {
+		t.Fatalf("malformed phone must still be limited on its raw form, got %q", got)
+	}
+	if got := keyFor(`{"password":"x"}`); got != "" {
+		t.Fatalf("absent phone must yield an empty key, got %q", got)
+	}
+}
+
+func TestClientIPKeyUsesGinResolvedIP(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	_ = r.SetTrustedProxies([]string{"10.0.0.0/8"})
+	var got string
+	r.GET("/x", func(c *gin.Context) { got = ClientIPKey()(c); c.Status(http.StatusOK) })
+
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	req.RemoteAddr = "10.0.0.1:1234"
+	req.Header.Set("X-Forwarded-For", "203.0.113.9")
+	r.ServeHTTP(httptest.NewRecorder(), req)
+	if got != "203.0.113.9" {
+		t.Fatalf("key = %q, want the forwarded client IP behind a trusted proxy", got)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/x", nil)
+	req.RemoteAddr = "198.51.100.4:1234"
+	req.Header.Set("X-Forwarded-For", "203.0.113.9")
+	r.ServeHTTP(httptest.NewRecorder(), req)
+	if got != "198.51.100.4" {
+		t.Fatalf("key = %q, want the socket address when the peer is not a trusted proxy", got)
 	}
 }

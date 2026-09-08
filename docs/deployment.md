@@ -142,7 +142,10 @@ The API is configured entirely through `API_*` environment variables:
 | `API_JWT_SECRET` | yes | High-entropy secret; rotating it invalidates all sessions |
 | `API_ZALO_CRED_KEY` | yes | Encrypts linked Zalo session credentials; min 32 bytes, hex or base64, generate with `openssl rand -base64 32`. Missing or too short is fatal on startup; rotating or losing it permanently orphans every already-linked account (every teacher must re-scan a QR code) — treat it as permanent, like `API_JWT_SECRET`. See [`.env.production.example`](../.env.production.example) |
 | `API_HTTP_PORT` | no | Defaults to 8080 |
+| `API_HTTP_MAX_BODY_BYTES` | no | Server-wide request body cap, default 1 MiB; roster import is exempt with its own 2 MiB cap |
+| `API_HTTP_TRUSTED_PROXIES` | no | Comma-separated IPs or CIDRs whose `X-Forwarded-For` the API believes; empty (default) trusts none and disables the per-IP login limiter. See "Trusted proxies" below |
 | `API_JWT_ACCESS_TTL` / `API_JWT_REFRESH_TTL` | no | Default 15m / 720h |
+| `API_JWT_REFRESH_REUSE_GRACE` | no | Default 15s; window in which a rotated-away refresh token still counts as a concurrent tab, `0` for strict revocation |
 | `API_LOG_LEVEL` | no | Use `info` in production |
 | `API_CORS_ORIGINS` | no | Only for split-origin topologies |
 | `API_AUDIT_BUFFER_SIZE` / `API_AUDIT_BATCH_SIZE` / `API_AUDIT_FLUSH_INTERVAL` / `API_AUDIT_DRAIN_TIMEOUT` | no | Audit capture tuning (defaults 1024 / 100 / 1s / 5s); see [`docs/event-bus.md`](./event-bus.md) |
@@ -177,6 +180,27 @@ Provision these outside this repository before deploying:
 - An external PostgreSQL instance reachable from the API host through
   `API_DATABASE_URL` — for this homelab, the operator-run instance described
   in the next section.
+
+### Trusted proxies
+
+By default the API trusts no proxy: the client IP it logs and rate-limits on
+is the socket peer, which behind Traefik is Traefik itself. The per-phone
+login limiter and the bcrypt gate work regardless, but the per-IP login
+limiter (60/min) is only mounted once `API_HTTP_TRUSTED_PROXIES` lists the
+addresses allowed to set `X-Forwarded-For`. Traefik's Docker provider
+forwards that header by default, so set the variable to the subnet of the
+`homelab` network (for example `172.18.0.0/16`, check with
+`docker network inspect homelab`). Requests reach Traefik through
+cloudflared on the same network, so that subnet already covers both hops; if
+cloudflared ever runs on another network, add its subnet too.
+
+Verify after enabling it: send one request from a known address and compare
+the `client_ip` field of the request log line against the real client IP. If the
+log still shows a Docker address, the list does not cover the hop that
+actually connects to the API and the variable must be widened, not the
+limiter relaxed. A wrong list is the only way a client can forge its IP for
+the limiter, so keep it to the proxy subnets. Rate-limit buckets live in
+memory per API replica.
 
 ### Operator-run PostgreSQL
 

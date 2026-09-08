@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -57,15 +58,21 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *gorm.DB, zaloSvc *zalo.
 	}
 
 	r := gin.New()
-	// Trust no proxy: ClientIP() uses the socket address instead of a
-	// client-forgeable X-Forwarded-For. Revisit when a load balancer fronts
-	// the API and its address range is known.
-	_ = r.SetTrustedProxies(nil)
+	// With no trusted proxies (the default) ClientIP() is the socket address
+	// rather than a client-forgeable X-Forwarded-For; behind Traefik that is
+	// Traefik itself. Config validation already vetted every entry, so a
+	// failure here is a programming error.
+	if err := r.SetTrustedProxies(cfg.HTTP.TrustedProxies); err != nil {
+		panic(fmt.Sprintf("trusted proxies: %v", err))
+	}
 	r.Use(
 		middleware.RequestID(),
 		middleware.Logger(log),
 		middleware.Recovery(),
 		middleware.CORS(cfg),
+		// Roster import streams a multipart upload with a 2 MiB cap of its
+		// own (imports.Handler), so the JSON-sized cap must not apply there.
+		middleware.BodyLimit(cfg.HTTP.MaxBodyBytes, "/api/v1/imports/roster"),
 	)
 
 	registerHealth(r, db)
@@ -122,13 +129,13 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, log *slog.Logger,
 	audit.RegisterRoutes(v1, audit.NewHandler(auditSvc), authChain...)
 
 	authHandler := auth.NewHandler(authSvc, cfg)
-	auth.RegisterRoutes(v1, authHandler)
+	auth.RegisterRoutes(v1, authHandler, loginLimits(cfg)...)
 	// The reset token and the target phone are the only credentials guarding
 	// these two routes — the caller has no session yet, so each gets its own
 	// rate limit keyed on the request body, not the caller's IP (same
 	// reasoning as invitations.RegisterPublicRoutes below).
 	auth.RegisterPublicRoutes(v1, authHandler,
-		middleware.RateLimit(middleware.JSONBodyKey("phone"), 5, time.Minute),
+		middleware.RateLimit(middleware.PhoneKey("phone"), 5, time.Minute),
 		middleware.RateLimit(middleware.JSONBodyKey("token"), 10, time.Minute))
 	teachers.RegisterRoutes(v1, teachers.NewHandler(teachersSvc), authChain...)
 
@@ -267,4 +274,17 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, log *slog.Logger,
 	invitations.RegisterPublicRoutes(v1, invitationsHandler,
 		middleware.RateLimit(middleware.JSONBodyKey("token"), 20, time.Minute),
 		middleware.RateLimit(middleware.JSONBodyKey("token"), 10, time.Minute))
+}
+
+// loginLimits is the limiter chain in front of POST /auth/login. Login is
+// throttled per normalized phone regardless of topology. A per-IP limiter
+// is only worth mounting once the operator has named the proxies whose
+// X-Forwarded-For may be believed: without them ClientIP() is Traefik's
+// socket address and every caller would share one bucket.
+func loginLimits(cfg *config.Config) []gin.HandlerFunc {
+	limits := []gin.HandlerFunc{middleware.RateLimit(middleware.PhoneKey("phone"), 10, time.Minute)}
+	if len(cfg.HTTP.TrustedProxies) > 0 {
+		limits = append([]gin.HandlerFunc{middleware.RateLimit(middleware.ClientIPKey(), 60, time.Minute)}, limits...)
+	}
+	return limits
 }

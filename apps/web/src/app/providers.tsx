@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 import { ThemeProvider } from "@/components/shared/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
-import { SessionRestore } from "@/features/auth";
+import { SessionCacheReset, SessionRestore } from "@/features/auth";
 import { ApiError } from "@/lib/api/errors";
 
 const queryClient = new QueryClient({
@@ -24,6 +24,7 @@ const queryClient = new QueryClient({
 export function Providers({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
+      <SessionCacheReset />
       <ThemeProvider>
         <SessionRestore>{children}</SessionRestore>
         <Toaster />

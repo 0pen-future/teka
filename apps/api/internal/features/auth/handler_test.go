@@ -28,9 +28,10 @@ func newHandlerHTTPTest(t *testing.T) (*gin.Engine, *fakeAccountService, *fakeOw
 	owners := newFakeOwnerResolver()
 	dmSender := &fakeResetDMSender{}
 	jwtCfg := config.JWTConfig{
-		Secret:     "handler-test-secret-0123456789abcdef",
-		AccessTTL:  15 * time.Minute,
-		RefreshTTL: 720 * time.Hour,
+		Secret:            "handler-test-secret-0123456789abcdef",
+		AccessTTL:         15 * time.Minute,
+		RefreshTTL:        720 * time.Hour,
+		RefreshReuseGrace: testReuseGrace,
 	}
 	svc := NewService(accounts, newFakeTokenRepository(), NewTokenIssuer(jwtCfg), noopTxManager{},
 		owners, dmSender, testResetConfig(), "https://app.example.com", nil)
@@ -39,12 +40,17 @@ func newHandlerHTTPTest(t *testing.T) (*gin.Engine, *fakeAccountService, *fakeOw
 	r := gin.New()
 	h := NewHandler(svc, cfg)
 	group := r.Group("/api/v1")
-	RegisterRoutes(group, h)
+	RegisterRoutes(group, h, middleware.RateLimit(middleware.PhoneKey("phone"), loginAttemptsPerMinute, time.Minute))
 	RegisterPublicRoutes(group, h,
 		middleware.RateLimit(middleware.JSONBodyKey("phone"), 1000, time.Minute),
 		middleware.RateLimit(middleware.JSONBodyKey("token"), 1000, time.Minute))
 	return r, accounts, owners, dmSender
 }
+
+// loginAttemptsPerMinute mirrors the per-phone login limit the router
+// mounts; the handler test wires it explicitly because RegisterRoutes takes
+// the limiter chain from its caller.
+const loginAttemptsPerMinute = 10
 
 type wireEnvelope struct {
 	Success bool            `json:"success"`
@@ -144,6 +150,36 @@ func TestLoginRejectsWrongPassword(t *testing.T) {
 	}
 }
 
+// TestLoginRateLimitedPerNormalizedPhone proves the login limiter counts the
+// local and international spellings of one number in the same bucket and
+// leaves other numbers untouched.
+func TestLoginRateLimitedPerNormalizedPhone(t *testing.T) {
+	r, accounts, _, _ := newHandlerHTTPTest(t)
+	accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
+	accounts.add(t, "+84907777777", "correct-password", teachers.StatusActive)
+
+	attempt := func(phone string) (int, wireEnvelope) {
+		w, env := doJSON(t, r, http.MethodPost, "/api/v1/auth/login",
+			`{"phone":"`+phone+`","password":"wrong-password"}`, nil)
+		return w.Code, env
+	}
+	for i := range loginAttemptsPerMinute {
+		phone := "0901234567"
+		if i%2 == 1 {
+			phone = "+84901234567"
+		}
+		if code, env := attempt(phone); code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: want 401, got %d %+v", i+1, code, env)
+		}
+	}
+	if code, env := attempt("0901234567"); code != http.StatusTooManyRequests || env.Error == nil || env.Error.Code != apperror.CodeTooManyReqs {
+		t.Fatalf("attempt %d: want 429 TOO_MANY_REQUESTS, got %d %+v", loginAttemptsPerMinute+1, code, env)
+	}
+	if code, _ := attempt("+84907777777"); code != http.StatusUnauthorized {
+		t.Fatalf("another phone must not share the bucket, got %d", code)
+	}
+}
+
 func TestRefreshRequiresCookie(t *testing.T) {
 	r, _, _, _ := newHandlerHTTPTest(t)
 
@@ -170,6 +206,36 @@ func TestRefreshRotatesCookieOverHTTP(t *testing.T) {
 	rotated := refreshCookie(t, w)
 	if rotated == nil || rotated.Value == first.Value {
 		t.Fatal("refresh must rotate the cookie value")
+	}
+}
+
+func TestRefreshReplayWithinGraceKeepsSessionOverHTTP(t *testing.T) {
+	r, accounts, _, _ := newHandlerHTTPTest(t)
+	accounts.add(t, "+84901234567", "password-123", teachers.StatusActive)
+
+	w, _ := doJSON(t, r, http.MethodPost, "/api/v1/auth/login",
+		`{"phone":"0901234567","password":"password-123"}`, nil)
+	first := refreshCookie(t, w)
+
+	w, _ = doJSON(t, r, http.MethodPost, "/api/v1/auth/refresh", "", func(req *http.Request) {
+		req.AddCookie(first)
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200 first refresh, got %d", w.Code)
+	}
+	rotated := refreshCookie(t, w)
+
+	// A second tab still holding the pre-rotation cookie refreshes moments
+	// later: it must stay signed in and receive its own cookie.
+	w, env := doJSON(t, r, http.MethodPost, "/api/v1/auth/refresh", "", func(req *http.Request) {
+		req.AddCookie(first)
+	})
+	if w.Code != http.StatusOK || !env.Success {
+		t.Fatalf("want 200 refresh within grace, got %d %+v", w.Code, env)
+	}
+	sibling := refreshCookie(t, w)
+	if sibling == nil || sibling.Value == first.Value || sibling.Value == rotated.Value {
+		t.Fatal("refresh within grace must set a fresh cookie of its own")
 	}
 }
 

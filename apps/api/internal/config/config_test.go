@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/hex"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +32,12 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.JWT.RefreshTTL != 720*time.Hour {
 		t.Errorf("JWT.RefreshTTL = %v, want 720h", cfg.JWT.RefreshTTL)
+	}
+	if cfg.HTTP.MaxBodyBytes != 1<<20 {
+		t.Errorf("HTTP.MaxBodyBytes = %d, want 1 MiB", cfg.HTTP.MaxBodyBytes)
+	}
+	if cfg.JWT.RefreshReuseGrace != 15*time.Second {
+		t.Errorf("JWT.RefreshReuseGrace = %v, want 15s", cfg.JWT.RefreshReuseGrace)
 	}
 	if cfg.LogLevel != "info" {
 		t.Errorf("LogLevel = %q, want info", cfg.LogLevel)
@@ -210,6 +217,21 @@ func TestLoadErrors(t *testing.T) {
 			wantSub: "API_ENV",
 		},
 		{
+			name:    "zero body cap",
+			mutate:  func(t *testing.T) { t.Setenv("API_HTTP_MAX_BODY_BYTES", "0") },
+			wantSub: "API_HTTP_MAX_BODY_BYTES",
+		},
+		{
+			name:    "malformed trusted proxy",
+			mutate:  func(t *testing.T) { t.Setenv("API_HTTP_TRUSTED_PROXIES", "10.0.0.0/8,abc") },
+			wantSub: "API_HTTP_TRUSTED_PROXIES",
+		},
+		{
+			name:    "negative refresh reuse grace",
+			mutate:  func(t *testing.T) { t.Setenv("API_JWT_REFRESH_REUSE_GRACE", "-1s") },
+			wantSub: "API_JWT_REFRESH_REUSE_GRACE",
+		},
+		{
 			name:    "invalid log level",
 			mutate:  func(t *testing.T) { t.Setenv("API_LOG_LEVEL", "verbose") },
 			wantSub: "API_LOG_LEVEL",
@@ -296,6 +318,7 @@ func TestParsesOverrides(t *testing.T) {
 	setRequired(t)
 	t.Setenv("API_HTTP_PORT", "9999")
 	t.Setenv("API_CORS_ORIGINS", "https://a.example,https://b.example")
+	t.Setenv("API_HTTP_TRUSTED_PROXIES", "10.0.0.0/8, 172.18.0.1")
 
 	cfg, err := Load()
 	if err != nil {
@@ -306,6 +329,25 @@ func TestParsesOverrides(t *testing.T) {
 	}
 	if len(cfg.CORSOrigins) != 2 {
 		t.Errorf("CORSOrigins = %v, want 2 entries", cfg.CORSOrigins)
+	}
+	if want := []string{"10.0.0.0/8", "172.18.0.1"}; !slices.Equal(cfg.HTTP.TrustedProxies, want) {
+		t.Errorf("HTTP.TrustedProxies = %v, want %v", cfg.HTTP.TrustedProxies, want)
+	}
+}
+
+// TestTrustedProxiesEmptyTrustsNone proves the unset and blank forms of the
+// variable both resolve to an empty list rather than one empty entry.
+func TestTrustedProxiesEmptyTrustsNone(t *testing.T) {
+	setRequired(t)
+	for _, v := range []string{"", " , "} {
+		t.Setenv("API_HTTP_TRUSTED_PROXIES", v)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load() with %q: %v", v, err)
+		}
+		if len(cfg.HTTP.TrustedProxies) != 0 {
+			t.Errorf("TrustedProxies with %q = %v, want empty", v, cfg.HTTP.TrustedProxies)
+		}
 	}
 }
 

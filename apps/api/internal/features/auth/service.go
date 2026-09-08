@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime"
 	"strings"
 	"time"
 
@@ -98,8 +99,14 @@ type Service struct {
 	// supported state (operator CLI builds the service without one) — publish
 	// goes through the nil-safe helper below.
 	bus events.Bus
-	now func() time.Time
+	// gate bounds concurrent bcrypt work; see bcryptGate.
+	gate *bcryptGate
+	now  func() time.Time
 }
+
+// bcryptGateWait is how long a login waits for a bcrypt slot before it is
+// turned away with 429.
+const bcryptGateWait = 2 * time.Second
 
 // NewService builds the auth service. owners and dmSender are constructor
 // parameters, not setters: by the time router.go builds auth, centers.Service
@@ -120,6 +127,7 @@ func NewService(accounts AccountService, repo Repository, issuer *TokenIssuer, t
 		resetCooldown: cfg.ResetCooldown,
 		publicBaseURL: publicBaseURL,
 		bus:           bus,
+		gate:          newBcryptGate(runtime.GOMAXPROCS(0), bcryptGateWait),
 		now:           time.Now,
 	}
 }
@@ -149,24 +157,36 @@ func (s *Service) Login(ctx context.Context, req LoginRequest, meta ClientMeta) 
 		return nil, invalid
 	}
 
+	// hash stays nil for an unknown phone, a non-active account, or an
+	// account without a password: every one of those still pays for one
+	// bcrypt comparison inside the gate, so a rejection takes the same time
+	// and the same slot whichever reason caused it.
+	var hash *string
 	p, err := s.accounts.GetByPhone(ctx, req.Phone)
-	if err != nil {
+	switch {
+	case err != nil:
 		var appErr *apperror.AppError
-		if errors.As(err, &appErr) && appErr.Code == apperror.CodeNotFound {
-			burnPassword(req.Password)
-			return rejected()
+		if !errors.As(err, &appErr) || appErr.Code != apperror.CodeNotFound {
+			return nil, err
 		}
-		return nil, err
+	case p.Account.Status == teachers.StatusActive:
+		hash = p.Account.PasswordHash
 	}
-	if p.Account.Status != teachers.StatusActive {
-		burnPassword(req.Password)
-		return rejected()
+
+	matched := false
+	if err := s.gate.run(ctx, func() {
+		if hash == nil {
+			burnPassword(req.Password)
+			return
+		}
+		matched = bcrypt.CompareHashAndPassword([]byte(*hash), []byte(req.Password)) == nil
+	}); err != nil {
+		// No verdict was reached, so no LoginFailed event: the credentials
+		// were never examined. A caller that gave up while waiting ends the
+		// same way; answering 429 keeps it out of the error log.
+		return nil, apperror.TooManyRequests("server busy, try again later")
 	}
-	if p.Account.PasswordHash == nil {
-		burnPassword(req.Password)
-		return rejected()
-	}
-	if bcrypt.CompareHashAndPassword([]byte(*p.Account.PasswordHash), []byte(req.Password)) != nil {
+	if !matched {
 		return rejected()
 	}
 	if err := s.accounts.TouchLastLogin(ctx, p.Account.ID); err != nil {
@@ -206,31 +226,19 @@ func (s *Service) Refresh(ctx context.Context, plaintext string) (*Session, erro
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
-	// The revocations below run outside the rotation transaction on purpose:
-	// they must persist even though the request itself fails.
+	// Already rotated away when read: either replay, or the second of two
+	// tabs refreshing the same cookie. The reuse-grace window tells them
+	// apart; outside it the whole family dies. This runs before the expiry
+	// check so that replaying an old token still kills the family.
 	if t.Revoked() {
-		if err := s.repo.RevokeFamily(ctx, t.FamilyID, now); err != nil {
-			return nil, apperror.Internal(err)
-		}
-		return nil, invalid
+		return s.reuseAfterRotation(ctx, t, now, true)
 	}
 	if t.Expired(now) {
 		return nil, invalid
 	}
-	p, err := s.accounts.GetByID(ctx, t.UserID)
+	p, err := s.activeProfile(ctx, t.UserID)
 	if err != nil {
-		var appErr *apperror.AppError
-		if errors.As(err, &appErr) && appErr.Code == apperror.CodeNotFound {
-			return nil, invalid
-		}
-		// Transient failures (e.g. pool exhaustion) must surface as 500, not
-		// masquerade as 401 — a 401 here logs nothing and logs the user out.
 		return nil, err
-	}
-	// A disabled account keeps its unexpired refresh tokens; they must stop
-	// working the moment the account is disabled.
-	if p.Account.Status != teachers.StatusActive {
-		return nil, invalid
 	}
 
 	var sess *Session
@@ -243,13 +251,10 @@ func (s *Service) Refresh(ctx context.Context, plaintext string) (*Session, erro
 		return err
 	})
 	// Losing the Revoke race means a concurrent request rotated this same
-	// token — that is reuse, so the family dies. Outside the transaction so
-	// the revocation persists despite the request failing.
+	// token between our read and our update — by construction within the
+	// grace window, so no age check is needed.
 	if errors.Is(err, ErrTokenAlreadyRevoked) {
-		if rerr := s.repo.RevokeFamily(ctx, t.FamilyID, now); rerr != nil {
-			return nil, apperror.Internal(rerr)
-		}
-		return nil, invalid
+		return s.reuseAfterRotation(ctx, t, now, false)
 	}
 	if err != nil {
 		var appErr *apperror.AppError
@@ -259,6 +264,70 @@ func (s *Service) Refresh(ctx context.Context, plaintext string) (*Session, erro
 		return nil, err
 	}
 	return sess, nil
+}
+
+// reuseAfterRotation handles a refresh token that was already revoked by a
+// rotation. Within the reuse-grace window, while the family still has a live
+// token, the presenter is treated as a concurrent tab and gets a sibling
+// token in the same family. Otherwise it is replay: the family is revoked
+// and the request fails. checkAge is false when the caller just lost the
+// Revoke race, which is concurrent by definition.
+//
+// The family revocation runs outside any transaction on purpose: it must
+// persist even though the request itself fails.
+func (s *Service) reuseAfterRotation(ctx context.Context, t *RefreshToken, now time.Time, checkAge bool) (*Session, error) {
+	invalid := apperror.Unauthorized("invalid refresh token")
+	grace := s.issuer.RefreshReuseGrace()
+	within := grace > 0 && (!checkAge || (t.RevokedAt != nil && now.Sub(*t.RevokedAt) <= grace))
+	if within {
+		alive, err := s.repo.FamilyHasLive(ctx, t.FamilyID)
+		if err != nil {
+			return nil, apperror.Internal(err)
+		}
+		if alive {
+			p, err := s.activeProfile(ctx, t.UserID)
+			if err == nil {
+				slog.Info("refresh reuse within grace", "family_id", t.FamilyID)
+				return s.issueSession(ctx, p, t.FamilyID)
+			}
+			if !isUnauthorized(err) {
+				return nil, err
+			}
+			// The account is gone or no longer active: nothing in this
+			// family may live on, so fall through to the revocation.
+		}
+	}
+	if err := s.repo.RevokeFamily(ctx, t.FamilyID, now); err != nil {
+		return nil, apperror.Internal(err)
+	}
+	return nil, invalid
+}
+
+// isUnauthorized reports whether err is a 401 from activeProfile, as opposed
+// to a transient failure that must surface as 500.
+func isUnauthorized(err error) bool {
+	var appErr *apperror.AppError
+	return errors.As(err, &appErr) && appErr.Code == apperror.CodeUnauthorized
+}
+
+// activeProfile loads the account behind a refresh token and rejects any
+// that is not active: a disabled account keeps its unexpired refresh tokens,
+// and they must stop working the moment the account is disabled.
+func (s *Service) activeProfile(ctx context.Context, userID uuid.UUID) (*teachers.Profile, error) {
+	p, err := s.accounts.GetByID(ctx, userID)
+	if err != nil {
+		var appErr *apperror.AppError
+		if errors.As(err, &appErr) && appErr.Code == apperror.CodeNotFound {
+			return nil, apperror.Unauthorized("invalid refresh token")
+		}
+		// Transient failures (e.g. pool exhaustion) must surface as 500, not
+		// masquerade as 401 — a 401 here logs nothing and logs the user out.
+		return nil, err
+	}
+	if p.Account.Status != teachers.StatusActive {
+		return nil, apperror.Unauthorized("invalid refresh token")
+	}
+	return p, nil
 }
 
 // Logout revokes the presented token's whole family. Unknown tokens succeed
