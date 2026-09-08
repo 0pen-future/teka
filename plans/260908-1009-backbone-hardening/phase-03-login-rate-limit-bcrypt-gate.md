@@ -40,6 +40,12 @@ POST /auth/login
 
 Vì sao chỉ hash password khi login: `ResetPassword` tra token trước (cheap), token lạ bị từ chối trước khi bcrypt; `forgot-password` không bcrypt. Vậy gate chỉ cần ở `Login`.
 
+**Cập nhật sau review — MINOR-5 (ctx cancel không còn thoát ra 500 giả):** khi caller bỏ đi trong lúc chờ gate (`ctx.Canceled`/`ctx.DeadlineExceeded`), bản đầu chỉ dịch `errBcryptBusy` sang 429 còn lỗi context thoát nguyên vẹn và bị `response.Err` biến thành `INTERNAL_ERROR` 500 kèm log error giả. Bản sửa cuối bắt cả hai loại lỗi (`errBcryptBusy` lẫn context) và trả `apperror.TooManyRequests` cho tất cả, có test `TestLoginRefusesWhenCallerLeavesWhileWaitingForBcrypt`.
+
+**Cập nhật sau review — MINOR-6 (swagger thiếu 429 cho login):** `handler.go` annotation của `/auth/login` nay có thêm `@Failure 429` cạnh 401/422, khớp với `forgot-password`/`reset-password` đã có; `make api-docs` chạy lại không sinh diff ngoài dòng này.
+
+**Cập nhật sau review (3 cycle):** thiết kế ban đầu của `JSONBodyKey` tra khoá trên `map[string]any` để lấy giá trị cho limiter. Review phát hiện điều đó tự cài lại luật khớp field của `encoding/json` và lệch với nó theo hai trục — hoa/thường, khoá trùng (MAJOR-1) và byte thừa sau JSON object do `json.Unmarshal` đòi input là đúng một giá trị còn gin bind bằng `json.Decoder` (MAJOR-11). Bản sửa cuối cùng bỏ hẳn việc tự cài luật: `JSONBodyKey` dựng một struct một field bằng `reflect.StructOf` mang đúng tag `json:"<field>"`, rồi decode qua `json.NewDecoder(...).Decode(...)` — cùng đường mà `ShouldBindJSON` dùng — nên limiter luôn thấy đúng giá trị handler sẽ bind, không có luật nào phải tự bảo trì. `PhoneKey` không đổi cấu trúc, chỉ thừa hưởng bản sửa qua `JSONBodyKey`.
+
 ## Related Code Files
 
 - Create: `apps/api/internal/features/auth/bcrypt_gate.go`, `apps/api/internal/features/auth/bcrypt_gate_test.go`.
@@ -63,7 +69,7 @@ Vì sao chỉ hash password khi login: `ResetPassword` tra token trước (cheap
    func newBcryptGate(size int, wait time.Duration) *bcryptGate
    func (g *bcryptGate) run(ctx context.Context, fn func()) error // ErrBcryptBusy khi hết chờ / ctx done
    ```
-   `NewService` tạo `newBcryptGate(max(1, runtime.GOMAXPROCS(0)), bcryptGateWait)`. Test: size 1, wait 10ms; chiếm slot trong goroutine → `run` thứ hai trả `ErrBcryptBusy`; thả slot → chạy được; ctx cancel → trả `ctx.Err()`.
+   `NewService` tạo `newBcryptGate(runtime.GOMAXPROCS(0), bcryptGateWait)` (không cần bọc `max(1, …)`: `runtime.GOMAXPROCS(0)` luôn ≥ 1, review NIT-9 xác nhận lớp bọc là code phòng thủ chết). Test: size 1, wait 10ms; chiếm slot trong goroutine → `run` thứ hai trả `ErrBcryptBusy`; thả slot → chạy được; ctx cancel → trả `ctx.Err()`.
 3. **`Login`.** Bọc cả hai đường trong `gate.run`; `ErrBcryptBusy` → `apperror.TooManyRequests(...)`, return trước khi publish event. Test service: `svc.gate = newBcryptGate(1, 10*time.Millisecond)`, chiếm slot, `Login` → `apperror` code `TOO_MANY_REQUESTS`, `fakeBus` không nhận `LoginFailed`; đường phone lạ cũng 429 (không lộ tài khoản tồn tại hay không).
 4. **Routes + router.** Chữ ký `RegisterRoutes`; router:
    ```go

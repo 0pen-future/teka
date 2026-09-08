@@ -13,7 +13,9 @@ blocks: []
 
 # Backbone hardening: refresh grace, body cap, login limit, web cache boundary, roster invalidation
 
-Status: in-progress · Nguồn: `plans/reports/review-260905-2208-architecture-review.md` finding **5, 6, 7, 8, 10** (tất cả CONFIRMED). Finding 1–4 và 9 đã có plan riêng (`plans/260906-0627-authz-write-scope-root-cause`, completed) hoặc ngoài phạm vi plan này.
+Status: completed · Nguồn: `plans/reports/review-260905-2208-architecture-review.md` finding **5, 6, 7, 8, 10** (tất cả CONFIRMED). Finding 1–4 và 9 đã có plan riêng (`plans/260906-0627-authz-write-scope-root-cause`, completed) hoặc ngoài phạm vi plan này.
+
+Cả 5 phase đã implement, review 3 cycle (8 → 8.5 → 9 → 9.5, DONE, không còn finding mở) và test xanh. Chi tiết: [tiến độ cuối](./reports/progress-260908-backbone-hardening.md), [code review](./reports/code-review-260908-backbone-hardening.md), [test report](./reports/test-report-260908-backbone-hardening.md).
 
 ## Overview
 
@@ -67,13 +69,13 @@ Nhóm chạy song song được: `{1}`, `{2 → 3}`, `{4}`, `{5}` — khác file
 
 ## Success Criteria
 
-- [ ] F5: test unit + integration chứng minh hai refresh đồng thời cùng token → cả hai 200, family còn sống với 2 token live; replay sau grace hoặc sau logout → 401 + family chết; `API_JWT_REFRESH_REUSE_GRACE=0` khôi phục hành vi cũ nguyên vẹn.
-- [ ] F6: `POST /api/v1/auth/forgot-password` với `Content-Length` 100 MB trả 413 `PAYLOAD_TOO_LARGE` mà handler và limiter không chạy; body chunked vượt cap cũng 413; `POST /imports/roster` 2 MiB vẫn qua cap toàn server và giữ hành vi cũ.
-- [ ] F7: 11 lần login sai cùng số (`0…` và `+84…` xen kẽ) → lần 11 là 429; số khác không ảnh hưởng; gate 1 slot bận → 429 không publish `LoginFailed`; env trusted proxies rỗng → `SetTrustedProxies(nil)` và không mount IP limiter (router test).
-- [ ] F8: cache có dữ liệu, `clearSession()` (refresh chết hoặc logout) → `queryCache` rỗng; đổi user A→B → rỗng; `setAccessToken`/`setUser` cùng id → giữ nguyên; test MSW: query 401 → refresh 401 → cache rỗng.
-- [ ] F10: sau `mutateAsync` của create/end/delete/import/anonymize, `queryClient.getQueryState(sessionsKeys.roster(id)).isInvalidated === true`.
-- [ ] `make test-api` (kể cả integration Docker), `make lint-api`, `cd apps/web && npm run typecheck && npm run test`, `make lint-web` đều xanh; `make api-docs` không diff ngoài ý định.
-- [ ] Docs bốn file trên phản ánh hành vi mới; review cross-module (`/ak:code-review` hoặc reviewer) trước merge vì chạm auth và middleware toàn server.
+- [x] F5: test unit + integration chứng minh hai refresh đồng thời cùng token → cả hai 200, family còn sống với 2 token live; replay sau grace hoặc sau logout → 401 + family chết; `API_JWT_REFRESH_REUSE_GRACE=0` khôi phục hành vi cũ nguyên vẹn.
+- [x] F6: `POST /api/v1/auth/forgot-password` với `Content-Length` 100 MB trả 413 `PAYLOAD_TOO_LARGE` mà handler và limiter không chạy; body chunked vượt cap cũng 413; `POST /imports/roster` 2 MiB vẫn qua cap toàn server và giữ hành vi cũ.
+- [x] F7: 11 lần login sai cùng số (`0…` và `+84…` xen kẽ) → lần 11 là 429; số khác không ảnh hưởng; gate 1 slot bận → 429 không publish `LoginFailed`; env trusted proxies rỗng → `SetTrustedProxies(nil)` và không mount IP limiter (router test).
+- [x] F8: cache có dữ liệu, `clearSession()` (refresh chết hoặc logout) → `queryCache` rỗng; đổi user A→B → rỗng; `setAccessToken`/`setUser` cùng id → giữ nguyên; test MSW: query 401 → refresh 401 → cache rỗng.
+- [x] F10: sau `mutateAsync` của create/end/delete/import/anonymize, `queryClient.getQueryState(sessionsKeys.roster(id)).isInvalidated === true`.
+- [x] `make test-api` (kể cả integration Docker), `make lint-api`, `cd apps/web && npm run typecheck && npm run test`, `make lint-web` đều xanh; `make api-docs` không diff ngoài ý định.
+- [x] Docs bốn file trên phản ánh hành vi mới; review cross-module (`/ak:code-review` hoặc reviewer) trước merge vì chạm auth và middleware toàn server.
 
 ## Rủi ro chung
 

@@ -83,6 +83,8 @@ Cấu hình đi qua `TokenIssuer` (đã nhận `config.JWTConfig`) để **khôn
    ```
    Gọi nó ở hai chỗ (nhánh `t.Revoked()` với `checkAge=true`; nhánh `errors.Is(err, ErrTokenAlreadyRevoked)` với `checkAge=false`). `service.go` đã dùng `slog` package-level (`slog.Warn` ở nhánh reset DM), dùng cùng cách.
    Lưu ý: `issueSession` ngoài tx chỉ có một `Create` — không cần `WithinTx`.
+
+   **Cập nhật sau review (đóng MINOR-3):** pseudocode trên revoke family vô điều kiện khi `activeProfile` lỗi. Bản sửa cuối tách hai loại lỗi bằng helper `isUnauthorized(err)`: lỗi 401 thật (tài khoản không còn tồn tại/không active) mới rơi xuống `RevokeFamily` + 401 như cũ; lỗi transient (500, ví dụ DB lỗi tạm thời) trả nguyên `err` mà **không** revoke family — giết family vì một lỗi hạ tầng tạm thời là sai. Hàm cuối cùng tên `reuseAfterRotation` (không phải `recoverRotationRace`).
 5. **Unit test** (`service_test.go`, dùng `svc.now` injectable):
    - Chỉnh `TestRefreshReuseRevokesFamily`: sau rotation, tiến `svc.now` thêm `grace + 1s` rồi replay T0 → 401 và family chết (giữ assertion cũ).
    - Thêm `TestRefreshReuseWithinGraceIssuesSiblingToken`: T0 → T1; replay T0 ngay → 200, T2 khác T1, cùng family, cả T1 và T2 sống; sau đó tiến `svc.now` quá grace, replay T0 lần nữa → 401 và **cả T1, T2** đều bị revoke.

@@ -97,3 +97,5 @@ Gin resolve route trước khi chạy chain nên `c.FullPath()` đã có giá tr
 - **`MaxBytesReader` đóng kết nối khi vượt cap** (`Connection: close`) — hành vi chuẩn Go, chấp nhận.
 - **Gin bọc lỗi decoder** khiến `errors.As` không khớp → test bước 1 bắt sớm; fallback so chuỗi có ghi lý do.
 - **Exempt bằng `FullPath` lệ thuộc chuỗi route** — nếu route import đổi path, cap 1 MiB áp lên và test import 1.5 MiB (bước 5d) sẽ đỏ, đủ làm lưới đỡ.
+
+**Cập nhật sau review (NIT-8 đã đóng):** rủi ro trên ban đầu chỉ được bảo vệ ở mức middleware (`bodylimit_test.go` tự đăng ký route literal, không chạm router thật). Review chỉ ra liên kết giữa hằng exempt trong `router.go` và route thật ở `imports/routes.go` không được test router-level nào giữ. Bản sửa cuối thêm `TestRosterImportIsExemptFromGlobalBodyCap` (`apps/api/internal/server/router_test.go`) gửi body > 1 MiB vào route `/api/v1/imports/roster` thật qua `NewRouter` và assert không bị 413 — nếu path exempt lệch khỏi route thật, test này đỏ ngay ở mức unit, không cần đợi suite Docker.
