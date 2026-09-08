@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,12 +13,15 @@ import (
 	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/response"
+	"teka/apps/api/internal/shared/validation"
 )
 
-// KeyFunc extracts the rate-limit bucket key for a request. Keys must be a
-// business identity (an invite/reset token, a phone number) — never
-// c.ClientIP(): the API runs behind Traefik with SetTrustedProxies(nil), so
-// ClientIP() collapses every caller into one shared bucket.
+// KeyFunc extracts the rate-limit bucket key for a request. Keys are a
+// business identity (an invite/reset token, a phone number). ClientIPKey is
+// the one exception and is only mounted when the router has been told which
+// proxies to trust: behind Traefik with SetTrustedProxies(nil), ClientIP()
+// is the proxy's socket address and would collapse every caller into one
+// shared bucket.
 type KeyFunc func(c *gin.Context) string
 
 // window is one fixed-window counter for a single key.
@@ -133,6 +137,25 @@ func JSONBodyKey(field string) KeyFunc {
 		v, _ := payload[field].(string)
 		return v
 	}
+}
+
+// PhoneKey rate-limits on a phone field of the JSON body, normalized so the
+// local (0…) and E.164 (+84…) spellings of one number share a bucket. A
+// value that is not a Vietnamese number is still limited on its trimmed raw
+// form, so a caller cannot dodge the bucket with a malformed spelling; only
+// an absent field yields "" (binding rejects that request on its own).
+func PhoneKey(field string) KeyFunc {
+	raw := JSONBodyKey(field)
+	return func(c *gin.Context) string {
+		return validation.NormalizePhone(strings.TrimSpace(raw(c)))
+	}
+}
+
+// ClientIPKey rate-limits on the caller's IP as gin resolves it. Mount it
+// only when the router has SetTrustedProxies from configuration, so
+// X-Forwarded-For is honoured from the real proxy and from nobody else.
+func ClientIPKey() KeyFunc {
+	return func(c *gin.Context) string { return c.ClientIP() }
 }
 
 // errReader replays one read error on every Read.

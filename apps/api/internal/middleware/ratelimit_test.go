@@ -219,3 +219,49 @@ func TestRateLimitSkipsEmptyKey(t *testing.T) {
 		}
 	}
 }
+
+func TestPhoneKeyNormalizesLocalAndInternationalForms(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	key := PhoneKey("phone")
+	keyFor := func(body string) string {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(body))
+		c.Request.Header.Set("Content-Type", "application/json")
+		return key(c)
+	}
+
+	local, intl := keyFor(`{"phone":" 0901234567 "}`), keyFor(`{"phone":"+84901234567"}`)
+	if local != "+84901234567" || local != intl {
+		t.Fatalf("local = %q, international = %q, want both +84901234567", local, intl)
+	}
+	if got := keyFor(`{"phone":"not-a-phone"}`); got != "not-a-phone" {
+		t.Fatalf("malformed phone must still be limited on its raw form, got %q", got)
+	}
+	if got := keyFor(`{"password":"x"}`); got != "" {
+		t.Fatalf("absent phone must yield an empty key, got %q", got)
+	}
+}
+
+func TestClientIPKeyUsesGinResolvedIP(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	_ = r.SetTrustedProxies([]string{"10.0.0.0/8"})
+	var got string
+	r.GET("/x", func(c *gin.Context) { got = ClientIPKey()(c); c.Status(http.StatusOK) })
+
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	req.RemoteAddr = "10.0.0.1:1234"
+	req.Header.Set("X-Forwarded-For", "203.0.113.9")
+	r.ServeHTTP(httptest.NewRecorder(), req)
+	if got != "203.0.113.9" {
+		t.Fatalf("key = %q, want the forwarded client IP behind a trusted proxy", got)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/x", nil)
+	req.RemoteAddr = "198.51.100.4:1234"
+	req.Header.Set("X-Forwarded-For", "203.0.113.9")
+	r.ServeHTTP(httptest.NewRecorder(), req)
+	if got != "198.51.100.4" {
+		t.Fatalf("key = %q, want the socket address when the peer is not a trusted proxy", got)
+	}
+}

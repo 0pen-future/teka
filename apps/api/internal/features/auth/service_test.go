@@ -385,6 +385,40 @@ func TestLoginRejectsBadCredentials(t *testing.T) {
 	wantUnauthorized(t, err)
 }
 
+// TestLoginRefusesWhileBcryptGateIsBusy proves a login that cannot get a
+// bcrypt slot in time is turned away with 429 before the credentials are
+// judged: no LoginFailed is published, and a known phone is refused exactly
+// like an unknown one so the busy path leaks nothing about the account.
+func TestLoginRefusesWhileBcryptGateIsBusy(t *testing.T) {
+	rec := &busRecorder{}
+	svc, accounts, _ := newTestAuthService(t)
+	svc.bus = rec.bus()
+	svc.gate = newBcryptGate(1, 10*time.Millisecond)
+	accounts.add(t, "+84901234567", "correct-password", teachers.StatusActive)
+
+	release := make(chan struct{})
+	holding := make(chan struct{})
+	go func() {
+		_ = svc.gate.run(context.Background(), func() {
+			close(holding)
+			<-release
+		})
+	}()
+	<-holding
+	defer close(release)
+
+	for _, phone := range []string{"+84901234567", "+84909999999"} {
+		_, err := svc.Login(context.Background(), LoginRequest{Phone: phone, Password: "correct-password"}, testMeta)
+		var appErr *apperror.AppError
+		if !errors.As(err, &appErr) || appErr.Code != apperror.CodeTooManyReqs {
+			t.Fatalf("phone %s: want TOO_MANY_REQUESTS while the gate is busy, got %v", phone, err)
+		}
+	}
+	if len(rec.events) != 0 {
+		t.Fatalf("events = %v, want none: a busy gate never judged the credentials", rec.events)
+	}
+}
+
 func TestLoginRejectsDisabledAccount(t *testing.T) {
 	svc, accounts, _ := newTestAuthService(t)
 	accounts.add(t, "+84901234567", "correct-password", teachers.StatusDisabled)

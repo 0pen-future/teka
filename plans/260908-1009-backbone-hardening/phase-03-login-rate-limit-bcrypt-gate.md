@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "API: login rate limit + bcrypt gate + trusted proxies opt-in"
-status: pending
+status: completed
 priority: P1
 effort: "1d"
 dependencies: [2]
@@ -82,11 +82,11 @@ Vì sao chỉ hash password khi login: `ResetPassword` tra token trước (cheap
 
 ## Success Criteria
 
-- [ ] Lần login sai thứ 11 trong 1 phút cùng số (mọi định dạng) → 429; số khác không bị ảnh hưởng.
-- [ ] Gate bận → 429 `TOO_MANY_REQUESTS`, không `LoginFailed`, cả nhánh phone lạ lẫn phone đúng đều 429 (timing-safe).
-- [ ] Env trusted proxies rỗng → `SetTrustedProxies(nil)` và không có IP limiter; khác rỗng → có; giá trị sai → lỗi khởi động.
-- [ ] forgot-password dùng `PhoneKey`; test hiện có của forgot vẫn pass.
-- [ ] Web login hiển thị message 429; docs API + deployment cập nhật; lint/test xanh.
+- [x] Lần login sai thứ 11 trong 1 phút cùng số (mọi định dạng) → 429; số khác không bị ảnh hưởng.
+- [x] Gate bận → 429 `TOO_MANY_REQUESTS`, không `LoginFailed`, cả nhánh phone lạ lẫn phone đúng đều 429 (timing-safe).
+- [x] Env trusted proxies rỗng → `SetTrustedProxies(nil)` và không có IP limiter; khác rỗng → có; giá trị sai → lỗi khởi động.
+- [x] forgot-password dùng `PhoneKey`; test hiện có của forgot vẫn pass.
+- [x] Web login hiển thị message 429; docs API + deployment cập nhật; lint/test xanh.
 
 ## Risk Assessment
 

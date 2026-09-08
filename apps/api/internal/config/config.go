@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -42,6 +43,10 @@ type HTTPConfig struct {
 	// MaxBodyBytes caps every request body server-wide (default 1 MiB); the
 	// roster import route is exempt and enforces its own upload cap.
 	MaxBodyBytes int64 `env:"HTTP_MAX_BODY_BYTES" envDefault:"1048576"`
+	// TrustedProxies lists the reverse proxies (IPs or CIDRs) whose
+	// X-Forwarded-For the router may believe. Empty trusts none, so
+	// ClientIP() is the socket address and no per-IP login limiter runs.
+	TrustedProxies []string `env:"HTTP_TRUSTED_PROXIES" envSeparator:","`
 }
 
 // DatabaseConfig configures the PostgreSQL connection and pool.
@@ -231,6 +236,9 @@ func (c *Config) validate() error {
 	if c.HTTP.MaxBodyBytes <= 0 {
 		return fmt.Errorf("API_HTTP_MAX_BODY_BYTES must be positive, got %d", c.HTTP.MaxBodyBytes)
 	}
+	if err := c.normalizeTrustedProxies(); err != nil {
+		return err
+	}
 	if c.JWT.RefreshReuseGrace < 0 {
 		return fmt.Errorf("API_JWT_REFRESH_REUSE_GRACE must not be negative, got %v", c.JWT.RefreshReuseGrace)
 	}
@@ -281,6 +289,25 @@ func (c *Config) validateAudit() error {
 	if a.DrainTimeout <= 0 {
 		return fmt.Errorf("API_AUDIT_DRAIN_TIMEOUT must be positive, got %v", a.DrainTimeout)
 	}
+	return nil
+}
+
+// normalizeTrustedProxies trims the configured entries, drops blanks (an
+// empty variable must mean "trust nobody", not one empty entry) and rejects
+// anything that is neither an IP nor a CIDR.
+func (c *Config) normalizeTrustedProxies() error {
+	cleaned := c.HTTP.TrustedProxies[:0]
+	for _, raw := range c.HTTP.TrustedProxies {
+		p := strings.TrimSpace(raw)
+		if p == "" {
+			continue
+		}
+		if _, _, err := net.ParseCIDR(p); err != nil && net.ParseIP(p) == nil {
+			return fmt.Errorf("API_HTTP_TRUSTED_PROXIES entry %q is neither an IP nor a CIDR", p)
+		}
+		cleaned = append(cleaned, p)
+	}
+	c.HTTP.TrustedProxies = cleaned
 	return nil
 }
 

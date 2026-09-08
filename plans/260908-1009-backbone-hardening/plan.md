@@ -1,7 +1,7 @@
 ---
 title: "Backbone hardening: refresh grace, body cap, login limit, web cache boundary, roster invalidation"
 description: "Xử lý finding 5, 6, 7, 8, 10 của review kiến trúc 2026-09-05: refresh reuse có grace window, cap body toàn server, rate limit + bcrypt gate cho login, xoá query cache khi hết phiên, ghi danh invalidate roster điểm danh."
-status: in-progress
+status: completed
 priority: P1
 effort: "3.5d"
 tags: [api, web, security, auth, resilience, cache]
@@ -50,7 +50,7 @@ Năm lỗi độc lập nhau, cùng thuộc nhóm "backbone / vận hành / web 
 |---|-------|--------|-----------|-----------|
 | 1 | [API: refresh reuse grace window](./phase-01-refresh-reuse-grace.md) | Completed | — | 1d |
 | 2 | [API: cap body toàn server + 413](./phase-02-body-limit.md) | Completed | — | 0.5d |
-| 3 | [API: login rate limit + bcrypt gate + trusted proxies opt-in](./phase-03-login-rate-limit-bcrypt-gate.md) | Pending | 2 (cùng sửa `ratelimit.go`) | 1d |
+| 3 | [API: login rate limit + bcrypt gate + trusted proxies opt-in](./phase-03-login-rate-limit-bcrypt-gate.md) | Completed | 2 (cùng sửa `ratelimit.go`) | 1d |
 | 4 | [Web: xoá query cache tại ranh giới phiên](./phase-04-web-session-cache-reset.md) | Completed | — | 0.5d |
 | 5 | [Web: ghi danh invalidate roster điểm danh](./phase-05-enrollment-roster-invalidation.md) | Completed | — | 0.5d |
 

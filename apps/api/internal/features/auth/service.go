@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime"
 	"strings"
 	"time"
 
@@ -98,8 +99,14 @@ type Service struct {
 	// supported state (operator CLI builds the service without one) — publish
 	// goes through the nil-safe helper below.
 	bus events.Bus
-	now func() time.Time
+	// gate bounds concurrent bcrypt work; see bcryptGate.
+	gate *bcryptGate
+	now  func() time.Time
 }
+
+// bcryptGateWait is how long a login waits for a bcrypt slot before it is
+// turned away with 429.
+const bcryptGateWait = 2 * time.Second
 
 // NewService builds the auth service. owners and dmSender are constructor
 // parameters, not setters: by the time router.go builds auth, centers.Service
@@ -120,6 +127,7 @@ func NewService(accounts AccountService, repo Repository, issuer *TokenIssuer, t
 		resetCooldown: cfg.ResetCooldown,
 		publicBaseURL: publicBaseURL,
 		bus:           bus,
+		gate:          newBcryptGate(max(1, runtime.GOMAXPROCS(0)), bcryptGateWait),
 		now:           time.Now,
 	}
 }
@@ -149,24 +157,38 @@ func (s *Service) Login(ctx context.Context, req LoginRequest, meta ClientMeta) 
 		return nil, invalid
 	}
 
+	// hash stays nil for an unknown phone, a non-active account, or an
+	// account without a password: every one of those still pays for one
+	// bcrypt comparison inside the gate, so a rejection takes the same time
+	// and the same slot whichever reason caused it.
+	var hash *string
 	p, err := s.accounts.GetByPhone(ctx, req.Phone)
-	if err != nil {
+	switch {
+	case err != nil:
 		var appErr *apperror.AppError
-		if errors.As(err, &appErr) && appErr.Code == apperror.CodeNotFound {
+		if !errors.As(err, &appErr) || appErr.Code != apperror.CodeNotFound {
+			return nil, err
+		}
+	case p.Account.Status == teachers.StatusActive:
+		hash = p.Account.PasswordHash
+	}
+
+	matched := false
+	if err := s.gate.run(ctx, func() {
+		if hash == nil {
 			burnPassword(req.Password)
-			return rejected()
+			return
+		}
+		matched = bcrypt.CompareHashAndPassword([]byte(*hash), []byte(req.Password)) == nil
+	}); err != nil {
+		// No verdict was reached, so no LoginFailed event: the credentials
+		// were never examined.
+		if errors.Is(err, errBcryptBusy) {
+			return nil, apperror.TooManyRequests("server busy, try again later")
 		}
 		return nil, err
 	}
-	if p.Account.Status != teachers.StatusActive {
-		burnPassword(req.Password)
-		return rejected()
-	}
-	if p.Account.PasswordHash == nil {
-		burnPassword(req.Password)
-		return rejected()
-	}
-	if bcrypt.CompareHashAndPassword([]byte(*p.Account.PasswordHash), []byte(req.Password)) != nil {
+	if !matched {
 		return rejected()
 	}
 	if err := s.accounts.TouchLastLogin(ctx, p.Account.ID); err != nil {
