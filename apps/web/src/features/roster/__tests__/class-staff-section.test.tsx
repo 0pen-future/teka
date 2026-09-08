@@ -7,7 +7,9 @@ import { useAuthStore } from "@/features/auth";
 import { centerKeys } from "@/features/center";
 import { API_URL, ok } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
+import { pickOption } from "@/test/pick-option";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
+import { mockViewport } from "@/test/viewport";
 
 import { ClassStaffSection } from "../components/class-staff-section";
 import {
@@ -63,6 +65,7 @@ function renderSection() {
 beforeEach(() => {
   resetRosterStore();
   server.use(...rosterHandlers);
+  mockViewport(1024);
 });
 
 afterEach(() => {
@@ -119,10 +122,7 @@ describe("ClassStaffSection", () => {
 
     await screen.findByText("Thiếu Học vụ");
     await user.click(screen.getByRole("button", { name: "+ Thêm học vụ" }));
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Chọn học vụ" }),
-      staffCandidateHocVu.id,
-    );
+    await pickOption(user, screen, "Chọn học vụ", staffCandidateHocVu.full_name);
     await user.click(screen.getByRole("button", { name: "Xác nhận" }));
 
     expect(await screen.findByText(staffCandidateHocVu.full_name)).toBeInTheDocument();
@@ -136,10 +136,7 @@ describe("ClassStaffSection", () => {
 
     await screen.findByText("Thiếu Học vụ");
     await user.click(screen.getByRole("button", { name: "+ Thêm học vụ" }));
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Chọn học vụ" }),
-      staffCandidateHocVu.id,
-    );
+    await pickOption(user, screen, "Chọn học vụ", staffCandidateHocVu.full_name);
     await user.click(screen.getByRole("button", { name: "Xác nhận" }));
     await screen.findByText(staffCandidateHocVu.full_name);
 
@@ -161,10 +158,7 @@ describe("ClassStaffSection", () => {
 
     await screen.findByText("Thiếu Học vụ");
     await user.click(screen.getByRole("button", { name: "+ Thêm học vụ" }));
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Chọn học vụ" }),
-      staffCandidateHocVu.id,
-    );
+    await pickOption(user, screen, "Chọn học vụ", staffCandidateHocVu.full_name);
     await user.click(screen.getByRole("button", { name: "Xác nhận" }));
     await screen.findByText(staffCandidateHocVu.full_name);
 
@@ -190,10 +184,7 @@ describe("ClassStaffSection", () => {
     // Soft-close hoc_vu first so there is an ended stint to reveal.
     await screen.findByText("Thiếu Học vụ");
     await user.click(screen.getByRole("button", { name: "+ Thêm học vụ" }));
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Chọn học vụ" }),
-      staffCandidateHocVu.id,
-    );
+    await pickOption(user, screen, "Chọn học vụ", staffCandidateHocVu.full_name);
     await user.click(screen.getByRole("button", { name: "Xác nhận" }));
     await screen.findByText(staffCandidateHocVu.full_name);
     await user.click(screen.getByRole("button", { name: "Gỡ" }));

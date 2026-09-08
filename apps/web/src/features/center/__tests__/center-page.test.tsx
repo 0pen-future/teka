@@ -1,13 +1,15 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
 import { mockInvites } from "@/features/invitation/__tests__/invitation-handlers";
 import { API_URL, CATALOG_VERSION, fail, ok } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
+import { pickOption } from "@/test/pick-option";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
+import { mockViewport } from "@/test/viewport";
 
 import { CenterPage } from "../pages/center-page";
 import {
@@ -34,6 +36,10 @@ function selfMember(isOwner: boolean) {
     is_owner: isOwner,
   });
 }
+
+beforeEach(() => {
+  mockViewport(1024);
+});
 
 afterEach(() => {
   useAuthStore.getState().clearSession();
@@ -233,10 +239,8 @@ describe("CenterPage — owner", () => {
 
     await user.click(await screen.findByRole("button", { name: "Phân quyền cho Giáo Viên A" }));
     const dialog = await screen.findByRole("dialog");
-    await user.selectOptions(
-      await within(dialog).findByRole("combobox", { name: "Quyền Gửi báo cáo học phí" }),
-      "grant",
-    );
+    await within(dialog).findByRole("combobox", { name: "Quyền Gửi báo cáo học phí" });
+    await pickOption(user, within(dialog), "Quyền Gửi báo cáo học phí", "Cấp riêng");
     await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
 
     expect(await screen.findByText("Đã lưu phân quyền")).toBeInTheDocument();
@@ -277,10 +281,8 @@ describe("CenterPage — owner", () => {
     expect(await screen.findByText("Thư ký gửi báo cáo")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Phân quyền cho Giáo Viên A" }));
     const dialog = await screen.findByRole("dialog");
-    await user.selectOptions(
-      await within(dialog).findByRole("combobox", { name: "Quyền Gửi báo cáo học phí" }),
-      "inherit",
-    );
+    await within(dialog).findByRole("combobox", { name: "Quyền Gửi báo cáo học phí" });
+    await pickOption(user, within(dialog), "Quyền Gửi báo cáo học phí", "Theo vai trò");
     await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
 
     expect(await screen.findByText("Đã lưu phân quyền")).toBeInTheDocument();
@@ -308,10 +310,8 @@ describe("CenterPage — owner", () => {
 
     await user.click(await screen.findByRole("button", { name: "Phân quyền cho Giáo Viên A" }));
     const dialog = await screen.findByRole("dialog");
-    await user.selectOptions(
-      await within(dialog).findByRole("combobox", { name: "Quyền Gửi báo cáo học phí" }),
-      "grant",
-    );
+    await within(dialog).findByRole("combobox", { name: "Quyền Gửi báo cáo học phí" });
+    await pickOption(user, within(dialog), "Quyền Gửi báo cáo học phí", "Cấp riêng");
     await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
 
     expect(await screen.findByText("Có lỗi xảy ra, thử lại sau")).toBeInTheDocument();
