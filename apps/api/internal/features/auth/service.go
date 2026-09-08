@@ -206,31 +206,18 @@ func (s *Service) Refresh(ctx context.Context, plaintext string) (*Session, erro
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
-	// The revocations below run outside the rotation transaction on purpose:
-	// they must persist even though the request itself fails.
-	if t.Revoked() {
-		if err := s.repo.RevokeFamily(ctx, t.FamilyID, now); err != nil {
-			return nil, apperror.Internal(err)
-		}
-		return nil, invalid
-	}
 	if t.Expired(now) {
 		return nil, invalid
 	}
-	p, err := s.accounts.GetByID(ctx, t.UserID)
-	if err != nil {
-		var appErr *apperror.AppError
-		if errors.As(err, &appErr) && appErr.Code == apperror.CodeNotFound {
-			return nil, invalid
-		}
-		// Transient failures (e.g. pool exhaustion) must surface as 500, not
-		// masquerade as 401 — a 401 here logs nothing and logs the user out.
-		return nil, err
+	// Already rotated away when read: either replay, or the second of two
+	// tabs refreshing the same cookie. The reuse-grace window tells them
+	// apart; outside it the whole family dies.
+	if t.Revoked() {
+		return s.reuseAfterRotation(ctx, t, now, true)
 	}
-	// A disabled account keeps its unexpired refresh tokens; they must stop
-	// working the moment the account is disabled.
-	if p.Account.Status != teachers.StatusActive {
-		return nil, invalid
+	p, err := s.activeProfile(ctx, t.UserID)
+	if err != nil {
+		return nil, err
 	}
 
 	var sess *Session
@@ -243,13 +230,10 @@ func (s *Service) Refresh(ctx context.Context, plaintext string) (*Session, erro
 		return err
 	})
 	// Losing the Revoke race means a concurrent request rotated this same
-	// token — that is reuse, so the family dies. Outside the transaction so
-	// the revocation persists despite the request failing.
+	// token between our read and our update — by construction within the
+	// grace window, so no age check is needed.
 	if errors.Is(err, ErrTokenAlreadyRevoked) {
-		if rerr := s.repo.RevokeFamily(ctx, t.FamilyID, now); rerr != nil {
-			return nil, apperror.Internal(rerr)
-		}
-		return nil, invalid
+		return s.reuseAfterRotation(ctx, t, now, false)
 	}
 	if err != nil {
 		var appErr *apperror.AppError
@@ -259,6 +243,59 @@ func (s *Service) Refresh(ctx context.Context, plaintext string) (*Session, erro
 		return nil, err
 	}
 	return sess, nil
+}
+
+// reuseAfterRotation handles a refresh token that was already revoked by a
+// rotation. Within the reuse-grace window, while the family still has a live
+// token, the presenter is treated as a concurrent tab and gets a sibling
+// token in the same family. Otherwise it is replay: the family is revoked
+// and the request fails. checkAge is false when the caller just lost the
+// Revoke race, which is concurrent by definition.
+//
+// The family revocation runs outside any transaction on purpose: it must
+// persist even though the request itself fails.
+func (s *Service) reuseAfterRotation(ctx context.Context, t *RefreshToken, now time.Time, checkAge bool) (*Session, error) {
+	invalid := apperror.Unauthorized("invalid refresh token")
+	grace := s.issuer.RefreshReuseGrace()
+	within := grace > 0 && (!checkAge || (t.RevokedAt != nil && now.Sub(*t.RevokedAt) <= grace))
+	if within {
+		alive, err := s.repo.FamilyHasLive(ctx, t.FamilyID)
+		if err != nil {
+			return nil, apperror.Internal(err)
+		}
+		if alive {
+			p, err := s.activeProfile(ctx, t.UserID)
+			if err != nil {
+				return nil, err
+			}
+			slog.Info("refresh reuse within grace", "family_id", t.FamilyID)
+			return s.issueSession(ctx, p, t.FamilyID)
+		}
+	}
+	if err := s.repo.RevokeFamily(ctx, t.FamilyID, now); err != nil {
+		return nil, apperror.Internal(err)
+	}
+	return nil, invalid
+}
+
+// activeProfile loads the account behind a refresh token and rejects any
+// that is not active: a disabled account keeps its unexpired refresh tokens,
+// and they must stop working the moment the account is disabled.
+func (s *Service) activeProfile(ctx context.Context, userID uuid.UUID) (*teachers.Profile, error) {
+	p, err := s.accounts.GetByID(ctx, userID)
+	if err != nil {
+		var appErr *apperror.AppError
+		if errors.As(err, &appErr) && appErr.Code == apperror.CodeNotFound {
+			return nil, apperror.Unauthorized("invalid refresh token")
+		}
+		// Transient failures (e.g. pool exhaustion) must surface as 500, not
+		// masquerade as 401 — a 401 here logs nothing and logs the user out.
+		return nil, err
+	}
+	if p.Account.Status != teachers.StatusActive {
+		return nil, apperror.Unauthorized("invalid refresh token")
+	}
+	return p, nil
 }
 
 // Logout revokes the presented token's whole family. Unknown tokens succeed

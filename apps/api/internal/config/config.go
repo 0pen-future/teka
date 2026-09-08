@@ -54,6 +54,11 @@ type JWTConfig struct {
 	Secret     string        `env:"JWT_SECRET,required"`
 	AccessTTL  time.Duration `env:"JWT_ACCESS_TTL" envDefault:"15m"`
 	RefreshTTL time.Duration `env:"JWT_REFRESH_TTL" envDefault:"720h"`
+	// RefreshReuseGrace is how long after a refresh token was rotated away a
+	// second presentation of it still counts as a concurrent rotation (two
+	// tabs refreshing the same cookie) rather than replay. Zero disables the
+	// window: every reuse revokes the family immediately.
+	RefreshReuseGrace time.Duration `env:"JWT_REFRESH_REUSE_GRACE" envDefault:"15s"`
 }
 
 // StatementsConfig configures parent statement links: the secret token
@@ -219,6 +224,9 @@ func (c *Config) validate() error {
 	}
 	if len(c.JWT.Secret) < minJWTSecretLen {
 		return fmt.Errorf("API_JWT_SECRET must be at least %d characters", minJWTSecretLen)
+	}
+	if c.JWT.RefreshReuseGrace < 0 {
+		return fmt.Errorf("API_JWT_REFRESH_REUSE_GRACE must not be negative, got %v", c.JWT.RefreshReuseGrace)
 	}
 	if _, err := parseLogLevel(c.LogLevel); err != nil {
 		return err

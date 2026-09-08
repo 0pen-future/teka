@@ -60,15 +60,24 @@ func extractResetToken(t *testing.T, text string) string {
 // scripted ResetDMSender a test can inspect afterward.
 func newIntegrationService(t *testing.T) (*auth.Service, *gorm.DB, *centers.Service, *capturingDMSender) {
 	t.Helper()
+	return newIntegrationServiceWithGrace(t, 0)
+}
+
+// newIntegrationServiceWithGrace is newIntegrationService with a refresh
+// reuse grace; the plain constructor runs strict (grace 0) so replay tests
+// keep their meaning.
+func newIntegrationServiceWithGrace(t *testing.T, grace time.Duration) (*auth.Service, *gorm.DB, *centers.Service, *capturingDMSender) {
+	t.Helper()
 	db := testutil.StartPostgres(t)
 	txMgr := database.NewTxManager(db)
 	teachersSvc := teachers.NewService(teachers.NewRepository(db))
 	centersSvc := centers.NewService(centers.NewRepository(db), txMgr, nil)
 	dmSender := &capturingDMSender{lookupOK: true}
 	issuer := auth.NewTokenIssuer(config.JWTConfig{
-		Secret:     testutil.JWTSecret,
-		AccessTTL:  15 * time.Minute,
-		RefreshTTL: 720 * time.Hour,
+		Secret:            testutil.JWTSecret,
+		AccessTTL:         15 * time.Minute,
+		RefreshTTL:        720 * time.Hour,
+		RefreshReuseGrace: grace,
 	})
 	cfg := config.OnboardingConfig{ResetTTL: 48 * time.Hour, ResetCooldown: 15 * time.Minute}
 	svc := auth.NewService(teachersSvc, auth.NewRepository(db), issuer, txMgr, centersSvc, dmSender, cfg, "https://app.example.com", nil)
@@ -109,6 +118,48 @@ func TestRefreshRotationAndReuseAgainstRealSQL(t *testing.T) {
 	require.EqualValues(t, 0, liveTokenCount(t, db), "reuse must revoke every live token in the family")
 
 	_, err = svc.Refresh(ctx, rotated.RefreshToken)
+	requireUnauthorized(t, err)
+}
+
+func TestRefreshConcurrentTabsAgainstRealSQL(t *testing.T) {
+	t.Parallel()
+	svc, db, _, _ := newIntegrationServiceWithGrace(t, 15*time.Second)
+	ctx := context.Background()
+
+	acct, _ := testutil.Teacher(t, db, testutil.WithPassword("password-123"))
+	sess, err := svc.Login(ctx, auth.LoginRequest{Phone: acct.Phone, Password: "password-123"}, auth.ClientMeta{})
+	require.NoError(t, err)
+
+	// Two tabs refresh the same cookie at once: one wins the row lock, the
+	// other loses it and must be treated as a concurrent tab, not replay.
+	results := make([]*auth.Session, 2)
+	errs := make([]error, 2)
+	var wg sync.WaitGroup
+	for i := range results {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			results[i], errs[i] = svc.Refresh(ctx, sess.RefreshToken)
+		}(i)
+	}
+	wg.Wait()
+	for i := range results {
+		require.NoError(t, errs[i], "tab %d must stay signed in", i)
+	}
+	require.NotEqual(t, results[0].RefreshToken, results[1].RefreshToken)
+	require.EqualValues(t, 2, liveTokenCount(t, db), "each tab holds its own live token in the family")
+
+	// A sequential replay inside the grace behaves the same way.
+	third, err := svc.Refresh(ctx, sess.RefreshToken)
+	require.NoError(t, err)
+	require.EqualValues(t, 3, liveTokenCount(t, db))
+
+	// Logout from any tab still takes the whole family down.
+	require.NoError(t, svc.Logout(ctx, third.RefreshToken, auth.ClientMeta{}))
+	require.EqualValues(t, 0, liveTokenCount(t, db))
+	_, err = svc.Refresh(ctx, results[0].RefreshToken)
+	requireUnauthorized(t, err)
+	_, err = svc.Refresh(ctx, sess.RefreshToken)
 	requireUnauthorized(t, err)
 }
 

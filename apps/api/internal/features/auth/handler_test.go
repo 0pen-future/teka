@@ -28,9 +28,10 @@ func newHandlerHTTPTest(t *testing.T) (*gin.Engine, *fakeAccountService, *fakeOw
 	owners := newFakeOwnerResolver()
 	dmSender := &fakeResetDMSender{}
 	jwtCfg := config.JWTConfig{
-		Secret:     "handler-test-secret-0123456789abcdef",
-		AccessTTL:  15 * time.Minute,
-		RefreshTTL: 720 * time.Hour,
+		Secret:            "handler-test-secret-0123456789abcdef",
+		AccessTTL:         15 * time.Minute,
+		RefreshTTL:        720 * time.Hour,
+		RefreshReuseGrace: testReuseGrace,
 	}
 	svc := NewService(accounts, newFakeTokenRepository(), NewTokenIssuer(jwtCfg), noopTxManager{},
 		owners, dmSender, testResetConfig(), "https://app.example.com", nil)
@@ -170,6 +171,36 @@ func TestRefreshRotatesCookieOverHTTP(t *testing.T) {
 	rotated := refreshCookie(t, w)
 	if rotated == nil || rotated.Value == first.Value {
 		t.Fatal("refresh must rotate the cookie value")
+	}
+}
+
+func TestRefreshReplayWithinGraceKeepsSessionOverHTTP(t *testing.T) {
+	r, accounts, _, _ := newHandlerHTTPTest(t)
+	accounts.add(t, "+84901234567", "password-123", teachers.StatusActive)
+
+	w, _ := doJSON(t, r, http.MethodPost, "/api/v1/auth/login",
+		`{"phone":"0901234567","password":"password-123"}`, nil)
+	first := refreshCookie(t, w)
+
+	w, _ = doJSON(t, r, http.MethodPost, "/api/v1/auth/refresh", "", func(req *http.Request) {
+		req.AddCookie(first)
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200 first refresh, got %d", w.Code)
+	}
+	rotated := refreshCookie(t, w)
+
+	// A second tab still holding the pre-rotation cookie refreshes moments
+	// later: it must stay signed in and receive its own cookie.
+	w, env := doJSON(t, r, http.MethodPost, "/api/v1/auth/refresh", "", func(req *http.Request) {
+		req.AddCookie(first)
+	})
+	if w.Code != http.StatusOK || !env.Success {
+		t.Fatalf("want 200 refresh within grace, got %d %+v", w.Code, env)
+	}
+	sibling := refreshCookie(t, w)
+	if sibling == nil || sibling.Value == first.Value || sibling.Value == rotated.Value {
+		t.Fatal("refresh within grace must set a fresh cookie of its own")
 	}
 }
 

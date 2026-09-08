@@ -32,6 +32,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.JWT.RefreshTTL != 720*time.Hour {
 		t.Errorf("JWT.RefreshTTL = %v, want 720h", cfg.JWT.RefreshTTL)
 	}
+	if cfg.JWT.RefreshReuseGrace != 15*time.Second {
+		t.Errorf("JWT.RefreshReuseGrace = %v, want 15s", cfg.JWT.RefreshReuseGrace)
+	}
 	if cfg.LogLevel != "info" {
 		t.Errorf("LogLevel = %q, want info", cfg.LogLevel)
 	}
@@ -208,6 +211,11 @@ func TestLoadErrors(t *testing.T) {
 			name:    "invalid env",
 			mutate:  func(t *testing.T) { t.Setenv("API_ENV", "staging") },
 			wantSub: "API_ENV",
+		},
+		{
+			name:    "negative refresh reuse grace",
+			mutate:  func(t *testing.T) { t.Setenv("API_JWT_REFRESH_REUSE_GRACE", "-1s") },
+			wantSub: "API_JWT_REFRESH_REUSE_GRACE",
 		},
 		{
 			name:    "invalid log level",

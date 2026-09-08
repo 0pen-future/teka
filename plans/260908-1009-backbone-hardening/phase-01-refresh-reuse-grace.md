@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "API: refresh reuse grace window"
-status: pending
+status: completed
 priority: P1
 effort: "1d"
 dependencies: []
@@ -97,11 +97,11 @@ Cấu hình đi qua `TokenIssuer` (đã nhận `config.JWTConfig`) để **khôn
 
 ## Success Criteria
 
-- [ ] `API_JWT_REFRESH_REUSE_GRACE` mặc định 15s, `0` tắt, âm lỗi khởi động; `.env.example` có dòng mới.
-- [ ] Unit: sibling token cùng family khi replay trong grace; 401 + family chết khi ngoài grace, sau logout, tài khoản không active, hoặc grace 0.
-- [ ] Integration: 2 goroutine refresh cùng token đều 200, `liveTokenCount == 2`; logout sau đó giết cả family.
-- [ ] Tất cả test cũ vẫn pass với assertion bảo mật nguyên vẹn (chỉ đổi mốc thời gian / cấu hình).
-- [ ] `docs/api-guidelines.md` mô tả grace; `make lint-api` xanh.
+- [x] `API_JWT_REFRESH_REUSE_GRACE` mặc định 15s, `0` tắt, âm lỗi khởi động; `.env.example` có dòng mới.
+- [x] Unit: sibling token cùng family khi replay trong grace; 401 + family chết khi ngoài grace, sau logout, tài khoản không active, hoặc grace 0.
+- [x] Integration: 2 goroutine refresh cùng token đều 200, `liveTokenCount == 2`; logout sau đó giết cả family.
+- [x] Tất cả test cũ vẫn pass với assertion bảo mật nguyên vẹn (chỉ đổi mốc thời gian / cấu hình).
+- [x] `docs/api-guidelines.md` mô tả grace; `make lint-api` xanh.
 
 ## Risk Assessment
 

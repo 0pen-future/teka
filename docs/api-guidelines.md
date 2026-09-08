@@ -449,9 +449,13 @@ per-field messages, anything else (malformed JSON) becomes a 400.
   delivered in an httpOnly `SameSite=Lax` cookie scoped to `/api/v1/auth`.
   `Secure` is set in production only — Safari drops Secure cookies on
   `http://localhost`, which would break local development. Every refresh
-  rotates the token within its family; presenting an already-rotated token
-  revokes the whole family (replay defense). Logout revokes the family and is
-  idempotent.
+  rotates the token within its family. Presenting an already-rotated token
+  within `API_JWT_REFRESH_REUSE_GRACE` (default 15s) while the family still
+  has a live token is treated as a concurrent tab refreshing the same cookie
+  and yields a sibling token in the same family; outside that window, or
+  once the family has no live token (logout, disable), it is replay and
+  revokes the whole family. Set the grace to `0` for strict revocation.
+  Logout revokes the family and is idempotent.
 - **Passwords**: bcrypt cost 12. Login responds identically (401) for unknown
   phone, disabled account, passwordless account, and wrong password, with a
   dummy bcrypt comparison on the non-compare paths to keep timing comparable.
