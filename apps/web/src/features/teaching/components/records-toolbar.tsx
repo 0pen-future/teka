@@ -1,10 +1,9 @@
 import { useId, type RefObject } from "react";
 import { Search, X } from "lucide-react";
 
+import { HvSelect } from "@/components/hv";
 import type { Class } from "@/features/roster";
 import { cn } from "@/lib/utils";
-
-import { RecordsClassSelect } from "./records-class-select";
 
 interface RecordsToolbarProps {
   classes: Class[];
@@ -141,11 +140,20 @@ export function RecordsToolbar({
         <span id={classLabelId} className={labelClassName}>
           Lớp
         </span>
-        <RecordsClassSelect
-          classes={classes}
-          selectedId={selectedClassId}
-          onSelect={onSelectClass}
+        <HvSelect
           labelId={classLabelId}
+          sheetTitle="Chọn lớp"
+          groupLabel="Lớp đang dạy"
+          searchNoun="lớp"
+          placeholder="Chọn lớp"
+          options={classes.map((k) => ({
+            value: k.id,
+            label: k.name,
+            meta: `${k.student_count} HS`,
+          }))}
+          value={selectedClassId}
+          onValueChange={onSelectClass}
+          className="min-w-[230px] max-sm:w-full"
         />
       </Field>
       <Field className="flex-1 basis-[260px]">
