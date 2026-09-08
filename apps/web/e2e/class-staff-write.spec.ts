@@ -32,7 +32,7 @@ async function login(page: Page, user: { phone: string; password: string; name: 
  */
 async function classIdFromRecordsPicker(page: Page, className: string): Promise<string> {
   await page.goto("/records");
-  await page.getByRole("button", { name: /^Lớp/ }).click();
+  await page.getByRole("combobox", { name: /^Lớp/ }).click();
   await page.getByRole("option", { name: new RegExp(className) }).click();
   await expect(page).toHaveURL(/class_id=/);
   const classId = new URL(page.url()).searchParams.get("class_id");
@@ -152,7 +152,9 @@ async function ensureClassTeacher(
   if ((await current.innerText()).includes(targetName)) {
     return;
   }
-  await card.getByLabel("Bàn giao cho").selectOption({ label: targetOptionLabel });
+  await card.getByLabel("Bàn giao cho").click();
+  // The option list portals to `body`, outside the card's DOM subtree.
+  await page.getByRole("option", { name: targetOptionLabel, exact: true }).click();
   await card.getByRole("button", { name: "Bàn giao lớp", exact: true }).click();
   await card.getByRole("button", { name: "Xác nhận bàn giao" }).click();
   await expect(page.getByText(new RegExp(`Đã bàn giao lớp cho ${targetName}`))).toBeVisible();

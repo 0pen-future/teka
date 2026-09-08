@@ -1,6 +1,13 @@
 import { useState } from "react";
 
-import { HvBadge, HvButton, HvModal, hvToast } from "@/components/hv";
+import {
+  HvBadge,
+  HvButton,
+  HvModal,
+  HvSelect,
+  type HvSelectOption,
+  hvToast,
+} from "@/components/hv";
 
 import { isStaleConflict } from "../api/permission-api";
 import {
@@ -17,6 +24,12 @@ export interface MemberPermissionsDialogProps {
 }
 
 type OverrideMode = "inherit" | "grant" | "deny";
+
+const OVERRIDE_MODE_OPTIONS: HvSelectOption[] = [
+  { value: "inherit", label: "Theo vai trò" },
+  { value: "grant", label: "Cấp riêng" },
+  { value: "deny", label: "Chặn riêng" },
+];
 
 function initialModes(member: MemberPermissions): Record<string, OverrideMode> {
   const modes: Record<string, OverrideMode> = {};
@@ -78,6 +91,9 @@ export function MemberPermissionsDialog({
     });
 
   function handleRoleChange(roleId: string) {
+    if (!member || roleId === (member.role_id ?? "")) {
+      return;
+    }
     assignRole.mutate(
       { teacherId, roleId },
       {
@@ -149,26 +165,19 @@ export function MemberPermissionsDialog({
         <label htmlFor="member-role" className="text-[13px] font-bold text-ink-700">
           Vai trò
         </label>
-        <select
+        <HvSelect
           id="member-role"
+          options={data.roles.map((r) => ({ value: r.id, label: r.name }))}
           value={member.role_id ?? ""}
-          onChange={(event) => handleRoleChange(event.target.value)}
+          onValueChange={handleRoleChange}
+          // A pre-RBAC membership holds no role row; assigning one is
+          // one-way, so the placeholder shows but no option can re-select it.
+          placeholder="Giáo viên (mặc định)"
           disabled={assignRole.isPending}
-          className="min-h-11 rounded-[var(--radius-md)] border border-line-200 bg-white px-3 text-[14px] text-ink-900"
-        >
-          {member.role_id === null ? (
-            // A pre-RBAC membership holds no role row; assigning one is
-            // one-way, so the placeholder is shown but not re-selectable.
-            <option value="" disabled>
-              Giáo viên (mặc định)
-            </option>
-          ) : null}
-          {data.roles.map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.name}
-            </option>
-          ))}
-        </select>
+          searchNoun="vai trò"
+          sheetTitle="Vai trò"
+          className="w-full"
+        />
       </div>
 
       <p className="mt-3 text-[12.5px] text-ink-500">
@@ -206,19 +215,17 @@ export function MemberPermissionsDialog({
                       </HvBadge>
                     )}
                   </div>
-                  <select
+                  <HvSelect
                     aria-label={`Quyền ${permission.label}`}
+                    options={OVERRIDE_MODE_OPTIONS}
                     value={mode}
-                    onChange={(event) => {
-                      const next = event.target.value as OverrideMode;
-                      setModes({ ...draft, [permission.key]: next });
-                    }}
-                    className="min-h-11 rounded-[var(--radius-md)] border border-line-200 bg-white px-2 text-[13px] text-ink-900"
-                  >
-                    <option value="inherit">Theo vai trò</option>
-                    <option value="grant">Cấp riêng</option>
-                    <option value="deny">Chặn riêng</option>
-                  </select>
+                    onValueChange={(next) =>
+                      setModes({ ...draft, [permission.key]: next as OverrideMode })
+                    }
+                    searchNoun="chế độ"
+                    sheetTitle={permission.label}
+                    className="w-[150px] shrink-0"
+                  />
                 </div>
               );
             })}

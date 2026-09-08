@@ -13,6 +13,7 @@ import {
 } from "@/features/roster/__tests__/roster-handlers";
 import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
+import { mockViewport } from "@/test/viewport";
 
 import { ClassbookPage } from "../pages/classbook-page";
 import {
@@ -64,6 +65,8 @@ beforeEach(() => {
   // the month window both derive from "today".
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-08-20T10:00:00"));
+  // Desktop: the class picker opens as a popover, not the bottom sheet.
+  mockViewport(1024);
   resetRosterStore();
   resetTeachingApiStore();
   server.use(...rosterHandlers, ...teachingHandlers);
@@ -440,10 +443,11 @@ describe("ClassbookPage unsaved-score guards", () => {
 
       await user.click(screen.getByRole("combobox", { name: /^Chọn lớp/ }));
       const picker = await screen.findByRole("listbox");
-      // Options carry the khung giờ in the label so same-named classes differ.
-      expect(within(picker).getByRole("option", { name: /Toán 6B/ })).toHaveTextContent(
-        "Toán 6B · Tối Thứ Ba",
-      );
+      // Options carry the khung giờ next to the label so same-named classes
+      // differ; the option markup has no separator, unlike the trigger text.
+      const option = within(picker).getByRole("option", { name: /Toán 6B/ });
+      expect(option).toHaveTextContent(/Toán 6B/);
+      expect(option).toHaveTextContent(/Tối Thứ Ba/);
       await user.click(within(picker).getByRole("option", { name: /Toán 6B/ }));
 
       const guard = await screen.findByRole("dialog", { name: "Còn 1 ô chưa lưu" });

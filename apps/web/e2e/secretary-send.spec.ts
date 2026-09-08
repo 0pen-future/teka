@@ -21,6 +21,13 @@ async function login(page: Page, phone: string, password: string, displayName: s
   ).toBeVisible();
 }
 
+// Maps an override mode value to the option label `HvSelect` renders for it.
+const OVERRIDE_MODE_LABELS: Record<string, string> = {
+  grant: "Cấp riêng",
+  inherit: "Theo vai trò",
+  deny: "Chặn riêng",
+};
+
 /**
  * The e2e database is reused between runs, so the grant must be
  * assert-then-set: the member permissions dialog shows the current
@@ -35,10 +42,12 @@ async function setSendReportsGrant(page: Page, granted: boolean) {
   await expect(reportsSend).toBeVisible();
 
   const target = granted ? "grant" : "inherit";
-  if ((await reportsSend.inputValue()) === target) {
+  if ((await reportsSend.getAttribute("data-value")) === target) {
     await dialog.getByRole("button", { name: "Đóng", exact: true }).click();
   } else {
-    await reportsSend.selectOption(target);
+    await reportsSend.click();
+    // The option list portals to `body`, outside the dialog's DOM subtree.
+    await page.getByRole("option", { name: OVERRIDE_MODE_LABELS[target], exact: true }).click();
     await dialog.getByRole("button", { name: "Lưu" }).click();
     await expect(page.getByText("Đã lưu phân quyền")).toBeVisible();
   }

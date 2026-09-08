@@ -36,7 +36,7 @@ async function assertStaffReadJourney(page: Page) {
   // the assigned class is offered by the class picker and its active
   // enrollments are listed.
   await page.goto("/records");
-  await page.getByRole("button", { name: /^Lớp/ }).click();
+  await page.getByRole("combobox", { name: /^Lớp/ }).click();
   await page.getByRole("option", { name: new RegExp(STAFF_CLASS) }).click();
   await expect(page).toHaveURL(/class_id=/);
   await expect(page.getByText("Bé An", { exact: true })).toBeVisible();

@@ -25,11 +25,11 @@ test("phone records: class sheet, live search, no-match state and detail link", 
   await page.goto("/records");
 
   // Below `sm` the class picker opens as a bottom sheet.
-  await page.getByRole("button", { name: /^Lớp/ }).click();
+  await page.getByRole("combobox", { name: /^Lớp/ }).click();
   await expect(page.getByRole("dialog", { name: "Chọn lớp" })).toBeVisible();
   await page.getByRole("option", { name: new RegExp(STAFF_CLASS) }).click();
   await expect(page.getByRole("dialog", { name: "Chọn lớp" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /^Lớp/ })).toHaveAccessibleName(
+  await expect(page.getByRole("combobox", { name: /^Lớp/ })).toHaveAccessibleName(
     new RegExp(`^Lớp ${STAFF_CLASS} · 2 HS$`),
   );
   await expect(page.getByText("Bé An", { exact: true })).toBeVisible();

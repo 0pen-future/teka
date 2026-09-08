@@ -1,14 +1,7 @@
 import { useState } from "react";
 
-import { HvButton } from "@/components/hv";
+import { HvButton, HvSelect, type HvSelectOption } from "@/components/hv";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import type { CenterMember } from "@/features/center";
 
 import type { AuditLogFilters } from "../schemas/audit-schemas";
@@ -59,6 +52,17 @@ export function AuditFilters({ members, filters, onChange }: AuditFiltersProps) 
     Boolean(filters.action) && !ACTION_GROUPS.some((group) => group.value === filters.action);
   const groupValue = isCustomAction ? "custom" : (filters.action ?? "all");
 
+  const teacherOptions: HvSelectOption[] = [
+    { value: "all", label: "Tất cả giáo viên" },
+    ...members.map((member) => ({ value: member.id, label: member.full_name })),
+  ];
+
+  const actionGroupOptions: HvSelectOption[] = [
+    { value: "all", label: "Tất cả hành động" },
+    ...(isCustomAction ? [{ value: "custom", label: "Tùy chỉnh", disabled: true }] : []),
+    ...ACTION_GROUPS.map((group) => ({ value: group.value, label: group.label })),
+  ];
+
   return (
     <form
       className="flex flex-wrap items-center gap-3"
@@ -67,48 +71,29 @@ export function AuditFilters({ members, filters, onChange }: AuditFiltersProps) 
         set({ action: actionDraft || undefined });
       }}
     >
-      <Select
+      <HvSelect
+        aria-label="Giáo viên"
+        sheetTitle="Giáo viên"
+        searchNoun="giáo viên"
+        className="w-[180px]"
+        options={teacherOptions}
         value={filters.actor_id ?? "all"}
         onValueChange={(value) => set({ actor_id: value === "all" ? undefined : value })}
-      >
-        <SelectTrigger aria-label="Giáo viên" className="w-[180px]">
-          <SelectValue placeholder="Tất cả giáo viên" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">Tất cả giáo viên</SelectItem>
-          {members.map((member) => (
-            <SelectItem key={member.id} value={member.id}>
-              {member.full_name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      />
 
-      <Select
+      <HvSelect
+        aria-label="Nhóm hành động"
+        sheetTitle="Nhóm hành động"
+        searchNoun="nhóm hành động"
+        className="w-[180px]"
+        options={actionGroupOptions}
         value={groupValue}
         onValueChange={(value) => {
           const action = value === "all" ? undefined : value;
           setActionDraft(action ?? "");
           set({ action });
         }}
-      >
-        <SelectTrigger aria-label="Nhóm hành động" className="w-[180px]">
-          <SelectValue placeholder="Tất cả hành động" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">Tất cả hành động</SelectItem>
-          {isCustomAction ? (
-            <SelectItem value="custom" disabled>
-              Tùy chỉnh
-            </SelectItem>
-          ) : null}
-          {ACTION_GROUPS.map((group) => (
-            <SelectItem key={group.value} value={group.value}>
-              {group.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      />
 
       <Input
         aria-label="Hành động"

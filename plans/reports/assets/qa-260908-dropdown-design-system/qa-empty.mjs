@@ -1,0 +1,15 @@
+import { createRequire } from "node:module";
+const require = createRequire("/home/cesc/Documents/personal-workspace/teka/apps/web/package.json");
+const { chromium, expect } = require("@playwright/test");
+const BASE = "http://localhost:55173"; const OUT = process.argv[2];
+const browser = await chromium.launch();
+const context = await browser.newContext({ viewport: { width: 1024, height: 768 }, locale: "vi-VN" });
+const page = await context.newPage();
+await page.goto(BASE + "/login");
+await page.getByLabel("Số điện thoại").fill("0901000001"); await page.getByLabel("Mật khẩu").fill("lan-password");
+await page.getByRole("button", { name: "Đăng nhập" }).click(); await page.waitForURL((u) => !u.pathname.startsWith("/login"));
+await page.goto(BASE + "/records?class_id=00000000-0000-4000-8000-000000000000");
+const cb = page.getByRole("combobox").first(); await expect(cb).toBeVisible(); await page.waitForTimeout(800);
+const info = await cb.evaluate((el) => { const cs = getComputedStyle(el); return { placeholder: el.hasAttribute("data-placeholder"), value: el.getAttribute("data-value"), text: el.textContent.trim(), name: el.getAttribute("aria-label") || el.getAttribute("aria-labelledby"), fontWeight: cs.fontWeight, color: cs.color }; });
+await page.screenshot({ path: OUT + "/1-empty-1024.jpg", type: "jpeg", quality: 80 });
+console.log(JSON.stringify(info)); await browser.close();

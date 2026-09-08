@@ -40,7 +40,7 @@ describe("RecordsToolbar", () => {
 
   it("labels the class picker and the student search", () => {
     const { searchRef } = renderToolbar();
-    expect(screen.getByRole("button", { name: "Lớp Toán 6A · 28 HS" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Lớp Toán 6A · 28 HS" })).toBeInTheDocument();
     const search = screen.getByLabelText("Tìm học sinh");
     expect(search).toHaveAttribute("placeholder", "Gõ tên học sinh…");
     expect(searchRef.current).toBe(search);
@@ -93,7 +93,7 @@ describe("RecordsToolbar", () => {
   it("forwards class picks", async () => {
     const user = userEvent.setup();
     const { onSelectClass } = renderToolbar();
-    await user.click(screen.getByRole("button", { name: /^Lớp/ }));
+    await user.click(screen.getByRole("combobox", { name: /^Lớp/ }));
     await user.click(screen.getByRole("option", { name: /Văn 7B/ }));
     expect(onSelectClass).toHaveBeenCalledWith("class-2");
   });

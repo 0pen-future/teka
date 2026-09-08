@@ -7,6 +7,7 @@ import { useAuthStore } from "@/features/auth";
 import { API_URL, listMeta, ok } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
+import { mockViewport } from "@/test/viewport";
 
 import { StudentsPage } from "../pages/students-page";
 import {
@@ -56,6 +57,8 @@ function classPills() {
 beforeEach(() => {
   resetRosterStore();
   server.use(...rosterHandlers);
+  // Desktop: the enroll dialog's class picker opens as a popover, not the sheet.
+  mockViewport(1024);
 });
 
 afterEach(() => {

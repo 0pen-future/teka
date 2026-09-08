@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { Link, useNavigate, useParams } from "react-router";
 
-import { HvButton, HvCard, hvToast } from "@/components/hv";
+import { HvButton, HvCard, HvSelect, hvToast } from "@/components/hv";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useSessionsList } from "@/features/attendance";
@@ -307,6 +307,16 @@ function TeacherHandoffCard({ klass, members }: { klass: Class; members: CenterM
         ? "Không bàn giao được lớp. Thử lại sau."
         : null;
 
+  function handleTargetChange(next: string) {
+    if (next === targetId) {
+      return;
+    }
+    setTargetId(next);
+    // Changing the target un-arms so a confirm always reflects the teacher
+    // currently shown in the select.
+    setArming(false);
+  }
+
   function confirm() {
     if (!targetId) {
       return;
@@ -341,26 +351,20 @@ function TeacherHandoffCard({ klass, members }: { klass: Class; members: CenterM
         <div className="mt-3 flex flex-col gap-3">
           <Field className="max-w-[320px]">
             <FieldLabel htmlFor="handoff-teacher">Bàn giao cho</FieldLabel>
-            <select
+            <HvSelect
               id="handoff-teacher"
+              options={targets.map((member) => ({
+                value: member.id,
+                label: member.is_owner ? `${member.full_name} (chủ trung tâm)` : member.full_name,
+              }))}
               value={targetId}
-              onChange={(event) => {
-                setTargetId(event.target.value);
-                // Changing the target un-arms so a confirm always reflects the
-                // teacher currently shown in the select.
-                setArming(false);
-              }}
+              onValueChange={handleTargetChange}
+              placeholder="— Chọn giáo viên —"
               disabled={reassign.isPending}
-              className="min-h-11 rounded-[var(--radius-md)] border border-line-200 bg-white px-3 text-[14px] text-ink-900"
-            >
-              <option value="">— Chọn giáo viên —</option>
-              {targets.map((member) => (
-                <option key={member.id} value={member.id}>
-                  {member.full_name}
-                  {member.is_owner ? " (chủ trung tâm)" : ""}
-                </option>
-              ))}
-            </select>
+              searchNoun="giáo viên"
+              sheetTitle="Bàn giao cho"
+              className="w-full"
+            />
           </Field>
 
           {errorMessage ? <p className="text-[13px] text-coral-600">{errorMessage}</p> : null}

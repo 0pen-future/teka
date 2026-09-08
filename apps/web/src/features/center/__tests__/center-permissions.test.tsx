@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
 import { mockInvites } from "@/features/invitation/__tests__/invitation-handlers";
@@ -13,7 +13,9 @@ import {
   fail,
 } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
+import { pickOption } from "@/test/pick-option";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
+import { mockViewport } from "@/test/viewport";
 
 import { CenterPage } from "../pages/center-page";
 import { CenterPermissionsPage } from "../pages/center-permissions-page";
@@ -52,9 +54,16 @@ function ownerSelf() {
   });
 }
 
+beforeEach(() => {
+  mockViewport(1024);
+});
+
 afterEach(() => {
   useAuthStore.getState().clearSession();
 });
+
+/** `getByText` ignore-selector: skip text rendered inside an `HvSelect` trigger. */
+const OUTSIDE_PICKERS = '[role="combobox"], [role="combobox"] *';
 
 describe("PermissionMatrix on the owner permissions page", () => {
   it("renders API labels per role with every row assignable", async () => {
@@ -290,14 +299,73 @@ describe("MemberPermissionsDialog", () => {
 
     await user.click(await screen.findByRole("button", { name: "Phân quyền cho Giáo Viên A" }));
     const dialog = await screen.findByRole("dialog");
-    // A pre-RBAC membership holds no role: the placeholder is selected.
+    // A pre-RBAC membership holds no role: the placeholder shows.
     const roleSelect = await within(dialog).findByRole("combobox", { name: "Vai trò" });
-    expect(roleSelect).toHaveValue("");
-    await user.selectOptions(roleSelect, HOC_VU.id);
+    expect(roleSelect).toHaveTextContent("Giáo viên (mặc định)");
+    await pickOption(user, within(dialog), "Vai trò", HOC_VU.name);
 
     expect(await screen.findByText("Đã đổi vai trò")).toBeInTheDocument();
     expect(targetId).toBe(memberA.id);
     expect(received).toEqual({ role_id: HOC_VU.id });
+  });
+
+  it("does not send a role PUT when re-picking the currently assigned role (D7)", async () => {
+    mockInvites([]);
+    const memberA = makeMember({ full_name: "Giáo Viên A" });
+    mockCenterMe(makeCenterMeOwner({ members: [ownerSelf(), memberA] }));
+    mockCenterPermissions(
+      makeCenterPermissions({
+        members: [makeMemberPermissions(memberA, { role_id: HOC_VU.id, role_key: HOC_VU.key })],
+      }),
+    );
+    let puts = 0;
+    server.use(
+      http.put(`${API_URL}/centers/me/members/:teacherId/role`, () => {
+        puts += 1;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    renderCenter();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Phân quyền cho Giáo Viên A" }));
+    const dialog = await screen.findByRole("dialog");
+    const roleSelect = await within(dialog).findByRole("combobox", { name: "Vai trò" });
+    expect(roleSelect).toHaveTextContent(HOC_VU.name);
+    await pickOption(user, within(dialog), "Vai trò", HOC_VU.name);
+
+    expect(puts).toBe(0);
+    expect(screen.queryByText("Đã đổi vai trò")).not.toBeInTheDocument();
+  });
+
+  it("keeps the form clean when re-picking a permission's current override mode", async () => {
+    mockInvites([]);
+    const memberA = makeMember({ full_name: "Giáo Viên A" });
+    mockCenterMe(makeCenterMeOwner({ members: [ownerSelf(), memberA] }));
+    mockCenterPermissions(
+      makeCenterPermissions({
+        roles: [
+          { ...GIAO_VIEN, permissions: ["audit.read"] },
+          ...DEFAULT_CENTER_PERMISSIONS.roles.slice(1),
+        ],
+        members: [
+          makeMemberPermissions(memberA, { role_id: GIAO_VIEN.id, role_key: GIAO_VIEN.key }),
+        ],
+      }),
+    );
+    renderCenter();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Phân quyền cho Giáo Viên A" }));
+    const dialog = await screen.findByRole("dialog");
+    const picker = await within(dialog).findByRole("combobox", {
+      name: "Quyền Xem nhật ký hoạt động",
+    });
+    expect(picker).toHaveTextContent("Theo vai trò");
+
+    // Same mode as already shown: no draft is created, so nothing to save.
+    await pickOption(user, within(dialog), "Quyền Xem nhật ký hoạt động", "Theo vai trò");
+    expect(within(dialog).getByRole("button", { name: "Lưu" })).toBeDisabled();
   });
 
   it("shows the effective source per key and saves a deny of a role permission", async () => {
@@ -333,15 +401,14 @@ describe("MemberPermissionsDialog", () => {
     const dialog = await screen.findByRole("dialog");
     // Effective sources: role-inherited vs. individually granted.
     expect(await within(dialog).findByText("Từ vai trò")).toBeInTheDocument();
-    expect(within(dialog).getByText("Cấp riêng", { selector: "span" })).toBeInTheDocument();
+    // The override picker's trigger shows the same wording as the badge, so
+    // the badge is "the copy that is not inside a combobox".
+    expect(within(dialog).getByText("Cấp riêng", { ignore: OUTSIDE_PICKERS })).toBeInTheDocument();
     // The precedence rule is stated where overrides are edited.
     expect(within(dialog).getByText(/Chặn riêng luôn thắng/)).toBeInTheDocument();
 
-    await user.selectOptions(
-      within(dialog).getByRole("combobox", { name: "Quyền Xem nhật ký hoạt động" }),
-      "deny",
-    );
-    expect(within(dialog).getByText("Chặn riêng", { selector: "span" })).toBeInTheDocument();
+    await pickOption(user, within(dialog), "Quyền Xem nhật ký hoạt động", "Chặn riêng");
+    expect(within(dialog).getByText("Chặn riêng", { ignore: OUTSIDE_PICKERS })).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
 
     expect(await screen.findByText("Đã lưu phân quyền")).toBeInTheDocument();

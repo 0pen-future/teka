@@ -8,6 +8,7 @@ import { formatDateTime } from "@/lib/utils";
 import { API_URL, fail, ok } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
+import { mockViewport } from "@/test/viewport";
 
 import { AuditPage } from "../pages/audit-page";
 import { auditHandlers, auditMemberId, auditRequests, resetAuditStore } from "./audit-handlers";
@@ -22,6 +23,7 @@ function renderAuditPage() {
 }
 
 beforeEach(() => {
+  mockViewport(1024);
   resetAuditStore();
   server.use(...auditHandlers);
 });
@@ -35,8 +37,8 @@ describe("AuditPage", () => {
     renderAuditPage();
 
     expect(await screen.findByText("class.create")).toBeInTheDocument();
-    // Actor names also live inside the selects' hidden native options —
-    // only the table copy proves the rows rendered.
+    // Actor names also feed the teacher picker's options — only the table
+    // copy proves the rows rendered.
     const table = screen.getByRole("table");
     expect(within(table).getByText("auth.login")).toBeInTheDocument();
     expect(within(table).getByText("Cô Lan")).toBeInTheDocument();
@@ -82,6 +84,26 @@ describe("AuditPage", () => {
     expect(auditRequests.at(-1)?.searchParams.get("cursor")).toBeNull();
     await waitFor(() => expect(screen.queryByText("class.create")).not.toBeInTheDocument());
     expect(screen.getByText("auth.login")).toBeInTheDocument();
+  });
+
+  it("shows a free-text action as a disabled Tùy chỉnh group option", async () => {
+    const user = userEvent.setup();
+    renderAuditPage();
+    await screen.findByText("class.create");
+
+    await user.type(screen.getByLabelText("Hành động"), "zalo.send{Enter}");
+    await waitFor(() => expect(auditRequests.at(-1)?.searchParams.get("action")).toBe("zalo.send"));
+
+    // The group picker must not claim "Tất cả" while a custom filter is live.
+    const groups = screen.getByRole("combobox", { name: "Nhóm hành động" });
+    expect(groups).toHaveTextContent("Tùy chỉnh");
+    await user.click(groups);
+    const custom = await screen.findByRole("option", { name: "Tùy chỉnh" });
+    expect(custom).toHaveAttribute("aria-disabled", "true");
+    await user.click(custom);
+    // Disabled options do not pick: the picker stays open on the same value.
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    expect(auditRequests.at(-1)?.searchParams.get("action")).toBe("zalo.send");
   });
 
   it("filters by actor through the member select", async () => {

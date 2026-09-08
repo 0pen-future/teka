@@ -299,7 +299,7 @@ describe("RecordsPage student search and class picker", () => {
     const user = userEvent.setup();
     renderRecordsPage();
     await screen.findByText("Nguyễn Văn An");
-    await user.click(screen.getByRole("button", { name: /^Lớp/ }));
+    await user.click(screen.getByRole("combobox", { name: /^Lớp/ }));
     const option = screen.getByRole("option", { name: /Toán 6A/ });
     expect(option).toHaveFocus();
 
@@ -318,7 +318,7 @@ describe("RecordsPage student search and class picker", () => {
     await user.type(search, "nguyen");
     expect(router.state.location.search).toBe("?q=nguyen");
 
-    await user.click(screen.getByRole("button", { name: /^Lớp/ }));
+    await user.click(screen.getByRole("combobox", { name: /^Lớp/ }));
     await user.click(screen.getByRole("option", { name: /Văn 7B/ }));
 
     expect(await screen.findByText("Trần Minh Khôi")).toBeInTheDocument();
@@ -326,7 +326,9 @@ describe("RecordsPage student search and class picker", () => {
     expect(search).toHaveValue("");
     expect(router.state.location.search).toBe(`?class_id=${second.id}`);
     expect(screen.getByRole("status")).toHaveTextContent(/^1 học sinh$/);
-    expect(screen.getByRole("button", { name: /^Lớp/ })).toHaveAccessibleName("Lớp Văn 7B · 1 HS");
+    expect(screen.getByRole("combobox", { name: /^Lớp/ })).toHaveAccessibleName(
+      "Lớp Văn 7B · 1 HS",
+    );
   });
 
   it("re-picking the current class pins class_id into the URL and keeps the query", async () => {
@@ -337,7 +339,7 @@ describe("RecordsPage student search and class picker", () => {
     await user.type(search, "nguyen");
     expect(router.state.location.search).toBe("?q=nguyen");
 
-    await user.click(screen.getByRole("button", { name: /^Lớp/ }));
+    await user.click(screen.getByRole("combobox", { name: /^Lớp/ }));
     await user.click(screen.getByRole("option", { name: /Toán 6A/ }));
 
     expect(search).toHaveValue("nguyen");
@@ -362,7 +364,7 @@ describe("RecordsPage student search and class picker", () => {
     await user.click(csv);
     expect(await screen.findByText("Đã tải HocSinh_Toán_6A.csv")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /^Lớp/ }));
+    await user.click(screen.getByRole("combobox", { name: /^Lớp/ }));
     expect(screen.getByRole("dialog", { name: "Chọn lớp" })).toBeInTheDocument();
   });
 });

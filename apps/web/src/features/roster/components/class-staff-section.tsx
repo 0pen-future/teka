@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { HvBadge, HvButton, HvCard, HvModal, hvToast } from "@/components/hv";
+import { HvBadge, HvButton, HvCard, HvModal, HvSelect, hvToast } from "@/components/hv";
 import { useCenter, type CenterMember } from "@/features/center";
 import { useCenterContext } from "@/features/teaching";
 import { ApiError } from "@/lib/api/errors";
@@ -238,20 +238,20 @@ function StaffRoleGroup({
 
       {adding ? (
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <select
+          <HvSelect
             aria-label={`Chọn ${roleLabel.toLowerCase()}`}
+            options={assignableMembers.map((member) => ({
+              value: member.id,
+              label: member.full_name,
+            }))}
             value={pickedId}
-            onChange={(event) => setPickedId(event.target.value)}
+            onValueChange={setPickedId}
+            placeholder="— Chọn thành viên —"
             disabled={assign.isPending}
-            className="min-h-11 rounded-[var(--radius-md)] border border-line-200 bg-white px-3 text-[14px] text-ink-900"
-          >
-            <option value="">— Chọn thành viên —</option>
-            {assignableMembers.map((member) => (
-              <option key={member.id} value={member.id}>
-                {member.full_name}
-              </option>
-            ))}
-          </select>
+            searchNoun="thành viên"
+            sheetTitle={`Chọn ${roleLabel.toLowerCase()}`}
+            className="min-w-[230px] max-sm:w-full"
+          />
           <HvButton size="sm" onClick={handleAssign} disabled={!pickedId || assign.isPending}>
             {assign.isPending ? "Đang thêm…" : "Xác nhận"}
           </HvButton>
