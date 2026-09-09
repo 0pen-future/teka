@@ -20,7 +20,7 @@ RUN test -n "${VITE_API_URL}" || { echo "VITE_API_URL build-arg is required" >&2
 ENV VITE_API_URL=${VITE_API_URL}
 RUN npm run build
 
-FROM nginxinc/nginx-unprivileged:1.31-alpine@sha256:901e944d1f4fc2bd077e8f5568b98c1f6f8cdacf6b97a87747c43134a339b9a7
+FROM nginxinc/nginx-unprivileged:1.31-alpine@sha256:2ddec616f1cb58bcac057aa388f28cb81e35137641ef4226d321714499329bd1
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
