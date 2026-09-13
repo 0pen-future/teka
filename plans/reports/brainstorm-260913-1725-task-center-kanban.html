@@ -1,0 +1,738 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brainstorm — Trung tâm công việc (Kanban, cột cấu hình) · Teka</title>
+<style>
+  /* Tokens kế thừa từ apps/web/src/styles/tokens (mint/cream/ink, Baloo 2 + Nunito, radius 20px, press shadow). */
+  :root{
+    --cream-50:#fbfdfb;--cream-100:#f4f8f3;--cream-200:#eaf1ea;--cream-300:#dfe9df;
+    --ink-900:#1c3a31;--ink-700:#27433b;--ink-500:#5b756c;--ink-400:#86998f;--ink-300:#aab9b1;--white:#fff;
+    --mint-50:#e9f7f1;--mint-100:#d3efe3;--mint-200:#a9e0cb;--mint-400:#5cc9a7;--mint-500:#3fa888;--mint-600:#2e8d6e;--mint-700:#1f6b53;
+    --sky-50:#eaf5fb;--sky-100:#d6ecf7;--sky-300:#7fc8e8;--sky-500:#2d7aa0;
+    --sun-100:#fff4d6;--sun-300:#ffd86b;--sun-400:#ffc83d;--sun-500:#f0a500;--sun-600:#b87d00;
+    --coral-100:#ffe7e1;--coral-400:#ff7a66;--coral-600:#b23a28;
+    --line-200:#e2ece2;--line-300:#cfe0d4;
+    --font-display:"Baloo 2",ui-rounded,"Segoe UI",system-ui,sans-serif;
+    --font-body:"Nunito","Segoe UI",system-ui,sans-serif;
+    --radius:20px;--shadow-sm:0 2px 6px rgba(28,58,49,.08);--shadow-md:0 8px 24px rgba(28,58,49,.10);
+    --press-mint:0 5px 0 var(--mint-500);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{animation:none!important;transition:none!important}}
+  body{margin:0;background:var(--cream-100);color:var(--ink-700);font:16px/1.55 var(--font-body)}
+  a{color:var(--mint-600)}
+  h1,h2,h3,h4{font-family:var(--font-display);color:var(--ink-900);line-height:1.2;margin:0 0 .4em}
+  h1{font-size:clamp(1.8rem,4vw,2.6rem)} h2{font-size:1.5rem;margin-top:0} h3{font-size:1.15rem} h4{font-size:1rem}
+  code,kbd{font:.88em ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--cream-200);padding:.1em .4em;border-radius:6px;color:var(--ink-900)}
+  pre{background:var(--ink-900);color:#eafff7;padding:16px;border-radius:14px;overflow:auto;font-size:.85rem;line-height:1.5}
+  pre code{background:none;color:inherit;padding:0}
+  .skip{position:absolute;left:-999px;top:8px;background:var(--white);padding:8px 12px;border-radius:10px}
+  .skip:focus{left:8px;z-index:10}
+  .wrap{max-width:1180px;margin:0 auto;padding:24px 20px 80px}
+  header.hero{display:grid;grid-template-columns:1fr auto;gap:24px;align-items:end;padding:32px 0 20px;border-bottom:2px solid var(--line-200)}
+  .meta{display:flex;flex-wrap:wrap;gap:8px 18px;color:var(--ink-500);font-size:.92rem}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-weight:700;font-size:.78rem;letter-spacing:.01em}
+  .pill.mint{background:var(--mint-100);color:var(--mint-700)}.pill.sky{background:var(--sky-100);color:var(--sky-500)}
+  .pill.sun{background:var(--sun-100);color:var(--sun-600)}.pill.coral{background:var(--coral-100);color:var(--coral-600)}
+  .pill.ink{background:var(--cream-200);color:var(--ink-500)}
+  nav.toc{position:sticky;top:0;z-index:5;background:rgba(244,248,243,.92);backdrop-filter:blur(6px);padding:10px 0;margin-bottom:24px;border-bottom:1px solid var(--line-200)}
+  nav.toc ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+  nav.toc a{text-decoration:none;color:var(--ink-700);padding:6px 12px;border-radius:999px;font-weight:700;font-size:.85rem;border:1px solid transparent}
+  nav.toc a:hover,nav.toc a:focus-visible{background:var(--white);border-color:var(--line-300)}
+  section{margin:40px 0}
+  .card{background:var(--white);border:1px solid var(--line-200);border-radius:var(--radius);padding:22px 24px;box-shadow:var(--shadow-sm)}
+  .grid{display:grid;gap:16px}
+  .g2{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+  .g3{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+  .contract .card{border-top:6px solid var(--mint-400)}
+  .contract .card:nth-child(2){border-top-color:var(--sky-300)}
+  .contract .card:nth-child(3){border-top-color:var(--sun-300)}
+  .contract .card:nth-child(4){border-top-color:var(--coral-400)}
+  ul.tight{margin:.4em 0 0;padding-left:1.2em}ul.tight li{margin:.25em 0}
+  table{width:100%;border-collapse:collapse;font-size:.92rem}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line-200);vertical-align:top}
+  th{background:var(--cream-50);color:var(--ink-900);font-family:var(--font-display);font-weight:700}
+  .scroll{overflow-x:auto;border:1px solid var(--line-200);border-radius:16px;background:var(--white)}
+  .evidence li{margin:.35em 0}
+  .approach{position:relative}
+  .approach.rec{outline:3px solid var(--mint-400);outline-offset:-3px}
+  .approach.dim{opacity:.7}
+  .approach .tag{position:absolute;top:-12px;right:16px}
+  .approach dl{margin:.6em 0 0}.approach dt{font-weight:800;color:var(--ink-900);margin-top:.6em;font-size:.85rem;text-transform:uppercase;letter-spacing:.04em}
+  .approach dd{margin:.15em 0 0}
+  .callout{border-left:5px solid var(--sun-300);background:var(--sun-100);padding:12px 16px;border-radius:0 14px 14px 0;margin:14px 0}
+  .callout.mint{border-color:var(--mint-400);background:var(--mint-50)}
+  .callout.coral{border-color:var(--coral-400);background:var(--coral-100)}
+  /* ---- diagrams ---- */
+  .flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;align-items:stretch}
+  .phase{background:var(--white);border:1px solid var(--line-200);border-radius:18px;padding:16px;position:relative}
+  .phase h4{display:flex;align-items:center;gap:8px}
+  .phase .n{width:28px;height:28px;border-radius:50%;background:var(--mint-400);color:#fff;display:inline-grid;place-items:center;font-size:.85rem;box-shadow:0 3px 0 var(--mint-500)}
+  .phase ul{padding-left:1.1em;margin:.3em 0 0;font-size:.9rem}.phase ul li{margin:.2em 0}
+  .phase .gate{margin-top:10px;font-size:.8rem;color:var(--ink-500);border-top:1px dashed var(--line-300);padding-top:8px}
+  .phase::after{content:"→";position:absolute;right:-14px;top:50%;transform:translateY(-50%);color:var(--ink-300);font-size:1.3rem}
+  .phase:last-child::after{content:""}
+  @media (max-width:720px){.phase::after{content:"↓";right:auto;left:50%;top:auto;bottom:-20px;transform:translateX(-50%)}}
+  svg text{font-family:var(--font-body)}
+  /* ---- mockups ---- */
+  .mock{background:var(--cream-100);border:1px solid var(--line-300);border-radius:22px;padding:16px;position:relative;overflow:hidden}
+  .mock .topbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .mock .title{font-family:var(--font-display);font-size:1.3rem;color:var(--ink-900)}
+  .seg{display:inline-flex;background:var(--cream-200);border-radius:999px;padding:3px}
+  .seg span{padding:5px 12px;border-radius:999px;font-size:.82rem;font-weight:700;color:var(--ink-500)}
+  .seg span.on{background:var(--white);color:var(--mint-700);box-shadow:var(--shadow-sm)}
+  .btn{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-display);font-weight:700;padding:8px 16px;border-radius:14px;border:0;font-size:.9rem}
+  .btn.primary{background:var(--mint-400);color:#fff;box-shadow:var(--press-mint)}
+  .btn.ghost{background:var(--white);color:var(--ink-700);border:1px solid var(--line-300)}
+  .btn.danger{background:var(--coral-100);color:var(--coral-600)}
+  .btn.icon{padding:8px 10px}
+  .boardwrap{overflow-x:auto;padding-bottom:6px}
+  .board{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(230px,1fr);gap:12px;min-width:max-content}
+  @media (max-width:760px){.boardwrap{overflow:visible}.board{grid-auto-flow:row;grid-auto-columns:auto;min-width:0}.board .col:not(.mobile-on){display:none}}
+  .col{background:var(--cream-50);border:1px solid var(--line-200);border-radius:18px;padding:10px;min-height:200px}
+  .col.done{background:var(--mint-50);border-color:var(--mint-100)}
+  .col header{display:flex;align-items:center;justify-content:space-between;padding:4px 6px 10px}
+  .col header b{font-family:var(--font-display);color:var(--ink-900)}
+  .count{background:var(--cream-200);color:var(--ink-500);border-radius:999px;padding:1px 9px;font-size:.78rem;font-weight:800}
+  .tcard{background:var(--white);border:1px solid var(--line-200);border-radius:14px;padding:10px 12px;margin:8px 0;box-shadow:var(--shadow-sm);position:relative}
+  .tcard.mine{border-left:4px solid var(--mint-400)}
+  .tcard.late{border-left:4px solid var(--coral-400)}
+  .tcard.done{opacity:.72}
+  .tcard .t{font-weight:800;color:var(--ink-900);font-size:.95rem}
+  .tcard .row{display:flex;justify-content:space-between;align-items:center;gap:6px;margin-top:8px;font-size:.78rem;color:var(--ink-500)}
+  .av{width:24px;height:24px;border-radius:50%;background:var(--sky-100);color:var(--sky-500);display:inline-grid;place-items:center;font-size:.7rem;font-weight:800}
+  .av.g{background:var(--mint-100);color:var(--mint-700)}
+  .empty{border:2px dashed var(--line-300);border-radius:14px;padding:18px 10px;text-align:center;color:var(--ink-400);font-size:.85rem}
+  .note{position:absolute;width:22px;height:22px;border-radius:50%;background:var(--sun-400);color:var(--ink-900);font-weight:900;font-size:.75rem;display:grid;place-items:center;box-shadow:0 2px 0 var(--sun-500);z-index:2}
+  .note.s{position:static;display:inline-grid;vertical-align:middle}
+  .notes{counter-reset:n;margin:12px 0 0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px 18px;font-size:.9rem}
+  .notes li{position:relative;padding-left:30px}
+  .notes li::before{counter-increment:n;content:counter(n);position:absolute;left:0;top:1px;width:22px;height:22px;border-radius:50%;background:var(--sun-400);color:var(--ink-900);font-weight:900;font-size:.75rem;display:grid;place-items:center}
+  .drawer{background:var(--white);border:1px solid var(--line-200);border-radius:18px;padding:16px;max-width:520px;box-shadow:var(--shadow-md);margin:0 auto}
+  .field{margin:10px 0}.field label{display:block;font-size:.78rem;font-weight:800;color:var(--ink-500);margin-bottom:4px;text-transform:uppercase;letter-spacing:.04em}
+  .input{border:1px solid var(--line-300);border-radius:12px;padding:9px 12px;background:var(--cream-50);color:var(--ink-700);font-size:.92rem;display:flex;justify-content:space-between}
+  .input.focus{border-color:var(--mint-400);box-shadow:0 0 0 3px var(--mint-100)}
+  .colrow{display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;align-items:center;padding:8px 10px;border:1px solid var(--line-200);border-radius:12px;background:var(--cream-50);margin:6px 0}
+  .colrow .grip{color:var(--ink-300);font-weight:900}
+  .colrow .mini{display:inline-flex;gap:4px}
+  .colrow .mini span{width:26px;height:26px;border:1px solid var(--line-300);border-radius:8px;display:inline-grid;place-items:center;font-size:.75rem;background:var(--white)}
+  .switch{width:34px;height:20px;border-radius:999px;background:var(--line-300);position:relative;display:inline-block}
+  .switch::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff}
+  .switch.on{background:var(--mint-400)}.switch.on::after{left:16px}
+  .matrix td:not(:first-child){text-align:center}
+  .chk{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:6px;border:2px solid var(--line-300);background:var(--white);font-size:.75rem;font-weight:900}
+  .chk.on{background:var(--mint-400);border-color:var(--mint-500);color:#fff}
+  .tabs{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+  .tabs button{font:700 .85rem var(--font-display);border:1px solid var(--line-300);background:var(--white);color:var(--ink-700);padding:6px 14px;border-radius:999px;cursor:pointer}
+  .tabs button[aria-selected="true"]{background:var(--mint-400);border-color:var(--mint-500);color:#fff}
+  .tabs button:focus-visible{outline:3px solid var(--mint-200)}
+  [hidden]{display:none!important}
+  .phone{max-width:380px;margin:0 auto}
+  footer{margin-top:60px;color:var(--ink-400);font-size:.85rem;border-top:1px solid var(--line-200);padding-top:16px}
+  .risk{display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:start}
+  .risk .pill{margin-top:2px}
+  .er{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;align-items:start}
+  .ent{border:1px solid var(--line-300);border-radius:14px;background:var(--white);overflow:hidden;font-size:.85rem}
+  .ent h4{margin:0;padding:8px 12px;background:var(--cream-200);font-size:.95rem}
+  .ent ul{list-style:none;margin:0;padding:8px 12px}.ent li{padding:2px 0;border-bottom:1px dashed var(--line-200)}.ent li:last-child{border:0}
+  .ent .k{color:var(--mint-700);font-weight:800}
+</style>
+</head>
+<body>
+<a class="skip" href="#contract">Bỏ qua tới nội dung</a>
+<div class="wrap">
+
+<header class="hero">
+  <div>
+    <span class="pill sky">Brainstorm brief · rev 3</span>
+    <h1>Trung tâm công việc Kanban với cột cấu hình theo trung tâm</h1>
+    <p style="margin:0;max-width:780px">Bảng công việc chung cho từng trung tâm dạy thêm. Chủ trung tâm (hoặc người được cấp quyền) tự đặt tên, sắp xếp, thêm/xoá cột; thành viên tạo, giao và chuyển việc giữa các cột. Phân quyền đi qua catalog + vai trò đã có. Rev 3: phương án B do người dùng chọn, 4 câu hỏi mở đã chốt — hợp đồng sẵn sàng cho <code>/ak:plan</code>.</p>
+  </div>
+  <div class="meta">
+    <span>Ngày <b>13/09/2026</b></span><span>Nhánh <code>master</code></span><span>Trạng thái <span class="pill mint">B · hợp đồng đã chốt</span></span>
+  </div>
+</header>
+
+<nav class="toc" aria-label="Mục lục">
+  <ul>
+    <li><a href="#contract">1. Hợp đồng</a></li>
+    <li><a href="#evidence">2. Bằng chứng repo</a></li>
+    <li><a href="#options">3. Phương án</a></li>
+    <li><a href="#design">4. Thiết kế B</a></li>
+    <li><a href="#flow">5. Luồng triển khai</a></li>
+    <li><a href="#mockups">6. Mockup UI</a></li>
+    <li><a href="#risks">7. Rủi ro & câu hỏi</a></li>
+  </ul>
+</nav>
+
+<!-- ===================== 1. CONTRACT ===================== -->
+<section id="contract" aria-labelledby="h-contract">
+  <h2 id="h-contract">1. Hợp đồng brainstorm</h2>
+  <div class="grid g2 contract">
+    <div class="card">
+      <h3>Outcome — kết quả mong muốn</h3>
+      <ul class="tight">
+        <li>Mục điều hướng mới <b>“Công việc”</b> mở bảng Kanban của trung tâm; mỗi trung tâm sinh ra với 3 cột mặc định <b>Cần làm → Đang làm → Hoàn thành</b> và có thể đổi tên, thêm, sắp xếp, xoá cột (tối đa 8).</li>
+        <li>Một cột được đánh dấu <b>“cột hoàn thành”</b>; việc chuyển vào đó được ghi <code>completed_at</code>, chuyển ra thì xoá dấu.</li>
+        <li>Thành viên có quyền tạo việc, giao cho thành viên khác, đặt hạn và ưu tiên, chuyển cột; chủ trung tâm thấy và sửa mọi việc.</li>
+        <li>Toàn bộ quyền “Công việc” (gồm <code>tasks.manage_board</code> và <code>tasks.view_all</code>) xuất hiện trong ma trận <b>Phân quyền vai trò</b>; hai khoá này mặc định trống, owner bật cho vai trò hoặc override từng thành viên.</li>
+        <li>Thành viên rời trung tâm không làm mất việc: việc họ được giao về “chưa giao”, việc họ tạo chuyển quyền sở hữu cho owner.</li>
+        <li>Mọi thao tác ghi (việc lẫn cột) để lại dòng trong Nhật ký hoạt động.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Constraints — ràng buộc</h3>
+      <ul class="tight">
+        <li>Catalog quyền <b>code-owned</b>: khoá mới khai báo trong <code>authctx/catalog.go</code>, tăng <code>CatalogVersion</code>, DB chỉ lưu phép gán.</li>
+        <li><b>Không nới ghi cho thành viên qua khoá</b>: <code>WriteWide()</code> chỉ owner; <code>*.view_all</code> chỉ nới đọc, chỉ xuất hiện trong hàm repository có tên chứa <code>read</code> (scopelint).</li>
+        <li>Cột là <b>tài nguyên dùng chung của trung tâm</b>, không có “own rows”: mọi ghi lên cột đi qua khoá <code>tasks.manage_board</code> + <code>center_id</code>; không dựa vào <code>WriteWide</code>.</li>
+        <li>Mỗi route mới có đúng một entry <code>routespec.Specs</code> kèm phân loại audit; test manifest fail-closed.</li>
+        <li>Frontend gate bằng <code>useCenterContext().has(key)</code>; nhãn quyền chỉ từ API; page có deep-link guard.</li>
+        <li>Không thêm thư viện DnD ở v1; a11y qua Radix + jsx-a11y; dark mode theo token map.</li>
+        <li>Migration bất biến up/down, parity test; backup DB trước khi apply; seed cột mặc định cho trung tâm đã có <b>và</b> trung tâm tạo mới.</li>
+        <li>Feature <code>centers</code> không import <code>tasks</code>: bàn giao việc khi rời trung tâm đi qua interface tiêm ở wiring (khuôn <code>AccountDisabler</code>), chạy trong cùng tx với <code>CloseMembership</code>.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Non-goals — không làm ở v1</h3>
+      <ul class="tight">
+        <li>Nhiều board / trung tâm, swimlane, WIP limit, màu hay icon cho cột, quy tắc chuyển cột (workflow rules).</li>
+        <li>Bình luận, đính kèm, checklist con, nhắc việc qua Zalo/thông báo.</li>
+        <li>Liên kết việc với lớp/học sinh/buổi (giữ chỗ cho <code>class_id</code> sau, không xây UI).</li>
+        <li>Kéo-thả chuột; v1 chuyển cột và sắp xếp cột bằng nút có phím tắt.</li>
+        <li>Compare-and-set cho cấu hình cột; xung đột hai người sửa cột cùng lúc giải quyết bằng refetch.</li>
+        <li>Báo cáo/thống kê công việc, escalation quá hạn.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Acceptance criteria — bằng chứng hoàn thành</h3>
+      <ul class="tight">
+        <li><b>AC1</b> Owner không cần gán gì vẫn CRUD việc, cấu hình cột, xem toàn bộ board.</li>
+        <li><b>AC2</b> Thành viên có <code>tasks.list</code> thấy việc mình tạo/được giao trên đúng cột; thêm <code>tasks.view_all</code> thấy toàn trung tâm; trung tâm khác không thấy gì.</li>
+        <li><b>AC3</b> Người được giao chuyển được cột việc của mình dù không phải người tạo; sửa nội dung/xoá chỉ người tạo hoặc owner, còn lại 403.</li>
+        <li><b>AC4</b> Thiếu <code>tasks.manage_board</code> → mọi API cột trả 403 và nút “Cấu hình cột” ẩn; có khoá → tạo/đổi tên/sắp xếp/xoá cột thành công.</li>
+        <li><b>AC5</b> Xoá cột đang có việc bắt buộc kèm <code>move_to</code>; API thực hiện di dời + xoá trong <b>một transaction</b>; thiếu <code>move_to</code> → 409. Không thể xoá cột cuối cùng.</li>
+        <li><b>AC6</b> Chuyển việc vào cột <code>is_done</code> ghi <code>completed_at</code>; chuyển ra xoá; đổi cờ <code>is_done</code> của cột không ghi lại lịch sử việc cũ.</li>
+        <li><b>AC7</b> Trung tâm mới tạo có sẵn 3 cột mặc định; migration backfill cho mọi trung tâm đang sống; parity test xanh.</li>
+        <li><b>AC8</b> Ma trận Phân quyền hiển thị nhóm “Công việc” (6 khoá) + “Thành viên” (<code>members.list</code>) với nhãn từ API; CRUD backfill cho 3 vai trò.</li>
+        <li><b>AC10</b> Xoá thành viên: trong cùng tx, việc họ được giao có <code>assignee_id = NULL</code>, việc họ tạo có <code>created_by = owner</code>; audit <code>task.handover</code> ghi số việc bàn giao; mời lại thành viên đó không hoàn tác.</li>
+        <li><b>AC9</b> Audit ghi <code>task.*</code> và <code>task_column.*</code>; manifest tests xanh; <code>make test-api</code>, <code>make test-web</code>, <code>make lint</code>, <code>make scopelint</code> xanh; e2e 1 luồng: thêm cột “Chờ duyệt” → tạo việc → giao → chuyển qua cột mới → hoàn thành.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 2. EVIDENCE ===================== -->
+<section id="evidence" aria-labelledby="h-evidence">
+  <h2 id="h-evidence">2. Bằng chứng từ repo (đã kiểm tra)</h2>
+  <div class="card">
+    <ul class="evidence">
+      <li><b>RBAC ba lớp đã có:</b> <code>center_roles</code> (3 vai trò hệ thống seed mỗi trung tâm), <code>center_role_permissions</code>, <code>center_member_permissions</code> grant/deny. Owner đứng ngoài hệ vai trò (migration 000013).</li>
+      <li><b>Seed theo trung tâm sống ở <code>centers/repository.go → CreateCenter</code>:</b> INSERT 3 vai trò rồi gán <code>DefaultRoleKeys()</code>. Cột mặc định của board seed cùng chỗ để trung tâm mới và trung tâm backfill hành xử giống nhau.</li>
+      <li><b>Catalog resource.action:</b> <code>DefaultRoleKeys()</code> trả mọi khoá grantable không phải scope và không thuộc legacy → khoá CRUD mới tự vào backfill; khoá <code>special</code> cũng vào trừ khi bị loại tường minh. Vì vậy <code>tasks.manage_board</code> cần quyết định rõ (câu hỏi #1).</li>
+      <li><b>CAS đã có cho vai trò</b> (<code>assignment_version</code>, <code>ErrStaleVersion</code>); v1 board không dùng CAS, chỉ refetch khi 404/409 — ghi vào non-goals để không bị hiểu là sót.</li>
+      <li><b>Khuôn repository:</b> <code>sessions/repository.go</code> tách <code>readScoped</code> / <code>writeScoped</code>; tasks theo khuôn với “own” = người tạo hoặc người được giao.</li>
+      <li><b>Rời trung tâm là soft:</b> <code>RemoveMember</code> chạy tx <code>CloseMembership</code> (stamp <code>left_at</code>) + <code>disabler.Disable</code>; không hard-delete nên FK CASCADE của tasks không kích hoạt. Owner có stint riêng trong <code>center_members</code> (role_id NULL) → <code>created_by</code> trỏ owner thoả FK composite. Bước bàn giao việc nối vào tx này qua interface tiêm như <code>AccountDisabler</code>.</li>
+      <li><b>Lỗ hổng:</b> danh sách thành viên chỉ trả cho owner qua <code>GET /centers/me</code>; thành viên thường không có endpoint chọn người nhận → cần directory tối giản.</li>
+      <li><b>Điều hướng:</b> <code>dashboard-layout.tsx</code> lọc entry theo <code>perm</code>; nhóm đầu chỉ có “Tổng quan”.</li>
+      <li><b>Design system:</b> HvCard/HvModal/HvSegmented/HvSelect/HvConfirmDialog/StatusPill sẵn dùng; không có DnD lib.</li>
+      <li><b>PRD non-goal về cấu hình</b> vẫn đúng; phương án B là quyết định của người dùng, brief giảm rủi ro bằng seed mặc định + trần 8 cột + không có rule theo cột.</li>
+      <li><b>Migration kế tiếp:</b> <code>000022</code>.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===================== 3. OPTIONS ===================== -->
+<section id="options" aria-labelledby="h-options">
+  <h2 id="h-options">3. Phương án đã so sánh và lựa chọn</h2>
+  <p>Rev 1 đề xuất A; người dùng chọn <b>B</b>. Giữ lại bảng so sánh để plan ghi nhận đánh đổi đã chấp nhận.</p>
+  <div class="grid g3">
+    <div class="card approach dim">
+      <h3>A. Cột cố định (enum)</h3>
+      <p>3 trạng thái cứng, không bảng cột. Rẻ nhất, hợp PRD, nhưng không cho trung tâm tự đặt quy trình.</p>
+      <dl><dt>Vì sao không chọn</dt><dd>Người dùng muốn trung tâm tự cấu hình cột; A phải làm lại khi có yêu cầu đó.</dd></dl>
+    </div>
+    <div class="card approach rec">
+      <span class="pill mint tag">Đã chọn</span>
+      <h3>B. Cột cấu hình theo trung tâm</h3>
+      <p>Bảng <code>task_columns</code>, tasks trỏ <code>column_id</code>, khoá <code>tasks.manage_board</code> cho CRUD cột, seed 3 cột mặc định.</p>
+      <dl>
+        <dt>Giả định chịu tải</dt><dd>Trung tâm cần quy trình riêng (thêm “Chờ duyệt”, “Đã giao PH”…).</dd>
+        <dt>Điểm gãy đầu tiên</dt><dd>Xoá cột đang có việc. Giải bằng <code>move_to</code> bắt buộc trong một tx, và không cho xoá cột cuối.</dd>
+        <dt>Trường hợp xấu</dt><dd>Hai người cấu hình cột đồng thời; client board cũ trỏ cột đã xoá → 404 → refetch. Chấp nhận ở v1, có thể thêm CAS sau theo khuôn <code>assignment_version</code>.</dd>
+        <dt>Chi phí bỏ</dt><dd>Trung bình: 2 bảng, 8 khoá, 2 nhóm endpoint. Giảm bằng cách giữ contract cột tối giản (name, position, is_done).</dd>
+      </dl>
+    </div>
+    <div class="card approach dim">
+      <h3>C. To-do cá nhân</h3>
+      <p>Không giao việc, không board chung.</p>
+      <dl><dt>Vì sao không chọn</dt><dd>Cắt phạm vi “quản lý công việc trung tâm”.</dd></dl>
+    </div>
+  </div>
+
+  <h3 style="margin-top:28px">Quyết định con của phương án B</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Quyết định</th><th>Chọn</th><th>Vì sao / đánh đổi</th></tr></thead>
+      <tbody>
+        <tr><td>Ngữ nghĩa “hoàn thành” (đã chốt)</td><td>Cờ <code>is_done</code> trên cột (0..n cột)</td><td>Board không cần enum trạng thái; “xong” là thuộc tính cột. Cho phép nhiều cột done (vd “Hoàn thành”, “Huỷ”) mà không thêm khái niệm. Đổi cờ không viết lại <code>completed_at</code> việc cũ.</td></tr>
+        <tr><td>Giới hạn cột (đã chốt)</td><td>1 ≤ số cột ≤ 8; tên ≤ 40 ký tự, duy nhất trong trung tâm (không phân biệt hoa thường)</td><td>Trần 8 giữ board đọc được trên desktop (scroll ngang) và mobile (dropdown). Unique index <code>(center_id, lower(name))</code> chặn trùng ở DB, không chỉ ở UI.</td></tr>
+        <tr><td>Xoá cột</td><td><code>DELETE …/:id?move_to=</code>; bắt buộc khi cột có việc; 1 tx; audit ghi cả <code>move_to</code></td><td>Một request nguyên tử thay vì “bulk move rồi delete” hai bước (bước 2 có thể fail để lại board lệch). FK <code>ON DELETE RESTRICT</code> làm lưới an toàn thứ hai.</td></tr>
+        <tr><td>Sắp xếp cột</td><td><code>PUT /task-columns/order</code> nhận <b>toàn bộ</b> danh sách id</td><td>Validate là hoán vị đúng của tập cột hiện có → không có trạng thái nửa chừng. Position INT gán lại 0..n-1.</td></tr>
+        <tr><td>Quyền cấu hình cột (đã chốt)</td><td><code>tasks.manage_board</code> — special / high, <b>opt-in</b> (loại khỏi backfill)</td><td>Cột là tài nguyên chung: một người xoá cột ảnh hưởng mọi người. Owner gán qua ma trận cho vai trò hoặc override thành viên.</td></tr>
+        <tr><td>Own rows của tasks</td><td>người tạo OR người được giao</td><td>Người nhận chuyển cột việc của mình không cần nới <code>WriteWide</code>. Sửa nội dung/xoá: người tạo hoặc owner. Tách rule qua 2 endpoint (<code>PATCH</code> vs <code>POST …/move</code>).</td></tr>
+        <tr><td>Chọn người nhận</td><td>Khoá <code>members.list</code> + directory (id, tên, vai trò)</td><td><code>members.manage</code> quá mạnh; directory không trả SĐT/email nên không đụng phone-privacy.</td></tr>
+        <tr><td><code>tasks.view_all</code></td><td>Opt-in, gán qua ma trận (đã chốt)</td><td>Scope key đã hiển thị trong ma trận như mọi <code>*.view_all</code> hiện có; owner bật cho vai trò hoặc override. Không cần UI mới.</td></tr>
+        <tr><td>Thành viên rời trung tâm (đã chốt)</td><td>Giữ việc; <code>assignee_id → NULL</code>, <code>created_by → owner</code> trong tx <code>RemoveMember</code></td><td><code>tasks.Service.HandoverOnDeparture(ctx, centerID, teacherID, ownerID)</code> tiêm vào <code>centers.Service</code> qua interface <code>TaskHandover</code>; chạy trước <code>CloseMembership</code> trong cùng tx. Việc mất người nhận hiện “chưa giao” cho owner xử lý lại.</td></tr>
+        <tr><td>Thứ tự việc trong cột</td><td><code>position DOUBLE PRECISION</code>, sort <code>(column_id, position, created_at)</code></td><td>Chèn giữa không renumber; sẵn cho DnD sau. v1 “đưa lên đầu cột” khi chuyển.</td></tr>
+        <tr><td>Xoá việc</td><td>Soft delete <code>deleted_at</code></td><td>Cùng khuôn classes/students; giữ dấu vết audit.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ===================== 4. DESIGN ===================== -->
+<section id="design" aria-labelledby="h-design">
+  <h2 id="h-design">4. Thiết kế đề xuất (phương án B)</h2>
+
+  <h3>Mô hình dữ liệu</h3>
+  <div class="er">
+    <div class="ent"><h4>centers</h4><ul><li><span class="k">id</span> UUID PK</li><li>owner_id</li><li>…</li></ul></div>
+    <div class="ent"><h4>task_columns</h4><ul><li><span class="k">id</span> UUID PK</li><li>center_id → centers</li><li>name VARCHAR(40)</li><li>position INT</li><li>is_done BOOL</li><li>created_at / updated_at</li><li><i>UNIQUE (id, center_id)</i></li><li><i>UNIQUE (center_id, lower(name))</i></li></ul></div>
+    <div class="ent"><h4>tasks</h4><ul><li><span class="k">id</span> UUID PK</li><li>center_id</li><li>column_id → task_columns (RESTRICT)</li><li>created_by → center_members</li><li>assignee_id → center_members (NULL)</li><li>title, description, priority</li><li>due_on, position, completed_at</li><li>created_at / updated_at / deleted_at</li></ul></div>
+    <div class="ent"><h4>center_members</h4><ul><li><span class="k">(teacher_id, center_id)</span></li><li>role_id → center_roles</li><li>left_at</li></ul></div>
+  </div>
+
+  <div class="grid g2" style="margin-top:16px">
+    <div class="card">
+      <h3>Migration 000022 <code>task_board</code></h3>
+<pre><code>CREATE TABLE task_columns (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  center_id  UUID NOT NULL REFERENCES centers(id) ON DELETE CASCADE,
+  name       VARCHAR(40) NOT NULL,
+  position   INT NOT NULL,
+  is_done    BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (id, center_id)                       -- đích cho FK composite
+);
+CREATE UNIQUE INDEX uq_task_columns_name
+  ON task_columns (center_id, lower(name));
+CREATE INDEX idx_task_columns_order ON task_columns (center_id, position);
+
+CREATE TABLE tasks (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  center_id    UUID NOT NULL,
+  column_id    UUID NOT NULL,
+  created_by   UUID NOT NULL,
+  assignee_id  UUID,
+  title        VARCHAR(200) NOT NULL,
+  description  TEXT NOT NULL DEFAULT '',
+  priority     VARCHAR(8) NOT NULL DEFAULT 'normal', -- validate trong code
+  due_on       DATE,
+  position     DOUBLE PRECISION NOT NULL DEFAULT 0,
+  completed_at TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at   TIMESTAMPTZ,
+  FOREIGN KEY (column_id, center_id)
+    REFERENCES task_columns (id, center_id) ON DELETE RESTRICT,
+  FOREIGN KEY (created_by, center_id)
+    REFERENCES center_members (teacher_id, center_id) ON DELETE CASCADE,
+  FOREIGN KEY (assignee_id, center_id)
+    REFERENCES center_members (teacher_id, center_id) ON DELETE CASCADE
+);
+CREATE INDEX idx_tasks_board ON tasks (center_id, column_id, position)
+  WHERE deleted_at IS NULL;
+CREATE INDEX idx_tasks_assignee ON tasks (center_id, assignee_id);
+CREATE INDEX idx_tasks_creator  ON tasks (center_id, created_by);
+
+-- Backfill: mỗi trung tâm đang sống nhận 3 cột mặc định.
+INSERT INTO task_columns (center_id, name, position, is_done)
+SELECT c.id, v.name, v.pos, v.done
+FROM centers c CROSS JOIN (VALUES
+  ('Cần làm', 0, FALSE), ('Đang làm', 1, FALSE), ('Hoàn thành', 2, TRUE)
+) AS v(name, pos, done)
+WHERE c.deleted_at IS NULL;
+
+-- Backfill quyền cho 3 vai trò hệ thống (ON CONFLICT DO NOTHING):
+--   tasks.create / list / read / edit / delete, members.list
+-- KHÔNG backfill: tasks.manage_board, tasks.view_all (opt-in).</code></pre>
+      <p style="font-size:.9rem;color:var(--ink-500)">FK composite kèm <code>center_id</code> theo khuôn 000007/000015. <code>RESTRICT</code> trên <code>column_id</code> buộc service di dời việc trước khi xoá cột. <code>CreateCenter</code> trong <code>centers/repository.go</code> thêm INSERT 3 cột mặc định ngay sau INSERT 3 vai trò.</p>
+    </div>
+    <div class="card">
+      <h3>Khoá catalog mới (<code>CatalogVersion</code> +1)</h3>
+      <div class="scroll"><table>
+        <thead><tr><th>Khoá</th><th>Kind / Risk</th><th>Nhãn</th><th>Backfill</th></tr></thead>
+        <tbody>
+          <tr><td><code>tasks.create</code></td><td>crud / low</td><td>Tạo công việc</td><td>3 vai trò</td></tr>
+          <tr><td><code>tasks.list</code></td><td>crud / low</td><td>Xem bảng công việc</td><td>3 vai trò</td></tr>
+          <tr><td><code>tasks.read</code></td><td>crud / low</td><td>Xem chi tiết công việc</td><td>3 vai trò</td></tr>
+          <tr><td><code>tasks.edit</code></td><td>crud / low</td><td>Sửa & chuyển cột công việc</td><td>3 vai trò</td></tr>
+          <tr><td><code>tasks.delete</code></td><td>crud / medium</td><td>Xoá công việc</td><td>3 vai trò</td></tr>
+          <tr><td><code>tasks.manage_board</code></td><td>special / high</td><td>Cấu hình cột bảng công việc</td><td>opt-in</td></tr>
+          <tr><td><code>tasks.view_all</code></td><td>scope / high</td><td>Xem mọi công việc trong trung tâm</td><td>opt-in</td></tr>
+          <tr><td><code>members.list</code></td><td>crud / low</td><td>Xem danh bạ thành viên</td><td>3 vai trò</td></tr>
+        </tbody>
+      </table></div>
+      <div class="callout" style="margin-top:14px;font-size:.9rem"><b>Lưu ý catalog:</b> <code>DefaultRoleKeys()</code> hiện gom mọi khoá grantable không phải scope, kể cả <code>special</code>. Để <code>tasks.manage_board</code> opt-in cần loại nó tường minh (như <code>legacyIdentitySet</code>) hoặc thêm thuộc tính <code>DefaultGrant=false</code> trên <code>PermDef</code>. Đề xuất thuộc tính, vì các khoá special sau này cũng cần.</div>
+      <h3 style="margin-top:18px">Quy tắc scope trong repository</h3>
+      <ul class="tight" style="font-size:.92rem">
+        <li><b>Cột</b> — <code>readColumns</code>: <code>center_id = ?</code> (mọi người có <code>tasks.list</code>). <code>writeColumns</code>: <code>center_id = ?</code>; quyền do middleware (<code>tasks.manage_board</code>) quyết, không có nhánh own-rows.</li>
+        <li><b>Việc</b> — <code>readScoped</code>: <code>center_id</code> ∧ (<code>view_all</code> ∨ <code>created_by = me</code> ∨ <code>assignee_id = me</code>).</li>
+        <li><code>writeOwn</code> (PATCH/DELETE): <code>center_id</code> ∧ (owner ∨ <code>created_by = me</code>).</li>
+        <li><code>writeParticipant</code> (POST …/move): <code>center_id</code> ∧ (owner ∨ <code>created_by = me</code> ∨ <code>assignee_id = me</code>).</li>
+        <li>Service kiểm tra <code>column_id</code> và <code>assignee_id</code> thuộc cùng <code>center_id</code> của scope; không nhận <code>center_id</code>/<code>teacher_id</code> từ request.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h3>Endpoint & phân loại routespec</h3>
+    <div class="scroll"><table>
+      <thead><tr><th>Method / Path</th><th>Khoá</th><th>Audit</th><th>Ghi chú</th></tr></thead>
+      <tbody>
+        <tr><td colspan="4" style="background:var(--cream-50)"><b>Board & cột</b></td></tr>
+        <tr><td><code>GET /api/v1/tasks/board?scope=mine|center&amp;assignee_id=</code></td><td><code>tasks.list</code></td><td>none</td><td>Một response: <code>columns[]</code> theo position + <code>tasks</code> nhóm theo <code>column_id</code>, mỗi cột ≤50 + cursor. <code>scope=center</code> chỉ hiệu lực khi có <code>view_all</code>.</td></tr>
+        <tr><td><code>POST /api/v1/task-columns</code></td><td><code>tasks.manage_board</code></td><td><code>task_column.create</code> / task_column</td><td>{name, is_done?}; append cuối; 409 khi trùng tên hoặc đã 8 cột.</td></tr>
+        <tr><td><code>PATCH /api/v1/task-columns/:id</code></td><td><code>tasks.manage_board</code></td><td><code>task_column.update</code> / task_column / id</td><td>{name?, is_done?}. Không đụng việc đang nằm trong cột.</td></tr>
+        <tr><td><code>PUT /api/v1/task-columns/order</code></td><td><code>tasks.manage_board</code></td><td><code>task_column.reorder</code> / task_column</td><td>{ids: [...]} phải là hoán vị đủ của tập cột; 409 nếu lệch (client cũ) → refetch.</td></tr>
+        <tr><td><code>DELETE /api/v1/task-columns/:id?move_to=</code></td><td><code>tasks.manage_board</code></td><td><code>task_column.delete</code> / task_column / id</td><td>1 tx: UPDATE tasks SET column_id = move_to (giữ position, cập nhật <code>completed_at</code> theo cờ cột đích) → DELETE cột. 409 nếu có việc mà thiếu <code>move_to</code>, nếu <code>move_to</code> = chính nó, hoặc là cột cuối cùng.</td></tr>
+        <tr><td colspan="4" style="background:var(--cream-50)"><b>Việc</b></td></tr>
+        <tr><td><code>POST /api/v1/tasks</code></td><td><code>tasks.create</code></td><td><code>task.create</code> / task</td><td>{title, description?, column_id?, assignee_id?, priority?, due_on?}; thiếu <code>column_id</code> → cột position 0.</td></tr>
+        <tr><td><code>GET /api/v1/tasks/:id</code></td><td><code>tasks.read</code></td><td>none</td><td>readScoped → 404 ngoài scope.</td></tr>
+        <tr><td><code>PATCH /api/v1/tasks/:id</code></td><td><code>tasks.edit</code></td><td><code>task.update</code> / task / id</td><td>title, description, assignee, priority, due_on. writeOwn.</td></tr>
+        <tr><td><code>POST /api/v1/tasks/:id/move</code></td><td><code>tasks.edit</code></td><td><code>task.move</code> / task / id</td><td>{column_id, position?}; set/clear <code>completed_at</code> theo <code>is_done</code> cột đích. writeParticipant.</td></tr>
+        <tr><td><code>DELETE /api/v1/tasks/:id</code></td><td><code>tasks.delete</code></td><td><code>task.delete</code> / task / id</td><td>Soft delete. writeOwn.</td></tr>
+        <tr><td colspan="4" style="background:var(--cream-50)"><b>Thành viên</b></td></tr>
+        <tr><td><code>DELETE /api/v1/centers/me/members/:teacherId</code> (đã có)</td><td><code>members.manage</code></td><td>+ <code>task.handover</code> / task</td><td>Không đổi contract; tx thêm bước bàn giao việc trước <code>CloseMembership</code>. Payload audit: số việc đổi assignee, số việc đổi creator.</td></tr>
+        <tr><td><code>GET /api/v1/centers/me/members/directory</code></td><td><code>members.list</code></td><td>none</td><td>[{teacher_id, display_name, role_name}] — không SĐT/email; chỉ stint đang sống.</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="grid g2" style="margin-top:16px">
+    <div class="card">
+      <h3>Backend: <code>internal/features/tasks/</code></h3>
+      <ul class="tight" style="font-size:.92rem">
+        <li><code>model.go</code> (TaskColumn, Task), <code>dto.go</code>, <code>validation.go</code> (tên cột, trần 8, priority, due_on)</li>
+        <li><code>column_repository.go</code> (readColumns / writeColumns, CountTasksInColumn, MoveAllTasks) và <code>task_repository.go</code> (readScoped / writeOwn / writeParticipant)</li>
+        <li><code>column_service.go</code> (create/rename/reorder/delete-with-move trong <code>TxManager</code>) và <code>task_service.go</code> (validate cột & assignee cùng center, completed_at theo cột)</li>
+        <li><code>handler.go</code>, <code>routes.go</code>; wiring trong <code>server.registerFeatures</code></li>
+        <li><code>centers/repository.go → CreateCenter</code>: INSERT 3 cột mặc định; directory handler trong <code>features/centers</code></li>
+        <li><code>centers/service.go</code>: interface <code>TaskHandover</code> tiêm cạnh <code>AccountDisabler</code>; <code>RemoveMember</code> gọi trước <code>CloseMembership</code>. Tasks feature cung cấp <code>HandoverOnDeparture</code> (2 UPDATE trong ctx tx).</li>
+        <li><code>authctx</code>: 8 khoá, thuộc tính <code>DefaultGrant</code>, <code>CatalogVersion</code>++</li>
+        <li>Tests: allow/deny/owner/override/cross-center cho việc và cột; delete-with-move nguyên tử; reorder hoán vị sai → 409; seed khi tạo trung tâm; xoá thành viên → bàn giao việc trong cùng tx (rollback khi Disable lỗi)</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Frontend: <code>src/features/tasks/</code></h3>
+      <ul class="tight" style="font-size:.92rem">
+        <li><code>api/tasks-api.ts</code>, <code>api/task-columns-api.ts</code>, <code>schemas/*.ts</code> (zod), <code>hooks/use-task-board.ts</code>, <code>hooks/use-task-columns.ts</code></li>
+        <li><code>pages/task-board-page.tsx</code> (guard <code>has("tasks.list")</code>); board scroll ngang khi &gt;3 cột; mobile: HvSegmented ≤4 cột, HvSelect khi nhiều hơn</li>
+        <li><code>components/task-board.tsx</code>, <code>task-column.tsx</code>, <code>task-card.tsx</code>, <code>task-form-modal.tsx</code>, <code>move-menu.tsx</code> (danh sách cột động)</li>
+        <li><code>components/board-settings-modal.tsx</code> (HvModal; gate <code>has("tasks.manage_board")</code>): đổi tên inline, nút ↑/↓, toggle “cột hoàn thành”, xoá qua HvConfirmDialog + HvSelect “chuyển việc sang”</li>
+        <li><code>features/center/api</code>: <code>fetchMemberDirectory</code>; MSW fixture + mirror <code>CatalogVersion</code></li>
+        <li>Nav: entry “Công việc” <code>/tasks</code>, <code>perm: "tasks.list"</code>, nhóm đầu cạnh “Tổng quan”</li>
+        <li>Tests: quartet cho board; settings modal ẩn/hiện theo <code>has()</code>; xoá cột có việc bắt buộc chọn đích; 409 reorder → refetch; e2e Playwright</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 5. FLOW ===================== -->
+<section id="flow" aria-labelledby="h-flow">
+  <h2 id="h-flow">5. Luồng triển khai</h2>
+  <div class="flow" role="list">
+    <div class="phase" role="listitem">
+      <h4><span class="n">1</span>API: catalog + migration</h4>
+      <ul><li>8 khoá, thuộc tính <code>DefaultGrant</code>, <code>CatalogVersion</code>++</li><li>000022: 2 bảng + seed cột + backfill quyền</li><li><code>CreateCenter</code> seed cột</li><li>Parity tests</li></ul>
+      <div class="gate">Gate: <code>go test ./internal/shared/authctx/... ./migrations/... ./internal/features/centers/...</code></div>
+    </div>
+    <div class="phase" role="listitem">
+      <h4><span class="n">2</span>API: cột + việc + directory</h4>
+      <ul><li>column/task repo, service, handler</li><li>routespec + audit actions</li><li>delete-with-move tx, reorder hoán vị</li><li>TaskHandover vào RemoveMember</li><li>RBAC matrix tests</li></ul>
+      <div class="gate">Gate: <code>make test-api</code>, <code>make scopelint</code>, <code>make api-docs</code></div>
+    </div>
+    <div class="phase" role="listitem">
+      <h4><span class="n">3</span>Web: board + cấu hình cột</h4>
+      <ul><li>api/schemas/hooks</li><li>Board N cột, card, move-menu, form</li><li>Board settings modal</li><li>Nav + guard + MSW</li></ul>
+      <div class="gate">Gate: <code>make test-web</code>, <code>make lint</code></div>
+    </div>
+    <div class="phase" role="listitem">
+      <h4><span class="n">4</span>Ma trận quyền + e2e</h4>
+      <ul><li>Nhóm “Công việc” từ catalog</li><li>e2e: thêm cột → tạo → giao → chuyển → xong → xoá cột có việc</li><li>Dark mode / mobile</li></ul>
+      <div class="gate">Gate: <code>make e2e</code> (stack teka-e2e)</div>
+    </div>
+    <div class="phase" role="listitem">
+      <h4><span class="n">5</span>Review, docs, ship</h4>
+      <ul><li>Review RBAC + tx xoá cột</li><li>docs: adding-permissions (DefaultGrant), frontend nav</li><li>Deploy API → gán <code>manage_board</code>, <code>view_all</code></li></ul>
+      <div class="gate">Gate: CI xanh, PR merge, verify allowed + denied trên prod</div>
+    </div>
+  </div>
+
+  <h3 style="margin-top:28px">Đường đi request “xoá cột đang có việc”</h3>
+  <div class="card" style="padding:12px">
+    <svg viewBox="0 0 1100 200" width="100%" height="auto" role="img" aria-labelledby="svg-del-title">
+      <title id="svg-del-title">Luồng xoá cột: modal cấu hình chọn cột đích, API di dời việc và xoá cột trong một transaction, phát sự kiện audit</title>
+      <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L10 5L0 10z" fill="#86998f"/></marker></defs>
+      <g font-size="13" fill="#27433b">
+        <rect x="10" y="40" width="160" height="70" rx="14" fill="#fff" stroke="#e2ece2"/><text x="90" y="68" text-anchor="middle" font-weight="700">BoardSettingsModal</text><text x="90" y="88" text-anchor="middle" fill="#5b756c">chọn “chuyển sang”</text>
+        <rect x="210" y="40" width="170" height="70" rx="14" fill="#e9f7f1" stroke="#a9e0cb"/><text x="295" y="68" text-anchor="middle" font-weight="700">DELETE /task-columns/:id</text><text x="295" y="88" text-anchor="middle" fill="#2e8d6e">?move_to=… · manage_board</text>
+        <rect x="420" y="40" width="150" height="70" rx="14" fill="#fff" stroke="#e2ece2"/><text x="495" y="68" text-anchor="middle" font-weight="700">Scope middleware</text><text x="495" y="88" text-anchor="middle" fill="#5b756c">Has(manage_board)?</text>
+        <rect x="610" y="20" width="330" height="110" rx="16" fill="#fff4d6" stroke="#ffd86b"/><text x="775" y="42" text-anchor="middle" font-weight="700" fill="#b87d00">column_service.Delete — 1 transaction</text>
+        <rect x="625" y="55" width="140" height="60" rx="12" fill="#fff" stroke="#e2ece2"/><text x="695" y="78" text-anchor="middle" font-weight="700">UPDATE tasks</text><text x="695" y="98" text-anchor="middle" fill="#5b756c">column_id = move_to</text>
+        <rect x="785" y="55" width="140" height="60" rx="12" fill="#fff" stroke="#e2ece2"/><text x="855" y="78" text-anchor="middle" font-weight="700">DELETE column</text><text x="855" y="98" text-anchor="middle" fill="#5b756c">RESTRICT đã thoả</text>
+        <rect x="970" y="40" width="120" height="70" rx="14" fill="#fff" stroke="#e2ece2"/><text x="1030" y="68" text-anchor="middle" font-weight="700">200 board</text><text x="1030" y="88" text-anchor="middle" fill="#5b756c">refetch</text>
+        <line x1="170" y1="75" x2="208" y2="75" stroke="#86998f" stroke-width="2" marker-end="url(#arr)"/>
+        <line x1="380" y1="75" x2="418" y2="75" stroke="#86998f" stroke-width="2" marker-end="url(#arr)"/>
+        <line x1="570" y1="75" x2="608" y2="75" stroke="#86998f" stroke-width="2" marker-end="url(#arr)"/>
+        <line x1="765" y1="85" x2="783" y2="85" stroke="#86998f" stroke-width="2" marker-end="url(#arr)"/>
+        <line x1="940" y1="75" x2="968" y2="75" stroke="#86998f" stroke-width="2" marker-end="url(#arr)"/>
+        <path d="M495 110 V175 H775 V132" fill="none" stroke="#7fc8e8" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arr)"/>
+        <text x="640" y="170" text-anchor="middle" fill="#2d7aa0">request-events → audit_logs (task_column.delete, move_to)</text>
+        <text x="495" y="130" text-anchor="middle" fill="#b23a28">403 thiếu khoá</text>
+        <text x="775" y="150" text-anchor="middle" fill="#b23a28">409: thiếu move_to · cột cuối · move_to = chính nó</text>
+      </g>
+    </svg>
+  </div>
+</section>
+
+<!-- ===================== 6. MOCKUPS ===================== -->
+<section id="mockups" aria-labelledby="h-mock">
+  <h2 id="h-mock">6. Mockup UI có chú thích</h2>
+  <p>Kế thừa token: nền <code>cream-100</code>, thẻ trắng viền <code>line-200</code>, radius 14–20px, nút chính <code>mint-400</code> + press shadow, chữ Baloo 2 / Nunito. Cột hoàn thành nền <code>mint-50</code>. Dark mode dùng token map chung.</p>
+
+  <div class="tabs" role="tablist" aria-label="Chế độ xem mockup">
+    <button role="tab" aria-selected="true" aria-controls="mk-desktop" id="tab-desktop">Board — desktop (4 cột)</button>
+    <button role="tab" aria-selected="false" aria-controls="mk-settings" id="tab-settings" tabindex="-1">Cấu hình cột</button>
+    <button role="tab" aria-selected="false" aria-controls="mk-delete" id="tab-delete" tabindex="-1">Xoá cột có việc</button>
+    <button role="tab" aria-selected="false" aria-controls="mk-mobile" id="tab-mobile" tabindex="-1">Board — mobile</button>
+    <button role="tab" aria-selected="false" aria-controls="mk-form" id="tab-form" tabindex="-1">Form công việc</button>
+    <button role="tab" aria-selected="false" aria-controls="mk-matrix" id="tab-matrix" tabindex="-1">Ma trận quyền</button>
+  </div>
+
+  <!-- Desktop board -->
+  <div id="mk-desktop" role="tabpanel" aria-labelledby="tab-desktop">
+    <div class="mock">
+      <div class="topbar">
+        <div><div class="title">Công việc</div><div style="font-size:.85rem;color:var(--ink-500)">14 việc đang mở · 3 quá hạn</div></div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <span class="seg" aria-label="Phạm vi"><span class="on">Của tôi</span><span>Toàn trung tâm</span></span><span class="note s">1</span>
+          <span class="input" style="min-width:160px">Người nhận: Tất cả ▾</span>
+          <span class="btn ghost icon" title="Cấu hình cột">⚙ Cấu hình cột</span><span class="note s">2</span>
+          <span class="btn primary">＋ Thêm công việc</span>
+        </div>
+      </div>
+      <div class="boardwrap"><div class="board">
+        <div class="col mobile-on">
+          <header><b>Cần làm</b><span class="count">5</span></header>
+          <div class="tcard mine"><span class="note" style="top:-8px;left:-8px">3</span>
+            <div class="t">Gọi phụ huynh lớp Toán 9A chưa đóng T9</div>
+            <div class="row"><span><span class="pill coral">Cao</span> · hạn 15/09</span><span class="av">HV</span></div>
+            <div class="row" style="margin-top:6px"><span></span><span class="btn ghost" style="padding:3px 10px;font-size:.78rem">Chuyển sang ▾</span></div>
+          </div>
+          <div class="tcard late"><div class="t">In phiếu thu tháng 9</div><div class="row"><span><span class="pill sun">Vừa</span> · <b style="color:var(--coral-600)">quá hạn 2 ngày</b></span><span class="av g">TG</span></div></div>
+          <div class="tcard"><div class="t">Cập nhật lịch lớp Lý 10</div><div class="row"><span><span class="pill ink">Thấp</span></span><span class="av" title="Chưa giao">—</span></div></div>
+        </div>
+        <div class="col">
+          <header><b>Đang làm</b><span class="count">4</span></header>
+          <div class="tcard mine"><div class="t">Nhập điểm giữa kỳ Anh 8B</div><div class="row"><span><span class="pill sun">Vừa</span> · hạn 18/09</span><span class="av">HV</span></div>
+            <div class="row" style="margin-top:6px"><span></span><span class="btn ghost" style="padding:3px 10px;font-size:.78rem">Chuyển sang ▾</span></div></div>
+          <div class="tcard"><div class="t">Soạn thông báo nghỉ lễ</div><div class="row"><span><span class="pill ink">Thấp</span></span><span class="av g">TG</span></div></div>
+        </div>
+        <div class="col">
+          <header><b>Chờ duyệt</b><span class="count">2</span><span class="note s" style="margin-left:6px">4</span></header>
+          <div class="tcard"><div class="t">Bảng học phí T9 lớp Văn 12</div><div class="row"><span><span class="pill coral">Cao</span> · hạn 14/09</span><span class="av">HV</span></div></div>
+          <div class="empty" style="margin-top:8px">Kéo thả chưa hỗ trợ — dùng “Chuyển sang”</div>
+        </div>
+        <div class="col done">
+          <header><b>Hoàn thành ✓</b><span class="count">3</span><span class="note s" style="margin-left:6px">5</span></header>
+          <div class="tcard done"><div class="t">Đối chiếu điểm danh tuần 36</div><div class="row"><span>xong 11/09</span><span class="av">HV</span></div></div>
+        </div>
+      </div></div>
+    </div>
+    <ol class="notes">
+      <li><b>HvSegmented “Của tôi / Toàn trung tâm”</b> chỉ render khi <code>has("tasks.view_all")</code>; mặc định “Của tôi”. → AC2.</li>
+      <li><b>“Cấu hình cột”</b> ghost button, chỉ render khi <code>has("tasks.manage_board")</code>; mở modal ở tab kế bên. → AC4.</li>
+      <li><b>Thẻ của tôi</b> viền trái <code>mint-400</code>; menu “Chuyển sang ▾” liệt kê cột động theo position (Radix DropdownMenu, phím <kbd>[</kbd>/<kbd>]</kbd> chuyển cột kề). → AC3.</li>
+      <li><b>Cột do trung tâm thêm</b> hiển thị y hệt cột mặc định; board scroll ngang khi &gt;3 cột, mỗi cột tối thiểu 230px. Không màu/icon riêng theo cột (non-goal).</li>
+      <li><b>Cột hoàn thành</b> nền <code>mint-50</code> + dấu ✓ ở tiêu đề; thẻ mờ 72%; hiện “xong dd/mm” từ <code>completed_at</code>. → AC6.</li>
+    </ol>
+  </div>
+
+  <!-- Settings -->
+  <div id="mk-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+    <div class="mock" style="padding:28px 16px">
+      <div class="drawer" role="dialog" aria-label="Mockup cấu hình cột">
+        <div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0">Cấu hình cột</h3><span class="pill ink">4 / 8 cột</span><span class="note s">1</span></div>
+        <div class="colrow"><span class="grip">⋮⋮</span><span class="input" style="padding:6px 10px">Cần làm</span><span class="mini"><span>↑</span><span>↓</span></span><span class="mini"><span class="switch" title="Cột hoàn thành"></span><span>🗑</span></span></div>
+        <div class="colrow"><span class="grip">⋮⋮</span><span class="input" style="padding:6px 10px">Đang làm</span><span class="mini"><span>↑</span><span>↓</span></span><span class="mini"><span class="switch"></span><span>🗑</span></span></div>
+        <div class="colrow"><span class="grip">⋮⋮</span><span class="input focus" style="padding:6px 10px">Chờ duyệt<span style="color:var(--ink-300)">|</span></span><span class="mini"><span>↑</span><span>↓</span></span><span class="mini"><span class="switch"></span><span>🗑</span></span><span class="note s">2</span></div>
+        <div class="colrow"><span class="grip">⋮⋮</span><span class="input" style="padding:6px 10px">Hoàn thành</span><span class="mini"><span>↑</span><span>↓</span></span><span class="mini"><span class="switch on"></span><span>🗑</span></span><span class="note s">3</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px">
+          <span class="btn ghost">＋ Thêm cột</span>
+          <span style="display:flex;gap:8px"><span class="btn ghost">Đóng</span></span>
+        </div>
+        <p style="font-size:.8rem;color:var(--ink-500);margin:10px 0 0">Mỗi thay đổi lưu ngay (đổi tên khi blur, ↑/↓ gọi reorder, toggle gọi PATCH). Không có nút “Lưu” tổng vì không có CAS ở v1.</p>
+      </div>
+    </div>
+    <ol class="notes">
+      <li><b>Bộ đếm n/8</b> lấy từ response; “Thêm cột” disabled khi đủ 8; lỗi 409 trùng tên hiển thị dưới ô (từ <code>ApiError.fields</code>).</li>
+      <li><b>Đổi tên inline</b> (input thường, không cần dialog); ↑/↓ gửi toàn bộ thứ tự id lên <code>PUT /task-columns/order</code>; 409 lệch tập → toast “Bảng đã thay đổi, tải lại” + refetch.</li>
+      <li><b>Toggle “cột hoàn thành”</b> (Radix Switch) — có thể bật nhiều cột; nút xoá disabled khi chỉ còn 1 cột. → AC5, AC6.</li>
+    </ol>
+  </div>
+
+  <!-- Delete -->
+  <div id="mk-delete" role="tabpanel" aria-labelledby="tab-delete" hidden>
+    <div class="mock" style="padding:28px 16px">
+      <div class="drawer" role="alertdialog" aria-label="Mockup xoá cột" style="max-width:440px">
+        <h3 style="margin:0 0 6px">Xoá cột “Chờ duyệt”?</h3>
+        <p style="margin:0 0 12px;font-size:.92rem">Cột đang có <b>2 việc</b>. Chọn cột để chuyển chúng sang trước khi xoá.</p>
+        <div class="field"><label>Chuyển việc sang</label><div class="input focus">Đang làm <span>▾</span></div><span class="note s">1</span></div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><span class="btn ghost">Huỷ</span><span class="btn danger">Chuyển & xoá cột</span><span class="note s">2</span></div>
+      </div>
+    </div>
+    <ol class="notes">
+      <li><b>HvSelect đích</b> loại trừ chính cột đang xoá; bắt buộc chọn khi count &gt; 0. Cột trống bỏ qua bước này và hiện HvConfirmDialog thường.</li>
+      <li><b>Một request</b> <code>DELETE …?move_to=</code>; API làm cả hai bước trong một tx, audit ghi <code>move_to</code>. → AC5.</li>
+    </ol>
+  </div>
+
+  <!-- Mobile -->
+  <div id="mk-mobile" role="tabpanel" aria-labelledby="tab-mobile" hidden>
+    <div class="mock phone">
+      <div class="topbar"><div class="title">Công việc</div><span class="btn primary" style="padding:6px 12px">＋</span></div>
+      <div class="seg" style="display:flex;justify-content:space-between;margin-bottom:10px"><span>Cần làm 5</span><span class="on">Đang làm 4</span><span>Chờ duyệt 2</span><span>Xong 3</span></div><span class="note s">1</span>
+      <div class="col mobile-on" style="margin-top:6px">
+        <div class="tcard mine"><div class="t">Nhập điểm giữa kỳ Anh 8B</div><div class="row"><span><span class="pill sun">Vừa</span> · 18/09</span><span class="av">HV</span></div>
+          <div class="row" style="margin-top:6px"><span></span><span class="btn ghost" style="padding:5px 10px;font-size:.8rem">Chuyển sang ▾</span></div></div>
+        <div class="tcard"><div class="t">Soạn thông báo nghỉ lễ</div><div class="row"><span><span class="pill ink">Thấp</span></span><span class="av g">TG</span></div></div>
+      </div>
+    </div>
+    <ol class="notes">
+      <li><b>≤4 cột</b> dùng HvSegmented với đếm số; <b>&gt;4 cột</b> chuyển sang HvSelect chọn cột để tránh tab quá hẹp. Chỉ render một cột → không scroll ngang.</li>
+      <li>Menu “Chuyển sang ▾” dùng chung với desktop; không phụ thuộc DnD.</li>
+    </ol>
+  </div>
+
+  <!-- Form -->
+  <div id="mk-form" role="tabpanel" aria-labelledby="tab-form" hidden>
+    <div class="mock" style="padding:28px 16px">
+      <div class="drawer" role="dialog" aria-label="Mockup form công việc" style="max-width:460px">
+        <div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0">Thêm công việc</h3><span class="pill ink">Esc để đóng</span></div>
+        <div class="field"><label>Tiêu đề *</label><div class="input focus">Gọi phụ huynh lớp Toán 9A chưa đóng T9</div></div>
+        <div class="field"><label>Mô tả</label><div class="input" style="min-height:64px;align-items:flex-start">Danh sách 6 PH còn nợ, ưu tiên gọi trước 17h…</div></div>
+        <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px">
+          <div class="field"><label>Cột</label><div class="input">Cần làm <span>▾</span></div><span class="note s">1</span></div>
+          <div class="field"><label>Giao cho</label><div class="input">Học vụ · Nguyễn Hoa <span>▾</span></div><span class="note s">2</span></div>
+        </div>
+        <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px">
+          <div class="field"><label>Hạn</label><div class="input">15/09/2026 <span>📅</span></div></div>
+          <div class="field"><label>Ưu tiên</label><span class="seg"><span>Thấp</span><span>Vừa</span><span class="on" style="color:var(--coral-600)">Cao</span></span></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px">
+          <span class="btn danger">Xoá</span><span class="note s">3</span>
+          <span style="display:flex;gap:8px"><span class="btn ghost">Huỷ</span><span class="btn primary">Lưu</span></span>
+        </div>
+      </div>
+    </div>
+    <ol class="notes">
+      <li><b>HvSelect “Cột”</b> mặc định cột position 0 (hoặc cột đang mở khi bấm “＋” trong cột); danh sách lấy từ response board.</li>
+      <li><b>HvSelect “Giao cho”</b> nạp từ directory (<code>members.list</code>): tên + vai trò, không SĐT.</li>
+      <li><b>Xoá</b> chỉ hiện khi caller là người tạo hoặc owner và có <code>tasks.delete</code>; người được giao thấy form chế độ đọc + menu chuyển cột. → AC3.</li>
+    </ol>
+  </div>
+
+  <!-- Matrix -->
+  <div id="mk-matrix" role="tabpanel" aria-labelledby="tab-matrix" hidden>
+    <div class="mock">
+      <div class="topbar"><div class="title">Phân quyền vai trò</div><span class="pill ink">Catalog v(N+1)</span></div>
+      <div class="scroll"><table class="matrix">
+        <thead><tr><th>Công việc <span class="note s">1</span></th><th>Giáo viên</th><th>Học vụ</th><th>Trợ giảng</th></tr></thead>
+        <tbody>
+          <tr><td>Xem bảng công việc <span class="pill ink">low</span></td><td><span class="chk on">✓</span></td><td><span class="chk on">✓</span></td><td><span class="chk on">✓</span></td></tr>
+          <tr><td>Tạo công việc <span class="pill ink">low</span></td><td><span class="chk on">✓</span></td><td><span class="chk on">✓</span></td><td><span class="chk on">✓</span></td></tr>
+          <tr><td>Xem chi tiết công việc <span class="pill ink">low</span></td><td><span class="chk on">✓</span></td><td><span class="chk on">✓</span></td><td><span class="chk on">✓</span></td></tr>
+          <tr><td>Sửa & chuyển cột công việc <span class="pill ink">low</span></td><td><span class="chk on">✓</span></td><td><span class="chk on">✓</span></td><td><span class="chk on">✓</span></td></tr>
+          <tr><td>Xoá công việc <span class="pill sun">medium</span></td><td><span class="chk on">✓</span></td><td><span class="chk on">✓</span></td><td><span class="chk on">✓</span></td></tr>
+          <tr><td>Cấu hình cột bảng công việc <span class="pill coral">high</span> <span class="note s">2</span></td><td><span class="chk">&nbsp;</span></td><td><span class="chk on">✓</span></td><td><span class="chk">&nbsp;</span></td></tr>
+          <tr><td>Xem mọi công việc trong trung tâm <span class="pill coral">high</span></td><td><span class="chk">&nbsp;</span></td><td><span class="chk on">✓</span></td><td><span class="chk">&nbsp;</span></td></tr>
+        </tbody>
+        <thead><tr><th>Thành viên</th><th></th><th></th><th></th></tr></thead>
+        <tbody><tr><td>Xem danh bạ thành viên <span class="pill ink">low</span></td><td><span class="chk on">✓</span></td><td><span class="chk on">✓</span></td><td><span class="chk on">✓</span></td></tr></tbody>
+      </table></div>
+    </div>
+    <ol class="notes">
+      <li><b>Không sửa UI ma trận</b>: <code>permission-matrix.tsx</code> nhóm theo <code>Resource</code> từ catalog nên nhóm “Công việc” tự xuất hiện. Bằng chứng AC8 là fixture MSW mirror version mới.</li>
+      <li><b>manage_board</b> và <b>view_all</b> mặc định trống (fail-closed); hình minh hoạ owner gán cho Học vụ. Risk high → nhấn coral như scope keys hiện có.</li>
+    </ol>
+  </div>
+</section>
+
+<!-- ===================== 7. RISKS ===================== -->
+<section id="risks" aria-labelledby="h-risks">
+  <h2 id="h-risks">7. Rủi ro và câu hỏi mở</h2>
+  <div class="grid g2">
+    <div class="card">
+      <h3>Rủi ro đã nhận diện</h3>
+      <div class="risk">
+        <span class="pill coral">Sản phẩm</span><div>Đi ngược PRD non-goal “cấu hình”. Đã là quyết định của người dùng; giảm thiểu bằng seed mặc định, trần 8 cột, không rule theo cột, và <code>manage_board</code> opt-in để chỉ một vài người đụng vào cấu trúc.</div>
+        <span class="pill coral">Toàn vẹn</span><div>Xoá cột có việc: nếu di dời và xoá không cùng tx, board có thể lệch. Thiết kế bắt buộc 1 tx + FK RESTRICT làm lưới thứ hai; integration test trên Postgres thật.</div>
+        <span class="pill coral">RBAC</span><div>“Own rows = creator OR assignee” là ngoại lệ so với khuôn <code>teacher_id = me</code>; giữ trong đúng 2 hàm write, có test cross-member + scopelint. Cột không có own-rows: mọi write qua <code>tasks.manage_board</code>.</div>
+        <span class="pill sun">Catalog</span><div><code>DefaultRoleKeys()</code> đang gom cả khoá special; cần <code>DefaultGrant</code> (hoặc loại tường minh) để <code>manage_board</code> không tự vào backfill. Đây là thay đổi contract catalog nhỏ, cần parity test.</div>
+        <span class="pill sun">Đồng thời</span><div>Không CAS cho cột ở v1: hai người cấu hình cùng lúc → last-write-wins cho rename/toggle, còn reorder và move fail-closed (409/404) rồi refetch. Có thể thêm <code>board_version</code> theo khuôn <code>assignment_version</code> sau.</div>
+        <span class="pill sun">Dữ liệu</span><div>Bàn giao khi rời trung tâm nằm trong tx của <code>centers</code> nhưng SQL thuộc <code>tasks</code>: nếu hook bị quên ở wiring, việc của người đã rời vẫn trỏ stint đã đóng (không mất dữ liệu, nhưng “Của tôi” của owner không thấy). Test wiring ở <code>server.registerFeatures</code> + integration test xoá thành viên.</div>
+        <span class="pill sky">Rollout</span><div>Không gán <code>manage_board</code>/<code>view_all</code> trước khi mọi instance API chạy catalog mới (docs §9).</div>
+        <span class="pill sky">UX</span><div>Không DnD; board nhiều cột trên desktop phải scroll ngang. Giữ <code>position</code> cho DnD sau.</div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Quyết định đã chốt (13/09/2026)</h3>
+      <ol class="tight">
+        <li><b><code>tasks.manage_board</code></b>: opt-in; owner gán qua ma trận (vai trò hoặc override).</li>
+        <li><b>Thành viên rời trung tâm</b>: giữ việc; <code>assignee_id → NULL</code>, <code>created_by → owner</code> trong tx <code>RemoveMember</code>.</li>
+        <li><b>Trần 8 cột</b>, nhiều cột <code>is_done</code> được phép.</li>
+        <li><b><code>tasks.view_all</code></b>: opt-in, cấu hình qua ma trận như mọi scope key hiện có.</li>
+      </ol>
+      <p style="font-size:.9rem;color:var(--ink-500)">Không còn câu hỏi mở.</p>
+      <div class="callout mint" style="margin-top:14px"><b>Bước tiếp theo:</b> chạy <code>/ak:plan</code> với hợp đồng ở mục 1, quyết định con ở mục 3 và 5 phase ở mục 5; sau đó <code>/ak:cook</code>.</div>
+    </div>
+  </div>
+</section>
+
+<footer>Brainstorm brief rev 3 · Teka · phương án B, 4 quyết định đã chốt · bằng chứng từ repo tại nhánh master (commit bb13590) · mockup dựng bằng HTML/CSS thuần theo token dự án, không dùng trình sinh ảnh.</footer>
+</div>
+
+<script>
+(function(){
+  var tabs=[].slice.call(document.querySelectorAll('[role="tab"]'));
+  function activate(tab){
+    tabs.forEach(function(t){
+      var on=t===tab;
+      t.setAttribute('aria-selected',on?'true':'false');
+      t.tabIndex=on?0:-1;
+      document.getElementById(t.getAttribute('aria-controls')).hidden=!on;
+    });
+    tab.focus();
+  }
+  tabs.forEach(function(t,i){
+    t.addEventListener('click',function(){activate(t)});
+    t.addEventListener('keydown',function(e){
+      var j=i;
+      if(e.key==='ArrowRight')j=(i+1)%tabs.length;
+      else if(e.key==='ArrowLeft')j=(i-1+tabs.length)%tabs.length;
+      else if(e.key==='Home')j=0;
+      else if(e.key==='End')j=tabs.length-1;
+      else return;
+      e.preventDefault();activate(tabs[j]);
+    });
+  });
+})();
+</script>
+</body>
+</html>
