@@ -7,6 +7,7 @@ import "github.com/gin-gonic/gin"
 func RegisterRoutes(rg *gin.RouterGroup, h *Handler, auth ...gin.HandlerFunc) {
 	g := rg.Group("/centers", auth...)
 	g.GET("/me", h.me)
+	g.GET("/me/members/directory", h.directory)
 	g.PATCH("/me", h.rename)
 	g.DELETE("/me/members/:teacherId", h.removeMember)
 	g.GET("/me/permissions", h.permissions)

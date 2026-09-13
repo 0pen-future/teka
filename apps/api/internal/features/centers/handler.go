@@ -61,6 +61,30 @@ func (h *Handler) me(c *gin.Context) {
 	response.OK(c, http.StatusOK, resp)
 }
 
+// directory lists the caller's center's live members for pickers (e.g. task
+// assignment): name and role only, never phone or email.
+//
+//	@Summary		List the center's live members for pickers
+//	@Tags			centers
+//	@Produce		json
+//	@Success		200	{object}	response.Envelope{data=[]DirectoryEntry}
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}	"missing members.list"
+//	@Security		BearerAuth
+//	@Router			/centers/me/members/directory [get]
+func (h *Handler) directory(c *gin.Context) {
+	scope, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	resp, err := h.svc.Directory(c.Request.Context(), scope)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, resp)
+}
+
 // rename changes the center's name; owner only.
 //
 //	@Summary		Rename my center

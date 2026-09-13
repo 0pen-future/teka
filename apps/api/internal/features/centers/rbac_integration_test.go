@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"teka/apps/api/internal/features/centers"
+	"teka/apps/api/internal/features/tasks"
 	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/testutil"
@@ -168,6 +169,55 @@ func TestMembershipReopenResetsRoleAndOverrides(t *testing.T) {
 	sc := e.scope(t, member.ID)
 	require.False(t, sc.CanSendReports, "no source may resurrect the revoked permission")
 	require.False(t, sc.Has(authctx.PermReportsSend))
+}
+
+// Removing a member with a wired TaskHandover unassigns their tasks and
+// reassigns the tasks they authored to the owner, in the same transaction as
+// the membership close — testutil.Teacher's fixture center is not born
+// through centers.Repository.CreateCenter, so it starts with no columns; the
+// test seeds one directly.
+func TestRemoveMemberHandsOverTasks(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	_, owner := testutil.Teacher(t, e.db)
+	_, member := testutil.Teacher(t, e.db)
+	e.join(t, member.ID, owner.ID)
+	ownerScope := e.scope(t, owner.ID)
+	centerID := ownerScope.CenterID
+
+	tasksSvc := tasks.NewService(e.db, e.tx, nil)
+	e.centersSvc.SetTaskHandover(tasksSvc)
+
+	columnID := id.New()
+	require.NoError(t, e.db.Exec(
+		`INSERT INTO task_columns (id, center_id, name, position, is_done) VALUES (?, ?, 'Cần làm', 0, FALSE)`,
+		columnID, centerID).Error)
+
+	assignedTask := id.New()
+	require.NoError(t, e.db.Exec(
+		`INSERT INTO tasks (id, center_id, column_id, created_by, assignee_id, title, priority)
+		 VALUES (?, ?, ?, ?, ?, 'Assigned to departing member', 'none')`,
+		assignedTask, centerID, columnID, owner.ID, member.ID).Error)
+
+	createdTask := id.New()
+	require.NoError(t, e.db.Exec(
+		`INSERT INTO tasks (id, center_id, column_id, created_by, title, priority)
+		 VALUES (?, ?, ?, ?, 'Created by departing member', 'none')`,
+		createdTask, centerID, columnID, member.ID).Error)
+
+	require.NoError(t, e.centersSvc.RemoveMember(context.Background(), ownerScope, member.ID))
+
+	var assigned struct{ AssigneeID *uuid.UUID }
+	require.NoError(t, e.db.Raw("SELECT assignee_id FROM tasks WHERE id = ?", assignedTask).Scan(&assigned).Error)
+	require.Nil(t, assigned.AssigneeID, "departed member's assigned task must be unassigned")
+
+	var created struct{ CreatedBy uuid.UUID }
+	require.NoError(t, e.db.Raw("SELECT created_by FROM tasks WHERE id = ?", createdTask).Scan(&created).Error)
+	require.Equal(t, owner.ID, created.CreatedBy, "departed member's authored task must pass to the owner")
+
+	var m centers.Member
+	require.NoError(t, e.db.First(&m, "teacher_id = ? AND center_id = ?", member.ID, centerID).Error)
+	require.NotNil(t, m.LeftAt, "membership must still close alongside the handover")
 }
 
 // The owner's own membership stint stays outside the role system even when

@@ -41,6 +41,8 @@ Field lists live on the structs; link, don't copy.
 | `http.request_completed` | [`middleware/request_events.go`](../apps/api/internal/middleware/request_events.go) | One event per mutating API request (POST/PUT/PATCH/DELETE), success or failure alike |
 | `auth.login_succeeded` / `auth.login_failed` / `auth.logged_out` | [`features/auth/events.go`](../apps/api/internal/features/auth/events.go) | Session lifecycle, published by the auth service itself (the middleware skips `/auth/login`, `/auth/logout`, `/auth/refresh` to avoid double-logging; refresh is deliberately not audited) |
 | `invitations.member_joined` | [`features/invitations/events.go`](../apps/api/internal/features/invitations/events.go) | Public invitation accept — carries the center id the middleware cannot resolve for an unauthenticated caller |
+| `tasks.column_deleted` | [`features/tasks/events.go`](../apps/api/internal/features/tasks/events.go) | Column delete-with-move — carries `move_to` and the moved task count the request middleware cannot see (a query parameter it never inspects); a second, richer row alongside the request-log row for the same `DELETE`, distinguished by an empty `Method` |
+| `centers.member_tasks_handed_over` | [`features/centers/events.go`](../apps/api/internal/features/centers/events.go) | Task handover on member removal — published from inside `RemoveMember`'s own transaction commit, not a direct board request, so it is the *only* audit row for this action |
 
 ## Audit capture pipeline
 
@@ -89,6 +91,9 @@ Accepted trade-offs, not bugs:
 - Failed logins are rate-unlimited today; each attempt writes an
   `auth.login_fail` row (the phone is stored masked, never in full). Per-IP
   rate limiting of `POST /auth/login` is backlog.
+- Reordering task columns (`PUT /task-columns/order`) has no dedicated event:
+  it relies solely on the generic request-log audit path, so its row carries
+  no detail about the columns' old or new order beyond the request body.
 
 ## Operations
 

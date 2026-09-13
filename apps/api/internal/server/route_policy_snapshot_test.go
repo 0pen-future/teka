@@ -136,6 +136,17 @@ var routePolicySnapshot = []RoutePolicy{
 	{Method: "GET", Path: "/api/v1/billing-periods/:id/notifications/run", Kind: PolicyService, Key: ""},
 	{Method: "POST", Path: "/api/v1/billing-periods/:id/notifications/run/resume", Kind: PolicyService, Key: ""},
 	{Method: "POST", Path: "/api/v1/notifications/mark-sent", Kind: PolicyPermission, Key: "notifications.mark_sent"},
+	{Method: "GET", Path: "/api/v1/centers/me/members/directory", Kind: PolicyPermission, Key: "members.list"},
+	{Method: "GET", Path: "/api/v1/tasks/board", Kind: PolicyPermission, Key: "tasks.list"},
+	{Method: "POST", Path: "/api/v1/task-columns", Kind: PolicyPermission, Key: "tasks.manage_board"},
+	{Method: "PATCH", Path: "/api/v1/task-columns/:id", Kind: PolicyPermission, Key: "tasks.manage_board"},
+	{Method: "PUT", Path: "/api/v1/task-columns/order", Kind: PolicyPermission, Key: "tasks.manage_board"},
+	{Method: "DELETE", Path: "/api/v1/task-columns/:id", Kind: PolicyPermission, Key: "tasks.manage_board"},
+	{Method: "POST", Path: "/api/v1/tasks", Kind: PolicyPermission, Key: "tasks.create"},
+	{Method: "GET", Path: "/api/v1/tasks/:id", Kind: PolicyPermission, Key: "tasks.read"},
+	{Method: "PATCH", Path: "/api/v1/tasks/:id", Kind: PolicyPermission, Key: "tasks.edit"},
+	{Method: "POST", Path: "/api/v1/tasks/:id/move", Kind: PolicyPermission, Key: "tasks.edit"},
+	{Method: "DELETE", Path: "/api/v1/tasks/:id", Kind: PolicyPermission, Key: "tasks.delete"},
 }
 
 // TestRoutePolicySnapshotUnchanged proves routePolicies still classifies

@@ -130,6 +130,15 @@ type MemberOverridesRequest struct {
 	AssignmentVersion int64    `json:"assignment_version"`
 }
 
+// DirectoryEntry is one live member on GET /centers/me/members/directory —
+// deliberately narrower than MemberResponse: no phone, since pickers (task
+// assignment) never need it and directory has no can_send_reports either.
+type DirectoryEntry struct {
+	TeacherID   uuid.UUID `json:"teacher_id"`
+	DisplayName string    `json:"display_name"`
+	RoleName    *string   `json:"role_name"`
+}
+
 // TeacherStatsResponse is one roster row of GET /centers/dashboard/teachers:
 // the member plus how much of the center's current activity is theirs.
 type TeacherStatsResponse struct {

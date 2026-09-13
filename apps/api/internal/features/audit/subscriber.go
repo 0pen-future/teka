@@ -3,6 +3,7 @@ package audit
 import (
 	"context"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"teka/apps/api/internal/features/centers"
 	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/features/invitations"
+	"teka/apps/api/internal/features/tasks"
 	"teka/apps/api/internal/middleware"
 	"teka/apps/api/internal/shared/events"
 	"teka/apps/api/internal/shared/id"
@@ -268,6 +270,48 @@ func (s *Subscriber) toRow(e events.Event) (Log, bool) {
 			Metadata: Metadata{
 				"class_id":   ev.ClassID.String(),
 				"student_id": ev.StudentID.String(),
+			},
+		}, true
+	case tasks.ColumnDeleted:
+		// The request middleware already writes a row for this DELETE, but it
+		// cannot see move_to (a query parameter it never inspects). This event
+		// adds a second row with the full picture; same action name as the
+		// request row, distinguishable by the Method field — the same pattern
+		// centers.RolePermissionsChanged uses above.
+		moveTo := ""
+		if ev.MoveTo != nil {
+			moveTo = ev.MoveTo.String()
+		}
+		return Log{
+			ID:          id.New(),
+			OccurredAt:  ev.OccurredAt,
+			CenterID:    nilIfZero(ev.CenterID),
+			ActorUserID: nilIfZero(ev.ActorID),
+			Action:      "task_column.delete",
+			EntityType:  "task_column",
+			EntityID:    ev.ColumnID.String(),
+			Metadata: Metadata{
+				"move_to":     moveTo,
+				"moved_count": strconv.Itoa(ev.MovedCount),
+			},
+		}, true
+	case centers.MemberTasksHandedOver:
+		// Published from inside RemoveMember's own transaction commit, not a
+		// direct request to the task board — there is no request-log row for
+		// this action at all, unlike the column-delete case above.
+		return Log{
+			ID:          id.New(),
+			OccurredAt:  ev.OccurredAt,
+			CenterID:    nilIfZero(ev.CenterID),
+			ActorUserID: nilIfZero(ev.ActorID),
+			Action:      "task.handover",
+			EntityType:  "task",
+			EntityID:    ev.MemberID.String(),
+			Metadata: Metadata{
+				"member_id":    ev.MemberID.String(),
+				"successor_id": ev.SuccessorID.String(),
+				"unassigned":   strconv.Itoa(ev.Unassigned),
+				"reassigned":   strconv.Itoa(ev.Reassigned),
 			},
 		}, true
 	case invitations.MemberJoined:

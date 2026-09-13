@@ -19,6 +19,9 @@ Go module `teka/apps/api`. Entrypoint `cmd/api/main.go`; DI wiring in
   `internal/middleware`'s request-audit skip sets all derive from it; add a
   new route's classification there, not in any of its three consumers.
 - `internal/testutil/` — test helpers; reuse for integration tests.
+- `pkg/kanban/` — task-board domain core kept dependency-free (stdlib +
+  `uuid` only, enforced by a `go list -deps` test). Persistence, tenancy and
+  HTTP live in `internal/features/tasks/`; see `docs/architecture.md`.
 
 ## Constraints
 
