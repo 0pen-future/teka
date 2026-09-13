@@ -21,6 +21,26 @@ changes. Revisit if a shared TypeScript package becomes necessary.
   schemas, types, state, and tests. `src/app/` owns bootstrap and routing;
   `src/lib/` owns API/config/utility infrastructure.
 
+### Hard-boundary libraries
+
+Two packages are written as if they lived in their own repositories, so they
+can be extracted later without a rewrite:
+
+- **`apps/api/pkg/kanban`** — task-board domain core (entities, policy, unit
+  of work and repository ports, service). It imports only the standard library
+  and `github.com/google/uuid`; a test in the package runs `go list -deps` and
+  fails on anything else. The `tasks` feature under `internal/features/`
+  supplies the GORM repositories, the tenant/actor mapping and the HTTP layer.
+- **`apps/web/src/lib/kanban`** — headless board state (pure reducer,
+  selectors, hook with prop getters, keyboard navigation). It may import only
+  `react`; an ESLint `no-restricted-imports` override in
+  [eslint.config.js](../apps/web/eslint.config.js) enforces that. The `tasks`
+  feature adapts TanStack Query data into the lib's data-source contract and
+  owns every design-system component.
+
+Neither package may import from a feature, shared infrastructure, or the other
+app. Each has a README describing its ports and the extraction procedure.
+
 ## Dependency injection (backend)
 
 Manual constructor injection, no framework. `internal/app.Container` holds the
