@@ -440,6 +440,17 @@ func ensureOwner(ctx context.Context, db *gorm.DB, log *slog.Logger, s seedTeach
 		).Error; err != nil {
 			return err
 		}
+		// Every center is also born with its starter task-board columns —
+		// the same invariant repository CreateCenter enforces.
+		for _, col := range centers.DefaultColumns(centerID) {
+			if err := tx.Exec(`
+				INSERT INTO task_columns (id, center_id, name, position, is_done)
+				VALUES (?, ?, ?, ?, ?)`,
+				uuid.UUID(col.ID), centerID, col.Name, col.Position, col.IsDone,
+			).Error; err != nil {
+				return err
+			}
+		}
 		if err := tx.Exec(
 			"INSERT INTO user_accounts (id, role, phone, password_hash, status) VALUES (?, 'teachers', ?, ?, 'active')",
 			accountID, s.Phone, string(hash),

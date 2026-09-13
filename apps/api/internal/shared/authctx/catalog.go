@@ -42,6 +42,16 @@ type PermDef struct {
 	Grantable   bool
 	Deprecated  bool
 	Order       int
+	// DefaultGrant marks a key that the compatibility backfill (see
+	// DefaultRoleKeys) may hand to every system role and role-less legacy
+	// stint. def and viewAll set this true so every pre-existing declaration
+	// keeps its old behavior; optIn sets it false for a key an owner must
+	// assign explicitly. It is a third axis alongside Grantable (assignable
+	// at all) and Kind != scope (visibility must not widen) — deliberately a
+	// field on the declaration, not a side map, so a future special key opts
+	// out at its one declaration site instead of a filter function growing a
+	// fourth branch.
+	DefaultGrant bool
 }
 
 // Resource-action catalog keys. Legacy identity keys (reports.send,
@@ -123,6 +133,16 @@ const (
 
 	PermNotificationsMarkSent = "notifications.mark_sent"
 	PermNotificationsViewAll  = "notifications.view_all"
+
+	PermTasksCreate      = "tasks.create"
+	PermTasksList        = "tasks.list"
+	PermTasksRead        = "tasks.read"
+	PermTasksEdit        = "tasks.edit"
+	PermTasksDelete      = "tasks.delete"
+	PermTasksManageBoard = "tasks.manage_board"
+	PermTasksViewAll     = "tasks.view_all"
+
+	PermMembersList = "members.list"
 )
 
 // def builds a grantable, non-deprecated catalog entry; resource and action
@@ -132,13 +152,22 @@ func def(key string, kind PermKind, risk PermRisk, label, description string) Pe
 	return PermDef{
 		Key: key, Resource: resource, Action: action,
 		Kind: kind, Risk: risk, Label: label, Description: description,
-		Grantable: true,
+		Grantable: true, DefaultGrant: true,
 	}
 }
 
 func viewAll(key, label string) PermDef {
 	d := def(key, PermKindScope, RiskHigh, label,
 		"Mở rộng phạm vi dữ liệu từ phần mình phụ trách sang toàn trung tâm.")
+	return d
+}
+
+// optIn builds a grantable, non-deprecated catalog entry that the
+// compatibility backfill must skip: an owner assigns it explicitly through
+// the permission UI or API, never automatically at migration time.
+func optIn(key string, kind PermKind, risk PermRisk, label, description string) PermDef {
+	d := def(key, kind, risk, label, description)
+	d.DefaultGrant = false
 	return d
 }
 
@@ -228,8 +257,17 @@ var permCatalog = []PermDef{
 	def(PermNotificationsMarkSent, PermKindSpecial, RiskLow, "Đánh dấu đã gửi thông báo", "Đánh dấu thông báo học phí đã được gửi tay."),
 	viewAll(PermNotificationsViewAll, "Xem mọi thông báo"),
 
+	def(PermTasksCreate, PermKindCRUD, RiskLow, "Tạo công việc", "Tạo công việc mới trong bảng công việc của trung tâm."),
+	def(PermTasksList, PermKindCRUD, RiskLow, "Xem bảng công việc", "Xem danh sách công việc trong phạm vi được thấy."),
+	def(PermTasksRead, PermKindCRUD, RiskLow, "Xem chi tiết công việc", "Xem chi tiết một công việc."),
+	def(PermTasksEdit, PermKindCRUD, RiskLow, "Sửa & chuyển cột công việc", "Cập nhật nội dung, hạn, ưu tiên và chuyển cột của công việc."),
+	def(PermTasksDelete, PermKindCRUD, RiskMedium, "Xoá công việc", "Xoá công việc khỏi bảng công việc."),
+	optIn(PermTasksManageBoard, PermKindSpecial, RiskHigh, "Cấu hình cột bảng công việc", "Tạo, đổi tên, sắp xếp hoặc xoá cột của bảng công việc."),
+	viewAll(PermTasksViewAll, "Xem mọi công việc"),
+
 	def(PermReportsSend, PermKindSpecial, RiskHigh, "Gửi báo cáo học phí", "Gửi thông báo học phí hàng loạt và theo dõi lượt gửi."),
 	def(PermMembersManage, PermKindSpecial, RiskHigh, "Quản lý thành viên", "Gỡ thành viên khỏi trung tâm."),
+	optIn(PermMembersList, PermKindCRUD, RiskLow, "Xem danh bạ thành viên", "Xem danh sách thành viên và vai trò trong trung tâm, không gồm số điện thoại hay email."),
 	def(PermCenterManage, PermKindSpecial, RiskMedium, "Quản lý trung tâm", "Cập nhật thông tin trung tâm."),
 	def(PermInvitationsManage, PermKindSpecial, RiskMedium, "Quản lý lời mời", "Tạo, xem và thu hồi lời mời tham gia trung tâm."),
 	def(PermAuditRead, PermKindCRUD, RiskMedium, "Xem nhật ký hoạt động", "Xem nhật ký hoạt động của trung tâm."),
@@ -289,9 +327,11 @@ func GrantableKeys() []string {
 // that rendered an older catalog must reload before writing. Version 1 was
 // the legacy 9-key registry; 2 the resource-action catalog with the
 // deprecated data.view_center_wide alias; 3 retired the alias and the two
-// unenforced scope keys (scores/teaching view_all). Bump on any change that
+// unenforced scope keys (scores/teaching view_all); 4 added the tasks group,
+// members.list, and the DefaultGrant attribute that opts tasks.manage_board
+// and members.list out of the default-role backfill. Bump on any change that
 // alters what a stored assignment means.
-const CatalogVersion = 3
+const CatalogVersion = 4
 
 // legacyIdentitySet is the pre-catalog identity keys: operations that were
 // permission-gated before the resource-action catalog existed. They stay out
@@ -323,14 +363,15 @@ var impliedKeys = map[string][]string{
 // via member grants, every role-less legacy stint) receives in the
 // compatibility backfill, in catalog order. Before the catalog, membership
 // alone granted all operational access — so the baseline is every grantable
-// operational key: scope keys stay out (visibility must not widen) and the
-// legacy identity keys stay out (already gated, granting would escalate).
-// The SQL backfill artifacts must stay in parity with this list — the
-// migrations package pins that with a checksum test.
+// operational key: scope keys stay out (visibility must not widen), the
+// legacy identity keys stay out (already gated, granting would escalate), and
+// keys declared with DefaultGrant: false stay out (an owner opts them in
+// explicitly — see optIn). The SQL backfill artifacts must stay in parity
+// with this list — the migrations package pins that with a checksum test.
 func DefaultRoleKeys() []string {
 	out := make([]string, 0, len(permCatalog))
 	for _, d := range permCatalog {
-		if d.Grantable && d.Kind != PermKindScope && !legacyIdentitySet[d.Key] {
+		if d.Grantable && d.Kind != PermKindScope && !legacyIdentitySet[d.Key] && d.DefaultGrant {
 			out = append(out, d.Key)
 		}
 	}
