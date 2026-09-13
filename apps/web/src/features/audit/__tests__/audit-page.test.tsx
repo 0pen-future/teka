@@ -106,6 +106,25 @@ describe("AuditPage", () => {
     expect(auditRequests.at(-1)?.searchParams.get("action")).toBe("zalo.send");
   });
 
+  it("filters task and task-column actions through their own groups", async () => {
+    const user = userEvent.setup();
+    renderAuditPage();
+    await screen.findByText("class.create");
+
+    const groups = screen.getByRole("combobox", { name: "Nhóm hành động" });
+    await user.click(groups);
+    await user.click(await screen.findByRole("option", { name: "Công việc" }));
+    await waitFor(() => expect(auditRequests.at(-1)?.searchParams.get("action")).toBe("task."));
+
+    // Column actions use the "task_column." prefix, which "task." does not
+    // cover under a LIKE-prefix match, so they get their own group.
+    await user.click(groups);
+    await user.click(await screen.findByRole("option", { name: "Cột công việc" }));
+    await waitFor(() =>
+      expect(auditRequests.at(-1)?.searchParams.get("action")).toBe("task_column."),
+    );
+  });
+
   it("filters by actor through the member select", async () => {
     const user = userEvent.setup();
     renderAuditPage();

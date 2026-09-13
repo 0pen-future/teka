@@ -14,6 +14,7 @@ import { profileRoutes } from "@/features/profile/routes";
 import { reportsRoutes } from "@/features/reports";
 import { rosterRoutes } from "@/features/roster/routes";
 import { statementRoutes } from "@/features/statement";
+import { tasksRoutes } from "@/features/tasks/routes";
 import { teachingRoutes } from "@/features/teaching/routes";
 import { AuthLayout } from "@/layouts/auth-layout";
 import { DashboardLayout } from "@/layouts/dashboard-layout";
@@ -50,6 +51,7 @@ export const router = createBrowserRouter([
           ...profileRoutes,
           ...centerRoutes,
           ...auditRoutes,
+          ...tasksRoutes,
         ],
       },
       {

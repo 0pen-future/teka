@@ -7,6 +7,7 @@ import {
   FileSpreadsheetIcon,
   HistoryIcon,
   IdCardIcon,
+  KanbanIcon,
   LogOutIcon,
   ShieldCheckIcon,
   SlidersHorizontalIcon,
@@ -126,6 +127,7 @@ function useNavGroups(): NavGroup[] {
           perm: "imports.run",
         },
         { label: "Nhật ký hoạt động", to: "/audit", Icon: HistoryIcon, perm: "audit.read" },
+        { label: "Công việc", to: "/tasks", Icon: KanbanIcon, perm: "tasks.list" },
         // Secretary-only (owner reaches every period through Học phí already;
         // the flag itself is member-only, so owner never matches).
         ...(isResolved && !isOwner && canSendReports
@@ -178,6 +180,7 @@ const OVERFLOW_LABELS = new Set([
   "Duyệt giáo án",
   "Nhập từ Excel",
   "Nhật ký hoạt động",
+  "Công việc",
   "Phân quyền vai trò",
   "Cấu hình lớp học",
   "Cài đặt trung tâm",
@@ -198,6 +201,7 @@ const OVERFLOW_PATH_PREFIXES = [
   "/lesson-plans",
   "/students",
   "/audit",
+  "/tasks",
   "/center",
 ];
 
