@@ -97,6 +97,16 @@ export interface UpdateTaskInput {
   due_on?: string | null;
 }
 
+/**
+ * `POST /tasks/:id/move` body. `after_task_id` names the task the moved one
+ * lands *after* inside `column_id`; `null` means "top of the column". The
+ * server computes the midpoint position and renormalizes when it needs to.
+ */
+export interface MoveTaskRequest {
+  column_id: string;
+  after_task_id: string | null;
+}
+
 // --- Task form (react-hook-form + Zod) ---
 
 export const taskFormSchema = z.object({

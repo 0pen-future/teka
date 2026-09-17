@@ -1,9 +1,12 @@
+import { DndContext, DragOverlay } from "@dnd-kit/core";
 import { useState } from "react";
 
 import { HvSegmented, HvSelect } from "@/components/hv";
-import type { ColumnId, KanbanColumn, TaskId } from "@/lib/kanban";
+import type { ColumnId, KanbanColumn, TaskId, TaskPropsExtra } from "@/lib/kanban";
 
+import type { BoardDndHandle } from "../hooks/use-board-dnd";
 import type { AppTask } from "../hooks/use-tasks-data-source";
+import { TaskCardPreview } from "./task-card-preview";
 import { TaskColumn } from "./task-column";
 
 /** Below this column count, a segmented tab strip fits; above it, a select avoids overflow. */
@@ -16,14 +19,19 @@ export interface BoardMobileProps {
   currentUserId: string | undefined;
   canCreate: boolean;
   canMove: boolean;
+  dnd: BoardDndHandle<AppTask>;
   onOpenTask: (taskId: TaskId) => void;
   onCreateTask: (columnId: ColumnId) => void;
   onMoveTask: (taskId: TaskId, columnId: ColumnId) => void;
   getColumnProps: (columnId: ColumnId) => Record<string, unknown>;
-  getTaskProps: (taskId: TaskId) => Record<string, unknown>;
+  getTaskProps: (taskId: TaskId, extra?: TaskPropsExtra) => Record<string, unknown>;
 }
 
-/** Renders one column at a time, switched via a segmented strip (≤4 columns) or a select (more). */
+/**
+ * Renders one column at a time, switched via a segmented strip (≤4 columns)
+ * or a select (more). Drag-and-drop here only reorders within the visible
+ * column; changing column stays on the move menu.
+ */
 export function BoardMobile({
   columns,
   tasksByColumn,
@@ -31,6 +39,7 @@ export function BoardMobile({
   currentUserId,
   canCreate,
   canMove,
+  dnd,
   onOpenTask,
   onCreateTask,
   onMoveTask,
@@ -49,6 +58,8 @@ export function BoardMobile({
   if (!active) {
     return <p className="py-6 text-center text-[13px] text-ink-400">Chưa có cột nào.</p>;
   }
+
+  const { activeTask } = dnd;
 
   return (
     <div className="flex flex-col gap-3">
@@ -78,20 +89,35 @@ export function BoardMobile({
           }))}
         />
       )}
-      <TaskColumn
-        column={active}
-        tasks={tasksByColumn.get(active.id) ?? []}
-        columns={columns}
-        assigneeNameFor={assigneeNameFor}
-        currentUserId={currentUserId}
-        canCreate={canCreate}
-        canMove={canMove}
-        onOpenTask={onOpenTask}
-        onCreateTask={onCreateTask}
-        onMoveTask={onMoveTask}
-        getColumnProps={() => getColumnProps(active.id)}
-        getTaskProps={getTaskProps}
-      />
+      <DndContext {...dnd.contextProps}>
+        <TaskColumn
+          column={active}
+          tasks={tasksByColumn.get(active.id) ?? []}
+          columns={columns}
+          assigneeNameFor={assigneeNameFor}
+          currentUserId={currentUserId}
+          canCreate={canCreate}
+          canMove={canMove}
+          isDropTarget={activeTask !== null && dnd.overColumnId === active.id}
+          reducedMotion={dnd.reducedMotion}
+          onOpenTask={onOpenTask}
+          onCreateTask={onCreateTask}
+          onMoveTask={onMoveTask}
+          getColumnProps={() => getColumnProps(active.id)}
+          getTaskProps={getTaskProps}
+        />
+        <DragOverlay dropAnimation={dnd.reducedMotion ? null : undefined}>
+          {activeTask ? (
+            <TaskCardPreview
+              task={activeTask}
+              assigneeName={assigneeNameFor(activeTask.assigneeId)}
+              isAssignedToMe={
+                currentUserId !== undefined && activeTask.assigneeId === currentUserId
+              }
+            />
+          ) : null}
+        </DragOverlay>
+      </DndContext>
     </div>
   );
 }

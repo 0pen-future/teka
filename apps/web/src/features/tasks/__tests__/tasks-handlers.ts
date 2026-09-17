@@ -286,7 +286,7 @@ export const tasksHandlers = [
     return HttpResponse.json(ok(task));
   }),
   http.post(`${API_URL}/tasks/:id/move`, async ({ params, request }) => {
-    const body = (await request.json()) as { column_id: string };
+    const body = (await request.json()) as { column_id: string; after_task_id?: string | null };
     const task = tasks.find((candidate) => candidate.id === params.id);
     if (!task) {
       return HttpResponse.json(fail("NOT_FOUND", "task not found"), { status: 404 });
@@ -295,14 +295,38 @@ export const tasksHandlers = [
     if (!destination) {
       return HttpResponse.json(fail("NOT_FOUND", "column not found"), { status: 404 });
     }
-    // Real API always places a moved task at the top of the destination column.
-    tasks.forEach((existing) => {
-      if (existing.column_id === body.column_id) {
-        existing.position += 1;
+    // Mirrors the real API: land right after `after_task_id` (which must be
+    // in the destination column), or at the top when it is absent/null, at
+    // the midpoint between the two neighbours.
+    const siblings = tasks
+      .filter((candidate) => candidate.column_id === body.column_id && candidate.id !== task.id)
+      .sort((a, b) => a.position - b.position);
+    let prev: MutableTask | undefined;
+    let next: MutableTask | undefined;
+    if (body.after_task_id) {
+      const afterIndex = siblings.findIndex((candidate) => candidate.id === body.after_task_id);
+      if (afterIndex === -1) {
+        return HttpResponse.json(
+          fail("VALIDATION_ERROR", "validation failed", {
+            after_task_id: "phải là việc đang nằm trong cột đích",
+          }),
+          { status: 422 },
+        );
       }
-    });
+      prev = siblings[afterIndex];
+      next = siblings[afterIndex + 1];
+    } else {
+      next = siblings[0];
+    }
     task.column_id = body.column_id;
-    task.position = 0;
+    task.position =
+      prev === undefined
+        ? next === undefined
+          ? 0
+          : next.position - 1
+        : next === undefined
+          ? prev.position + 1
+          : (prev.position + next.position) / 2;
     task.completed_at = destination.is_done ? "2026-09-13T10:00:00Z" : null;
     task.updated_at = "2026-09-13T10:00:00Z";
     return HttpResponse.json(ok(task));

@@ -98,6 +98,11 @@ export default tseslint.config(
               group: ["axios"],
               message: "src/lib/kanban must not perform HTTP calls directly.",
             },
+            {
+              group: ["@dnd-kit/*"],
+              message:
+                "src/lib/kanban is drag-layer-agnostic — the app's use-board-dnd adapter owns dnd-kit.",
+            },
           ],
         },
       ],

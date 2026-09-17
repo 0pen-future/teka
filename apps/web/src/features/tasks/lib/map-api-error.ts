@@ -84,10 +84,18 @@ export function applyKanbanFormError<T extends FieldValues>(
   }
 }
 
-/** Vietnamese toast copy for a `KanbanError` surfaced outside a form. */
-export function kanbanErrorToastMessage(error: unknown): string {
+/**
+ * Vietnamese toast copy for a `KanbanError` surfaced outside a form.
+ * `fallback` names the action that failed ("Không chuyển được việc, …") for
+ * errors that carry no reason of their own (network, 5xx), so the toast
+ * still tells the user what just went wrong.
+ */
+export function kanbanErrorToastMessage(
+  error: unknown,
+  fallback: string = GENERIC_ERROR_MESSAGE,
+): string {
   if (!isKanbanError(error)) {
-    return GENERIC_ERROR_MESSAGE;
+    return fallback;
   }
   switch (error.kind) {
     case "validation":
@@ -99,6 +107,6 @@ export function kanbanErrorToastMessage(error: unknown): string {
     case "not-found":
       return error.entity === "task" ? "Công việc không còn tồn tại." : "Cột không còn tồn tại.";
     case "unknown":
-      return GENERIC_ERROR_MESSAGE;
+      return fallback;
   }
 }

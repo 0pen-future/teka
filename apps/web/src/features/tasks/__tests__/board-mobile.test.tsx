@@ -27,7 +27,11 @@ function makeTask(id: string, columnId: string, title: string): AppTask {
   };
 }
 
-const noop = { getColumnProps: () => ({}), getTaskProps: () => ({}) };
+const noop = {
+  getColumnProps: () => ({}),
+  getTaskProps: () => ({}),
+  dnd: { contextProps: {}, activeTask: null, overColumnId: null, reducedMotion: false },
+};
 
 function renderBoard(
   columns: ReturnType<typeof makeColumn>[],

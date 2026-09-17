@@ -1142,13 +1142,17 @@ export const handlers = [
     return HttpResponse.json(ok({ ...existing, ...body, updated_at: "2026-09-13T10:00:00Z" }));
   }),
   http.post(`${API_URL}/tasks/:id/move`, async ({ params, request }) => {
-    const body = (await request.json()) as { column_id: string };
+    const body = (await request.json()) as { column_id: string; after_task_id?: string | null };
     const existing = defaultTasksById[params.id as string] ?? defaultTask1;
+    // Stateless: `after_task_id` only decides whether the echoed position is
+    // "top" (null) or "just below that task"; the stateful handler in
+    // `src/features/tasks/__tests__/tasks-handlers.ts` does the real insert.
+    const after = body.after_task_id ? defaultTasksById[body.after_task_id] : undefined;
     return HttpResponse.json(
       ok({
         ...existing,
         column_id: body.column_id,
-        position: 0,
+        position: after ? after.position + 1 : 0,
         updated_at: "2026-09-13T10:00:00Z",
       }),
     );

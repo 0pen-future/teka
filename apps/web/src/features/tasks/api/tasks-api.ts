@@ -7,6 +7,7 @@ import {
   type BoardResponse,
   type BoardScope,
   type CreateTaskInput,
+  type MoveTaskRequest,
   type Task,
   type UpdateTaskInput,
 } from "../schemas/task-schemas";
@@ -35,8 +36,8 @@ export async function updateTask(taskId: string, input: UpdateTaskInput): Promis
   return parseData(taskSchema, res.data);
 }
 
-export async function moveTask(taskId: string, columnId: string): Promise<Task> {
-  const res = await apiClient.post<unknown>(`/tasks/${taskId}/move`, { column_id: columnId });
+export async function moveTask(taskId: string, body: MoveTaskRequest): Promise<Task> {
+  const res = await apiClient.post<unknown>(`/tasks/${taskId}/move`, body);
   return parseData(taskSchema, res.data);
 }
 

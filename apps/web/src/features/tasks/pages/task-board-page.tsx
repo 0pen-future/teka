@@ -1,20 +1,22 @@
 import { useState } from "react";
 import { Navigate } from "react-router";
 
-import { HvButton, HvSegmented, HvStateBlock } from "@/components/hv";
+import { HvButton, HvSegmented, HvStateBlock, hvToast } from "@/components/hv";
 import { useAuthStore } from "@/features/auth/stores/auth-store";
 import { useCenterContext } from "@/features/teaching";
 import { useMediaQuery } from "@/lib/hooks/use-media-query";
-import type { ColumnId, TaskId } from "@/lib/kanban";
+import type { ColumnId, DropTarget, TaskId } from "@/lib/kanban";
 import { useKanban } from "@/lib/kanban";
 
 import { BoardDesktop } from "../components/board-desktop";
 import { BoardMobile } from "../components/board-mobile";
 import { BoardSettingsModal } from "../components/board-settings-modal";
 import { TaskFormModal } from "../components/task-form-modal";
+import { useBoardDnd } from "../hooks/use-board-dnd";
 import { useMemberDirectory } from "../hooks/use-member-directory";
 import { useTaskBoard } from "../hooks/use-task-board";
 import { useTasksDataSource, type AppTask } from "../hooks/use-tasks-data-source";
+import { kanbanErrorToastMessage } from "../lib/map-api-error";
 import type { BoardScope } from "../schemas/task-schemas";
 
 const SCOPE_OPTIONS: { value: BoardScope; label: string }[] = [
@@ -28,16 +30,21 @@ const KEYBOARD_MESSAGES = {
   moveFailed: "Không chuyển được việc.",
 };
 
+/** Toast copy when a move fails for no reason the server spelled out (network, 5xx). */
+const MOVE_FAILED_TOAST = "Không chuyển được việc, vui lòng thử lại.";
+
 interface TaskFormTarget {
   task?: AppTask;
   defaultColumnId?: ColumnId;
 }
 
 /**
- * Task board for holders of `tasks.list`. Column moves go exclusively
- * through the move menu / keyboard shortcuts (no drag-and-drop in v1) — see
- * `use-tasks-data-source.ts` for why the optimistic update always places a
- * moved task at the top of its destination column.
+ * Task board for holders of `tasks.list`. A task moves three ways — pointer
+ * drag-and-drop (`useBoardDnd`, cross-column on desktop only), the card's
+ * move menu, and the lib's `[`/`]` shortcut — and all of them end in
+ * `kanban.moveTask(taskId, columnId, index)`, so the optimistic order and
+ * the API's `after_task_id` are derived in one place
+ * (`use-tasks-data-source.ts`). The menu and shortcut send index 0 (top).
  */
 export function TaskBoardPage() {
   const { has, isResolved, isError } = useCenterContext();
@@ -72,6 +79,40 @@ export function TaskBoardPage() {
     messages: KEYBOARD_MESSAGES,
   });
 
+  const moveAndAnnounce = (taskId: TaskId, columnId: ColumnId, index: number, slot?: string) => {
+    const task = kanban.board.tasks.find((candidate) => candidate.id === taskId);
+    const target = kanban.board.columns.find((column) => column.id === columnId);
+    void kanban.moveTask(taskId, columnId, index).then(
+      () => {
+        if (task) {
+          const where = `sang cột ${target?.name ?? ""}`;
+          setAnnouncement(`Đã chuyển "${task.title}" ${where}${slot ? `, ${slot}` : ""}.`);
+        }
+      },
+      (error: unknown) => {
+        // The data source refetches the board once the request settles,
+        // which puts the card back where the server has it; the toast is
+        // for sighted users, the live region for the rest.
+        hvToast(kanbanErrorToastMessage(error, MOVE_FAILED_TOAST), { variant: "danger" });
+        setAnnouncement(KEYBOARD_MESSAGES.moveFailed);
+      },
+    );
+  };
+
+  const handleDrop = (taskId: TaskId, target: DropTarget) => {
+    const task = kanban.board.tasks.find((candidate) => candidate.id === taskId);
+    const columnSize = kanban.tasksByColumn.get(target.columnId)?.length ?? 0;
+    // The dropped card is already counted when it stays in its own column.
+    const total = task?.columnId === target.columnId ? columnSize : columnSize + 1;
+    moveAndAnnounce(taskId, target.columnId, target.index, `vị trí ${target.index + 1}/${total}`);
+  };
+
+  const dnd = useBoardDnd<AppTask>({
+    board: kanban.board,
+    allowCrossColumn: isDesktop,
+    onMove: handleDrop,
+  });
+
   if (!isResolved && !isError) {
     return null;
   }
@@ -97,13 +138,7 @@ export function TaskBoardPage() {
   };
 
   const handleMoveTask = (taskId: TaskId, columnId: ColumnId) => {
-    const task = kanban.board.tasks.find((candidate) => candidate.id === taskId);
-    void kanban.moveTask(taskId, columnId, 0).then(() => {
-      if (task) {
-        const target = kanban.board.columns.find((column) => column.id === columnId);
-        setAnnouncement(`Đã chuyển "${task.title}" sang cột ${target?.name ?? ""}.`);
-      }
-    });
+    moveAndAnnounce(taskId, columnId, 0);
   };
 
   const boardContent = boardQuery.isPending ? (
@@ -126,6 +161,7 @@ export function TaskBoardPage() {
       currentUserId={currentUserId}
       canCreate={canCreate}
       canMove={canEdit}
+      dnd={dnd}
       onOpenTask={handleOpenTask}
       onCreateTask={handleCreateTask}
       onMoveTask={handleMoveTask}
@@ -140,6 +176,7 @@ export function TaskBoardPage() {
       currentUserId={currentUserId}
       canCreate={canCreate}
       canMove={canEdit}
+      dnd={dnd}
       onOpenTask={handleOpenTask}
       onCreateTask={handleCreateTask}
       onMoveTask={handleMoveTask}
@@ -176,8 +213,15 @@ export function TaskBoardPage() {
 
       {boardContent}
 
+      {/* Two live regions, one per announcement owner: the page's own
+          (drag, menu, modals) and the lib's `[`/`]` outcome. Merging them
+          with `||` would let the page's last message shadow every later
+          keyboard-move announcement. */}
       <div aria-live="polite" role="status" className="sr-only">
-        {announcement || kanban.announcement}
+        {announcement}
+      </div>
+      <div aria-live="polite" role="status" className="sr-only">
+        {kanban.announcement}
       </div>
 
       {formTarget ? (

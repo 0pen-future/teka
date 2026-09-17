@@ -16,10 +16,11 @@ export interface MoveMenuProps {
 }
 
 /**
- * v1 has no drag-and-drop: this menu is the only way to move a task besides
- * the headless lib's `[`/`]` keyboard shortcut. Columns render in board
- * order; the current column is excluded rather than shown disabled, since
- * "move here" never applies to where the task already is.
+ * The pointer-free way to change column (drag-and-drop and the lib's `[`/`]`
+ * shortcut are the others); on phones it is also the only cross-column
+ * path, since drag there stays inside the visible column. Columns render
+ * in board order; the current column is excluded rather than shown
+ * disabled, since "move here" never applies to where the task already is.
  */
 export function MoveMenu({ currentColumnId, columns, onMove, disabled = false }: MoveMenuProps) {
   const targets = [...columns]

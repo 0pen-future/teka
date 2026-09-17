@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Web: kéo-thả bằng dnd-kit (adapter opt-in ở feature tasks)"
-status: pending
+status: completed
 priority: P1
 effort: "1.5d"
 dependencies: [1, 3]
@@ -24,7 +24,7 @@ cột (desktop) hoặc trong cột (mobile), gọi `POST /tasks/:id/move` với
   - Mobile: chỉ sắp xếp trong cột đang xem (`BoardMobile` hiển thị 1 cột); kích hoạt bằng nhấn giữ 250ms, tolerance 5px; chuyển cột vẫn qua menu "Chuyển".
   - Sensor: `MouseSensor{distance:6}` + `TouchSensor{delay:250,tolerance:5}` đăng ký **ở mọi viewport** (không dùng `PointerSensor` cùng `TouchSensor`: trên cảm ứng `pointerdown` bắn trước `touchstart` và dnd-kit chỉ cho một sensor chiếm cử chỉ, nên `TouchSensor` sẽ không bao giờ chạy). `isDesktop` chỉ quyết định có cho thả sang cột khác, không chọn sensor → tablet cảm ứng ≥768px vẫn nhấn giữ. Card `touch-action: manipulation` (không `pan-y`, tránh trình duyệt cướp cử chỉ sau khi delay đã qua).
   - Chỉ người có `tasks.edit` (đã map thành `canMove`) mới kéo được; `useSortable({ disabled: !canMove })`.
-  - Thả tại chỗ hoặc ngoài vùng hợp lệ → không gọi API. Thả hợp lệ → `moveTaskMutation({ taskId, columnId, afterTaskId, position })`; optimistic đặt `position = optimisticPositionFor(...)`; lỗi → toast "Không chuyển được việc." + invalidate (mẫu sẵn có).
+  - Thả tại chỗ hoặc ngoài vùng hợp lệ → không gọi API. Thả hợp lệ → `moveTaskMutation({ taskId, columnId, afterTaskId, position })`; optimistic đặt `position = optimisticPositionFor(...)`; lỗi → toast theo loại lỗi (`kanbanErrorToastMessage`: 422 hiện message field, lỗi không xác định → "Không chuyển được việc, vui lòng thử lại."), live region "Không chuyển được việc.", rồi invalidate (mẫu sẵn có).
   - Thông báo a11y: sau khi thả thành công đặt `announcement` "Đã chuyển "{title}" sang cột {name}, vị trí {k}/{n}." vào live region hiện có; làm **rỗng** live region + `screenReaderInstructions` của dnd-kit (`accessibility={{ announcements: {...trả undefined}, screenReaderInstructions: { draggable: "" } }}`). dnd-kit vẫn render node `LiveRegion` + `HiddenText` (không gỡ được), chỉ không có nội dung → test page phải chọn live region của trang theo text/`id`, không assert "chỉ 1 vùng aria-live".
   - Card giữ `role="option"`, `tabIndex` roving, `aria-selected`: **không spread `attributes` của dnd-kit** lên card (dnd-kit destructure với giá trị mặc định nên `role: undefined` vẫn ra `role="button"`, kèm `aria-roledescription`, `aria-describedby`, `aria-pressed`). Card chỉ cần `setNodeRef` + `listeners` + `style`. Truyền chúng qua cơ chế `extra` sẵn có của lib: `getTaskProps(task.id, { ref: setNodeRef, ...listeners })` — lib tự merge ref (`mergeRefs` là hàm private, feature không gọi được; và `taskProps` đã chứa `ref` nên đặt `ref=` riêng sẽ bị ghi đè).
   - Không dùng `KeyboardSensor` (Space/Enter trên option đã có nghĩa "mở việc"; `[`/`]` là đường bàn phím).
@@ -110,12 +110,12 @@ Mẫu thiết kế: **Adapter** (`use-board-dnd.ts` cô lập dnd-kit; đổi li
 
 ## Success Criteria
 
-- [ ] AC7: kéo card trong cột và sang cột khác trên desktop → API nhận `after_task_id` đúng, thứ tự sau refetch khớp thứ tự đã thả (MSW stateful + e2e phase 6).
-- [ ] AC8: mobile kéo trong cột bằng nhấn giữ; cột khác không nhận thả; menu "Chuyển" vẫn hoạt động.
-- [ ] AC9: DOM sau khi thêm DnD: mọi card `role="option"`, không `role="button"`, 1 `tabIndex=0` mỗi cột, không `aria-roledescription`/`aria-describedby`/`aria-pressed`; live region dnd-kit rỗng, live region của trang là nơi duy nhất có text; `[`/`]` vẫn di chuyển việc và focus theo (test lib + page).
-- [ ] `canMove=false` → không kéo được (không `listeners`), card vẫn mở được bằng click/Enter.
-- [ ] Thả tại chỗ không gọi API (test hook).
-- [ ] `npm run lint` chặn `@dnd-kit` trong `src/lib/kanban`.
+- [x] AC7: kéo card trong cột và sang cột khác trên desktop → API nhận `after_task_id` đúng, thứ tự sau refetch khớp thứ tự đã thả (MSW stateful + e2e phase 6).
+- [x] AC8: mobile kéo trong cột bằng nhấn giữ; cột khác không nhận thả; menu "Chuyển" vẫn hoạt động.
+- [x] AC9: DOM sau khi thêm DnD: mọi card `role="option"`, không `role="button"`, 1 `tabIndex=0` mỗi cột, không `aria-roledescription`/`aria-describedby`/`aria-pressed`; live region dnd-kit rỗng, live region của trang là nơi duy nhất có text; `[`/`]` vẫn di chuyển việc và focus theo (test lib + page).
+- [x] `canMove=false` → không kéo được (không `listeners`), card vẫn mở được bằng click/Enter.
+- [x] Thả tại chỗ không gọi API (test hook).
+- [x] `npm run lint` chặn `@dnd-kit` trong `src/lib/kanban`.
 
 ## Risk Assessment
 

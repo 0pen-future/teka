@@ -4,7 +4,7 @@ import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
-import { API_URL, ok } from "@/test/msw/handlers";
+import { API_URL, fail, ok } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
 import { mockViewport } from "@/test/viewport";
@@ -129,9 +129,138 @@ describe("TaskBoardPage", () => {
     expect(card).not.toBeNull();
     fireEvent.keyDown(card as HTMLElement, { key: "]" });
 
+    // dnd-kit mounts its own (silenced) live region, so select ours by text.
     await waitFor(() =>
-      expect(screen.getByRole("status")).toHaveTextContent("Đã chuyển việc sang cột Hoàn thành."),
+      expect(screen.getByText("Đã chuyển việc sang cột Hoàn thành.")).toBeInTheDocument(),
     );
+    expect(
+      within(screen.getByRole("listbox", { name: "Hoàn thành" })).getByText(
+        "Soạn đề kiểm tra giữa kỳ",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("still announces a keyboard move after the page has announced a menu move", async () => {
+    const user = userEvent.setup();
+    signInAs(testPrimaryTeacher);
+    renderBoardPage();
+    await screen.findByRole("listbox", { name: "Cần làm" });
+
+    // A menu move fills the page's own live region first…
+    const first = screen.getByText("Sắp lịch dạy bù").closest('[role="option"]');
+    await user.click(within(first as HTMLElement).getByRole("button", { name: "Chuyển cột" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Hoàn thành" }));
+    expect(
+      await screen.findByText(/Đã chuyển "Sắp lịch dạy bù" sang cột Hoàn thành/),
+    ).toBeInTheDocument();
+
+    // …and the lib's `]` outcome must still be announced, not shadowed by it.
+    const second = screen.getByText("Soạn đề kiểm tra giữa kỳ").closest('[role="option"]');
+    fireEvent.keyDown(second as HTMLElement, { key: "]" });
+    expect(await screen.findByText("Đã chuyển việc sang cột Hoàn thành.")).toBeInTheDocument();
+    expect(screen.getByText(/Đã chuyển "Sắp lịch dạy bù" sang cột Hoàn thành/)).toBeInTheDocument();
+  });
+
+  it("reloads the server order and toasts when the server rejects a move", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post(`${API_URL}/tasks/:id/move`, () =>
+        HttpResponse.json(
+          fail("VALIDATION_ERROR", "Dữ liệu không hợp lệ", {
+            after_task_id: "phải là việc đang nằm trong cột đích",
+          }),
+          { status: 422 },
+        ),
+      ),
+    );
+    signInAs(testPrimaryTeacher);
+    renderBoardPage();
+    await screen.findByRole("listbox", { name: "Cần làm" });
+
+    const card = screen.getByText("Soạn đề kiểm tra giữa kỳ").closest('[role="option"]');
+    await user.click(within(card as HTMLElement).getByRole("button", { name: "Chuyển cột" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Hoàn thành" }));
+
+    // Sighted users get the server's field message as a danger toast; the
+    // live region carries the generic copy for everyone else.
+    expect(await screen.findByText("phải là việc đang nằm trong cột đích")).toBeInTheDocument();
+    expect(screen.getByText("Không chuyển được việc.")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole("listbox", { name: "Cần làm" })).getByText(
+          "Soạn đề kiểm tra giữa kỳ",
+        ),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("names the failed action in the toast when the server gives no reason", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post(`${API_URL}/tasks/:id/move`, () =>
+        HttpResponse.json(fail("INTERNAL", "Lỗi hệ thống"), { status: 500 }),
+      ),
+    );
+    signInAs(testPrimaryTeacher);
+    renderBoardPage();
+    await screen.findByRole("listbox", { name: "Cần làm" });
+
+    const card = screen.getByText("Soạn đề kiểm tra giữa kỳ").closest('[role="option"]');
+    await user.click(within(card as HTMLElement).getByRole("button", { name: "Chuyển cột" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Hoàn thành" }));
+
+    expect(
+      await screen.findByText("Không chuyển được việc, vui lòng thử lại."),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the lib's option semantics on cards instead of dnd-kit's button role", async () => {
+    signInAs(testPrimaryTeacher);
+    renderBoardPage();
+    const todoColumn = await screen.findByRole("listbox", { name: "Cần làm" });
+
+    const options = within(todoColumn).getAllByRole("option");
+    expect(options.length).toBeGreaterThan(0);
+    for (const option of options) {
+      expect(option).not.toHaveAttribute("aria-roledescription");
+      expect(option).not.toHaveAttribute("aria-describedby");
+      expect(option).not.toHaveAttribute("aria-pressed");
+    }
+    // Roving tabindex: exactly one card in the column is in the tab order.
+    expect(options.filter((option) => option.tabIndex === 0)).toHaveLength(1);
+  });
+
+  it("marks a card as dragging once the mouse moves past the activation distance", async () => {
+    signInAs(testPrimaryTeacher);
+    renderBoardPage();
+    await screen.findByRole("listbox", { name: "Cần làm" });
+
+    const card = screen.getByText("Soạn đề kiểm tra giữa kỳ").closest('[role="option"]');
+    expect(card).not.toBeNull();
+    fireEvent.mouseDown(card as HTMLElement, { button: 0, clientX: 10, clientY: 10 });
+    fireEvent.mouseMove(document, { clientX: 10, clientY: 30 });
+
+    await waitFor(() => expect(card).toHaveAttribute("data-dragging", "true"));
+    expect(screen.getByRole("listbox", { name: "Cần làm" }).closest("[data-over]")).not.toBeNull();
+
+    fireEvent.mouseUp(document, { clientX: 10, clientY: 30 });
+    await waitFor(() => expect(card).not.toHaveAttribute("data-dragging"));
+  });
+
+  it("does not start a drag for a caller without tasks.edit", async () => {
+    server.use(memberCenterMe(["tasks.list"]));
+    signInAs(testPrimaryTeacher);
+    renderBoardPage();
+    await screen.findByRole("listbox", { name: "Cần làm" });
+
+    const card = screen.getByText("Soạn đề kiểm tra giữa kỳ").closest('[role="option"]');
+    expect(card).not.toBeNull();
+    fireEvent.mouseDown(card as HTMLElement, { button: 0, clientX: 10, clientY: 10 });
+    fireEvent.mouseMove(document, { clientX: 10, clientY: 40 });
+    fireEvent.mouseUp(document, { clientX: 10, clientY: 40 });
+
+    expect(card).not.toHaveAttribute("data-dragging");
+    expect(within(card as HTMLElement).getByRole("button", { name: "Chuyển cột" })).toBeDisabled();
   });
 
   it("deletes a task from the form modal after confirming", async () => {

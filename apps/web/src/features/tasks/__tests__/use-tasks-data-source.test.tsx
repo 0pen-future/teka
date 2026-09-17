@@ -18,8 +18,10 @@ import {
   type BoardQueryData,
 } from "../hooks/use-tasks-data-source";
 import {
+  assignedToOthersTaskId,
   columnDoneId,
   columnTodoId,
+  foreignTaskId,
   ownTaskId,
   resetTasksStore,
   tasksHandlers,
@@ -112,6 +114,124 @@ describe("useTasksDataSource", () => {
       expect(isKanbanError(error) && error.kind).toBe("conflict");
     },
   );
+
+  describe("moveTask", () => {
+    interface MoveBody {
+      column_id: string;
+      after_task_id: string | null;
+    }
+
+    function captureMoveBodies(): MoveBody[] {
+      const bodies: MoveBody[] = [];
+      // Returning nothing lets MSW fall through to the stateful handler
+      // registered in `beforeEach`, so the response stays realistic.
+      server.use(
+        http.post(`${API_URL}/tasks/:id/move`, async ({ request }) => {
+          bodies.push((await request.clone().json()) as MoveBody);
+          return undefined;
+        }),
+      );
+      return bodies;
+    }
+
+    async function setupWithCachedBoard() {
+      const { queryClient, wrapper } = setup();
+      const { result } = renderHook(() => useTasksDataSource({ scope: "mine" }), { wrapper });
+      const boardKey = tasksKeys.board({ scope: "mine" });
+      queryClient.setQueryData(boardKey, toBoardQueryData(await getBoard({ scope: "mine" })));
+      return { queryClient, result, boardKey };
+    }
+
+    it("sends after_task_id = null for a move to the top of another column and orders it first optimistically", async () => {
+      const bodies = captureMoveBodies();
+      const { queryClient, result, boardKey } = await setupWithCachedBoard();
+
+      await result.current.dataSource.moveTask(asTaskId(ownTaskId), asColumnId(columnDoneId), 0);
+
+      expect(bodies).toEqual([{ column_id: columnDoneId, after_task_id: null }]);
+      const cached = queryClient.getQueryData<BoardQueryData>(boardKey);
+      expect(cached?.board.tasks.find((task) => task.id === ownTaskId)?.columnId).toBe(
+        columnDoneId,
+      );
+    });
+
+    it("translates a target index into the task it lands after and a midpoint position", async () => {
+      const bodies = captureMoveBodies();
+      const { queryClient, result, boardKey } = await setupWithCachedBoard();
+      // Column "Cần làm" is [own(1), assignedToOthers(2), foreign(3)]; dropping
+      // `own` at index 2 means "after foreign" once `own` itself is removed.
+      const movePromise = result.current.dataSource.moveTask(
+        asTaskId(ownTaskId),
+        asColumnId(columnTodoId),
+        2,
+      );
+
+      await waitFor(() => {
+        const cached = queryClient.getQueryData<BoardQueryData>(boardKey);
+        const own = cached?.board.tasks.find((task) => task.id === ownTaskId);
+        expect(own?.position).toBe(4);
+      });
+      await movePromise;
+
+      expect(bodies).toEqual([{ column_id: columnTodoId, after_task_id: foreignTaskId }]);
+      const board = await result.current.dataSource.loadBoard();
+      expect(
+        board.tasks
+          .filter((task) => task.columnId === columnTodoId)
+          .sort((a, b) => a.position - b.position)
+          .map((task) => task.id),
+      ).toEqual([assignedToOthersTaskId, foreignTaskId, ownTaskId]);
+    });
+
+    it("places the task between two neighbours when dropped in the middle", async () => {
+      const bodies = captureMoveBodies();
+      const { result } = await setupWithCachedBoard();
+
+      await result.current.dataSource.moveTask(
+        asTaskId(foreignTaskId),
+        asColumnId(columnTodoId),
+        1,
+      );
+
+      expect(bodies).toEqual([{ column_id: columnTodoId, after_task_id: ownTaskId }]);
+      const board = await result.current.dataSource.loadBoard();
+      expect(
+        board.tasks
+          .filter((task) => task.columnId === columnTodoId)
+          .sort((a, b) => a.position - b.position)
+          .map((task) => task.id),
+      ).toEqual([ownTaskId, foreignTaskId, assignedToOthersTaskId]);
+    });
+
+    it("maps the server's after_task_id validation error onto a KanbanError", async () => {
+      server.use(
+        http.post(`${API_URL}/tasks/:id/move`, () =>
+          HttpResponse.json(
+            fail("VALIDATION_ERROR", "validation failed", {
+              after_task_id: "phải là việc đang nằm trong cột đích",
+            }),
+            { status: 422 },
+          ),
+        ),
+      );
+      const { result } = await setupWithCachedBoard();
+
+      const error: unknown = await result.current.moveTaskMutation
+        .mutateAsync({
+          taskId: asTaskId(ownTaskId),
+          columnId: asColumnId(columnDoneId),
+          afterTaskId: asTaskId(foreignTaskId),
+          position: 0,
+        })
+        .catch((caught: unknown) => caught);
+
+      expect(isKanbanError(error)).toBe(true);
+      expect(error).toMatchObject({
+        kind: "validation",
+        fields: { after_task_id: "phải là việc đang nằm trong cột đích" },
+      });
+    });
+  });
 
   it("serializes mutations sharing the kanban-board scope instead of racing them", async () => {
     const order: string[] = [];

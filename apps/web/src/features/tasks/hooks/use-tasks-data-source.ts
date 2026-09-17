@@ -1,9 +1,12 @@
 import { useMutation, useQueryClient, type UseMutationResult } from "@tanstack/react-query";
 
 import {
+  afterTaskIdAt,
   asColumnId,
   asTaskId,
   kanbanReducer,
+  optimisticPositionFor,
+  selectTasksByColumn,
   type ColumnId,
   type KanbanAction,
   type KanbanBoard,
@@ -67,6 +70,21 @@ export interface CreateTaskVariables {
   assigneeId?: string | null;
   priority?: TaskPriority;
   dueOn?: string | null;
+}
+
+/**
+ * `afterTaskId`/`position` are the same drop target in the two vocabularies
+ * the move touches: the API wants "land after this task" (`null` = top of
+ * column), the optimistic reducer wants a sortable `position` between the
+ * neighbours. `dataSource.moveTask` derives both from a target index via the
+ * lib's position helpers; callers with a different source of truth (none
+ * today) can supply them directly.
+ */
+export interface MoveTaskVariables {
+  taskId: TaskId;
+  columnId: ColumnId;
+  afterTaskId: TaskId | null;
+  position: number;
 }
 
 export interface UpdateTaskVariables {
@@ -160,6 +178,7 @@ export interface UseTasksDataSourceResult {
   dataSource: KanbanDataSource<AppTask>;
   createTaskMutation: UseMutationResult<AppTask, KanbanError, CreateTaskVariables>;
   updateTaskMutation: UseMutationResult<AppTask, KanbanError, UpdateTaskVariables>;
+  moveTaskMutation: UseMutationResult<AppTask, KanbanError, MoveTaskVariables>;
   deleteTaskMutation: UseMutationResult<void, KanbanError, TaskId>;
   createColumnMutation: UseMutationResult<KanbanColumn, KanbanError, CreateColumnVariables>;
   updateColumnMutation: UseMutationResult<KanbanColumn, KanbanError, UpdateColumnVariables>;
@@ -342,27 +361,25 @@ export function useTasksDataSource(params: GetBoardParams): UseTasksDataSourceRe
     onSettled: invalidateBoard,
   });
 
-  const moveTaskMutation = useMutation<
-    AppTask,
-    KanbanError,
-    { taskId: TaskId; columnId: ColumnId }
-  >({
+  const moveTaskMutation = useMutation<AppTask, KanbanError, MoveTaskVariables>({
     scope: KANBAN_MUTATION_SCOPE,
-    mutationFn: async ({ taskId, columnId }) => {
+    mutationFn: async ({ taskId, columnId, afterTaskId }) => {
       try {
-        const task = await moveTaskApi(taskId, columnId);
+        const task = await moveTaskApi(taskId, {
+          column_id: columnId,
+          after_task_id: afterTaskId ?? null,
+        });
         return toAppTask(task);
       } catch (error) {
         throw mapApiError(error, "task");
       }
     },
-    onMutate: async ({ taskId, columnId }) => {
+    onMutate: async ({ taskId, columnId, position }) => {
       await queryClient.cancelQueries({ queryKey: tasksKeys.boards() });
-      // The API always places a moved task at the top of its destination
-      // column regardless of the `position` the caller (the lib's own
-      // `[`/`]` keyboard shortcut, or the app's move menu) requests, so the
-      // optimistic update reflects that truth instead of the requested one.
-      applyOptimistic({ type: "tasks/moved", taskId, columnId, position: 0 });
+      // `position` is a client-side midpoint between the drop slot's
+      // neighbours: the server picks its own value (and may renormalize the
+      // column), but the optimistic order is the one the user just saw.
+      applyOptimistic({ type: "tasks/moved", taskId, columnId, position });
     },
     onSuccess: (task) => {
       applyOptimistic({ type: "tasks/upserted", task });
@@ -415,11 +432,21 @@ export function useTasksDataSource(params: GetBoardParams): UseTasksDataSourceRe
         priority: patch.priority,
         dueOn: patch.dueOn,
       }),
-    // The port declares a 3rd `position` parameter; the API always places
-    // a moved task at the top of the destination column, so it's ignored
-    // here (a function with fewer parameters structurally satisfies a
-    // function-typed property that declares more).
-    moveTask: (taskId, columnId) => moveTaskMutation.mutateAsync({ taskId, columnId }),
+    // The port's `position` is a target *index* in the destination column
+    // (0 = top; the lib's `[`/`]` shortcut and the move menu both send 0,
+    // drag-and-drop sends the drop slot). Translate it against the cached
+    // board into the API's `after_task_id` and a reducer-friendly midpoint
+    // position; an unknown/empty column degrades to "top of column".
+    moveTask: (taskId, columnId, index) => {
+      const cachedBoard = queryClient.getQueryData<BoardQueryData>(boardKey)?.board;
+      const columnTasks = cachedBoard ? (selectTasksByColumn(cachedBoard).get(columnId) ?? []) : [];
+      return moveTaskMutation.mutateAsync({
+        taskId,
+        columnId,
+        afterTaskId: afterTaskIdAt(columnTasks, index, taskId),
+        position: optimisticPositionFor(columnTasks, index, taskId),
+      });
+    },
     deleteTask: (taskId) => deleteTaskMutation.mutateAsync(taskId),
   };
 
@@ -427,6 +454,7 @@ export function useTasksDataSource(params: GetBoardParams): UseTasksDataSourceRe
     dataSource,
     createTaskMutation,
     updateTaskMutation,
+    moveTaskMutation,
     deleteTaskMutation,
     createColumnMutation,
     updateColumnMutation,

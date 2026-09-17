@@ -51,7 +51,7 @@ Feature UI reaches for these before raw shadcn or one-off markup:
 - Controls: `HvButton` (all sizes keep a 44px hit area), `HvSegmented`
   (segmented radio group, or `variant="tabs"` with real tab semantics),
   `HvScoreInput` + `parseScoreInput` for score cells (`type="text"
-  inputmode="decimal"`, accepts "7,5", exposes `data-state`
+inputmode="decimal"`, accepts "7,5", exposes `data-state`
   idle/dirty/saved/invalid), `HvSelect` (the select-style dropdown: a `combobox`
   trigger opening a `listbox` with roving focus — popover from `sm` up, bottom
   sheet below, a filter box once the list passes `searchThreshold`; read the
@@ -119,6 +119,19 @@ Radix primitives for interactive components, `eslint-plugin-jsx-a11y` in CI,
 a skip link in the root layout, `aria-label` on icon-only buttons, and both
 color schemes (class-based dark mode via the theme provider).
 
+**Drag-and-drop (task board).** dnd-kit lives only in the `tasks` feature
+(`hooks/use-board-dnd.ts` adapts it onto the headless `src/lib/kanban`, which
+stays drag-layer-agnostic — ESLint blocks `@dnd-kit/*` there). Sensors are
+fixed for every viewport: `MouseSensor` with a 6px distance so a plain click
+still opens the card, and `TouchSensor` with a 250ms hold so the column
+keeps scrolling; there is no keyboard or pointer sensor. Keyboard moves stay
+on the lib's `[`/`]` shortcut, so cards keep `role="option"` and the lib's
+roving `tabIndex` — never spread dnd-kit's `attributes` onto a card, and keep
+dnd-kit's own announcer silenced (the page owns the Vietnamese live region).
+Desktop drops may change column; on phones a drag only reorders inside the
+visible column and the move menu remains the cross-column path. Transitions
+are dropped under `prefers-reduced-motion`.
+
 ## Testing
 
 Two layers, two runners:
@@ -141,6 +154,11 @@ Two layers, two runners:
   resolve for a given width. Dropdowns are driven by clicking the `combobox`
   and then the `option` (`pickOption` in `src/test/pick-option.ts`); pass
   `mockViewport(1024)` so the popover branch runs instead of the sheet.
+  dnd-kit works in jsdom: `fireEvent.mouseDown` on a card followed by a
+  `mouseMove` on `document` past 6px sets `data-dragging` on it; the adapter
+  hook itself is tested with `renderHook` and hand-built `onDragEnd` events.
+  dnd-kit mounts a second `aria-live` node, so assert on the board's
+  announcement by text rather than `getByRole("status")`.
 - **End-to-end tests** — Playwright against a running stack
   (`make e2e` / `npm run e2e`), specs in `e2e/*.spec.ts`. Expects the app on
   localhost:5173 (override with `E2E_BASE_URL`) backed by the API with seeded
