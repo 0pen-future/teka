@@ -55,3 +55,28 @@ Element.prototype.scrollIntoView = () => undefined;
 Element.prototype.hasPointerCapture = () => false;
 Element.prototype.setPointerCapture = () => undefined;
 Element.prototype.releasePointerCapture = () => undefined;
+
+// ProseMirror measures selection rectangles while the task description
+// editor is open. jsdom implements them on Element but not on Range, and
+// has no `elementFromPoint` (a click inside the editor asks which element
+// sits under the pointer). Filled in only where missing, checked with `in`
+// so no method is referenced unbound.
+const emptyRects = () =>
+  ({
+    length: 0,
+    item: () => null,
+    [Symbol.iterator]: [][Symbol.iterator],
+  }) as unknown as DOMRectList;
+// Widened to `object`: the DOM typings declare these members, so an `in`
+// check on the typed prototype would narrow it to `never`.
+const rangeProto: object = Range.prototype;
+const documentProto: object = Document.prototype;
+if (!("getClientRects" in rangeProto)) {
+  Range.prototype.getClientRects = emptyRects;
+}
+if (!("getBoundingClientRect" in rangeProto)) {
+  Range.prototype.getBoundingClientRect = () => new DOMRect(0, 0, 0, 0);
+}
+if (!("elementFromPoint" in documentProto)) {
+  Document.prototype.elementFromPoint = () => null;
+}

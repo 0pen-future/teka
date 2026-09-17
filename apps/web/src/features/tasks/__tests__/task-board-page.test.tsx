@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
 import { API_URL, fail, ok } from "@/test/msw/handlers";
@@ -11,6 +11,31 @@ import { mockViewport } from "@/test/viewport";
 
 import { TaskBoardPage } from "../pages/task-board-page";
 import { resetTasksStore, tasksHandlers } from "./tasks-handlers";
+
+// The board tests only open the form; the editor itself (TipTap and
+// ProseMirror, the feature's largest chunk) is covered by its own test
+// files, so a plain textarea stands in for it here.
+vi.mock("../components/task-description-editor", () => ({
+  DESCRIPTION_MAX_CHARS: 2000,
+  TaskDescriptionEditor: ({
+    id,
+    value,
+    onChange,
+    labelId,
+  }: {
+    id: string;
+    value: string;
+    onChange: (html: string) => void;
+    labelId: string;
+  }) => (
+    <textarea
+      id={id}
+      aria-labelledby={labelId}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  ),
+}));
 
 function memberCenterMe(permissions: string[]) {
   return http.get(`${API_URL}/centers/me`, () =>
@@ -291,7 +316,13 @@ describe("TaskBoardPage", () => {
     const dialog = await screen.findByRole("dialog", { name: "Chi tiết công việc" });
 
     expect(within(dialog).getByLabelText("Tiêu đề")).toBeDisabled();
-    expect(within(dialog).getByLabelText("Mô tả")).toBeDisabled();
+    // Read-only shows the description as rendered HTML, not an editor.
+    expect(within(dialog).queryByRole("textbox", { name: "Mô tả" })).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("link", { name: "bảng học phí" })).toHaveAttribute(
+      "href",
+      "https://teka.vn/hoc-phi",
+    );
+    expect(dialog.querySelector("script")).toBeNull();
     expect(within(dialog).queryByRole("button", { name: "Xoá" })).not.toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: "Lưu" })).not.toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Đóng" })).toBeInTheDocument();

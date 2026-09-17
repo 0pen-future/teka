@@ -2,6 +2,7 @@ import { useDndMonitor } from "@dnd-kit/core";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
+  useMemo,
   useRef,
   type ComponentProps,
   type CSSProperties,
@@ -15,6 +16,7 @@ import { cn, formatDateTime, formatDayMonth } from "@/lib/utils";
 
 import type { BoardDndData } from "../hooks/use-board-dnd";
 import type { AppTask } from "../hooks/use-tasks-data-source";
+import { textFromHtml } from "../lib/rich-text";
 import { MoveMenu } from "./move-menu";
 import {
   PRIORITY_LABELS,
@@ -48,9 +50,13 @@ export interface TaskCardBodyProps {
 export function TaskCardBody({ task, assigneeName }: TaskCardBodyProps) {
   const done = task.completedAt !== null;
   const overdue = isOverdue(task);
+  const preview = useMemo(() => textFromHtml(task.description), [task.description]);
   return (
     <>
       <p className="text-[13.5px] font-bold text-ink-900">{task.title}</p>
+      {preview ? (
+        <p className="mt-1 line-clamp-2 text-[12px] leading-snug text-ink-500">{preview}</p>
+      ) : null}
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
         <HvBadge size="sm" variant={PRIORITY_VARIANTS[task.priority]}>
           {PRIORITY_LABELS[task.priority]}

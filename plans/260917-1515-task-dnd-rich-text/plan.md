@@ -115,7 +115,7 @@ catalog v4, …) vẫn đóng. Plan này thêm:
 | 2 | [API: mô tả rich text (sanitize, giới hạn, migration 000023)](./phase-02-api-rich-text-description.md) | Completed | 1d | — |
 | 3 | [Web lib `src/lib/kanban`: helper vị trí thuần, keyboard lên đầu cột](./phase-03-web-kanban-lib-position-helpers.md) | Completed | 0.5d | — |
 | 4 | [Web: kéo-thả trong feature `tasks` (dnd-kit)](./phase-04-web-drag-and-drop.md) | Completed | 1.5d | 1, 3 |
-| 5 | [Web: trình soạn thảo rich text (TipTap) + RichTextView](./phase-05-web-rich-text-editor.md) | Pending | 1.5d | 2 |
+| 5 | [Web: trình soạn thảo rich text (TipTap) + RichTextView](./phase-05-web-rich-text-editor.md) | Completed | 1.5d | 2 |
 | 6 | [E2E, docs, hợp đồng v2, ship](./phase-06-e2e-docs-ship.md) | Pending | 1d | 4, 5 |
 
 Phase 1, 2, 3 độc lập về file, có thể chạy song song. Phase 4 và 5 độc lập

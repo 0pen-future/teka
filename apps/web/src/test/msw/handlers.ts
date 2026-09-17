@@ -859,7 +859,7 @@ const defaultTask2: DefaultTaskFixture = {
   id: "51000000-0000-4000-8000-000000000002",
   column_id: taskColumnDoing.id,
   title: "Gọi phụ huynh lớp Toán 6A",
-  description: "Xác nhận lịch học bù",
+  description: "<p>Xác nhận lịch học bù</p>",
   priority: "high",
   due_on: null,
   assignee_id: secondaryTeacher.id,

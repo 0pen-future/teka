@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { plainTextLength } from "../lib/rich-text";
+
 /** `tasks.Priority` — plain enum, no numeric weighting on the wire. */
 export const TASK_PRIORITIES = ["none", "low", "medium", "high"] as const;
 export const taskPrioritySchema = z.enum(TASK_PRIORITIES);
@@ -111,7 +113,10 @@ export interface MoveTaskRequest {
 
 export const taskFormSchema = z.object({
   title: z.string().trim().min(1, "Vui lòng nhập tiêu đề").max(200, "Tiêu đề tối đa 200 ký tự"),
-  description: z.string().max(2000, "Mô tả tối đa 2000 ký tự"),
+  description: z
+    .string()
+    .max(20000, "Mô tả quá dài, hãy bỏ bớt định dạng")
+    .refine((value) => plainTextLength(value) <= 2000, "Mô tả tối đa 2000 ký tự"),
   column_id: z.string().min(1, "Vui lòng chọn cột"),
   assignee_id: z.string().nullable(),
   priority: taskPrioritySchema,

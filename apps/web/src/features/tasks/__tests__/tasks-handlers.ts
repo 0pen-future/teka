@@ -52,12 +52,21 @@ let taskIdCounter = 0;
 export const boardScopeRequests: string[] = [];
 /** Every `PUT /task-columns/order` request body, for assertions. */
 export const columnOrderRequests: string[][] = [];
+/** Every `POST /tasks` and `PATCH /tasks/:id` request body, for assertions on what the form sends. */
+export const taskWriteRequests: Record<string, unknown>[] = [];
+
+/** Overwrites a seeded task's description, for cases the default fixtures do not cover. */
+export function seedTaskDescription(taskId: string, description: string): void {
+  const task = tasks.find((candidate) => candidate.id === taskId);
+  if (task) task.description = description;
+}
 
 export function resetTasksStore(): void {
   columnIdCounter = 0;
   taskIdCounter = 0;
   boardScopeRequests.length = 0;
   columnOrderRequests.length = 0;
+  taskWriteRequests.length = 0;
   columns = [
     {
       id: columnTodoId,
@@ -81,7 +90,8 @@ export function resetTasksStore(): void {
       id: ownTaskId,
       column_id: columnTodoId,
       title: "Soạn đề kiểm tra giữa kỳ",
-      description: "",
+      description:
+        "<p>Đề gồm <strong>3 phần</strong>:</p><ul><li>Trắc nghiệm</li><li>Tự luận</li></ul>",
       priority: "medium",
       due_on: "2026-09-25",
       assignee_id: primaryTeacher.id,
@@ -95,7 +105,8 @@ export function resetTasksStore(): void {
       id: assignedToOthersTaskId,
       column_id: columnTodoId,
       title: "Sắp lịch dạy bù",
-      description: "",
+      // A row migration 000023 has not rewritten yet: still plain text.
+      description: "Hỏi lớp 6A & 7B\nbáo lại trước thứ 6",
       priority: "low",
       due_on: null,
       assignee_id: secondaryTeacher.id,
@@ -109,7 +120,8 @@ export function resetTasksStore(): void {
       id: foreignTaskId,
       column_id: columnTodoId,
       title: "Kiểm tra học phí tháng 9",
-      description: "",
+      description:
+        '<p>Xem <a href="https://teka.vn/hoc-phi">bảng học phí</a><script>alert(1)</script></p>',
       priority: "high",
       due_on: null,
       assignee_id: primaryTeacher.id,
@@ -246,6 +258,7 @@ export const tasksHandlers = [
       priority?: string;
       due_on?: string;
     };
+    taskWriteRequests.push(body);
     taskIdCounter += 1;
     const task: MutableTask = {
       id: `61000000-0000-4000-8000-0000000000${String(90 + taskIdCounter).padStart(2, "0")}`,
@@ -278,6 +291,7 @@ export const tasksHandlers = [
   }),
   http.patch(`${API_URL}/tasks/:id`, async ({ params, request }) => {
     const body = (await request.json()) as Record<string, unknown>;
+    taskWriteRequests.push(body);
     const task = tasks.find((candidate) => candidate.id === params.id);
     if (!task) {
       return HttpResponse.json(fail("NOT_FOUND", "task not found"), { status: 404 });

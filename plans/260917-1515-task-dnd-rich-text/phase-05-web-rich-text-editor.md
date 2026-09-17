@@ -1,7 +1,7 @@
 ---
 phase: 5
 title: "Web: editor TipTap cho mô tả + RichTextView an toàn"
-status: pending
+status: completed
 priority: P1
 effort: "1.5d"
 dependencies: [2]
@@ -93,11 +93,23 @@ Lớp phòng thủ: server bluemonday (phase 2) là ranh giới tin cậy; DOMPu
 
 ## Success Criteria
 
-- [ ] AC10: tạo/sửa việc với đậm/nghiêng/gạch chân/gạch ngang/list/link → API nhận HTML subset; mở lại thấy đúng định dạng; mô tả rỗng gửi `""`.
-- [ ] AC11: `rich-text.test.ts` XSS xanh; `dangerouslySetInnerHTML` chỉ xuất hiện trong `rich-text-view.tsx` (thêm test grep hoặc rule eslint `react/no-danger` với override cho file đó).
-- [ ] Editor chunk lazy tách riêng; trang bảng không tải TipTap khi chưa mở modal.
-- [ ] A11y: toolbar `role="toolbar"`, nút có tên; editor `textbox` có tên "Mô tả"; lỗi zod gắn `aria-describedby`.
-- [ ] Toàn bộ test web xanh trong jsdom với polyfill.
+- [x] AC10: tạo/sửa việc với đậm/nghiêng/gạch chân/gạch ngang/list/link → API nhận HTML subset; mở lại thấy đúng định dạng; mô tả rỗng gửi `""`.
+- [x] AC11: `rich-text.test.ts` XSS xanh; `dangerouslySetInnerHTML` chỉ xuất hiện trong `rich-text-view.tsx` (thêm test grep hoặc rule eslint `react/no-danger` với override cho file đó).
+- [x] Editor chunk lazy tách riêng; trang bảng không tải TipTap khi chưa mở modal.
+- [x] A11y: toolbar `role="toolbar"`, nút có tên; editor `textbox` có tên "Mô tả"; lỗi zod gắn `aria-describedby`.
+- [x] Toàn bộ test web xanh trong jsdom với polyfill.
+
+## Execution Notes
+
+Điểm lệch so với thiết kế ở trên, đã xác minh bằng test/build (2026-09-17):
+
+- Không cài `@tiptap/extensions`/`CharacterCount`: bộ đếm lấy `doc.textBetween(0, size, "", "")` đếm code point, khớp cách Go đếm rune trên text đã bỏ thẻ; bỏ được một gói và một nguồn lệch số.
+- Bỏ `protocols: ["http","https","mailto"]` khỏi cấu hình link: ba scheme này là mặc định của linkify, khai báo lại chỉ in cảnh báo `linkifyjs: already initialized` ra console. Giới hạn scheme thật nằm ở panel URL (`LINK_PATTERN`), DOMPurify và bluemonday.
+- Hook DOMPurify ghi `rel`/`target` đúng thứ tự và điều kiện của bluemonday (`nofollow noreferrer noopener` + `target="_blank"` cho link http(s); `nofollow noreferrer` cho mailto) để mở-rồi-Lưu không gửi PATCH mô tả khác đi.
+- Polyfill jsdom chỉ gán khi thiếu (`"getClientRects" in Range.prototype`, không dùng `??=` vì rule `unbound-method`); `Element.prototype.getClientRects` jsdom đã có nên không đè.
+- `task-board-page.test.tsx` `vi.mock` editor bằng textarea để file test trang bảng không nạp `@tiptap/*`; editor thật kiểm ở `task-description-editor.test.tsx` và `task-form-modal.test.tsx`.
+- Bộ đếm không còn `aria-live` (đọc lại mỗi phím gõ); thay bằng `role="status"` ẩn chỉ có nội dung khi vượt 2000.
+- Chưa kiểm tay bước 7 (Telex trên Chrome/Android, dán từ Google Docs) — cần làm trước khi ship Phase 6.
 
 ## Risk Assessment
 

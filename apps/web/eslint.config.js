@@ -26,6 +26,23 @@ export default tseslint.config(
         tsconfigRootDir: import.meta.dirname,
       },
     },
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']",
+          message:
+            "Render server HTML only through RichTextView (src/features/tasks/components/rich-text-view.tsx), which sanitizes it first.",
+        },
+      ],
+    },
+  },
+  {
+    // The one place that may inject HTML: it sanitizes with DOMPurify first.
+    files: ["src/features/tasks/components/rich-text-view.tsx"],
+    rules: {
+      "no-restricted-syntax": "off",
+    },
   },
   {
     // Generated shadcn primitives keep upstream shape for easy re-generation.

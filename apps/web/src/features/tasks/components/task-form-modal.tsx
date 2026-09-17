@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
+import { Suspense, lazy, useEffect, useState } from "react";
+import { Controller, useForm } from "react-hook-form";
 import type { UseMutationResult } from "@tanstack/react-query";
 
 import {
@@ -14,7 +14,6 @@ import {
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import type { ColumnId, KanbanColumn, KanbanError, TaskId } from "@/lib/kanban";
-import { cn } from "@/lib/utils";
 
 import type {
   AppTask,
@@ -22,7 +21,28 @@ import type {
   UpdateTaskVariables,
 } from "../hooks/use-tasks-data-source";
 import { applyKanbanFormError, kanbanErrorToastMessage } from "../lib/map-api-error";
+import { normalizeIncoming } from "../lib/rich-text";
 import { taskFormSchema, type TaskFormValues, type TaskPriority } from "../schemas/task-schemas";
+import { RichTextView } from "./rich-text-view";
+
+// TipTap and ProseMirror are the heaviest part of the tasks feature and only
+// matter once a task is opened for editing: keep them out of the board's chunk.
+const TaskDescriptionEditor = lazy(() =>
+  import("./task-description-editor").then((module) => ({
+    default: module.TaskDescriptionEditor,
+  })),
+);
+
+/** Same footprint as the editor (toolbar + surface + counter) so the modal does not jump when the chunk lands. */
+function EditorSkeleton() {
+  return (
+    <div
+      aria-busy
+      aria-label="Đang tải trình soạn thảo"
+      className="min-h-[164px] animate-pulse rounded-[14px] border-2 border-line-200 bg-cream-100"
+    />
+  );
+}
 
 const PRIORITY_OPTIONS: { value: TaskPriority; label: string }[] = [
   { value: "none", label: "Không" },
@@ -60,7 +80,7 @@ function toFormValues(
   if (task) {
     return {
       title: task.title,
-      description: task.description,
+      description: normalizeIncoming(task.description),
       column_id: task.columnId,
       assignee_id: task.assigneeId,
       priority: task.priority,
@@ -227,21 +247,33 @@ export function TaskFormModal({
             <FieldError errors={[errors.title]} />
           </Field>
           <Field data-invalid={Boolean(errors.description)}>
-            <FieldLabel htmlFor="task-description">Mô tả</FieldLabel>
-            <textarea
-              id="task-description"
-              disabled={readOnly}
-              aria-invalid={Boolean(errors.description)}
-              rows={3}
-              className={cn(
-                "w-full min-w-0 rounded-[14px] border-2 border-line-200 bg-white px-3 py-2.5 text-[14.5px] text-ink-700 outline-none",
-                "placeholder:text-ink-400 focus-visible:border-mint-400",
-                "disabled:cursor-not-allowed disabled:bg-cream-200 disabled:text-ink-300",
-                "aria-invalid:border-coral-400",
-              )}
-              {...form.register("description")}
-            />
-            <FieldError errors={[errors.description]} />
+            <FieldLabel id="task-description-label">Mô tả</FieldLabel>
+            {readOnly && task ? (
+              <RichTextView
+                html={task.description}
+                emptyText="Không có mô tả"
+                className="rounded-[14px] bg-cream-100 px-3 py-2.5"
+              />
+            ) : (
+              <Controller
+                control={form.control}
+                name="description"
+                render={({ field }) => (
+                  <Suspense fallback={<EditorSkeleton />}>
+                    <TaskDescriptionEditor
+                      id="task-description"
+                      value={field.value}
+                      onChange={field.onChange}
+                      onBlur={field.onBlur}
+                      labelId="task-description-label"
+                      invalid={Boolean(errors.description)}
+                      describedBy={errors.description ? "task-description-error" : undefined}
+                    />
+                  </Suspense>
+                )}
+              />
+            )}
+            <FieldError id="task-description-error" errors={[errors.description]} />
           </Field>
           {mode === "create" ? (
             <Field data-invalid={Boolean(errors.column_id)}>

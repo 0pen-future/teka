@@ -132,6 +132,20 @@ Desktop drops may change column; on phones a drag only reorders inside the
 visible column and the move menu remains the cross-column path. Transitions
 are dropped under `prefers-reduced-motion`.
 
+**Rich text (task descriptions).** The API stores a description as a
+sanitized HTML subset (`p br strong em u s ul ol li a`). On the web that
+subset is edited with TipTap in `tasks/components/task-description-editor.tsx`,
+which the form modal loads lazily so the board's chunk never carries
+ProseMirror, and rendered only through `tasks/components/rich-text-view.tsx`,
+which runs DOMPurify (`tasks/lib/rich-text.ts`, same allow-list, links forced
+to `rel="noopener noreferrer nofollow" target="_blank"`) before injecting.
+That view is the single file allowed to use `dangerouslySetInnerHTML`
+(`no-restricted-syntax` in [eslint.config.js](../apps/web/eslint.config.js)
+blocks it everywhere else); cards show a text-only preview via
+`textFromHtml`. The form counts characters the way the server does
+(`plainTextLength`: text only, entities decoded) so the 2000-character limit
+trips on exactly the input the API would reject.
+
 ## Testing
 
 Two layers, two runners:
