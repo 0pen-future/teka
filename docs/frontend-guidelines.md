@@ -176,12 +176,21 @@ Two layers, two runners:
 - **End-to-end tests** — Playwright against a running stack
   (`make e2e` / `npm run e2e`), specs in `e2e/*.spec.ts`. Expects the app on
   localhost:5173 (override with `E2E_BASE_URL`) backed by the API with seeded
-  dev users. Tests run on one worker because they mutate a shared database.
-  Prefer role-based locators; use `exact: true` on cell lookups so row
-  action `aria-label`s don't collide in strict mode.
+  dev users. `make e2e-isolated` builds its own compose project (`teka-e2e`,
+  ports 55173/58080/55432), seeds it, runs the suite and tears it down, so a
+  run never touches the `make dev` database. Tests run on one worker because
+  they mutate a shared database. Two projects: `desktop` runs every spec
+  except `*-mobile.spec.ts`; `mobile` runs only those, under the Pixel 7
+  device profile with touch on. Prefer role-based locators; use `exact: true`
+  on cell lookups so row action `aria-label`s don't collide in strict mode.
+  Shared setup lives in `e2e/helpers/` (`auth.ts` logs in through the UI or
+  the API, `board.ts` seeds tasks over the API and reads column order,
+  `drag.ts` walks a pointer or a CDP touch across the board in steps, since
+  dnd-kit only reacts to successive move events).
 
 ## Verification
 
 `make lint-web` runs eslint, prettier check, and `tsc -b`; `make test-web` runs
 the offline unit suite; `make build-web` builds the production bundle;
-`make e2e` runs Playwright against the dev stack.
+`make e2e` runs Playwright against the dev stack and `make e2e-isolated`
+against a throwaway compose stack.

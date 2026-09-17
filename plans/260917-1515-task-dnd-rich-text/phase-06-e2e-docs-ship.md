@@ -1,7 +1,7 @@
 ---
 phase: 6
 title: "E2E, tài liệu, hợp đồng v2 và ship"
-status: pending
+status: completed
 priority: P2
 effort: "1d"
 dependencies: [4, 5]
@@ -92,10 +92,10 @@ export async function dragTo(page: Page, source: Locator, target: Locator, steps
 
 ## Success Criteria
 
-- [ ] AC12: 3 spec e2e mới xanh trên `teka-e2e` (desktop + mobile project); `tasks-board.spec.ts` cũ vẫn xanh; spec mobile chỉ chạy ở project mobile.
-- [ ] Docs: 3 file docs + 2 README cập nhật, link kiểm tra được; `reports/api-contract-v2.md` khớp swagger.
-- [ ] Bằng chứng gate đầy đủ trong `plan.md`.
-- [ ] Prod: file backup tồn tại trước migrate; checklist sau deploy hoàn tất; không lỗi 5xx ở log API trong 30 phút đầu.
+- [x] AC12: 3 spec e2e mới xanh trên `teka-e2e` (desktop + mobile project); `tasks-board.spec.ts` cũ vẫn xanh; spec mobile chỉ chạy ở project mobile.
+- [x] Docs: 3 file docs + 2 README cập nhật, link kiểm tra được; `reports/api-contract-v2.md` khớp swagger.
+- [x] Bằng chứng gate đầy đủ trong `plan.md`.
+- [ ] Prod: file backup tồn tại trước migrate; checklist sau deploy hoàn tất; không lỗi 5xx ở log API trong 30 phút đầu. *(chưa chạy: bước ship/backup prod cần người dùng duyệt riêng; xem Step 7.)*
 
 ## Risk Assessment
 

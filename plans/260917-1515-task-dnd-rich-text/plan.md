@@ -116,7 +116,7 @@ catalog v4, …) vẫn đóng. Plan này thêm:
 | 3 | [Web lib `src/lib/kanban`: helper vị trí thuần, keyboard lên đầu cột](./phase-03-web-kanban-lib-position-helpers.md) | Completed | 0.5d | — |
 | 4 | [Web: kéo-thả trong feature `tasks` (dnd-kit)](./phase-04-web-drag-and-drop.md) | Completed | 1.5d | 1, 3 |
 | 5 | [Web: trình soạn thảo rich text (TipTap) + RichTextView](./phase-05-web-rich-text-editor.md) | Completed | 1.5d | 2 |
-| 6 | [E2E, docs, hợp đồng v2, ship](./phase-06-e2e-docs-ship.md) | Pending | 1d | 4, 5 |
+| 6 | [E2E, docs, hợp đồng v2, ship](./phase-06-e2e-docs-ship.md) | Completed (ship chờ duyệt) | 1d | 4, 5 |
 
 Phase 1, 2, 3 độc lập về file, có thể chạy song song. Phase 4 và 5 độc lập
 nhau (file khác nhau trong `features/tasks`, trừ `task-form-modal.tsx` chỉ
@@ -246,5 +246,44 @@ Rà sau khi gộp red-team (17/09):
 - **Không còn** tham chiếu `PointerSensor` (ngoài D1 mô tả năng lực thư viện
   và câu cấm), `mergeRefs`, `pan-y`, `index.css`, `extension-character-count`,
   guard `NOT LIKE` trong lệnh migration, "chỉ 1 vùng aria-live".
+
+## Test evidence
+
+Chạy 17/09/2026 trên working tree Phase 6 (sau commit `4c9d062`). Mỗi lệnh
+chạy đơn lẻ; `make test-api` chạy tuần tự vì chạy song song bị timeout do tranh
+chấp tài nguyên, không phải lỗi mã.
+
+| Gate | Lệnh | Kết quả |
+|------|------|---------|
+| Lint web | `make lint-web` | 0 lỗi, 6 cảnh báo có sẵn từ trước (không thuộc plan) |
+| Typecheck web | `cd apps/web && npm run typecheck` | OK (bao gồm `e2e/` qua `tsconfig.node.json`) |
+| Unit web | `make test-web` | 99 file, 808 pass, 3 skipped, 0 fail |
+| Lint API | `make lint-api` | 0 issue |
+| Swagger | `make api-docs` | `git diff apps/api/docs` sạch |
+| Integration API | `cd apps/api && go test -tags=integration -p 1 -coverpkg=./... -coverprofile=coverage.out $(go list ./...)` | 40 gói ok, 0 FAIL, coverage 77.2% |
+| E2E plan (gate AC12) | `make e2e-isolated E2E_ARGS="tasks-board"` | 5 test pass (4 desktop + 1 mobile), 55s; spec dnd chạy lặp 2 lần vẫn xanh |
+| E2E toàn bộ | `make e2e-isolated` | 37/37 pass (36 desktop + 1 mobile), 5.0 phút, exit 0; stack `teka-e2e` tự hạ (`down -v`) |
+
+Ghi chú:
+
+- Ba suite `billing`/`collections`/`statement` từng đỏ trên master (ghi nhận
+  01/09) **xanh** trong lần chạy toàn bộ này vì stack cô lập seed lại từ đầu;
+  nguyên nhân đỏ trước đây là dữ liệu dev bẩn, không phải mã.
+- `tasks-board-mobile.spec.ts` chỉ chạy ở project `mobile` (Pixel 7, CDP
+  `Input.dispatchTouchEvent`), các spec khác chỉ ở project `desktop`
+  (`npx playwright test --list` xác nhận, không chạy trùng).
+- Báo cáo tester:
+  [test-260917-2038-phase-06-e2e-docs.md](../reports/test-260917-2038-phase-06-e2e-docs.md).
+  Báo cáo review:
+  [code-review-260917-2035-phase-06-e2e-docs.md](../reports/code-review-260917-2035-phase-06-e2e-docs.md)
+  (1 High, 4 Medium, 8 Low). Đã sửa H1 (`up` nằm trong khối `status` để
+  `down -v` luôn chạy), M2 (ghim `POSTGRES_*` trong `E2E_COMPOSE`), M3
+  (`scrollIntoViewIfNeeded` trước khi đo toạ độ), M4 (assert cột đích chính
+  xác `[first]`), M5 (`tasks-board.spec.ts` dùng helper chung), L6–L10, L12;
+  L11 và L13 giữ nguyên (docs đúng, không có CI phụ thuộc tên test). Sau khi
+  sửa: `make e2e-isolated E2E_ARGS="tasks-board"` 5/5 pass (51s), lint,
+  typecheck, prettier sạch.
+- Mục Prod (backup DB trước migration 000023, deploy, checklist sau deploy)
+  **chưa thực hiện**; cần người dùng duyệt riêng trước khi chạy.
 
 <!-- slug: task-dnd-rich-text -->

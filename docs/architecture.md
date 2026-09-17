@@ -29,12 +29,21 @@ can be extracted later without a rewrite:
 - **`apps/api/pkg/kanban`** — task-board domain core (entities, policy, unit
   of work and repository ports, service). It imports only the standard library
   and `github.com/google/uuid`; a test in the package runs `go list -deps` and
-  fails on anything else. The `tasks` feature under `internal/features/`
-  supplies the GORM repositories, the tenant/actor mapping and the HTTP layer.
+  fails on anything else. A task's place in its column is a float position:
+  a move lands at the top or at the midpoint after a given task, and the core
+  renormalizes the column inside the same transaction (under a per-column
+  lock) when the gap gets too small — see the package README's "Position
+  strategy". The `tasks` feature under `internal/features/` supplies the GORM
+  repositories, the tenant/actor mapping and the HTTP layer, and owns the
+  description's trust boundary: a description is a sanitized HTML subset,
+  cleaned by bluemonday on write (`description.go`) and again by DOMPurify on
+  the web before it is rendered, so neither side trusts the other's output.
 - **`apps/web/src/lib/kanban`** — headless board state (pure reducer,
   selectors, hook with prop getters, keyboard navigation, pure drop-position
-  helpers for an app-supplied drag layer). It may import only
-  `react`; an ESLint `no-restricted-imports` override in
+  helpers). It has no drag layer of its own: pointer drag-and-drop is an
+  opt-in adapter in the `tasks` feature (`hooks/use-board-dnd.ts`, dnd-kit)
+  that maps drop events onto the lib's position helpers. The lib may import
+  only `react`; an ESLint `no-restricted-imports` override in
   [eslint.config.js](../apps/web/eslint.config.js) enforces that. The `tasks`
   feature adapts TanStack Query data into the lib's data-source contract and
   owns every design-system component.
