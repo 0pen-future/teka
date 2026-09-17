@@ -88,6 +88,28 @@ test-web: ## Run frontend unit tests (vitest + MSW, fully offline)
 e2e: ## Run Playwright end-to-end tests (expects 'make dev' stack with seeded users)
 	@cd $(WEB_DIR) && npm run e2e
 
+# Isolated stack for the e2e suite: its own compose project, ports and volumes,
+# so it never touches the 'make dev' database. Torn down even when specs fail.
+E2E_COMPOSE := POSTGRES_USER=teka POSTGRES_PASSWORD=teka_dev_password POSTGRES_DB=teka \
+	POSTGRES_PORT=55432 API_HTTP_PORT=58080 WEB_PORT=55173 ADMINER_PORT=58081 \
+	API_STATEMENTS_PUBLIC_BASE_URL=http://localhost:55173 \
+	API_CORS_ORIGINS=http://localhost:55173,http://127.0.0.1:55173 \
+	docker compose -p teka-e2e
+E2E_DATABASE_URL := postgres://teka:teka_dev_password@localhost:55432/teka?sslmode=disable
+
+.PHONY: e2e-isolated
+e2e-isolated: ## Build an isolated compose stack, seed it, run Playwright, tear it down (E2E_ARGS narrows the run)
+	@status=0; \
+	$(E2E_COMPOSE) up -d --build --wait || status=$$?; \
+	if [ $$status -eq 0 ]; then \
+		(cd $(API_DIR) && API_DATABASE_URL=$(E2E_DATABASE_URL) go run ./cmd/api seed) || status=$$?; \
+	fi; \
+	if [ $$status -eq 0 ]; then \
+		(cd $(WEB_DIR) && E2E_BASE_URL=http://localhost:55173 npx playwright test $(E2E_ARGS)) || status=$$?; \
+	fi; \
+	$(E2E_COMPOSE) down -v; \
+	exit $$status
+
 .PHONY: lint
 lint: lint-api lint-web ## Lint both apps
 

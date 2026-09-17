@@ -1,20 +1,7 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
-// Dev-only credentials created by the API seeder (`apps/api` seed command).
-const OWNER_PHONE = "0901000001";
-const OWNER_PASSWORD = "lan-password";
-
-async function login(page: Page) {
-  await page.goto("/login");
-  await page.getByLabel("Số điện thoại").fill(OWNER_PHONE);
-  await page.getByLabel("Mật khẩu").fill(OWNER_PASSWORD);
-  await page.getByRole("button", { name: "Đăng nhập" }).click();
-  await expect(page.getByText(/Chào buổi (sáng|trưa|chiều|tối), Cô Lan!/)).toBeVisible();
-}
-
-function column(page: Page, name: string) {
-  return page.getByRole("listbox", { name });
-}
+import { loginAsOwner } from "./helpers/auth.js";
+import { card, column } from "./helpers/board.js";
 
 test("task board flow: add a column, create, move, fold the column away, delete", async ({
   page,
@@ -26,7 +13,7 @@ test("task board flow: add a column, create, move, fold the column away, delete"
   const columnName = `E2E Cột ${suffix}`;
   const taskTitle = `E2E Việc ${suffix}`;
 
-  await login(page);
+  await loginAsOwner(page);
 
   // 1. The owner lands on the seeded default columns.
   await page.goto("/tasks");
@@ -52,11 +39,13 @@ test("task board flow: add a column, create, move, fold the column away, delete"
   await expect(column(page, "Cần làm").getByText(taskTitle)).toBeVisible();
 
   // 4. Move it to the new column through the card's move menu.
-  const card = column(page, "Cần làm").getByRole("option", { name: new RegExp(taskTitle) });
-  await card.getByRole("button", { name: "Chuyển cột" }).click();
+  const taskCard = card(column(page, "Cần làm"), taskTitle);
+  await taskCard.getByRole("button", { name: "Chuyển cột" }).click();
   await page.getByRole("menuitem", { name: columnName }).click();
   await expect(column(page, columnName).getByText(taskTitle)).toBeVisible();
   await expect(column(page, "Cần làm").getByText(taskTitle)).toHaveCount(0);
+  // A menu move sends no neighbour, so the task lands at the top of the column.
+  await expect(column(page, columnName).getByRole("option").first()).toContainText(taskTitle);
 
   // 5. Delete the new column: it still holds the task, so a destination is
   // required and the task must land there.
