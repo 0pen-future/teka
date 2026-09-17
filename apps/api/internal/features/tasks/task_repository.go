@@ -91,6 +91,61 @@ func (r *taskRepository) MinPositionInColumn(ctx context.Context, tenant kanban.
 	return *minPos, true, nil
 }
 
+// ListColumnPositions returns col's live tasks in board order, reduced to
+// id and position. It runs inside the caller's transaction (Service.MoveTask
+// opens one) and first takes a transaction-scoped advisory lock keyed on
+// tenant+column, so two concurrent moves into the same column are serialized:
+// the second one lists positions only after the first has committed, and can
+// never bisect the same gap from the same snapshot. The lock releases
+// automatically on commit or rollback.
+func (r *taskRepository) ListColumnPositions(ctx context.Context, tenant kanban.TenantID, col kanban.ColumnID) ([]kanban.TaskPosition, error) {
+	db := database.FromContext(ctx, r.db)
+	lockKey := uuid.UUID(tenant).String() + ":" + uuid.UUID(col).String()
+	if err := db.Exec(`SELECT pg_advisory_xact_lock(hashtext(?::text))`, lockKey).Error; err != nil {
+		return nil, err
+	}
+	var rows []struct {
+		ID       uuid.UUID
+		Position float64
+	}
+	err := db.
+		Model(&taskModel{}).
+		Select("id, position").
+		Where("center_id = ? AND column_id = ? AND deleted_at IS NULL", uuid.UUID(tenant), uuid.UUID(col)).
+		Order("position, created_at").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]kanban.TaskPosition, len(rows))
+	for i, row := range rows {
+		out[i] = kanban.TaskPosition{ID: kanban.TaskID(row.ID), Position: row.Position}
+	}
+	return out, nil
+}
+
+// RenormalizeColumn rewrites position to 0..len(order)-1 following order,
+// one update per task, inside the caller's transaction. It is only reached
+// when float gaps in col have shrunk below what MoveTask can bisect, so the
+// per-row cost is paid rarely, and the advisory lock ListColumnPositions took
+// earlier in the same transaction keeps other movers out until commit.
+// Deletes do not take that lock, so a row listed a moment ago may already be
+// soft-deleted; it no longer needs a position and is skipped rather than
+// failing the move as "task not found".
+func (r *taskRepository) RenormalizeColumn(ctx context.Context, tenant kanban.TenantID, col kanban.ColumnID, order []kanban.TaskID) error {
+	db := database.FromContext(ctx, r.db)
+	for i, id := range order {
+		err := db.
+			Model(&taskModel{}).
+			Where("id = ? AND center_id = ? AND column_id = ? AND deleted_at IS NULL", uuid.UUID(id), uuid.UUID(tenant), uuid.UUID(col)).
+			Update("position", float64(i)).Error
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Get returns the live task identified by id within tenant, or
 // kanban.ErrTaskNotFound if it does not exist, is soft-deleted, or belongs
 // to another tenant.

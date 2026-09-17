@@ -314,7 +314,7 @@ func (h *Handler) updateTask(c *gin.Context) {
 // moveTask changes a task's column.
 //
 //	@Summary		Move a task to another column
-//	@Description	Requires being the center owner, the task's creator, or its assignee. The task always lands at the top of the destination column.
+//	@Description	Requires being the center owner, the task's creator, or its assignee. With after_task_id the task lands directly below that task, which must be a live task of the destination column; without it (or with null) the task lands at the top of the column.
 //	@Tags			tasks
 //	@Accept			json
 //	@Produce		json
@@ -324,6 +324,7 @@ func (h *Handler) updateTask(c *gin.Context) {
 //	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
 //	@Failure		403		{object}	response.Envelope{error=response.ErrorBody}	"not the owner, creator, or assignee"
 //	@Failure		404		{object}	response.Envelope{error=response.ErrorBody}	"task or destination column not found"
+//	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}	"after_task_id is not a live task of the destination column"
 //	@Security		BearerAuth
 //	@Router			/tasks/{id}/move [post]
 func (h *Handler) moveTask(c *gin.Context) {

@@ -68,7 +68,7 @@ func (s *Service) Board(ctx context.Context, sc authctx.Scope) (BoardResponse, e
 	columns := make([]BoardColumnResponse, len(cols))
 	for i, c := range cols {
 		inCol := byColumn[uuid.UUID(c.ID)]
-		sort.Slice(inCol, func(a, b int) bool { return inCol[a].Position < inCol[b].Position })
+		sort.SliceStable(inCol, func(a, b int) bool { return inCol[a].Position < inCol[b].Position })
 		hasMore := len(inCol) > boardTasksPerColumn
 		if hasMore {
 			inCol = inCol[:boardTasksPerColumn]
@@ -270,9 +270,15 @@ func (s *Service) UpdateTask(ctx context.Context, sc authctx.Scope, id uuid.UUID
 	return taskResponseFrom(updated), nil
 }
 
-// MoveTask changes a task's column, landing it at the top of the target.
+// MoveTask changes a task's column and/or its place in it: at the top when
+// after_task_id is absent or null, directly below that task otherwise.
 func (s *Service) MoveTask(ctx context.Context, sc authctx.Scope, id uuid.UUID, req MoveTaskRequest) (TaskResponse, error) {
-	task, err := s.core.MoveTask(ctx, kanban.TenantID(sc.CenterID), actorFrom(sc), kanban.TaskID(id), kanban.ColumnID(req.ColumnID))
+	var after *kanban.TaskID
+	if req.AfterTaskID.Set && req.AfterTaskID.Value != nil {
+		anchor := kanban.TaskID(*req.AfterTaskID.Value)
+		after = &anchor
+	}
+	task, err := s.core.MoveTask(ctx, kanban.TenantID(sc.CenterID), actorFrom(sc), kanban.TaskID(id), kanban.ColumnID(req.ColumnID), after)
 	if err != nil {
 		return TaskResponse{}, translateError(err)
 	}

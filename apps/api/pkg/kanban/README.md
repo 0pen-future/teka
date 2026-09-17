@@ -82,17 +82,19 @@ cap per tenant), `WithMaxNameLen(n)` (column name length limit),
 | `UpdateColumn` | `Columns.Get`, `Columns.ExistsName` | `Columns.Update` | no | — |
 | `ReorderColumns` | `Columns.List` | `Columns.UpdatePositions` | no | — |
 | `DeleteColumn` | `Columns.Get`, `Columns.List`, `Tasks.CountInColumn` | `Tasks.MoveAllToColumn`, `Columns.Delete` | **yes** | `ColumnDeleted` |
-| `CreateTask` | `Columns.Get`, `Tasks.ListBoard`, `MemberChecker.IsMember` | `Tasks.Create` | no | — |
+| `CreateTask` | `Columns.Get`, `Tasks.MinPositionInColumn`, `MemberChecker.IsMember` | `Tasks.Create` | no | — |
 | `GetTask` | `Tasks.Get` | — | no | — |
 | `UpdateTask` | `Tasks.Get`, `MemberChecker.IsMember` | `Tasks.Update` | no | — |
-| `MoveTask` | `Tasks.Get`, `Columns.Get`, `Tasks.ListBoard` | `Tasks.Update` | no | — |
+| `MoveTask` | `Tasks.Get`, `Columns.Get`, `Tasks.ListColumnPositions` | `Tasks.RenormalizeColumn` (when gaps run out), `Tasks.Update` | **yes** | — |
 | `DeleteTask` | `Tasks.Get` | `Tasks.SoftDelete` | no | — |
 | `HandoverOnDeparture` | — | `Tasks.UnassignBy`, `Tasks.ReassignCreator` | **no** | **no** |
 
 ## Transaction and event contract
 
-Only `DeleteColumn` opens its own `UnitOfWork.Within`, and only `DeleteColumn`
-publishes — and only after `Within` returns `nil`. This means:
+`DeleteColumn` and `MoveTask` open their own `UnitOfWork.Within`; `MoveTask`
+does so purely for atomicity (position lookup, optional renormalization and
+the write must see one snapshot of the column) and publishes nothing. Only
+`DeleteColumn` publishes — and only after `Within` returns `nil`. This means:
 
 - **Do not call a publishing use-case from inside your own ambient
   transaction.** If your host's `UnitOfWork` implementation joins an ambient
@@ -123,15 +125,41 @@ under heavy concurrent create traffic.
 
 ## Position strategy
 
-`Task.Position` is a `float64`. Both `CreateTask` and `MoveTask` place a task
-at the top of its column by computing `min(existing positions) - 1` (0 for an
-empty column) — there is no manual position input, because this feature has
-no drag-and-drop. Repeatedly inserting at the top only ever decreases the
-value, so it never runs into the "keep bisecting between two floats" precision
-problem that fractional-indexing schemes usually worry about. If a future
-version needs manual reordering (bisecting between two arbitrary positions),
-add a periodic renormalization job — this scheme does not need one for
-top-of-column insertion alone.
+`Task.Position` is a `float64` and a column reads in ascending `Position`
+(ties broken by creation time). Two placements exist:
+
+- **Top of column** — `CreateTask`, and `MoveTask` with `after == nil`: the
+  task gets `min(existing positions) - 1` (0 for an empty column).
+  `CreateTask` reads the minimum via `TaskRepository.MinPositionInColumn`;
+  `MoveTask` takes it from the first row of `ListColumnPositions` so the top
+  move holds the same column lock as every other move (see below). Repeated
+  top insertion only ever decreases the value, so it never bisects and never
+  loses precision.
+- **After a given task** — `MoveTask` with `after` set (drag-and-drop): the
+  core calls `TaskRepository.ListColumnPositions` for the destination column,
+  finds `after`, and takes the midpoint between it and its successor (the
+  successor search skips the moving task itself, so a same-column reorder
+  behaves like a cross-column one). With no successor the task gets
+  `after.Position + 1`. `after` must be a live task of the destination column
+  and not the moving task, otherwise `ErrInvalidAfterTask` (wrapping
+  `ErrInvalidInput`) is returned.
+
+Bisecting halves the gap each time, so the core enforces a floor:
+`minPositionGap` (`1e-6`). When a midpoint would leave a gap below it, the
+core calls `TaskRepository.RenormalizeColumn` with the column's current order
+(positions become `0..n-1`), re-lists, and computes the midpoint again. No two
+neighbours in a column are therefore ever closer than `minPositionGap`, and
+no periodic renormalization job is needed.
+
+All of this runs inside one `UnitOfWork.Within`. Because placement is a
+read-then-write, `ListColumnPositions` must also serialize concurrent moves
+into the same column for the rest of the transaction — the Postgres adapter
+takes `pg_advisory_xact_lock` keyed on tenant + column before listing — so two
+simultaneous moves after the same anchor cannot compute the same midpoint,
+and a top move cannot commit between another move's renormalization read and
+its per-row writes (which would overwrite the top move's position). Deletes
+do not take the lock; `RenormalizeColumn` therefore skips rows that vanished
+since the listing instead of failing the move.
 
 ## Minimal adapter example
 

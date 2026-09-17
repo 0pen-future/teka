@@ -2,7 +2,9 @@ package tasks
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"sort"
 	"testing"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/events"
+	"teka/apps/api/internal/shared/validation"
 	"teka/apps/api/pkg/kanban"
 )
 
@@ -140,6 +143,35 @@ func (r *fakeTaskRepo) MinPositionInColumn(_ context.Context, tenant kanban.Tena
 		}
 	}
 	return minPos, found, nil
+}
+
+func (r *fakeTaskRepo) ListColumnPositions(_ context.Context, tenant kanban.TenantID, col kanban.ColumnID) ([]kanban.TaskPosition, error) {
+	var out []kanban.TaskPosition
+	for id, t := range r.tasks {
+		if r.deleted[id] || t.TenantID != tenant || t.ColumnID != col {
+			continue
+		}
+		out = append(out, kanban.TaskPosition{ID: t.ID, Position: t.Position})
+	}
+	sort.Slice(out, func(a, b int) bool {
+		if out[a].Position != out[b].Position {
+			return out[a].Position < out[b].Position
+		}
+		return uuid.UUID(out[a].ID).String() < uuid.UUID(out[b].ID).String()
+	})
+	return out, nil
+}
+
+func (r *fakeTaskRepo) RenormalizeColumn(_ context.Context, tenant kanban.TenantID, col kanban.ColumnID, order []kanban.TaskID) error {
+	for i, id := range order {
+		t, ok := r.tasks[id]
+		if !ok || r.deleted[id] || t.TenantID != tenant || t.ColumnID != col {
+			return kanban.ErrTaskNotFound
+		}
+		t.Position = float64(i)
+		r.tasks[id] = t
+	}
+	return nil
 }
 
 func (r *fakeTaskRepo) Get(_ context.Context, tenant kanban.TenantID, id kanban.TaskID) (kanban.Task, error) {
@@ -485,6 +517,104 @@ func TestAssigneeAloneCannotEditButCanMove(t *testing.T) {
 	moved, err := env.svc.MoveTask(context.Background(), scopeFor(assignee, center, false), uuid.UUID(tid), MoveTaskRequest{ColumnID: uuid.UUID(target.ID)})
 	require.NoError(t, err, "an assignee may move a task even though they may not edit it")
 	require.Equal(t, uuid.UUID(target.ID), moved.ColumnID)
+}
+
+// moveEnv seeds one center with two columns and returns a helper that adds a
+// task to a column at a given position, so the move tests read as data.
+type moveEnv struct {
+	*testEnv
+	center, owner uuid.UUID
+	src, dst      kanban.Column
+}
+
+func newMoveEnv(t *testing.T) moveEnv {
+	t.Helper()
+	env := newTestEnv()
+	center := uuid.New()
+	owner := uuid.New()
+	src := kanban.Column{ID: kanban.ColumnID(uuid.New()), TenantID: kanban.TenantID(center), Name: "todo"}
+	dst := kanban.Column{ID: kanban.ColumnID(uuid.New()), TenantID: kanban.TenantID(center), Name: "doing", Position: 1}
+	env.cols.cols[src.ID] = src
+	env.cols.cols[dst.ID] = dst
+	return moveEnv{testEnv: env, center: center, owner: owner, src: src, dst: dst}
+}
+
+func (m moveEnv) task(col kanban.Column, pos float64) kanban.TaskID {
+	tid := kanban.TaskID(uuid.New())
+	m.tasksRep.tasks[tid] = kanban.Task{
+		ID: tid, TenantID: kanban.TenantID(m.center), ColumnID: col.ID,
+		CreatedBy: kanban.ActorID(m.owner), Title: "t", Position: pos,
+	}
+	return tid
+}
+
+func (m moveEnv) move(id kanban.TaskID, req MoveTaskRequest) (TaskResponse, error) {
+	return m.svc.MoveTask(context.Background(), scopeFor(m.owner, m.center, true), uuid.UUID(id), req)
+}
+
+func TestMoveTaskWithoutAfterKeepsTopPlacement(t *testing.T) {
+	m := newMoveEnv(t)
+	m.task(m.dst, 4)
+	moving := m.task(m.src, 0)
+
+	for name, body := range map[string]string{
+		"absent": `{"column_id":"` + uuid.UUID(m.dst.ID).String() + `"}`,
+		"null":   `{"column_id":"` + uuid.UUID(m.dst.ID).String() + `","after_task_id":null}`,
+	} {
+		var req MoveTaskRequest
+		require.NoError(t, json.Unmarshal([]byte(body), &req), name)
+		moved, err := m.move(moving, req)
+		require.NoError(t, err, name)
+		require.Equal(t, uuid.UUID(m.dst.ID), moved.ColumnID, name)
+		require.Equal(t, 3.0, moved.Position, "%s: lands one above the current minimum", name)
+		m.tasksRep.tasks[moving] = kanban.Task{ID: moving, TenantID: kanban.TenantID(m.center), ColumnID: m.src.ID, CreatedBy: kanban.ActorID(m.owner), Title: "t"}
+	}
+}
+
+func TestMoveTaskAfterPlacesBelowTheAnchor(t *testing.T) {
+	m := newMoveEnv(t)
+	first := m.task(m.dst, 0)
+	m.task(m.dst, 1)
+	moving := m.task(m.src, 0)
+
+	after := uuid.UUID(first)
+	moved, err := m.move(moving, MoveTaskRequest{ColumnID: uuid.UUID(m.dst.ID), AfterTaskID: Optional[uuid.UUID]{Set: true, Value: &after}})
+	require.NoError(t, err)
+	require.Equal(t, uuid.UUID(m.dst.ID), moved.ColumnID)
+	require.Equal(t, 0.5, moved.Position)
+
+	board, err := m.svc.Board(context.Background(), scopeFor(m.owner, m.center, true))
+	require.NoError(t, err)
+	var got []uuid.UUID
+	for _, col := range board.Columns {
+		if col.ID != uuid.UUID(m.dst.ID) {
+			continue
+		}
+		for _, task := range col.Tasks {
+			got = append(got, task.ID)
+		}
+	}
+	require.Equal(t, []uuid.UUID{uuid.UUID(first), uuid.UUID(moving)}, got[:2], "board order follows the new position")
+}
+
+func TestMoveTaskAfterOutsideTheDestinationIs422(t *testing.T) {
+	m := newMoveEnv(t)
+	moving := m.task(m.src, 0)
+	sibling := m.task(m.src, 1)
+
+	after := uuid.UUID(sibling)
+	_, err := m.move(moving, MoveTaskRequest{ColumnID: uuid.UUID(m.dst.ID), AfterTaskID: Optional[uuid.UUID]{Set: true, Value: &after}})
+	ae := appErr(t, err)
+	require.Equal(t, apperror.CodeValidation, ae.Code)
+	require.Contains(t, ae.Fields, "after_task_id")
+	require.Equal(t, m.src.ID, m.tasksRep.tasks[moving].ColumnID, "a rejected move leaves the task in place")
+}
+
+func TestMoveTaskRequestRejectsNonUUIDAfterTask(t *testing.T) {
+	var req MoveTaskRequest
+	err := json.Unmarshal([]byte(`{"column_id":"`+uuid.New().String()+`","after_task_id":"not-a-uuid"}`), &req)
+	require.Error(t, err)
+	require.Equal(t, apperror.CodeBadRequest, validation.BindError(err).Code, "a malformed anchor is a bad request, not a validation error")
 }
 
 func TestDeleteColumnReportsMovedCountAndPublishesEvent(t *testing.T) {

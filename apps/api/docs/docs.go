@@ -13420,7 +13420,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Requires being the center owner, the task's creator, or its assignee. The task always lands at the top of the destination column.",
+                "description": "Requires being the center owner, the task's creator, or its assignee. With after_task_id the task lands directly below that task, which must be a live task of the destination column; without it (or with null) the task lands at the top of the column.",
                 "consumes": [
                     "application/json"
                 ],
@@ -13507,6 +13507,24 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "task or destination column not found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "after_task_id is not a live task of the destination column",
                         "schema": {
                             "allOf": [
                                 {
@@ -16372,6 +16390,9 @@ const docTemplate = `{
                 "column_id"
             ],
             "properties": {
+                "after_task_id": {
+                    "type": "string"
+                },
                 "column_id": {
                     "type": "string"
                 }

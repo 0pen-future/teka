@@ -71,6 +71,14 @@ type ColumnRepository interface {
 	ExistsName(ctx context.Context, tenant TenantID, name string) (bool, error)
 }
 
+// TaskPosition is one live task's ordering key inside a column: the minimum
+// a repository needs to return for MoveTask to place a task between two
+// neighbours without loading whole Task rows.
+type TaskPosition struct {
+	ID       TaskID
+	Position float64
+}
+
 // TaskRepository persists Task entities for one tenant. As with
 // ColumnRepository, tenant is always the first parameter after ctx.
 type TaskRepository interface {
@@ -85,6 +93,18 @@ type TaskRepository interface {
 	// ordering is a live-board concept. found is false when col holds no
 	// live task, in which case minPos is meaningless.
 	MinPositionInColumn(ctx context.Context, tenant TenantID, col ColumnID) (minPos float64, found bool, err error)
+	// ListColumnPositions returns the live tasks of col ordered like
+	// ListBoard (Position, then creation time), reduced to id and position —
+	// the ordering key MoveTask needs to place a task between two
+	// neighbours. It must be called inside a UnitOfWork and must serialize
+	// concurrent callers on the same column for the rest of that
+	// transaction (Postgres: pg_advisory_xact_lock keyed on tenant+column),
+	// so two moves cannot compute the same midpoint from the same snapshot.
+	ListColumnPositions(ctx context.Context, tenant TenantID, col ColumnID) ([]TaskPosition, error)
+	// RenormalizeColumn rewrites Position to 0..len(order)-1 following order,
+	// which lists every live task of col exactly once. It is called inside
+	// the caller's transaction when float gaps get too small to bisect.
+	RenormalizeColumn(ctx context.Context, tenant TenantID, col ColumnID, order []TaskID) error
 	// Get returns the task identified by id within tenant, excluding
 	// soft-deleted tasks. It returns ErrTaskNotFound when id does not exist,
 	// exists under a different tenant, or is soft-deleted.

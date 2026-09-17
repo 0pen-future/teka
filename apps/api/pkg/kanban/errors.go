@@ -51,4 +51,9 @@ var (
 	// the column being deleted, so an adapter can report it on the
 	// "move_to" field.
 	ErrMoveToSelf = fmt.Errorf("%w: move target is the column being deleted", ErrInvalidInput)
+	// ErrInvalidAfterTask wraps ErrInvalidInput for MoveTask's after anchor
+	// not being a live task of the destination column (missing, another
+	// tenant, soft-deleted, in a different column, or the moving task
+	// itself), so an adapter can report it on the "after_task_id" field.
+	ErrInvalidAfterTask = fmt.Errorf("%w: after_task_id is not a live task in the destination column", ErrInvalidInput)
 )

@@ -296,12 +296,16 @@ func (s *Service) UpdateTask(ctx context.Context, tenant TenantID, actor Actor, 
 }
 
 // MoveTask moves the task identified by id into target, which must resolve
-// within tenant. It requires CanMoveTask (owner, creator, or assignee). The
-// task always lands at the top of the destination column — there is no
-// manual position parameter, since the feature has no drag-and-drop.
+// within tenant, and places it in that column. It requires CanMoveTask
+// (owner, creator, or assignee). A nil after lands the task at the top of
+// the destination column; a non-nil after places it directly after that
+// task, which must be a live task of target other than id itself
+// (ErrInvalidAfterTask otherwise). The placement and the write run inside
+// one UnitOfWork.Within so the neighbours read to compute the position are
+// the ones the row is written next to (see README.md "Position strategy").
 // CompletedAt is set to Clock.Now() when target.IsDone, and cleared
 // otherwise.
-func (s *Service) MoveTask(ctx context.Context, tenant TenantID, actor Actor, id TaskID, target ColumnID) (Task, error) {
+func (s *Service) MoveTask(ctx context.Context, tenant TenantID, actor Actor, id TaskID, target ColumnID, after *TaskID) (Task, error) {
 	task, err := s.repos.Tasks.Get(ctx, tenant, id)
 	if err != nil {
 		return Task{}, err
@@ -313,14 +317,22 @@ func (s *Service) MoveTask(ctx context.Context, tenant TenantID, actor Actor, id
 	if err != nil {
 		return Task{}, err
 	}
-	pos, err := s.topPositionInColumn(ctx, tenant, target)
+	var moved Task
+	err = s.uow.Within(ctx, func(ctx context.Context) error {
+		pos, err := s.positionInColumn(ctx, tenant, target, id, after)
+		if err != nil {
+			return err
+		}
+		task.ColumnID = target
+		task.Position = pos
+		task.CompletedAt = completedAtIf(s.cfg.clock, col.IsDone)
+		moved, err = s.repos.Tasks.Update(ctx, tenant, task)
+		return err
+	})
 	if err != nil {
 		return Task{}, err
 	}
-	task.ColumnID = target
-	task.Position = pos
-	task.CompletedAt = completedAtIf(s.cfg.clock, col.IsDone)
-	return s.repos.Tasks.Update(ctx, tenant, task)
+	return moved, nil
 }
 
 // DeleteTask soft-deletes the task identified by id. It requires
@@ -388,6 +400,96 @@ func (s *Service) topPositionInColumn(ctx context.Context, tenant TenantID, col 
 		return 0, nil
 	}
 	return minPos - 1, nil
+}
+
+// minPositionGap is the smallest gap MoveTask ever leaves between two
+// neighbours. positionAfter bisects a gap only while both halves stay at or
+// above it; otherwise the column is renormalized to whole numbers first, so
+// repeatedly inserting between the same two tasks can never exhaust float64
+// precision and collapse two tasks onto one position.
+const minPositionGap = 1e-6
+
+// positionInColumn returns the Position that places moving inside col
+// according to after: at the top when after is nil (the v1 behaviour), or
+// directly after *after otherwise. It must run inside UnitOfWork.Within.
+// Both placements go through ListColumnPositions, which serializes
+// concurrent moves on col for the rest of the transaction: a top move that
+// skipped the lock could commit its min-1 while another move is
+// renormalizing the column, and the renormalization's per-row update would
+// then overwrite it and silently undo the move. When after is set and the
+// gap to bisect is too small the column is renormalized once and the
+// position recomputed from the fresh rows.
+func (s *Service) positionInColumn(ctx context.Context, tenant TenantID, col ColumnID, moving TaskID, after *TaskID) (float64, error) {
+	rows, err := s.repos.Tasks.ListColumnPositions(ctx, tenant, col)
+	if err != nil {
+		return 0, err
+	}
+	if after == nil {
+		return topOf(rows), nil
+	}
+	pos, renormalize, ok := positionAfter(rows, moving, *after)
+	if !ok {
+		return 0, ErrInvalidAfterTask
+	}
+	if !renormalize {
+		return pos, nil
+	}
+	order := make([]TaskID, len(rows))
+	for i, r := range rows {
+		order[i] = r.ID
+	}
+	if err := s.repos.Tasks.RenormalizeColumn(ctx, tenant, col, order); err != nil {
+		return 0, err
+	}
+	rows, err = s.repos.Tasks.ListColumnPositions(ctx, tenant, col)
+	if err != nil {
+		return 0, err
+	}
+	pos, _, ok = positionAfter(rows, moving, *after)
+	if !ok {
+		return 0, ErrInvalidAfterTask
+	}
+	return pos, nil
+}
+
+// topOf is topPositionInColumn computed from an already listed column:
+// one below the lowest position (rows are ascending), 0 when empty. The
+// moving task counts like any other row, so moving the top task "to the
+// top" again simply decrements it.
+func topOf(rows []TaskPosition) float64 {
+	if len(rows) == 0 {
+		return 0
+	}
+	return rows[0].Position - 1
+}
+
+// positionAfter returns the Position that places moving directly after
+// anchor within rows, which are already ordered by Position then creation
+// time and exclude soft-deleted tasks. moving may or may not be in rows
+// (same-column reorder vs. cross-column move) and is skipped when looking
+// for anchor's successor, so "after anchor" means the same thing in both
+// cases. With no successor the result is anchor.Position + 1; otherwise it
+// is the midpoint, and renormalize reports that bisecting would leave a gap
+// below minPositionGap — the caller must renormalize the column and call
+// again. ok is false when anchor is absent from rows or equals moving.
+func positionAfter(rows []TaskPosition, moving, anchor TaskID) (pos float64, renormalize, ok bool) {
+	if anchor == moving {
+		return 0, false, false
+	}
+	for i, r := range rows {
+		if r.ID != anchor {
+			continue
+		}
+		for _, next := range rows[i+1:] {
+			if next.ID == moving {
+				continue
+			}
+			gap := next.Position - r.Position
+			return r.Position + gap/2, gap/2 < minPositionGap, true
+		}
+		return r.Position + 1, false, true
+	}
+	return 0, false, false
 }
 
 // completedAtIf returns clock.Now() when done is true, else nil.

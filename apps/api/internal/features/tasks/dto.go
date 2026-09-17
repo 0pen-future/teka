@@ -167,9 +167,11 @@ type UpdateTaskRequest struct {
 	DueOn       Optional[string]    `json:"due_on" swaggertype:"string"`
 }
 
-// MoveTaskRequest is POST /tasks/:id/move's body. v1 has no drag-and-drop, so
-// there is no manual position — the task always lands at the top of
-// ColumnID.
+// MoveTaskRequest is POST /tasks/:id/move's body. AfterTaskID names the live
+// task of ColumnID the moved task should sit directly below; absent or null
+// keeps the original behaviour of landing at the top of the column, so
+// callers that never send it are unaffected by drag-and-drop ordering.
 type MoveTaskRequest struct {
-	ColumnID uuid.UUID `json:"column_id" binding:"required"`
+	ColumnID    uuid.UUID           `json:"column_id" binding:"required"`
+	AfterTaskID Optional[uuid.UUID] `json:"after_task_id" swaggertype:"string"`
 }
