@@ -17,6 +17,9 @@ import { cn } from "@/lib/utils";
 /** Same cap the form schema and the API enforce on the text of a description. */
 export const DESCRIPTION_MAX_CHARS = 2000;
 
+/** The counter stays visible (not just on focus) once the text gets this close to the cap. */
+const NEAR_LIMIT_CHARS = 1800;
+
 const LINK_PATTERN = /^(?:https?:\/\/|mailto:)\S+$/i;
 const LINK_HINT = "Liên kết phải bắt đầu bằng http://, https:// hoặc mailto:";
 
@@ -74,6 +77,10 @@ export function TaskDescriptionEditor({
   // What this editor last handed to the form, so an echo of our own change
   // does not reset the document (and the caret) through `setContent`.
   const lastEmittedRef = useRef(value);
+  // Whether focus is anywhere inside the bordered field — the toolbar, the
+  // link panel, or the text itself — so the counter can show while any of
+  // them is in use, not just the contenteditable.
+  const [focusWithin, setFocusWithin] = useState(false);
 
   const editor = useEditor({
     extensions: [
@@ -169,11 +176,19 @@ export function TaskDescriptionEditor({
   };
 
   const overLimit = state.count > DESCRIPTION_MAX_CHARS;
+  const nearLimit = state.count >= NEAR_LIMIT_CHARS;
+  const showCounter = focusWithin || nearLimit;
 
   return (
     <div
+      onFocus={() => setFocusWithin(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setFocusWithin(false);
+        }
+      }}
       className={cn(
-        "rounded-[14px] border-2 border-line-200 bg-white focus-within:border-mint-400",
+        "rounded-[14px] border border-line-200 bg-white focus-within:border-mint-400",
         invalid && "border-coral-400",
       )}
     >
@@ -265,15 +280,19 @@ export function TaskDescriptionEditor({
       ) : null}
       <EditorContent editor={editor} />
       {/* Not a live region: it changes on every keystroke and would talk
-          over the text being typed. Crossing the limit is announced once. */}
-      <p
-        className={cn(
-          "px-3 pb-2 text-right text-[11.5px]",
-          overLimit ? "font-semibold text-coral-400" : "text-ink-400",
-        )}
-      >
-        {state.count}/{DESCRIPTION_MAX_CHARS}
-      </p>
+          over the text being typed. Crossing the limit is announced once.
+          Hidden until the field has focus or the count nears the cap, so it
+          doesn't clutter a form full of untouched fields. */}
+      {showCounter ? (
+        <p
+          className={cn(
+            "px-3 pb-2 text-right text-[11.5px]",
+            overLimit ? "font-semibold text-coral-400" : "text-ink-400",
+          )}
+        >
+          {state.count}/{DESCRIPTION_MAX_CHARS}
+        </p>
+      ) : null}
       <span role="status" className="sr-only">
         {overLimit ? `Mô tả vượt quá ${DESCRIPTION_MAX_CHARS} ký tự` : ""}
       </span>
@@ -363,7 +382,7 @@ function ToolbarButton({
       onMouseDown={(event) => event.preventDefault()}
       onClick={item.onClick}
       className={cn(
-        "inline-flex size-7 items-center justify-center rounded-md text-ink-500 hover:bg-cream-100 hover:text-ink-900",
+        "inline-flex size-10 items-center justify-center rounded-md text-ink-500 hover:bg-cream-100 hover:text-ink-900",
         item.pressed && "bg-mint-50 text-mint-600",
       )}
     >

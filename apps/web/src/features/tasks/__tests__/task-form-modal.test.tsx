@@ -1,8 +1,10 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { http, HttpResponse } from "msw";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
+import { API_URL, ok } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
 import { mockViewport } from "@/test/viewport";
@@ -20,6 +22,13 @@ function renderBoardPage() {
   return renderWithProviders(<TaskBoardPage />, { route: "/tasks", path: "/tasks" });
 }
 
+/** Overrides `/centers/me` for a limited member instead of the default owner mock. */
+function memberCenterMe(permissions: string[]) {
+  return http.get(`${API_URL}/centers/me`, () =>
+    HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh", permissions })),
+  );
+}
+
 async function openTask(user: ReturnType<typeof userEvent.setup>, title: string) {
   signInAs(testPrimaryTeacher);
   renderBoardPage();
@@ -28,6 +37,16 @@ async function openTask(user: ReturnType<typeof userEvent.setup>, title: string)
   const dialog = await screen.findByRole("dialog", { name: "Chi tiết công việc" });
   const textbox = await within(dialog).findByRole("textbox", { name: "Mô tả" });
   return { dialog, textbox };
+}
+
+/** For the read-only branches, where the body renders sanitized HTML instead of an editor. */
+async function openReadOnlyTask(user: ReturnType<typeof userEvent.setup>, title: string) {
+  signInAs(testPrimaryTeacher);
+  renderBoardPage();
+  await screen.findByRole("listbox", { name: "Cần làm" });
+  await user.click(screen.getByText(title));
+  const dialog = await screen.findByRole("dialog", { name: "Chi tiết công việc" });
+  return { dialog };
 }
 
 beforeEach(() => {
@@ -134,5 +153,185 @@ describe("TaskFormModal description", () => {
 
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(taskWriteRequests.at(-1)).toMatchObject({ title: "Việc không mô tả", description: "" });
+  });
+});
+
+describe("TaskFormModal footer, context row and delete flow", () => {
+  it("shows the current column and creator as a context row under the title", async () => {
+    const user = userEvent.setup();
+    const { dialog } = await openTask(user, "Soạn đề kiểm tra giữa kỳ");
+
+    expect(within(dialog).getByText("Cần làm · Cô Lan · Tạo 10/09")).toBeInTheDocument();
+  });
+
+  it("orders the footer as Xoá, Huỷ, Lưu", async () => {
+    const user = userEvent.setup();
+    const { dialog } = await openTask(user, "Soạn đề kiểm tra giữa kỳ");
+
+    const footerLabels = within(dialog)
+      .getAllByRole("button")
+      .map((button) => button.textContent)
+      .filter((label): label is string => label === "Xoá" || label === "Huỷ" || label === "Lưu");
+    expect(footerLabels).toEqual(["Xoá", "Huỷ", "Lưu"]);
+  });
+
+  it("hides Xoá for a caller without tasks.delete", async () => {
+    const user = userEvent.setup();
+    server.use(memberCenterMe(["tasks.list", "tasks.create", "tasks.edit"]));
+    const { dialog } = await openTask(user, "Soạn đề kiểm tra giữa kỳ");
+
+    expect(within(dialog).queryByRole("button", { name: "Xoá" })).not.toBeInTheDocument();
+  });
+
+  it('shows a "Chưa lưu" badge once the form is dirty, and guards a dirty Huỷ behind a confirm dialog', async () => {
+    const user = userEvent.setup();
+    const { dialog } = await openTask(user, "Soạn đề kiểm tra giữa kỳ");
+    expect(within(dialog).queryByText("Chưa lưu")).not.toBeInTheDocument();
+
+    await user.type(within(dialog).getByLabelText("Tiêu đề"), "!");
+    expect(within(dialog).getByText("Chưa lưu")).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "Huỷ" }));
+    const confirm = await screen.findByRole("dialog", { name: "Bỏ thay đổi?" });
+    await user.click(within(confirm).getByRole("button", { name: "Tiếp tục sửa" }));
+
+    expect(screen.getByRole("dialog", { name: "Chi tiết công việc" })).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Tiêu đề")).toHaveValue("Soạn đề kiểm tra giữa kỳ!");
+  });
+
+  it("closes without asking on Escape once a confirmed discard is chosen", async () => {
+    const user = userEvent.setup();
+    const { dialog } = await openTask(user, "Soạn đề kiểm tra giữa kỳ");
+    await user.type(within(dialog).getByLabelText("Tiêu đề"), "!");
+
+    await user.keyboard("{Escape}");
+    const confirm = await screen.findByRole("dialog", { name: "Bỏ thay đổi?" });
+    await user.click(within(confirm).getByRole("button", { name: "Bỏ thay đổi" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("closes immediately on Escape when the form is not dirty", async () => {
+    const user = userEvent.setup();
+    await openTask(user, "Soạn đề kiểm tra giữa kỳ");
+
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("moves the task to the selected column on save", async () => {
+    const user = userEvent.setup();
+    const { dialog } = await openTask(user, "Soạn đề kiểm tra giữa kỳ");
+
+    await user.click(within(dialog).getByLabelText("Cột"));
+    await user.click(await screen.findByRole("option", { name: "Hoàn thành" }));
+    await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(
+      within(screen.getByRole("listbox", { name: "Hoàn thành" })).getByText(
+        "Soạn đề kiểm tra giữa kỳ",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("listbox", { name: "Cần làm" })).queryByText(
+        "Soạn đề kiểm tra giữa kỳ",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers an undo toast after deleting, and Hoàn tác brings the task back", async () => {
+    const user = userEvent.setup();
+    const { dialog } = await openTask(user, "Soạn đề kiểm tra giữa kỳ");
+
+    await user.click(within(dialog).getByRole("button", { name: "Xoá" }));
+    const confirmDialog = await screen.findByRole("dialog", { name: "Xoá công việc này?" });
+    await user.click(within(confirmDialog).getByRole("button", { name: "Xoá" }));
+
+    await waitFor(() =>
+      expect(screen.queryByText("Soạn đề kiểm tra giữa kỳ")).not.toBeInTheDocument(),
+    );
+    expect(await screen.findByText("Đã xoá công việc")).toBeInTheDocument();
+    const undoButton = screen.getByRole("button", { name: "Hoàn tác" });
+
+    await user.click(undoButton);
+
+    expect(await screen.findByText("Soạn đề kiểm tra giữa kỳ")).toBeInTheDocument();
+  });
+});
+
+describe("TaskFormModal quick due chips", () => {
+  beforeEach(() => {
+    // Freeze only Date (setTimeout stays real for msw/userEvent): the quick
+    // chips derive their values from "today".
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-18T10:00:00"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("sets Hạn to today's local date from the Hôm nay chip", async () => {
+    const user = userEvent.setup();
+    const { dialog } = await openTask(user, "Soạn đề kiểm tra giữa kỳ");
+
+    await user.click(within(dialog).getByRole("button", { name: "Hôm nay" }));
+
+    expect(within(dialog).getByLabelText("Hạn")).toHaveValue("2026-09-18");
+  });
+
+  it("sets Hạn to next Monday from the Thứ 2 tới chip", async () => {
+    const user = userEvent.setup();
+    const { dialog } = await openTask(user, "Soạn đề kiểm tra giữa kỳ");
+
+    await user.click(within(dialog).getByRole("button", { name: "Thứ 2 tới" }));
+
+    expect(within(dialog).getByLabelText("Hạn")).toHaveValue("2026-09-21");
+  });
+});
+
+describe("TaskFormModal read-only branches", () => {
+  it("lets an assignee with tasks.edit move the task without writing its content", async () => {
+    const user = userEvent.setup();
+    const { dialog } = await openReadOnlyTask(user, "Kiểm tra học phí tháng 9");
+
+    expect(within(dialog).getByLabelText("Tiêu đề")).toBeDisabled();
+    expect(within(dialog).getByText("Bạn chỉ có thể đổi cột của việc này.")).toBeInTheDocument();
+    const columnTrigger = within(dialog).getByLabelText("Cột");
+    expect(columnTrigger).not.toBeDisabled();
+    const saveButton = within(dialog).getByRole("button", { name: "Lưu" });
+    expect(saveButton).toBeDisabled();
+    expect(within(dialog).queryByRole("button", { name: "Xoá" })).not.toBeInTheDocument();
+
+    await user.click(columnTrigger);
+    await user.click(await screen.findByRole("option", { name: "Hoàn thành" }));
+    expect(saveButton).toBeEnabled();
+
+    await user.click(saveButton);
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    // The server's `CanWriteTask` would 403 an assignee's content edit, so
+    // the move must be the only request this branch sends.
+    expect(taskWriteRequests).toHaveLength(0);
+    expect(
+      within(screen.getByRole("listbox", { name: "Hoàn thành" })).getByText(
+        "Kiểm tra học phí tháng 9",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a view-only footer with a disabled Cột for a caller without tasks.edit", async () => {
+    const user = userEvent.setup();
+    server.use(memberCenterMe(["tasks.list"]));
+    const { dialog } = await openReadOnlyTask(user, "Kiểm tra học phí tháng 9");
+
+    expect(within(dialog).getByLabelText("Cột")).toBeDisabled();
+    expect(within(dialog).getByText("Bạn chỉ có thể xem việc này.")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Đóng" })).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Lưu" })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Huỷ" })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Xoá" })).not.toBeInTheDocument();
   });
 });

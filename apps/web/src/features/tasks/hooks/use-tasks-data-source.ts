@@ -28,6 +28,7 @@ import {
   deleteTask as deleteTaskApi,
   getBoard,
   moveTask as moveTaskApi,
+  restoreTask as restoreTaskApi,
   updateTask as updateTaskApi,
   type GetBoardParams,
 } from "../api/tasks-api";
@@ -180,6 +181,7 @@ export interface UseTasksDataSourceResult {
   updateTaskMutation: UseMutationResult<AppTask, KanbanError, UpdateTaskVariables>;
   moveTaskMutation: UseMutationResult<AppTask, KanbanError, MoveTaskVariables>;
   deleteTaskMutation: UseMutationResult<void, KanbanError, TaskId>;
+  restoreTaskMutation: UseMutationResult<AppTask, KanbanError, TaskId>;
   createColumnMutation: UseMutationResult<KanbanColumn, KanbanError, CreateColumnVariables>;
   updateColumnMutation: UseMutationResult<KanbanColumn, KanbanError, UpdateColumnVariables>;
   reorderColumnsMutation: UseMutationResult<void, KanbanError, ColumnId[]>;
@@ -403,6 +405,25 @@ export function useTasksDataSource(params: GetBoardParams): UseTasksDataSourceRe
     onSettled: invalidateBoard,
   });
 
+  // No optimistic apply in `onMutate`: the client no longer holds the
+  // deleted row to rebuild it from, so the restored task only enters the
+  // board once the server confirms it exists again.
+  const restoreTaskMutation = useMutation<AppTask, KanbanError, TaskId>({
+    scope: KANBAN_MUTATION_SCOPE,
+    mutationFn: async (taskId) => {
+      try {
+        const task = await restoreTaskApi(taskId);
+        return toAppTask(task);
+      } catch (error) {
+        throw mapApiError(error, "task");
+      }
+    },
+    onSuccess: (task) => {
+      applyOptimistic({ type: "tasks/upserted", task });
+    },
+    onSettled: invalidateBoard,
+  });
+
   // Not memoized: the page passes `params` as a fresh object literal every
   // render, so a `useMemo` here would recompute every render anyway. Nothing
   // downstream needs `dataSource` to keep a stable identity — `useKanban`'s
@@ -456,6 +477,7 @@ export function useTasksDataSource(params: GetBoardParams): UseTasksDataSourceRe
     updateTaskMutation,
     moveTaskMutation,
     deleteTaskMutation,
+    restoreTaskMutation,
     createColumnMutation,
     updateColumnMutation,
     reorderColumnsMutation,

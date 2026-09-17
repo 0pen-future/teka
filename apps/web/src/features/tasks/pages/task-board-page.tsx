@@ -234,11 +234,14 @@ export function TaskBoardPage() {
           members={members}
           currentUserId={currentUserId}
           canDelete={canDelete}
+          canEdit={canEdit}
           task={formTarget.task}
           defaultColumnId={formTarget.defaultColumnId}
           createTaskMutation={mutations.createTaskMutation}
           updateTaskMutation={mutations.updateTaskMutation}
           deleteTaskMutation={mutations.deleteTaskMutation}
+          restoreTaskMutation={mutations.restoreTaskMutation}
+          onMoveTask={(taskId, columnId) => kanban.moveTask(taskId, columnId, 0)}
           onAnnounce={setAnnouncement}
         />
       ) : null}

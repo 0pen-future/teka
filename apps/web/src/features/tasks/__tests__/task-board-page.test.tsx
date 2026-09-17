@@ -324,7 +324,10 @@ describe("TaskBoardPage", () => {
     );
     expect(dialog.querySelector("script")).toBeNull();
     expect(within(dialog).queryByRole("button", { name: "Xoá" })).not.toBeInTheDocument();
-    expect(within(dialog).queryByRole("button", { name: "Lưu" })).not.toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: "Đóng" })).toBeInTheDocument();
+    // The caller still holds tasks.edit, so this is the assignee-only-move
+    // branch: Cột stays enabled and Lưu is disabled until it changes.
+    expect(within(dialog).getByLabelText("Cột")).not.toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Lưu" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Huỷ" })).toBeInTheDocument();
   });
 });

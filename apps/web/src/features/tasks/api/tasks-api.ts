@@ -44,3 +44,9 @@ export async function moveTask(taskId: string, body: MoveTaskRequest): Promise<T
 export async function deleteTask(taskId: string): Promise<void> {
   await apiClient.delete(`/tasks/${taskId}`);
 }
+
+/** Undo window for a just-deleted task; the server rejects it once the window has lapsed. */
+export async function restoreTask(taskId: string): Promise<Task> {
+  const res = await apiClient.post<unknown>(`/tasks/${taskId}/restore`);
+  return parseData(taskSchema, res.data);
+}

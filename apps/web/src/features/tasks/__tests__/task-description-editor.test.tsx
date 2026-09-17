@@ -66,7 +66,6 @@ describe("TaskDescriptionEditor", () => {
     render(<Harness initial="<p><strong>đậm</strong> thường</p>" />);
     const textbox = await screen.findByRole("textbox", { name: "Mô tả" });
     expect(textbox.querySelector("strong")).toHaveTextContent("đậm");
-    expect(screen.getByText("2000", { exact: false })).toHaveTextContent("10/2000");
   });
 
   it("emits the HTML of what is typed and an empty string once the document is emptied", async () => {
@@ -197,5 +196,21 @@ describe("TaskDescriptionEditor", () => {
     await screen.findByRole("textbox", { name: "Mô tả" });
     expect(screen.getByText("2001/2000")).not.toHaveAttribute("aria-live");
     expect(screen.getByRole("status")).toHaveTextContent("Mô tả vượt quá 2000 ký tự");
+  });
+
+  it("hides the counter until the field has focus", async () => {
+    const user = userEvent.setup();
+    render(<Harness initial="<p>đậm</p>" />);
+    const textbox = await screen.findByRole("textbox", { name: "Mô tả" });
+    expect(screen.queryByText("3/2000")).not.toBeInTheDocument();
+
+    await user.click(textbox);
+    expect(screen.getByText("3/2000")).toBeInTheDocument();
+  });
+
+  it("keeps the counter visible once the text nears the cap, without focus", async () => {
+    render(<Harness initial={"<p>" + "a".repeat(1800) + "</p>"} />);
+    await screen.findByRole("textbox", { name: "Mô tả" });
+    expect(screen.getByText("1800/2000")).toBeInTheDocument();
   });
 });

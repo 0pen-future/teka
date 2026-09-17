@@ -45,6 +45,8 @@ interface MutableTask {
 
 let columns: MutableColumn[] = [];
 let tasks: MutableTask[] = [];
+/** Rows `DELETE /tasks/:id` moved out of `tasks`, so `POST /tasks/:id/restore` can bring them back. */
+let deletedTasks: MutableTask[] = [];
 let columnIdCounter = 0;
 let taskIdCounter = 0;
 
@@ -67,6 +69,7 @@ export function resetTasksStore(): void {
   boardScopeRequests.length = 0;
   columnOrderRequests.length = 0;
   taskWriteRequests.length = 0;
+  deletedTasks = [];
   columns = [
     {
       id: columnTodoId,
@@ -346,8 +349,25 @@ export const tasksHandlers = [
     return HttpResponse.json(ok(task));
   }),
   http.delete(`${API_URL}/tasks/:id`, ({ params }) => {
-    tasks = tasks.filter((candidate) => candidate.id !== params.id);
+    const index = tasks.findIndex((candidate) => candidate.id === params.id);
+    const removed = index === -1 ? undefined : tasks[index];
+    if (!removed) {
+      return HttpResponse.json(fail("NOT_FOUND", "task not found"), { status: 404 });
+    }
+    tasks.splice(index, 1);
+    deletedTasks.push(removed);
     return new HttpResponse(null, { status: 204 });
+  }),
+  http.post(`${API_URL}/tasks/:id/restore`, ({ params }) => {
+    const index = deletedTasks.findIndex((candidate) => candidate.id === params.id);
+    const restored = index === -1 ? undefined : deletedTasks[index];
+    if (!restored) {
+      return HttpResponse.json(fail("NOT_FOUND", "task not found"), { status: 404 });
+    }
+    deletedTasks.splice(index, 1);
+    restored.updated_at = "2026-09-13T10:00:00Z";
+    tasks.push(restored);
+    return HttpResponse.json(ok(restored));
   }),
   http.get(`${API_URL}/centers/me/members/directory`, () =>
     HttpResponse.json(
