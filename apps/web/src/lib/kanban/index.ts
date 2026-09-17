@@ -17,6 +17,9 @@ export { isKanbanError } from "./errors";
 
 export type { KanbanDataSource } from "./data-source";
 
+export type { DropEvent, DropTarget } from "./positions";
+export { afterTaskIdAt, optimisticPositionFor, positionBetween, resolveDrop } from "./positions";
+
 export type { ColumnId, KanbanBoard, KanbanColumn, KanbanTask, TaskId } from "./types";
 export { asColumnId, asTaskId } from "./types";
 

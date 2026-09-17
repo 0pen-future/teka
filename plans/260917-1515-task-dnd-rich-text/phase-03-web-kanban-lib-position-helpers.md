@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Web lib: helper vị trí thuần + [ / ] về đầu cột"
-status: pending
+status: completed
 priority: P2
 effort: "0.5d"
 dependencies: []
@@ -65,10 +65,10 @@ Lib không biết dnd-kit: `overType` do adapter gán từ `data.current.type` c
 
 ## Success Criteria
 
-- [ ] `positions.test.ts` phủ mọi nhánh; `use-kanban-keyboard.test.tsx` xanh với `0`.
-- [ ] `index.ts` export `resolveDrop`, `afterTaskIdAt`, `positionBetween`, `optimisticPositionFor`, `DropTarget`.
-- [ ] `npm run lint`, `npm run typecheck`, `npm run test -- src/lib/kanban` xanh; không import mới ngoài `react`.
-- [ ] README mô tả DnD là chế độ opt-in ở app, `[`/`]` giữ nguyên là đường bàn phím.
+- [x] `positions.test.ts` phủ mọi nhánh; `use-kanban-keyboard.test.tsx` xanh với `0`.
+- [x] `index.ts` export `resolveDrop`, `afterTaskIdAt`, `positionBetween`, `optimisticPositionFor`, `DropTarget`.
+- [x] `npm run lint`, `npm run typecheck`, `npm run test -- src/lib/kanban` xanh; không import mới ngoài `react`.
+- [x] README mô tả DnD là chế độ opt-in ở app, `[`/`]` giữ nguyên là đường bàn phím.
 
 ## Risk Assessment
 

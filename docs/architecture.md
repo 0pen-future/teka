@@ -32,7 +32,8 @@ can be extracted later without a rewrite:
   fails on anything else. The `tasks` feature under `internal/features/`
   supplies the GORM repositories, the tenant/actor mapping and the HTTP layer.
 - **`apps/web/src/lib/kanban`** — headless board state (pure reducer,
-  selectors, hook with prop getters, keyboard navigation). It may import only
+  selectors, hook with prop getters, keyboard navigation, pure drop-position
+  helpers for an app-supplied drag layer). It may import only
   `react`; an ESLint `no-restricted-imports` override in
   [eslint.config.js](../apps/web/eslint.config.js) enforces that. The `tasks`
   feature adapts TanStack Query data into the lib's data-source contract and

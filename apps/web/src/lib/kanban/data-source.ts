@@ -23,6 +23,12 @@ export interface KanbanDataSource<TTask extends KanbanTask> {
 
   createTask: (input: Omit<TTask, "id">) => Promise<TTask>;
   updateTask: (taskId: TaskId, patch: Partial<Omit<TTask, "id">>) => Promise<TTask>;
+  /**
+   * `position` is the target *index* in `columnId` counted with the moved
+   * task removed from it: `0` is the top (what `[`/`]` send), the remaining
+   * tasks' length is the bottom. Adapters translate it into whatever the
+   * backend wants — e.g. via `afterTaskIdAt` for an "insert after X" API.
+   */
   moveTask: (taskId: TaskId, columnId: ColumnId, position: number) => Promise<TTask>;
   deleteTask: (taskId: TaskId) => Promise<void>;
 }

@@ -36,12 +36,15 @@ Sources read before any prop-getter code was written:
   task in that column has `tabIndex={-1}`. Tab moves focus between columns;
   Arrow Up/Down move focus within the focused column's listbox.
 - `Home` / `End` jump to the first/last task in the focused column.
-- `[` and `]` move the focused task to the previous/next column
-  (`selectAdjacentColumnId`) and call `dataSource.moveTask` directly — a
-  no-op at the board's edges. This is a deliberately simpler alternative to
-  full keyboard-emulated drag-and-drop (an explicit non-goal of this version),
-  analogous to the WCAG "move up/down button" reordering technique (G219):
-  a discrete, non-drag action rather than a drag gesture emulated via focus.
+- `[` and `]` move the focused task to the **top** of the previous/next
+  column (`selectAdjacentColumnId`, then
+  `dataSource.moveTask(taskId, columnId, 0)`) — a no-op at the board's
+  edges. This is a deliberately
+  simpler alternative to keyboard-emulated drag-and-drop, analogous to the
+  WCAG "move up/down button" reordering technique (G219): a discrete,
+  non-drag action rather than a drag gesture emulated via focus. "Top" is
+  where a move with no explicit neighbour lands server-side in Teka, so the
+  announcement, the optimistic update and the refetched board all agree.
 - The hook never renders a live region itself. `announcement` (a short
   string set after every keyboard-triggered outcome, e.g. `"Moved task to
 Doing."` or `"Could not move task."` by default) is returned from the
@@ -49,10 +52,15 @@ Doing."` or `"Could not move task."` by default) is returned from the
   `aria-live="polite"` region. The lib does not localize this string by
   default — see "Locale" below.
 
-**Non-goal:** full pointer/keyboard drag-and-drop (pick-up/move/drop
-emulation). If a later version needs it, add it as an additional, opt-in
-interaction mode — do not replace `[`/`]` moves, which remain the
-accessible, low-friction path for keyboard-only and switch-device users.
+**Pointer drag-and-drop is opt-in and lives in the app, not here.** The lib
+ships no drag layer and no dnd dependency; it only provides the pure
+position helpers below (`resolveDrop` & co.), which turn "dropped at index
+i" into the data-source call and the optimistic `position`. Teka's dnd-kit
+layer on top of them is the app's own `use-board-dnd` hook under
+`src/features/tasks/hooks/`. Whatever the
+app adds, `[`/`]` moves stay as they are: they remain the accessible,
+low-friction path for keyboard-only and switch-device users, and are not to
+be replaced by keyboard-emulated dragging.
 
 ## Locale
 
@@ -117,6 +125,13 @@ caching, retries, or optimistic updates.
 | `moveTask`       | `(taskId, columnId, position) => Promise<TTask>`                 | Move/reorder a task (drag, or `[`/`]`) |
 | `deleteTask`     | `(taskId) => Promise<void>`                                      | Delete task                            |
 
+`moveTask`'s `position` is the **target index** in `columnId`, counted with
+the moved task removed from that column: `0` is the top (what `[`/`]` send),
+the remaining tasks' length is the bottom. It is not the stored `position`
+number. The adapter translates it into the backend's contract — Teka's API
+wants "insert after task X", which `afterTaskIdAt` derives from the same
+index (see "Position helpers").
+
 Every method resolves to a value or rejects. Rejections should be (or be
 mapped to, by the adapter) a `KanbanError` — see `errors.ts` for the union
 and the `isKanbanError` type guard. The lib never inspects HTTP status codes
@@ -134,7 +149,7 @@ trip `@typescript-eslint/unbound-method`.
 ```ts
 // e.g. src/features/<feature>/hooks/use-kanban-data-source.ts
 import { apiClient } from "@/lib/api/client";
-import { asColumnId, asTaskId, type KanbanDataSource } from "@/lib/kanban";
+import { afterTaskIdAt, asColumnId, asTaskId, type KanbanDataSource } from "@/lib/kanban";
 
 export function createKanbanDataSource(boardId: string): KanbanDataSource<TaskCardDto> {
   return {
@@ -150,13 +165,60 @@ export function createKanbanDataSource(boardId: string): KanbanDataSource<TaskCa
       };
     },
     moveTask: async (taskId, columnId, position) => {
-      const dto = await apiClient.patch(`/tasks/${taskId}/move`, { columnId, position });
+      // `position` is a target index; this backend wants "after which task".
+      const afterTaskId = afterTaskIdAt(tasksInColumn(columnId), position, taskId);
+      const dto = await apiClient.patch(`/tasks/${taskId}/move`, { columnId, afterTaskId });
       return { ...dto, id: asTaskId(dto.id), columnId: asColumnId(dto.columnId) };
     },
     // ...remaining 7 methods follow the same shape: call apiClient, cast IDs
     // at the boundary with asColumnId/asTaskId, translate HTTP failures into
     // KanbanError before rejecting.
   };
+}
+```
+
+## Position helpers
+
+`positions.ts` holds the pure functions an app-level drag layer needs to talk
+to the ports above. None of them touch React or the drag library; the app's
+`onDragEnd` handler is the only caller.
+
+| Function                                           | Returns              | Use                                                                                            |
+| -------------------------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------- |
+| `resolveDrop(board, { taskId, overId, overType })` | `DropTarget \| null` | Turn "dropped over task/column X" into `{ columnId, index, afterTaskId }`; `null` = do nothing |
+| `afterTaskIdAt(tasks, index, movingId)`            | `TaskId \| null`     | Id of the task above slot `index` (`null` = top)                                               |
+| `positionBetween(prev, next)`                      | `number`             | A sortable `position` between two neighbours                                                   |
+| `optimisticPositionFor(tasks, index, movingId)`    | `number`             | `positionBetween` applied to the neighbours at `index`                                         |
+
+Two invariants hold everywhere: **`index` is counted on the target column
+with the moving task removed**, and **`afterTaskId === null` means top of
+the column**. `resolveDrop` follows what a vertical sortable list displays
+while dragging, i.e. `arrayMove(items, activeIndex, overIndex)`: over a task
+in the same column, dragging down lands the card just _below_ it and
+dragging up just _above_ it; over a task in another column, the card is
+inserted _before_ it; over a column, the card goes to the bottom. Dropping a
+task on itself, on the slot it already occupies (the bottom task of a column
+dropped on that column), or over an id that is not on the board, yields
+`null` — the caller then skips both the optimistic update and the request.
+
+`positionBetween` may return negative or non-integer values; `selectTasksByColumn`
+sorts numerically, so that is fine for an optimistic `tasks/moved`, and the
+server is expected to renormalize the stored values on its side.
+
+```ts
+function onDragEnd({ active, over }) {
+  if (!over) return;
+  const taskId = asTaskId(String(active.id));
+  const target = resolveDrop(board, {
+    taskId,
+    overId: String(over.id),
+    overType: over.data.current?.type === "column" ? "column" : "task",
+  });
+  if (!target) return;
+  const columnTasks = selectTasksByColumn(board).get(target.columnId) ?? [];
+  const position = optimisticPositionFor(columnTasks, target.index, taskId);
+  // optimistic: kanbanReducer(board, { type: "tasks/moved", taskId, columnId: target.columnId, position })
+  // persist:    dataSource.moveTask(taskId, target.columnId, target.index)
 }
 ```
 

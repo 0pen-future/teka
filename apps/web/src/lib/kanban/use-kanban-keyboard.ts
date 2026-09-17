@@ -240,9 +240,11 @@ export function useKanbanKeyboard<TTask extends KanbanTask>({
             if (!task) {
               return;
             }
-            const targetTasks = tasksByColumn.get(targetColumnId) ?? [];
+            // Always to the top of the target column: that is where a move
+            // with no explicit "after" lands server-side, and where the
+            // app's optimistic update puts it too.
             dataSource
-              .moveTask(task.id, targetColumnId, targetTasks.length)
+              .moveTask(task.id, targetColumnId, 0)
               .then(() => {
                 // `board` still reflects the pre-move state here (this hook
                 // never mutates it — see README.md "Board is a prop"), so

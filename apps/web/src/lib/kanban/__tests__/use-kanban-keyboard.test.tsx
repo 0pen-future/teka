@@ -97,7 +97,7 @@ describe("useKanbanKeyboard", () => {
 
     fireEvent.keyDown(screen.getByTestId("task-a1"), { key: "]" });
 
-    await waitFor(() => expect(moveTask).toHaveBeenCalledWith(asTaskId("a1"), colB.id, 1));
+    await waitFor(() => expect(moveTask).toHaveBeenCalledWith(asTaskId("a1"), colB.id, 0));
     await waitFor(() =>
       expect(screen.getByTestId("announcement")).toHaveTextContent(`Moved task to ${colB.name}.`),
     );
