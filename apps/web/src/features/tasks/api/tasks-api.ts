@@ -5,7 +5,6 @@ import {
   boardResponseSchema,
   taskSchema,
   type BoardResponse,
-  type BoardScope,
   type CreateTaskInput,
   type MoveTaskRequest,
   type Task,
@@ -13,7 +12,8 @@ import {
 } from "../schemas/task-schemas";
 
 export interface GetBoardParams {
-  scope: BoardScope;
+  /** The caller's local calendar date (`YYYY-MM-DD`), so "today"/"overdue" match their timezone, not the server's. */
+  today: string;
 }
 
 export async function getBoard(params: GetBoardParams): Promise<BoardResponse> {

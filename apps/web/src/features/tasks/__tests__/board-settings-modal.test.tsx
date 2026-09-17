@@ -31,9 +31,9 @@ afterEach(() => {
 });
 
 function Harness() {
-  const { data } = useTaskBoard({ scope: "mine" });
+  const { data } = useTaskBoard({ today: "2026-09-17" });
   const { createColumnMutation, updateColumnMutation, deleteColumnMutation, dataSource } =
-    useTasksDataSource({ scope: "mine" });
+    useTasksDataSource({ today: "2026-09-17" });
   const [announcement, setAnnouncement] = useState("");
   const board = data?.board ?? { columns: [], tasks: [] };
   const { tasksByColumn, reorderColumn } = useKanban({ board, dataSource });

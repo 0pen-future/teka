@@ -1,7 +1,8 @@
+import { Columns2Icon } from "lucide-react";
 import { useState } from "react";
 import { Navigate } from "react-router";
 
-import { HvButton, HvSegmented, HvStateBlock, hvToast } from "@/components/hv";
+import { HvButton, HvStateBlock, hvToast } from "@/components/hv";
 import { useAuthStore } from "@/features/auth/stores/auth-store";
 import { useCenterContext } from "@/features/teaching";
 import { useMediaQuery } from "@/lib/hooks/use-media-query";
@@ -16,13 +17,26 @@ import { useBoardDnd } from "../hooks/use-board-dnd";
 import { useMemberDirectory } from "../hooks/use-member-directory";
 import { useTaskBoard } from "../hooks/use-task-board";
 import { useTasksDataSource, type AppTask } from "../hooks/use-tasks-data-source";
+import { localIsoDate } from "../lib/due-state";
 import { kanbanErrorToastMessage } from "../lib/map-api-error";
-import type { BoardScope } from "../schemas/task-schemas";
+import type { BoardCounts } from "../schemas/task-schemas";
 
-const SCOPE_OPTIONS: { value: BoardScope; label: string }[] = [
-  { value: "mine", label: "Của tôi" },
-  { value: "center", label: "Toàn trung tâm" },
-];
+/**
+ * Subtitle under the page title: a holder of `tasks.view_all` sees the
+ * center-wide total; everyone else sees their own visible set broken down by
+ * how urgent it is. Zero-count buckets drop out of the "mine" line — an
+ * empty "0 quá hạn · 0 hôm nay" reads as noise, not reassurance — but the
+ * leading "N việc" always shows, even at zero, so the line is never blank.
+ */
+function BoardSummary({ counts, canViewAll }: { counts: BoardCounts; canViewAll: boolean }) {
+  if (canViewAll) {
+    return <p className="mt-1 text-[13px] text-ink-500">Toàn trung tâm · {counts.all} việc</p>;
+  }
+  const parts = [`${counts.all} việc`];
+  if (counts.overdue > 0) parts.push(`${counts.overdue} quá hạn`);
+  if (counts.today > 0) parts.push(`${counts.today} hôm nay`);
+  return <p className="mt-1 text-[13px] text-ink-500">{parts.join(" · ")}</p>;
+}
 
 /** Vietnamese copy for the headless lib's `[`/`]` keyboard-move announcement (see `src/lib/kanban/README.md` "Locale"). */
 const KEYBOARD_MESSAGES = {
@@ -58,12 +72,10 @@ export function TaskBoardPage() {
   const canDelete = has("tasks.delete");
   const canManageBoard = has("tasks.manage_board");
 
-  const [requestedScope, setRequestedScope] = useState<BoardScope>("mine");
-  const scope: BoardScope = canViewAll ? requestedScope : "mine";
-
-  const boardQuery = useTaskBoard({ scope });
+  const today = localIsoDate(new Date());
+  const boardQuery = useTaskBoard({ today });
   const membersQuery = useMemberDirectory();
-  const dataSourceResult = useTasksDataSource({ scope });
+  const dataSourceResult = useTasksDataSource({ today });
   const { dataSource, ...mutations } = dataSourceResult;
 
   const [announcement, setAnnouncement] = useState("");
@@ -71,7 +83,7 @@ export function TaskBoardPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const board = boardQuery.data?.board;
-  const effectiveScope = boardQuery.data?.scope ?? scope;
+  const counts = boardQuery.data?.counts;
 
   const kanban = useKanban<AppTask>({
     board: board ?? { columns: [], tasks: [] },
@@ -187,28 +199,17 @@ export function TaskBoardPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="font-display text-[22px] font-extrabold text-ink-900">Công việc</h1>
-        <div className="flex items-center gap-2">
-          {canViewAll ? (
-            <HvSegmented
-              aria-label="Phạm vi bảng công việc"
-              value={effectiveScope}
-              onValueChange={setRequestedScope}
-              options={SCOPE_OPTIONS}
-            />
-          ) : null}
-          {canManageBoard ? (
-            <HvButton
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => setSettingsOpen(true)}
-            >
-              Cấu hình cột
-            </HvButton>
-          ) : null}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="font-display text-[22px] font-extrabold text-ink-900">Công việc</h1>
+          {counts ? <BoardSummary counts={counts} canViewAll={canViewAll} /> : null}
         </div>
+        {canManageBoard ? (
+          <HvButton type="button" variant="ghost" size="sm" onClick={() => setSettingsOpen(true)}>
+            <Columns2Icon aria-hidden className="size-4" />
+            Cấu hình cột
+          </HvButton>
+        ) : null}
       </div>
 
       {boardContent}

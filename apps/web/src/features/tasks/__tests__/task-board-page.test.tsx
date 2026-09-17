@@ -10,7 +10,7 @@ import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils"
 import { mockViewport } from "@/test/viewport";
 
 import { TaskBoardPage } from "../pages/task-board-page";
-import { resetTasksStore, tasksHandlers } from "./tasks-handlers";
+import { boardTodayRequests, resetTasksStore, tasksHandlers } from "./tasks-handlers";
 
 // The board tests only open the form; the editor itself (TipTap and
 // ProseMirror, the feature's largest chunk) is covered by its own test
@@ -82,26 +82,45 @@ describe("TaskBoardPage", () => {
     expect(screen.getByText("Soạn đề kiểm tra giữa kỳ")).toBeInTheDocument();
   });
 
-  it("hides the scope switch and board settings button for a member limited to tasks.list", async () => {
-    server.use(memberCenterMe(["tasks.list"]));
-    signInAs(testPrimaryTeacher);
-    renderBoardPage();
+  describe("board summary", () => {
+    beforeEach(() => {
+      // Freeze only Date (setTimeout stays real for msw/userEvent): the
+      // summary's "quá hạn" bucket compares each task's due date to "today".
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-09-26T10:00:00"));
+    });
 
-    await screen.findByRole("listbox", { name: "Cần làm" });
-    expect(
-      screen.queryByRole("radiogroup", { name: "Phạm vi bảng công việc" }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Cấu hình cột" })).not.toBeInTheDocument();
-  });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
 
-  it("shows the scope switch and settings button for a member with view_all and manage_board", async () => {
-    server.use(memberCenterMe(["tasks.list", "tasks.view_all", "tasks.manage_board"]));
-    signInAs(testPrimaryTeacher);
-    renderBoardPage();
+    it("shows the mine-scoped count summary and no board settings button for a member limited to tasks.list", async () => {
+      server.use(memberCenterMe(["tasks.list"]));
+      signInAs(testPrimaryTeacher);
+      renderBoardPage();
 
-    await screen.findByRole("listbox", { name: "Cần làm" });
-    expect(screen.getByRole("radiogroup", { name: "Phạm vi bảng công việc" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Cấu hình cột" })).toBeInTheDocument();
+      await screen.findByRole("listbox", { name: "Cần làm" });
+      expect(await screen.findByText("3 việc · 1 quá hạn")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Cấu hình cột" })).not.toBeInTheDocument();
+    });
+
+    it("shows the center-wide count summary and settings button for a member with view_all and manage_board", async () => {
+      server.use(memberCenterMe(["tasks.list", "tasks.view_all", "tasks.manage_board"]));
+      signInAs(testPrimaryTeacher);
+      renderBoardPage();
+
+      await screen.findByRole("listbox", { name: "Cần làm" });
+      expect(await screen.findByText("Toàn trung tâm · 3 việc")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Cấu hình cột" })).toBeInTheDocument();
+    });
+
+    it("requests the board with the caller's local today", async () => {
+      signInAs(testPrimaryTeacher);
+      renderBoardPage();
+
+      await screen.findByRole("listbox", { name: "Cần làm" });
+      expect(boardTodayRequests.at(-1)).toBe("2026-09-26");
+    });
   });
 
   it("creates a task through the column '+' button and the form modal", async () => {
@@ -131,7 +150,7 @@ describe("TaskBoardPage", () => {
       .getByText("Soạn đề kiểm tra giữa kỳ")
       .closest('[role="option"]');
     expect(card).not.toBeNull();
-    await user.click(within(card as HTMLElement).getByRole("button", { name: "Chuyển cột" }));
+    await user.click(within(card as HTMLElement).getByRole("button", { name: "Thao tác" }));
     await user.click(await screen.findByRole("menuitem", { name: "Hoàn thành" }));
 
     await waitFor(() => {
@@ -173,7 +192,7 @@ describe("TaskBoardPage", () => {
 
     // A menu move fills the page's own live region first…
     const first = screen.getByText("Sắp lịch dạy bù").closest('[role="option"]');
-    await user.click(within(first as HTMLElement).getByRole("button", { name: "Chuyển cột" }));
+    await user.click(within(first as HTMLElement).getByRole("button", { name: "Thao tác" }));
     await user.click(await screen.findByRole("menuitem", { name: "Hoàn thành" }));
     expect(
       await screen.findByText(/Đã chuyển "Sắp lịch dạy bù" sang cột Hoàn thành/),
@@ -203,7 +222,7 @@ describe("TaskBoardPage", () => {
     await screen.findByRole("listbox", { name: "Cần làm" });
 
     const card = screen.getByText("Soạn đề kiểm tra giữa kỳ").closest('[role="option"]');
-    await user.click(within(card as HTMLElement).getByRole("button", { name: "Chuyển cột" }));
+    await user.click(within(card as HTMLElement).getByRole("button", { name: "Thao tác" }));
     await user.click(await screen.findByRole("menuitem", { name: "Hoàn thành" }));
 
     // Sighted users get the server's field message as a danger toast; the
@@ -231,7 +250,7 @@ describe("TaskBoardPage", () => {
     await screen.findByRole("listbox", { name: "Cần làm" });
 
     const card = screen.getByText("Soạn đề kiểm tra giữa kỳ").closest('[role="option"]');
-    await user.click(within(card as HTMLElement).getByRole("button", { name: "Chuyển cột" }));
+    await user.click(within(card as HTMLElement).getByRole("button", { name: "Thao tác" }));
     await user.click(await screen.findByRole("menuitem", { name: "Hoàn thành" }));
 
     expect(
@@ -285,7 +304,7 @@ describe("TaskBoardPage", () => {
     fireEvent.mouseUp(document, { clientX: 10, clientY: 40 });
 
     expect(card).not.toHaveAttribute("data-dragging");
-    expect(within(card as HTMLElement).getByRole("button", { name: "Chuyển cột" })).toBeDisabled();
+    expect(within(card as HTMLElement).getByRole("button", { name: "Thao tác" })).toBeDisabled();
   });
 
   it("deletes a task from the form modal after confirming", async () => {

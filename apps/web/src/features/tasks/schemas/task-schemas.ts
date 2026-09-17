@@ -46,16 +46,22 @@ export const boardColumnSchema = taskColumnSchema.extend({
 });
 export type BoardColumn = z.infer<typeof boardColumnSchema>;
 
-export const boardScopeSchema = z.enum(["mine", "center"]);
-export type BoardScope = z.infer<typeof boardScopeSchema>;
+/** `tasks.BoardCountsResponse`. Counts open (`completed_at == null`) tasks in
+ * the caller's visible set, independent of any per-column display cap. */
+export const boardCountsSchema = z.object({
+  all: z.number(),
+  mine: z.number(),
+  overdue: z.number(),
+  today: z.number(),
+  unassigned: z.number(),
+  by_assignee: z.array(z.object({ teacher_id: z.string(), count: z.number() })),
+});
+export type BoardCounts = z.infer<typeof boardCountsSchema>;
 
-/** `GET /tasks/board` response. `scope` echoes the effective scope the
- * server applied — it may silently degrade `center` to `mine` when the
- * caller lacks `tasks.view_all`, so the client renders the segmented
- * control from this value, not from what it requested. */
+/** `GET /tasks/board` response. */
 export const boardResponseSchema = z.object({
-  scope: boardScopeSchema,
   columns: z.array(boardColumnSchema),
+  counts: boardCountsSchema,
 });
 export type BoardResponse = z.infer<typeof boardResponseSchema>;
 

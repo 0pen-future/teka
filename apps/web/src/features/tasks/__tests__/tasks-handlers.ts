@@ -50,8 +50,8 @@ let deletedTasks: MutableTask[] = [];
 let columnIdCounter = 0;
 let taskIdCounter = 0;
 
-/** Every `GET /tasks/board` request's `scope` query param, for assertions. */
-export const boardScopeRequests: string[] = [];
+/** Every `GET /tasks/board` request's `today` query param, for assertions. */
+export const boardTodayRequests: string[] = [];
 /** Every `PUT /task-columns/order` request body, for assertions. */
 export const columnOrderRequests: string[][] = [];
 /** Every `POST /tasks` and `PATCH /tasks/:id` request body, for assertions on what the form sends. */
@@ -66,7 +66,7 @@ export function seedTaskDescription(taskId: string, description: string): void {
 export function resetTasksStore(): void {
   columnIdCounter = 0;
   taskIdCounter = 0;
-  boardScopeRequests.length = 0;
+  boardTodayRequests.length = 0;
   columnOrderRequests.length = 0;
   taskWriteRequests.length = 0;
   deletedTasks = [];
@@ -151,12 +151,43 @@ function boardColumnsPayload() {
     }));
 }
 
+/** Mirrors `tasks.BoardCountsResponse`: open tasks only, `overdue`/`today` compared against the caller's `today`. */
+function boardCounts(today: string) {
+  const open = tasks.filter((task) => task.completed_at === null);
+  const byAssignee = new Map<string, number>();
+  let overdue = 0;
+  let dueToday = 0;
+  let unassigned = 0;
+  open.forEach((task) => {
+    if (task.due_on !== null) {
+      if (task.due_on < today) overdue += 1;
+      else if (task.due_on === today) dueToday += 1;
+    }
+    if (task.assignee_id === null) {
+      unassigned += 1;
+    } else {
+      byAssignee.set(task.assignee_id, (byAssignee.get(task.assignee_id) ?? 0) + 1);
+    }
+  });
+  const by_assignee = [...byAssignee.entries()]
+    .map(([teacher_id, count]) => ({ teacher_id, count }))
+    .sort((a, b) => b.count - a.count || a.teacher_id.localeCompare(b.teacher_id));
+  return {
+    all: open.length,
+    mine: byAssignee.get(primaryTeacher.id) ?? 0,
+    overdue,
+    today: dueToday,
+    unassigned,
+    by_assignee,
+  };
+}
+
 export const tasksHandlers = [
   http.get(`${API_URL}/tasks/board`, ({ request }) => {
     const url = new URL(request.url);
-    const scope = url.searchParams.get("scope") === "center" ? "center" : "mine";
-    boardScopeRequests.push(scope);
-    return HttpResponse.json(ok({ scope, columns: boardColumnsPayload() }));
+    const today = url.searchParams.get("today") ?? "2026-09-17";
+    boardTodayRequests.push(today);
+    return HttpResponse.json(ok({ columns: boardColumnsPayload(), counts: boardCounts(today) }));
   }),
   http.post(`${API_URL}/task-columns`, async ({ request }) => {
     const body = (await request.json()) as { name: string; is_done?: boolean };

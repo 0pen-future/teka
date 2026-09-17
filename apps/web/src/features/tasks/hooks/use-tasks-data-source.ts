@@ -34,8 +34,8 @@ import {
 } from "../api/tasks-api";
 import { mapApiError } from "../lib/map-api-error";
 import type {
+  BoardCounts,
   BoardResponse,
-  BoardScope,
   Task,
   TaskColumn,
   TaskPriority,
@@ -159,20 +159,20 @@ function toAppBoard(response: BoardResponse): KanbanBoard<AppTask> {
 /**
  * The shape cached at `tasksKeys.board(params)`. `board` is the
  * reducer-friendly `KanbanBoard<AppTask>` the mutations below optimistically
- * rewrite via `kanbanReducer`; `scope` is carried alongside it (not inside
+ * rewrite via `kanbanReducer`; `counts` is carried alongside it (not inside
  * it, since the headless lib's `KanbanBoard` type has no room for
- * app-specific fields) because the server may silently degrade a requested
- * `"center"` scope to `"mine"` when the caller lacks `tasks.view_all`, and
- * the page renders its scope switch from this echoed value, not the request.
+ * app-specific fields) and stays as of the last fetch — no mutation below
+ * rewrites it optimistically, so it settles once `onSettled`'s board
+ * invalidation refetches.
  */
 export interface BoardQueryData {
-  scope: BoardScope;
+  counts: BoardCounts;
   board: KanbanBoard<AppTask>;
 }
 
 /** Exported so `use-task-board.ts`'s query and this file's mutations agree on one cache shape. */
 export function toBoardQueryData(response: BoardResponse): BoardQueryData {
-  return { scope: response.scope, board: toAppBoard(response) };
+  return { counts: response.counts, board: toAppBoard(response) };
 }
 
 export interface UseTasksDataSourceResult {

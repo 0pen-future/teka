@@ -56,7 +56,7 @@ export function BoardMobile({
   const active = sorted.find((column) => column.id === activeColumnId) ?? sorted[0];
 
   if (!active) {
-    return <p className="py-6 text-center text-[13px] text-ink-400">Chưa có cột nào.</p>;
+    return <p className="py-6 text-center text-[13px] text-ink-500">Chưa có cột nào.</p>;
   }
 
   const { activeTask } = dnd;

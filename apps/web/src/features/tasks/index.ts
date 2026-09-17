@@ -5,8 +5,8 @@ export { tasksKeys } from "./hooks/tasks-keys";
 export { useTaskBoard } from "./hooks/use-task-board";
 export { useMemberDirectory } from "./hooks/use-member-directory";
 export type {
+  BoardCounts,
   BoardResponse,
-  BoardScope,
   Task,
   TaskColumn,
   TaskPriority,

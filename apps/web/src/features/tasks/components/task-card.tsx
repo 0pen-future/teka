@@ -1,29 +1,20 @@
 import { useDndMonitor } from "@dnd-kit/core";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import {
-  useMemo,
-  useRef,
-  type ComponentProps,
-  type CSSProperties,
-  type MouseEvent,
-  type TouchEvent,
-} from "react";
+import { useMemo, useRef, type ComponentProps, type CSSProperties, type ReactNode } from "react";
 
 import { HvBadge } from "@/components/hv";
 import type { ColumnId, KanbanColumn, TaskPropsExtra } from "@/lib/kanban";
-import { cn, formatDateTime, formatDayMonth } from "@/lib/utils";
+import { cn, formatDateTime } from "@/lib/utils";
 
 import type { BoardDndData } from "../hooks/use-board-dnd";
 import type { AppTask } from "../hooks/use-tasks-data-source";
+import { dueState } from "../lib/due-state";
 import { textFromHtml } from "../lib/rich-text";
-import { MoveMenu } from "./move-menu";
-import {
-  PRIORITY_LABELS,
-  PRIORITY_VARIANTS,
-  isOverdue,
-  taskCardSurfaceClassName,
-} from "./task-card-styles";
+import { ActionsMenu } from "./actions-menu";
+import { AssigneeAvatar } from "./assignee-avatar";
+import { CardControlBarrier } from "./card-control-barrier";
+import { PRIORITY_LABELS, PRIORITY_VARIANTS, taskCardSurfaceClassName } from "./task-card-styles";
 
 /**
  * How long after a drop the card ignores a click. Browsers fire `click`
@@ -39,39 +30,48 @@ const CLICK_SUPPRESSION_MS = 300;
 export interface TaskCardBodyProps {
   task: AppTask;
   assigneeName: string | null;
+  /**
+   * Slot for the live card's actions menu, rendered at the end of the
+   * header row next to the title. The drag-overlay preview leaves this
+   * unset — a static copy has nothing to act on.
+   */
+  actions?: ReactNode;
 }
 
 /**
- * Title + badges, shared by the live card and the drag-overlay preview.
- * `xong dd/mm` uses `formatDateTime` (completedAt is an RFC3339 instant, not
- * a bare DATE) and keeps only the leading `dd/MM` slice, since the exact time
- * of completion doesn't matter here.
+ * Header row + badges, shared by the live card and the drag-overlay
+ * preview. `xong dd/mm` uses `formatDateTime` (completedAt is an RFC3339
+ * instant, not a bare DATE) and keeps only the leading `dd/MM` slice, since
+ * the exact time of completion doesn't matter here.
  */
-export function TaskCardBody({ task, assigneeName }: TaskCardBodyProps) {
+export function TaskCardBody({ task, assigneeName, actions }: TaskCardBodyProps) {
   const done = task.completedAt !== null;
-  const overdue = isOverdue(task);
+  const due = useMemo(() => dueState(task), [task]);
   const preview = useMemo(() => textFromHtml(task.description), [task.description]);
   return (
     <>
-      <p className="text-[13.5px] font-bold text-ink-900">{task.title}</p>
+      <div className="flex items-start gap-2">
+        {assigneeName ? <AssigneeAvatar name={assigneeName} className="mt-0.5" /> : null}
+        <p className="min-w-0 flex-1 text-[13.5px] font-bold text-ink-900">{task.title}</p>
+        {actions}
+      </div>
       {preview ? (
         <p className="mt-1 line-clamp-2 text-[12px] leading-snug text-ink-500">{preview}</p>
       ) : null}
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        <HvBadge size="sm" variant={PRIORITY_VARIANTS[task.priority]}>
-          {PRIORITY_LABELS[task.priority]}
-        </HvBadge>
+        {task.priority !== "none" ? (
+          <HvBadge size="sm" variant={PRIORITY_VARIANTS[task.priority]}>
+            {PRIORITY_LABELS[task.priority]}
+          </HvBadge>
+        ) : null}
         {done ? (
           <HvBadge size="sm" variant="success">
             Xong {formatDateTime(task.completedAt!).slice(0, 5)}
           </HvBadge>
         ) : task.dueOn ? (
-          <HvBadge size="sm" variant={overdue ? "danger" : "neutral"}>
-            Hạn {formatDayMonth(task.dueOn)}
+          <HvBadge size="sm" variant={due.variant}>
+            {due.label}
           </HvBadge>
-        ) : null}
-        {assigneeName ? (
-          <span className="truncate text-[11.5px] font-semibold text-ink-400">{assigneeName}</span>
         ) : null}
       </div>
     </>
@@ -143,10 +143,6 @@ export function TaskCard({
     touchAction: "manipulation",
   };
 
-  const stopPointerActivation = (event: MouseEvent | TouchEvent) => {
-    event.stopPropagation();
-  };
-
   return (
     // `getTaskProps` spreads the headless lib's role="option"/tabIndex/roving
     // focus wiring, which the a11y rule can't see through a spread to verify;
@@ -164,29 +160,29 @@ export function TaskCard({
       style={style}
       data-dragging={isDragging || undefined}
       className={cn(
+        "group",
         taskCardSurfaceClassName(task, isAssignedToMe),
         "cursor-pointer outline-none focus-visible:ring-4 focus-visible:ring-mint-100",
         !moveDisabled && "cursor-grab active:cursor-grabbing",
         isDragging && "opacity-40",
       )}
     >
-      <TaskCardBody task={task} assigneeName={assigneeName} />
-      {/* Bubbling barrier only: "Chuyển" must neither open the card (click)
-          nor start a drag (mouse/touch press reaching dnd-kit's listeners). */}
-      <div
-        role="presentation"
-        className="mt-2 flex justify-end"
-        onClick={(event) => event.stopPropagation()}
-        onMouseDown={stopPointerActivation}
-        onTouchStart={stopPointerActivation}
-      >
-        <MoveMenu
-          currentColumnId={task.columnId}
-          columns={columns}
-          onMove={onMove}
-          disabled={moveDisabled}
-        />
-      </div>
+      <TaskCardBody
+        task={task}
+        assigneeName={assigneeName}
+        actions={
+          // The barrier keeps the menu from opening the card (click) or
+          // starting a drag (mouse/touch press reaching dnd-kit's listeners).
+          <CardControlBarrier className="shrink-0">
+            <ActionsMenu
+              currentColumnId={task.columnId}
+              columns={columns}
+              onMove={onMove}
+              disabled={moveDisabled}
+            />
+          </CardControlBarrier>
+        }
+      />
     </div>
   );
 }

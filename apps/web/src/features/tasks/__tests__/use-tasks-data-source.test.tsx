@@ -50,7 +50,7 @@ function setup() {
 describe("useTasksDataSource", () => {
   it("maps the wire board response onto the headless lib's camelCase shape", async () => {
     const { wrapper } = setup();
-    const { result } = renderHook(() => useTasksDataSource({ scope: "mine" }), { wrapper });
+    const { result } = renderHook(() => useTasksDataSource({ today: "2026-09-17" }), { wrapper });
 
     const board = await result.current.dataSource.loadBoard();
 
@@ -68,7 +68,7 @@ describe("useTasksDataSource", () => {
 
   it("maps a 422 field error from the API onto a KanbanError validation result", async () => {
     const { wrapper } = setup();
-    const { result } = renderHook(() => useTasksDataSource({ scope: "mine" }), { wrapper });
+    const { result } = renderHook(() => useTasksDataSource({ today: "2026-09-17" }), { wrapper });
 
     await expect(
       result.current.createColumnMutation.mutateAsync({ name: "Cần làm", isDone: false }),
@@ -82,7 +82,7 @@ describe("useTasksDataSource", () => {
       ),
     );
     const { wrapper } = setup();
-    const { result } = renderHook(() => useTasksDataSource({ scope: "mine" }), { wrapper });
+    const { result } = renderHook(() => useTasksDataSource({ today: "2026-09-17" }), { wrapper });
 
     await expect(
       result.current.deleteTaskMutation.mutateAsync(asTaskId(ownTaskId)),
@@ -105,7 +105,7 @@ describe("useTasksDataSource", () => {
         ),
       );
       const { wrapper } = setup();
-      const { result } = renderHook(() => useTasksDataSource({ scope: "mine" }), { wrapper });
+      const { result } = renderHook(() => useTasksDataSource({ today: "2026-09-17" }), { wrapper });
 
       const error: unknown = await result.current.reorderColumnsMutation
         .mutateAsync([asColumnId(columnTodoId), asColumnId(columnDoneId)])
@@ -136,9 +136,9 @@ describe("useTasksDataSource", () => {
 
     async function setupWithCachedBoard() {
       const { queryClient, wrapper } = setup();
-      const { result } = renderHook(() => useTasksDataSource({ scope: "mine" }), { wrapper });
-      const boardKey = tasksKeys.board({ scope: "mine" });
-      queryClient.setQueryData(boardKey, toBoardQueryData(await getBoard({ scope: "mine" })));
+      const { result } = renderHook(() => useTasksDataSource({ today: "2026-09-17" }), { wrapper });
+      const boardKey = tasksKeys.board({ today: "2026-09-17" });
+      queryClient.setQueryData(boardKey, toBoardQueryData(await getBoard({ today: "2026-09-17" })));
       return { queryClient, result, boardKey };
     }
 
@@ -281,7 +281,7 @@ describe("useTasksDataSource", () => {
       }),
     );
     const { wrapper } = setup();
-    const { result } = renderHook(() => useTasksDataSource({ scope: "mine" }), { wrapper });
+    const { result } = renderHook(() => useTasksDataSource({ today: "2026-09-17" }), { wrapper });
 
     const createPromise = result.current.createTaskMutation.mutateAsync({
       title: "Việc mới",
@@ -308,9 +308,9 @@ describe("useTasksDataSource", () => {
       }),
     );
     const { queryClient, wrapper } = setup();
-    const { result } = renderHook(() => useTasksDataSource({ scope: "mine" }), { wrapper });
-    const boardKey = tasksKeys.board({ scope: "mine" });
-    queryClient.setQueryData(boardKey, toBoardQueryData(await getBoard({ scope: "mine" })));
+    const { result } = renderHook(() => useTasksDataSource({ today: "2026-09-17" }), { wrapper });
+    const boardKey = tasksKeys.board({ today: "2026-09-17" });
+    queryClient.setQueryData(boardKey, toBoardQueryData(await getBoard({ today: "2026-09-17" })));
 
     const deletePromise = result.current.deleteColumnMutation.mutateAsync({
       columnId: asColumnId(columnTodoId),

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { localIsoDate, quickDueOptions } from "../lib/due-state";
+import { dueState, localIsoDate, quickDueOptions } from "../lib/due-state";
 
 // The suite runs with `TZ=Asia/Ho_Chi_Minh` (see vitest.config.ts), so `Date`'s
 // local getters read VN wall-clock time while `toISOString()`/`getUTCDate()`
@@ -56,5 +56,47 @@ describe("quickDueOptions", () => {
   it("Bỏ hạn always clears the value", () => {
     vi.setSystemTime(new Date("2026-09-17T10:00:00+07:00"));
     expect(quickDueOptions(new Date()).find((option) => option.label === "Bỏ hạn")?.value).toBe("");
+  });
+});
+
+describe("dueState", () => {
+  it("is not overdue for a task due today, even at 18:30 VN (23:30 UTC, the next UTC day)", () => {
+    vi.setSystemTime(new Date("2026-09-17T18:30:00+07:00"));
+    const state = dueState({ dueOn: "2026-09-17", completedAt: null });
+    expect(state).toMatchObject({ kind: "today", label: "Hôm nay", variant: "warning" });
+  });
+
+  it("reports days overdue for a task due yesterday", () => {
+    vi.setSystemTime(new Date("2026-09-17T10:00:00+07:00"));
+    const state = dueState({ dueOn: "2026-09-16", completedAt: null });
+    expect(state).toMatchObject({
+      kind: "overdue",
+      days: 1,
+      label: "Quá hạn 1 ngày",
+      variant: "danger",
+    });
+  });
+
+  it("labels a task due tomorrow", () => {
+    vi.setSystemTime(new Date("2026-09-17T10:00:00+07:00"));
+    const state = dueState({ dueOn: "2026-09-18", completedAt: null });
+    expect(state).toMatchObject({ kind: "tomorrow", label: "Ngày mai", variant: "neutral" });
+  });
+
+  it("labels a task due further out with its dd/MM date", () => {
+    vi.setSystemTime(new Date("2026-09-17T10:00:00+07:00"));
+    const state = dueState({ dueOn: "2026-09-25", completedAt: null });
+    expect(state).toMatchObject({ kind: "upcoming", label: "Hạn 25/09", variant: "neutral" });
+  });
+
+  it("resolves to none when the task has no due date", () => {
+    vi.setSystemTime(new Date("2026-09-17T10:00:00+07:00"));
+    expect(dueState({ dueOn: null, completedAt: null }).kind).toBe("none");
+  });
+
+  it("resolves to none once the task is completed, even if it was overdue", () => {
+    vi.setSystemTime(new Date("2026-09-17T10:00:00+07:00"));
+    const state = dueState({ dueOn: "2026-09-01", completedAt: "2026-09-05T08:00:00Z" });
+    expect(state.kind).toBe("none");
   });
 });

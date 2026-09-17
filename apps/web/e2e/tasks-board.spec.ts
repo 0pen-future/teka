@@ -40,7 +40,7 @@ test("task board flow: add a column, create, move, fold the column away, delete"
 
   // 4. Move it to the new column through the card's move menu.
   const taskCard = card(column(page, "Cần làm"), taskTitle);
-  await taskCard.getByRole("button", { name: "Chuyển cột" }).click();
+  await taskCard.getByRole("button", { name: "Thao tác" }).click();
   await page.getByRole("menuitem", { name: columnName }).click();
   await expect(column(page, columnName).getByText(taskTitle)).toBeVisible();
   await expect(column(page, "Cần làm").getByText(taskTitle)).toHaveCount(0);
