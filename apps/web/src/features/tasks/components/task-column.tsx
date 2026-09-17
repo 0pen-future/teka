@@ -1,19 +1,20 @@
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { CheckIcon, PlusIcon } from "lucide-react";
+import { CheckIcon, ChevronLeftIcon, PlusIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 
-import type { ColumnId, KanbanColumn, TaskId, TaskPropsExtra } from "@/lib/kanban";
+import type { ColumnId, TaskId, TaskPropsExtra } from "@/lib/kanban";
 import { cn } from "@/lib/utils";
 
 import type { BoardDndData } from "../hooks/use-board-dnd";
-import type { AppTask } from "../hooks/use-tasks-data-source";
+import type { AppColumn, AppTask } from "../hooks/use-tasks-data-source";
+import { COLUMN_DOT, COLUMN_TINT } from "../lib/column-colors";
 import { TaskCard } from "./task-card";
 
 export interface TaskColumnProps {
-  column: KanbanColumn;
+  column: AppColumn;
   tasks: AppTask[];
-  columns: KanbanColumn[];
+  columns: AppColumn[];
   assigneeNameFor: (assigneeId: string | null) => string | null;
   currentUserId: string | undefined;
   canCreate: boolean;
@@ -21,11 +22,16 @@ export interface TaskColumnProps {
   /** True while a dragged card hovers anywhere over this column. */
   isDropTarget: boolean;
   reducedMotion: boolean;
+  /** True when this column is empty because a board filter hid every task, not because it has none. */
+  filtering: boolean;
   onOpenTask: (taskId: TaskId) => void;
   onCreateTask: (columnId: ColumnId) => void;
   onMoveTask: (taskId: TaskId, columnId: ColumnId) => void;
+  onQuickDone: (taskId: TaskId) => void;
   getColumnProps: () => ComponentProps<"div">;
   getTaskProps: (taskId: TaskId, extra: TaskPropsExtra) => ComponentProps<"div">;
+  /** Desktop-only: omitted on mobile, which does not support collapsing columns. */
+  onCollapse?: () => void;
   className?: string;
 }
 
@@ -45,11 +51,14 @@ export function TaskColumn({
   canMove,
   isDropTarget,
   reducedMotion,
+  filtering,
   onOpenTask,
   onCreateTask,
   onMoveTask,
+  onQuickDone,
   getColumnProps,
   getTaskProps,
+  onCollapse,
   className,
 }: TaskColumnProps) {
   const droppableData: BoardDndData = { type: "column" };
@@ -60,13 +69,17 @@ export function TaskColumn({
       data-over={isDropTarget || undefined}
       className={cn(
         "flex min-h-0 flex-col rounded-[16px] border border-line-200 p-2.5 transition-colors",
-        column.isDone ? "bg-mint-50" : "bg-cream-100",
+        COLUMN_TINT[column.color],
         isDropTarget && "border-mint-400 ring-2 ring-mint-100",
         className,
       )}
     >
       <div className="flex items-center justify-between gap-2 px-1 pb-2">
         <div className="flex min-w-0 items-center gap-1.5">
+          <span
+            aria-hidden
+            className={cn("size-2.5 shrink-0 rounded-full", COLUMN_DOT[column.color])}
+          />
           {column.isDone ? (
             <CheckIcon aria-hidden className="size-4 shrink-0 text-mint-600" />
           ) : null}
@@ -75,16 +88,29 @@ export function TaskColumn({
             {tasks.length}
           </span>
         </div>
-        {canCreate ? (
-          <button
-            type="button"
-            onClick={() => onCreateTask(column.id)}
-            aria-label={`Thêm việc vào ${column.name}`}
-            className="inline-flex size-10 shrink-0 items-center justify-center rounded-full text-ink-500 hover:bg-white hover:text-mint-600"
-          >
-            <PlusIcon aria-hidden className="size-4" />
-          </button>
-        ) : null}
+        <div className="flex shrink-0 items-center gap-1">
+          {canCreate ? (
+            <button
+              type="button"
+              onClick={() => onCreateTask(column.id)}
+              aria-label={`Thêm việc vào ${column.name}`}
+              className="inline-flex size-10 shrink-0 items-center justify-center rounded-full text-ink-500 hover:bg-white hover:text-mint-600"
+            >
+              <PlusIcon aria-hidden className="size-4" />
+            </button>
+          ) : null}
+          {onCollapse ? (
+            <button
+              type="button"
+              onClick={onCollapse}
+              aria-expanded
+              aria-label={`Thu gọn cột ${column.name}`}
+              className="hidden size-10 shrink-0 items-center justify-center rounded-full text-ink-500 hover:bg-white hover:text-mint-600 min-[900px]:inline-flex"
+            >
+              <ChevronLeftIcon aria-hidden className="size-4" />
+            </button>
+          ) : null}
+        </div>
       </div>
       <SortableContext items={tasks.map((task) => task.id)} strategy={verticalListSortingStrategy}>
         <div
@@ -94,8 +120,10 @@ export function TaskColumn({
         >
           {tasks.length === 0 ? (
             <div className="flex min-h-[96px] flex-col items-center justify-center gap-2 rounded-[12px] border-2 border-dashed border-line-200 px-2 py-3">
-              <p className="text-center text-[12px] text-ink-500">Chưa có việc</p>
-              {canCreate ? (
+              <p className="text-center text-[12px] text-ink-500">
+                {filtering ? "Không có việc khớp lọc" : "Chưa có việc"}
+              </p>
+              {canCreate && !filtering ? (
                 <button
                   type="button"
                   onClick={() => onCreateTask(column.id)}
@@ -115,6 +143,7 @@ export function TaskColumn({
                 isAssignedToMe={currentUserId !== undefined && task.assigneeId === currentUserId}
                 onOpen={() => onOpenTask(task.id)}
                 onMove={(columnId) => onMoveTask(task.id, columnId)}
+                onQuickDone={() => onQuickDone(task.id)}
                 moveDisabled={!canMove}
                 reducedMotion={reducedMotion}
                 getTaskProps={(extra) => getTaskProps(task.id, extra)}

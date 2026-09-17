@@ -1,4 +1,4 @@
-import type { ColumnId, KanbanBoard, KanbanTask } from "./types";
+import type { ColumnId, KanbanBoard, KanbanColumn, KanbanTask } from "./types";
 
 export type AdjacentDirection = "previous" | "next";
 
@@ -19,9 +19,10 @@ function compareTasks<TTask extends KanbanTask>(a: TTask, b: TTask): number {
  * `createdAt`. Does not mutate `board`. Columns with no tasks still get an
  * entry with an empty array.
  */
-export function selectTasksByColumn<TTask extends KanbanTask>(
-  board: KanbanBoard<TTask>,
-): Map<ColumnId, TTask[]> {
+export function selectTasksByColumn<
+  TTask extends KanbanTask,
+  TColumn extends KanbanColumn = KanbanColumn,
+>(board: KanbanBoard<TTask, TColumn>): Map<ColumnId, TTask[]> {
   const byColumn = new Map<ColumnId, TTask[]>();
   for (const column of board.columns) {
     byColumn.set(column.id, []);
@@ -42,9 +43,10 @@ export function selectTasksByColumn<TTask extends KanbanTask>(
 }
 
 /** Counts tasks per column, including zero-count entries for empty columns. */
-export function selectColumnCounts<TTask extends KanbanTask>(
-  board: KanbanBoard<TTask>,
-): Map<ColumnId, number> {
+export function selectColumnCounts<
+  TTask extends KanbanTask,
+  TColumn extends KanbanColumn = KanbanColumn,
+>(board: KanbanBoard<TTask, TColumn>): Map<ColumnId, number> {
   const counts = new Map<ColumnId, number>();
   for (const column of board.columns) {
     counts.set(column.id, 0);
@@ -60,8 +62,11 @@ export function selectColumnCounts<TTask extends KanbanTask>(
  * direction, ranked by `order`. Returns `undefined` at the board's edge or
  * when `columnId` is not found.
  */
-export function selectAdjacentColumnId<TTask extends KanbanTask>(
-  board: KanbanBoard<TTask>,
+export function selectAdjacentColumnId<
+  TTask extends KanbanTask,
+  TColumn extends KanbanColumn = KanbanColumn,
+>(
+  board: KanbanBoard<TTask, TColumn>,
   columnId: ColumnId,
   direction: AdjacentDirection,
 ): ColumnId | undefined {

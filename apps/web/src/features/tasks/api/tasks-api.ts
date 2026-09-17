@@ -5,6 +5,7 @@ import {
   boardResponseSchema,
   taskSchema,
   type BoardResponse,
+  type BoardFilterValue,
   type CreateTaskInput,
   type MoveTaskRequest,
   type Task,
@@ -14,10 +15,25 @@ import {
 export interface GetBoardParams {
   /** The caller's local calendar date (`YYYY-MM-DD`), so "today"/"overdue" match their timezone, not the server's. */
   today: string;
+  /** `"all"` (the default) is equivalent to omitting the param server-side; kept here so it is always a defined key on the query cache. */
+  filter?: BoardFilterValue;
+  /** A teacher's id, ANDed onto `filter` server-side. Omitted (not `""`) when not narrowing by assignee. */
+  assignee?: string;
 }
 
+/**
+ * `filter: "all"` and an empty `assignee` are the server's own defaults, so
+ * they are left off the querystring entirely rather than sent as literal
+ * values — one less thing for the API contract to special-case.
+ */
 export async function getBoard(params: GetBoardParams): Promise<BoardResponse> {
-  const res = await apiClient.get<unknown>("/tasks/board", { params });
+  const res = await apiClient.get<unknown>("/tasks/board", {
+    params: {
+      today: params.today,
+      filter: params.filter && params.filter !== "all" ? params.filter : undefined,
+      assignee: params.assignee === "" ? undefined : params.assignee,
+    },
+  });
   return parseData(boardResponseSchema, res.data);
 }
 

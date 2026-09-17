@@ -41,7 +41,18 @@ export interface KanbanTask {
   createdAt?: string;
 }
 
-export interface KanbanBoard<TTask extends KanbanTask> {
-  columns: KanbanColumn[];
+/**
+ * `TColumn` defaults to the lib's own {@link KanbanColumn} so every existing
+ * caller (`KanbanBoard<AppTask>`) keeps compiling unchanged. An app that
+ * extends `KanbanColumn` with its own fields (Teka: `color`) can supply that
+ * type instead — see README.md "Types" — and get it back out of `columns`
+ * without a cast, while the reducer and hook below stay agnostic to what the
+ * extra fields are.
+ */
+export interface KanbanBoard<
+  TTask extends KanbanTask,
+  TColumn extends KanbanColumn = KanbanColumn,
+> {
+  columns: TColumn[];
   tasks: TTask[];
 }

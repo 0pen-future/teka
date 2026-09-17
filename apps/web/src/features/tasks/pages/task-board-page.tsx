@@ -9,14 +9,18 @@ import { useMediaQuery } from "@/lib/hooks/use-media-query";
 import type { ColumnId, DropTarget, TaskId } from "@/lib/kanban";
 import { useKanban } from "@/lib/kanban";
 
+import type { GetBoardParams } from "../api/tasks-api";
 import { BoardDesktop } from "../components/board-desktop";
+import { BoardFilterBar } from "../components/board-filter-bar";
 import { BoardMobile } from "../components/board-mobile";
 import { BoardSettingsModal } from "../components/board-settings-modal";
 import { TaskFormModal } from "../components/task-form-modal";
 import { useBoardDnd } from "../hooks/use-board-dnd";
+import { useBoardUrlState } from "../hooks/use-board-url-state";
 import { useMemberDirectory } from "../hooks/use-member-directory";
 import { useTaskBoard } from "../hooks/use-task-board";
-import { useTasksDataSource, type AppTask } from "../hooks/use-tasks-data-source";
+import { useTasksDataSource, type AppColumn, type AppTask } from "../hooks/use-tasks-data-source";
+import { isFiltering } from "../lib/board-filters";
 import { localIsoDate } from "../lib/due-state";
 import { kanbanErrorToastMessage } from "../lib/map-api-error";
 import type { BoardCounts } from "../schemas/task-schemas";
@@ -73,9 +77,16 @@ export function TaskBoardPage() {
   const canManageBoard = has("tasks.manage_board");
 
   const today = localIsoDate(new Date());
-  const boardQuery = useTaskBoard({ today });
+  const urlState = useBoardUrlState();
+  // A teacher without `tasks.view_all` never sees the filter bar, so their
+  // board query stays a plain `{ today }` — one cache entry, not one per
+  // stale filter value they can't even reach.
+  const boardParams: GetBoardParams = canViewAll
+    ? { today, filter: urlState.filter, assignee: urlState.assignee }
+    : { today };
+  const boardQuery = useTaskBoard(boardParams);
   const membersQuery = useMemberDirectory();
-  const dataSourceResult = useTasksDataSource({ today });
+  const dataSourceResult = useTasksDataSource(boardParams);
   const { dataSource, ...mutations } = dataSourceResult;
 
   const [announcement, setAnnouncement] = useState("");
@@ -84,8 +95,9 @@ export function TaskBoardPage() {
 
   const board = boardQuery.data?.board;
   const counts = boardQuery.data?.counts;
+  const filtering = canViewAll && isFiltering(urlState);
 
-  const kanban = useKanban<AppTask>({
+  const kanban = useKanban<AppTask, AppColumn>({
     board: board ?? { columns: [], tasks: [] },
     dataSource,
     messages: KEYBOARD_MESSAGES,
@@ -153,6 +165,50 @@ export function TaskBoardPage() {
     moveAndAnnounce(taskId, columnId, 0);
   };
 
+  /**
+   * "Xong" checkbox: moves the task to the first "done" column (by column
+   * order) and offers a 6s undo back to where it was, mirroring the
+   * delete/restore toast in `task-form-modal.tsx`. A no-op if the board has
+   * no done column at all.
+   */
+  const handleQuickDone = (taskId: TaskId) => {
+    const task = kanban.board.tasks.find((candidate) => candidate.id === taskId);
+    const doneColumn = [...kanban.board.columns]
+      .sort((a, b) => a.order - b.order)
+      .find((column) => column.isDone);
+    if (!task || !doneColumn) return;
+    const fromColumnId = task.columnId;
+    void kanban.moveTask(taskId, doneColumn.id, 0).then(
+      () => {
+        setAnnouncement(`Đã đánh dấu "${task.title}" là xong. Nhấn Hoàn tác trong 6 giây.`);
+        hvToast("Đã đánh dấu xong", {
+          variant: "success",
+          duration: 6000,
+          action: {
+            label: "Hoàn tác",
+            onClick: () => {
+              void kanban.moveTask(taskId, fromColumnId, 0).then(
+                () => setAnnouncement(`Đã hoàn tác, chuyển "${task.title}" về cột trước đó.`),
+                (error: unknown) => hvToast(kanbanErrorToastMessage(error), { variant: "danger" }),
+              );
+            },
+          },
+        });
+      },
+      (error: unknown) => {
+        hvToast(kanbanErrorToastMessage(error, MOVE_FAILED_TOAST), { variant: "danger" });
+        setAnnouncement(KEYBOARD_MESSAGES.moveFailed);
+      },
+    );
+  };
+
+  const handleToggleCollapse = (columnId: ColumnId) => {
+    const next = new Set(urlState.collapsed);
+    if (next.has(columnId)) next.delete(columnId);
+    else next.add(columnId);
+    urlState.set({ collapsed: next });
+  };
+
   const boardContent = boardQuery.isPending ? (
     <HvStateBlock state="loading" title="Đang tải bảng công việc…" />
   ) : boardQuery.isError ? (
@@ -173,10 +229,14 @@ export function TaskBoardPage() {
       currentUserId={currentUserId}
       canCreate={canCreate}
       canMove={canEdit}
+      filtering={filtering}
       dnd={dnd}
+      collapsed={urlState.collapsed}
+      onToggleCollapse={handleToggleCollapse}
       onOpenTask={handleOpenTask}
       onCreateTask={handleCreateTask}
       onMoveTask={handleMoveTask}
+      onQuickDone={handleQuickDone}
       getColumnProps={kanban.getColumnProps}
       getTaskProps={kanban.getTaskProps}
     />
@@ -188,10 +248,12 @@ export function TaskBoardPage() {
       currentUserId={currentUserId}
       canCreate={canCreate}
       canMove={canEdit}
+      filtering={filtering}
       dnd={dnd}
       onOpenTask={handleOpenTask}
       onCreateTask={handleCreateTask}
       onMoveTask={handleMoveTask}
+      onQuickDone={handleQuickDone}
       getColumnProps={kanban.getColumnProps}
       getTaskProps={kanban.getTaskProps}
     />
@@ -211,6 +273,16 @@ export function TaskBoardPage() {
           </HvButton>
         ) : null}
       </div>
+
+      {canViewAll && counts ? (
+        <BoardFilterBar
+          filter={urlState.filter}
+          assignee={urlState.assignee}
+          counts={counts}
+          members={members}
+          onChange={(partial) => urlState.set(partial)}
+        />
+      ) : null}
 
       {boardContent}
 

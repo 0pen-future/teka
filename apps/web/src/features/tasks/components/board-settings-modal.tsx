@@ -6,16 +6,19 @@ import type { UseMutationResult } from "@tanstack/react-query";
 import { HvButton, HvIcon, HvModal, hvToast } from "@/components/hv";
 import { Input } from "@/components/ui/input";
 import type { AdjacentDirection } from "@/lib/kanban";
-import { isKanbanError, type ColumnId, type KanbanColumn, type KanbanError } from "@/lib/kanban";
+import { isKanbanError, type ColumnId, type KanbanError } from "@/lib/kanban";
 import { cn } from "@/lib/utils";
 
 import type {
+  AppColumn,
   AppTask,
   CreateColumnVariables,
   DeleteColumnVariables,
   UpdateColumnVariables,
 } from "../hooks/use-tasks-data-source";
 import { kanbanErrorToastMessage } from "../lib/map-api-error";
+import type { ColumnColor } from "../schemas/task-schemas";
+import { ColumnColorPicker } from "./column-color-picker";
 import { DeleteColumnDialog } from "./delete-column-dialog";
 
 const MAX_COLUMNS = 8;
@@ -55,11 +58,11 @@ function DoneSwitch({
 }
 
 interface ColumnRowProps {
-  column: KanbanColumn;
+  column: AppColumn;
   taskCount: number;
   index: number;
   count: number;
-  updateColumnMutation: UseMutationResult<KanbanColumn, KanbanError, UpdateColumnVariables>;
+  updateColumnMutation: UseMutationResult<AppColumn, KanbanError, UpdateColumnVariables>;
   onReorder: (direction: AdjacentDirection) => void;
   onRequestDelete: () => void;
   disableDelete: boolean;
@@ -159,7 +162,21 @@ function ColumnRow({
         </button>
       </div>
       {nameError ? <p className="pl-6 text-[12px] text-coral-600">{nameError}</p> : null}
-      <p className="pl-6 text-[11.5px] text-ink-400">{taskCount} việc</p>
+      <div className="flex items-center justify-between gap-2 pl-6">
+        <p className="text-[11.5px] text-ink-400">{taskCount} việc</p>
+        <ColumnColorPicker
+          value={column.color}
+          aria-label={`Màu cột ${column.name}`}
+          onValueChange={(color) => {
+            updateColumnMutation.mutate(
+              { columnId: column.id, color },
+              {
+                onError: (error) => hvToast(kanbanErrorToastMessage(error), { variant: "danger" }),
+              },
+            );
+          }}
+        />
+      </div>
     </div>
   );
 }
@@ -167,10 +184,10 @@ function ColumnRow({
 export interface BoardSettingsModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  columns: KanbanColumn[];
+  columns: AppColumn[];
   tasksByColumn: Map<ColumnId, AppTask[]>;
-  createColumnMutation: UseMutationResult<KanbanColumn, KanbanError, CreateColumnVariables>;
-  updateColumnMutation: UseMutationResult<KanbanColumn, KanbanError, UpdateColumnVariables>;
+  createColumnMutation: UseMutationResult<AppColumn, KanbanError, CreateColumnVariables>;
+  updateColumnMutation: UseMutationResult<AppColumn, KanbanError, UpdateColumnVariables>;
   deleteColumnMutation: UseMutationResult<void, KanbanError, DeleteColumnVariables>;
   reorderColumn: (columnId: ColumnId, direction: AdjacentDirection) => Promise<void>;
   onAnnounce: (message: string) => void;
@@ -196,7 +213,8 @@ export function BoardSettingsModal({
   const sorted = [...columns].sort((a, b) => a.order - b.order);
   const [newName, setNewName] = useState("");
   const [newNameError, setNewNameError] = useState<string | undefined>(undefined);
-  const [deleteTarget, setDeleteTarget] = useState<KanbanColumn | undefined>(undefined);
+  const [newColor, setNewColor] = useState<ColumnColor>("none");
+  const [deleteTarget, setDeleteTarget] = useState<AppColumn | undefined>(undefined);
 
   const handleReorder = async (columnId: ColumnId, direction: AdjacentDirection) => {
     try {
@@ -210,8 +228,13 @@ export function BoardSettingsModal({
     const trimmed = newName.trim();
     if (trimmed === "") return;
     try {
-      const column = await createColumnMutation.mutateAsync({ name: trimmed, isDone: false });
+      const column = await createColumnMutation.mutateAsync({
+        name: trimmed,
+        isDone: false,
+        color: newColor,
+      });
       setNewName("");
+      setNewColor("none");
       setNewNameError(undefined);
       onAnnounce(`Đã tạo cột ${column.name}.`);
     } catch (error) {
@@ -248,7 +271,7 @@ export function BoardSettingsModal({
               disableDelete={sorted.length <= 1}
             />
           ))}
-          <div className="flex flex-col gap-1 border-t border-line-200 pt-3">
+          <div className="flex flex-col gap-2 border-t border-line-200 pt-3">
             <div className="flex gap-2">
               <Input
                 aria-label="Tên cột mới"
@@ -273,6 +296,12 @@ export function BoardSettingsModal({
                 Thêm cột
               </HvButton>
             </div>
+            <ColumnColorPicker
+              value={newColor}
+              aria-label="Màu cột mới"
+              disabled={sorted.length >= MAX_COLUMNS}
+              onValueChange={setNewColor}
+            />
             {newNameError ? <p className="text-[12px] text-coral-600">{newNameError}</p> : null}
           </div>
         </div>

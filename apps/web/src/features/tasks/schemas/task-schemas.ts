@@ -7,12 +7,18 @@ export const TASK_PRIORITIES = ["none", "low", "medium", "high"] as const;
 export const taskPrioritySchema = z.enum(TASK_PRIORITIES);
 export type TaskPriority = z.infer<typeof taskPrioritySchema>;
 
+/** `task_columns.ColumnResponse.color` — a tint id, not a raw color value. */
+export const COLUMN_COLORS = ["none", "sky", "sun", "mint"] as const;
+export const columnColorSchema = z.enum(COLUMN_COLORS);
+export type ColumnColor = z.infer<typeof columnColorSchema>;
+
 /** `task_columns.ColumnResponse`. */
 export const taskColumnSchema = z.object({
   id: z.string(),
   name: z.string(),
   position: z.number(),
   is_done: z.boolean(),
+  color: columnColorSchema,
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -45,6 +51,11 @@ export const boardColumnSchema = taskColumnSchema.extend({
   has_more: z.boolean(),
 });
 export type BoardColumn = z.infer<typeof boardColumnSchema>;
+
+/** `GET /tasks/board`'s `filter` query param — server-side (see D3 in the plan), not a client-side selector. */
+export const BOARD_FILTERS = ["all", "mine", "overdue", "today", "unassigned"] as const;
+export const boardFilterSchema = z.enum(BOARD_FILTERS);
+export type BoardFilterValue = z.infer<typeof boardFilterSchema>;
 
 /** `tasks.BoardCountsResponse`. Counts open (`completed_at == null`) tasks in
  * the caller's visible set, independent of any per-column display cap. */
@@ -81,11 +92,13 @@ export const deleteColumnResponseSchema = z.object({
 export interface CreateColumnInput {
   name: string;
   is_done?: boolean;
+  color?: ColumnColor;
 }
 
 export interface UpdateColumnInput {
   name?: string;
   is_done?: boolean;
+  color?: ColumnColor;
 }
 
 export interface CreateTaskInput {

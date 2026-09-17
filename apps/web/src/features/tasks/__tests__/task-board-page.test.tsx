@@ -10,7 +10,13 @@ import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils"
 import { mockViewport } from "@/test/viewport";
 
 import { TaskBoardPage } from "../pages/task-board-page";
-import { boardTodayRequests, resetTasksStore, tasksHandlers } from "./tasks-handlers";
+import {
+  boardAssigneeRequests,
+  boardFilterRequests,
+  boardTodayRequests,
+  resetTasksStore,
+  tasksHandlers,
+} from "./tasks-handlers";
 
 // The board tests only open the form; the editor itself (TipTap and
 // ProseMirror, the feature's largest chunk) is covered by its own test
@@ -348,5 +354,137 @@ describe("TaskBoardPage", () => {
     expect(within(dialog).getByLabelText("Cột")).not.toBeDisabled();
     expect(within(dialog).getByRole("button", { name: "Lưu" })).toBeDisabled();
     expect(within(dialog).getByRole("button", { name: "Huỷ" })).toBeInTheDocument();
+  });
+
+  describe("board filter bar", () => {
+    it("renders the quick filters for a caller with tasks.view_all", async () => {
+      signInAs(testPrimaryTeacher);
+      renderBoardPage();
+      await screen.findByRole("listbox", { name: "Cần làm" });
+
+      expect(screen.getByRole("group", { name: "Bộ lọc nhanh" })).toBeInTheDocument();
+    });
+
+    it("hides the quick filters for a member limited to tasks.list", async () => {
+      server.use(memberCenterMe(["tasks.list"]));
+      signInAs(testPrimaryTeacher);
+      renderBoardPage();
+      await screen.findByRole("listbox", { name: "Cần làm" });
+
+      expect(screen.queryByRole("group", { name: "Bộ lọc nhanh" })).not.toBeInTheDocument();
+    });
+
+    it("re-requests the board with the chosen status filter and reflects it in the URL", async () => {
+      const user = userEvent.setup();
+      signInAs(testPrimaryTeacher);
+      const { router } = renderBoardPage();
+      await screen.findByRole("listbox", { name: "Cần làm" });
+
+      await user.click(screen.getByRole("radio", { name: /^Quá hạn/ }));
+
+      await waitFor(() => expect(boardFilterRequests.at(-1)).toBe("overdue"));
+      expect(router.state.location.search).toContain("filter=overdue");
+    });
+
+    it("re-requests the board with the chosen assignee, then clears it on a second click", async () => {
+      const user = userEvent.setup();
+      signInAs(testPrimaryTeacher);
+      renderBoardPage();
+      await screen.findByRole("listbox", { name: "Cần làm" });
+
+      const chip = await screen.findByRole("radio", { name: /^Cô Lan/ });
+      await user.click(chip);
+      await waitFor(() => expect(boardAssigneeRequests.at(-1)).toBe(testPrimaryTeacher.id));
+
+      await user.click(chip);
+      await waitFor(() => expect(boardAssigneeRequests.at(-1)).toBe(""));
+    });
+
+    it("clears the active filter through the 'Xoá lọc' button", async () => {
+      const user = userEvent.setup();
+      signInAs(testPrimaryTeacher);
+      renderBoardPage();
+      await screen.findByRole("listbox", { name: "Cần làm" });
+
+      await user.click(screen.getByRole("radio", { name: /^Hôm nay/ }));
+      await waitFor(() => expect(boardFilterRequests.at(-1)).toBe("today"));
+
+      await user.click(screen.getByRole("button", { name: "Xoá lọc" }));
+
+      await waitFor(() => expect(boardFilterRequests.at(-1)).toBe("all"));
+      expect(screen.queryByRole("button", { name: "Xoá lọc" })).not.toBeInTheDocument();
+    });
+  });
+
+  describe("quick done", () => {
+    it("moves a task to the done column through its quick-done checkbox", async () => {
+      const user = userEvent.setup();
+      signInAs(testPrimaryTeacher);
+      renderBoardPage();
+      await screen.findByRole("listbox", { name: "Cần làm" });
+
+      await user.click(
+        screen.getByRole("checkbox", { name: 'Đánh dấu "Soạn đề kiểm tra giữa kỳ" là xong' }),
+      );
+
+      await waitFor(() => {
+        const doneColumn = screen.getByRole("listbox", { name: "Hoàn thành" });
+        expect(within(doneColumn).getByText("Soạn đề kiểm tra giữa kỳ")).toBeInTheDocument();
+      });
+      expect(await screen.findByText("Đã đánh dấu xong")).toBeInTheDocument();
+    });
+
+    it("moves the task back to its original column when the undo toast action is clicked", async () => {
+      const user = userEvent.setup();
+      signInAs(testPrimaryTeacher);
+      renderBoardPage();
+      await screen.findByRole("listbox", { name: "Cần làm" });
+
+      await user.click(
+        screen.getByRole("checkbox", { name: 'Đánh dấu "Soạn đề kiểm tra giữa kỳ" là xong' }),
+      );
+      await waitFor(() => {
+        const doneColumn = screen.getByRole("listbox", { name: "Hoàn thành" });
+        expect(within(doneColumn).getByText("Soạn đề kiểm tra giữa kỳ")).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole("button", { name: "Hoàn tác" }));
+
+      await waitFor(() => {
+        const todoColumn = screen.getByRole("listbox", { name: "Cần làm" });
+        expect(within(todoColumn).getByText("Soạn đề kiểm tra giữa kỳ")).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe("column collapse", () => {
+    it("collapses a column to a rail and persists it in the URL", async () => {
+      const user = userEvent.setup();
+      signInAs(testPrimaryTeacher);
+      const { router } = renderBoardPage();
+      await screen.findByRole("listbox", { name: "Cần làm" });
+
+      await user.click(screen.getByRole("button", { name: "Thu gọn cột Cần làm" }));
+
+      await waitFor(() =>
+        expect(screen.queryByRole("listbox", { name: "Cần làm" })).not.toBeInTheDocument(),
+      );
+      expect(screen.getByRole("button", { name: "Mở rộng cột Cần làm" })).toBeInTheDocument();
+      expect(router.state.location.search).toContain("collapsed=");
+    });
+
+    it("expands a collapsed column back to its full view from the rail", async () => {
+      const user = userEvent.setup();
+      signInAs(testPrimaryTeacher);
+      renderBoardPage();
+      await screen.findByRole("listbox", { name: "Cần làm" });
+
+      await user.click(screen.getByRole("button", { name: "Thu gọn cột Cần làm" }));
+      await screen.findByRole("button", { name: "Mở rộng cột Cần làm" });
+
+      await user.click(screen.getByRole("button", { name: "Mở rộng cột Cần làm" }));
+
+      expect(await screen.findByRole("listbox", { name: "Cần làm" })).toBeInTheDocument();
+    });
   });
 });

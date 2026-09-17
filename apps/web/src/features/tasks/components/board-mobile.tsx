@@ -2,10 +2,10 @@ import { DndContext, DragOverlay } from "@dnd-kit/core";
 import { useState } from "react";
 
 import { HvSegmented, HvSelect } from "@/components/hv";
-import type { ColumnId, KanbanColumn, TaskId, TaskPropsExtra } from "@/lib/kanban";
+import type { ColumnId, TaskId, TaskPropsExtra } from "@/lib/kanban";
 
 import type { BoardDndHandle } from "../hooks/use-board-dnd";
-import type { AppTask } from "../hooks/use-tasks-data-source";
+import type { AppColumn, AppTask } from "../hooks/use-tasks-data-source";
 import { TaskCardPreview } from "./task-card-preview";
 import { TaskColumn } from "./task-column";
 
@@ -13,16 +13,19 @@ import { TaskColumn } from "./task-column";
 const SEGMENTED_MAX_COLUMNS = 4;
 
 export interface BoardMobileProps {
-  columns: KanbanColumn[];
+  columns: AppColumn[];
   tasksByColumn: Map<ColumnId, AppTask[]>;
   assigneeNameFor: (assigneeId: string | null) => string | null;
   currentUserId: string | undefined;
   canCreate: boolean;
   canMove: boolean;
+  /** True when an active board filter, not a genuinely empty column, explains an empty column. */
+  filtering: boolean;
   dnd: BoardDndHandle<AppTask>;
   onOpenTask: (taskId: TaskId) => void;
   onCreateTask: (columnId: ColumnId) => void;
   onMoveTask: (taskId: TaskId, columnId: ColumnId) => void;
+  onQuickDone: (taskId: TaskId) => void;
   getColumnProps: (columnId: ColumnId) => Record<string, unknown>;
   getTaskProps: (taskId: TaskId, extra?: TaskPropsExtra) => Record<string, unknown>;
 }
@@ -39,10 +42,12 @@ export function BoardMobile({
   currentUserId,
   canCreate,
   canMove,
+  filtering,
   dnd,
   onOpenTask,
   onCreateTask,
   onMoveTask,
+  onQuickDone,
   getColumnProps,
   getTaskProps,
 }: BoardMobileProps) {
@@ -100,9 +105,11 @@ export function BoardMobile({
           canMove={canMove}
           isDropTarget={activeTask !== null && dnd.overColumnId === active.id}
           reducedMotion={dnd.reducedMotion}
+          filtering={filtering}
           onOpenTask={onOpenTask}
           onCreateTask={onCreateTask}
           onMoveTask={onMoveTask}
+          onQuickDone={onQuickDone}
           getColumnProps={() => getColumnProps(active.id)}
           getTaskProps={getTaskProps}
         />

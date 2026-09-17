@@ -7,13 +7,13 @@ import type { ColumnId, KanbanBoard, KanbanColumn, KanbanTask, TaskId } from "./
  * `setQueryData(key, (board) => kanbanReducer(board, action))`. See
  * README.md "Board is a prop".
  */
-export type KanbanAction<TTask extends KanbanTask> =
-  | { type: "board/replaced"; board: KanbanBoard<TTask> }
+export type KanbanAction<TTask extends KanbanTask, TColumn extends KanbanColumn = KanbanColumn> =
+  | { type: "board/replaced"; board: KanbanBoard<TTask, TColumn> }
   | { type: "tasks/moved"; taskId: TaskId; columnId: ColumnId; position: number }
   | { type: "tasks/upserted"; task: TTask }
   | { type: "tasks/removed"; taskId: TaskId }
   | { type: "columns/reordered"; order: ColumnId[] }
-  | { type: "columns/upserted"; column: KanbanColumn }
+  | { type: "columns/upserted"; column: TColumn }
   | { type: "columns/removed"; columnId: ColumnId };
 
 /**
@@ -22,10 +22,13 @@ export type KanbanAction<TTask extends KanbanTask> =
  * reference unchanged (the exhaustive `switch` below makes the compiler
  * reject a new `KanbanAction` variant that forgets a `case`).
  */
-export function kanbanReducer<TTask extends KanbanTask>(
-  board: KanbanBoard<TTask>,
-  action: KanbanAction<TTask>,
-): KanbanBoard<TTask> {
+export function kanbanReducer<
+  TTask extends KanbanTask,
+  TColumn extends KanbanColumn = KanbanColumn,
+>(
+  board: KanbanBoard<TTask, TColumn>,
+  action: KanbanAction<TTask, TColumn>,
+): KanbanBoard<TTask, TColumn> {
   switch (action.type) {
     case "board/replaced": {
       return action.board;

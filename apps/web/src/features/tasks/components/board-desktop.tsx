@@ -1,24 +1,31 @@
 import { DndContext, DragOverlay } from "@dnd-kit/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { ColumnId, KanbanColumn, TaskId, TaskPropsExtra } from "@/lib/kanban";
+import type { ColumnId, TaskId, TaskPropsExtra } from "@/lib/kanban";
 
 import type { BoardDndHandle } from "../hooks/use-board-dnd";
-import type { AppTask } from "../hooks/use-tasks-data-source";
+import type { AppColumn, AppTask } from "../hooks/use-tasks-data-source";
+import { CollapsedColumnRail } from "./collapsed-column-rail";
 import { TaskCardPreview } from "./task-card-preview";
 import { TaskColumn } from "./task-column";
 
 export interface BoardDesktopProps {
-  columns: KanbanColumn[];
+  columns: AppColumn[];
   tasksByColumn: Map<ColumnId, AppTask[]>;
   assigneeNameFor: (assigneeId: string | null) => string | null;
   currentUserId: string | undefined;
   canCreate: boolean;
   canMove: boolean;
+  /** True when an active board filter, not a genuinely empty column, explains an empty column. */
+  filtering: boolean;
   dnd: BoardDndHandle<AppTask>;
+  /** Columns collapsed to a rail; persisted in the URL (see `useBoardUrlState`). */
+  collapsed: Set<ColumnId>;
+  onToggleCollapse: (columnId: ColumnId) => void;
   onOpenTask: (taskId: TaskId) => void;
   onCreateTask: (columnId: ColumnId) => void;
   onMoveTask: (taskId: TaskId, columnId: ColumnId) => void;
+  onQuickDone: (taskId: TaskId) => void;
   getColumnProps: (columnId: ColumnId) => Record<string, unknown>;
   getTaskProps: (taskId: TaskId, extra?: TaskPropsExtra) => Record<string, unknown>;
 }
@@ -31,10 +38,14 @@ export function BoardDesktop({
   currentUserId,
   canCreate,
   canMove,
+  filtering,
   dnd,
+  collapsed,
+  onToggleCollapse,
   onOpenTask,
   onCreateTask,
   onMoveTask,
+  onQuickDone,
   getColumnProps,
   getTaskProps,
 }: BoardDesktopProps) {
@@ -77,26 +88,39 @@ export function BoardDesktop({
           onScroll={updateCanScrollRight}
           className="flex gap-3 overflow-x-auto overscroll-x-contain pb-2 [scroll-snap-type:x_proximity]"
         >
-          {sorted.map((column) => (
-            <TaskColumn
-              key={column.id}
-              column={column}
-              tasks={tasksByColumn.get(column.id) ?? []}
-              columns={columns}
-              assigneeNameFor={assigneeNameFor}
-              currentUserId={currentUserId}
-              canCreate={canCreate}
-              canMove={canMove}
-              isDropTarget={activeTask !== null && dnd.overColumnId === column.id}
-              reducedMotion={dnd.reducedMotion}
-              onOpenTask={onOpenTask}
-              onCreateTask={onCreateTask}
-              onMoveTask={onMoveTask}
-              getColumnProps={() => getColumnProps(column.id)}
-              getTaskProps={getTaskProps}
-              className="min-w-[230px] w-[280px] shrink-0 [scroll-snap-align:start]"
-            />
-          ))}
+          {sorted.map((column) =>
+            collapsed.has(column.id) ? (
+              <CollapsedColumnRail
+                key={column.id}
+                column={column}
+                taskCount={tasksByColumn.get(column.id)?.length ?? 0}
+                onExpand={() => onToggleCollapse(column.id)}
+                className="[scroll-snap-align:start]"
+              />
+            ) : (
+              <TaskColumn
+                key={column.id}
+                column={column}
+                tasks={tasksByColumn.get(column.id) ?? []}
+                columns={columns}
+                assigneeNameFor={assigneeNameFor}
+                currentUserId={currentUserId}
+                canCreate={canCreate}
+                canMove={canMove}
+                isDropTarget={activeTask !== null && dnd.overColumnId === column.id}
+                reducedMotion={dnd.reducedMotion}
+                filtering={filtering}
+                onOpenTask={onOpenTask}
+                onCreateTask={onCreateTask}
+                onMoveTask={onMoveTask}
+                onQuickDone={onQuickDone}
+                onCollapse={() => onToggleCollapse(column.id)}
+                getColumnProps={() => getColumnProps(column.id)}
+                getTaskProps={getTaskProps}
+                className="min-w-[230px] w-[280px] shrink-0 [scroll-snap-align:start]"
+              />
+            ),
+          )}
         </div>
       </div>
       <DragOverlay dropAnimation={dnd.reducedMotion ? null : undefined}>

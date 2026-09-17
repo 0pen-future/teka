@@ -8,7 +8,7 @@ import { BoardMobile } from "../components/board-mobile";
 import type { AppTask } from "../hooks/use-tasks-data-source";
 
 function makeColumn(id: string, name: string, order: number) {
-  return { id: asColumnId(id), name, order, isDone: false };
+  return { id: asColumnId(id), name, order, isDone: false, color: "none" as const };
 }
 
 function makeTask(id: string, columnId: string, title: string): AppTask {
@@ -45,9 +45,11 @@ function renderBoard(
       currentUserId={undefined}
       canCreate={false}
       canMove={false}
+      filtering={false}
       onOpenTask={vi.fn()}
       onCreateTask={vi.fn()}
       onMoveTask={vi.fn()}
+      onQuickDone={vi.fn()}
       {...noop}
     />,
   );
@@ -121,9 +123,11 @@ describe("BoardMobile", () => {
         currentUserId={undefined}
         canCreate={false}
         canMove={false}
+        filtering={false}
         onOpenTask={vi.fn()}
         onCreateTask={vi.fn()}
         onMoveTask={vi.fn()}
+        onQuickDone={vi.fn()}
         {...noop}
       />,
     );

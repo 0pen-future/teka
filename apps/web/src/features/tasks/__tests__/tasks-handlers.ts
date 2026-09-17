@@ -24,6 +24,7 @@ interface MutableColumn {
   name: string;
   position: number;
   is_done: boolean;
+  color: string;
   created_at: string;
   updated_at: string;
 }
@@ -52,6 +53,10 @@ let taskIdCounter = 0;
 
 /** Every `GET /tasks/board` request's `today` query param, for assertions. */
 export const boardTodayRequests: string[] = [];
+/** Every `GET /tasks/board` request's `filter` query param, for assertions. */
+export const boardFilterRequests: string[] = [];
+/** Every `GET /tasks/board` request's `assignee` query param, for assertions. */
+export const boardAssigneeRequests: string[] = [];
 /** Every `PUT /task-columns/order` request body, for assertions. */
 export const columnOrderRequests: string[][] = [];
 /** Every `POST /tasks` and `PATCH /tasks/:id` request body, for assertions on what the form sends. */
@@ -67,6 +72,8 @@ export function resetTasksStore(): void {
   columnIdCounter = 0;
   taskIdCounter = 0;
   boardTodayRequests.length = 0;
+  boardFilterRequests.length = 0;
+  boardAssigneeRequests.length = 0;
   columnOrderRequests.length = 0;
   taskWriteRequests.length = 0;
   deletedTasks = [];
@@ -76,6 +83,7 @@ export function resetTasksStore(): void {
       name: "Cần làm",
       position: 1,
       is_done: false,
+      color: "none",
       created_at: "2026-09-01T08:00:00Z",
       updated_at: "2026-09-01T08:00:00Z",
     },
@@ -84,6 +92,7 @@ export function resetTasksStore(): void {
       name: "Hoàn thành",
       position: 2,
       is_done: true,
+      color: "mint",
       created_at: "2026-09-01T08:00:00Z",
       updated_at: "2026-09-01T08:00:00Z",
     },
@@ -139,13 +148,65 @@ export function resetTasksStore(): void {
 
 resetTasksStore();
 
-function boardColumnsPayload() {
+/**
+ * Mirrors `boardFilterFrom` in the API's `service.go`: `filter` sets the base
+ * predicate (`mine` restricts to the caller's assignments without an
+ * open-only gate; `overdue`/`today`/`unassigned` add one); an explicit
+ * `assignee` then overrides whatever assignee predicate `filter` implied
+ * (including clearing `unassigned`), rather than ANDing a second one on.
+ */
+function matchesBoardFilter(
+  task: MutableTask,
+  filter: string,
+  assignee: string,
+  today: string,
+): boolean {
+  let openOnly = false;
+  let unassigned = false;
+  let assigneeId: string | undefined;
+  let dueBefore: string | undefined;
+  let dueOn: string | undefined;
+
+  switch (filter) {
+    case "mine":
+      assigneeId = primaryTeacher.id;
+      break;
+    case "overdue":
+      dueBefore = today;
+      openOnly = true;
+      break;
+    case "today":
+      dueOn = today;
+      openOnly = true;
+      break;
+    case "unassigned":
+      unassigned = true;
+      openOnly = true;
+      break;
+    default:
+      break;
+  }
+  if (assignee) {
+    assigneeId = assignee;
+    unassigned = false;
+  }
+
+  if (openOnly && task.completed_at !== null) return false;
+  if (unassigned && task.assignee_id !== null) return false;
+  if (assigneeId && task.assignee_id !== assigneeId) return false;
+  if (dueBefore && !(task.due_on !== null && task.due_on < dueBefore)) return false;
+  if (dueOn && task.due_on !== dueOn) return false;
+  return true;
+}
+
+function boardColumnsPayload(filter: string, assignee: string, today: string) {
   return [...columns]
     .sort((a, b) => a.position - b.position)
     .map((column) => ({
       ...column,
       tasks: tasks
         .filter((task) => task.column_id === column.id)
+        .filter((task) => matchesBoardFilter(task, filter, assignee, today))
         .sort((a, b) => a.position - b.position),
       has_more: false,
     }));
@@ -186,11 +247,17 @@ export const tasksHandlers = [
   http.get(`${API_URL}/tasks/board`, ({ request }) => {
     const url = new URL(request.url);
     const today = url.searchParams.get("today") ?? "2026-09-17";
+    const filter = url.searchParams.get("filter") ?? "all";
+    const assignee = url.searchParams.get("assignee") ?? "";
     boardTodayRequests.push(today);
-    return HttpResponse.json(ok({ columns: boardColumnsPayload(), counts: boardCounts(today) }));
+    boardFilterRequests.push(filter);
+    boardAssigneeRequests.push(assignee);
+    return HttpResponse.json(
+      ok({ columns: boardColumnsPayload(filter, assignee, today), counts: boardCounts(today) }),
+    );
   }),
   http.post(`${API_URL}/task-columns`, async ({ request }) => {
-    const body = (await request.json()) as { name: string; is_done?: boolean };
+    const body = (await request.json()) as { name: string; is_done?: boolean; color?: string };
     const trimmed = body.name.trim();
     if (columns.some((column) => column.name === trimmed)) {
       return HttpResponse.json(
@@ -210,6 +277,7 @@ export const tasksHandlers = [
       name: trimmed,
       position: columns.length + 1,
       is_done: body.is_done ?? false,
+      color: body.color ?? "none",
       created_at: "2026-09-13T10:00:00Z",
       updated_at: "2026-09-13T10:00:00Z",
     };
@@ -217,7 +285,7 @@ export const tasksHandlers = [
     return HttpResponse.json(ok(column), { status: 201 });
   }),
   http.patch(`${API_URL}/task-columns/:id`, async ({ params, request }) => {
-    const body = (await request.json()) as { name?: string; is_done?: boolean };
+    const body = (await request.json()) as { name?: string; is_done?: boolean; color?: string };
     const column = columns.find((candidate) => candidate.id === params.id);
     if (!column) {
       return HttpResponse.json(fail("NOT_FOUND", "column not found"), { status: 404 });
@@ -234,6 +302,9 @@ export const tasksHandlers = [
     }
     if (body.is_done !== undefined) {
       column.is_done = body.is_done;
+    }
+    if (body.color !== undefined) {
+      column.color = body.color;
     }
     column.updated_at = "2026-09-13T10:00:00Z";
     return HttpResponse.json(ok(column));

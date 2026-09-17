@@ -5,6 +5,34 @@ selectors, a `KanbanDataSource` port, and two hooks (`useKanban`,
 `useKanbanKeyboard`). No JSX, no CSS, no design system, no TanStack, no
 `@/lib/api`. The only dependency is `react`.
 
+## Types
+
+`KanbanBoard<TTask extends KanbanTask, TColumn extends KanbanColumn = KanbanColumn>`
+carries a second type parameter for the column shape, defaulted to the lib's
+own `KanbanColumn` so every existing `KanbanBoard<TTask>` call site keeps
+compiling unchanged. An app that needs extra column fields (Teka: a `color`
+swatch the lib itself never reads) declares its own `AppColumn extends
+KanbanColumn { color: ... }` and threads it through:
+
+```ts
+interface AppColumn extends KanbanColumn {
+  color: "none" | "sky" | "sun" | "mint";
+}
+
+useKanban<AppTask, AppColumn>({ board, dataSource, messages });
+```
+
+`KanbanAction`, `kanbanReducer`, `UseKanbanOptions`, `UseKanbanResult`, and
+the three selectors (`selectTasksByColumn`, `selectColumnCounts`,
+`selectAdjacentColumnId`) all forward the same `TColumn` parameter, so a
+`columns/upserted` action and the board it produces both keep the app's
+richer column type end to end — `board.columns[i].color` reads back typed,
+with no cast at the app boundary. `KanbanDataSource<TTask>` and
+`useKanbanKeyboard` stay untouched: neither one branches on column shape, and
+TypeScript's structural (covariant) array typing lets a `KanbanBoard<TTask,
+AppColumn>` flow into code still typed for the default `KanbanBoard<TTask>`
+without an explicit conversion.
+
 ## Accessibility contract (verified before implementation)
 
 Sources read before any prop-getter code was written:

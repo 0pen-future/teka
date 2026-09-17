@@ -4,16 +4,17 @@ import { CSS } from "@dnd-kit/utilities";
 import { useMemo, useRef, type ComponentProps, type CSSProperties, type ReactNode } from "react";
 
 import { HvBadge } from "@/components/hv";
-import type { ColumnId, KanbanColumn, TaskPropsExtra } from "@/lib/kanban";
+import type { ColumnId, TaskPropsExtra } from "@/lib/kanban";
 import { cn, formatDateTime } from "@/lib/utils";
 
 import type { BoardDndData } from "../hooks/use-board-dnd";
-import type { AppTask } from "../hooks/use-tasks-data-source";
+import type { AppColumn, AppTask } from "../hooks/use-tasks-data-source";
 import { dueState } from "../lib/due-state";
 import { textFromHtml } from "../lib/rich-text";
 import { ActionsMenu } from "./actions-menu";
 import { AssigneeAvatar } from "./assignee-avatar";
 import { CardControlBarrier } from "./card-control-barrier";
+import { QuickDoneCheckbox } from "./quick-done-checkbox";
 import { PRIORITY_LABELS, PRIORITY_VARIANTS, taskCardSurfaceClassName } from "./task-card-styles";
 
 /**
@@ -36,6 +37,11 @@ export interface TaskCardBodyProps {
    * unset — a static copy has nothing to act on.
    */
   actions?: ReactNode;
+  /**
+   * Slot for the "Xong" quick-done checkbox, rendered at the card's leading
+   * edge. Unset on the drag-overlay preview, same reasoning as `actions`.
+   */
+  quickDone?: ReactNode;
 }
 
 /**
@@ -44,13 +50,14 @@ export interface TaskCardBodyProps {
  * instant, not a bare DATE) and keeps only the leading `dd/MM` slice, since
  * the exact time of completion doesn't matter here.
  */
-export function TaskCardBody({ task, assigneeName, actions }: TaskCardBodyProps) {
+export function TaskCardBody({ task, assigneeName, actions, quickDone }: TaskCardBodyProps) {
   const done = task.completedAt !== null;
   const due = useMemo(() => dueState(task), [task]);
   const preview = useMemo(() => textFromHtml(task.description), [task.description]);
   return (
     <>
       <div className="flex items-start gap-2">
+        {quickDone}
         {assigneeName ? <AssigneeAvatar name={assigneeName} className="mt-0.5" /> : null}
         <p className="min-w-0 flex-1 text-[13.5px] font-bold text-ink-900">{task.title}</p>
         {actions}
@@ -80,11 +87,13 @@ export function TaskCardBody({ task, assigneeName, actions }: TaskCardBodyProps)
 
 export interface TaskCardProps {
   task: AppTask;
-  columns: KanbanColumn[];
+  columns: AppColumn[];
   assigneeName: string | null;
   isAssignedToMe: boolean;
   onOpen: () => void;
   onMove: (columnId: ColumnId) => void;
+  /** Moves the task to the first "done" column; a no-op once it's already done (the checkbox disables itself). */
+  onQuickDone: () => void;
   moveDisabled?: boolean;
   /** Skip the sort transition under `prefers-reduced-motion` (read once by `useBoardDnd`). */
   reducedMotion: boolean;
@@ -110,6 +119,7 @@ export function TaskCard({
   isAssignedToMe,
   onOpen,
   onMove,
+  onQuickDone,
   moveDisabled = false,
   reducedMotion,
   getTaskProps,
@@ -170,6 +180,18 @@ export function TaskCard({
       <TaskCardBody
         task={task}
         assigneeName={assigneeName}
+        quickDone={
+          // Same barrier reasoning as `actions` below: a click or press on
+          // the checkbox must not open the card or start a drag.
+          <CardControlBarrier>
+            <QuickDoneCheckbox
+              checked={task.completedAt !== null}
+              onCheckedChange={onQuickDone}
+              disabled={moveDisabled}
+              label={`Đánh dấu "${task.title}" là xong`}
+            />
+          </CardControlBarrier>
+        }
         actions={
           // The barrier keeps the menu from opening the card (click) or
           // starting a drag (mouse/touch press reaching dnd-kit's listeners).

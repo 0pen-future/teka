@@ -2,7 +2,7 @@ import { useCallback, useMemo } from "react";
 
 import type { KanbanDataSource } from "./data-source";
 import { selectTasksByColumn, type AdjacentDirection } from "./selectors";
-import type { ColumnId, KanbanBoard, KanbanTask, TaskId } from "./types";
+import type { ColumnId, KanbanBoard, KanbanColumn, KanbanTask, TaskId } from "./types";
 import {
   useKanbanKeyboard,
   type ColumnPropsExtra,
@@ -21,21 +21,27 @@ export interface TaskProps extends KeyboardTaskProps {
   role: "option";
 }
 
-export interface UseKanbanOptions<TTask extends KanbanTask> {
+export interface UseKanbanOptions<
+  TTask extends KanbanTask,
+  TColumn extends KanbanColumn = KanbanColumn,
+> {
   /**
    * The board to render. Owned by the app (Teka: a TanStack Query cache),
    * returned back from this hook unchanged — see README.md "Board is a
    * prop". Passing a new `board` (e.g. after `kanbanReducer` or a refetch)
    * is the only way `tasksByColumn` and the prop getters change.
    */
-  board: KanbanBoard<TTask>;
+  board: KanbanBoard<TTask, TColumn>;
   dataSource: KanbanDataSource<TTask>;
   /** Forwarded to {@link useKanbanKeyboard}; defaults to English. */
   messages?: UseKanbanKeyboardMessages;
 }
 
-export interface UseKanbanResult<TTask extends KanbanTask> {
-  board: KanbanBoard<TTask>;
+export interface UseKanbanResult<
+  TTask extends KanbanTask,
+  TColumn extends KanbanColumn = KanbanColumn,
+> {
+  board: KanbanBoard<TTask, TColumn>;
   tasksByColumn: Map<ColumnId, TTask[]>;
   moveTask: (taskId: TaskId, columnId: ColumnId, position: number) => Promise<TTask>;
   reorderColumn: (columnId: ColumnId, direction: AdjacentDirection) => Promise<void>;
@@ -54,11 +60,11 @@ export interface UseKanbanResult<TTask extends KanbanTask> {
  * (roving-tabindex focus, the latest announcement), delegated to
  * {@link useKanbanKeyboard}.
  */
-export function useKanban<TTask extends KanbanTask>({
+export function useKanban<TTask extends KanbanTask, TColumn extends KanbanColumn = KanbanColumn>({
   board,
   dataSource,
   messages,
-}: UseKanbanOptions<TTask>): UseKanbanResult<TTask> {
+}: UseKanbanOptions<TTask, TColumn>): UseKanbanResult<TTask, TColumn> {
   const tasksByColumn = useMemo(() => selectTasksByColumn(board), [board]);
   const keyboard = useKanbanKeyboard({ board, dataSource, messages });
 

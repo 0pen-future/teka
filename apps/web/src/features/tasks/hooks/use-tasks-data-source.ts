@@ -36,6 +36,7 @@ import { mapApiError } from "../lib/map-api-error";
 import type {
   BoardCounts,
   BoardResponse,
+  ColumnColor,
   Task,
   TaskColumn,
   TaskPriority,
@@ -62,6 +63,15 @@ export interface AppTask extends KanbanTask {
   createdBy: string;
   completedAt: string | null;
   updatedAt: string;
+}
+
+/**
+ * The board-rendering column shape: the headless lib's `KanbanColumn` fields
+ * plus the app-specific `color` tint the lib itself never reads (see
+ * `src/lib/kanban/README.md` "Types").
+ */
+export interface AppColumn extends KanbanColumn {
+  color: ColumnColor;
 }
 
 export interface CreateTaskVariables {
@@ -100,12 +110,14 @@ export interface UpdateTaskVariables {
 export interface CreateColumnVariables {
   name: string;
   isDone: boolean;
+  color?: ColumnColor;
 }
 
 export interface UpdateColumnVariables {
   columnId: ColumnId;
   name?: string;
   isDone?: boolean;
+  color?: ColumnColor;
 }
 
 export interface DeleteColumnVariables {
@@ -140,16 +152,17 @@ function toAppTask(task: Task): AppTask {
   };
 }
 
-function toAppColumn(column: TaskColumn): KanbanColumn {
+function toAppColumn(column: TaskColumn): AppColumn {
   return {
     id: asColumnId(column.id),
     name: column.name,
     order: column.position,
     isDone: column.is_done,
+    color: column.color,
   };
 }
 
-function toAppBoard(response: BoardResponse): KanbanBoard<AppTask> {
+function toAppBoard(response: BoardResponse): KanbanBoard<AppTask, AppColumn> {
   return {
     columns: response.columns.map(toAppColumn),
     tasks: response.columns.flatMap((column) => column.tasks.map(toAppTask)),
@@ -167,7 +180,7 @@ function toAppBoard(response: BoardResponse): KanbanBoard<AppTask> {
  */
 export interface BoardQueryData {
   counts: BoardCounts;
-  board: KanbanBoard<AppTask>;
+  board: KanbanBoard<AppTask, AppColumn>;
 }
 
 /** Exported so `use-task-board.ts`'s query and this file's mutations agree on one cache shape. */
@@ -182,8 +195,8 @@ export interface UseTasksDataSourceResult {
   moveTaskMutation: UseMutationResult<AppTask, KanbanError, MoveTaskVariables>;
   deleteTaskMutation: UseMutationResult<void, KanbanError, TaskId>;
   restoreTaskMutation: UseMutationResult<AppTask, KanbanError, TaskId>;
-  createColumnMutation: UseMutationResult<KanbanColumn, KanbanError, CreateColumnVariables>;
-  updateColumnMutation: UseMutationResult<KanbanColumn, KanbanError, UpdateColumnVariables>;
+  createColumnMutation: UseMutationResult<AppColumn, KanbanError, CreateColumnVariables>;
+  updateColumnMutation: UseMutationResult<AppColumn, KanbanError, UpdateColumnVariables>;
   reorderColumnsMutation: UseMutationResult<void, KanbanError, ColumnId[]>;
   deleteColumnMutation: UseMutationResult<void, KanbanError, DeleteColumnVariables>;
 }
@@ -206,7 +219,7 @@ export function useTasksDataSource(params: GetBoardParams): UseTasksDataSourceRe
   const queryClient = useQueryClient();
   const boardKey = tasksKeys.board(params);
 
-  const applyOptimistic = (action: KanbanAction<AppTask>): void => {
+  const applyOptimistic = (action: KanbanAction<AppTask, AppColumn>): void => {
     queryClient.setQueryData<BoardQueryData>(boardKey, (data) =>
       data ? { ...data, board: kanbanReducer(data.board, action) } : data,
     );
@@ -216,11 +229,15 @@ export function useTasksDataSource(params: GetBoardParams): UseTasksDataSourceRe
     void queryClient.invalidateQueries({ queryKey: tasksKeys.boards() });
   };
 
-  const createColumnMutation = useMutation<KanbanColumn, KanbanError, CreateColumnVariables>({
+  const createColumnMutation = useMutation<AppColumn, KanbanError, CreateColumnVariables>({
     scope: KANBAN_MUTATION_SCOPE,
     mutationFn: async (variables) => {
       try {
-        const column = await createColumnApi({ name: variables.name, is_done: variables.isDone });
+        const column = await createColumnApi({
+          name: variables.name,
+          is_done: variables.isDone,
+          color: variables.color,
+        });
         return toAppColumn(column);
       } catch (error) {
         throw mapApiError(error, "column");
@@ -232,13 +249,14 @@ export function useTasksDataSource(params: GetBoardParams): UseTasksDataSourceRe
     onSettled: invalidateBoard,
   });
 
-  const updateColumnMutation = useMutation<KanbanColumn, KanbanError, UpdateColumnVariables>({
+  const updateColumnMutation = useMutation<AppColumn, KanbanError, UpdateColumnVariables>({
     scope: KANBAN_MUTATION_SCOPE,
     mutationFn: async (variables) => {
       try {
         const column = await updateColumnApi(variables.columnId, {
           name: variables.name,
           is_done: variables.isDone,
+          color: variables.color,
         });
         return toAppColumn(column);
       } catch (error) {
@@ -256,6 +274,7 @@ export function useTasksDataSource(params: GetBoardParams): UseTasksDataSourceRe
             ...existing,
             name: variables.name ?? existing.name,
             isDone: variables.isDone ?? existing.isDone,
+            color: variables.color ?? existing.color,
           },
         });
       }
