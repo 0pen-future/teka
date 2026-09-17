@@ -435,6 +435,13 @@ DTOs carry `binding` tags; handlers translate binding failures with
 `validation.BindError(err)`: validator errors become a 422 envelope with
 per-field messages, anything else (malformed JSON) becomes a 400.
 
+Rich text fields are sanitized at the feature layer, never in `pkg/` cores
+or on the client alone: the field's bluemonday allowlist lives next to its
+DTO (see `internal/features/tasks/description.go`), the DTO's `binding`
+cap bounds the raw markup, and the service caps the text the markup carries.
+Plain text sent to such a field is wrapped the same way the migration that
+introduced the field wrapped legacy rows, so old clients keep line breaks.
+
 ## Authentication
 
 - **Login identifier**: the Vietnamese phone number. Requests accept local

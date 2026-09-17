@@ -320,10 +320,10 @@ func TestDownFoldsPersonalChannelIntoManual(t *testing.T) {
 		 VALUES (?, ?, ?, ?, 'zalo_personal')`,
 		notifID, f.teacherID, f.centerID, f.statementID).Error)
 
-	// Roll back through 000005 (zalo_personal_mapping): eighteen steps now
-	// that the additive 000008-000022 sit on top of the migrations this test
+	// Roll back through 000005 (zalo_personal_mapping): nineteen steps now
+	// that the additive 000008-000023 sit on top of the migrations this test
 	// predates.
-	require.NoError(t, database.MigrateDown(m, 18))
+	require.NoError(t, database.MigrateDown(m, 19))
 
 	var channel string
 	require.NoError(t, db.Raw(
@@ -2139,4 +2139,79 @@ func TestTaskBoardBackfillSeedsThreeDefaultColumns(t *testing.T) {
 	require.NoError(t, db.Raw(
 		`SELECT count(*) FROM task_columns WHERE center_id = ?`, live.centerID).Scan(&n).Error)
 	require.EqualValues(t, 3, n, "re-applying the same seed must not create duplicate columns")
+}
+
+// Legacy task descriptions are plain text; once the API stores a sanitized
+// HTML subset, every stored description must already be in that form or the
+// client would render old text as markup (and lose its line breaks). The
+// wrap escapes text — a plain description that happens to start with "<p>"
+// is data, not a paragraph — and covers soft-deleted rows so the column is
+// uniform. Down is documented as lossy, so it is checked only for the text
+// and line breaks it promises to keep.
+func TestTaskDescriptionWrapsLegacyPlainText(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+	// Step back below 000023 and seed plain-text descriptions.
+	require.NoError(t, m.Migrate(22))
+
+	db := openDB(t, url)
+	f := seedNotificationParents(t, db, "+84900001501")
+	column := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO task_columns (id, center_id, name, position) VALUES (?, ?, 'Cần làm', 0)`,
+		column, f.centerID).Error)
+
+	seed := func(description string, deleted bool) uuid.UUID {
+		id := uuid.New()
+		var deletedAt any
+		if deleted {
+			deletedAt = time.Now()
+		}
+		require.NoError(t, db.Exec(
+			`INSERT INTO tasks (id, center_id, column_id, created_by, title, description, deleted_at)
+			 VALUES (?, ?, ?, ?, 'Việc', ?, ?)`,
+			id, f.centerID, column, f.teacherID, description, deletedAt).Error)
+		return id
+	}
+	empty := seed("", false)
+	special := seed("x < y & z\r\nnext\nlast", false)
+	literalP := seed("<p>not a paragraph</p>", false)
+	gone := seed("gone", true)
+
+	description := func(id uuid.UUID) string {
+		var s string
+		require.NoError(t, db.Raw(`SELECT description FROM tasks WHERE id = ?`, id).Scan(&s).Error)
+		return s
+	}
+
+	require.NoError(t, m.Migrate(23))
+	require.Equal(t, "", description(empty), "an empty description stays empty")
+	require.Equal(t, "<p>x &lt; y &amp; z<br>next<br>last</p>", description(special))
+	require.Equal(t, "<p>&lt;p&gt;not a paragraph&lt;/p&gt;</p>", description(literalP),
+		"plain text starting with a tag must be escaped, not trusted as markup")
+	require.Equal(t, "<p>gone</p>", description(gone), "soft-deleted rows are wrapped too")
+
+	var unwrapped int64
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM tasks WHERE description <> '' AND description NOT LIKE '<p>%'`,
+	).Scan(&unwrapped).Error)
+	require.Zero(t, unwrapped, "every non-empty description must now be wrapped")
+
+	require.NoError(t, m.Migrate(22))
+	require.Equal(t, "", description(empty))
+	require.Equal(t, "x < y & z\nnext\nlast", description(special),
+		"down restores the text and its line breaks; the CRLF was already folded on the way up")
+	require.Equal(t, "<p>not a paragraph</p>", description(literalP))
+	require.Equal(t, "gone", description(gone))
+
+	// Up again from the restored plain text lands on the same HTML: the
+	// migration pair round-trips text and line breaks.
+	require.NoError(t, m.Migrate(23))
+	require.Equal(t, "<p>x &lt; y &amp; z<br>next<br>last</p>", description(special))
+	require.Equal(t, "<p>&lt;p&gt;not a paragraph&lt;/p&gt;</p>", description(literalP))
 }

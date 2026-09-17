@@ -12949,7 +12949,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "An absent column_id defaults to the board's first column.",
+                "description": "An absent column_id defaults to the board's first column. description is an HTML subset (p, br, strong, em, u, s, ul, ol, li, a[href] with http/https/mailto); the server sanitizes it, treats a value not starting with \"\u003c\" as plain text, and rejects more than 4000 text characters.",
                 "consumes": [
                     "application/json"
                 ],
@@ -13289,7 +13289,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Requires being the center owner or the task's creator. assignee_id and due_on are tri-state: absent leaves the field unchanged, null clears it, a value sets it.",
+                "description": "Requires being the center owner or the task's creator. assignee_id and due_on are tri-state: absent leaves the field unchanged, null clears it, a value sets it. description is an HTML subset (p, br, strong, em, u, s, ul, ol, li, a[href] with http/https/mailto); the server sanitizes it, treats a value not starting with \"\u003c\" as plain text, and rejects more than 4000 text characters.",
                 "consumes": [
                     "application/json"
                 ],
@@ -16355,7 +16355,7 @@ const docTemplate = `{
                 },
                 "description": {
                     "type": "string",
-                    "maxLength": 4000
+                    "maxLength": 20000
                 },
                 "due_on": {
                     "type": "string"
@@ -16475,7 +16475,7 @@ const docTemplate = `{
                 },
                 "description": {
                     "type": "string",
-                    "maxLength": 4000
+                    "maxLength": 20000
                 },
                 "due_on": {
                     "type": "string"

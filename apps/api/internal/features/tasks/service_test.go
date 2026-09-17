@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin/binding"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
@@ -749,4 +751,69 @@ func TestParseDueOnAcceptsNilAndRejectsBadFormat(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Equal(t, 2026, got.Year())
+}
+
+func TestCreateTaskStoresSanitizedDescription(t *testing.T) {
+	env := newTestEnv()
+	center := uuid.New()
+	owner := uuid.New()
+	col := kanban.Column{ID: kanban.ColumnID(uuid.New()), TenantID: kanban.TenantID(center)}
+	env.cols.cols[col.ID] = col
+
+	resp, err := env.svc.CreateTask(context.Background(), scopeFor(owner, center, true), CreateTaskRequest{
+		Title:       "x",
+		Description: `<p>Hi</p><script>alert(1)</script><a href="javascript:x" onclick="y">l</a>`,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "<p>Hi</p>l", resp.Description)
+	require.Equal(t, "<p>Hi</p>l", env.tasksRep.tasks[kanban.TaskID(resp.ID)].Description, "the stored value is the sanitized one")
+
+	plain, err := env.svc.CreateTask(context.Background(), scopeFor(owner, center, true), CreateTaskRequest{
+		Title: "x", Description: "a\nb",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "<p>a<br>b</p>", plain.Description, "plain text keeps its line break as a paragraph with <br>")
+}
+
+func TestUpdateTaskRejectsOverlongDescription(t *testing.T) {
+	env := newTestEnv()
+	center := uuid.New()
+	owner := uuid.New()
+	col := kanban.Column{ID: kanban.ColumnID(uuid.New()), TenantID: kanban.TenantID(center)}
+	env.cols.cols[col.ID] = col
+	created, err := env.svc.CreateTask(context.Background(), scopeFor(owner, center, true), CreateTaskRequest{Title: "x", Description: "keep"})
+	require.NoError(t, err)
+
+	tooLong := strings.Repeat("ă", maxDescriptionRunes+1)
+	_, err = env.svc.UpdateTask(context.Background(), scopeFor(owner, center, true), created.ID, UpdateTaskRequest{Description: &tooLong})
+	ae := appErr(t, err)
+	require.Equal(t, apperror.CodeValidation, ae.Code)
+	require.Equal(t, "tối đa 4000 ký tự", ae.Fields["description"])
+	require.Equal(t, "<p>keep</p>", env.tasksRep.tasks[kanban.TaskID(created.ID)].Description, "a rejected update leaves the stored description untouched")
+
+	empty := "<p><br></p>"
+	updated, err := env.svc.UpdateTask(context.Background(), scopeFor(owner, center, true), created.ID, UpdateTaskRequest{Description: &empty})
+	require.NoError(t, err)
+	require.Equal(t, "", updated.Description, "an all-markup document clears the description")
+}
+
+// The binding cap bounds the raw markup a client may send, so the sanitizer
+// never has to chew through an unbounded body; the 4000-character limit on
+// the text it carries is the service's job (see normalizeDescription). The
+// validator counts runes, so a multi-byte script is not penalised.
+func TestDescriptionBindingCapsRawMarkup(t *testing.T) {
+	within := strings.Repeat("ă", 20000)
+	over := within + "ă"
+
+	require.NoError(t, binding.Validator.ValidateStruct(&CreateTaskRequest{Title: "x", Description: within}))
+	err := binding.Validator.ValidateStruct(&CreateTaskRequest{Title: "x", Description: over})
+	require.Error(t, err)
+	ae := validation.BindError(err)
+	require.Equal(t, apperror.CodeValidation, ae.Code)
+	require.Contains(t, ae.Fields, "description")
+
+	require.NoError(t, binding.Validator.ValidateStruct(&UpdateTaskRequest{Description: &within}))
+	err = binding.Validator.ValidateStruct(&UpdateTaskRequest{Description: &over})
+	require.Error(t, err)
+	require.Contains(t, validation.BindError(err).Fields, "description")
 }

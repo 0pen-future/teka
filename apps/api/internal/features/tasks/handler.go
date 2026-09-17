@@ -214,7 +214,7 @@ func (h *Handler) deleteColumn(c *gin.Context) {
 // createTask adds a task to the board.
 //
 //	@Summary		Create a task
-//	@Description	An absent column_id defaults to the board's first column.
+//	@Description	An absent column_id defaults to the board's first column. description is an HTML subset (p, br, strong, em, u, s, ul, ol, li, a[href] with http/https/mailto); the server sanitizes it, treats a value not starting with "<" as plain text, and rejects more than 4000 text characters.
 //	@Tags			tasks
 //	@Accept			json
 //	@Produce		json
@@ -276,7 +276,7 @@ func (h *Handler) getTask(c *gin.Context) {
 // updateTask patches a task's editable content.
 //
 //	@Summary		Update a task
-//	@Description	Requires being the center owner or the task's creator. assignee_id and due_on are tri-state: absent leaves the field unchanged, null clears it, a value sets it.
+//	@Description	Requires being the center owner or the task's creator. assignee_id and due_on are tri-state: absent leaves the field unchanged, null clears it, a value sets it. description is an HTML subset (p, br, strong, em, u, s, ul, ol, li, a[href] with http/https/mailto); the server sanitizes it, treats a value not starting with "<" as plain text, and rejects more than 4000 text characters.
 //	@Tags			tasks
 //	@Accept			json
 //	@Produce		json

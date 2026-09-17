@@ -183,6 +183,10 @@ func (s *Service) CreateTask(ctx context.Context, sc authctx.Scope, req CreateTa
 	if err != nil {
 		return TaskResponse{}, err
 	}
+	description, err := normalizeDescription(req.Description)
+	if err != nil {
+		return TaskResponse{}, translateError(err)
+	}
 	var assignee *kanban.ActorID
 	if req.AssigneeID != nil {
 		v := kanban.ActorID(*req.AssigneeID)
@@ -192,7 +196,7 @@ func (s *Service) CreateTask(ctx context.Context, sc authctx.Scope, req CreateTa
 	in := kanban.CreateTaskInput{
 		ColumnID:    kanban.ColumnID(*columnID),
 		Title:       req.Title,
-		Description: req.Description,
+		Description: description,
 		Priority:    priorityFromString(req.Priority),
 		DueOn:       dueOn,
 		AssigneeID:  assignee,
@@ -214,7 +218,9 @@ func (s *Service) GetTask(ctx context.Context, sc authctx.Scope, id uuid.UUID) (
 }
 
 // UpdateTask patches a task's editable content. Title/Description/Priority
-// are plain optionals; AssigneeID/DueOn use Optional[T]'s three states. Since
+// are plain optionals; AssigneeID/DueOn use Optional[T]'s three states. A
+// sent description is normalized like on create, so an update can never
+// store markup outside the allowlist. Since
 // kanban.UpdateTaskInput replaces a task's whole editable state at once (see
 // pkg/kanban/entity.go), this loads the current task first and merges the
 // patch on top of it — CanWriteTask (owner or creator) is a subset of
@@ -234,7 +240,10 @@ func (s *Service) UpdateTask(ctx context.Context, sc authctx.Scope, id uuid.UUID
 	}
 	description := current.Description
 	if req.Description != nil {
-		description = *req.Description
+		description, err = normalizeDescription(*req.Description)
+		if err != nil {
+			return TaskResponse{}, translateError(err)
+		}
 	}
 	priority := current.Priority
 	if req.Priority != nil {

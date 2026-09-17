@@ -73,6 +73,8 @@ func translateError(err error) error {
 		return apperror.Invalid("validation failed", map[string]string{"move_to": "phải là một cột khác"})
 	case errors.Is(err, kanban.ErrInvalidAfterTask):
 		return apperror.Invalid("validation failed", map[string]string{"after_task_id": "phải là việc đang nằm trong cột đích"})
+	case errors.Is(err, errDescriptionTooLong):
+		return apperror.Invalid("validation failed", map[string]string{"description": "tối đa 4000 ký tự"})
 	case errors.Is(err, kanban.ErrInvalidInput):
 		return apperror.Invalid("invalid input", nil)
 	default:

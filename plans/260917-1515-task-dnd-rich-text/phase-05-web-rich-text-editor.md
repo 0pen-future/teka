@@ -107,3 +107,6 @@ Lớp phòng thủ: server bluemonday (phase 2) là ranh giới tin cậy; DOMPu
 - **Tailwind v4 không có plugin typography** → `.prose-task` thủ công, ~10 dòng.
 - **Dữ liệu dev chưa migrate** → `normalizeIncoming` che (cả `defaultValues` lẫn `content`); không dùng làm lý do bỏ migration.
 - **`CharacterCount` đếm khác `plainTextLength`** (có thể đếm cả markup/entity) → chỉ là gợi ý hiển thị; lỗi thật do zod/Go quyết định. Nếu lệch gây khó hiểu, thay số hiển thị bằng `plainTextLength(editor.getHTML())`.
+- **Server không cân bằng thẻ** (bluemonday giữ nguyên `<p><strong>a` chưa đóng; review Phase 2 L4): `RichTextView` phải render trong một container riêng qua DOMPurify, không nối chuỗi mô tả vào markup khác. DOMPurify sẽ tự đóng thẻ khi parse.
+- **Bảng dán từ Word/Sheets mất ranh giới ô** (`<table>` ngoài allowlist → text nối liền "ab"; review Phase 2 L6): editor TipTap không có extension table nên paste đã ép về paragraph; nếu người dùng phàn nàn, cân nhắc mở rộng allowlist ở cả Go lẫn DOMPurify, không sửa riêng một phía.
+- **Schema cũ cap 2000 ký tự HTML** (`task-schemas.ts:104`; review Phase 2 M2): sau migration 000023 một mô tả thuần ~1995 ký tự thành HTML dài hơn 2000, nên schema mới (đếm text ≤ 2000, HTML ≤ 20000) phải deploy cùng API ở Phase 6, không tách rời.

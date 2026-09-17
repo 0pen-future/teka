@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "API: mô tả rich text (sanitize, giới hạn, migration 000023)"
-status: pending
+status: completed
 priority: P1
 effort: "1d"
 dependencies: []
@@ -134,10 +134,10 @@ strip `<[^>]+>` → unescape `&lt;`, `&gt;` rồi `&amp;` sau cùng; comment rõ
 
 ## Success Criteria
 
-- [ ] AC5 đầy đủ trong `description_test.go` + HTTP test.
-- [ ] AC6: migration test up/down xanh; up idempotent (chạy 2 lần cùng kết quả).
-- [ ] `TestImportBoundary` xanh; `govulncheck ./...` (nếu có trong lint) không báo bluemonday.
-- [ ] Swagger mô tả đúng subset; `make api-docs` diff sạch.
+- [x] AC5 đầy đủ trong `description_test.go` + HTTP test.
+- [x] AC6: migration test up/down xanh; up idempotent (chạy 2 lần cùng kết quả).
+- [x] `TestImportBoundary` xanh; `govulncheck ./...` (nếu có trong lint) không báo bluemonday.
+- [x] Swagger mô tả đúng subset; `make api-docs` diff sạch.
 
 ## Risk Assessment
 

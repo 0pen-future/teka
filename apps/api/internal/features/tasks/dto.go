@@ -144,10 +144,12 @@ type DeleteColumnResponse struct {
 }
 
 // CreateTaskRequest adds a task. An absent ColumnID defaults to the board's
-// position-0 column, per the API contract.
+// position-0 column, per the API contract. Description is an HTML subset
+// (see description.go): the binding cap bounds the raw markup a client may
+// send, the service caps the text it carries at maxDescriptionRunes.
 type CreateTaskRequest struct {
 	Title       string     `json:"title" binding:"required,min=1,max=200"`
-	Description string     `json:"description" binding:"max=4000"`
+	Description string     `json:"description" binding:"max=20000"`
 	ColumnID    *uuid.UUID `json:"column_id"`
 	AssigneeID  *uuid.UUID `json:"assignee_id"`
 	Priority    string     `json:"priority" binding:"omitempty,oneof=none low medium high"`
@@ -161,7 +163,7 @@ type CreateTaskRequest struct {
 // absent = unchanged, null = clear, value = set.
 type UpdateTaskRequest struct {
 	Title       *string             `json:"title" binding:"omitempty,min=1,max=200"`
-	Description *string             `json:"description" binding:"omitempty,max=4000"`
+	Description *string             `json:"description" binding:"omitempty,max=20000"`
 	Priority    *string             `json:"priority" binding:"omitempty,oneof=none low medium high"`
 	AssigneeID  Optional[uuid.UUID] `json:"assignee_id" swaggertype:"string"`
 	DueOn       Optional[string]    `json:"due_on" swaggertype:"string"`
