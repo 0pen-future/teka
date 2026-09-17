@@ -58,6 +58,14 @@ describe("HvSegmented", () => {
     );
   });
 
+  it("keeps item labels on a single line", () => {
+    render(<Harness variant="segmented" />);
+    expect(screen.getByRole("radio", { name: "Ghi chú" })).toHaveClass("whitespace-nowrap");
+
+    render(<Harness variant="tabs" />);
+    expect(screen.getAllByRole("tab", { name: "Ghi chú" })[0]).toHaveClass("whitespace-nowrap");
+  });
+
   it("renders the segmented variant as a radio group", async () => {
     const user = userEvent.setup();
     const onValueChange = vi.fn();

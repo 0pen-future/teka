@@ -40,7 +40,8 @@ const containerClassName =
 
 const itemClassName = cn(
   "inline-flex min-h-11 flex-1 cursor-pointer select-none items-center justify-center gap-1.5",
-  "rounded-[calc(var(--radius-md)-4px)] px-3.5 font-display text-[length:var(--text-sm)] font-bold",
+  "whitespace-nowrap rounded-[calc(var(--radius-md)-4px)] px-3.5 font-display",
+  "text-[length:var(--text-sm)] font-bold",
   "text-ink-500 transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)]",
   "focus-visible:outline-none focus-visible:ring-4",
   "disabled:cursor-not-allowed disabled:opacity-50",

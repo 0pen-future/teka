@@ -13,6 +13,9 @@ export type { StatusPillStatus } from "./status-pill-labels";
 export { HvBadge } from "./hv-badge";
 export type { HvBadgeProps, HvBadgeSize, HvBadgeVariant } from "./hv-badge";
 
+export { HvChip } from "./hv-chip";
+export type { HvChipProps, HvChipSize } from "./hv-chip";
+
 export { StatPill } from "./stat-pill";
 export type { StatPillKind, StatPillProps, StatPillSize } from "./stat-pill";
 
