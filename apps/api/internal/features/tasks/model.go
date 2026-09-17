@@ -24,6 +24,7 @@ type columnModel struct {
 	Name      string    `gorm:"column:name"`
 	Position  int       `gorm:"column:position"`
 	IsDone    bool      `gorm:"column:is_done"`
+	Color     string    `gorm:"column:color"`
 	CreatedAt time.Time `gorm:"column:created_at"`
 	UpdatedAt time.Time `gorm:"column:updated_at"`
 }
@@ -108,6 +109,7 @@ func columnToCore(m columnModel) kanban.Column {
 		Name:      m.Name,
 		Position:  m.Position,
 		IsDone:    m.IsDone,
+		Color:     m.Color,
 		CreatedAt: m.CreatedAt,
 		UpdatedAt: m.UpdatedAt,
 	}
@@ -122,6 +124,7 @@ func columnFromCore(c kanban.Column) columnModel {
 		Name:      c.Name,
 		Position:  c.Position,
 		IsDone:    c.IsDone,
+		Color:     c.Color,
 		CreatedAt: c.CreatedAt,
 		UpdatedAt: c.UpdatedAt,
 	}

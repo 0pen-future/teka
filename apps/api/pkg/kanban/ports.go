@@ -39,6 +39,36 @@ type Visibility struct {
 type ColumnPatch struct {
 	Name   *string
 	IsDone *bool
+	Color  *string
+}
+
+// BoardFilter narrows ListBoard beyond Visibility. Zero value applies no
+// filter. Fields are ANDed together and with Visibility; a caller sets only
+// the ones meaningful to the filter it is expressing (see Service.Board).
+type BoardFilter struct {
+	// AssigneeID, when non-nil, restricts to tasks assigned to that actor.
+	AssigneeID *ActorID
+	// Unassigned restricts to tasks with no assignee.
+	Unassigned bool
+	// DueBefore, when non-nil, restricts to tasks whose DueOn is before this
+	// calendar date (time-of-day is ignored).
+	DueBefore *time.Time
+	// DueOn, when non-nil, restricts to tasks whose DueOn is this calendar
+	// date (time-of-day is ignored).
+	DueOn *time.Time
+	// OpenOnly restricts to tasks with no CompletedAt.
+	OpenOnly bool
+}
+
+// BoardCounts summarizes open (CompletedAt nil) tasks within a Visibility
+// scope, independent of any BoardFilter and unbounded by ListBoard's
+// per-column limit. ByAssignee omits any actor with a zero count.
+type BoardCounts struct {
+	All        int
+	Overdue    int
+	Today      int
+	Unassigned int
+	ByAssignee map[ActorID]int
 }
 
 // ColumnRepository persists Column entities for one tenant. Every method
@@ -82,12 +112,28 @@ type TaskPosition struct {
 // TaskRepository persists Task entities for one tenant. As with
 // ColumnRepository, tenant is always the first parameter after ctx.
 type TaskRepository interface {
-	// ListBoard returns tasks for tenant narrowed by vis, excluding
-	// soft-deleted tasks, ordered by column then Position then creation
-	// time. limit, when > 0, caps how many tasks are returned per column
-	// (still following that same order) rather than the whole tenant; 0
+	// ListBoard returns tasks for tenant narrowed by vis and filter,
+	// excluding soft-deleted tasks, ordered by column then Position then
+	// creation time. filter is ANDed with vis (see BoardFilter). limit, when
+	// > 0, caps how many tasks are returned per column (still following that
+	// same order, applied after filtering) rather than the whole tenant; 0
 	// means no per-column cap.
-	ListBoard(ctx context.Context, tenant TenantID, vis Visibility, limit int) ([]Task, error)
+	ListBoard(ctx context.Context, tenant TenantID, vis Visibility, filter BoardFilter, limit int) ([]Task, error)
+	// CountBoard summarizes open tasks visible under vis as of today (a
+	// calendar date; time-of-day is ignored), independent of any
+	// BoardFilter and unbounded by ListBoard's limit.
+	CountBoard(ctx context.Context, tenant TenantID, vis Visibility, today time.Time) (BoardCounts, error)
+	// GetDeleted returns the task identified by id within tenant, but only
+	// when it is soft-deleted — the mirror image of Get, which excludes
+	// soft-deleted tasks. It returns ErrTaskNotFound when id does not exist,
+	// exists under a different tenant, or is still live.
+	GetDeleted(ctx context.Context, tenant TenantID, id TaskID) (Task, error)
+	// Restore clears the soft-delete marker on the task identified by id
+	// within tenant, leaving every other field (ColumnID, Position,
+	// CompletedAt, ...) exactly as it was when deleted. It returns
+	// ErrTaskNotFound when id does not exist, exists under a different
+	// tenant, or is still live.
+	Restore(ctx context.Context, tenant TenantID, id TaskID) error
 	// MinPositionInColumn returns the lowest Position among col's tasks,
 	// excluding soft-deleted ones — only live tasks count, since Position
 	// ordering is a live-board concept. found is false when col holds no

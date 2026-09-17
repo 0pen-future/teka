@@ -46,11 +46,15 @@ func (h *Handler) pathUUID(c *gin.Context, name, resource string) (uuid.UUID, bo
 // board returns the caller's kanban board.
 //
 //	@Summary		Get the task board
-//	@Description	Every column, and the tasks Policy makes visible to the caller (their own vs. the whole center's, reported as scope).
+//	@Description	Every column, the tasks Policy and filter make visible to the caller (their own vs. the whole center's, reported as scope), and counts over that same visible set.
 //	@Tags			tasks
 //	@Produce		json
-//	@Success		200	{object}	response.Envelope{data=BoardResponse}
-//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Param			filter		query		string	false	"all|mine|overdue|today|unassigned"
+//	@Param			assignee	query		string	false	"restrict to this assignee, ANDed with filter"	format(uuid)
+//	@Param			today		query		string	false	"YYYY-MM-DD, the client's own calendar date; defaults to the server's current UTC date"
+//	@Success		200			{object}	response.Envelope{data=BoardResponse}
+//	@Failure		401			{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		422			{object}	response.Envelope{error=response.ErrorBody}	"invalid filter, assignee, or today"
 //	@Security		BearerAuth
 //	@Router			/tasks/board [get]
 func (h *Handler) board(c *gin.Context) {
@@ -58,7 +62,12 @@ func (h *Handler) board(c *gin.Context) {
 	if !ok {
 		return
 	}
-	resp, err := h.svc.Board(c.Request.Context(), scope)
+	var q BoardQuery
+	if err := c.ShouldBindQuery(&q); err != nil {
+		response.Err(c, validation.BindError(err))
+		return
+	}
+	resp, err := h.svc.Board(c.Request.Context(), scope, q)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -375,4 +384,35 @@ func (h *Handler) deleteTask(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// restoreTask reverses a soft-delete, reviving the task in its original
+// column, position, and completion state.
+//
+//	@Summary		Restore a deleted task
+//	@Description	Requires being the center owner or the task's creator. Clears the soft-delete marker; the task reappears with its original column, position, and completed_at.
+//	@Tags			tasks
+//	@Produce		json
+//	@Param			id	path		string	true	"task id"	format(uuid)
+//	@Success		200	{object}	response.Envelope{data=TaskResponse}
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}	"not the owner or the task's creator"
+//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}	"no soft-deleted task with this id"
+//	@Security		BearerAuth
+//	@Router			/tasks/{id}/restore [post]
+func (h *Handler) restoreTask(c *gin.Context) {
+	scope, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	taskID, ok := h.pathUUID(c, "id", "task")
+	if !ok {
+		return
+	}
+	resp, err := h.svc.RestoreTask(c.Request.Context(), scope, taskID)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, resp)
 }

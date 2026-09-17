@@ -93,7 +93,7 @@ func (r *columnRepository) Create(ctx context.Context, tenant kanban.TenantID, c
 	return columnToCore(row), nil
 }
 
-// Update persists col's current field values (Name, IsDone — the only
+// Update persists col's current field values (Name, IsDone, Color — the only
 // fields Service.UpdateColumn mutates) over the row matching its id and
 // tenant.
 func (r *columnRepository) Update(ctx context.Context, tenant kanban.TenantID, col kanban.Column) (kanban.Column, error) {
@@ -103,6 +103,7 @@ func (r *columnRepository) Update(ctx context.Context, tenant kanban.TenantID, c
 		Updates(map[string]any{
 			"name":       col.Name,
 			"is_done":    col.IsDone,
+			"color":      col.Color,
 			"updated_at": gorm.Expr("now()"),
 		})
 	if res.Error != nil {

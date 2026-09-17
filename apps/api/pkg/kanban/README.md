@@ -31,6 +31,18 @@ authorization) is a port the host implements.
 | `EventSink` | `Publish(ctx, event any)` — called only after a use-case's own `UnitOfWork.Within` returns `nil` |
 | `Clock` | `Now() time.Time` — injected so tests assert deterministic `CompletedAt` values instead of wall-clock time |
 
+`TaskRepository.ListBoard` also takes a `BoardFilter` (`AssigneeID`,
+`Unassigned`, `DueBefore`, `DueOn`, `OpenOnly` — zero value means no filter),
+ANDed with `Visibility`, never a replacement for it. `TaskRepository.CountBoard`
+takes the same `Visibility` plus a `today` date and returns `BoardCounts`
+(`All`, `Overdue`, `Today`, `Unassigned`, `ByAssignee`) — open (uncompleted)
+tasks only, independent of any `BoardFilter` and unbounded by `ListBoard`'s
+`limit`. Every date comparison in `BoardFilter`/`CountBoard` is **date-only**:
+callers pass a `time.Time` truncated to a calendar date, and the adapter
+compares against `due_on`'s date part, never a timestamp range — the calendar
+day in question is whichever the client considers "today" (see
+`internal/features/tasks/service.go`), not a server-derived timezone.
+
 Every `ColumnRepository`/`TaskRepository` method takes `tenant TenantID` as
 its first parameter after `ctx`. This is deliberate: a repository method
 cannot forget to scope a query, because the compiler requires the tenant to
@@ -77,7 +89,8 @@ cap per tenant), `WithMaxNameLen(n)` (column name length limit),
 
 | Use-case | Reads | Writes | Uses `UnitOfWork` | Publishes |
 |---|---|---|---|---|
-| `Board` | `Columns.List`, `Tasks.ListBoard` | — | no | — |
+| `Board` | `Columns.List`, `Tasks.ListBoard` (with `BoardFilter`) | — | no | — |
+| `BoardCounts` | `Tasks.CountBoard` | — | no | — |
 | `CreateColumn` | `Columns.ExistsName`, `Columns.CountByTenant` | `Columns.Create` | no | — |
 | `UpdateColumn` | `Columns.Get`, `Columns.ExistsName` | `Columns.Update` | no | — |
 | `ReorderColumns` | `Columns.List` | `Columns.UpdatePositions` | no | — |
@@ -87,6 +100,7 @@ cap per tenant), `WithMaxNameLen(n)` (column name length limit),
 | `UpdateTask` | `Tasks.Get`, `MemberChecker.IsMember` | `Tasks.Update` | no | — |
 | `MoveTask` | `Tasks.Get`, `Columns.Get`, `Tasks.ListColumnPositions` | `Tasks.RenormalizeColumn` (when gaps run out), `Tasks.Update` | **yes** | — |
 | `DeleteTask` | `Tasks.Get` | `Tasks.SoftDelete` | no | — |
+| `RestoreTask` | `Tasks.GetDeleted`, `Tasks.Get` | `Tasks.Restore` | **yes** | — |
 | `HandoverOnDeparture` | — | `Tasks.UnassignBy`, `Tasks.ReassignCreator` | **no** | **no** |
 
 ## Transaction and event contract
@@ -177,7 +191,7 @@ svc := kanban.NewService(
     myEventSinkAdapter{bus: bus}, // wraps events.Bus.Publish
 )
 
-cols, tasks, err := svc.Board(ctx, tenant, actor)
+cols, tasks, err := svc.Board(ctx, tenant, actor, kanban.BoardFilter{}, 0)
 ```
 
 `myEventSinkAdapter.Publish(ctx, event any)` type-switches on `event` (today
@@ -194,7 +208,7 @@ so the same repository works both inside and outside a `Within` call.
 
 This library contains no user-facing strings, and no code comment or doc in
 this package names a specific language's column labels. `DefaultColumns(idGen,
-specs)` seeds `Column.Position` and IDs from `[]DefaultColumnSpec{Name, IsDone}`, but
+specs)` seeds `Column.Position` and IDs from `[]DefaultColumnSpec{Name, IsDone, Color}`, but
 the names themselves belong entirely to the adapter (see
 `internal/features/centers/default_columns.go` and migration `000022` in this
 repo for Teka's own localized names).

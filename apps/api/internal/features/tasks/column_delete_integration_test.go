@@ -138,6 +138,29 @@ func TestDeleteColumnMoveClearsCompletedAtForNonDoneDestination(t *testing.T) {
 	require.Nil(t, row.CompletedAt)
 }
 
+// TestRestoreAfterColumnDeleteLandsInTheMoveToDestination locks in
+// MoveAllToColumn's deliberate non-filtering of deleted_at: a task deleted
+// before its column is removed still gets swept into move_to alongside the
+// live ones, so a later restore finds it already relocated instead of
+// pointing at a column that no longer exists.
+func TestRestoreAfterColumnDeleteLandsInTheMoveToDestination(t *testing.T) {
+	t.Parallel()
+	e := newTasksEnv(t)
+	_, owner := testutil.Teacher(t, e.db)
+	scope := testutil.ScopeFor(t, e.db, owner.ID)
+	source := seedColumn(t, e.db, scope.CenterID, "source", 0, false)
+	dest := seedColumn(t, e.db, scope.CenterID, "dest", 1, false)
+	taskID := seedTask(t, e.db, scope.CenterID, source, owner.ID, "t", seedTaskOpts{})
+	require.NoError(t, e.svc.DeleteTask(context.Background(), scope, taskID))
+
+	_, err := e.svc.DeleteColumn(context.Background(), scope, source, &dest)
+	require.NoError(t, err)
+
+	resp, err := e.svc.RestoreTask(context.Background(), scope, taskID)
+	require.NoError(t, err)
+	require.Equal(t, dest, resp.ColumnID)
+}
+
 // TestCreateColumnRejectsDuplicateNameCaseInsensitively asserts the
 // uq_task_columns_name backstop is reachable through the real repository,
 // not just theoretically correct.

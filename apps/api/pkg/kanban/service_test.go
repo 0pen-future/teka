@@ -157,26 +157,93 @@ func (r *fakeTaskRepo) RenormalizeColumn(_ context.Context, tenant TenantID, col
 	return nil
 }
 
+// dateOnly truncates t to its calendar date in UTC, matching how BoardFilter
+// and CountBoard compare DueOn: by date, never by time-of-day.
+func dateOnly(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+func visible(vis Visibility, t Task) bool {
+	if vis.All {
+		return true
+	}
+	isCreator := t.CreatedBy == vis.Participant
+	isAssignee := t.AssigneeID != nil && *t.AssigneeID == vis.Participant
+	return isCreator || isAssignee
+}
+
 // ListBoard ignores limit: fakes exist to exercise Service's own logic, and
 // the per-column cap is pushed all the way into the SQL adapter (see
 // task_repository.go), so there is nothing for this in-memory stand-in to
-// truncate.
-func (r *fakeTaskRepo) ListBoard(_ context.Context, tenant TenantID, vis Visibility, _ int) ([]Task, error) {
+// truncate. filter is applied with a plain loop, ANDed with vis.
+func (r *fakeTaskRepo) ListBoard(_ context.Context, tenant TenantID, vis Visibility, filter BoardFilter, _ int) ([]Task, error) {
 	var out []Task
 	for id, t := range r.tasks {
-		if t.TenantID != tenant || r.deleted[id] {
+		if t.TenantID != tenant || r.deleted[id] || !visible(vis, t) {
 			continue
 		}
-		if !vis.All {
-			isCreator := t.CreatedBy == vis.Participant
-			isAssignee := t.AssigneeID != nil && *t.AssigneeID == vis.Participant
-			if !isCreator && !isAssignee {
-				continue
-			}
+		if filter.AssigneeID != nil && (t.AssigneeID == nil || *t.AssigneeID != *filter.AssigneeID) {
+			continue
+		}
+		if filter.Unassigned && t.AssigneeID != nil {
+			continue
+		}
+		if filter.DueBefore != nil && (t.DueOn == nil || !dateOnly(*t.DueOn).Before(dateOnly(*filter.DueBefore))) {
+			continue
+		}
+		if filter.DueOn != nil && (t.DueOn == nil || !dateOnly(*t.DueOn).Equal(dateOnly(*filter.DueOn))) {
+			continue
+		}
+		if filter.OpenOnly && t.CompletedAt != nil {
+			continue
 		}
 		out = append(out, t)
 	}
 	return out, nil
+}
+
+// CountBoard summarizes open tasks visible under vis, independent of any
+// BoardFilter — mirroring the port contract the SQL adapter also follows.
+func (r *fakeTaskRepo) CountBoard(_ context.Context, tenant TenantID, vis Visibility, today time.Time) (BoardCounts, error) {
+	today = dateOnly(today)
+	counts := BoardCounts{ByAssignee: map[ActorID]int{}}
+	for id, t := range r.tasks {
+		if t.TenantID != tenant || r.deleted[id] || !visible(vis, t) || t.CompletedAt != nil {
+			continue
+		}
+		counts.All++
+		if t.DueOn != nil {
+			switch d := dateOnly(*t.DueOn); {
+			case d.Before(today):
+				counts.Overdue++
+			case d.Equal(today):
+				counts.Today++
+			}
+		}
+		if t.AssigneeID == nil {
+			counts.Unassigned++
+		} else {
+			counts.ByAssignee[*t.AssigneeID]++
+		}
+	}
+	return counts, nil
+}
+
+func (r *fakeTaskRepo) GetDeleted(_ context.Context, tenant TenantID, id TaskID) (Task, error) {
+	t, ok := r.tasks[id]
+	if !ok || t.TenantID != tenant || !r.deleted[id] {
+		return Task{}, ErrTaskNotFound
+	}
+	return t, nil
+}
+
+func (r *fakeTaskRepo) Restore(_ context.Context, tenant TenantID, id TaskID) error {
+	t, ok := r.tasks[id]
+	if !ok || t.TenantID != tenant || !r.deleted[id] {
+		return ErrTaskNotFound
+	}
+	delete(r.deleted, id)
+	return nil
 }
 
 func (r *fakeTaskRepo) MinPositionInColumn(_ context.Context, tenant TenantID, col ColumnID) (float64, bool, error) {
@@ -371,11 +438,11 @@ func TestBoardOwnerSeesEverythingParticipantSeesOwnOnly(t *testing.T) {
 	env.addTask(tenant, col.ID, creator, nil)
 	env.addTask(tenant, col.ID, other, nil)
 
-	_, tasks, err := env.svc.Board(context.Background(), tenant, ownerActor(newActor()), 0)
+	_, tasks, err := env.svc.Board(context.Background(), tenant, ownerActor(newActor()), BoardFilter{}, 0)
 	require.NoError(t, err)
 	require.Len(t, tasks, 2)
 
-	_, tasks, err = env.svc.Board(context.Background(), tenant, plainActor(creator), 0)
+	_, tasks, err = env.svc.Board(context.Background(), tenant, plainActor(creator), BoardFilter{}, 0)
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
 	require.Equal(t, creator, tasks[0].CreatedBy)
@@ -388,9 +455,91 @@ func TestBoardOrdersColumnsByPosition(t *testing.T) {
 	second := env.addColumn(tenant, "Second", false, 1)
 	first := env.addColumn(tenant, "First", false, 0)
 
-	cols, _, err := env.svc.Board(context.Background(), tenant, ownerActor(newActor()), 0)
+	cols, _, err := env.svc.Board(context.Background(), tenant, ownerActor(newActor()), BoardFilter{}, 0)
 	require.NoError(t, err)
 	require.Equal(t, []ColumnID{first.ID, second.ID}, []ColumnID{cols[0].ID, cols[1].ID})
+}
+
+func TestBoardFilterDueBeforeWithOpenOnlyExcludesCompletedAndNotYetDue(t *testing.T) {
+	t.Parallel()
+	env := newTestEnv()
+	tenant := newTenant()
+	col := env.addColumn(tenant, "Todo", false, 0)
+	creator := newActor()
+
+	yesterday := fixedNow.AddDate(0, 0, -1)
+	overdueOpen := env.addTask(tenant, col.ID, creator, nil)
+	overdueOpen.DueOn = &yesterday
+	env.tasks.tasks[overdueOpen.ID] = overdueOpen
+
+	overdueDone := env.addTask(tenant, col.ID, creator, nil)
+	overdueDone.DueOn = &yesterday
+	completedAt := fixedNow
+	overdueDone.CompletedAt = &completedAt
+	env.tasks.tasks[overdueDone.ID] = overdueDone
+
+	tomorrow := fixedNow.AddDate(0, 0, 1)
+	notYetDue := env.addTask(tenant, col.ID, creator, nil)
+	notYetDue.DueOn = &tomorrow
+	env.tasks.tasks[notYetDue.ID] = notYetDue
+
+	filter := BoardFilter{DueBefore: &fixedNow, OpenOnly: true}
+	_, tasks, err := env.svc.Board(context.Background(), tenant, ownerActor(newActor()), filter, 0)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.Equal(t, overdueOpen.ID, tasks[0].ID)
+}
+
+func TestBoardFilterUnassigned(t *testing.T) {
+	t.Parallel()
+	env := newTestEnv()
+	tenant := newTenant()
+	col := env.addColumn(tenant, "Todo", false, 0)
+	creator := newActor()
+	assignee := newActor()
+	env.addTask(tenant, col.ID, creator, &assignee)
+	unassigned := env.addTask(tenant, col.ID, creator, nil)
+
+	_, tasks, err := env.svc.Board(context.Background(), tenant, ownerActor(newActor()), BoardFilter{Unassigned: true}, 0)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.Equal(t, unassigned.ID, tasks[0].ID)
+}
+
+func TestBoardFilterAssigneeID(t *testing.T) {
+	t.Parallel()
+	env := newTestEnv()
+	tenant := newTenant()
+	col := env.addColumn(tenant, "Todo", false, 0)
+	creator := newActor()
+	target := newActor()
+	other := newActor()
+	wanted := env.addTask(tenant, col.ID, creator, &target)
+	env.addTask(tenant, col.ID, creator, &other)
+
+	_, tasks, err := env.svc.Board(context.Background(), tenant, ownerActor(newActor()), BoardFilter{AssigneeID: &target}, 0)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.Equal(t, wanted.ID, tasks[0].ID)
+}
+
+func TestBoardCountsParticipantOnlyCountsOwn(t *testing.T) {
+	t.Parallel()
+	env := newTestEnv()
+	tenant := newTenant()
+	col := env.addColumn(tenant, "Todo", false, 0)
+	participant := newActor()
+	other := newActor()
+	env.addTask(tenant, col.ID, participant, nil)
+	env.addTask(tenant, col.ID, other, nil)
+
+	counts, err := env.svc.BoardCounts(context.Background(), tenant, plainActor(participant), fixedNow)
+	require.NoError(t, err)
+	require.Equal(t, 1, counts.All)
+
+	ownerCounts, err := env.svc.BoardCounts(context.Background(), tenant, ownerActor(newActor()), fixedNow)
+	require.NoError(t, err)
+	require.Equal(t, 2, ownerCounts.All)
 }
 
 // --- CreateColumn ------------------------------------------------------
@@ -401,7 +550,7 @@ func TestCreateColumnAppendsAtNextPosition(t *testing.T) {
 	tenant := newTenant()
 	env.addColumn(tenant, "Todo", false, 0)
 
-	col, err := env.svc.CreateColumn(context.Background(), tenant, ownerActor(newActor()), "Doing", false)
+	col, err := env.svc.CreateColumn(context.Background(), tenant, ownerActor(newActor()), "Doing", false, "")
 	require.NoError(t, err)
 	require.Equal(t, 1, col.Position)
 }
@@ -410,7 +559,7 @@ func TestCreateColumnRequiresManageBoard(t *testing.T) {
 	t.Parallel()
 	env := newTestEnv()
 	tenant := newTenant()
-	_, err := env.svc.CreateColumn(context.Background(), tenant, plainActor(newActor()), "Doing", false)
+	_, err := env.svc.CreateColumn(context.Background(), tenant, plainActor(newActor()), "Doing", false, "")
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
@@ -421,7 +570,7 @@ func TestCreateColumnLimit(t *testing.T) {
 	for i := 0; i < defaultMaxColumns; i++ {
 		env.addColumn(tenant, uuid.NewString(), false, i)
 	}
-	_, err := env.svc.CreateColumn(context.Background(), tenant, ownerActor(newActor()), "One too many", false)
+	_, err := env.svc.CreateColumn(context.Background(), tenant, ownerActor(newActor()), "One too many", false, "")
 	require.ErrorIs(t, err, ErrColumnLimit)
 }
 
@@ -430,7 +579,7 @@ func TestCreateColumnDuplicateNameCaseInsensitive(t *testing.T) {
 	env := newTestEnv()
 	tenant := newTenant()
 	env.addColumn(tenant, "Todo", false, 0)
-	_, err := env.svc.CreateColumn(context.Background(), tenant, ownerActor(newActor()), "TODO", false)
+	_, err := env.svc.CreateColumn(context.Background(), tenant, ownerActor(newActor()), "TODO", false, "")
 	require.ErrorIs(t, err, ErrDuplicateColumnName)
 }
 
@@ -438,14 +587,32 @@ func TestCreateColumnRejectsEmptyOrTooLongName(t *testing.T) {
 	t.Parallel()
 	env := newTestEnv()
 	tenant := newTenant()
-	_, err := env.svc.CreateColumn(context.Background(), tenant, ownerActor(newActor()), "   ", false)
+	_, err := env.svc.CreateColumn(context.Background(), tenant, ownerActor(newActor()), "   ", false, "")
 	require.ErrorIs(t, err, ErrInvalidInput)
 
 	long := make([]byte, defaultMaxNameLen+1)
 	for i := range long {
 		long[i] = 'a'
 	}
-	_, err = env.svc.CreateColumn(context.Background(), tenant, ownerActor(newActor()), string(long), false)
+	_, err = env.svc.CreateColumn(context.Background(), tenant, ownerActor(newActor()), string(long), false, "")
+	require.ErrorIs(t, err, ErrInvalidInput)
+}
+
+func TestCreateColumnSetsColor(t *testing.T) {
+	t.Parallel()
+	env := newTestEnv()
+	tenant := newTenant()
+	col, err := env.svc.CreateColumn(context.Background(), tenant, ownerActor(newActor()), "Doing", false, "sky")
+	require.NoError(t, err)
+	require.Equal(t, "sky", col.Color)
+}
+
+func TestCreateColumnRejectsTooLongColor(t *testing.T) {
+	t.Parallel()
+	env := newTestEnv()
+	tenant := newTenant()
+	long := strings.Repeat("a", maxColorLen+1)
+	_, err := env.svc.CreateColumn(context.Background(), tenant, ownerActor(newActor()), "Doing", false, long)
 	require.ErrorIs(t, err, ErrInvalidInput)
 }
 
@@ -488,6 +655,40 @@ func TestUpdateColumnDuplicateName(t *testing.T) {
 	name := "todo"
 	_, err := env.svc.UpdateColumn(context.Background(), tenant, ownerActor(newActor()), col.ID, ColumnPatch{Name: &name})
 	require.ErrorIs(t, err, ErrDuplicateColumnName)
+}
+
+func TestUpdateColumnPatchesColor(t *testing.T) {
+	t.Parallel()
+	env := newTestEnv()
+	tenant := newTenant()
+	col := env.addColumn(tenant, "Todo", false, 0)
+	color := "mint"
+	updated, err := env.svc.UpdateColumn(context.Background(), tenant, ownerActor(newActor()), col.ID, ColumnPatch{Color: &color})
+	require.NoError(t, err)
+	require.Equal(t, "mint", updated.Color)
+}
+
+func TestUpdateColumnEmptyColorKeepsCurrent(t *testing.T) {
+	t.Parallel()
+	env := newTestEnv()
+	tenant := newTenant()
+	col := env.addColumn(tenant, "Todo", false, 0)
+	col.Color = "sun"
+	env.cols.cols[col.ID] = col
+	blank := "   "
+	updated, err := env.svc.UpdateColumn(context.Background(), tenant, ownerActor(newActor()), col.ID, ColumnPatch{Color: &blank})
+	require.NoError(t, err)
+	require.Equal(t, "sun", updated.Color)
+}
+
+func TestUpdateColumnRejectsTooLongColor(t *testing.T) {
+	t.Parallel()
+	env := newTestEnv()
+	tenant := newTenant()
+	col := env.addColumn(tenant, "Todo", false, 0)
+	long := strings.Repeat("a", maxColorLen+1)
+	_, err := env.svc.UpdateColumn(context.Background(), tenant, ownerActor(newActor()), col.ID, ColumnPatch{Color: &long})
+	require.ErrorIs(t, err, ErrInvalidInput)
 }
 
 // --- ReorderColumns ------------------------------------------------------
@@ -791,6 +992,68 @@ func TestUpdateTaskClearsDueOnAndAssignee(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, updated.DueOn)
 	require.Nil(t, updated.AssigneeID)
+}
+
+// --- RestoreTask -----------------------------------------------------------
+
+func TestRestoreTaskRevivesWithOriginalPlacement(t *testing.T) {
+	t.Parallel()
+	env := newTestEnv()
+	tenant := newTenant()
+	col := env.addColumn(tenant, "Todo", false, 0)
+	creator := newActor()
+	task := env.addTaskAt(tenant, col.ID, creator, 5)
+	require.NoError(t, env.svc.DeleteTask(context.Background(), tenant, plainActor(creator), task.ID))
+
+	restored, err := env.svc.RestoreTask(context.Background(), tenant, plainActor(creator), task.ID)
+	require.NoError(t, err)
+	require.Equal(t, col.ID, restored.ColumnID)
+	require.Equal(t, 5.0, restored.Position)
+	require.Equal(t, 1, env.uow.calls, "restore and the re-read share one unit of work")
+
+	_, err = env.svc.GetTask(context.Background(), tenant, plainActor(creator), task.ID)
+	require.NoError(t, err, "the task must be readable again through the normal Get path")
+}
+
+func TestRestoreTaskLiveTaskIsNotFound(t *testing.T) {
+	t.Parallel()
+	env := newTestEnv()
+	tenant := newTenant()
+	col := env.addColumn(tenant, "Todo", false, 0)
+	task := env.addTask(tenant, col.ID, newActor(), nil)
+
+	_, err := env.svc.RestoreTask(context.Background(), tenant, ownerActor(newActor()), task.ID)
+	require.ErrorIs(t, err, ErrTaskNotFound)
+}
+
+func TestRestoreTaskUnknownIDIsNotFound(t *testing.T) {
+	t.Parallel()
+	env := newTestEnv()
+	tenant := newTenant()
+	_, err := env.svc.RestoreTask(context.Background(), tenant, ownerActor(newActor()), TaskID(uuid.New()))
+	require.ErrorIs(t, err, ErrTaskNotFound)
+}
+
+func TestRestoreTaskForbiddenForNonCreator(t *testing.T) {
+	t.Parallel()
+	env := newTestEnv()
+	tenant := newTenant()
+	col := env.addColumn(tenant, "Todo", false, 0)
+	creator := newActor()
+	assignee := newActor()
+	stranger := newActor()
+	task := env.addTask(tenant, col.ID, creator, &assignee)
+	require.NoError(t, env.svc.DeleteTask(context.Background(), tenant, plainActor(creator), task.ID))
+
+	for name, actor := range map[string]Actor{
+		"assignee": plainActor(assignee),
+		"stranger": plainActor(stranger),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := env.svc.RestoreTask(context.Background(), tenant, actor, task.ID)
+			require.ErrorIs(t, err, ErrForbidden)
+		})
+	}
 }
 
 // --- MoveTask --------------------------------------------------------------
@@ -1098,9 +1361,9 @@ func TestHandoverOnDepartureUnassignsAndReassignsWithoutTxOrEvent(t *testing.T) 
 func TestDefaultColumnsAssignsPositionsAndKeepsIsDone(t *testing.T) {
 	t.Parallel()
 	specs := []DefaultColumnSpec{
-		{Name: "Todo", IsDone: false},
-		{Name: "Doing", IsDone: false},
-		{Name: "Done", IsDone: true},
+		{Name: "Todo", IsDone: false, Color: "none"},
+		{Name: "Doing", IsDone: false, Color: "sky"},
+		{Name: "Done", IsDone: true, Color: "mint"},
 	}
 	cols := DefaultColumns(uuid.New, specs)
 	require.Len(t, cols, 3)
@@ -1109,6 +1372,7 @@ func TestDefaultColumnsAssignsPositionsAndKeepsIsDone(t *testing.T) {
 		require.Equal(t, i, c.Position)
 		require.Equal(t, specs[i].Name, c.Name)
 		require.Equal(t, specs[i].IsDone, c.IsDone)
+		require.Equal(t, specs[i].Color, c.Color)
 		require.NotEqual(t, uuid.Nil, uuid.UUID(c.ID))
 		require.False(t, seen[c.ID], "ids must be unique")
 		seen[c.ID] = true

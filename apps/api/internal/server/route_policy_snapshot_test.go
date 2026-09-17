@@ -147,6 +147,7 @@ var routePolicySnapshot = []RoutePolicy{
 	{Method: "PATCH", Path: "/api/v1/tasks/:id", Kind: PolicyPermission, Key: "tasks.edit"},
 	{Method: "POST", Path: "/api/v1/tasks/:id/move", Kind: PolicyPermission, Key: "tasks.edit"},
 	{Method: "DELETE", Path: "/api/v1/tasks/:id", Kind: PolicyPermission, Key: "tasks.delete"},
+	{Method: "POST", Path: "/api/v1/tasks/:id/restore", Kind: PolicyPermission, Key: "tasks.delete"},
 }
 
 // TestRoutePolicySnapshotUnchanged proves routePolicies still classifies

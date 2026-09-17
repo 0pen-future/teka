@@ -30,7 +30,7 @@ func afterTask(col, anchor uuid.UUID) tasks.MoveTaskRequest {
 // reports them, in board order.
 func columnTasks(t *testing.T, e *tasksEnv, scope authctx.Scope, col uuid.UUID) ([]uuid.UUID, []float64) {
 	t.Helper()
-	resp, err := e.svc.Board(context.Background(), scope)
+	resp, err := e.svc.Board(context.Background(), scope, tasks.BoardQuery{})
 	require.NoError(t, err)
 	for _, c := range resp.Columns {
 		if c.ID != col {

@@ -379,6 +379,7 @@ var Specs = []Spec{
 	perm("PATCH", "/api/v1/tasks/:id", authctx.PermTasksEdit, req("task.update", "task", "id")),
 	perm("POST", "/api/v1/tasks/:id/move", authctx.PermTasksEdit, req("task.move", "task", "id")),
 	perm("DELETE", "/api/v1/tasks/:id", authctx.PermTasksDelete, req("task.delete", "task", "id")),
+	perm("POST", "/api/v1/tasks/:id/restore", authctx.PermTasksDelete, req("task.restore", "task", "id")),
 }
 
 // Policies returns the manifest for the server package's route-policy

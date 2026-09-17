@@ -320,10 +320,10 @@ func TestDownFoldsPersonalChannelIntoManual(t *testing.T) {
 		 VALUES (?, ?, ?, ?, 'zalo_personal')`,
 		notifID, f.teacherID, f.centerID, f.statementID).Error)
 
-	// Roll back through 000005 (zalo_personal_mapping): nineteen steps now
-	// that the additive 000008-000023 sit on top of the migrations this test
+	// Roll back through 000005 (zalo_personal_mapping): twenty steps now
+	// that the additive 000008-000024 sit on top of the migrations this test
 	// predates.
-	require.NoError(t, database.MigrateDown(m, 19))
+	require.NoError(t, database.MigrateDown(m, 20))
 
 	var channel string
 	require.NoError(t, db.Raw(

@@ -41,13 +41,16 @@ const (
 
 // Column is one stage of a tenant's board. IsDone marks a column whose tasks
 // are considered complete: moving a task into such a column sets its
-// CompletedAt (see Service.MoveTask).
+// CompletedAt (see Service.MoveTask). Color is an opaque label an adapter may
+// use to tint the column in its UI; the library only bounds its length (see
+// validateColor) and never interprets its value.
 type Column struct {
 	ID        ColumnID
 	TenantID  TenantID
 	Name      string
 	Position  int
 	IsDone    bool
+	Color     string
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }

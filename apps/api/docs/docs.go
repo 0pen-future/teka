@@ -13054,7 +13054,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Every column, and the tasks Policy makes visible to the caller (their own vs. the whole center's, reported as scope).",
+                "description": "Every column, the tasks Policy and filter make visible to the caller (their own vs. the whole center's, reported as scope), and counts over that same visible set.",
                 "produces": [
                     "application/json"
                 ],
@@ -13062,6 +13062,27 @@ const docTemplate = `{
                     "tasks"
                 ],
                 "summary": "Get the task board",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "all|mine|overdue|today|unassigned",
+                        "name": "filter",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "restrict to this assignee, ANDed with filter",
+                        "name": "assignee",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "YYYY-MM-DD, the client's own calendar date; defaults to the server's current UTC date",
+                        "name": "today",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -13083,6 +13104,24 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "invalid filter, assignee, or today",
                         "schema": {
                             "allOf": [
                                 {
@@ -13525,6 +13564,107 @@ const docTemplate = `{
                     },
                     "422": {
                         "description": "after_task_id is not a live task of the destination column",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/tasks/{id}/restore": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Requires being the center owner or the task's creator. Clears the soft-delete marker; the task reappears with its original column, position, and completed_at.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tasks"
+                ],
+                "summary": "Restore a deleted task",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "task id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/tasks.TaskResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "not the owner or the task's creator",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "no soft-deleted task with this id",
                         "schema": {
                             "allOf": [
                                 {
@@ -16245,9 +16385,23 @@ const docTemplate = `{
                 }
             }
         },
+        "tasks.AssigneeCountResponse": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "teacher_id": {
+                    "type": "string"
+                }
+            }
+        },
         "tasks.BoardColumnResponse": {
             "type": "object",
             "properties": {
+                "color": {
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -16277,6 +16431,32 @@ const docTemplate = `{
                 }
             }
         },
+        "tasks.BoardCountsResponse": {
+            "type": "object",
+            "properties": {
+                "all": {
+                    "type": "integer"
+                },
+                "by_assignee": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/tasks.AssigneeCountResponse"
+                    }
+                },
+                "mine": {
+                    "type": "integer"
+                },
+                "overdue": {
+                    "type": "integer"
+                },
+                "today": {
+                    "type": "integer"
+                },
+                "unassigned": {
+                    "type": "integer"
+                }
+            }
+        },
         "tasks.BoardResponse": {
             "type": "object",
             "properties": {
@@ -16286,6 +16466,9 @@ const docTemplate = `{
                         "$ref": "#/definitions/tasks.BoardColumnResponse"
                     }
                 },
+                "counts": {
+                    "$ref": "#/definitions/tasks.BoardCountsResponse"
+                },
                 "scope": {
                     "type": "string"
                 }
@@ -16294,6 +16477,9 @@ const docTemplate = `{
         "tasks.ColumnResponse": {
             "type": "object",
             "properties": {
+                "color": {
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -16331,6 +16517,15 @@ const docTemplate = `{
                 "name"
             ],
             "properties": {
+                "color": {
+                    "type": "string",
+                    "enum": [
+                        "none",
+                        "sky",
+                        "sun",
+                        "mint"
+                    ]
+                },
                 "is_done": {
                     "type": "boolean"
                 },
@@ -16457,6 +16652,15 @@ const docTemplate = `{
         "tasks.UpdateColumnRequest": {
             "type": "object",
             "properties": {
+                "color": {
+                    "type": "string",
+                    "enum": [
+                        "none",
+                        "sky",
+                        "sun",
+                        "mint"
+                    ]
+                },
                 "is_done": {
                     "type": "boolean"
                 },

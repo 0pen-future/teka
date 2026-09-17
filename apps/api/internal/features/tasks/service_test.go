@@ -115,7 +115,9 @@ func newFakeTaskRepo() *fakeTaskRepo {
 // ListBoard ignores limit: this fake backs the adapter's own Board tests,
 // which assert on the Go-side hasMore/slicing logic against an unfiltered
 // result — the per-column SQL cap itself is covered by the real repository.
-func (r *fakeTaskRepo) ListBoard(_ context.Context, tenant kanban.TenantID, vis kanban.Visibility, _ int) ([]kanban.Task, error) {
+// filter is applied for real, since Service.Board now builds one from
+// BoardQuery and the adapter's own tests assert on its effect.
+func (r *fakeTaskRepo) ListBoard(_ context.Context, tenant kanban.TenantID, vis kanban.Visibility, filter kanban.BoardFilter, _ int) ([]kanban.Task, error) {
 	var out []kanban.Task
 	for id, t := range r.tasks {
 		if r.deleted[id] || t.TenantID != tenant {
@@ -128,9 +130,84 @@ func (r *fakeTaskRepo) ListBoard(_ context.Context, tenant kanban.TenantID, vis 
 				continue
 			}
 		}
+		if !fakeBoardFilterMatches(filter, t) {
+			continue
+		}
 		out = append(out, t)
 	}
 	return out, nil
+}
+
+// fakeBoardFilterMatches mirrors taskRepository.boardFilterClause's
+// predicate, in plain Go, against one in-memory task.
+func fakeBoardFilterMatches(filter kanban.BoardFilter, t kanban.Task) bool {
+	if filter.AssigneeID != nil && (t.AssigneeID == nil || *t.AssigneeID != *filter.AssigneeID) {
+		return false
+	}
+	if filter.Unassigned && t.AssigneeID != nil {
+		return false
+	}
+	if filter.DueBefore != nil && (t.DueOn == nil || !t.DueOn.Before(*filter.DueBefore)) {
+		return false
+	}
+	if filter.DueOn != nil && (t.DueOn == nil || !t.DueOn.Equal(*filter.DueOn)) {
+		return false
+	}
+	if filter.OpenOnly && t.CompletedAt != nil {
+		return false
+	}
+	return true
+}
+
+// CountBoard mirrors taskRepository.CountBoard's aggregation, in plain Go,
+// over the in-memory task set.
+func (r *fakeTaskRepo) CountBoard(_ context.Context, tenant kanban.TenantID, vis kanban.Visibility, today time.Time) (kanban.BoardCounts, error) {
+	counts := kanban.BoardCounts{ByAssignee: map[kanban.ActorID]int{}}
+	for id, t := range r.tasks {
+		if r.deleted[id] || t.TenantID != tenant || t.CompletedAt != nil {
+			continue
+		}
+		if !vis.All {
+			isCreator := t.CreatedBy == vis.Participant
+			isAssignee := t.AssigneeID != nil && *t.AssigneeID == vis.Participant
+			if !isCreator && !isAssignee {
+				continue
+			}
+		}
+		counts.All++
+		if t.DueOn != nil && t.DueOn.Before(today) {
+			counts.Overdue++
+		}
+		if t.DueOn != nil && t.DueOn.Equal(today) {
+			counts.Today++
+		}
+		if t.AssigneeID == nil {
+			counts.Unassigned++
+		} else {
+			counts.ByAssignee[*t.AssigneeID]++
+		}
+	}
+	return counts, nil
+}
+
+// GetDeleted returns id only when it exists and is soft-deleted, the mirror
+// image of Get.
+func (r *fakeTaskRepo) GetDeleted(_ context.Context, tenant kanban.TenantID, id kanban.TaskID) (kanban.Task, error) {
+	t, ok := r.tasks[id]
+	if !ok || !r.deleted[id] || t.TenantID != tenant {
+		return kanban.Task{}, kanban.ErrTaskNotFound
+	}
+	return t, nil
+}
+
+// Restore clears id's soft-delete marker.
+func (r *fakeTaskRepo) Restore(_ context.Context, tenant kanban.TenantID, id kanban.TaskID) error {
+	t, ok := r.tasks[id]
+	if !ok || !r.deleted[id] || t.TenantID != tenant {
+		return kanban.ErrTaskNotFound
+	}
+	delete(r.deleted, id)
+	return nil
 }
 
 func (r *fakeTaskRepo) MinPositionInColumn(_ context.Context, tenant kanban.TenantID, col kanban.ColumnID) (float64, bool, error) {
@@ -328,7 +405,7 @@ func TestBoardScopeMineForOrdinaryMember(t *testing.T) {
 		CreatedBy: kanban.ActorID(owner), Title: "owner's task",
 	}
 
-	resp, err := env.svc.Board(context.Background(), scopeFor(member, center, false))
+	resp, err := env.svc.Board(context.Background(), scopeFor(member, center, false), BoardQuery{})
 	require.NoError(t, err)
 	require.Equal(t, "mine", resp.Scope, "a plain member without tasks.view_all sees only their own rows")
 	require.Len(t, resp.Columns, 1)
@@ -341,7 +418,7 @@ func TestBoardScopeCenterForOwner(t *testing.T) {
 	col := kanban.Column{ID: kanban.ColumnID(uuid.New()), TenantID: kanban.TenantID(center)}
 	env.cols.cols[col.ID] = col
 
-	resp, err := env.svc.Board(context.Background(), scopeFor(uuid.New(), center, true))
+	resp, err := env.svc.Board(context.Background(), scopeFor(uuid.New(), center, true), BoardQuery{})
 	require.NoError(t, err)
 	require.Equal(t, "center", resp.Scope, "the owner always sees the whole board")
 }
@@ -352,7 +429,7 @@ func TestBoardScopeCenterForViewAllHolder(t *testing.T) {
 	col := kanban.Column{ID: kanban.ColumnID(uuid.New()), TenantID: kanban.TenantID(center)}
 	env.cols.cols[col.ID] = col
 
-	resp, err := env.svc.Board(context.Background(), scopeFor(uuid.New(), center, false, authctx.PermTasksViewAll))
+	resp, err := env.svc.Board(context.Background(), scopeFor(uuid.New(), center, false, authctx.PermTasksViewAll), BoardQuery{})
 	require.NoError(t, err)
 	require.Equal(t, "center", resp.Scope, "tasks.view_all degrades a non-owner into the center-wide view")
 }
@@ -371,7 +448,7 @@ func TestBoardCapsTasksPerColumnAndReportsHasMore(t *testing.T) {
 		}
 	}
 
-	resp, err := env.svc.Board(context.Background(), scopeFor(owner, center, true))
+	resp, err := env.svc.Board(context.Background(), scopeFor(owner, center, true), BoardQuery{})
 	require.NoError(t, err)
 	require.Len(t, resp.Columns, 1)
 	require.Len(t, resp.Columns[0].Tasks, boardTasksPerColumn)
@@ -387,7 +464,7 @@ func TestBoardUnderCapReportsNoHasMore(t *testing.T) {
 	tid := kanban.TaskID(uuid.New())
 	env.tasksRep.tasks[tid] = kanban.Task{ID: tid, TenantID: kanban.TenantID(center), ColumnID: col.ID, CreatedBy: kanban.ActorID(owner)}
 
-	resp, err := env.svc.Board(context.Background(), scopeFor(owner, center, true))
+	resp, err := env.svc.Board(context.Background(), scopeFor(owner, center, true), BoardQuery{})
 	require.NoError(t, err)
 	require.False(t, resp.Columns[0].HasMore)
 }
@@ -585,7 +662,7 @@ func TestMoveTaskAfterPlacesBelowTheAnchor(t *testing.T) {
 	require.Equal(t, uuid.UUID(m.dst.ID), moved.ColumnID)
 	require.Equal(t, 0.5, moved.Position)
 
-	board, err := m.svc.Board(context.Background(), scopeFor(m.owner, m.center, true))
+	board, err := m.svc.Board(context.Background(), scopeFor(m.owner, m.center, true), BoardQuery{})
 	require.NoError(t, err)
 	var got []uuid.UUID
 	for _, col := range board.Columns {

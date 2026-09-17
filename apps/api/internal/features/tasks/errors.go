@@ -35,6 +35,12 @@ func translateDBError(err error) error {
 		case "fk_tasks_creator_center", "fk_tasks_assignee_center":
 			return kanban.ErrAssigneeNotMember
 		}
+	case "23514": // check_violation
+		if pgErr.ConstraintName == "ck_task_columns_color" {
+			// Binding already rejects any color outside the enum; this is a
+			// backstop for a caller that bypassed it.
+			return apperror.Invalid("color must be one of none, sky, sun, mint", map[string]string{"color": "phải là none, sky, sun hoặc mint"})
+		}
 	}
 	return err
 }

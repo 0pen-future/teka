@@ -108,6 +108,31 @@ func TestNonCreatorNonOwnerAssigneeCannotEditOrDeleteButCanMove(t *testing.T) {
 	require.NoError(t, err, "an assignee who is neither creator nor owner may still move the task")
 }
 
+// TestNonCreatorNonOwnerAssigneeCannotRestoreTask asserts RestoreTask gates
+// on the same CanWriteTask rule as delete: the assignee alone cannot "undo"
+// a deletion of a task they neither created nor own the center of.
+func TestNonCreatorNonOwnerAssigneeCannotRestoreTask(t *testing.T) {
+	t.Parallel()
+	e := newTasksEnv(t)
+	_, owner := testutil.Teacher(t, e.db)
+	_, creator := testutil.Teacher(t, e.db)
+	_, assignee := testutil.Teacher(t, e.db)
+	testutil.JoinCenter(t, e.db, creator.ID, owner.CenterID)
+	testutil.JoinCenter(t, e.db, assignee.ID, owner.CenterID)
+	ownerScope := testutil.ScopeFor(t, e.db, owner.ID)
+	creatorScope := testutil.ScopeFor(t, e.db, creator.ID)
+	assigneeScope := testutil.ScopeFor(t, e.db, assignee.ID)
+	col := seedColumn(t, e.db, ownerScope.CenterID, "a", 0, false)
+	taskID := seedTask(t, e.db, ownerScope.CenterID, col, creator.ID, "t", seedTaskOpts{assignee: &assignee.ID})
+	require.NoError(t, e.svc.DeleteTask(context.Background(), creatorScope, taskID))
+
+	_, err := e.svc.RestoreTask(context.Background(), assigneeScope, taskID)
+	require.Equal(t, apperror.CodeForbidden, appErr(t, err).Code)
+
+	_, err = e.svc.RestoreTask(context.Background(), creatorScope, taskID)
+	require.NoError(t, err, "the creator retains the right to undo their own delete")
+}
+
 // TestUnrelatedMemberCannotReadTask asserts CanReadTask denies a member who
 // is neither owner, tasks.view_all holder, creator, nor assignee.
 func TestUnrelatedMemberCannotReadTask(t *testing.T) {
@@ -141,14 +166,14 @@ func TestBoardScopeDegradesToMineWithoutViewAll(t *testing.T) {
 	seedTask(t, e.db, ownerScope.CenterID, col, owner.ID, "owner's task", seedTaskOpts{})
 
 	memberScope := testutil.ScopeFor(t, e.db, member.ID)
-	resp, err := e.svc.Board(context.Background(), memberScope)
+	resp, err := e.svc.Board(context.Background(), memberScope, tasks.BoardQuery{})
 	require.NoError(t, err)
 	require.Equal(t, "mine", resp.Scope)
 	require.Empty(t, resp.Columns[0].Tasks)
 
 	grantPerm(t, e.db, member.ID, ownerScope.CenterID, authctx.PermTasksViewAll)
 	memberScope = testutil.ScopeFor(t, e.db, member.ID)
-	resp, err = e.svc.Board(context.Background(), memberScope)
+	resp, err = e.svc.Board(context.Background(), memberScope, tasks.BoardQuery{})
 	require.NoError(t, err)
 	require.Equal(t, "center", resp.Scope)
 	require.Len(t, resp.Columns[0].Tasks, 1)

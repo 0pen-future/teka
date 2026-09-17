@@ -39,6 +39,7 @@ type ColumnResponse struct {
 	Name      string    `json:"name"`
 	Position  int       `json:"position"`
 	IsDone    bool      `json:"is_done"`
+	Color     string    `json:"color"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -50,6 +51,7 @@ func columnResponseFrom(c kanban.Column) ColumnResponse {
 		Name:      c.Name,
 		Position:  c.Position,
 		IsDone:    c.IsDone,
+		Color:     c.Color,
 		CreatedAt: c.CreatedAt,
 		UpdatedAt: c.UpdatedAt,
 	}
@@ -111,18 +113,50 @@ type BoardColumnResponse struct {
 type BoardResponse struct {
 	Scope   string                `json:"scope"`
 	Columns []BoardColumnResponse `json:"columns"`
+	Counts  BoardCountsResponse   `json:"counts"`
+}
+
+// BoardQuery is GET /tasks/board's query string. Filter/Assignee/Today are
+// all optional: an absent Filter behaves like "all", an absent Today
+// defaults to the server's current UTC date (see Service.Board), and Assignee
+// ANDs an extra assignee_id predicate onto whatever Filter already applies.
+type BoardQuery struct {
+	Filter   string `form:"filter" binding:"omitempty,oneof=all mine overdue today unassigned"`
+	Assignee string `form:"assignee" binding:"omitempty,uuid"`
+	Today    string `form:"today" binding:"omitempty,datetime=2006-01-02"`
+}
+
+// AssigneeCountResponse is one entry of BoardCountsResponse.ByAssignee.
+type AssigneeCountResponse struct {
+	TeacherID uuid.UUID `json:"teacher_id"`
+	Count     int       `json:"count"`
+}
+
+// BoardCountsResponse summarizes open tasks in the caller's visible set,
+// independent of BoardQuery.Filter/Assignee and unbounded by the per-column
+// display cap. ByAssignee is always an array (never null) and omits anyone
+// with a zero count.
+type BoardCountsResponse struct {
+	All        int                     `json:"all"`
+	Mine       int                     `json:"mine"`
+	Overdue    int                     `json:"overdue"`
+	Today      int                     `json:"today"`
+	Unassigned int                     `json:"unassigned"`
+	ByAssignee []AssigneeCountResponse `json:"by_assignee"`
 }
 
 // CreateColumnRequest adds a column to the board.
 type CreateColumnRequest struct {
-	Name   string `json:"name" binding:"required,min=1,max=40"`
-	IsDone *bool  `json:"is_done"`
+	Name   string  `json:"name" binding:"required,min=1,max=40"`
+	IsDone *bool   `json:"is_done"`
+	Color  *string `json:"color" binding:"omitempty,oneof=none sky sun mint"`
 }
 
 // UpdateColumnRequest patches a column; a nil field leaves it unchanged.
 type UpdateColumnRequest struct {
 	Name   *string `json:"name" binding:"omitempty,min=1,max=40"`
 	IsDone *bool   `json:"is_done"`
+	Color  *string `json:"color" binding:"omitempty,oneof=none sky sun mint"`
 }
 
 // ColumnsResponse wraps a column list ({"columns": [...]}), used by both the

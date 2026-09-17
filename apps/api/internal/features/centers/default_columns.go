@@ -14,9 +14,9 @@ import (
 // that migration's own parity test freezes its SQL literal independently;
 // this is the Go-side half of the same three columns.
 var defaultColumnSpecs = []kanban.DefaultColumnSpec{
-	{Name: "Cần làm", IsDone: false},
-	{Name: "Đang làm", IsDone: false},
-	{Name: "Hoàn thành", IsDone: true},
+	{Name: "Cần làm", IsDone: false, Color: "none"},
+	{Name: "Đang làm", IsDone: false, Color: "sky"},
+	{Name: "Hoàn thành", IsDone: true, Color: "mint"},
 }
 
 // DefaultColumns builds the three starter columns for a newly created

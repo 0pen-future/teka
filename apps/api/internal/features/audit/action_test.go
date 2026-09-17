@@ -120,6 +120,7 @@ var actionSnapshot = []struct {
 	{"PATCH", "/api/v1/tasks/:id", ActionSpec{Action: "task.update", EntityType: "task", IDParam: "id"}},
 	{"POST", "/api/v1/tasks/:id/move", ActionSpec{Action: "task.move", EntityType: "task", IDParam: "id"}},
 	{"DELETE", "/api/v1/tasks/:id", ActionSpec{Action: "task.delete", EntityType: "task", IDParam: "id"}},
+	{"POST", "/api/v1/tasks/:id/restore", ActionSpec{Action: "task.restore", EntityType: "task", IDParam: "id"}},
 }
 
 // TestActionSnapshotUnchanged proves LookupAction still resolves every

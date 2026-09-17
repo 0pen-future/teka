@@ -1848,8 +1848,17 @@ definitions:
     - contact_id
     - full_name
     type: object
+  tasks.AssigneeCountResponse:
+    properties:
+      count:
+        type: integer
+      teacher_id:
+        type: string
+    type: object
   tasks.BoardColumnResponse:
     properties:
+      color:
+        type: string
       created_at:
         type: string
       has_more:
@@ -1869,17 +1878,38 @@ definitions:
       updated_at:
         type: string
     type: object
+  tasks.BoardCountsResponse:
+    properties:
+      all:
+        type: integer
+      by_assignee:
+        items:
+          $ref: '#/definitions/tasks.AssigneeCountResponse'
+        type: array
+      mine:
+        type: integer
+      overdue:
+        type: integer
+      today:
+        type: integer
+      unassigned:
+        type: integer
+    type: object
   tasks.BoardResponse:
     properties:
       columns:
         items:
           $ref: '#/definitions/tasks.BoardColumnResponse'
         type: array
+      counts:
+        $ref: '#/definitions/tasks.BoardCountsResponse'
       scope:
         type: string
     type: object
   tasks.ColumnResponse:
     properties:
+      color:
+        type: string
       created_at:
         type: string
       id:
@@ -1902,6 +1932,13 @@ definitions:
     type: object
   tasks.CreateColumnRequest:
     properties:
+      color:
+        enum:
+        - none
+        - sky
+        - sun
+        - mint
+        type: string
       is_done:
         type: boolean
       name:
@@ -1989,6 +2026,13 @@ definitions:
     type: object
   tasks.UpdateColumnRequest:
     properties:
+      color:
+        enum:
+        - none
+        - sky
+        - sun
+        - mint
+        type: string
       is_done:
         type: boolean
       name:
@@ -9799,10 +9843,82 @@ paths:
       summary: Move a task to another column
       tags:
       - tasks
+  /tasks/{id}/restore:
+    post:
+      description: Requires being the center owner or the task's creator. Clears the
+        soft-delete marker; the task reappears with its original column, position,
+        and completed_at.
+      parameters:
+      - description: task id
+        format: uuid
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/tasks.TaskResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: not the owner or the task's creator
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: no soft-deleted task with this id
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Restore a deleted task
+      tags:
+      - tasks
   /tasks/board:
     get:
-      description: Every column, and the tasks Policy makes visible to the caller
-        (their own vs. the whole center's, reported as scope).
+      description: Every column, the tasks Policy and filter make visible to the caller
+        (their own vs. the whole center's, reported as scope), and counts over that
+        same visible set.
+      parameters:
+      - description: all|mine|overdue|today|unassigned
+        in: query
+        name: filter
+        type: string
+      - description: restrict to this assignee, ANDed with filter
+        format: uuid
+        in: query
+        name: assignee
+        type: string
+      - description: YYYY-MM-DD, the client's own calendar date; defaults to the server's
+          current UTC date
+        in: query
+        name: today
+        type: string
       produces:
       - application/json
       responses:
@@ -9817,6 +9933,15 @@ paths:
               type: object
         "401":
           description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: invalid filter, assignee, or today
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'

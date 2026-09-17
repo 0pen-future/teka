@@ -7,12 +7,18 @@ import (
 	"github.com/google/uuid"
 )
 
+// maxColorLen bounds Column.Color: the library treats color as an opaque,
+// length-only-checked string (see validateColor) and leaves which values are
+// meaningful to the adapter's own enum and the database CHECK constraint.
+const maxColorLen = 16
+
 // DefaultColumnSpec describes one column to seed via DefaultColumns. The
 // core does not know what names to use — see README.md "Localization
 // boundary" — so an adapter supplies its own localized column names.
 type DefaultColumnSpec struct {
 	Name   string
 	IsDone bool
+	Color  string
 }
 
 // DefaultColumns builds one Column per spec, in order, with Position set to
@@ -32,6 +38,7 @@ func DefaultColumns(idGen func() uuid.UUID, specs []DefaultColumnSpec) []Column 
 			Name:     spec.Name,
 			Position: i,
 			IsDone:   spec.IsDone,
+			Color:    spec.Color,
 		}
 	}
 	return cols
@@ -46,6 +53,24 @@ func validateName(name string, maxLen int) (string, error) {
 		return "", ErrEmptyName
 	}
 	if utf8.RuneCountInString(trimmed) > maxLen {
+		return "", ErrInvalidInput
+	}
+	return trimmed, nil
+}
+
+// validateColor trims color and returns the trimmed form. An empty (post-trim)
+// color keeps current unchanged instead of clearing it — an adapter resolves
+// "no color supplied" to its own default (e.g. "none") before ever reaching
+// Create/UpdateColumn, so an empty string here only arises from an explicit
+// patch field the caller chose to send blank, which this treats as a no-op
+// rather than an attempt to clear the color. Longer than maxColorLen runes
+// after trimming is ErrInvalidInput.
+func validateColor(color, current string) (string, error) {
+	trimmed := strings.TrimSpace(color)
+	if trimmed == "" {
+		return current, nil
+	}
+	if utf8.RuneCountInString(trimmed) > maxColorLen {
 		return "", ErrInvalidInput
 	}
 	return trimmed, nil

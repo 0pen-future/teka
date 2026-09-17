@@ -36,16 +36,16 @@ type UpdateTaskInput struct {
 }
 
 // Board returns tenant's columns (ordered by Position) and the tasks actor
-// may see, narrowed by Policy.Visibility. There is no separate
+// may see, narrowed by Policy.Visibility and filter. There is no separate
 // "CanViewBoard" check: which tasks come back is entirely determined by
-// Visibility, and whether actor may call Board at all is a capability
-// concern the host application enforces before reaching the core (see
-// README.md "Policy split"). limitPerColumn is forwarded to
+// Visibility (and filter, ANDed with it), and whether actor may call Board at
+// all is a capability concern the host application enforces before reaching
+// the core (see README.md "Policy split"). limitPerColumn is forwarded to
 // TaskRepository.ListBoard unchanged: 0 fetches every visible task, a
-// positive value caps how many come back per column (a caller that wants to
-// report "more tasks exist" per column should ask for one more than it
-// intends to display).
-func (s *Service) Board(ctx context.Context, tenant TenantID, actor Actor, limitPerColumn int) ([]Column, []Task, error) {
+// positive value caps how many come back per column, applied after filtering
+// (a caller that wants to report "more tasks exist" per column should ask
+// for one more than it intends to display).
+func (s *Service) Board(ctx context.Context, tenant TenantID, actor Actor, filter BoardFilter, limitPerColumn int) ([]Column, []Task, error) {
 	cols, err := s.repos.Columns.List(ctx, tenant)
 	if err != nil {
 		return nil, nil, err
@@ -53,11 +53,20 @@ func (s *Service) Board(ctx context.Context, tenant TenantID, actor Actor, limit
 	sort.Slice(cols, func(i, j int) bool { return cols[i].Position < cols[j].Position })
 
 	vis := s.policy.Visibility(actor, tenant)
-	tasks, err := s.repos.Tasks.ListBoard(ctx, tenant, vis, limitPerColumn)
+	tasks, err := s.repos.Tasks.ListBoard(ctx, tenant, vis, filter, limitPerColumn)
 	if err != nil {
 		return nil, nil, err
 	}
 	return cols, tasks, nil
+}
+
+// BoardCounts summarizes open tasks actor may see as of today (a calendar
+// date; time-of-day is ignored), narrowed by the same Policy.Visibility as
+// Board but independent of any BoardFilter and unbounded by Board's
+// limitPerColumn — see TaskRepository.CountBoard.
+func (s *Service) BoardCounts(ctx context.Context, tenant TenantID, actor Actor, today time.Time) (BoardCounts, error) {
+	vis := s.policy.Visibility(actor, tenant)
+	return s.repos.Tasks.CountBoard(ctx, tenant, vis, today)
 }
 
 // CreateColumn adds a column to tenant's board, appended after the current
@@ -68,11 +77,15 @@ func (s *Service) Board(ctx context.Context, tenant TenantID, actor Actor, limit
 // point of view (there is no multi-repo state to wrap in UnitOfWork here);
 // see README.md "Column cap contract" for why the adapter must serialize
 // concurrent creates per tenant to make the cap exact.
-func (s *Service) CreateColumn(ctx context.Context, tenant TenantID, actor Actor, name string, isDone bool) (Column, error) {
+func (s *Service) CreateColumn(ctx context.Context, tenant TenantID, actor Actor, name string, isDone bool, color string) (Column, error) {
 	if !s.policy.CanManageBoard(actor, tenant) {
 		return Column{}, ErrForbidden
 	}
 	trimmed, err := validateName(name, s.cfg.MaxNameLen)
+	if err != nil {
+		return Column{}, err
+	}
+	resolvedColor, err := validateColor(color, "")
 	if err != nil {
 		return Column{}, err
 	}
@@ -96,6 +109,7 @@ func (s *Service) CreateColumn(ctx context.Context, tenant TenantID, actor Actor
 		Name:     trimmed,
 		Position: count,
 		IsDone:   isDone,
+		Color:    resolvedColor,
 	}
 	return s.repos.Columns.Create(ctx, tenant, col)
 }
@@ -131,6 +145,13 @@ func (s *Service) UpdateColumn(ctx context.Context, tenant TenantID, actor Actor
 	}
 	if patch.IsDone != nil {
 		col.IsDone = *patch.IsDone
+	}
+	if patch.Color != nil {
+		resolvedColor, err := validateColor(*patch.Color, col.Color)
+		if err != nil {
+			return Column{}, err
+		}
+		col.Color = resolvedColor
 	}
 	return s.repos.Columns.Update(ctx, tenant, col)
 }
@@ -346,6 +367,37 @@ func (s *Service) DeleteTask(ctx context.Context, tenant TenantID, actor Actor, 
 		return ErrForbidden
 	}
 	return s.repos.Tasks.SoftDelete(ctx, tenant, id)
+}
+
+// RestoreTask reverses a prior soft-delete on the task identified by id,
+// leaving its ColumnID, Position, and CompletedAt exactly as they were at
+// the moment of deletion. It requires CanWriteTask — the same gate as
+// DeleteTask — so only someone who could have deleted the task can bring it
+// back; it returns ErrTaskNotFound when id does not resolve to a
+// soft-deleted task within tenant (missing, another tenant, or still live).
+// Restore and the re-read run inside one UnitOfWork.Within so the returned
+// Task reflects the committed row.
+func (s *Service) RestoreTask(ctx context.Context, tenant TenantID, actor Actor, id TaskID) (Task, error) {
+	task, err := s.repos.Tasks.GetDeleted(ctx, tenant, id)
+	if err != nil {
+		return Task{}, err
+	}
+	if !s.policy.CanWriteTask(actor, task) {
+		return Task{}, ErrForbidden
+	}
+	var restored Task
+	err = s.uow.Within(ctx, func(ctx context.Context) error {
+		if err := s.repos.Tasks.Restore(ctx, tenant, id); err != nil {
+			return err
+		}
+		var getErr error
+		restored, getErr = s.repos.Tasks.Get(ctx, tenant, id)
+		return getErr
+	})
+	if err != nil {
+		return Task{}, err
+	}
+	return restored, nil
 }
 
 // HandoverOnDeparture unassigns every task in tenant assigned to departed and

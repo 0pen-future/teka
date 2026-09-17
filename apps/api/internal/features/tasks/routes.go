@@ -15,6 +15,7 @@ func RegisterRoutes(rg *gin.RouterGroup, h *Handler, auth ...gin.HandlerFunc) {
 	g.PATCH("/tasks/:id", h.updateTask)
 	g.POST("/tasks/:id/move", h.moveTask)
 	g.DELETE("/tasks/:id", h.deleteTask)
+	g.POST("/tasks/:id/restore", h.restoreTask)
 
 	g.POST("/task-columns", h.createColumn)
 	g.PATCH("/task-columns/:id", h.updateColumn)

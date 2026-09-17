@@ -16,6 +16,11 @@ import (
 	"teka/apps/api/pkg/kanban"
 )
 
+// defaultColumnColor is what an omitted CreateColumnRequest.Color resolves
+// to — the board's cream default, matching the migration's own column
+// default.
+const defaultColumnColor = "none"
+
 // boardTasksPerColumn caps how many tasks GET /tasks/board returns per
 // column; a column past the cap reports HasMore instead of paging, since v1
 // has no board-side pagination UI.
@@ -45,16 +50,31 @@ func NewService(db *gorm.DB, tx database.TxManager, bus events.Bus) *Service {
 	return &Service{core: core}
 }
 
-// Board returns the caller's board: every column, and the tasks Policy makes
-// visible to them. Scope reports which visibility rule applied ("center" for
-// an owner or a tasks.view_all holder, "mine" otherwise) so the client can
-// label the view without re-deriving the rule itself.
-func (s *Service) Board(ctx context.Context, sc authctx.Scope) (BoardResponse, error) {
+// Board returns the caller's board: every column, the tasks Policy and q
+// make visible to them, and counts over that same visible set. Scope reports
+// which visibility rule applied ("center" for an owner or a tasks.view_all
+// holder, "mine" otherwise) so the client can label the view without
+// re-deriving the rule itself.
+func (s *Service) Board(ctx context.Context, sc authctx.Scope, q BoardQuery) (BoardResponse, error) {
 	tenant := kanban.TenantID(sc.CenterID)
 	actor := actorFrom(sc)
+
+	today, err := parseBoardToday(q.Today)
+	if err != nil {
+		return BoardResponse{}, err
+	}
+	filter, err := boardFilterFrom(q, actor, today)
+	if err != nil {
+		return BoardResponse{}, err
+	}
+
 	// Ask the core for one task past the display cap per column, so the SQL
 	// layer (not a full tenant scan) decides HasMore below.
-	cols, tasks, err := s.core.Board(ctx, tenant, actor, boardTasksPerColumn+1)
+	cols, tasks, err := s.core.Board(ctx, tenant, actor, filter, boardTasksPerColumn+1)
+	if err != nil {
+		return BoardResponse{}, translateError(err)
+	}
+	counts, err := s.core.BoardCounts(ctx, tenant, actor, today)
 	if err != nil {
 		return BoardResponse{}, translateError(err)
 	}
@@ -88,25 +108,113 @@ func (s *Service) Board(ctx context.Context, sc authctx.Scope) (BoardResponse, e
 	if actor.IsOwner || actor.Perms[kanban.PermViewAll] {
 		scope = "center"
 	}
-	return BoardResponse{Scope: scope, Columns: columns}, nil
+	return BoardResponse{
+		Scope:   scope,
+		Columns: columns,
+		Counts:  boardCountsResponseFrom(counts, actor.ID),
+	}, nil
 }
 
-// CreateColumn adds a column to the caller's board.
+// parseBoardToday converts BoardQuery.Today (already format-validated by its
+// binding tag) into the calendar date board filtering/counting compares
+// against, defaulting to the server's current UTC date when the client sends
+// none — see BoardFilter's doc comment on why this is the client's own
+// "today", not a server-derived timezone.
+func parseBoardToday(today string) (time.Time, error) {
+	if today == "" {
+		now := time.Now().UTC()
+		return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC), nil
+	}
+	t, err := time.Parse(dateLayout, today)
+	if err != nil {
+		return time.Time{}, apperror.Invalid("today must be YYYY-MM-DD", map[string]string{"today": "must be YYYY-MM-DD"})
+	}
+	return t, nil
+}
+
+// boardFilterFrom translates q's already-validated Filter/Assignee into a
+// kanban.BoardFilter, per the mapping table in the API contract: mine, unlike
+// overdue/today/unassigned, does not restrict to open tasks (a completed task
+// the caller is assigned to still belongs in their "mine" view). Assignee, when
+// present, ANDs an assignee_id predicate onto whatever Filter already set,
+// taking precedence over the one "mine" implies.
+func boardFilterFrom(q BoardQuery, actor kanban.Actor, today time.Time) (kanban.BoardFilter, error) {
+	var filter kanban.BoardFilter
+	switch q.Filter {
+	case "mine":
+		v := actor.ID
+		filter.AssigneeID = &v
+	case "overdue":
+		v := today
+		filter.DueBefore = &v
+		filter.OpenOnly = true
+	case "today":
+		v := today
+		filter.DueOn = &v
+		filter.OpenOnly = true
+	case "unassigned":
+		filter.Unassigned = true
+		filter.OpenOnly = true
+	}
+	if q.Assignee != "" {
+		parsed, err := uuid.Parse(q.Assignee)
+		if err != nil {
+			return kanban.BoardFilter{}, apperror.Invalid("assignee must be a uuid", map[string]string{"assignee": "must be a uuid"})
+		}
+		v := kanban.ActorID(parsed)
+		filter.AssigneeID = &v
+		filter.Unassigned = false
+	}
+	return filter, nil
+}
+
+// boardCountsResponseFrom builds a BoardCountsResponse from the core's
+// tenant-wide counts, deriving Mine from ByAssignee[actorID] (mine is not a
+// core concept — see kanban.Service.Board's doc comment) and sorting
+// ByAssignee by count descending, then teacher id, so the response is
+// deterministic across calls.
+func boardCountsResponseFrom(counts kanban.BoardCounts, actorID kanban.ActorID) BoardCountsResponse {
+	byAssignee := make([]AssigneeCountResponse, 0, len(counts.ByAssignee))
+	for assigneeID, count := range counts.ByAssignee {
+		byAssignee = append(byAssignee, AssigneeCountResponse{TeacherID: uuid.UUID(assigneeID), Count: count})
+	}
+	sort.Slice(byAssignee, func(i, j int) bool {
+		if byAssignee[i].Count != byAssignee[j].Count {
+			return byAssignee[i].Count > byAssignee[j].Count
+		}
+		return byAssignee[i].TeacherID.String() < byAssignee[j].TeacherID.String()
+	})
+	return BoardCountsResponse{
+		All:        counts.All,
+		Mine:       counts.ByAssignee[actorID],
+		Overdue:    counts.Overdue,
+		Today:      counts.Today,
+		Unassigned: counts.Unassigned,
+		ByAssignee: byAssignee,
+	}
+}
+
+// CreateColumn adds a column to the caller's board. An absent Color defaults
+// to "none", the board's cream default.
 func (s *Service) CreateColumn(ctx context.Context, sc authctx.Scope, req CreateColumnRequest) (ColumnResponse, error) {
 	isDone := false
 	if req.IsDone != nil {
 		isDone = *req.IsDone
 	}
-	col, err := s.core.CreateColumn(ctx, kanban.TenantID(sc.CenterID), actorFrom(sc), req.Name, isDone)
+	color := defaultColumnColor
+	if req.Color != nil {
+		color = *req.Color
+	}
+	col, err := s.core.CreateColumn(ctx, kanban.TenantID(sc.CenterID), actorFrom(sc), req.Name, isDone, color)
 	if err != nil {
 		return ColumnResponse{}, translateError(err)
 	}
 	return columnResponseFrom(col), nil
 }
 
-// UpdateColumn renames a column and/or toggles its IsDone flag.
+// UpdateColumn renames a column, toggles its IsDone flag, and/or recolors it.
 func (s *Service) UpdateColumn(ctx context.Context, sc authctx.Scope, colID uuid.UUID, req UpdateColumnRequest) (ColumnResponse, error) {
-	patch := kanban.ColumnPatch{Name: req.Name, IsDone: req.IsDone}
+	patch := kanban.ColumnPatch{Name: req.Name, IsDone: req.IsDone, Color: req.Color}
 	col, err := s.core.UpdateColumn(ctx, kanban.TenantID(sc.CenterID), actorFrom(sc), kanban.ColumnID(colID), patch)
 	if err != nil {
 		return ColumnResponse{}, translateError(err)
@@ -126,9 +234,10 @@ func (s *Service) ReorderColumns(ctx context.Context, sc authctx.Scope, req Reor
 	if err := s.core.ReorderColumns(ctx, tenant, actor, order); err != nil {
 		return ColumnsResponse{}, translateError(err)
 	}
-	// Only the columns are used here; 0 keeps this call's existing
-	// unlimited-tasks behavior (out of scope for the per-column cap below).
-	cols, _, err := s.core.Board(ctx, tenant, actor, 0)
+	// Only the columns are used here; an empty filter and 0 keep this call's
+	// existing unlimited-tasks behavior (out of scope for the per-column cap
+	// below).
+	cols, _, err := s.core.Board(ctx, tenant, actor, kanban.BoardFilter{}, 0)
 	if err != nil {
 		return ColumnsResponse{}, translateError(err)
 	}
@@ -168,7 +277,7 @@ func (s *Service) CreateTask(ctx context.Context, sc authctx.Scope, req CreateTa
 
 	columnID := req.ColumnID
 	if columnID == nil {
-		cols, _, err := s.core.Board(ctx, tenant, actor, 0)
+		cols, _, err := s.core.Board(ctx, tenant, actor, kanban.BoardFilter{}, 0)
 		if err != nil {
 			return TaskResponse{}, translateError(err)
 		}
@@ -298,6 +407,17 @@ func (s *Service) MoveTask(ctx context.Context, sc authctx.Scope, id uuid.UUID, 
 func (s *Service) DeleteTask(ctx context.Context, sc authctx.Scope, id uuid.UUID) error {
 	err := s.core.DeleteTask(ctx, kanban.TenantID(sc.CenterID), actorFrom(sc), kanban.TaskID(id))
 	return translateError(err)
+}
+
+// RestoreTask reverses a soft-delete, reviving the task in its original
+// column/position/completion state. Requires the same tasks.delete route
+// policy and CanWriteTask ownership as DeleteTask itself.
+func (s *Service) RestoreTask(ctx context.Context, sc authctx.Scope, id uuid.UUID) (TaskResponse, error) {
+	task, err := s.core.RestoreTask(ctx, kanban.TenantID(sc.CenterID), actorFrom(sc), kanban.TaskID(id))
+	if err != nil {
+		return TaskResponse{}, translateError(err)
+	}
+	return taskResponseFrom(task), nil
 }
 
 // HandoverOnDeparture implements centers.TaskHandover: it unassigns the

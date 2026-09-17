@@ -12,6 +12,7 @@ import (
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/tasks"
+	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/shared/events"
 	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/testutil"
@@ -60,9 +61,11 @@ func seedColumn(t *testing.T, db *gorm.DB, centerID uuid.UUID, name string, posi
 
 // seedTaskOpts customizes a fixture task row before insertion.
 type seedTaskOpts struct {
-	assignee  *uuid.UUID
-	position  float64
-	deletedAt bool
+	assignee    *uuid.UUID
+	position    float64
+	deletedAt   bool
+	dueOn       *string // YYYY-MM-DD
+	completedAt bool
 }
 
 // seedTask inserts a tasks row directly, bypassing the service.
@@ -73,10 +76,14 @@ func seedTask(t *testing.T, db *gorm.DB, centerID, columnID, createdBy uuid.UUID
 	if opts.deletedAt {
 		deletedExpr = "now()"
 	}
+	completedExpr := "NULL"
+	if opts.completedAt {
+		completedExpr = "now()"
+	}
 	require.NoError(t, db.Exec(
-		`INSERT INTO tasks (id, center_id, column_id, created_by, assignee_id, title, priority, position, deleted_at)
-		 VALUES (?, ?, ?, ?, ?, ?, 'none', ?, `+deletedExpr+`)`,
-		taskID, centerID, columnID, createdBy, opts.assignee, title, opts.position).Error)
+		`INSERT INTO tasks (id, center_id, column_id, created_by, assignee_id, title, priority, position, due_on, deleted_at, completed_at)
+		 VALUES (?, ?, ?, ?, ?, ?, 'none', ?, ?, `+deletedExpr+`, `+completedExpr+`)`,
+		taskID, centerID, columnID, createdBy, opts.assignee, title, opts.position, opts.dueOn).Error)
 	return taskID
 }
 
@@ -92,7 +99,7 @@ func TestBoardOrdersColumnsByPosition(t *testing.T) {
 	first := seedColumn(t, e.db, scope.CenterID, "first", 0, false)
 	second := seedColumn(t, e.db, scope.CenterID, "second", 1, false)
 
-	resp, err := e.svc.Board(context.Background(), scope)
+	resp, err := e.svc.Board(context.Background(), scope, tasks.BoardQuery{})
 	require.NoError(t, err)
 	require.Len(t, resp.Columns, 3)
 	require.Equal(t, first, resp.Columns[0].ID)
@@ -114,7 +121,7 @@ func TestBoardCapsAt50TasksAndReportsHasMore(t *testing.T) {
 		seedTask(t, e.db, scope.CenterID, col, owner.ID, "t", seedTaskOpts{position: float64(i)})
 	}
 
-	resp, err := e.svc.Board(context.Background(), scope)
+	resp, err := e.svc.Board(context.Background(), scope, tasks.BoardQuery{})
 	require.NoError(t, err)
 	require.Len(t, resp.Columns, 1)
 	require.Len(t, resp.Columns[0].Tasks, 50)
@@ -135,7 +142,7 @@ func TestBoardOrdersTasksByPositionThenCreatedAt(t *testing.T) {
 	first := seedTask(t, e.db, scope.CenterID, col, owner.ID, "first", seedTaskOpts{position: 0})
 	middle := seedTask(t, e.db, scope.CenterID, col, owner.ID, "middle", seedTaskOpts{position: 1})
 
-	resp, err := e.svc.Board(context.Background(), scope)
+	resp, err := e.svc.Board(context.Background(), scope, tasks.BoardQuery{})
 	require.NoError(t, err)
 	require.Len(t, resp.Columns[0].Tasks, 3)
 	require.Equal(t, first, resp.Columns[0].Tasks[0].ID)
@@ -153,7 +160,50 @@ func TestBoardExcludesSoftDeletedTasks(t *testing.T) {
 	col := seedColumn(t, e.db, scope.CenterID, "To do", 0, false)
 	seedTask(t, e.db, scope.CenterID, col, owner.ID, "gone", seedTaskOpts{deletedAt: true})
 
-	resp, err := e.svc.Board(context.Background(), scope)
+	resp, err := e.svc.Board(context.Background(), scope, tasks.BoardQuery{})
 	require.NoError(t, err)
 	require.Empty(t, resp.Columns[0].Tasks)
+}
+
+// TestCreateColumnPersistsColor asserts a column created with an explicit
+// color round-trips through the response, and the board later reflects the
+// same value for every column it lists.
+func TestCreateColumnPersistsColor(t *testing.T) {
+	t.Parallel()
+	e := newTasksEnv(t)
+	_, owner := testutil.Teacher(t, e.db)
+	scope := testutil.ScopeFor(t, e.db, owner.ID)
+	seedColumn(t, e.db, scope.CenterID, "existing", 0, false)
+
+	sun := "sun"
+	resp, err := e.svc.CreateColumn(context.Background(), scope, tasks.CreateColumnRequest{Name: "waiting", Color: &sun})
+	require.NoError(t, err)
+	require.Equal(t, "sun", resp.Color)
+
+	board, err := e.svc.Board(context.Background(), scope, tasks.BoardQuery{})
+	require.NoError(t, err)
+	for _, col := range board.Columns {
+		if col.ID == resp.ID {
+			require.Equal(t, "sun", col.Color)
+		} else {
+			require.Equal(t, "none", col.Color, "a column created without a color defaults to none")
+		}
+	}
+}
+
+// TestUpdateColumnRejectsColorOutsideTheEnum asserts a color outside the
+// enum is rejected even past the handler's binding tag — the ck_task_columns_
+// color CHECK constraint is a live backstop, translated by errors.go into a
+// 422 rather than surfacing as a raw DB error.
+func TestUpdateColumnRejectsColorOutsideTheEnum(t *testing.T) {
+	t.Parallel()
+	e := newTasksEnv(t)
+	_, owner := testutil.Teacher(t, e.db)
+	scope := testutil.ScopeFor(t, e.db, owner.ID)
+	col := seedColumn(t, e.db, scope.CenterID, "To do", 0, false)
+
+	pink := "pink"
+	_, err := e.svc.UpdateColumn(context.Background(), scope, col, tasks.UpdateColumnRequest{Color: &pink})
+	ae := appErr(t, err)
+	require.Equal(t, apperror.CodeValidation, ae.Code)
 }
