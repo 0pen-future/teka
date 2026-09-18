@@ -112,6 +112,15 @@ var actionSnapshot = []struct {
 	{"DELETE", "/api/v1/centers/me/invitations/:id", ActionSpec{Action: "invitation.revoke", EntityType: "invitation", IDParam: "id"}},
 	{"POST", "/api/v1/classes/:id/staff", ActionSpec{Action: "class.staff.assign", EntityType: "class", IDParam: "id"}},
 	{"POST", "/api/v1/classes/:id/archive", ActionSpec{Action: "class.archive", EntityType: "class", IDParam: "id"}},
+	{"POST", "/api/v1/task-columns", ActionSpec{Action: "task_column.create", EntityType: "task_column", IDParam: ""}},
+	{"PATCH", "/api/v1/task-columns/:id", ActionSpec{Action: "task_column.update", EntityType: "task_column", IDParam: "id"}},
+	{"PUT", "/api/v1/task-columns/order", ActionSpec{Action: "task_column.reorder", EntityType: "task_column", IDParam: ""}},
+	{"DELETE", "/api/v1/task-columns/:id", ActionSpec{Action: "task_column.delete", EntityType: "task_column", IDParam: "id"}},
+	{"POST", "/api/v1/tasks", ActionSpec{Action: "task.create", EntityType: "task", IDParam: ""}},
+	{"PATCH", "/api/v1/tasks/:id", ActionSpec{Action: "task.update", EntityType: "task", IDParam: "id"}},
+	{"POST", "/api/v1/tasks/:id/move", ActionSpec{Action: "task.move", EntityType: "task", IDParam: "id"}},
+	{"DELETE", "/api/v1/tasks/:id", ActionSpec{Action: "task.delete", EntityType: "task", IDParam: "id"}},
+	{"POST", "/api/v1/tasks/:id/restore", ActionSpec{Action: "task.restore", EntityType: "task", IDParam: "id"}},
 }
 
 // TestActionSnapshotUnchanged proves LookupAction still resolves every

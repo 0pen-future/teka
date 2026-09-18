@@ -14,7 +14,7 @@ export const API_URL = "http://localhost:8080/api/v1";
 export const PUBLIC_API_URL = API_URL.replace(/\/api\/v1\/?$/, "");
 
 /** Version stamp of the mirrored catalog below (`authctx.CatalogVersion`). */
-export const CATALOG_VERSION = 3;
+export const CATALOG_VERSION = 4;
 
 function perm(
   key: string,
@@ -276,6 +276,37 @@ export const PERMISSION_CATALOG = [
   ),
   perm("notifications.view_all", "Xem mọi thông báo", "scope", "high", SCOPE_DESC),
   perm(
+    "tasks.create",
+    "Tạo công việc",
+    "crud",
+    "low",
+    "Tạo công việc mới trong bảng công việc của trung tâm.",
+  ),
+  perm(
+    "tasks.list",
+    "Xem bảng công việc",
+    "crud",
+    "low",
+    "Xem danh sách công việc trong phạm vi được thấy.",
+  ),
+  perm("tasks.read", "Xem chi tiết công việc", "crud", "low", "Xem chi tiết một công việc."),
+  perm(
+    "tasks.edit",
+    "Sửa & chuyển cột công việc",
+    "crud",
+    "low",
+    "Cập nhật nội dung, hạn, ưu tiên và chuyển cột của công việc.",
+  ),
+  perm("tasks.delete", "Xoá công việc", "crud", "medium", "Xoá công việc khỏi bảng công việc."),
+  perm(
+    "tasks.manage_board",
+    "Cấu hình cột bảng công việc",
+    "special",
+    "high",
+    "Tạo, đổi tên, sắp xếp hoặc xoá cột của bảng công việc.",
+  ),
+  perm("tasks.view_all", "Xem mọi công việc", "scope", "high", SCOPE_DESC),
+  perm(
     "reports.send",
     "Gửi báo cáo học phí",
     "special",
@@ -283,6 +314,13 @@ export const PERMISSION_CATALOG = [
     "Gửi thông báo học phí hàng loạt và theo dõi lượt gửi.",
   ),
   perm("members.manage", "Quản lý thành viên", "special", "high", "Gỡ thành viên khỏi trung tâm."),
+  perm(
+    "members.list",
+    "Xem danh bạ thành viên",
+    "crud",
+    "low",
+    "Xem danh sách thành viên và vai trò trong trung tâm, không gồm số điện thoại hay email.",
+  ),
   perm("center.manage", "Quản lý trung tâm", "special", "medium", "Cập nhật thông tin trung tâm."),
   perm(
     "invitations.manage",
@@ -756,6 +794,125 @@ const publicStatementFixturesByToken: Record<string, unknown> = {
   "no-qr-token": publicStatementFixtureNoQr,
 };
 
+// --- Task-center kanban fixtures ---
+
+const taskColumnTodo = {
+  id: "50000000-0000-4000-8000-000000000001",
+  name: "Cần làm",
+  position: 1,
+  is_done: false,
+  created_at: "2026-08-01T10:00:00Z",
+  updated_at: "2026-08-01T10:00:00Z",
+};
+
+const taskColumnDoing = {
+  id: "50000000-0000-4000-8000-000000000002",
+  name: "Đang làm",
+  position: 2,
+  is_done: false,
+  created_at: "2026-08-01T10:00:00Z",
+  updated_at: "2026-08-01T10:00:00Z",
+};
+
+const taskColumnDone = {
+  id: "50000000-0000-4000-8000-000000000003",
+  name: "Hoàn thành",
+  position: 3,
+  is_done: true,
+  created_at: "2026-08-01T10:00:00Z",
+  updated_at: "2026-08-01T10:00:00Z",
+};
+
+const defaultTaskColumnList = [taskColumnTodo, taskColumnDoing, taskColumnDone];
+
+interface DefaultTaskFixture {
+  id: string;
+  column_id: string;
+  title: string;
+  description: string;
+  priority: string;
+  due_on: string | null;
+  assignee_id: string;
+  created_by: string;
+  position: number;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+const defaultTask1: DefaultTaskFixture = {
+  id: "51000000-0000-4000-8000-000000000001",
+  column_id: taskColumnTodo.id,
+  title: "Chuẩn bị giáo án tuần 3",
+  description: "",
+  priority: "medium",
+  due_on: "2026-09-20",
+  assignee_id: primaryTeacher.id,
+  created_by: primaryTeacher.id,
+  position: 1,
+  completed_at: null,
+  created_at: "2026-09-10T08:00:00Z",
+  updated_at: "2026-09-10T08:00:00Z",
+};
+
+const defaultTask2: DefaultTaskFixture = {
+  id: "51000000-0000-4000-8000-000000000002",
+  column_id: taskColumnDoing.id,
+  title: "Gọi phụ huynh lớp Toán 6A",
+  description: "<p>Xác nhận lịch học bù</p>",
+  priority: "high",
+  due_on: null,
+  assignee_id: secondaryTeacher.id,
+  created_by: primaryTeacher.id,
+  position: 1,
+  completed_at: null,
+  created_at: "2026-09-11T08:00:00Z",
+  updated_at: "2026-09-11T08:00:00Z",
+};
+
+const defaultTask3: DefaultTaskFixture = {
+  id: "51000000-0000-4000-8000-000000000003",
+  column_id: taskColumnDone.id,
+  title: "Nộp báo cáo doanh thu tháng 8",
+  description: "",
+  priority: "low",
+  due_on: "2026-09-05",
+  assignee_id: primaryTeacher.id,
+  created_by: primaryTeacher.id,
+  position: 1,
+  completed_at: "2026-09-05T09:00:00Z",
+  created_at: "2026-09-01T08:00:00Z",
+  updated_at: "2026-09-05T09:00:00Z",
+};
+
+const defaultTasksById: Record<string, DefaultTaskFixture> = {
+  [defaultTask1.id]: defaultTask1,
+  [defaultTask2.id]: defaultTask2,
+  [defaultTask3.id]: defaultTask3,
+};
+
+/** `GET /tasks/board` default board — echoes whatever scope was requested. */
+function defaultBoardColumns() {
+  return [
+    { ...taskColumnTodo, tasks: [defaultTask1], has_more: false },
+    { ...taskColumnDoing, tasks: [defaultTask2], has_more: false },
+    { ...taskColumnDone, tasks: [defaultTask3], has_more: false },
+  ];
+}
+
+export const defaultMemberDirectory = [
+  {
+    teacher_id: primaryTeacher.id,
+    display_name: primaryTeacher.full_name,
+    role_name: "Chủ trung tâm",
+  },
+  {
+    teacher_id: secondaryTeacher.id,
+    display_name: secondaryTeacher.full_name,
+    role_name: "Giáo viên",
+  },
+];
+
 // --- Default happy-path handlers; tests override per case with server.use() ---
 
 export const handlers = [
@@ -891,4 +1048,117 @@ export const handlers = [
     }
     return HttpResponse.json(ok(fixture));
   }),
+  // Task-center kanban defaults: a 3-column board (todo/doing/done) with one
+  // task each. Flow tests (create/move/delete/settings) override with
+  // `server.use()` from `@/features/tasks/__tests__/tasks-handlers.ts`.
+  http.get(`${API_URL}/tasks/board`, ({ request }) => {
+    const url = new URL(request.url);
+    const scope = url.searchParams.get("scope") === "center" ? "center" : "mine";
+    return HttpResponse.json(ok({ scope, columns: defaultBoardColumns() }));
+  }),
+  http.post(`${API_URL}/task-columns`, async ({ request }) => {
+    const body = (await request.json()) as { name: string; is_done?: boolean };
+    return HttpResponse.json(
+      ok({
+        id: "50000000-0000-4000-8000-000000000099",
+        name: body.name,
+        position: defaultTaskColumnList.length + 1,
+        is_done: body.is_done ?? false,
+        created_at: "2026-09-13T10:00:00Z",
+        updated_at: "2026-09-13T10:00:00Z",
+      }),
+      { status: 201 },
+    );
+  }),
+  http.patch(`${API_URL}/task-columns/:id`, async ({ params, request }) => {
+    const body = (await request.json()) as { name?: string; is_done?: boolean };
+    const existing =
+      defaultTaskColumnList.find((column) => column.id === params.id) ?? taskColumnTodo;
+    return HttpResponse.json(
+      ok({
+        id: params.id as string,
+        name: body.name ?? existing.name,
+        position: existing.position,
+        is_done: body.is_done ?? existing.is_done,
+        created_at: existing.created_at,
+        updated_at: "2026-09-13T10:00:00Z",
+      }),
+    );
+  }),
+  http.put(`${API_URL}/task-columns/order`, async ({ request }) => {
+    const body = (await request.json()) as { ids: string[] };
+    const byId = new Map(defaultTaskColumnList.map((column) => [column.id, column]));
+    const columns = body.ids.map((id, index) => {
+      const existing = byId.get(id);
+      return {
+        id,
+        name: existing?.name ?? "",
+        position: index + 1,
+        is_done: existing?.is_done ?? false,
+        created_at: existing?.created_at ?? "2026-09-13T10:00:00Z",
+        updated_at: "2026-09-13T10:00:00Z",
+      };
+    });
+    return HttpResponse.json(ok({ columns }));
+  }),
+  http.delete(`${API_URL}/task-columns/:id`, () => HttpResponse.json(ok({ moved_count: 0 }))),
+  http.post(`${API_URL}/tasks`, async ({ request }) => {
+    const body = (await request.json()) as {
+      title: string;
+      description?: string;
+      column_id?: string;
+      assignee_id?: string;
+      priority?: string;
+      due_on?: string;
+    };
+    return HttpResponse.json(
+      ok({
+        id: "51000000-0000-4000-8000-000000000099",
+        column_id: body.column_id ?? taskColumnTodo.id,
+        title: body.title,
+        description: body.description ?? "",
+        priority: body.priority ?? "none",
+        due_on: body.due_on ?? null,
+        assignee_id: body.assignee_id ?? null,
+        created_by: primaryTeacher.id,
+        position: 0,
+        completed_at: null,
+        created_at: "2026-09-13T10:00:00Z",
+        updated_at: "2026-09-13T10:00:00Z",
+      }),
+      { status: 201 },
+    );
+  }),
+  http.get(`${API_URL}/tasks/:id`, ({ params }) => {
+    const task = defaultTasksById[params.id as string];
+    if (!task) {
+      return HttpResponse.json(fail("NOT_FOUND", "task not found"), { status: 404 });
+    }
+    return HttpResponse.json(ok(task));
+  }),
+  http.patch(`${API_URL}/tasks/:id`, async ({ params, request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    const existing = defaultTasksById[params.id as string] ?? defaultTask1;
+    return HttpResponse.json(ok({ ...existing, ...body, updated_at: "2026-09-13T10:00:00Z" }));
+  }),
+  http.post(`${API_URL}/tasks/:id/move`, async ({ params, request }) => {
+    const body = (await request.json()) as { column_id: string; after_task_id?: string | null };
+    const existing = defaultTasksById[params.id as string] ?? defaultTask1;
+    // Stateless: `after_task_id` only decides whether the echoed position is
+    // "top" (null) or "just below that task"; the stateful handler in
+    // `src/features/tasks/__tests__/tasks-handlers.ts` does the real insert.
+    const after = body.after_task_id ? defaultTasksById[body.after_task_id] : undefined;
+    return HttpResponse.json(
+      ok({
+        ...existing,
+        column_id: body.column_id,
+        position: after ? after.position + 1 : 0,
+        updated_at: "2026-09-13T10:00:00Z",
+      }),
+    );
+  }),
+  http.delete(`${API_URL}/tasks/:id`, () => new HttpResponse(null, { status: 204 })),
+  http.get(`${API_URL}/centers/me/members/directory`, () =>
+    HttpResponse.json(ok(defaultMemberDirectory)),
+  ),
 ];

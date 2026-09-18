@@ -36,6 +36,7 @@ Run `make help` for the full annotated list. The everyday ones:
 | `make test` | All backend + frontend tests (`test-api`, `test-web`) |
 | `make lint` | Lint both apps (`lint-api`, `lint-web`) |
 | `make e2e` | Playwright end-to-end tests against the running dev stack |
+| `make e2e-isolated` | Same suite on a throwaway compose stack (`teka-e2e`): build, seed, test, tear down; `E2E_ARGS="tasks-board"` narrows the run |
 | `make api-docs` | Regenerate the OpenAPI spec from swag annotations |
 | `make migrate-up` / `make seed` | Apply migrations / seed dev users |
 | `make build` | Build both production Docker images |

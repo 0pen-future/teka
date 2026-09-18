@@ -55,3 +55,23 @@ type MemberOverridesChanged struct {
 
 // EventName implements events.Event.
 func (MemberOverridesChanged) EventName() string { return "centers.member_overrides_changed" }
+
+// MemberTasksHandedOver records a departing member's task board handover:
+// their assigned tasks are unassigned, and the tasks they created are
+// reassigned to SuccessorID (the center owner). Published after RemoveMember's
+// transaction commits, alongside the membership close it happened inside —
+// the generic request-log audit path cannot describe this on its own since
+// it is triggered from inside another feature's transaction, not a direct
+// request to the task board.
+type MemberTasksHandedOver struct {
+	OccurredAt  time.Time
+	CenterID    uuid.UUID
+	ActorID     uuid.UUID
+	MemberID    uuid.UUID
+	SuccessorID uuid.UUID
+	Unassigned  int
+	Reassigned  int
+}
+
+// EventName implements events.Event.
+func (MemberTasksHandedOver) EventName() string { return "centers.member_tasks_handed_over" }

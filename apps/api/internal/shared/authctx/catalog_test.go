@@ -33,6 +33,15 @@ var expectedScopeKeys = []string{
 	PermPaymentsViewAll,
 	PermStatementsViewAll,
 	PermNotificationsViewAll,
+	PermTasksViewAll,
+}
+
+// The two catalog v4 keys an owner must assign explicitly: DefaultGrant is
+// false, so the compatibility backfill and the default-role baseline never
+// carry them.
+var optInKeys = []string{
+	PermTasksManageBoard,
+	PermMembersList,
 }
 
 // Keys the catalog once knew and has since retired: assignment rows for them
@@ -245,8 +254,8 @@ func TestEffectiveKeysCoversCatalogInOrder(t *testing.T) {
 // already — granting them would escalate).
 func TestDefaultRoleKeysPreserveLegacyBaseline(t *testing.T) {
 	defaults := DefaultRoleKeys()
-	if len(defaults) != 53 {
-		t.Fatalf("default baseline must hold the 53 operational keys, got %d", len(defaults))
+	if len(defaults) != 58 {
+		t.Fatalf("default baseline must hold the 58 operational keys, got %d", len(defaults))
 	}
 	inDefaults := map[string]bool{}
 	for _, key := range defaults {
@@ -267,14 +276,23 @@ func TestDefaultRoleKeysPreserveLegacyBaseline(t *testing.T) {
 			t.Errorf("legacy identity key %q must not be granted by default", key)
 		}
 	}
+	for _, key := range optInKeys {
+		if inDefaults[key] {
+			t.Errorf("opt-in key %q must not be granted by default", key)
+		}
+	}
+	if inDefaults[PermTasksViewAll] {
+		t.Errorf("scope key %q must not be granted by default", PermTasksViewAll)
+	}
 	// Bidirectional: every grantable operational key outside the legacy
-	// identity set is a default — no silent access loss at cutover.
+	// identity set and outside the explicit opt-in allowlist is a default —
+	// no silent access loss at cutover.
 	legacy := map[string]bool{}
 	for _, key := range legacyIdentityKeys {
 		legacy[key] = true
 	}
 	for _, d := range PermDefs() {
-		if !d.Grantable || d.Kind == PermKindScope || legacy[d.Key] {
+		if !d.Grantable || d.Kind == PermKindScope || legacy[d.Key] || !d.DefaultGrant {
 			continue
 		}
 		if !inDefaults[d.Key] {
@@ -292,11 +310,29 @@ func TestDefaultRoleKeysPreserveLegacyBaseline(t *testing.T) {
 
 // The catalog version is the CAS anchor for permission-assignment writes: a
 // client that loaded the read model under an older catalog must get 409, not
-// a silent partial write. Version 3 retired the data.view_center_wide alias
-// and the unenforced scores/teaching scope keys. Bump it on any catalog
-// change that alters what a stored assignment means.
+// a silent partial write. Version 4 added the tasks group, members.list, and
+// the DefaultGrant attribute. Bump it on any catalog change that alters what
+// a stored assignment means.
 func TestCatalogVersion(t *testing.T) {
-	if CatalogVersion != 3 {
-		t.Fatalf("catalog version must be 3 after the legacy-key retirement, got %d", CatalogVersion)
+	if CatalogVersion != 4 {
+		t.Fatalf("catalog version must be 4 after adding the tasks group, got %d", CatalogVersion)
+	}
+}
+
+// DefaultGrant is the single opt-out mechanism for the default-role
+// backfill: every catalog entry must set it true except the explicit
+// allowlist below. A future special or scope key that forgets to opt in
+// stays a default by construction, so this test — not a fourth filter
+// branch in DefaultRoleKeys — is what catches a missed optIn() call.
+func TestDefaultGrantAllowlist(t *testing.T) {
+	optIn := map[string]bool{}
+	for _, key := range optInKeys {
+		optIn[key] = true
+	}
+	for _, d := range PermDefs() {
+		want := !optIn[d.Key]
+		if d.DefaultGrant != want {
+			t.Errorf("key %q DefaultGrant = %v, want %v", d.Key, d.DefaultGrant, want)
+		}
 	}
 }

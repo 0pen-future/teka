@@ -44,14 +44,17 @@ lint exceptions for that folder live in `eslint.config.js`.
 Feature UI reaches for these before raw shadcn or one-off markup:
 
 - Layout and feedback: `HvCard`, `HvModal` (`size` md/lg/xl; every size is a
-  bottom sheet below `sm`), `HvConfirmDialog` for single-action confirmations,
+  bottom sheet below `sm`; `stickyFooter` opts md/lg into the same fixed
+  header/footer + scrolling body layout "xl" always uses, for a form whose
+  footer must stay reachable while the body grows, e.g. the task detail
+  modal), `HvConfirmDialog` for single-action confirmations,
   `HvNotice` (`tone` info/warning/danger; danger defaults to `role="alert"`),
   `HvStateBlock` for the loading/empty/error trio instead of hand-written
   "Đang tải…" text, `hvToast` for transient results.
 - Controls: `HvButton` (all sizes keep a 44px hit area), `HvSegmented`
   (segmented radio group, or `variant="tabs"` with real tab semantics),
   `HvScoreInput` + `parseScoreInput` for score cells (`type="text"
-  inputmode="decimal"`, accepts "7,5", exposes `data-state`
+inputmode="decimal"`, accepts "7,5", exposes `data-state`
   idle/dirty/saved/invalid), `HvSelect` (the select-style dropdown: a `combobox`
   trigger opening a `listbox` with roving focus — popover from `sm` up, bottom
   sheet below, a filter box once the list passes `searchThreshold`; read the
@@ -119,6 +122,50 @@ Radix primitives for interactive components, `eslint-plugin-jsx-a11y` in CI,
 a skip link in the root layout, `aria-label` on icon-only buttons, and both
 color schemes (class-based dark mode via the theme provider).
 
+**Drag-and-drop (task board).** dnd-kit lives only in the `tasks` feature
+(`hooks/use-board-dnd.ts` adapts it onto the headless `src/lib/kanban`, which
+stays drag-layer-agnostic — ESLint blocks `@dnd-kit/*` there). Sensors are
+fixed for every viewport: `MouseSensor` with a 6px distance so a plain click
+still opens the card, and `TouchSensor` with a 250ms hold so the column
+keeps scrolling; there is no keyboard or pointer sensor. Keyboard moves stay
+on the lib's `[`/`]` shortcut, so cards keep `role="option"` and the lib's
+roving `tabIndex` — never spread dnd-kit's `attributes` onto a card, and keep
+dnd-kit's own announcer silenced (the page owns the Vietnamese live region).
+Desktop drops may change column; on phones a drag only reorders inside the
+visible column and the move menu remains the cross-column path. Transitions
+are dropped under `prefers-reduced-motion`.
+
+**Rich text (task descriptions).** The API stores a description as a
+sanitized HTML subset (`p br strong em u s ul ol li a`). On the web that
+subset is edited with TipTap in `tasks/components/task-description-editor.tsx`,
+which the form modal loads lazily so the board's chunk never carries
+ProseMirror, and rendered only through `tasks/components/rich-text-view.tsx`,
+which runs DOMPurify (`tasks/lib/rich-text.ts`, same allow-list, links forced
+to `rel="noopener noreferrer nofollow" target="_blank"`) before injecting.
+That view is the single file allowed to use `dangerouslySetInnerHTML`
+(`no-restricted-syntax` in [eslint.config.js](../apps/web/eslint.config.js)
+blocks it everywhere else); cards show a text-only preview via
+`textFromHtml`. The form counts characters the way the server does
+(`plainTextLength`: text only, entities decoded) so the 2000-character limit
+trips on exactly the input the API would reject.
+
+**Board filters are server-side (task board).** `GET /tasks/board` takes
+`filter` (`all|mine|overdue|today|unassigned`), `assignee` (a teacher id,
+ANDed on top of `filter`), and `today` (the client's local date, since
+"overdue"/"today" must match the caller's calendar day, not the server's);
+the client never re-filters a fetched board client-side. `filter=all` — the
+default — is omitted from the request entirely rather than sent explicitly
+(`tasks-api.ts#getBoard`). `useBoardUrlState` (`tasks/hooks`) persists
+`filter`/`assignee`/plus which columns are collapsed in the URL via
+`useSearchParams`, dropping any param that is back at its default so a
+plain `/tasks` never carries redundant query string; `BoardFilterBar` (status
+chips + a per-teacher chip carrying the open-task count) renders only for
+`tasks.view_all` holders — everyone else sees `BoardSummary`'s plain task/
+overdue/today counts instead, since the filter bar's teacher chips only make
+sense center-wide. A drag performed while a filter is active still computes
+its drop position against the currently *visible* (filtered) column order
+(`use-tasks-data-source.ts#moveTask`), not the full unfiltered column.
+
 ## Testing
 
 Two layers, two runners:
@@ -141,15 +188,29 @@ Two layers, two runners:
   resolve for a given width. Dropdowns are driven by clicking the `combobox`
   and then the `option` (`pickOption` in `src/test/pick-option.ts`); pass
   `mockViewport(1024)` so the popover branch runs instead of the sheet.
+  dnd-kit works in jsdom: `fireEvent.mouseDown` on a card followed by a
+  `mouseMove` on `document` past 6px sets `data-dragging` on it; the adapter
+  hook itself is tested with `renderHook` and hand-built `onDragEnd` events.
+  dnd-kit mounts a second `aria-live` node, so assert on the board's
+  announcement by text rather than `getByRole("status")`.
 - **End-to-end tests** — Playwright against a running stack
   (`make e2e` / `npm run e2e`), specs in `e2e/*.spec.ts`. Expects the app on
   localhost:5173 (override with `E2E_BASE_URL`) backed by the API with seeded
-  dev users. Tests run on one worker because they mutate a shared database.
-  Prefer role-based locators; use `exact: true` on cell lookups so row
-  action `aria-label`s don't collide in strict mode.
+  dev users. `make e2e-isolated` builds its own compose project (`teka-e2e`,
+  ports 55173/58080/55432), seeds it, runs the suite and tears it down, so a
+  run never touches the `make dev` database. Tests run on one worker because
+  they mutate a shared database. Two projects: `desktop` runs every spec
+  except `*-mobile.spec.ts`; `mobile` runs only those, under the Pixel 7
+  device profile with touch on. Prefer role-based locators; use `exact: true`
+  on cell lookups so row action `aria-label`s don't collide in strict mode.
+  Shared setup lives in `e2e/helpers/` (`auth.ts` logs in through the UI or
+  the API, `board.ts` seeds tasks over the API and reads column order,
+  `drag.ts` walks a pointer or a CDP touch across the board in steps, since
+  dnd-kit only reacts to successive move events).
 
 ## Verification
 
 `make lint-web` runs eslint, prettier check, and `tsc -b`; `make test-web` runs
 the offline unit suite; `make build-web` builds the production bundle;
-`make e2e` runs Playwright against the dev stack.
+`make e2e` runs Playwright against the dev stack and `make e2e-isolated`
+against a throwaway compose stack.

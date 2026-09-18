@@ -14,6 +14,9 @@ TanStack Query, Zustand. Scripts and env setup: `README.md` in this folder.
 - `src/lib/api/` — API access layer (`client.ts`, `envelope.ts`, `errors.ts`,
   `interceptors.ts`, `public-client.ts`). Feature `api/` files go through this
   layer, never raw axios/fetch.
+- `src/lib/kanban/` — headless board state (reducer, hook, keyboard nav).
+  May import only `react` (ESLint `no-restricted-imports`); the `tasks`
+  feature adapts TanStack Query data into it. See `docs/architecture.md`.
 
 ## Constraints
 

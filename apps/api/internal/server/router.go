@@ -34,6 +34,7 @@ import (
 	"teka/apps/api/internal/features/sessions"
 	"teka/apps/api/internal/features/statements"
 	"teka/apps/api/internal/features/students"
+	"teka/apps/api/internal/features/tasks"
 	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/features/teaching"
 	"teka/apps/api/internal/features/zalo"
@@ -124,6 +125,14 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, log *slog.Logger,
 		enforceRoutePolicy(log),
 	}
 	centers.RegisterRoutes(v1, centers.NewHandler(centersSvc), authChain...)
+
+	// tasksSvc must exist before centersSvc.SetTaskHandover wires it in: a
+	// member's departure hands their tasks over inside RemoveMember's own
+	// transaction (see centers.Service.RemoveMember), so centersSvc needs the
+	// task board's Service, not the other way around.
+	tasksSvc := tasks.NewService(db, txMgr, bus)
+	tasks.RegisterRoutes(v1, tasks.NewHandler(tasksSvc), authChain...)
+	centersSvc.SetTaskHandover(tasksSvc)
 
 	auditSvc := audit.NewService(audit.NewRepository(db))
 	audit.RegisterRoutes(v1, audit.NewHandler(auditSvc), authChain...)

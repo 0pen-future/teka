@@ -198,6 +198,7 @@ describe("buildCatalogTabs", () => {
       "Thanh toán",
       "Sao kê",
       "Thông báo",
+      "Công việc",
       "Quản trị",
     ]);
     expect(tabs.at(-1)?.groups.map((group) => group.resource)).toEqual([

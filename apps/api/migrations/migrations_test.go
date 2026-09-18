@@ -36,6 +36,7 @@ var domainTables = []string{
 	"student_scores",
 	"owner_anchor_backfill",
 	"rbac_backfill_rows", "rbac_backfill_ledger",
+	"task_columns", "tasks",
 }
 
 // centerTables is every business table 000007 re-keyed to the center tenant.
@@ -319,10 +320,10 @@ func TestDownFoldsPersonalChannelIntoManual(t *testing.T) {
 		 VALUES (?, ?, ?, ?, 'zalo_personal')`,
 		notifID, f.teacherID, f.centerID, f.statementID).Error)
 
-	// Roll back through 000005 (zalo_personal_mapping): seventeen steps now
-	// that the additive 000008-000021 sit on top of the migrations this test
+	// Roll back through 000005 (zalo_personal_mapping): twenty steps now
+	// that the additive 000008-000024 sit on top of the migrations this test
 	// predates.
-	require.NoError(t, database.MigrateDown(m, 17))
+	require.NoError(t, database.MigrateDown(m, 20))
 
 	var channel string
 	require.NoError(t, db.Raw(
@@ -1811,9 +1812,13 @@ func TestResourceActionCatalogBackfill(t *testing.T) {
 	}
 	require.NoError(t, db.Raw(`SELECT * FROM rbac_backfill_ledger`).Scan(&ledger).Error)
 	require.Regexp(t, `^sha256:[0-9a-f]{64}$`, ledger.MappingChecksum)
-	require.Equal(t, 3*len(defaults)-1, ledger.RoleDefaultRows,
+	// The ledger is 000018's own record of what its immutable, frozen SQL
+	// mapping inserted — it must track frozenDefaultKeys (the v2 mapping
+	// 000018 shipped with), not the live catalog, which keeps growing under
+	// 000022 and beyond without ever touching this ledger row again.
+	require.Equal(t, 3*len(frozenDefaultKeys)-1, ledger.RoleDefaultRows,
 		"three system roles minus the one colliding manual grant")
-	require.Equal(t, len(defaults), ledger.MemberDefaultRows)
+	require.Equal(t, len(frozenDefaultKeys), ledger.MemberDefaultRows)
 	require.Equal(t, 12, ledger.ScopeRoleRows)
 	require.Equal(t, 11+12, ledger.ScopeMemberRows,
 		"eleven for the roled member (deny collision) plus twelve for the role-less deny")
@@ -1844,4 +1849,369 @@ func TestResourceActionCatalogBackfill(t *testing.T) {
 		`SELECT column_name FROM information_schema.columns
 		 WHERE table_schema = 'public' AND table_name = 'center_roles'`)
 	require.False(t, cols["assignment_version"], "down must drop the CAS column")
+}
+
+// A column name is a display slot the whole center shares — the DB must
+// refuse a second column that differs only by case, not just an exact dup.
+func TestTaskColumnsUniqueNameCaseInsensitive(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+
+	db := openDB(t, url)
+	f := seedNotificationParents(t, db, "+84900001001")
+
+	require.NoError(t, db.Exec(
+		`INSERT INTO task_columns (center_id, name, position) VALUES (?, 'Cần làm', 0)`,
+		f.centerID).Error)
+
+	err = db.Exec(
+		`INSERT INTO task_columns (center_id, name, position) VALUES (?, 'cần LÀM', 1)`,
+		f.centerID).Error
+	require.ErrorContains(t, err, "uq_task_columns_name",
+		"a name differing only by case must be rejected within the same center")
+
+	// The same name is free in a different center.
+	other := seedNotificationParents(t, db, "+84900001002")
+	require.NoError(t, db.Exec(
+		`INSERT INTO task_columns (center_id, name, position) VALUES (?, 'Cần làm', 0)`,
+		other.centerID).Error)
+}
+
+// The composite FKs on tasks (column_id, center_id) → task_columns and
+// (created_by/assignee_id, center_id) → center_members are the database's own
+// guard that a task can never point at a column, creator, or assignee that
+// belongs to a different center — mirroring the classes/center_members guard.
+func TestTaskGuardsRejectCrossCenterRows(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+
+	db := openDB(t, url)
+	a := seedNotificationParents(t, db, "+84900001101")
+	b := seedNotificationParents(t, db, "+84900001102")
+
+	columnA := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO task_columns (id, center_id, name, position) VALUES (?, ?, 'Cần làm', 0)`,
+		columnA, a.centerID).Error)
+	columnB := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO task_columns (id, center_id, name, position) VALUES (?, ?, 'Cần làm', 0)`,
+		columnB, b.centerID).Error)
+
+	// A task naming center A but a column that belongs to center B.
+	err = db.Exec(
+		`INSERT INTO tasks (center_id, column_id, created_by, title)
+		 VALUES (?, ?, ?, 'Việc lệch cột')`,
+		a.centerID, columnB, a.teacherID).Error
+	require.ErrorContains(t, err, "fk_tasks_column_center",
+		"a task pairing its center with another center's column must be rejected")
+
+	// A task naming center A but a creator who is a member of center B.
+	err = db.Exec(
+		`INSERT INTO tasks (center_id, column_id, created_by, title)
+		 VALUES (?, ?, ?, 'Việc lệch người tạo')`,
+		a.centerID, columnA, b.teacherID).Error
+	require.ErrorContains(t, err, "fk_tasks_creator_center",
+		"a task pairing its center with another center's creator must be rejected")
+
+	// A task naming center A but an assignee who is a member of center B.
+	err = db.Exec(
+		`INSERT INTO tasks (center_id, column_id, created_by, assignee_id, title)
+		 VALUES (?, ?, ?, ?, 'Việc lệch người nhận')`,
+		a.centerID, columnA, a.teacherID, b.teacherID).Error
+	require.ErrorContains(t, err, "fk_tasks_assignee_center",
+		"a task pairing its center with another center's assignee must be rejected")
+
+	// Same center throughout must succeed — the guard is about cross-center
+	// pairing, not about the columns/members existing at all.
+	require.NoError(t, db.Exec(
+		`INSERT INTO tasks (center_id, column_id, created_by, assignee_id, title)
+		 VALUES (?, ?, ?, ?, 'Việc hợp lệ')`,
+		a.centerID, columnA, a.teacherID, a.teacherID).Error)
+}
+
+// A column is a shared resource: deleting it while a task still references it
+// — even a soft-deleted task — must be rejected so the service is forced to
+// move tasks out first. RESTRICT, not CASCADE, is what makes that true.
+func TestTaskColumnDeleteRestrictedBySoftDeletedTask(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+
+	db := openDB(t, url)
+	f := seedNotificationParents(t, db, "+84900001201")
+
+	columnID := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO task_columns (id, center_id, name, position) VALUES (?, ?, 'Cần làm', 0)`,
+		columnID, f.centerID).Error)
+	taskID := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO tasks (id, center_id, column_id, created_by, title)
+		 VALUES (?, ?, ?, ?, 'Việc đã xoá mềm')`,
+		taskID, f.centerID, columnID, f.teacherID).Error)
+	require.NoError(t, db.Exec(
+		`UPDATE tasks SET deleted_at = now() WHERE id = ?`, taskID).Error)
+
+	err = db.Exec(`DELETE FROM task_columns WHERE id = ?`, columnID).Error
+	require.ErrorContains(t, err, "fk_tasks_column_center",
+		"a soft-deleted task still counts as a reference — the column must not be removable")
+
+	// Once the task is gone for good, the column is free to delete.
+	require.NoError(t, db.Exec(`DELETE FROM tasks WHERE id = ?`, taskID).Error)
+	require.NoError(t, db.Exec(`DELETE FROM task_columns WHERE id = ?`, columnID).Error)
+}
+
+// The RBAC backfill must be observed over pre-existing data — a plain
+// integration test migrates an empty schema and never exercises it. Step back
+// below 000022, seed a role-less live member, migrate forward, and check the
+// member-level grant it receives.
+func TestTaskBoardBackfillGrantsRoleLessMemberCRUD(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+	// Step back below 000022 and seed the pre-backfill shape.
+	require.NoError(t, m.Migrate(21))
+
+	db := openDB(t, url)
+	live := seedNotificationParents(t, db, "+84900001301")
+	// can_send_reports was dropped in 000019 — a head-schema fixture at
+	// version 21 must not reference it, so member creation is inline here
+	// rather than through the pre-000019 rbacMember helper.
+	member := func(phone string, roleID *uuid.UUID, closed bool) uuid.UUID {
+		teacherID := uuid.New()
+		require.NoError(t, db.Exec(
+			`INSERT INTO user_accounts (id, role, phone) VALUES (?, 'teachers', ?)`,
+			teacherID, phone).Error)
+		leftAt := "NULL"
+		if closed {
+			leftAt = "now()"
+		}
+		require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec(
+				`INSERT INTO teachers (id, full_name, center_id) VALUES (?, 'Giáo Viên', ?)`,
+				teacherID, live.centerID).Error; err != nil {
+				return err
+			}
+			return tx.Exec(fmt.Sprintf(
+				`INSERT INTO center_members (teacher_id, center_id, role_id, left_at)
+				 VALUES (?, ?, ?, %s)`, leftAt),
+				teacherID, live.centerID, roleID).Error
+		}))
+		return teacherID
+	}
+	roleless := member("+84900001302", nil, false)
+	former := member("+84900001303", nil, true)
+
+	roleID := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO center_roles (id, center_id, key, name) VALUES (?, ?, 'giao_vien', 'Giáo viên')`,
+		roleID, live.centerID).Error)
+	roled := member("+84900001304", &roleID, false)
+
+	// A retired center's role must be skipped entirely.
+	retired := seedNotificationParents(t, db, "+84900001305")
+	require.NoError(t, db.Exec(
+		`UPDATE centers SET deleted_at = now() WHERE id = ?`, retired.centerID).Error)
+
+	require.NoError(t, database.MigrateUp(m))
+
+	taskKeys := []string{"tasks.create", "tasks.list", "tasks.read", "tasks.edit", "tasks.delete"}
+	memberGrants := func(teacherID uuid.UUID) map[string]bool {
+		var rows []struct {
+			PermissionKey string
+			Allowed       bool
+		}
+		require.NoError(t, db.Raw(
+			`SELECT permission_key, allowed FROM center_member_permissions
+			 WHERE teacher_id = ? AND center_id = ?`, teacherID, live.centerID).Scan(&rows).Error)
+		out := map[string]bool{}
+		for _, r := range rows {
+			out[r.PermissionKey] = r.Allowed
+		}
+		return out
+	}
+	rolelessGrants := memberGrants(roleless)
+	require.Len(t, rolelessGrants, len(taskKeys), "a role-less live member gets exactly the 5 task CRUD grants")
+	for _, key := range taskKeys {
+		require.Truef(t, rolelessGrants[key], "role-less member must hold default %s", key)
+	}
+	require.NotContains(t, rolelessGrants, "tasks.manage_board", "opt-in keys must never be backfilled")
+	require.NotContains(t, rolelessGrants, "tasks.view_all", "opt-in keys must never be backfilled")
+
+	// Closed stints, roled members, and the owner stay untouched.
+	require.Empty(t, memberGrants(former))
+	require.Empty(t, memberGrants(roled))
+	require.Empty(t, memberGrants(live.teacherID))
+
+	// The role does get the 5 keys — every system role of a live center does.
+	var roleKeys []string
+	require.NoError(t, db.Raw(
+		`SELECT permission_key FROM center_role_permissions WHERE role_id = ?`, roleID).Scan(&roleKeys).Error)
+	require.ElementsMatch(t, taskKeys, roleKeys)
+
+	// A retired center's roles receive nothing.
+	var n int64
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM center_role_permissions rp
+		 JOIN center_roles cr ON cr.id = rp.role_id
+		 WHERE cr.center_id = ?`, retired.centerID).Scan(&n).Error)
+	require.Zero(t, n, "a retired center's roles receive nothing")
+
+	// Down must remove exactly the rows it backfilled and nothing pre-existing.
+	require.NoError(t, m.Migrate(21))
+	require.Empty(t, memberGrants(roleless))
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM center_role_permissions WHERE role_id = ?`, roleID).Scan(&n).Error)
+	require.Zero(t, n)
+}
+
+// Every live center must land on exactly the three default columns, in the
+// fixed order the Kanban board renders them, with only the last marked done.
+// A retired center must get none.
+func TestTaskBoardBackfillSeedsThreeDefaultColumns(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+	// Step back below 000022 and seed the pre-backfill shape.
+	require.NoError(t, m.Migrate(21))
+
+	db := openDB(t, url)
+	live := seedNotificationParents(t, db, "+84900001401")
+	retired := seedNotificationParents(t, db, "+84900001402")
+	require.NoError(t, db.Exec(
+		`UPDATE centers SET deleted_at = now() WHERE id = ?`, retired.centerID).Error)
+
+	require.NoError(t, database.MigrateUp(m))
+
+	var cols []struct {
+		Name     string
+		Position int
+		IsDone   bool
+	}
+	require.NoError(t, db.Raw(
+		`SELECT name, position, is_done FROM task_columns WHERE center_id = ? ORDER BY position`,
+		live.centerID).Scan(&cols).Error)
+	require.Len(t, cols, 3, "a live center must get exactly three default columns")
+	require.Equal(t, "Cần làm", cols[0].Name)
+	require.False(t, cols[0].IsDone)
+	require.Equal(t, "Đang làm", cols[1].Name)
+	require.False(t, cols[1].IsDone)
+	require.Equal(t, "Hoàn thành", cols[2].Name)
+	require.True(t, cols[2].IsDone, "only the last default column is the done column")
+
+	var n int64
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM task_columns WHERE center_id = ?`, retired.centerID).Scan(&n).Error)
+	require.Zero(t, n, "a retired center gets no default columns")
+
+	// The seed statement is ON CONFLICT DO NOTHING against the case-insensitive
+	// unique index — a default name that already exists (e.g. hand-created by
+	// the owner before the migration ran) must not be duplicated.
+	require.NoError(t, db.Exec(
+		`INSERT INTO task_columns (center_id, name, position, is_done)
+		 SELECT c.id, v.name, v.pos, v.done FROM centers c
+		 CROSS JOIN (VALUES ('Cần làm', 0, FALSE), ('Đang làm', 1, FALSE), ('Hoàn thành', 2, TRUE))
+		   AS v(name, pos, done)
+		 WHERE c.id = ? ON CONFLICT DO NOTHING`, live.centerID).Error)
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM task_columns WHERE center_id = ?`, live.centerID).Scan(&n).Error)
+	require.EqualValues(t, 3, n, "re-applying the same seed must not create duplicate columns")
+}
+
+// Legacy task descriptions are plain text; once the API stores a sanitized
+// HTML subset, every stored description must already be in that form or the
+// client would render old text as markup (and lose its line breaks). The
+// wrap escapes text — a plain description that happens to start with "<p>"
+// is data, not a paragraph — and covers soft-deleted rows so the column is
+// uniform. Down is documented as lossy, so it is checked only for the text
+// and line breaks it promises to keep.
+func TestTaskDescriptionWrapsLegacyPlainText(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+	// Step back below 000023 and seed plain-text descriptions.
+	require.NoError(t, m.Migrate(22))
+
+	db := openDB(t, url)
+	f := seedNotificationParents(t, db, "+84900001501")
+	column := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO task_columns (id, center_id, name, position) VALUES (?, ?, 'Cần làm', 0)`,
+		column, f.centerID).Error)
+
+	seed := func(description string, deleted bool) uuid.UUID {
+		id := uuid.New()
+		var deletedAt any
+		if deleted {
+			deletedAt = time.Now()
+		}
+		require.NoError(t, db.Exec(
+			`INSERT INTO tasks (id, center_id, column_id, created_by, title, description, deleted_at)
+			 VALUES (?, ?, ?, ?, 'Việc', ?, ?)`,
+			id, f.centerID, column, f.teacherID, description, deletedAt).Error)
+		return id
+	}
+	empty := seed("", false)
+	special := seed("x < y & z\r\nnext\nlast", false)
+	literalP := seed("<p>not a paragraph</p>", false)
+	gone := seed("gone", true)
+
+	description := func(id uuid.UUID) string {
+		var s string
+		require.NoError(t, db.Raw(`SELECT description FROM tasks WHERE id = ?`, id).Scan(&s).Error)
+		return s
+	}
+
+	require.NoError(t, m.Migrate(23))
+	require.Equal(t, "", description(empty), "an empty description stays empty")
+	require.Equal(t, "<p>x &lt; y &amp; z<br>next<br>last</p>", description(special))
+	require.Equal(t, "<p>&lt;p&gt;not a paragraph&lt;/p&gt;</p>", description(literalP),
+		"plain text starting with a tag must be escaped, not trusted as markup")
+	require.Equal(t, "<p>gone</p>", description(gone), "soft-deleted rows are wrapped too")
+
+	var unwrapped int64
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM tasks WHERE description <> '' AND description NOT LIKE '<p>%'`,
+	).Scan(&unwrapped).Error)
+	require.Zero(t, unwrapped, "every non-empty description must now be wrapped")
+
+	require.NoError(t, m.Migrate(22))
+	require.Equal(t, "", description(empty))
+	require.Equal(t, "x < y & z\nnext\nlast", description(special),
+		"down restores the text and its line breaks; the CRLF was already folded on the way up")
+	require.Equal(t, "<p>not a paragraph</p>", description(literalP))
+	require.Equal(t, "gone", description(gone))
+
+	// Up again from the restored plain text lands on the same HTML: the
+	// migration pair round-trips text and line breaks.
+	require.NoError(t, m.Migrate(23))
+	require.Equal(t, "<p>x &lt; y &amp; z<br>next<br>last</p>", description(special))
+	require.Equal(t, "<p>&lt;p&gt;not a paragraph&lt;/p&gt;</p>", description(literalP))
 }

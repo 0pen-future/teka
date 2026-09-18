@@ -13,6 +13,7 @@ import (
 	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/events"
+	"teka/apps/api/internal/shared/logger"
 	"teka/apps/api/internal/shared/validation"
 )
 
@@ -25,6 +26,15 @@ type AccountDisabler interface {
 	Disable(ctx context.Context, accountID uuid.UUID) error
 }
 
+// TaskHandover is the slice of the task board this service consumes to hand
+// a departing member's work to the center owner (consumer-defined interface;
+// implemented by *tasks.Service). It runs inside RemoveMember's own
+// transaction, so a handover failure rolls the whole removal back rather than
+// leaving a member closed out with orphaned tasks.
+type TaskHandover interface {
+	HandoverOnDeparture(ctx context.Context, centerID, departed, newOwner uuid.UUID) (unassigned, reassigned int, err error)
+}
+
 // Service implements center membership business logic.
 type Service struct {
 	repo     Repository
@@ -33,6 +43,9 @@ type Service struct {
 	// bus receives the permission-mutation events for the audit trail. Nil is
 	// a supported state — publish goes through the nil-safe helper below.
 	bus events.Bus
+	// taskHandover is set post-construction, same as disabler — see
+	// SetTaskHandover.
+	taskHandover TaskHandover
 }
 
 // NewService builds the centers service. The bus is a constructor parameter
@@ -56,6 +69,23 @@ func (s *Service) publish(e events.Event) {
 // teachers.SetTokenRevoker).
 func (s *Service) SetAccountDisabler(d AccountDisabler) {
 	s.disabler = d
+}
+
+// SetTaskHandover wires the tasks dependency after construction — a setter
+// for the same reason as SetAccountDisabler: router.go builds centers before
+// tasks (tasks.NewService takes no centers dependency, but keeping every
+// cross-feature wire in registerFeatures, after both services exist, avoids
+// a special case for this one).
+func (s *Service) SetTaskHandover(h TaskHandover) {
+	s.taskHandover = h
+}
+
+// TaskHandoverWired reports whether SetTaskHandover has run. It exists for
+// the server package's wiring test, which proves registerFeatures calls
+// SetTaskHandover without needing a live database to exercise RemoveMember
+// itself end to end.
+func (s *Service) TaskHandoverWired() bool {
+	return s.taskHandover != nil
 }
 
 // ResolveScope loads the caller's center scope; it satisfies
@@ -265,6 +295,24 @@ func (s *Service) Rename(ctx context.Context, scope authctx.Scope, req RenameReq
 	return nil
 }
 
+// Directory lists the caller's center's live members for pickers (e.g. task
+// assignment) that must not see phone or email — takes members.list, an
+// opt-in key distinct from the owner-roster read in Me.
+func (s *Service) Directory(ctx context.Context, scope authctx.Scope) ([]DirectoryEntry, error) {
+	if !scope.Has(authctx.PermMembersList) {
+		return nil, apperror.Forbidden("you are not allowed to view the member directory")
+	}
+	rows, err := s.repo.Directory(ctx, scope.CenterID)
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+	out := make([]DirectoryEntry, len(rows))
+	for i, row := range rows {
+		out[i] = DirectoryEntry(row)
+	}
+	return out, nil
+}
+
 // RemoveMember offboards a member: takes members.manage. The membership stint closes
 // and the account is disabled — status flips to disabled and every refresh
 // token it holds is revoked, via AccountDisabler (*auth.Service.Disable) — no
@@ -295,7 +343,27 @@ func (s *Service) RemoveMember(ctx context.Context, scope authctx.Scope, targetI
 		return apperror.Internal(err)
 	}
 
+	var ev MemberTasksHandedOver
 	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		if s.taskHandover == nil {
+			// Not wired: keep removing the member, but without a board there
+			// is nothing to hand over — same nil-safe posture as bus above.
+			logger.FromContext(ctx).Warn("task handover not wired, skipping")
+		} else {
+			unassigned, reassigned, err := s.taskHandover.HandoverOnDeparture(ctx, scope.CenterID, targetID, center.OwnerID)
+			if err != nil {
+				return err
+			}
+			ev = MemberTasksHandedOver{
+				OccurredAt:  time.Now(),
+				CenterID:    scope.CenterID,
+				ActorID:     scope.TeacherID,
+				MemberID:    targetID,
+				SuccessorID: center.OwnerID,
+				Unassigned:  unassigned,
+				Reassigned:  reassigned,
+			}
+		}
 		if err := s.repo.CloseMembership(ctx, targetID, scope.CenterID); err != nil {
 			return err
 		}
@@ -306,6 +374,9 @@ func (s *Service) RemoveMember(ctx context.Context, scope authctx.Scope, targetI
 			return apperror.Conflict("membership changed concurrently, retry")
 		}
 		return apperror.From(err)
+	}
+	if s.taskHandover != nil && (ev.Unassigned > 0 || ev.Reassigned > 0) {
+		s.publish(ev)
 	}
 	return nil
 }

@@ -165,6 +165,42 @@ describe("PermissionMatrix on the owner permissions page", () => {
     expect(screen.getByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
   });
 
+  it("lists every task key under the Công việc tab and the directory key under Thành viên", async () => {
+    mockCenterMe(makeCenterMeOwner({ members: [ownerSelf()] }));
+    mockCenterPermissions(makeCenterPermissions());
+    renderPermissionsPage();
+    const user = userEvent.setup();
+
+    // The task board is a business resource, so it tabs out on its own and
+    // sits before the folded admin tab.
+    const tabs = await screen.findAllByRole("tab");
+    const tabNames = tabs.map((tab) => tab.textContent?.trim());
+    expect(tabNames.indexOf("Công việc")).toBeGreaterThan(-1);
+    expect(tabNames.indexOf("Công việc")).toBeLessThan(tabNames.indexOf("Quản trị"));
+
+    await user.click(screen.getByRole("tab", { name: "Công việc" }));
+    for (const label of [
+      "Tạo công việc",
+      "Xem bảng công việc",
+      "Xem chi tiết công việc",
+      "Sửa & chuyển cột công việc",
+      "Xoá công việc",
+      "Cấu hình cột bảng công việc",
+      "Xem mọi công việc",
+    ]) {
+      expect(screen.getByRole("checkbox", { name: `${label} — Giáo viên` })).toBeInTheDocument();
+    }
+    expect(screen.getAllByText("Rủi ro cao").length).toBeGreaterThan(0);
+
+    // The member directory key stays with the other member-admin keys.
+    await user.click(screen.getByRole("tab", { name: "Quản trị" }));
+    const members = screen.getByRole("heading", { name: "Thành viên" }).closest("section");
+    if (!members) throw new Error("Thành viên group section not rendered");
+    expect(
+      within(members).getByRole("checkbox", { name: "Xem danh bạ thành viên — Giáo viên" }),
+    ).toBeInTheDocument();
+  });
+
   it("keeps an unsaved draft when switching tabs and marks its tab dirty", async () => {
     mockCenterMe(makeCenterMeOwner({ members: [ownerSelf()] }));
     mockCenterPermissions(makeCenterPermissions());

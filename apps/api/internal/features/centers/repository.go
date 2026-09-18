@@ -89,6 +89,14 @@ type TeacherRow struct {
 	FullName string
 }
 
+// DirectoryRow is one live member on the assignment-picker directory.
+// RoleName is null for a role-less stint.
+type DirectoryRow struct {
+	TeacherID   uuid.UUID
+	DisplayName string
+	RoleName    *string
+}
+
 // TeacherStatsRow is one dashboard roster row with activity counts.
 type TeacherStatsRow struct {
 	ID             uuid.UUID
@@ -139,6 +147,9 @@ type Repository interface {
 	// center; ErrNotFound also for members of other centers (no existence
 	// leak).
 	GetTeacherInCenter(ctx context.Context, centerID, teacherID uuid.UUID) (*TeacherRow, error)
+	// Directory lists the center's live members for pickers that must not see
+	// phone or email (e.g. task assignment) — name and role only.
+	Directory(ctx context.Context, centerID uuid.UUID) ([]DirectoryRow, error)
 	Rename(ctx context.Context, centerID uuid.UUID, name string) error
 	CreateCenter(ctx context.Context, c *Center) error
 	// OpenMembership inserts the live stint, reopening a closed row from an
@@ -332,6 +343,26 @@ func (r *gormRepository) GetTeacherInCenter(ctx context.Context, centerID, teach
 	return &row, nil
 }
 
+// Directory lists the center's live members (center_members, left_at NULL)
+// with name and role only — no phone/email, unlike ListMembers/TeacherRow.
+// The owner does have a center_members row (every teacher gets one, owner
+// included — see migrations/000007_centers.up.sql) and so does appear here.
+// That is intentional: it lets ReassignCreator hand a departing member's
+// authored tasks to the owner without ever violating fk_tasks_creator_center.
+func (r *gormRepository) Directory(ctx context.Context, centerID uuid.UUID) ([]DirectoryRow, error) {
+	var rows []DirectoryRow
+	err := database.FromContext(ctx, r.db).Raw(`
+		SELECT t.id AS teacher_id, t.full_name AS display_name, cr.name AS role_name
+		FROM center_members cm
+		JOIN teachers t ON t.id = cm.teacher_id AND t.deleted_at IS NULL
+		JOIN user_accounts ua ON ua.id = t.id AND ua.deleted_at IS NULL AND ua.status = ?
+		LEFT JOIN center_roles cr ON cr.id = cm.role_id
+		WHERE cm.center_id = ? AND cm.left_at IS NULL
+		ORDER BY t.full_name, t.id`,
+		teachers.StatusActive, centerID).Scan(&rows).Error
+	return rows, err
+}
+
 func (r *gormRepository) Rename(ctx context.Context, centerID uuid.UUID, name string) error {
 	res := database.FromContext(ctx, r.db).
 		Model(&Center{}).
@@ -364,13 +395,27 @@ func (r *gormRepository) CreateCenter(ctx context.Context, c *Center) error {
 	// backfill of pre-catalog centers: membership used to grant all
 	// operational access, so a fresh role denying everything would make new
 	// centers behave differently from existing ones.
-	return database.FromContext(ctx, r.db).Exec(`
+	if err := database.FromContext(ctx, r.db).Exec(`
 		INSERT INTO center_role_permissions (role_id, permission_key)
 		SELECT cr.id, k
 		FROM center_roles cr
 		CROSS JOIN unnest(string_to_array(?, ',')) AS k
 		WHERE cr.center_id = ?`,
-		strings.Join(authctx.DefaultRoleKeys(), ","), c.ID).Error
+		strings.Join(authctx.DefaultRoleKeys(), ","), c.ID).Error; err != nil {
+		return err
+	}
+	// Every center is also born with its three starter task-board columns —
+	// same names/order/is_done as migration 000022's own backfill of
+	// pre-existing centers (default_columns.go documents the parity).
+	for _, col := range DefaultColumns(c.ID) {
+		if err := database.FromContext(ctx, r.db).Exec(`
+			INSERT INTO task_columns (id, center_id, name, position, is_done)
+			VALUES (?, ?, ?, ?, ?)`,
+			uuid.UUID(col.ID), c.ID, col.Name, col.Position, col.IsDone).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *gormRepository) OpenMembership(ctx context.Context, teacherID, centerID uuid.UUID) (time.Time, error) {

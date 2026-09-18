@@ -61,6 +61,19 @@ export const centerMeSchema = z.union([centerMeOwnerSchema, centerMeMemberSchema
 
 export type CenterMe = z.infer<typeof centerMeSchema>;
 
+/**
+ * `centers.DirectoryEntryResponse` (`GET /centers/me/members/directory`) —
+ * the assignee-picker read model: no phone/email, only live (non-ended)
+ * stints, gated on `members.list` rather than the owner-only roster.
+ */
+export const memberDirectoryEntrySchema = z.object({
+  teacher_id: z.string(),
+  display_name: z.string(),
+  role_name: z.string().nullable(),
+});
+
+export type MemberDirectoryEntry = z.infer<typeof memberDirectoryEntrySchema>;
+
 /** `centers.RenameRequest` — server caps at 255 (`binding:"max=255"`). */
 export const renameCenterInputSchema = z.object({
   name: z

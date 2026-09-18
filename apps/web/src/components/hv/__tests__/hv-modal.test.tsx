@@ -110,3 +110,43 @@ describe("HvModal size", () => {
     expect(body).toHaveClass("flex-1", "min-h-0", "overflow-auto");
   });
 });
+
+describe("HvModal stickyFooter", () => {
+  it("keeps the default bottom-sheet behavior when stickyFooter is not passed", () => {
+    render(
+      <HvModal open onOpenChange={vi.fn()} title="Xác nhận" footer={<button>Đóng</button>}>
+        <p>Nội dung</p>
+      </HvModal>,
+    );
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).not.toHaveAttribute("data-sticky-footer");
+    expect(dialog).not.toHaveClass("flex-col");
+    const body = screen.getByText("Nội dung").parentElement;
+    expect(body).not.toHaveClass("overflow-auto");
+    const footer = screen.getByRole("button", { name: "Đóng" }).parentElement;
+    expect(footer).not.toHaveClass("shrink-0");
+  });
+
+  it("switches a md panel to a fixed header/footer with a scrolling body when enabled", () => {
+    render(
+      <HvModal
+        open
+        onOpenChange={vi.fn()}
+        title="Xác nhận"
+        size="md"
+        stickyFooter
+        footer={<button>Đóng</button>}
+      >
+        <p>Nội dung</p>
+      </HvModal>,
+    );
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveAttribute("data-sticky-footer", "true");
+    expect(dialog).toHaveClass("flex-col", "max-h-[95dvh]", "overflow-hidden", "sm:max-h-[90dvh]");
+    expect(dialog).toHaveClass("sm:max-w-md");
+    const body = screen.getByText("Nội dung").parentElement;
+    expect(body).toHaveClass("min-h-0", "flex-1", "overflow-auto");
+    const footer = screen.getByRole("button", { name: "Đóng" }).parentElement;
+    expect(footer).toHaveClass("shrink-0");
+  });
+});

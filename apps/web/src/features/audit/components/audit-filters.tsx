@@ -23,6 +23,8 @@ const ACTION_GROUPS = [
   { value: "statement.", label: "Sao kê" },
   { value: "contact.", label: "Phụ huynh" },
   { value: "invitation.", label: "Lời mời" },
+  { value: "task.", label: "Công việc" },
+  { value: "task_column.", label: "Cột công việc" },
   { value: "center.", label: "Trung tâm" },
   { value: "import.", label: "Nhập liệu" },
   { value: "zalo.", label: "Zalo" },

@@ -197,6 +197,9 @@ var Specs = []Spec{
 	perm("PATCH", "/api/v1/centers/me", authctx.PermCenterManage, req("center.rename", "center", "")),
 	perm("DELETE", "/api/v1/centers/me/members/:teacherId", authctx.PermMembersManage,
 		req("center.member.remove", "teacher", "teacherId")),
+	// The task-assignment picker: name and role only, no phone/email — a
+	// narrower read than the owner-only roster on GET /centers/me.
+	perm("GET", "/api/v1/centers/me/members/directory", authctx.PermMembersList, none()),
 	perm("POST", "/api/v1/centers/me/invitations", authctx.PermInvitationsManage,
 		req("invitation.create", "invitation", "")),
 	perm("GET", "/api/v1/centers/me/invitations", authctx.PermInvitationsManage, none()),
@@ -346,6 +349,37 @@ var Specs = []Spec{
 		req("notification.run.resume", "billing_period", "id")),
 	perm("POST", "/api/v1/notifications/mark-sent", authctx.PermNotificationsMarkSent,
 		req("notification.mark_sent", "notification", "")),
+
+	// Task board. Columns are a shared resource with no own-rows concept —
+	// every column write gates on tasks.manage_board alone. Tasks split
+	// "own rows" as creator OR assignee, enforced by pkg/kanban's Policy, not
+	// routespec — this Kind only guarantees a live member holding the listed
+	// capability key; visibility and per-task write rules live in the
+	// service (see tasks/policy.go).
+	perm("GET", "/api/v1/tasks/board", authctx.PermTasksList, none()),
+	perm("POST", "/api/v1/task-columns", authctx.PermTasksManageBoard,
+		req("task_column.create", "task_column", "")),
+	perm("PATCH", "/api/v1/task-columns/:id", authctx.PermTasksManageBoard,
+		req("task_column.update", "task_column", "id")),
+	perm("PUT", "/api/v1/task-columns/order", authctx.PermTasksManageBoard,
+		req("task_column.reorder", "task_column", "")),
+	// DELETE's move_to travels as a query parameter, which the request
+	// middleware never inspects, so the tasks service also publishes its own
+	// ColumnDeleted event carrying move_to and moved_count (see
+	// audit/subscriber.go). Both rows share the action name and are
+	// distinguished by the Method field, the same pattern
+	// centers.RolePermissionsChanged uses alongside its own request row —
+	// this must stay SourceRequest, not a skip source, since WithSource
+	// derives its skip sets by path only and PATCH at this same path is
+	// SourceRequest (see routespec_test.go's TestSamePathSameAuditSource).
+	perm("DELETE", "/api/v1/task-columns/:id", authctx.PermTasksManageBoard,
+		req("task_column.delete", "task_column", "id")),
+	perm("POST", "/api/v1/tasks", authctx.PermTasksCreate, req("task.create", "task", "")),
+	perm("GET", "/api/v1/tasks/:id", authctx.PermTasksRead, none()),
+	perm("PATCH", "/api/v1/tasks/:id", authctx.PermTasksEdit, req("task.update", "task", "id")),
+	perm("POST", "/api/v1/tasks/:id/move", authctx.PermTasksEdit, req("task.move", "task", "id")),
+	perm("DELETE", "/api/v1/tasks/:id", authctx.PermTasksDelete, req("task.delete", "task", "id")),
+	perm("POST", "/api/v1/tasks/:id/restore", authctx.PermTasksDelete, req("task.restore", "task", "id")),
 }
 
 // Policies returns the manifest for the server package's route-policy

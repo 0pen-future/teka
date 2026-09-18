@@ -77,6 +77,7 @@ describe("grouped sidebar", () => {
         "Duyệt giáo án",
         "Nhập từ Excel",
         "Nhật ký hoạt động",
+        "Công việc",
         "Lớp & học sinh",
         "Phân quyền vai trò",
         "Cài đặt trung tâm",
@@ -286,6 +287,7 @@ describe("teaching v2 nav", () => {
       "Duyệt giáo án",
       "Nhập từ Excel",
       "Nhật ký hoạt động",
+      "Công việc",
       "Lớp & học sinh",
       "Phân quyền vai trò",
       "Cấu hình lớp học",
@@ -330,6 +332,50 @@ describe("teaching v2 nav", () => {
     // Member role label proves /centers/me resolved member-shaped.
     await screen.findByText("Giáo viên");
     expect(screen.queryByRole("link", { name: "Nhật ký hoạt động" })).not.toBeInTheDocument();
+  });
+
+  it("shows Công việc to owners linking /tasks, including inside the Thêm sheet", async () => {
+    const user = userEvent.setup();
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+    expect(await within(sidebarNav).findByRole("link", { name: "Công việc" })).toHaveAttribute(
+      "href",
+      "/tasks",
+    );
+
+    const { moreTab } = await findBottomNav();
+    await user.click(moreTab);
+    const sheet = await screen.findByRole("dialog");
+    expect(within(sheet).getByRole("link", { name: "Công việc" })).toHaveAttribute(
+      "href",
+      "/tasks",
+    );
+  });
+
+  it("hides Công việc from a member without tasks.list", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh" })),
+      ),
+    );
+    renderLayout();
+    // Member role label proves /centers/me resolved member-shaped.
+    await screen.findByText("Giáo viên");
+    expect(screen.queryByRole("link", { name: "Công việc" })).not.toBeInTheDocument();
+  });
+
+  it("shows Công việc to a member holding tasks.list", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh", permissions: ["tasks.list"] })),
+      ),
+    );
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+    expect(await within(sidebarNav).findByRole("link", { name: "Công việc" })).toHaveAttribute(
+      "href",
+      "/tasks",
+    );
   });
 
   it("shows granted surfaces to a member holding the matching permissions", async () => {

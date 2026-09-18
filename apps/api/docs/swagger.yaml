@@ -375,6 +375,15 @@ definitions:
       name:
         type: string
     type: object
+  centers.DirectoryEntry:
+    properties:
+      display_name:
+        type: string
+      role_name:
+        type: string
+      teacher_id:
+        type: string
+    type: object
   centers.MeResponse:
     properties:
       center:
@@ -1838,6 +1847,219 @@ definitions:
     required:
     - contact_id
     - full_name
+    type: object
+  tasks.AssigneeCountResponse:
+    properties:
+      count:
+        type: integer
+      teacher_id:
+        type: string
+    type: object
+  tasks.BoardColumnResponse:
+    properties:
+      color:
+        type: string
+      created_at:
+        type: string
+      has_more:
+        type: boolean
+      id:
+        type: string
+      is_done:
+        type: boolean
+      name:
+        type: string
+      position:
+        type: integer
+      tasks:
+        items:
+          $ref: '#/definitions/tasks.TaskResponse'
+        type: array
+      updated_at:
+        type: string
+    type: object
+  tasks.BoardCountsResponse:
+    properties:
+      all:
+        type: integer
+      by_assignee:
+        items:
+          $ref: '#/definitions/tasks.AssigneeCountResponse'
+        type: array
+      mine:
+        type: integer
+      overdue:
+        type: integer
+      today:
+        type: integer
+      unassigned:
+        type: integer
+    type: object
+  tasks.BoardResponse:
+    properties:
+      columns:
+        items:
+          $ref: '#/definitions/tasks.BoardColumnResponse'
+        type: array
+      counts:
+        $ref: '#/definitions/tasks.BoardCountsResponse'
+      scope:
+        type: string
+    type: object
+  tasks.ColumnResponse:
+    properties:
+      color:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      is_done:
+        type: boolean
+      name:
+        type: string
+      position:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  tasks.ColumnsResponse:
+    properties:
+      columns:
+        items:
+          $ref: '#/definitions/tasks.ColumnResponse'
+        type: array
+    type: object
+  tasks.CreateColumnRequest:
+    properties:
+      color:
+        enum:
+        - none
+        - sky
+        - sun
+        - mint
+        type: string
+      is_done:
+        type: boolean
+      name:
+        maxLength: 40
+        minLength: 1
+        type: string
+    required:
+    - name
+    type: object
+  tasks.CreateTaskRequest:
+    properties:
+      assignee_id:
+        type: string
+      column_id:
+        type: string
+      description:
+        maxLength: 20000
+        type: string
+      due_on:
+        type: string
+      priority:
+        enum:
+        - none
+        - low
+        - medium
+        - high
+        type: string
+      title:
+        maxLength: 200
+        minLength: 1
+        type: string
+    required:
+    - title
+    type: object
+  tasks.DeleteColumnResponse:
+    properties:
+      moved_count:
+        type: integer
+    type: object
+  tasks.MoveTaskRequest:
+    properties:
+      after_task_id:
+        type: string
+      column_id:
+        type: string
+    required:
+    - column_id
+    type: object
+  tasks.ReorderColumnsRequest:
+    properties:
+      ids:
+        items:
+          type: string
+        minItems: 1
+        type: array
+    required:
+    - ids
+    type: object
+  tasks.TaskResponse:
+    properties:
+      assignee_id:
+        type: string
+      column_id:
+        type: string
+      completed_at:
+        type: string
+      created_at:
+        type: string
+      created_by:
+        type: string
+      description:
+        type: string
+      due_on:
+        type: string
+      id:
+        type: string
+      position:
+        type: number
+      priority:
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  tasks.UpdateColumnRequest:
+    properties:
+      color:
+        enum:
+        - none
+        - sky
+        - sun
+        - mint
+        type: string
+      is_done:
+        type: boolean
+      name:
+        maxLength: 40
+        minLength: 1
+        type: string
+    type: object
+  tasks.UpdateTaskRequest:
+    properties:
+      assignee_id:
+        type: string
+      description:
+        maxLength: 20000
+        type: string
+      due_on:
+        type: string
+      priority:
+        enum:
+        - none
+        - low
+        - medium
+        - high
+        type: string
+      title:
+        maxLength: 200
+        minLength: 1
+        type: string
     type: object
   teachers.TeacherResponse:
     properties:
@@ -3966,6 +4188,45 @@ paths:
       security:
       - BearerAuth: []
       summary: Assign a member's role (owner-only)
+      tags:
+      - centers
+  /centers/me/members/directory:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/centers.DirectoryEntry'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: missing members.list
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List the center's live members for pickers
       tags:
       - centers
   /centers/me/permissions:
@@ -9013,6 +9274,686 @@ paths:
       summary: Update student
       tags:
       - students
+  /task-columns:
+    post:
+      consumes:
+      - application/json
+      description: Requires tasks.manage_board (owner always has it).
+      parameters:
+      - description: column
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/tasks.CreateColumnRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/tasks.ColumnResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: missing tasks.manage_board
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: validation failed, duplicate name, or column limit reached
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Create a column
+      tags:
+      - tasks
+  /task-columns/{id}:
+    delete:
+      description: Requires tasks.manage_board. Cannot delete the board's last column.
+        A non-empty column requires move_to.
+      parameters:
+      - description: column id
+        format: uuid
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: destination column id for the deleted column's tasks
+        format: uuid
+        in: query
+        name: move_to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/tasks.DeleteColumnResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: missing tasks.manage_board
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: column not found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: cannot delete the last column, or column still has tasks; specify
+            move_to
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: move_to names the column being deleted
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a column
+      tags:
+      - tasks
+    patch:
+      consumes:
+      - application/json
+      description: Requires tasks.manage_board. A nil field is left unchanged.
+      parameters:
+      - description: column id
+        format: uuid
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: patch
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/tasks.UpdateColumnRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/tasks.ColumnResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: missing tasks.manage_board
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: column not found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: validation failed or duplicate name
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Update a column
+      tags:
+      - tasks
+  /task-columns/order:
+    put:
+      consumes:
+      - application/json
+      description: Requires tasks.manage_board. ids must be a permutation of the board's
+        current column ids.
+      parameters:
+      - description: full column id order
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/tasks.ReorderColumnsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/tasks.ColumnsResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: missing tasks.manage_board
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: not a permutation of the current columns
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Reorder columns
+      tags:
+      - tasks
+  /tasks:
+    post:
+      consumes:
+      - application/json
+      description: An absent column_id defaults to the board's first column. description
+        is an HTML subset (p, br, strong, em, u, s, ul, ol, li, a[href] with http/https/mailto);
+        the server sanitizes it, treats a value not starting with "<" as plain text,
+        and rejects more than 4000 text characters.
+      parameters:
+      - description: task
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/tasks.CreateTaskRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/tasks.TaskResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: column not found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: validation failed, or assignee is not a member of this center
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Create a task
+      tags:
+      - tasks
+  /tasks/{id}:
+    delete:
+      description: Requires being the center owner or the task's creator. Soft delete.
+      parameters:
+      - description: task id
+        format: uuid
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: not the owner or the task's creator
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: task not found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a task
+      tags:
+      - tasks
+    get:
+      description: Requires being the center owner, holding tasks.view_all, or being
+        the task's creator or assignee.
+      parameters:
+      - description: task id
+        format: uuid
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/tasks.TaskResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: not visible to the caller
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: task not found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get a task
+      tags:
+      - tasks
+    patch:
+      consumes:
+      - application/json
+      description: 'Requires being the center owner or the task''s creator. assignee_id
+        and due_on are tri-state: absent leaves the field unchanged, null clears it,
+        a value sets it. description is an HTML subset (p, br, strong, em, u, s, ul,
+        ol, li, a[href] with http/https/mailto); the server sanitizes it, treats a
+        value not starting with "<" as plain text, and rejects more than 4000 text
+        characters.'
+      parameters:
+      - description: task id
+        format: uuid
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: patch
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/tasks.UpdateTaskRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/tasks.TaskResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: not the owner or the task's creator
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: task not found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: validation failed, or assignee is not a member of this center
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Update a task
+      tags:
+      - tasks
+  /tasks/{id}/move:
+    post:
+      consumes:
+      - application/json
+      description: Requires being the center owner, the task's creator, or its assignee.
+        With after_task_id the task lands directly below that task, which must be
+        a live task of the destination column; without it (or with null) the task
+        lands at the top of the column.
+      parameters:
+      - description: task id
+        format: uuid
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: destination column
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/tasks.MoveTaskRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/tasks.TaskResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: not the owner, creator, or assignee
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: task or destination column not found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: after_task_id is not a live task of the destination column
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Move a task to another column
+      tags:
+      - tasks
+  /tasks/{id}/restore:
+    post:
+      description: Requires being the center owner or the task's creator. Clears the
+        soft-delete marker; the task reappears with its original column, position,
+        and completed_at.
+      parameters:
+      - description: task id
+        format: uuid
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/tasks.TaskResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: not the owner or the task's creator
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: no soft-deleted task with this id
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Restore a deleted task
+      tags:
+      - tasks
+  /tasks/board:
+    get:
+      description: Every column, the tasks Policy and filter make visible to the caller
+        (their own vs. the whole center's, reported as scope), and counts over that
+        same visible set.
+      parameters:
+      - description: all|mine|overdue|today|unassigned
+        in: query
+        name: filter
+        type: string
+      - description: restrict to this assignee, ANDed with filter
+        format: uuid
+        in: query
+        name: assignee
+        type: string
+      - description: YYYY-MM-DD, the client's own calendar date; defaults to the server's
+          current UTC date
+        in: query
+        name: today
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/tasks.BoardResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: invalid filter, assignee, or today
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get the task board
+      tags:
+      - tasks
   /teaching/review-queue:
     get:
       description: Every pending giáo án in the center with class name, submitter,

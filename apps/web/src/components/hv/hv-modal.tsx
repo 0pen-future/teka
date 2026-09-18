@@ -38,33 +38,42 @@ function HvModalOverlay({
  */
 export type HvModalSize = "md" | "lg" | "xl";
 
-/**
- * "md" and "lg" are content-sized cards; "xl" is a page-width workspace that
- * grows with its content up to 90dvh, after which the body scrolls while
- * title and footer stay put.
- */
+/** Size-specific max-width only; the scrolling layout lives in `layoutClassName`. */
 const sizeClassName: Record<HvModalSize, string> = {
   md: "sm:max-w-md",
   lg: "sm:max-w-[720px]",
-  xl: "flex max-h-[95dvh] flex-col overflow-hidden sm:max-h-[90dvh] sm:max-w-[var(--w-page)]",
+  xl: "sm:max-w-[var(--w-page)]",
 };
+
+/**
+ * Column layout applied whenever the panel scrolls its body instead of the
+ * whole page: "xl" always does (page-width workspace), other sizes opt in
+ * via `stickyFooter`. Grows with its content up to 90dvh, after which the
+ * body scrolls while title and footer stay put.
+ */
+const layoutClassName = "flex max-h-[95dvh] flex-col overflow-hidden sm:max-h-[90dvh]";
 
 function HvModalContent({
   className,
   children,
   showCloseButton = true,
   size = "md",
+  stickyFooter = false,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean;
   size?: HvModalSize;
+  /** Opt-in column layout (fixed header/footer, scrolling body) for md/lg. "xl" always behaves this way. */
+  stickyFooter?: boolean;
 }) {
+  const scrollsBody = size === "xl" || stickyFooter;
   return (
     <DialogPortal>
       <HvModalOverlay />
       <DialogPrimitive.Content
         data-slot="hv-modal-content"
         data-size={size}
+        data-sticky-footer={scrollsBody || undefined}
         className={cn(
           "fixed inset-x-0 bottom-0 top-auto z-50 max-h-[85vh] w-full translate-x-0 translate-y-0",
           "overflow-y-auto rounded-t-[var(--radius-xl)] rounded-b-none bg-white p-6",
@@ -73,6 +82,7 @@ function HvModalContent({
           "sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2",
           "sm:rounded-[var(--radius-xl)]",
           sizeClassName[size],
+          scrollsBody && layoutClassName,
           className,
         )}
         aria-describedby={undefined}
@@ -126,6 +136,14 @@ export interface HvModalProps {
   footer?: React.ReactNode;
   /** Panel width preset. Defaults to "md". */
   size?: HvModalSize;
+  /**
+   * Opt-in column layout: fixed header/footer with a scrolling body, for
+   * "md"/"lg" panels whose content can grow long. Defaults to `false` —
+   * existing modals that don't pass this prop keep their current bottom-
+   * sheet-that-scrolls-as-a-whole behavior. "xl" always scrolls its body
+   * regardless of this prop.
+   */
+  stickyFooter?: boolean;
   /** Extra classes applied to the panel. */
   className?: string;
   /** Radix open-autofocus hook; call `preventDefault` and focus a ref to pick the initial control. */
@@ -146,15 +164,18 @@ export function HvModal({
   children,
   footer,
   size = "md",
+  stickyFooter = false,
   className,
   onOpenAutoFocus,
   onCloseAutoFocus,
 }: HvModalProps) {
   const descriptionId = React.useId();
+  const scrollsBody = size === "xl" || stickyFooter;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <HvModalContent
         size={size}
+        stickyFooter={stickyFooter}
         className={className}
         aria-describedby={description != null ? descriptionId : undefined}
         onOpenAutoFocus={onOpenAutoFocus}
@@ -176,7 +197,7 @@ export function HvModal({
           </DialogPrimitive.Description>
         ) : null}
         <div
-          className={cn("font-body text-ink-700", size === "xl" && "min-h-0 flex-1 overflow-auto")}
+          className={cn("font-body text-ink-700", scrollsBody && "min-h-0 flex-1 overflow-auto")}
         >
           {children}
         </div>
@@ -184,7 +205,7 @@ export function HvModal({
           <div
             className={cn(
               "mt-[var(--space-5)] flex justify-end gap-[var(--space-2)]",
-              size === "xl" && "shrink-0",
+              scrollsBody && "shrink-0",
             )}
           >
             {footer}

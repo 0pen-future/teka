@@ -26,6 +26,23 @@ export default tseslint.config(
         tsconfigRootDir: import.meta.dirname,
       },
     },
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']",
+          message:
+            "Render server HTML only through RichTextView (src/features/tasks/components/rich-text-view.tsx), which sanitizes it first.",
+        },
+      ],
+    },
+  },
+  {
+    // The one place that may inject HTML: it sanitizes with DOMPurify first.
+    files: ["src/features/tasks/components/rich-text-view.tsx"],
+    rules: {
+      "no-restricted-syntax": "off",
+    },
   },
   {
     // Generated shadcn primitives keep upstream shape for easy re-generation.
@@ -54,6 +71,54 @@ export default tseslint.config(
             {
               group: ["@/lib/api/client"],
               message: "Use @/lib/api/public-client instead — this route carries no session.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // src/lib/kanban is a headless core meant to be extracted into its own
+    // package later (see apps/web/src/lib/kanban/README.md); its only
+    // allowed dependency is `react`.
+    files: ["src/lib/kanban/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/features/*", "@/features"],
+              message:
+                "src/lib/kanban must stay UI/transport-agnostic — it cannot depend on app features.",
+            },
+            {
+              group: ["@/components/*", "@/components"],
+              message: "src/lib/kanban must not depend on the design system — it is headless.",
+            },
+            {
+              group: ["@/lib/api", "@/lib/api/*"],
+              message:
+                "src/lib/kanban knows nothing about HTTP — the app's KanbanDataSource adapter owns that.",
+            },
+            {
+              group: ["@tanstack/*"],
+              message:
+                "src/lib/kanban must not depend on TanStack — the app owns caching/optimistic updates.",
+            },
+            {
+              group: ["zod"],
+              message:
+                "src/lib/kanban does not validate external input — that belongs to the adapter layer.",
+            },
+            {
+              group: ["axios"],
+              message: "src/lib/kanban must not perform HTTP calls directly.",
+            },
+            {
+              group: ["@dnd-kit/*"],
+              message:
+                "src/lib/kanban is drag-layer-agnostic — the app's use-board-dnd adapter owns dnd-kit.",
             },
           ],
         },

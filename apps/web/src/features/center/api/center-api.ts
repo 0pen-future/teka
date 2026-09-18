@@ -1,12 +1,14 @@
 import { apiClient } from "@/lib/api/client";
-import { parseData } from "@/lib/api/envelope";
+import { parseArray, parseData } from "@/lib/api/envelope";
 import { ApiError } from "@/lib/api/errors";
 
 import {
   centerMeOwnerSchema,
   centerMeSchema,
+  memberDirectoryEntrySchema,
   type CenterMe,
   type CenterMeOwner,
+  type MemberDirectoryEntry,
   type RenameCenterInput,
 } from "../schemas/center-schemas";
 
@@ -39,4 +41,14 @@ export async function removeMember(teacherId: string): Promise<void> {
     }
     throw error;
   }
+}
+
+/**
+ * Assignee-picker source for the tasks feature (`members.list`) — kept in
+ * this domain because directory rows are member data, not task data; the
+ * tasks feature imports it through `@/features/center`.
+ */
+export async function getMemberDirectory(): Promise<MemberDirectoryEntry[]> {
+  const res = await apiClient.get<unknown>("/centers/me/members/directory");
+  return parseArray(memberDirectoryEntrySchema, res.data);
 }

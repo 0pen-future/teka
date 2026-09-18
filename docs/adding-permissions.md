@@ -67,6 +67,18 @@ The version change makes stale permission-management clients reload instead of
 replacing assignments from an old catalog view. Align the mirrored version and
 fixture in [web test handlers](../apps/web/src/test/msw/handlers.ts).
 
+`def()` and `viewAll()` set `PermDef.DefaultGrant` to `true`: the key is
+eligible for `DefaultRoleKeys()`, the baseline `DefaultRoleKeys()` filters by
+`Grantable && Kind != PermKindScope && !legacyIdentitySet[key] && DefaultGrant`,
+so a scope key (`viewAll`) never actually reaches an existing role even though
+it reports `DefaultGrant: true`. Use `optIn()` instead of `def()` for a key
+that must never be silently granted to an existing role — it sets
+`DefaultGrant: false` and keeps every other attribute identical to `def()`.
+Reach for `optIn()` for a new sensitive or high-risk capability by default;
+see [step 4](#4-choose-the-database-rollout-policy) for when a `def()` key
+still needs a manual backfill migration instead of relying on
+`DefaultRoleKeys()` alone.
+
 Do not define the key in a database table or duplicate its label in TypeScript.
 The API catalog is authoritative.
 
@@ -113,15 +125,30 @@ compare-and-set protection, and audit evidence; avoid direct production SQL.
 
 If existing roles must receive it automatically:
 
-1. Confirm its catalog attributes include it in `DefaultRoleKeys()`.
+1. Declare it with `def()` (or `viewAll()` for a `<resource>.view_all` key),
+   never `optIn()`, so `DefaultGrant` is `true` and the key is eligible for
+   `DefaultRoleKeys()`.
 2. Add the next immutable `NNNNNN_slug.up.sql` and `.down.sql` pair under
    [migrations](../apps/api/migrations).
-3. Backfill `center_role_permissions` with conflict-safe insertion.
-4. Remove only that key from role assignments in the down migration.
+3. Backfill `center_role_permissions` with conflict-safe insertion, and
+   `center_member_permissions` too when a role-less live member should also
+   receive the default (see migration `000022_task_board.up.sql` for the
+   two-table pattern).
+4. Remove only that key from role (and member) assignments in the down
+   migration.
 5. Update the migration/default parity tests in that package.
 
+A key declared with `optIn()` must never be granted by a backfill migration:
+an owner assigns it by hand through the permission UI or API. Once the key
+has shipped, a down migration only needs to undo schema it introduced, not
+sweep grants. The exception is a pre-ship rollback: a down file that also
+removes the opt-in keys it introduced (as `000022_task_board.down.sql` does)
+is only safe before the feature reaches production, and must say so in its
+header — after that, revert with a new forward migration instead.
+
 Treat backfilling as a security decision. Sensitive new capabilities should
-normally fail closed and remain unassigned.
+normally use `optIn()` and fail closed, remaining unassigned until an owner
+opts a role or member in.
 
 ## 5. Classify the route
 

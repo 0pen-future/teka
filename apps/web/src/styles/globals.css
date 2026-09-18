@@ -244,3 +244,33 @@
     }
   }
 }
+
+/* Task descriptions: the sanitized HTML subset rendered by RichTextView and
+   edited in TaskDescriptionEditor (`.prose-task` is on the editor surface). */
+@layer components {
+  .prose-task p {
+    margin: 0 0 0.5em;
+  }
+  .prose-task p:last-child {
+    margin-bottom: 0;
+  }
+  .prose-task ul,
+  .prose-task ol {
+    margin: 0 0 0.5em;
+    padding-left: 1.4em;
+  }
+  .prose-task ul {
+    list-style: disc;
+  }
+  .prose-task ol {
+    list-style: decimal;
+  }
+  .prose-task a {
+    color: var(--mint-600);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .prose-task s {
+    color: var(--ink-400);
+  }
+}

@@ -653,7 +653,65 @@ CREATE INDEX idx_notifications_run ON notifications(run_id) WHERE run_id IS NOT 
 CREATE INDEX idx_notifications_center ON notifications(center_id) WHERE deleted_at IS NULL;
 
 -- =============================================================
--- 9. VIEW HỖ TRỢ
+-- 9. TRUNG TÂM CÔNG VIỆC — bảng Kanban theo trung tâm (migration 000022)
+-- Cột do trung tâm tự cấu hình (tối đa 8, tên duy nhất không phân biệt hoa
+-- thường). Mọi FK là composite kèm center_id để một việc không bao giờ trỏ
+-- chéo trung tâm. Hiển thị "ai thấy việc nào" là luật ở service, không ở DB.
+-- =============================================================
+
+CREATE TABLE task_columns (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    center_id  UUID NOT NULL REFERENCES centers(id) ON DELETE CASCADE,
+    name       VARCHAR(40) NOT NULL,
+    position   INT NOT NULL,
+    is_done    BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (id, center_id) -- đích cho FK composite của tasks.column_id
+);
+CREATE UNIQUE INDEX uq_task_columns_name ON task_columns (center_id, lower(name));
+CREATE INDEX idx_task_columns_order ON task_columns (center_id, position);
+
+CREATE TABLE tasks (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    center_id    UUID NOT NULL,
+    column_id    UUID NOT NULL,
+    created_by   UUID NOT NULL,
+    assignee_id  UUID,
+    title        VARCHAR(200) NOT NULL,
+    description  TEXT NOT NULL DEFAULT '',
+    priority     VARCHAR(8) NOT NULL DEFAULT 'none'
+                     CHECK (priority IN ('none', 'low', 'medium', 'high')),
+    due_on       DATE,
+    -- Thứ tự trong cột: số nhỏ hơn nằm trên; đưa lên đầu = MIN(position) - 1,
+    -- nên là DOUBLE PRECISION thay vì INT để không phải đánh lại cả cột.
+    position     DOUBLE PRECISION NOT NULL DEFAULT 0,
+    completed_at TIMESTAMPTZ,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at   TIMESTAMPTZ,
+    -- RESTRICT: service phải di dời việc (kể cả việc đã xoá mềm) trước khi
+    -- xoá cột — cột là tài nguyên chung, xoá ảnh hưởng mọi người.
+    CONSTRAINT fk_tasks_column_center
+        FOREIGN KEY (column_id, center_id) REFERENCES task_columns (id, center_id) ON DELETE RESTRICT,
+    -- CASCADE theo khuôn center_members: xoá cứng teacher/center (PII) không
+    -- được bị chặn bởi việc họ đã tạo.
+    CONSTRAINT fk_tasks_creator_center
+        FOREIGN KEY (created_by, center_id) REFERENCES center_members (teacher_id, center_id) ON DELETE CASCADE,
+    -- Chỉ bỏ gán, không xoá việc do người khác tạo khi người được gán rời đi.
+    CONSTRAINT fk_tasks_assignee_center
+        FOREIGN KEY (assignee_id, center_id) REFERENCES center_members (teacher_id, center_id) ON DELETE SET NULL (assignee_id)
+);
+CREATE INDEX idx_tasks_board ON tasks (center_id, column_id, position) WHERE deleted_at IS NULL;
+CREATE INDEX idx_tasks_assignee ON tasks (center_id, assignee_id);
+CREATE INDEX idx_tasks_creator ON tasks (center_id, created_by);
+
+-- Mỗi trung tâm sinh ra với 3 cột mặc định (Cần làm / Đang làm / Hoàn thành);
+-- literal nằm ở apps/api/internal/features/centers/default_columns.go và
+-- được migration backfill cho trung tâm có sẵn.
+
+-- =============================================================
+-- 10. VIEW HỖ TRỢ
 -- =============================================================
 
 -- Bảng thu tiền chế độ "xem theo người liên hệ" (R7, mặc định).
@@ -701,7 +759,7 @@ WHERE a.billable = true
   );
 
 -- =============================================================
--- 10. XOÁ DỮ LIỆU CÁ NHÂN (Nghị định 13/2023)
+-- 11. XOÁ DỮ LIỆU CÁ NHÂN (Nghị định 13/2023)
 --
 -- Không đặt logic trong DB. Việc này do job định kỳ ở backend (Go) thực hiện,
 -- nhất quán với nguyên tắc "không nhét nghiệp vụ vào DB" ở ghi chú (l).

@@ -1,0 +1,1073 @@
+<title>Bảng công việc Teka</title>
+<meta name="description" content="Review UX màn Chi tiết công việc và bảng Kanban, kèm 2 phương án redesign tương tác theo design system Học Vui Mỗi Ngày">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito:wght@400;600;700;800&display=swap">
+<style>
+  :root{
+    --cream-50:#fbfdfb;--cream-100:#f4f8f3;--cream-200:#eaf1ea;--cream-300:#dfe9df;
+    --ink-900:#1c3a31;--ink-700:#27433b;--ink-500:#5b756c;--ink-400:#86998f;--ink-300:#aab9b1;
+    --mint-50:#e9f7f1;--mint-100:#d3efe3;--mint-200:#a9e0cb;--mint-300:#7fd2b4;--mint-400:#5cc9a7;--mint-500:#3fa888;--mint-600:#2e8d6e;--mint-700:#1f6b53;
+    --sky-50:#eaf5fb;--sky-100:#d6ecf7;--sky-200:#a9d8ee;--sky-300:#7fc8e8;--sky-400:#4fa9d4;--sky-500:#2d7aa0;--sky-600:#226383;
+    --sun-100:#fff4d6;--sun-200:#ffe6a3;--sun-300:#ffd86b;--sun-400:#ffc83d;--sun-500:#f0a500;--sun-600:#b87d00;
+    --coral-100:#ffe7e1;--coral-300:#ff9b8a;--coral-400:#ff7a66;--coral-500:#e85a44;--coral-600:#b23a28;
+    --line-100:#eef4ee;--line-200:#e2ece2;--line-300:#cfe0d4;
+    --radius-xs:8px;--radius-sm:12px;--radius-md:16px;--radius-lg:20px;--radius-xl:24px;--radius-pill:999px;
+    --shadow-xs:0 1px 2px rgba(28,58,49,.06);--shadow-sm:0 2px 6px rgba(28,58,49,.08);--shadow-md:0 8px 20px -8px rgba(28,58,49,.18);--shadow-lg:0 18px 40px -18px rgba(28,58,49,.28);--shadow-xl:0 28px 60px -24px rgba(28,58,49,.32);
+    --press-mint:0 5px 0 var(--mint-500);--press-sky:0 5px 0 var(--sky-400);--press-coral:0 5px 0 var(--coral-500);--press-line:0 4px 0 var(--line-300);
+    --ring:0 0 0 4px var(--mint-200);
+    --font-display:"Baloo 2",system-ui,sans-serif;--font-body:"Nunito",system-ui,sans-serif;
+    --dur-fast:140ms;--dur-base:220ms;--dur-slow:360ms;--ease-out:cubic-bezier(.22,1,.36,1);--ease-soft:cubic-bezier(.34,1.56,.64,1);
+    --w-page:1080px;
+    color-scheme:light;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth;scroll-padding-top:24px}
+  body{margin:0;background:var(--cream-100);color:var(--ink-700);font:600 15px/1.6 var(--font-body);-webkit-font-smoothing:antialiased;padding-inline:16px}
+  h1,h2,h3,h4{font-family:var(--font-display);color:var(--ink-900);margin:0;line-height:1.2;text-wrap:balance}
+  h1{font-size:36px;font-weight:800}h2{font-size:26px;font-weight:800}h3{font-size:20px;font-weight:700}h4{font-size:16px;font-weight:700}
+  p{margin:0;text-wrap:pretty}
+  a{color:var(--mint-600);font-weight:700}
+  button{font:inherit;color:inherit}
+  :focus-visible{outline:none;box-shadow:var(--ring)}
+  code{font:600 12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--cream-200);padding:1px 6px;border-radius:6px;color:var(--ink-900)}
+  .muted{color:var(--ink-500)}
+  .cap{font-size:12px;letter-spacing:.06em;text-transform:uppercase;font-weight:800;color:var(--ink-500)}
+  .shell{max-width:1360px;margin:0 auto;padding-block:32px 96px;display:grid;grid-template-columns:1fr;gap:32px}
+  @media(min-width:1024px){.shell{grid-template-columns:232px minmax(0,1fr);padding-block:40px 120px}}
+  nav.toc{align-self:start;position:sticky;top:24px;display:none}
+  @media(min-width:1024px){nav.toc{display:block}}
+  nav.toc .brand{display:flex;align-items:center;gap:10px;margin-bottom:20px}
+  nav.toc .logo{width:40px;height:40px;border-radius:var(--radius-sm);background:var(--mint-400);box-shadow:0 3px 0 var(--mint-500);display:grid;place-items:center;color:#fff;font:800 20px var(--font-display)}
+  nav.toc strong{font:800 17px var(--font-display);color:var(--ink-900);display:block;line-height:1.15}
+  nav.toc ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+  nav.toc a{display:flex;gap:10px;align-items:baseline;padding:8px 12px;border-radius:14px;color:var(--ink-500);font-size:14px;text-decoration:none;transition:background var(--dur-fast) var(--ease-out)}
+  nav.toc a:hover{background:var(--cream-200);color:var(--ink-900)}
+  nav.toc a .n{font:800 12px var(--font-display);color:var(--ink-400);min-width:18px}
+  nav.toc .meta{margin-top:20px;padding:14px;border-radius:var(--radius-md);background:#fff;box-shadow:var(--shadow-sm);font-size:12.5px;color:var(--ink-500);display:flex;flex-direction:column;gap:4px}
+  nav.toc .meta b{color:var(--ink-900)}
+  main{display:flex;flex-direction:column;gap:56px;min-width:0}
+  section{display:flex;flex-direction:column;gap:20px;scroll-margin-top:24px}
+  .sec-head{display:flex;flex-direction:column;gap:6px}
+  .sec-head .lede{font-size:15px;color:var(--ink-500);max-width:68ch}
+  .eyebrow{font:800 12px var(--font-display);letter-spacing:.08em;text-transform:uppercase;color:var(--mint-600)}
+
+  header.hero{background:#fff;border-radius:var(--radius-xl);box-shadow:var(--shadow-md);padding:32px;display:grid;gap:24px}
+  @media(min-width:760px){header.hero{grid-template-columns:1.25fr 1fr;align-items:start}}
+  header.hero .lede{font-size:16px;color:var(--ink-500);max-width:58ch;margin-top:10px}
+  .pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:var(--radius-pill);font:700 13px var(--font-display);background:var(--mint-50);color:var(--mint-600)}
+  .pill.sky{background:var(--sky-50);color:var(--sky-500)}.pill.sun{background:var(--sun-100);color:var(--sun-600)}.pill.coral{background:var(--coral-100);color:var(--coral-600)}.pill.neutral{background:var(--cream-200);color:var(--ink-500)}
+  .score{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+  .score .tile{background:var(--cream-100);border-radius:var(--radius-md);padding:14px 16px;display:flex;flex-direction:column;gap:2px}
+  .score .tile b{font:800 26px/1.1 var(--font-display);color:var(--ink-900);font-variant-numeric:tabular-nums}
+  .score .tile span{font-size:12.5px;color:var(--ink-500)}
+  .score .bad b{color:var(--coral-600)}.score .warn b{color:var(--sun-600)}.score .good b{color:var(--mint-600)}
+  .rec{margin-top:16px;padding:14px 16px;border-radius:var(--radius-md);background:var(--mint-50);border:1.5px solid var(--mint-200);font-size:14px;color:var(--ink-700)}
+  .rec b{color:var(--mint-700)}
+
+  .card{background:#fff;border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+  .grid2{display:grid;gap:16px}@media(min-width:860px){.grid2{grid-template-columns:1fr 1fr}}
+
+  /* findings list */
+  .findings{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+  .finding{display:grid;grid-template-columns:auto 1fr;gap:12px;padding:12px 14px;border-radius:var(--radius-md);background:var(--cream-100)}
+  .finding .sev{align-self:start;width:52px;text-align:center;padding:4px 0;border-radius:var(--radius-pill);font:800 11px var(--font-display);letter-spacing:.04em;text-transform:uppercase}
+  .sev.high{background:var(--coral-100);color:var(--coral-600)}.sev.mid{background:var(--sun-100);color:var(--sun-600)}.sev.low{background:var(--sky-50);color:var(--sky-500)}
+  .finding b{color:var(--ink-900);font-size:14px}
+  .finding p{font-size:13.5px;color:var(--ink-500);margin-top:2px}
+  .finding .fix{color:var(--ink-700)}
+  .finding .fix::before{content:"Sửa: ";font-weight:800;color:var(--mint-600)}
+  .finding .rule{font:700 11px ui-monospace,Menlo,monospace;color:var(--ink-400);margin-left:6px;letter-spacing:0}
+
+  /* option header */
+  .opt-head{display:grid;gap:16px;background:#fff;border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:20px 22px}
+  @media(min-width:900px){.opt-head{grid-template-columns:1.1fr 1fr}}
+  .opt-head ul{margin:6px 0 0;padding-left:18px;font-size:14px;display:flex;flex-direction:column;gap:4px}
+  .opt-head li b{color:var(--ink-900)}
+  .tradeoff{background:var(--cream-100);border-radius:var(--radius-md);padding:12px 14px;font-size:13.5px}
+  .tradeoff .cap{margin-bottom:6px;display:block}
+  .tradeoff ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:3px}
+  .try{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:13px;color:var(--ink-500)}
+  .try .kbd{font:700 12px ui-monospace,Menlo,monospace;background:#fff;border:1.5px solid var(--line-300);border-bottom-width:3px;border-radius:6px;padding:1px 6px;color:var(--ink-700)}
+
+  /* frames */
+  .frame{border-radius:var(--radius-xl);padding:28px;background:var(--cream-200);border:1.5px solid var(--line-200);display:grid;place-items:start center;overflow:hidden}
+  .frame.scrim{background:rgba(28,58,49,.42)}
+  .frame.board-frame{padding:0;background:var(--cream-100);place-items:stretch}
+  @media(max-width:560px){.frame{padding:12px}}
+
+  /* ---------- shared UI primitives (mirror hv kit) ---------- */
+  .hvbtn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 18px;border:0;border-radius:var(--radius-md);cursor:pointer;font:700 15px var(--font-display);letter-spacing:.04em;transition:transform var(--dur-fast) var(--ease-out),box-shadow var(--dur-fast) var(--ease-out),filter var(--dur-fast);white-space:nowrap}
+  .hvbtn:hover{filter:brightness(1.04)}
+  .hvbtn:active{transform:translateY(5px);box-shadow:none!important}
+  .hvbtn.primary{background:var(--mint-400);color:#fff;box-shadow:var(--press-mint)}
+  .hvbtn.secondary{background:var(--sky-300);color:#fff;box-shadow:var(--press-sky)}
+  .hvbtn.danger{background:var(--coral-400);color:#fff;box-shadow:var(--press-coral)}
+  .hvbtn.ghost{background:#fff;color:var(--mint-600);box-shadow:0 5px 0 var(--line-300),inset 0 0 0 2px var(--line-200)}
+  .hvbtn.ghost:active{box-shadow:inset 0 0 0 2px var(--line-200)!important}
+  .hvbtn.md{min-height:56px;padding:0 24px;font-size:17px}
+  .hvbtn.block{width:100%}
+  .hvbtn:disabled{background:var(--line-200);color:var(--ink-300);box-shadow:none;cursor:not-allowed;transform:none}
+  .hvbtn svg{width:1.1em;height:1.1em}
+  .btn-text{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 12px;border:0;border-radius:var(--radius-sm);background:transparent;cursor:pointer;font:700 14px var(--font-display);color:var(--ink-500);transition:background var(--dur-fast),color var(--dur-fast)}
+  .btn-text:hover{background:var(--cream-100);color:var(--ink-900)}
+  .btn-text.danger{color:var(--coral-600)}.btn-text.danger:hover{background:var(--coral-100)}
+  .btn-text.mint{color:var(--mint-600)}.btn-text.mint:hover{background:var(--mint-50)}
+  .btn-text svg{width:16px;height:16px}
+  .icon-btn{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border:0;border-radius:var(--radius-pill);background:transparent;color:var(--ink-500);cursor:pointer;transition:background var(--dur-fast),color var(--dur-fast)}
+  .icon-btn:hover{background:var(--cream-200);color:var(--ink-900)}
+  .icon-btn svg{width:20px;height:20px}
+  .icon-btn.sm{width:40px;height:40px}.icon-btn.sm svg{width:18px;height:18px}
+  svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+  .avatar{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:var(--radius-pill);font:800 11px var(--font-display);color:#fff;background:var(--ink-400);flex:none;letter-spacing:.02em}
+  .avatar.mint{background:var(--mint-500)}.avatar.sky{background:var(--sky-400)}.avatar.sun{background:var(--sun-500)}
+  .avatar.lg{width:32px;height:32px;font-size:12px}
+  .avatar.none{background:transparent;border:1.5px dashed var(--line-300);color:var(--ink-400)}
+  .chip{display:inline-flex;align-items:center;gap:5px;padding:4px 9px;border-radius:var(--radius-pill);font:700 12px var(--font-body);line-height:1;white-space:nowrap}
+  .chip svg{width:12px;height:12px}
+  .chip .dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+  .chip.neutral{background:var(--cream-200);color:var(--ink-500)}
+  .chip.low{background:var(--sky-50);color:var(--sky-500)}
+  .chip.medium{background:var(--sun-100);color:var(--sun-600)}
+  .chip.high{background:var(--coral-100);color:var(--coral-600)}
+  .chip.overdue{background:var(--coral-100);color:var(--coral-600)}
+  .chip.today{background:var(--sun-100);color:var(--sun-600)}
+  .chip.done{background:var(--mint-50);color:var(--mint-600)}
+  .seg{display:inline-flex;gap:4px;padding:4px;border-radius:var(--radius-md);border:2px solid var(--line-200);background:#fff}
+  .seg button{min-height:40px;padding:0 14px;border:0;border-radius:calc(var(--radius-md) - 4px);background:transparent;cursor:pointer;font:700 14px var(--font-display);color:var(--ink-500);white-space:nowrap;transition:background var(--dur-fast),color var(--dur-fast)}
+  .seg button:hover{background:var(--cream-100);color:var(--ink-900)}
+  .seg button[aria-checked="true"]{background:var(--mint-400);color:#fff}
+  .inp,.sel{width:100%;min-height:44px;padding:8px 12px;border:2px solid var(--line-200);border-radius:14px;background:#fff;font:700 14.5px var(--font-body);color:var(--ink-700);outline:none;transition:border-color var(--dur-fast)}
+  .inp:hover,.sel:hover{border-color:var(--mint-300)}
+  .inp:focus,.sel:focus{border-color:var(--mint-400);box-shadow:none}
+  .inp::placeholder{color:var(--ink-400);font-weight:600}
+  .sel{appearance:none;-webkit-appearance:none;padding-right:36px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%235b756c' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;cursor:pointer;font-weight:800;color:var(--ink-900)}
+  .lbl{display:block;font:700 13.5px var(--font-display);color:var(--ink-700);margin-bottom:6px}
+  .lbl .req{color:var(--coral-500);font-weight:800}
+  .fld{display:flex;flex-direction:column;min-width:0}
+  .lbl-row{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .lbl-row .lbl{margin-bottom:6px}
+  .help{font-size:12.5px;color:var(--ink-500);margin-top:6px}
+  .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);opacity:0;background:var(--ink-900);color:#fff;padding:12px 16px;border-radius:var(--radius-md);box-shadow:var(--shadow-lg);font:700 14px var(--font-body);display:flex;align-items:center;gap:12px;z-index:1000;pointer-events:none;transition:transform var(--dur-base) var(--ease-out),opacity var(--dur-base);max-width:calc(100vw - 32px)}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);pointer-events:auto}
+  .toast button{border:0;background:rgba(255,255,255,.14);color:#fff;font:800 13px var(--font-display);padding:6px 10px;border-radius:8px;cursor:pointer}
+  .toast button:hover{background:rgba(255,255,255,.24)}
+
+  /* ---------- editor ---------- */
+  .editor{border:2px solid var(--line-200);border-radius:14px;background:#fff;transition:border-color var(--dur-fast);position:relative}
+  .editor:focus-within{border-color:var(--mint-400)}
+  .toolbar{display:flex;gap:2px;padding:6px;border-bottom:1.5px solid var(--line-100);flex-wrap:wrap}
+  .toolbar .tb{width:40px;height:40px;border:0;border-radius:10px;background:transparent;color:var(--ink-500);cursor:pointer;display:grid;place-items:center;transition:background var(--dur-fast),color var(--dur-fast)}
+  .toolbar .tb:hover{background:var(--cream-100);color:var(--ink-900)}
+  .toolbar .tb[aria-pressed="true"]{background:var(--mint-50);color:var(--mint-700)}
+  .toolbar .sep{width:1.5px;background:var(--line-200);margin:8px 4px}
+  .ed-surface{min-height:120px;max-height:260px;overflow:auto;padding:12px 14px 30px;font:600 15px/1.55 var(--font-body);color:var(--ink-700);outline:none}
+  .ed-surface p,.rich p{margin:0 0 8px}.ed-surface ul,.ed-surface ol,.rich ul,.rich ol{margin:0 0 8px;padding-left:22px}
+  .ed-surface a,.rich a{color:var(--sky-500);text-decoration:underline}
+  .ed-surface:empty::before{content:attr(data-placeholder);color:var(--ink-400)}
+  .counter{position:absolute;right:10px;bottom:6px;font:700 11.5px var(--font-body);color:var(--ink-400);font-variant-numeric:tabular-nums;opacity:0;transition:opacity var(--dur-fast)}
+  .editor:focus-within .counter,.counter.warn,.counter.over{opacity:1}
+  .counter.warn{color:var(--sun-600)}.counter.over{color:var(--coral-600)}
+  .linkpanel{display:flex;gap:8px;padding:8px;border-bottom:1.5px solid var(--line-100);align-items:center;flex-wrap:wrap}
+  .linkpanel .inp{flex:1;min-height:40px;min-width:180px}
+  .linkpanel .err{width:100%;font-size:12.5px;color:var(--coral-600)}
+  .rich{font:600 15px/1.55 var(--font-body);color:var(--ink-700)}
+
+  /* ---------- modal shell ---------- */
+  .modal{width:100%;max-width:520px;background:#fff;border-radius:var(--radius-xl);box-shadow:var(--shadow-xl);display:flex;flex-direction:column;max-height:min(760px,90dvh);overflow:hidden;position:relative}
+  .modal.wide{max-width:820px}
+  .m-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:20px 16px 12px 24px}
+  .m-head h3{font-size:22px;font-weight:800}
+  .m-eyebrow{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font-size:12.5px;color:var(--ink-500);margin-bottom:4px}
+  .m-eyebrow .col-tag{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:var(--radius-pill);background:var(--sky-50);color:var(--sky-500);font:800 12px var(--font-display)}
+  .m-eyebrow .col-tag.done{background:var(--mint-50);color:var(--mint-600)}
+  .m-body{padding:4px 24px 20px;overflow:auto;display:flex;flex-direction:column;gap:18px}
+  .m-foot{display:flex;align-items:center;gap:10px;padding:12px 16px 16px 12px;border-top:1.5px solid var(--line-100);background:#fff}
+  .m-foot .spacer{flex:1}
+  .dirty{font:700 12.5px var(--font-body);color:var(--sun-600);background:var(--sun-100);padding:4px 10px;border-radius:var(--radius-pill)}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:520px){.row2{grid-template-columns:1fr}}
+  .quick{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .quick button{min-height:32px;padding:0 10px;border:1.5px solid var(--line-200);border-radius:var(--radius-pill);background:#fff;cursor:pointer;font:700 12.5px var(--font-body);color:var(--ink-500);transition:border-color var(--dur-fast),color var(--dur-fast),background var(--dur-fast)}
+  .quick button:hover{border-color:var(--mint-300);color:var(--mint-700);background:var(--mint-50)}
+  .prio{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+  @media(max-width:440px){.prio{grid-template-columns:repeat(2,1fr)}}
+  .prio label{position:relative;display:flex;align-items:center;justify-content:center;gap:7px;min-height:44px;border:2px solid var(--line-200);border-radius:14px;background:#fff;cursor:pointer;font:700 14px var(--font-display);color:var(--ink-500);transition:border-color var(--dur-fast),background var(--dur-fast),color var(--dur-fast);white-space:nowrap}
+  .prio label:hover{border-color:var(--line-300);background:var(--cream-50)}
+  .prio input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer}
+  .prio .dot{width:9px;height:9px;border-radius:50%;background:var(--ink-300)}
+  .prio label[data-p="low"] .dot{background:var(--sky-400)}.prio label[data-p="medium"] .dot{background:var(--sun-400)}.prio label[data-p="high"] .dot{background:var(--coral-400)}
+  .prio label:has(input:checked){border-color:currentColor;color:var(--ink-900);background:var(--cream-100)}
+  .prio label[data-p="low"]:has(input:checked){background:var(--sky-50);border-color:var(--sky-300);color:var(--sky-600)}
+  .prio label[data-p="medium"]:has(input:checked){background:var(--sun-100);border-color:var(--sun-300);color:var(--sun-600)}
+  .prio label[data-p="high"]:has(input:checked){background:var(--coral-100);border-color:var(--coral-300);color:var(--coral-600)}
+  .prio label:has(input:focus-visible){box-shadow:var(--ring)}
+  .confirm{position:absolute;inset:auto 0 0 0;background:#fff;border-top:2px solid var(--line-200);padding:16px 20px;display:flex;flex-direction:column;gap:12px;box-shadow:0 -12px 30px -18px rgba(28,58,49,.3);border-radius:0 0 var(--radius-xl) var(--radius-xl);animation:slideUp var(--dur-base) var(--ease-out)}
+  .confirm b{font:800 16px var(--font-display);color:var(--ink-900)}
+  .confirm p{font-size:13.5px;color:var(--ink-500)}
+  .confirm .acts{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+  .confirm.danger{border-top-color:var(--coral-300)}
+  @keyframes slideUp{from{transform:translateY(12px);opacity:0}to{transform:none;opacity:1}}
+  @keyframes popIn{from{transform:scale(.96);opacity:0}to{transform:none;opacity:1}}
+  .deleted{padding:40px 24px;text-align:center;display:flex;flex-direction:column;gap:10px;align-items:center}
+  /* modal B */
+  .mb-grid{display:grid;gap:0;flex:1;min-height:0;overflow:auto}
+  @media(min-width:720px){.mb-grid{grid-template-columns:minmax(0,1fr) 264px}}
+  .mb-main{padding:4px 24px 20px;display:flex;flex-direction:column;gap:16px;min-width:0}
+  .mb-title{font:800 22px/1.25 var(--font-display);color:var(--ink-900);outline:none;border-radius:8px;padding:4px 6px;margin:-4px -6px;transition:background var(--dur-fast)}
+  .mb-title:hover{background:var(--cream-100)}.mb-title:focus{background:var(--cream-100);box-shadow:var(--ring)}
+  .mb-title:empty::before{content:"Tiêu đề công việc";color:var(--ink-400)}
+  .mb-desc .rich{padding:12px 14px;border-radius:14px;background:var(--cream-100);min-height:72px;cursor:text;transition:background var(--dur-fast)}
+  .mb-desc .rich:hover{background:var(--cream-200)}
+  .mb-desc .rich.empty{color:var(--ink-400)}
+  .meta-line{font-size:12.5px;color:var(--ink-500);display:flex;flex-wrap:wrap;gap:4px 10px}
+  .mb-props{background:var(--cream-100);padding:16px 18px 20px;display:flex;flex-direction:column;gap:12px;border-left:1.5px solid var(--line-100)}
+  @media(max-width:719px){.mb-props{border-left:0;border-top:1.5px solid var(--line-100)}}
+  .prop{display:grid;grid-template-columns:82px 1fr;align-items:center;gap:8px}
+  .prop .p-lbl{font:700 12.5px var(--font-display);color:var(--ink-500)}
+  .prop .sel,.prop .inp{min-height:40px;padding:6px 10px;font-size:13.5px;border-width:1.5px;background-color:#fff}
+  .prop .sel{padding-right:30px;background-position:right 8px center}
+  .prop .state{grid-column:2;font-size:12px;margin-top:-4px}
+  .mb-props hr{border:0;border-top:1.5px solid var(--line-200);margin:4px 0}
+  .mb-props .hvbtn{min-height:44px;font-size:14px}
+
+  /* ---------- board ---------- */
+  .board{display:flex;flex-direction:column;gap:14px;padding:20px 20px 16px;min-width:0}
+  .b-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+  .b-head h3{font-size:22px;font-weight:800}
+  .b-sub{font-size:13px;color:var(--ink-500);margin-top:2px;display:flex;flex-wrap:wrap;gap:4px 8px}
+  .b-sub .warnc{color:var(--coral-600);font-weight:800}.b-sub .todayc{color:var(--sun-600);font-weight:800}
+  .b-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .b-scroll{position:relative;margin:0 -20px;padding:0 20px}
+  .b-scroll::before,.b-scroll::after{content:"";position:absolute;top:0;bottom:0;width:20px;pointer-events:none;z-index:2}
+  .b-scroll::before{left:0;background:linear-gradient(90deg,var(--cream-100),transparent)}
+  .b-scroll::after{right:0;background:linear-gradient(270deg,var(--cream-100),transparent)}
+  .b-cols{display:flex;gap:12px;overflow-x:auto;padding:2px 2px 12px;scroll-snap-type:x proximity;scrollbar-width:thin;scrollbar-color:var(--line-300) transparent}
+  .col{flex:0 0 272px;width:272px;display:flex;flex-direction:column;border-radius:var(--radius-md);background:var(--cream-200);padding:8px;min-height:360px;scroll-snap-align:start;transition:box-shadow var(--dur-fast),background var(--dur-fast)}
+  .col.is-done{background:var(--mint-50)}
+  .col.over{box-shadow:0 0 0 2px var(--mint-400),0 0 0 6px var(--mint-100)}
+  .col-head{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:4px 4px 8px 8px}
+  .col-head h4{display:flex;align-items:center;gap:7px;font-size:15px;min-width:0}
+  .col-head h4 span.name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .col-head .cnt{font:800 11.5px var(--font-body);color:var(--ink-500);background:#fff;padding:3px 8px;border-radius:var(--radius-pill);font-variant-numeric:tabular-nums}
+  .col-head .chk{color:var(--mint-600);width:16px;height:16px}
+  .col-head .acts{display:flex;gap:0}
+  .col-list{display:flex;flex-direction:column;gap:8px;flex:1;min-height:80px;border-radius:12px;transition:background var(--dur-fast)}
+  .col-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;border:2px dashed var(--line-300);border-radius:12px;padding:20px 12px;color:var(--ink-500);font-size:13px;min-height:120px;text-align:center}
+  .col.over .col-empty{border-color:var(--mint-400);background:var(--mint-50)}
+  .col-empty .btn-text{min-height:36px}
+  /* card */
+  .tcard{position:relative;background:#fff;border-radius:12px;padding:12px 12px 10px 14px;box-shadow:var(--shadow-xs);cursor:grab;border-left:4px solid var(--line-200);transition:transform var(--dur-fast) var(--ease-out),box-shadow var(--dur-fast);outline:none}
+  .tcard:hover{transform:translateY(-1px);box-shadow:var(--shadow-md)}
+  .tcard:focus-visible{box-shadow:var(--ring),var(--shadow-sm)}
+  .tcard:active{cursor:grabbing}
+  .tcard.dragging{opacity:.4}
+  .tcard.mine{border-left-color:var(--mint-400)}
+  .tcard.overdue{border-left-color:var(--coral-400)}
+  .tcard.is-done{opacity:.72;border-left-color:var(--line-200)}
+  .tcard.is-done .card-title{text-decoration:line-through;text-decoration-color:var(--ink-300);text-decoration-thickness:1.5px}
+  .card-top{display:flex;align-items:flex-start;gap:6px}
+  .card-title{flex:1;font:800 14.5px/1.3 var(--font-body);color:var(--ink-900);min-width:0;overflow-wrap:anywhere}
+  .card-desc{margin-top:4px;font-size:13px;line-height:1.45;color:var(--ink-500);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .card-foot{display:flex;align-items:center;gap:6px;margin-top:10px;flex-wrap:wrap}
+  .card-foot .avatar{margin-left:auto}
+  .card-foot .avatar.sm{width:26px;height:26px;font-size:10.5px}
+  .tcard .more{margin:-6px -6px -6px 0;opacity:0;transition:opacity var(--dur-fast)}
+  .tcard:hover .more,.tcard:focus-within .more,.tcard.menu-open .more{opacity:1}
+  @media(hover:none){.tcard .more{opacity:1}}
+  .menu{position:absolute;right:8px;top:40px;z-index:5;background:#fff;border-radius:14px;box-shadow:var(--shadow-lg);border:1.5px solid var(--line-200);padding:6px;min-width:180px;display:flex;flex-direction:column;animation:popIn var(--dur-fast) var(--ease-out)}
+  .menu .mh{font:800 11px var(--font-display);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-400);padding:6px 10px 4px}
+  .menu button{display:flex;align-items:center;gap:8px;min-height:40px;padding:0 10px;border:0;background:transparent;border-radius:9px;cursor:pointer;font:700 13.5px var(--font-body);color:var(--ink-700);text-align:left}
+  .menu button:hover{background:var(--cream-100);color:var(--ink-900)}
+  .menu button svg{width:15px;height:15px;color:var(--ink-400)}
+  .menu button.danger{color:var(--coral-600)}
+  .menu hr{border:0;border-top:1.5px solid var(--line-100);margin:4px 0}
+  /* board B extras */
+  .filters{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  .filters .fchip{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 12px;border:1.5px solid var(--line-200);border-radius:var(--radius-pill);background:#fff;cursor:pointer;font:700 13px var(--font-body);color:var(--ink-500);transition:border-color var(--dur-fast),background var(--dur-fast),color var(--dur-fast)}
+  .filters .fchip:hover{border-color:var(--line-300);color:var(--ink-900)}
+  .filters .fchip[aria-pressed="true"]{background:var(--ink-900);border-color:var(--ink-900);color:#fff}
+  .filters .fchip .n{font-variant-numeric:tabular-nums;opacity:.75}
+  .filters .fchip.warn[aria-pressed="false"]{color:var(--coral-600);border-color:var(--coral-300)}
+  .filters .fchip .avatar{width:20px;height:20px;font-size:9px;margin-left:-6px}
+  .filters .fsep{width:1.5px;height:22px;background:var(--line-300);margin:0 4px}
+  .col.acc-doing{background:var(--sky-50)}.col.acc-review{background:var(--sun-100)}.col.acc-todo{background:var(--cream-200)}
+  .col.collapsed{flex-basis:56px;width:56px;min-height:360px;padding:8px 4px;cursor:pointer}
+  .col.collapsed .col-head{flex-direction:column;padding:4px 0;gap:8px}
+  .col.collapsed .col-head h4{writing-mode:vertical-rl;transform:rotate(180deg);font-size:14px}
+  .col.collapsed .col-list,.col.collapsed .col-head .add{display:none}
+  .col-head .icon-btn.sm{width:36px;height:36px}
+  .qdone{position:absolute;left:-2px;top:10px;transform:translateX(-50%);width:26px;height:26px;border-radius:50%;border:2px solid var(--line-300);background:#fff;color:var(--mint-600);display:grid;place-items:center;cursor:pointer;opacity:0;transition:opacity var(--dur-fast),background var(--dur-fast),border-color var(--dur-fast)}
+  .qdone svg{width:14px;height:14px}
+  .tcard:hover .qdone,.tcard:focus-within .qdone{opacity:1}
+  .qdone:hover{background:var(--mint-400);border-color:var(--mint-400);color:#fff}
+  @media(hover:none){.qdone{opacity:1}}
+  .tcard.b{padding-left:18px;border-left-width:0;padding-right:10px}
+  .tcard.b.overdue .card-title::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--coral-400);margin-right:6px;vertical-align:1px}
+  .tcard.b .card-top .avatar{order:2}
+  .tcard.b .card-top .more{order:3}
+  .b-empty-all{padding:32px;text-align:center;color:var(--ink-500);font-size:14px}
+
+  /* dialog */
+  dialog.dlg{border:0;padding:0;background:transparent;max-width:min(96vw,840px);width:100%;overflow:visible}
+  dialog.dlg::backdrop{background:rgba(28,58,49,.4)}
+  dialog.dlg .modal{max-height:min(88dvh,780px);animation:popIn var(--dur-base) var(--ease-soft);margin:0 auto}
+  /* compare table */
+  .tablewrap{overflow-x:auto;border-radius:var(--radius-lg);background:#fff;box-shadow:var(--shadow-sm)}
+  table.spec{border-collapse:separate;border-spacing:0;width:100%;font-size:13.5px;min-width:640px}
+  table.spec th,table.spec td{padding:12px 14px;text-align:left;vertical-align:top;border-bottom:1.5px solid var(--line-100)}
+  table.spec th{font:800 12px var(--font-display);letter-spacing:.05em;text-transform:uppercase;color:var(--ink-500);background:var(--cream-50)}
+  table.spec td:first-child{font-weight:800;color:var(--ink-900);white-space:nowrap}
+  table.spec tr:last-child td{border-bottom:0}
+  .impl{display:grid;gap:12px}@media(min-width:860px){.impl{grid-template-columns:1fr 1fr}}
+  .impl .card h4{margin-bottom:2px}
+  .impl ul{margin:0;padding-left:18px;font-size:13.5px;display:flex;flex-direction:column;gap:5px}
+  @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-cal" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
+    <symbol id="i-bold" viewBox="0 0 24 24"><path d="M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8"/></symbol>
+    <symbol id="i-italic" viewBox="0 0 24 24"><line x1="19" x2="10" y1="4" y2="4"/><line x1="14" x2="5" y1="20" y2="20"/><line x1="15" x2="9" y1="4" y2="20"/></symbol>
+    <symbol id="i-underline" viewBox="0 0 24 24"><path d="M6 4v6a6 6 0 0 0 12 0V4"/><line x1="4" x2="20" y1="20" y2="20"/></symbol>
+    <symbol id="i-strike" viewBox="0 0 24 24"><path d="M16 4H9a3 3 0 0 0-2.83 4"/><path d="M14 12a4 4 0 0 1 0 8H6"/><line x1="4" x2="20" y1="12" y2="12"/></symbol>
+    <symbol id="i-ul" viewBox="0 0 24 24"><path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M3 6h.01"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M8 6h13"/></symbol>
+    <symbol id="i-ol" viewBox="0 0 24 24"><path d="M10 12h11"/><path d="M10 18h11"/><path d="M10 6h11"/><path d="M4 10h2"/><path d="M4 6h1v4"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
+    <symbol id="i-columns" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/></symbol>
+    <symbol id="i-move" viewBox="0 0 24 24"><path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/></symbol>
+    <symbol id="i-open" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+    <symbol id="i-chev-l" viewBox="0 0 24 24"><path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/></symbol>
+    <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="m6 17 5-5-5-5"/><path d="m13 17 5-5-5-5"/></symbol>
+    <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></symbol>
+  </defs>
+</svg>
+
+<div class="shell">
+  <nav class="toc" aria-label="Mục lục">
+    <div class="brand"><div class="logo">T</div><div><strong>Bảng công việc</strong><span class="muted" style="font-size:12.5px">Review &amp; redesign</span></div></div>
+    <ol>
+      <li><a href="#tomtat"><span class="n">0</span>Tóm tắt</a></li>
+      <li><a href="#hientrang"><span class="n">1</span>Hiện trạng</a></li>
+      <li><a href="#modalA"><span class="n">2</span>Modal · A</a></li>
+      <li><a href="#modalB"><span class="n">3</span>Modal · B</a></li>
+      <li><a href="#boardA"><span class="n">4</span>Bảng · A</a></li>
+      <li><a href="#boardB"><span class="n">5</span>Bảng · B</a></li>
+      <li><a href="#sosanh"><span class="n">6</span>So sánh</a></li>
+      <li><a href="#trienkhai"><span class="n">7</span>Triển khai</a></li>
+    </ol>
+    <div class="meta">
+      <span><b>Design system</b> Học Vui Mỗi Ngày · Dịu Mát</span>
+      <span><b>Tokens</b> apps/web/src/styles/tokens</span>
+      <span><b>Ngày</b> 17/09/2026</span>
+    </div>
+  </nav>
+
+  <main>
+    <header class="hero" id="tomtat">
+      <div>
+        <span class="eyebrow">Teka · Sổ lớp · UX review</span>
+        <h1 style="margin-top:6px">Chi tiết công việc &amp; bảng Kanban</h1>
+        <p class="lede">Hai màn hình hiện tại đã đúng token màu và chữ, nhưng cách bố trí hành động, tương phản chữ phụ và độ nhiễu của thẻ làm giáo viên phải bấm và cuộn nhiều hơn cần thiết. Bên dưới là danh sách vấn đề theo mức độ và <b>hai phương án tương tác</b> cho mỗi màn, cùng bộ hv kit.</p>
+        <div class="pills">
+          <span class="pill">Baloo 2 + Nunito</span><span class="pill sky">mint · sky · sun · coral</span><span class="pill neutral">HvModal · HvSegmented · HvBadge</span><span class="pill sun">4 bản demo tương tác</span>
+        </div>
+        <div class="rec"><b>Khuyến nghị:</b> làm <b>Modal A + Bảng A</b> trước (sửa toàn bộ lỗi mức Cao, không thêm component mới). Nâng lên <b>Bảng B</b> khi chế độ "Toàn trung tâm" được quản lý dùng hằng ngày; <b>Modal B</b> khi phần mô tả dài trở thành nội dung chính.</div>
+      </div>
+      <div class="score" aria-label="Số liệu review">
+        <div class="tile bad"><b>6</b><span>vấn đề mức Cao</span></div>
+        <div class="tile warn"><b>8</b><span>vấn đề mức Trung bình / Thấp</span></div>
+        <div class="tile"><b>3,0:1</b><span>tương phản chữ ink-400 trên trắng (cần 4,5:1)</span></div>
+        <div class="tile good"><b>0</b><span>component hv mới cần thêm cho phương án A</span></div>
+      </div>
+    </header>
+
+    <!-- ============ 1. HIỆN TRẠNG ============ -->
+    <section id="hientrang">
+      <div class="sec-head"><span class="eyebrow">1 · Hiện trạng</span><h2>Điều gì đang cản người dùng</h2><p class="lede">Đối chiếu ảnh chụp với mã nguồn (<code>task-form-modal.tsx</code>, <code>task-card.tsx</code>, <code>task-column.tsx</code>) và bộ quy tắc UX của skill. Mã quy tắc ghi cạnh mỗi mục.</p></div>
+      <div class="grid2">
+        <div class="card">
+          <h3>Modal "Chi tiết công việc"</h3>
+          <ol class="findings">
+            <li class="finding"><span class="sev high">Cao</span><div><b>"Xoá" ngang hàng với "Lưu"</b><span class="rule">primary-action · destructive-emphasis</span><p>Nút coral đặc, cùng cỡ chunky 56px như nút chính. Một màn có hai CTA và hành động phá huỷ nằm cùng hàng với hành động chính, dễ bấm nhầm trên điện thoại.</p><p class="fix">Xoá thành text button màu danger, tách hẳn sang trái; xác nhận ngay trong modal.</p></div></li>
+            <li class="finding"><span class="sev high">Cao</span><div><b>Độ ưu tiên gãy dòng và không có màu</b><span class="rule">consistency · color-not-only</span><p>"Trung bình" rớt xuống 2 dòng làm segmented cao lệch. Trên bảng, ưu tiên là badge màu (sky / sun / coral) nhưng trong modal chỉ là chữ, người dùng phải học hai cách biểu diễn.</p><p class="fix">Chip 4 ô không xuống dòng, có chấm màu trùng với badge trên thẻ.</p></div></li>
+            <li class="finding"><span class="sev mid">TB</span><div><b>Trình soạn thảo viền lồng viền</b><span class="rule">whitespace-balance · progressive-disclosure</span><p>Khung ngoài + khung trong màu mint + bộ đếm "108/2000" luôn hiện ở góc. Vùng mô tả chiếm gần một phần ba modal dù đa số việc chỉ có 1–2 dòng.</p><p class="fix">Một viền, toolbar nằm trong, bộ đếm chỉ hiện khi đang gõ hoặc gần chạm giới hạn.</p></div></li>
+            <li class="finding"><span class="sev mid">TB</span><div><b>Footer cuộn mất</b><span class="rule">fixed-element-offset</span><p>Modal cao ~1.400px ở ảnh chụp; trên laptop 768px phải cuộn xuống mới thấy Lưu / Huỷ.</p><p class="fix">Tiêu đề và footer dính, chỉ phần thân cuộn (HvModal size xl đã có cơ chế này, cần mở cho md).</p></div></li>
+            <li class="finding"><span class="sev mid">TB</span><div><b>Thiếu ngữ cảnh và không đổi được cột</b><span class="rule">state-preservation · back-behavior</span><p>Không biết việc đang ở cột nào, ai tạo, hoàn thành lúc nào. Muốn chuyển cột phải đóng modal rồi tìm nút "Chuyển" trên thẻ.</p><p class="fix">Dòng ngữ cảnh dưới tiêu đề (cột · người tạo · ngày) và trường "Cột" ngay trong form.</p></div></li>
+            <li class="finding"><span class="sev low">Thấp</span><div><b>Đóng modal mất thay đổi không báo</b><span class="rule">sheet-dismiss-confirm</span><p>Bấm ra ngoài hoặc Esc khi đang gõ mô tả là mất hết.</p><p class="fix">Chip "Chưa lưu" + hộp xác nhận bỏ thay đổi.</p></div></li>
+            <li class="finding"><span class="sev low">Thấp</span><div><b>Toolbar nhỏ, không có tên</b><span class="rule">touch-target-size · aria-labels</span><p>Icon 28px không tooltip, khó bấm trên touch và không đọc được bằng screen reader.</p><p class="fix">Ô 40×40, <code>title</code> + <code>aria-pressed</code>.</p></div></li>
+            <li class="finding"><span class="sev low">Thấp</span><div><b>Hạn chỉ là ô ngày thô</b><span class="rule">input-helper-text</span><p>Phần lớn hạn là "hôm nay / ngày mai / đầu tuần sau", phải mở date picker mỗi lần.</p><p class="fix">Chip chọn nhanh + "Bỏ hạn".</p></div></li>
+          </ol>
+        </div>
+        <div class="card">
+          <h3>Bảng Kanban "Công việc"</h3>
+          <ol class="findings">
+            <li class="finding"><span class="sev high">Cao</span><div><b>"Chuyển ›" chiếm một hàng trên mọi thẻ</b><span class="rule">overflow-menu · content-priority</span><p>Kể cả thẻ đã hoàn thành. Thẻ cao thêm ~36px, một màn hình 1080px chỉ hiện 4–5 thẻ; hành động phụ được trưng bày ngang tiêu đề.</p><p class="fix">Menu ⋯ 40px hiện khi hover / focus (luôn hiện trên touch), giữ phím tắt <code>[</code> <code>]</code> và kéo thả.</p></div></li>
+            <li class="finding"><span class="sev high">Cao</span><div><b>Badge "Không" trên mọi thẻ</b><span class="rule">visual-hierarchy</span><p>Ưu tiên "none" vẫn render một badge xám. Đó là thông tin rỗng chiếm chỗ của thông tin thật (hạn, người phụ trách).</p><p class="fix">Ẩn khi none; Thấp / TB / Cao dùng chip có chấm màu.</p></div></li>
+            <li class="finding"><span class="sev high">Cao</span><div><b>Chữ phụ không đạt tương phản</b><span class="rule">color-contrast</span><p>Tên người phụ trách 11,5px, "Chưa có việc", số đếm cột đều dùng <code>ink-400</code> (#86998f) trên trắng ≈ 3,0:1, dưới ngưỡng 4,5:1.</p><p class="fix">Dùng <code>ink-500</code> (#5b756c ≈ 4,9:1); người phụ trách thành avatar chữ cái có tên khi hover.</p></div></li>
+            <li class="finding"><span class="sev mid">TB</span><div><b>Nút "+" cột chỉ 24px</b><span class="rule">touch-target-size</span><p><code>size-6</code> = 24×24px, dưới mức 44px tối thiểu.</p><p class="fix">40px với nền hover.</p></div></li>
+            <li class="finding"><span class="sev mid">TB</span><div><b>Header: bộ lọc gãy dòng, nút phụ nổi hơn</b><span class="rule">primary-action</span><p>"Toàn trung tâm" rớt 2 dòng trong segmented. "Cấu hình cột" là nút sky đặc, nổi hơn cả bộ lọc dù chỉ chủ trung tâm thỉnh thoảng dùng.</p><p class="fix">Segmented <code>white-space:nowrap</code>; Cấu hình cột thành ghost có icon.</p></div></li>
+            <li class="finding"><span class="sev mid">TB</span><div><b>Cột trống không có gì để làm</b><span class="rule">empty-states</span><p>Chỉ dòng chữ 12px mờ, không gợi ý thả thẻ hay thêm việc.</p><p class="fix">Vùng nét đứt sáng lên khi kéo qua + nút "Thêm việc".</p></div></li>
+            <li class="finding"><span class="sev mid">TB</span><div><b>Cuộn ngang không có dấu hiệu</b><span class="rule">horizontal-scroll</span><p>Cột đầu bị cắt, thanh cuộn nằm tận đáy trang.</p><p class="fix">Fade hai mép, snap theo cột; phương án B cho phép thu gọn cột.</p></div></li>
+            <li class="finding"><span class="sev low">Thấp</span><div><b>Không có affordance kéo thả</b><span class="rule">swipe-clarity · press-feedback</span><p>Thẻ không đổi gì khi hover; người dùng không biết có thể kéo.</p><p class="fix">Hover nâng nhẹ + bóng, cursor grab, cột đích sáng viền mint.</p></div></li>
+            <li class="finding"><span class="sev low">Thấp</span><div><b>Chữ 12px dưới thang DS</b><span class="rule">font-scale</span><p>Mô tả 12px, tên người 11,5px; thang DS bắt đầu từ 13px (<code>--text-xs</code>).</p><p class="fix">Tiêu đề 14,5px, mô tả 13px, chip 12px chỉ cho nhãn.</p></div></li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 2. MODAL A ============ -->
+    <section id="modalA">
+      <div class="sec-head"><span class="eyebrow">2 · Modal · Phương án A</span><h2>Form gọn, hành động đúng chỗ</h2><p class="lede">Giữ nguyên cấu trúc form và HvModal md để đổi ít mã nhất, nhưng sắp lại thứ bậc: ngữ cảnh ở trên, nội dung ở giữa, một CTA duy nhất ở footer dính.</p></div>
+      <div class="opt-head">
+        <div><span class="cap">Điểm khác biệt</span>
+          <ul>
+            <li><b>Dòng ngữ cảnh</b> dưới tiêu đề: cột hiện tại, người tạo, ngày tạo. Trường "Cột" cho phép đổi cột ngay trong form.</li>
+            <li><b>Một viền cho trình soạn thảo</b>, toolbar 40px có tên, bộ đếm chỉ hiện khi gõ hoặc ≥ 1.800 ký tự.</li>
+            <li><b>Ưu tiên là 4 chip có chấm màu</b> trùng badge trên bảng; không bao giờ gãy dòng (2×2 dưới 440px).</li>
+            <li><b>Hạn có chip nhanh</b>: Hôm nay · Ngày mai · Thứ 2 tới · Bỏ hạn.</li>
+            <li><b>Footer dính</b>: Xoá là text-danger bên trái; Huỷ ghost + Lưu primary bên phải; chip "Chưa lưu" khi có thay đổi; xác nhận khi bỏ thay đổi hoặc xoá, có Hoàn tác sau khi xoá.</li>
+          </ul>
+        </div>
+        <div class="tradeoff"><span class="cap">Đánh đổi</span>
+          <ul>
+            <li>Vẫn là form dài; trên điện thoại vẫn phải cuộn phần thân (footer luôn thấy).</li>
+            <li>Đọc mô tả dài phải cuộn trong khung editor 260px.</li>
+            <li>Cần mở khoá footer dính cho HvModal size md (hiện chỉ xl có).</li>
+          </ul>
+          <p class="try" style="margin-top:10px">Thử: gõ vào mô tả, bấm chip ưu tiên, chọn "Hôm nay", rồi bấm Huỷ để thấy xác nhận. Bấm Xoá để thấy Hoàn tác.</p>
+        </div>
+      </div>
+      <div class="frame scrim"><div id="hostA" data-host="A"></div></div>
+    </section>
+
+    <!-- ============ 3. MODAL B ============ -->
+    <section id="modalB">
+      <div class="sec-head"><span class="eyebrow">3 · Modal · Phương án B</span><h2>Trang chi tiết, sửa tại chỗ</h2><p class="lede">Đổi tư duy từ "form" sang "tài liệu có thuộc tính": tiêu đề và mô tả đọc như một trang, thuộc tính xếp cột bên phải. Bấm vào đâu sửa ở đó, không có trạng thái xem / sửa riêng.</p></div>
+      <div class="opt-head">
+        <div><span class="cap">Điểm khác biệt</span>
+          <ul>
+            <li><b>Tiêu đề là heading sửa được</b> (contenteditable một dòng), không còn ô input đóng khung.</li>
+            <li><b>Mô tả hiển thị đã render</b>; bấm vào hoặc "Sửa" mới bật toolbar. Việc không có mô tả không chiếm chỗ.</li>
+            <li><b>Cột thuộc tính bên phải</b> (Cột · Phụ trách · Hạn · Ưu tiên) dạng nhãn–giá trị, kèm trạng thái hạn ("Đến hạn hôm nay", "Quá hạn 2 ngày").</li>
+            <li><b>"Đánh dấu hoàn thành"</b> ngay trong modal, vì đây là chuyển cột phổ biến nhất.</li>
+            <li>Metadata (tạo bởi, cập nhật) nằm cuối nội dung, không lẫn với trường nhập.</li>
+          </ul>
+        </div>
+        <div class="tradeoff"><span class="cap">Đánh đổi</span>
+          <ul>
+            <li>Cần HvModal lg (820px) và mẫu "inline edit" mới, nhiều test hơn A.</li>
+            <li>Heading contenteditable phải xử lý paste, Enter, giới hạn 200 ký tự bằng tay.</li>
+            <li>Dưới 720px cột thuộc tính xếp xuống dưới mô tả; người dùng điện thoại phải cuộn để đổi hạn.</li>
+          </ul>
+          <p class="try" style="margin-top:10px">Thử: bấm vào tiêu đề để sửa, bấm vào mô tả để bật toolbar, đổi "Cột" hoặc bấm "Đánh dấu hoàn thành".</p>
+        </div>
+      </div>
+      <div class="frame scrim"><div id="hostB" data-host="B"></div></div>
+    </section>
+
+    <!-- ============ 4. BOARD A ============ -->
+    <section id="boardA">
+      <div class="sec-head"><span class="eyebrow">4 · Bảng · Phương án A</span><h2>Thẻ gọn, hành động ẩn đúng lúc</h2><p class="lede">Giữ bố cục 4 cột và mọi đường tương tác hiện có (kéo thả, menu chuyển, phím <code>[</code> <code>]</code>), nhưng bỏ mọi thứ không mang thông tin khỏi thẻ để nhìn được nhiều việc hơn trong một màn.</p></div>
+      <div class="opt-head">
+        <div><span class="cap">Điểm khác biệt</span>
+          <ul>
+            <li><b>Thẻ thấp hơn ~35%</b>: bỏ hàng "Chuyển ›", bỏ badge "Không"; menu ⋯ hiện khi hover / focus, luôn hiện trên touch.</li>
+            <li><b>Hạn nói thẳng trạng thái</b>: "Quá hạn 2 ngày" coral, "Hôm nay" sun, "Ngày mai", còn lại "Hạn 22/09".</li>
+            <li><b>Người phụ trách thành avatar chữ cái</b> góc phải, tên hiện khi hover; viền trái mint = việc của tôi, coral = quá hạn.</li>
+            <li><b>Header</b>: dòng tóm tắt "8 việc · 1 quá hạn · 1 hôm nay"; segmented không gãy dòng; "Cấu hình cột" thành ghost có icon.</li>
+            <li><b>Cột trống</b> là vùng thả nét đứt có nút "Thêm việc"; nút "+" cột 40px; fade hai mép khi cuộn ngang.</li>
+          </ul>
+        </div>
+        <div class="tradeoff"><span class="cap">Đánh đổi</span>
+          <ul>
+            <li>Menu ẩn khi hover khiến người dùng mới trên desktop cần một lần khám phá (giảm nhờ luôn hiện khi focus bàn phím).</li>
+            <li>Avatar chữ cái trùng nhau khi hai giáo viên cùng chữ đầu; cần tên đầy đủ trong tooltip / aria-label.</li>
+          </ul>
+          <p class="try" style="margin-top:10px">Thử: kéo thẻ sang cột khác, bấm ⋯ để chuyển, bấm thẻ để mở Modal A, chọn "Của tôi", hoặc focus thẻ rồi nhấn <span class="kbd">]</span>.</p>
+        </div>
+      </div>
+      <div class="frame board-frame"><div class="board" data-board="A" data-scope="center"></div></div>
+    </section>
+
+    <!-- ============ 5. BOARD B ============ -->
+    <section id="boardB">
+      <div class="sec-head"><span class="eyebrow">5 · Bảng · Phương án B</span><h2>Bảng điều phối cho người quản lý</h2><p class="lede">Dành cho chế độ "Toàn trung tâm": trả lời nhanh "ai đang quá hạn, hôm nay có gì, việc nào chưa giao" bằng dải lọc, và biến hành động phổ biến nhất (đánh dấu xong) thành một cú bấm.</p></div>
+      <div class="opt-head">
+        <div><span class="cap">Điểm khác biệt</span>
+          <ul>
+            <li><b>Dải lọc nhanh</b> thay segmented: Tất cả · Của tôi · Quá hạn · Hôm nay · Chưa giao, cộng chip theo từng giáo viên với số việc.</li>
+            <li><b>Ô tích "Xong"</b> nhô ra mép trái thẻ khi hover; một cú bấm chuyển sang Hoàn thành (kèm Hoàn tác).</li>
+            <li><b>Cột tô nền theo giai đoạn</b> (Đang làm sky, Chờ duyệt sun, Hoàn thành mint) và <b>thu gọn được</b> thành rail dọc để bớt cuộn ngang.</li>
+            <li>Avatar đặt ngay hàng tiêu đề để quét "ai làm gì" theo chiều dọc; chấm coral trước tiêu đề khi quá hạn.</li>
+          </ul>
+        </div>
+        <div class="tradeoff"><span class="cap">Đánh đổi</span>
+          <ul>
+            <li>Nhiều trạng thái UI hơn (bộ lọc, cột thu gọn) cần lưu vào URL / store để giữ khi quay lại.</li>
+            <li>Ô tích "Xong" phải bị chặn khỏi dnd-kit activator như nút "Chuyển" hiện tại.</li>
+            <li>Với giáo viên chỉ có 3–5 việc, dải lọc là thừa; nên chỉ bật cho scope "Toàn trung tâm".</li>
+          </ul>
+          <p class="try" style="margin-top:10px">Thử: bấm "Quá hạn" hoặc một tên giáo viên, hover thẻ rồi bấm ô tích, bấm mũi tên ở đầu cột "Hoàn thành" để thu gọn.</p>
+        </div>
+      </div>
+      <div class="frame board-frame"><div class="board" data-board="B" data-filter="all" data-person="" data-collapsed=""></div></div>
+    </section>
+
+    <!-- ============ 6. SO SÁNH ============ -->
+    <section id="sosanh">
+      <div class="sec-head"><span class="eyebrow">6 · So sánh</span><h2>Chọn phương án nào</h2></div>
+      <div class="tablewrap"><table class="spec">
+        <thead><tr><th>Tiêu chí</th><th>Modal A</th><th>Modal B</th><th>Bảng A</th><th>Bảng B</th></tr></thead>
+        <tbody>
+          <tr><td>Sửa lỗi mức Cao</td><td>Cả 2</td><td>Cả 2</td><td>Cả 3</td><td>Cả 3</td></tr>
+          <tr><td>Mức thay đổi mã</td><td>Thấp: sắp lại JSX trong <code>task-form-modal.tsx</code>, thêm sticky footer cho HvModal md</td><td>Trung bình: HvModal lg, heading inline-edit, toggle view/edit mô tả</td><td>Thấp: <code>task-card.tsx</code>, <code>task-column.tsx</code>, <code>move-menu.tsx</code></td><td>Trung bình: thêm dải lọc + state thu gọn, nút quick-done phải né dnd-kit</td></tr>
+          <tr><td>Component hv mới</td><td>Không</td><td>Không, nhưng thêm mẫu inline-edit</td><td>Không (HvBadge có sẵn)</td><td>Chip lọc (có thể dùng HvBadge + button)</td></tr>
+          <tr><td>Phù hợp nhất</td><td>Giáo viên tạo / sửa việc ngắn hằng ngày</td><td>Việc có mô tả dài, đọc nhiều hơn sửa</td><td>Mọi scope; nền cho B</td><td>Chủ trung tâm điều phối nhiều giáo viên</td></tr>
+          <tr><td>Rủi ro chính</td><td>Không đáng kể</td><td>Contenteditable heading trên mobile, a11y của inline edit</td><td>Menu hover cần focus-visible tốt</td><td>Nhiều state UI cần đồng bộ URL</td></tr>
+          <tr><td>Khuyến nghị</td><td><b>Làm ngay</b></td><td>Giai đoạn 2 nếu mô tả dài phổ biến</td><td><b>Làm ngay</b></td><td>Giai đoạn 2, bật theo scope</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- ============ 7. TRIỂN KHAI ============ -->
+    <section id="trienkhai">
+      <div class="sec-head"><span class="eyebrow">7 · Triển khai</span><h2>Ánh xạ sang mã hiện có</h2><p class="lede">Mọi giá trị trong demo lấy từ token DS (<code>colors.css</code>, <code>effects.css</code>, <code>typography.css</code>). Không có hex mới.</p></div>
+      <div class="impl">
+        <div class="card"><h4>Kit dùng chung (<code>components/hv</code>)</h4><ul>
+          <li><code>hv-segmented.tsx</code>: thêm <code>whitespace-nowrap</code> cho item; sửa cả lỗi "Toàn trung tâm" và "Trung bình".</li>
+          <li><code>hv-modal.tsx</code>: cho size md/lg dùng cùng cơ chế <code>flex-col</code> + body cuộn + footer dính như xl (prop <code>stickyFooter</code> hoặc mặc định).</li>
+          <li><code>hv-badge.tsx</code>: giữ nguyên; thêm prop <code>dot</code> đã có để render chấm ưu tiên.</li>
+        </ul></div>
+        <div class="card"><h4>Modal (<code>features/tasks</code>)</h4><ul>
+          <li><code>task-form-modal.tsx</code>: dòng ngữ cảnh (cột, <code>createdBy</code>, <code>createdAt</code>); trường "Cột" ở chế độ edit gọi <code>onMoveTask</code>; ưu tiên thành radio group chip; chip hạn nhanh set <code>due_on</code>; footer: Xoá thành <code>HvButton variant="ghost"</code> kiểu text-danger, chỉ khi <code>canDeleteThisTask</code>; dùng <code>form.formState.isDirty</code> cho chip "Chưa lưu" và chặn <code>onOpenChange(false)</code> bằng HvConfirmDialog.</li>
+          <li><code>task-description-editor.tsx</code>: bỏ viền surface trong, nút toolbar 40px với <code>title</code> + <code>aria-pressed</code>; bộ đếm ẩn cho tới focus-within hoặc ≥ 1.800.</li>
+          <li>Phương án B: đổi <code>size="lg"</code>, tách <code>TaskPropertiesPanel</code>, mô tả dùng <code>RichTextView</code> mặc định và lazy-load editor khi bấm "Sửa".</li>
+        </ul></div>
+        <div class="card"><h4>Bảng (<code>features/tasks</code>)</h4><ul>
+          <li><code>task-card.tsx</code>: bỏ hàng "Chuyển"; <code>MoveMenu</code> thành trigger icon ⋯ 40px trong <code>card-top</code>, class <code>opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100</code>; giữ barrier <code>stopPropagation</code> đã có.</li>
+          <li><code>task-card-styles.ts</code>: <code>PRIORITY_LABELS.none</code> không render; thêm hàm <code>dueState(task)</code> trả về overdue / today / tomorrow / date để chọn variant và nhãn.</li>
+          <li><code>task-column.tsx</code>: nút "+" <code>size-10</code>; empty state có <code>HvButton variant="ghost" size="sm"</code> "Thêm việc"; số đếm dùng <code>text-ink-500</code>.</li>
+          <li><code>task-board-page.tsx</code>: dòng tóm tắt dưới h1; "Cấu hình cột" đổi sang ghost + icon <code>Columns2</code>.</li>
+          <li><code>board-desktop.tsx</code>: bọc hàng cột trong wrapper có fade hai mép (pseudo-element), <code>scroll-snap-type: x proximity</code>.</li>
+        </ul></div>
+        <div class="card"><h4>Kiểm thử cần cập nhật</h4><ul>
+          <li>Unit: <code>task-card</code> không render badge khi priority none; menu chuyển vẫn mở bằng bàn phím; <code>[</code>/<code>]</code> không đổi.</li>
+          <li>Unit: modal chặn đóng khi dirty, chip hạn nhanh set đúng ISO date, Xoá chỉ hiện khi <code>canDelete</code>.</li>
+          <li>E2E (<code>make e2e-isolated</code>): spec kéo thả hiện tại vẫn qua vì cấu trúc dnd không đổi; cập nhật locator "Chuyển" thành <code>getByRole("button", {name: "Thao tác"})</code>.</li>
+          <li>A11y: kiểm tra lại tương phản ink-500 trên nền cột sky-50 / sun-100 của Bảng B (≥ 4,5:1 với chữ 13px đậm).</li>
+        </ul></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<dialog class="dlg" id="dlg" aria-label="Chi tiết công việc"><div id="hostD" data-host="D"></div></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+  'use strict';
+  const TODAY = '2026-09-17';
+  const ME = 'yen';
+  const PEOPLE = {
+    yen:  {name:'Yến Trần',     ini:'YT', hue:'mint'},
+    thuoc:{name:'Thược Nguyễn', ini:'TN', hue:'sky'},
+    ha:   {name:'Hà Phạm',      ini:'HP', hue:'sun'}
+  };
+  const COLS = [
+    {id:'todo',   name:'Cần làm'},
+    {id:'doing',  name:'Đang làm'},
+    {id:'review', name:'Chờ duyệt'},
+    {id:'done',   name:'Hoàn thành', done:true}
+  ];
+  const PRIO = {none:'Không', low:'Thấp', medium:'Trung bình', high:'Cao'};
+  let tasks = [
+    {id:'t2', title:'Gọi phụ huynh bé Minh về học phí tháng 9', desc:'<p>Nhắc lịch đóng <strong>trước 20/09</strong>. Nếu gia đình khó khăn, ghi chú lại để chủ trung tâm xét giảm.</p>', col:'todo', assignee:'thuoc', prio:'high', due:'2026-09-15', done:null, createdBy:'yen', createdAt:'2026-09-10', updatedAt:'2026-09-16'},
+    {id:'t3', title:'In phiếu điểm giữa kỳ lớp 2B', desc:'<p>Lấy điểm từ bộ điểm "Giữa kỳ 1", in 2 bản: 1 gửi phụ huynh, 1 lưu.</p>', col:'todo', assignee:'yen', prio:'medium', due:'2026-09-19', done:null, createdBy:'yen', createdAt:'2026-09-14', updatedAt:'2026-09-14'},
+    {id:'t1', title:'Tạo giáo án cho lớp 1A', desc:'<p>Nội dung của giáo án được mô tả chi tiết trong này nhé. Tuần này tập trung phần <strong>đọc hiểu</strong>.</p><ul><li>Bài 12: Ôn vần <em>an, ăn, ân</em></li><li>Bài 13: Tập viết chữ hoa B</li><li>Trò chơi ghép vần cuối giờ</li></ul><p>Tham khảo mẫu năm ngoái ở <a href="https://example.com/giao-an-1a">thư mục giáo án</a>.</p>', col:'doing', assignee:'yen', prio:'low', due:'2026-09-17', done:null, createdBy:'yen', createdAt:'2026-09-12', updatedAt:'2026-09-16'},
+    {id:'t4', title:'Chuẩn bị đề kiểm tra Toán lớp 3', desc:'<p>20 câu, 45 phút. Có 3 câu vận dụng cao.</p>', col:'doing', assignee:'ha', prio:'medium', due:'2026-09-22', done:null, createdBy:'thuoc', createdAt:'2026-09-13', updatedAt:'2026-09-13'},
+    {id:'t5', title:'Sắp xếp lại kho sách tầng 2', desc:'', col:'doing', assignee:null, prio:'none', due:null, done:null, createdBy:'thuoc', createdAt:'2026-09-11', updatedAt:'2026-09-11'},
+    {id:'t6', title:'Cập nhật lịch học tháng 10 lên nhóm Zalo', desc:'<p>Đã soạn ảnh lịch, chờ chủ trung tâm duyệt học phí mới rồi đăng.</p>', col:'review', assignee:'thuoc', prio:'low', due:'2026-09-25', done:null, createdBy:'thuoc', createdAt:'2026-09-15', updatedAt:'2026-09-16'},
+    {id:'t7', title:'Tổng kết điểm danh tháng 8', desc:'', col:'done', assignee:'thuoc', prio:'none', due:'2026-09-05', done:'2026-09-05', createdBy:'thuoc', createdAt:'2026-09-01', updatedAt:'2026-09-05'},
+    {id:'t8', title:'Mua bút lông bảng và giấy A4', desc:'<p>2 hộp bút xanh, 1 hộp đỏ, 3 ram A4.</p>', col:'done', assignee:'ha', prio:'low', due:'2026-09-12', done:'2026-09-12', createdBy:'yen', createdAt:'2026-09-08', updatedAt:'2026-09-12'}
+  ];
+  let lastDeleted = null;
+
+  /* ---------- helpers ---------- */
+  const $ = (s, r=document) => r.querySelector(s);
+  const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const ico = (id, cls='i') => `<svg class="${cls}" aria-hidden="true"><use href="#${id}"/></svg>`;
+  const dmy = iso => iso ? iso.slice(8,10)+'/'+iso.slice(5,7) : '';
+  const dmyFull = iso => iso ? iso.slice(8,10)+'/'+iso.slice(5,7)+'/'+iso.slice(0,4) : '';
+  const dayDiff = iso => Math.round((Date.parse(iso) - Date.parse(TODAY)) / 86400000);
+  const addDays = n => { const d = new Date(TODAY+'T00:00:00Z'); d.setUTCDate(d.getUTCDate()+n); return d.toISOString().slice(0,10); };
+  const nextMonday = () => { const d = new Date(TODAY+'T00:00:00Z'); const wd = d.getUTCDay(); const add = ((8 - wd) % 7) || 7; d.setUTCDate(d.getUTCDate()+add); return d.toISOString().slice(0,10); };
+  const task = id => tasks.find(t => t.id === id);
+  const col = id => COLS.find(c => c.id === id);
+  const textLen = html => { const d = document.createElement('div'); d.innerHTML = html; return Array.from(d.textContent || '').length; };
+
+  function dueState(t){
+    if (t.done) return {k:'done', label:'Xong '+dmy(t.done), icon:'i-check'};
+    if (!t.due) return null;
+    const d = dayDiff(t.due);
+    if (d < 0) return {k:'overdue', label:'Quá hạn '+(-d)+' ngày', icon:'i-alert'};
+    if (d === 0) return {k:'today', label:'Hôm nay', icon:'i-clock'};
+    if (d === 1) return {k:'neutral', label:'Ngày mai', icon:'i-cal'};
+    return {k:'neutral', label:'Hạn '+dmy(t.due), icon:'i-cal'};
+  }
+  const isOverdue = t => !t.done && t.due && dayDiff(t.due) < 0;
+  const isToday = t => !t.done && t.due && dayDiff(t.due) === 0;
+
+  function avatar(pid, extra=''){
+    if (!pid) return `<span class="avatar none ${extra}" title="Chưa giao" aria-label="Chưa giao">${ico('i-plus','i')}</span>`;
+    const p = PEOPLE[pid];
+    return `<span class="avatar ${p.hue} ${extra}" title="${esc(p.name)}" aria-label="Phụ trách: ${esc(p.name)}">${p.ini}</span>`;
+  }
+  function chipPrio(p){
+    if (p === 'none') return '';
+    return `<span class="chip ${p}"><span class="dot"></span>${PRIO[p]}</span>`;
+  }
+  function chipDue(t){
+    const s = dueState(t); if (!s) return '';
+    return `<span class="chip ${s.k}">${ico(s.icon,'')}${s.label}</span>`;
+  }
+
+  let toastTimer;
+  function toast(msg, action){
+    const el = $('#toast');
+    el.innerHTML = esc(msg) + (action ? ` <button type="button" data-act="${action.act}">${esc(action.label)}</button>` : '');
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), action ? 6000 : 3200);
+  }
+
+  /* ---------- editor markup ---------- */
+  function toolbar(){
+    const b = (cmd, id, name) => `<button type="button" class="tb" data-cmd="${cmd}" title="${name}" aria-label="${name}" aria-pressed="false">${ico(id)}</button>`;
+    return `<div class="toolbar" role="toolbar" aria-label="Định dạng">
+      ${b('bold','i-bold','Đậm (Ctrl+B)')}${b('italic','i-italic','Nghiêng (Ctrl+I)')}${b('underline','i-underline','Gạch chân (Ctrl+U)')}${b('strikeThrough','i-strike','Gạch ngang')}
+      <span class="sep"></span>${b('insertUnorderedList','i-ul','Danh sách chấm')}${b('insertOrderedList','i-ol','Danh sách số')}
+      <span class="sep"></span>${b('createLink','i-link','Chèn liên kết')}
+    </div>`;
+  }
+  function editor(html, labelId){
+    return `<div class="editor" data-role="editor">${toolbar()}
+      <div class="ed-surface" contenteditable="true" role="textbox" aria-multiline="true" aria-labelledby="${labelId}" data-placeholder="Mô tả ngắn: cần làm gì, lưu ý gì…">${html}</div>
+      <span class="counter" data-role="counter" aria-live="polite"></span>
+    </div>`;
+  }
+
+  /* ---------- modal A ---------- */
+  function renderModalA(host, t){
+    const c = col(t.col);
+    host.innerHTML = `
+    <div class="modal" data-variant="A" data-task="${t.id}">
+      <header class="m-head">
+        <div style="min-width:0">
+          <div class="m-eyebrow"><span class="col-tag ${c.done?'done':''}">${c.done?ico('i-check',''):''}${esc(c.name)}</span><span>${esc(PEOPLE[t.createdBy].name)} tạo ${dmyFull(t.createdAt)}</span></div>
+          <h3>Chi tiết công việc</h3>
+        </div>
+        <button type="button" class="icon-btn" data-act="close" aria-label="Đóng">${ico('i-x')}</button>
+      </header>
+      <div class="m-body">
+        <div class="fld"><label class="lbl" for="${host.id}-title">Tiêu đề <b class="req" aria-hidden="true">*</b></label><input class="inp" id="${host.id}-title" name="title" value="${esc(t.title)}" maxlength="200" required></div>
+        <div class="fld"><span class="lbl" id="${host.id}-desc-lbl">Mô tả</span>${editor(t.desc, host.id+'-desc-lbl')}</div>
+        <div class="row2">
+          <div class="fld"><label class="lbl" for="${host.id}-col">Cột</label><select class="sel" id="${host.id}-col" name="col">${COLS.map(x=>`<option value="${x.id}" ${x.id===t.col?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
+          <div class="fld"><label class="lbl" for="${host.id}-who">Người phụ trách</label><select class="sel" id="${host.id}-who" name="assignee"><option value="">Không giao</option>${Object.keys(PEOPLE).map(k=>`<option value="${k}" ${k===t.assignee?'selected':''}>${esc(PEOPLE[k].name)}</option>`).join('')}</select></div>
+        </div>
+        <div class="fld"><label class="lbl" for="${host.id}-due">Hạn</label><input class="inp" type="date" id="${host.id}-due" name="due" value="${t.due||''}">
+          <div class="quick"><button type="button" data-due="0">Hôm nay</button><button type="button" data-due="1">Ngày mai</button><button type="button" data-due="mon">Thứ 2 tới</button><button type="button" data-due="">Bỏ hạn</button></div>
+        </div>
+        <fieldset class="fld" style="border:0;padding:0;margin:0"><legend class="lbl">Độ ưu tiên</legend>
+          <div class="prio">${['none','low','medium','high'].map(p=>`<label data-p="${p}"><input type="radio" name="${host.id}-prio" value="${p}" ${p===t.prio?'checked':''}><span class="dot" aria-hidden="true"></span>${PRIO[p]}</label>`).join('')}</div>
+        </fieldset>
+      </div>
+      <footer class="m-foot">
+        <button type="button" class="btn-text danger" data-act="delete">${ico('i-trash')}Xoá</button>
+        <span class="spacer"></span>
+        <span class="dirty" data-role="dirty" hidden>Chưa lưu</span>
+        <button type="button" class="hvbtn ghost" data-act="cancel">Huỷ</button>
+        <button type="button" class="hvbtn primary" data-act="save">Lưu</button>
+      </footer>
+    </div>`;
+    snap(host);
+    updateCounter(host);
+  }
+
+  /* ---------- modal B ---------- */
+  function renderModalB(host, t){
+    const c = col(t.col);
+    const s = dueState(t);
+    const empty = !t.desc;
+    host.innerHTML = `
+    <div class="modal wide" data-variant="B" data-task="${t.id}">
+      <header class="m-head" style="padding-bottom:6px">
+        <div class="m-eyebrow" style="margin:6px 0 0"><span>Công việc</span><span aria-hidden="true">›</span><span class="col-tag ${c.done?'done':''}">${c.done?ico('i-check',''):''}${esc(c.name)}</span></div>
+        <button type="button" class="icon-btn" data-act="close" aria-label="Đóng">${ico('i-x')}</button>
+      </header>
+      <div class="mb-grid">
+        <div class="mb-main">
+          <h3 class="mb-title" contenteditable="true" role="textbox" aria-label="Tiêu đề" data-role="title" spellcheck="false">${esc(t.title)}</h3>
+          <div class="mb-desc" data-role="descwrap">
+            <div class="lbl-row"><span class="lbl" id="${host.id}-desc-lbl">Mô tả</span><button type="button" class="btn-text mint" data-act="edit-desc" style="min-height:32px">${ico('i-pencil')}Sửa</button></div>
+            <div class="rich ${empty?'empty':''}" data-role="view" data-act="edit-desc" tabindex="0">${empty?'Chưa có mô tả. Bấm để thêm.':t.desc}</div>
+            <div data-role="edwrap" hidden>${editor(t.desc, host.id+'-desc-lbl')}</div>
+          </div>
+          <p class="meta-line"><span>Tạo bởi <b>${esc(PEOPLE[t.createdBy].name)}</b> · ${dmyFull(t.createdAt)}</span><span>Cập nhật ${dmyFull(t.updatedAt)}</span>${t.done?`<span>Hoàn thành ${dmyFull(t.done)}</span>`:''}</p>
+        </div>
+        <aside class="mb-props" aria-label="Thuộc tính">
+          <div class="prop"><label class="p-lbl" for="${host.id}-col">Cột</label><select class="sel" id="${host.id}-col" name="col">${COLS.map(x=>`<option value="${x.id}" ${x.id===t.col?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
+          <div class="prop"><label class="p-lbl" for="${host.id}-who">Phụ trách</label><select class="sel" id="${host.id}-who" name="assignee"><option value="">Không giao</option>${Object.keys(PEOPLE).map(k=>`<option value="${k}" ${k===t.assignee?'selected':''}>${esc(PEOPLE[k].name)}</option>`).join('')}</select></div>
+          <div class="prop"><label class="p-lbl" for="${host.id}-due">Hạn</label><input class="inp" type="date" id="${host.id}-due" name="due" value="${t.due||''}">${s&&s.k!=='neutral'?`<span class="state chip ${s.k}" data-role="duestate">${ico(s.icon,'')}${s.label}</span>`:'<span class="state" data-role="duestate"></span>'}</div>
+          <div class="prop"><label class="p-lbl" for="${host.id}-prio">Ưu tiên</label><select class="sel" id="${host.id}-prio" name="prio">${Object.keys(PRIO).map(p=>`<option value="${p}" ${p===t.prio?'selected':''}>${PRIO[p]}</option>`).join('')}</select></div>
+          <hr>
+          ${c.done ? `<button type="button" class="hvbtn ghost block" data-act="reopen">${ico('i-undo')}Mở lại việc</button>` : `<button type="button" class="hvbtn primary block" data-act="quick-done">${ico('i-check')}Đánh dấu hoàn thành</button>`}
+        </aside>
+      </div>
+      <footer class="m-foot">
+        <button type="button" class="btn-text danger" data-act="delete">${ico('i-trash')}Xoá</button>
+        <span class="spacer"></span>
+        <span class="dirty" data-role="dirty" hidden>Chưa lưu</span>
+        <button type="button" class="hvbtn ghost" data-act="cancel">Huỷ</button>
+        <button type="button" class="hvbtn primary" data-act="save">Lưu</button>
+      </footer>
+    </div>`;
+    snap(host);
+  }
+
+  function renderModal(host, variant, id){
+    const t = task(id);
+    if (!t){ host.innerHTML = `<div class="modal"><div class="deleted"><b style="font:800 18px var(--font-display);color:var(--ink-900)">Công việc đã xoá</b><p class="muted">Bạn có thể hoàn tác trong vài giây.</p><button type="button" class="hvbtn ghost" data-act="undo">${ico('i-undo')}Hoàn tác</button></div></div>`; return; }
+    host.dataset.variant = variant;
+    (variant === 'B' ? renderModalB : renderModalA)(host, t);
+  }
+
+  /* ---------- modal state ---------- */
+  function readModal(host){
+    const m = $('.modal', host); if (!m) return null;
+    const v = m.dataset.variant;
+    const title = v === 'B' ? ($('[data-role=title]', m).textContent || '').trim() : $('[name=title]', m).value.trim();
+    const surface = $('.ed-surface', m);
+    let desc;
+    if (v === 'B'){ const w = $('[data-role=edwrap]', m); desc = w.hidden ? task(m.dataset.task).desc : (surface.textContent.trim() ? surface.innerHTML : ''); }
+    else desc = surface.textContent.trim() ? surface.innerHTML : '';
+    const prio = v === 'B' ? $('[name=prio]', m).value : ($(`input[name="${host.id}-prio"]:checked`, m) || {}).value;
+    return { title, desc, col: $('[name=col]', m).value, assignee: $('[name=assignee]', m).value || null, due: $('[name=due]', m).value || null, prio };
+  }
+  function snap(host){ host.dataset.snap = JSON.stringify(readModal(host)); updateDirty(host); }
+  function isDirty(host){ return JSON.stringify(readModal(host)) !== host.dataset.snap; }
+  function updateDirty(host){
+    const d = $('[data-role=dirty]', host); if (!d) return;
+    d.hidden = !isDirty(host);
+    if (host.dataset.variant === 'B'){
+      const m = $('.modal', host); const due = $('[name=due]', m).value; const st = $('[data-role=duestate]', m);
+      if (st){ const s = dueState({done:null, due:due||null}); st.className = 'state' + (s && s.k!=='neutral' ? ' chip '+s.k : ''); st.innerHTML = s && s.k!=='neutral' ? ico(s.icon,'')+s.label : (due ? '' : ''); }
+    }
+  }
+  function updateCounter(host){
+    const ed = $('[data-role=editor]', host); if (!ed) return;
+    const n = Array.from($('.ed-surface', ed).textContent || '').length;
+    const c = $('[data-role=counter]', ed);
+    c.textContent = n.toLocaleString('vi-VN') + ' / 2.000';
+    c.classList.toggle('warn', n >= 1800 && n <= 2000);
+    c.classList.toggle('over', n > 2000);
+  }
+  function updateToolbar(ed){
+    $$('.tb[data-cmd]', ed).forEach(b => {
+      const cmd = b.dataset.cmd; if (cmd === 'createLink') return;
+      let on = false; try { on = document.queryCommandState(cmd); } catch(e){}
+      b.setAttribute('aria-pressed', String(!!on));
+    });
+  }
+  function showConfirm(host, kind){
+    const m = $('.modal', host);
+    const old = $('.confirm', m); if (old) old.remove();
+    const box = document.createElement('div');
+    box.className = 'confirm' + (kind === 'delete' ? ' danger' : '');
+    box.setAttribute('role','alertdialog');
+    box.innerHTML = kind === 'delete'
+      ? `<b>Xoá công việc này?</b><p>Công việc sẽ rời khỏi bảng. Bạn có 6 giây để hoàn tác.</p><div class="acts"><button type="button" class="hvbtn ghost" data-act="confirm-no">Giữ lại</button><button type="button" class="hvbtn danger" data-act="confirm-delete">${ico('i-trash')}Xoá</button></div>`
+      : `<b>Bỏ thay đổi chưa lưu?</b><p>Tiêu đề, mô tả hoặc thuộc tính bạn vừa sửa sẽ không được giữ.</p><div class="acts"><button type="button" class="hvbtn ghost" data-act="confirm-no">Tiếp tục sửa</button><button type="button" class="hvbtn primary" data-act="confirm-discard">Bỏ thay đổi</button></div>`;
+    m.appendChild(box);
+    $('[data-act=confirm-no]', box).focus();
+  }
+  function closeHost(host){
+    if (host.id === 'hostD'){ $('#dlg').close(); }
+    else renderModal(host, host.dataset.variant, host.dataset.taskId || (host.id==='hostA'||host.id==='hostB' ? 't1' : 't1'));
+  }
+  function saveHost(host){
+    const m = $('.modal', host); const t = task(m.dataset.task); const v = readModal(host);
+    if (!v.title){ $('[name=title], [data-role=title]', m).focus(); toast('Vui lòng nhập tiêu đề'); return; }
+    if (textLen(v.desc) > 2000){ toast('Mô tả vượt 2.000 ký tự, hãy rút gọn'); return; }
+    const wasDone = t.col === 'done';
+    Object.assign(t, v);
+    t.updatedAt = TODAY;
+    if (t.col === 'done' && !wasDone) t.done = TODAY;
+    if (t.col !== 'done') t.done = null;
+    toast('Đã lưu công việc');
+    renderBoards();
+    if (host.id === 'hostD') $('#dlg').close(); else renderModal(host, host.dataset.variant, t.id);
+  }
+  function deleteTask(id){
+    const idx = tasks.findIndex(t => t.id === id); if (idx < 0) return;
+    lastDeleted = {t: tasks[idx], idx};
+    tasks.splice(idx, 1);
+    renderBoards();
+    toast('Đã xoá "' + lastDeleted.t.title + '"', {act:'undo', label:'Hoàn tác'});
+  }
+  function undoDelete(){
+    if (!lastDeleted) return;
+    tasks.splice(Math.min(lastDeleted.idx, tasks.length), 0, lastDeleted.t);
+    const id = lastDeleted.t.id; lastDeleted = null;
+    renderBoards();
+    ['hostA','hostB'].forEach(h => { const host = $('#'+h); if (!$('.modal .m-body, .modal .mb-grid', host)) renderModal(host, host.dataset.variant, id); });
+    $('#toast').classList.remove('show');
+    toast('Đã khôi phục công việc');
+  }
+  function moveTask(id, colId, opts={}){
+    const t = task(id); if (!t || t.col === colId) return;
+    const from = col(t.col).name;
+    t.col = colId; t.updatedAt = TODAY;
+    t.done = col(colId).done ? TODAY : null;
+    renderBoards();
+    if (!opts.silent) toast(`Đã chuyển "${t.title}" sang ${col(colId).name}`, {act:'undo-move', label:'Hoàn tác'});
+    lastMove = {id, from: COLS.find(c=>c.name===from).id};
+  }
+  let lastMove = null;
+
+  /* ---------- boards ---------- */
+  function cardA(t){
+    const cls = ['tcard', t.done?'is-done':'', isOverdue(t)?'overdue':'', t.assignee===ME?'mine':''].filter(Boolean).join(' ');
+    const preview = t.desc ? (() => { const d = document.createElement('div'); d.innerHTML = t.desc; return d.textContent.replace(/\s+/g,' ').trim(); })() : '';
+    return `<article class="${cls}" draggable="true" tabindex="0" role="option" data-task="${t.id}" aria-label="${esc(t.title)}">
+      <div class="card-top"><p class="card-title">${esc(t.title)}</p><button type="button" class="icon-btn sm more" data-act="menu" aria-label="Thao tác" aria-haspopup="menu" aria-expanded="false">${ico('i-more')}</button></div>
+      ${preview?`<p class="card-desc">${esc(preview)}</p>`:''}
+      <div class="card-foot">${chipPrio(t.prio)}${chipDue(t)}${avatar(t.assignee,'sm')}</div>
+    </article>`;
+  }
+  function cardB(t){
+    const cls = ['tcard b', t.done?'is-done':'', isOverdue(t)?'overdue':''].filter(Boolean).join(' ');
+    const preview = t.desc ? (() => { const d = document.createElement('div'); d.innerHTML = t.desc; return d.textContent.replace(/\s+/g,' ').trim(); })() : '';
+    return `<article class="${cls}" draggable="true" tabindex="0" role="option" data-task="${t.id}" aria-label="${esc(t.title)}">
+      ${t.done?'':`<button type="button" class="qdone" data-act="done" aria-label="Đánh dấu hoàn thành" title="Đánh dấu hoàn thành">${ico('i-check','')}</button>`}
+      <div class="card-top"><p class="card-title">${esc(t.title)}</p>${avatar(t.assignee,'sm')}<button type="button" class="icon-btn sm more" data-act="menu" aria-label="Thao tác" aria-haspopup="menu" aria-expanded="false">${ico('i-more')}</button></div>
+      ${preview?`<p class="card-desc">${esc(preview)}</p>`:''}
+      <div class="card-foot">${chipPrio(t.prio)}${chipDue(t)}</div>
+    </article>`;
+  }
+  function menuFor(t){
+    return `<div class="menu" role="menu"><span class="mh">Chuyển tới</span>${COLS.filter(c=>c.id!==t.col).map(c=>`<button type="button" role="menuitem" data-act="move" data-col="${c.id}">${ico('i-move','')}${esc(c.name)}</button>`).join('')}<hr><button type="button" role="menuitem" data-act="open">${ico('i-open','')}Mở chi tiết</button></div>`;
+  }
+  function filterTasks(root){
+    const v = root.dataset.board;
+    return tasks.filter(t => {
+      if (v === 'A') return root.dataset.scope === 'mine' ? t.assignee === ME : true;
+      const f = root.dataset.filter, p = root.dataset.person;
+      if (p && t.assignee !== p) return false;
+      if (f === 'mine') return t.assignee === ME;
+      if (f === 'overdue') return isOverdue(t);
+      if (f === 'today') return isToday(t);
+      if (f === 'unassigned') return !t.assignee;
+      return true;
+    });
+  }
+  function renderBoard(root){
+    const v = root.dataset.board;
+    const visible = filterTasks(root);
+    const n = tasks.length, over = tasks.filter(isOverdue).length, today = tasks.filter(isToday).length, mine = tasks.filter(t=>t.assignee===ME).length, un = tasks.filter(t=>!t.assignee && !t.done).length;
+    let head;
+    if (v === 'A'){
+      head = `<div class="b-head"><div><h3>Công việc</h3><p class="b-sub"><span>${n} việc</span>${over?`<span class="warnc">· ${over} quá hạn</span>`:''}${today?`<span class="todayc">· ${today} đến hạn hôm nay</span>`:''}</p></div>
+        <div class="b-tools"><div class="seg" role="radiogroup" aria-label="Phạm vi"><button type="button" role="radio" data-scope="mine" aria-checked="${root.dataset.scope==='mine'}">Của tôi</button><button type="button" role="radio" data-scope="center" aria-checked="${root.dataset.scope==='center'}">Toàn trung tâm</button></div><button type="button" class="hvbtn ghost" style="min-height:44px">${ico('i-columns')}Cấu hình cột</button></div></div>`;
+    } else {
+      const f = root.dataset.filter, p = root.dataset.person;
+      const fc = (k,label,cnt,extra='') => `<button type="button" class="fchip ${extra}" data-filter="${k}" aria-pressed="${f===k}">${label}${cnt!=null?` <span class="n">${cnt}</span>`:''}</button>`;
+      head = `<div class="b-head"><div><h3>Công việc</h3><p class="b-sub"><span>Toàn trung tâm · ${n} việc</span></p></div><div class="b-tools"><button type="button" class="hvbtn ghost" style="min-height:44px">${ico('i-columns')}Cấu hình cột</button></div></div>
+        <div class="filters" role="group" aria-label="Bộ lọc nhanh">${fc('all','Tất cả',n)}${fc('mine','Của tôi',mine)}${fc('overdue','Quá hạn',over,over?'warn':'')}${fc('today','Hôm nay',today)}${fc('unassigned','Chưa giao',un)}<span class="fsep" aria-hidden="true"></span>
+        ${Object.keys(PEOPLE).map(k=>`<button type="button" class="fchip" data-person="${k}" aria-pressed="${p===k}">${avatar(k)}${esc(PEOPLE[k].name)} <span class="n">${tasks.filter(t=>t.assignee===k&&!t.done).length}</span></button>`).join('')}</div>`;
+    }
+    const collapsed = (root.dataset.collapsed||'').split(',').filter(Boolean);
+    const cols = COLS.map(c => {
+      const list = visible.filter(t => t.col === c.id);
+      const isC = v === 'B' && collapsed.includes(c.id);
+      const cls = ['col', c.done?'is-done':'', v==='B'?'acc-'+c.id:'', isC?'collapsed':''].filter(Boolean).join(' ');
+      const cards = list.map(v==='A'?cardA:cardB).join('');
+      const empty = list.length ? '' : `<div class="col-empty"><span>${visible.length<tasks.length?'Không có việc khớp bộ lọc':'Chưa có việc'}</span><button type="button" class="btn-text mint" data-act="add" data-col="${c.id}">${ico('i-plus')}Thêm việc</button></div>`;
+      return `<section class="${cls}" data-col="${c.id}" aria-label="${esc(c.name)}">
+        <header class="col-head"><h4>${c.done?ico('i-check','i chk'):''}<span class="name">${esc(c.name)}</span><span class="cnt">${list.length}</span></h4>
+          <div class="acts">${v==='B'?`<button type="button" class="icon-btn sm" data-act="collapse" data-col="${c.id}" aria-label="${isC?'Mở rộng':'Thu gọn'} cột ${esc(c.name)}" aria-expanded="${!isC}">${ico(isC?'i-chev-r':'i-chev-l')}</button>`:''}<button type="button" class="icon-btn sm add" data-act="add" data-col="${c.id}" aria-label="Thêm việc vào ${esc(c.name)}">${ico('i-plus')}</button></div></header>
+        <div class="col-list" role="listbox" aria-label="${esc(c.name)}" data-drop="${c.id}">${cards}${empty}</div>
+      </section>`;
+    }).join('');
+    root.innerHTML = head + `<div class="b-scroll"><div class="b-cols">${cols}</div></div>`;
+  }
+  function renderBoards(){ $$('[data-board]').forEach(renderBoard); }
+
+  /* ---------- dialog ---------- */
+  function openDialog(variant, id){
+    const host = $('#hostD'); renderModal(host, variant, id);
+    const dlg = $('#dlg'); if (!dlg.open) dlg.showModal();
+    const first = $('[name=title], [data-role=title]', host); if (first) first.focus();
+  }
+
+  /* ---------- events (delegated) ---------- */
+  document.addEventListener('click', e => {
+    const tb = e.target.closest('.tb[data-cmd]');
+    if (tb){
+      const ed = tb.closest('[data-role=editor]'); const surface = $('.ed-surface', ed);
+      if (tb.dataset.cmd === 'createLink'){ openLinkPanel(ed); return; }
+      surface.focus(); document.execCommand(tb.dataset.cmd, false, null); updateToolbar(ed); updateCounter(tb.closest('[data-host]')); updateDirty(tb.closest('[data-host]')); return;
+    }
+    const actEl = e.target.closest('[data-act]');
+    const host = e.target.closest('[data-host]');
+    const board = e.target.closest('[data-board]');
+
+    // board-level non-act clicks
+    if (board && !actEl){
+      const scope = e.target.closest('[data-scope]'); if (scope){ board.dataset.scope = scope.dataset.scope; renderBoard(board); return; }
+      const f = e.target.closest('[data-filter]'); if (f){ board.dataset.filter = f.dataset.filter; renderBoard(board); return; }
+      const p = e.target.closest('[data-person]'); if (p){ board.dataset.person = board.dataset.person === p.dataset.person ? '' : p.dataset.person; renderBoard(board); return; }
+      const card = e.target.closest('.tcard'); if (card && !e.target.closest('.menu')){ openDialog(board.dataset.board, card.dataset.task); return; }
+      const colEl = e.target.closest('.col.collapsed'); if (colEl){ toggleCollapse(board, colEl.dataset.col); return; }
+    }
+    if (!actEl){
+      // close open menus
+      if (!e.target.closest('.menu')) $$('.tcard.menu-open').forEach(c => { c.classList.remove('menu-open'); const m = $('.menu', c); if (m) m.remove(); $('.more', c).setAttribute('aria-expanded','false'); });
+      return;
+    }
+    const act = actEl.dataset.act;
+    if (act === 'undo'){ undoDelete(); return; }
+    if (act === 'undo-move'){ if (lastMove){ moveTask(lastMove.id, lastMove.from, {silent:true}); lastMove = null; $('#toast').classList.remove('show'); toast('Đã hoàn tác'); } return; }
+
+    if (board){
+      const card = actEl.closest('.tcard');
+      if (act === 'menu'){
+        e.stopPropagation();
+        const open = card.classList.contains('menu-open');
+        $$('.tcard.menu-open').forEach(c => { c.classList.remove('menu-open'); const m = $('.menu', c); if (m) m.remove(); $('.more', c).setAttribute('aria-expanded','false'); });
+        if (!open){ card.classList.add('menu-open'); card.insertAdjacentHTML('beforeend', menuFor(task(card.dataset.task))); actEl.setAttribute('aria-expanded','true'); $('.menu button', card).focus(); }
+        return;
+      }
+      if (act === 'move'){ moveTask(card.dataset.task, actEl.dataset.col); return; }
+      if (act === 'open'){ openDialog(board.dataset.board, card.dataset.task); return; }
+      if (act === 'done'){ e.stopPropagation(); moveTask(card.dataset.task, 'done'); return; }
+      if (act === 'add'){ toast('Mở form tạo việc trong cột "' + col(actEl.dataset.col).name + '" (ngoài phạm vi demo)'); return; }
+      if (act === 'collapse'){ toggleCollapse(board, actEl.dataset.col); return; }
+      return;
+    }
+    if (host){
+      if (act === 'close' || act === 'cancel'){ if (isDirty(host)) showConfirm(host, 'discard'); else closeHost(host); return; }
+      if (act === 'confirm-no'){ $('.confirm', host).remove(); return; }
+      if (act === 'confirm-discard'){ closeHost(host); return; }
+      if (act === 'delete'){ showConfirm(host, 'delete'); return; }
+      if (act === 'confirm-delete'){ const id = $('.modal', host).dataset.task; deleteTask(id); if (host.id === 'hostD') $('#dlg').close(); else renderModal(host, host.dataset.variant, id); return; }
+      if (act === 'save'){ saveHost(host); return; }
+      if (act === 'quick-done'){ const m = $('.modal', host); $('[name=col]', m).value = 'done'; saveHost(host); return; }
+      if (act === 'reopen'){ const m = $('.modal', host); $('[name=col]', m).value = 'doing'; saveHost(host); return; }
+      if (act === 'edit-desc'){ const m = $('.modal', host); $('[data-role=view]', m).hidden = true; const w = $('[data-role=edwrap]', m); w.hidden = false; $('[data-act=edit-desc].btn-text', m).hidden = true; $('.ed-surface', w).focus(); updateCounter(host); return; }
+    }
+  });
+
+  function toggleCollapse(board, colId){
+    const set = new Set((board.dataset.collapsed||'').split(',').filter(Boolean));
+    set.has(colId) ? set.delete(colId) : set.add(colId);
+    board.dataset.collapsed = Array.from(set).join(',');
+    renderBoard(board);
+  }
+
+  // quick due chips
+  document.addEventListener('click', e => {
+    const q = e.target.closest('[data-due]'); if (!q) return;
+    const host = q.closest('[data-host]'); const inp = $('[name=due]', host);
+    const v = q.dataset.due;
+    inp.value = v === '' ? '' : v === 'mon' ? nextMonday() : addDays(Number(v));
+    inp.dispatchEvent(new Event('change', {bubbles:true}));
+  });
+
+  document.addEventListener('input', e => {
+    const host = e.target.closest('[data-host]'); if (!host) return;
+    if (e.target.classList.contains('ed-surface')){ updateCounter(host); updateToolbar(e.target.closest('[data-role=editor]')); }
+    if (e.target.dataset.role === 'title' && e.target.textContent.length > 200){ e.target.textContent = e.target.textContent.slice(0,200); toast('Tiêu đề tối đa 200 ký tự'); }
+    updateDirty(host);
+  });
+  document.addEventListener('change', e => { const host = e.target.closest('[data-host]'); if (host) updateDirty(host); });
+  document.addEventListener('selectionchange', () => { const a = document.activeElement; if (a && a.classList && a.classList.contains('ed-surface')) updateToolbar(a.closest('[data-role=editor]')); });
+  document.addEventListener('keydown', e => {
+    // single-line title
+    if (e.target.dataset && e.target.dataset.role === 'title' && e.key === 'Enter'){ e.preventDefault(); e.target.blur(); }
+    // keyboard shortcuts on board cards, mirroring the kanban lib
+    const card = e.target.closest && e.target.closest('.tcard');
+    if (card && e.target === card){
+      const t = task(card.dataset.task); const i = COLS.findIndex(c => c.id === t.col);
+      if (e.key === '['){ e.preventDefault(); if (i > 0) moveTask(t.id, COLS[i-1].id); }
+      else if (e.key === ']'){ e.preventDefault(); if (i < COLS.length-1) moveTask(t.id, COLS[i+1].id); }
+      else if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); openDialog(card.closest('[data-board]').dataset.board, t.id); }
+    }
+    if (e.key === 'Escape'){ const m = e.target.closest && e.target.closest('.tcard.menu-open'); if (m){ $('.menu', m).remove(); m.classList.remove('menu-open'); $('.more', m).focus(); } }
+  });
+  // paste plain text into single-line title
+  document.addEventListener('paste', e => {
+    if (e.target.dataset && e.target.dataset.role === 'title'){ e.preventDefault(); document.execCommand('insertText', false, (e.clipboardData.getData('text/plain')||'').replace(/\s+/g,' ')); }
+  });
+
+  /* link panel */
+  let savedRange = null;
+  function openLinkPanel(ed){
+    if ($('.linkpanel', ed)) return;
+    const sel = window.getSelection(); savedRange = sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+    const p = document.createElement('div'); p.className = 'linkpanel';
+    p.innerHTML = `<input class="inp" type="url" placeholder="https://…" aria-label="Địa chỉ liên kết"><button type="button" class="hvbtn primary" style="min-height:40px" data-link="ok">Chèn</button><button type="button" class="btn-text" data-link="cancel">Huỷ</button>`;
+    $('.toolbar', ed).after(p); $('input', p).focus();
+  }
+  document.addEventListener('click', e => {
+    const b = e.target.closest('[data-link]'); if (!b) return;
+    const p = b.closest('.linkpanel'); const ed = p.closest('[data-role=editor]');
+    if (b.dataset.link === 'ok'){
+      const url = $('input', p).value.trim();
+      if (!/^(https?:\/\/|mailto:)\S+$/i.test(url)){ let err = $('.err', p); if (!err){ err = document.createElement('span'); err.className = 'err'; p.appendChild(err); } err.textContent = 'Liên kết phải bắt đầu bằng http://, https:// hoặc mailto:'; return; }
+      const surface = $('.ed-surface', ed); surface.focus();
+      if (savedRange){ const s = window.getSelection(); s.removeAllRanges(); s.addRange(savedRange); }
+      if (savedRange && !savedRange.collapsed) document.execCommand('createLink', false, url); else document.execCommand('insertHTML', false, `<a href="${esc(url)}">${esc(url)}</a>`);
+      updateDirty(ed.closest('[data-host]')); updateCounter(ed.closest('[data-host]'));
+    }
+    p.remove();
+  });
+
+  /* drag & drop (HTML5; the real app uses dnd-kit with the same visual states) */
+  let dragId = null;
+  document.addEventListener('dragstart', e => {
+    const card = e.target.closest && e.target.closest('.tcard'); if (!card) return;
+    dragId = card.dataset.task; card.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragId);
+  });
+  document.addEventListener('dragend', e => { const card = e.target.closest && e.target.closest('.tcard'); if (card) card.classList.remove('dragging'); $$('.col.over').forEach(c => c.classList.remove('over')); dragId = null; });
+  document.addEventListener('dragover', e => { const list = e.target.closest && e.target.closest('.col'); if (!list || !dragId) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move'; $$('.col.over').forEach(c => { if (c !== list) c.classList.remove('over'); }); list.classList.add('over'); });
+  document.addEventListener('dragleave', e => { const list = e.target.closest && e.target.closest('.col'); if (list && !list.contains(e.relatedTarget)) list.classList.remove('over'); });
+  document.addEventListener('drop', e => { const list = e.target.closest && e.target.closest('.col'); if (!list || !dragId) return; e.preventDefault(); const id = dragId; dragId = null; list.classList.remove('over'); moveTask(id, list.dataset.col); });
+
+  /* dialog dismiss paths */
+  const dlg = $('#dlg');
+  dlg.addEventListener('cancel', e => { const host = $('#hostD'); if (isDirty(host)){ e.preventDefault(); showConfirm(host, 'discard'); } });
+  dlg.addEventListener('click', e => { if (e.target === dlg){ const host = $('#hostD'); isDirty(host) ? showConfirm(host, 'discard') : dlg.close(); } });
+
+  /* boot */
+  function start(){
+    renderModal($('#hostA'), 'A', 't1');
+    renderModal($('#hostB'), 'B', 't1');
+    renderBoards();
+  }
+  start();
+})();
+</script>
