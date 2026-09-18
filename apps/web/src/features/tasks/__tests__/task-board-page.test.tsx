@@ -67,6 +67,17 @@ afterEach(() => {
   useAuthStore.getState().clearSession();
 });
 
+/** The `role="option"` card whose title is `title`. */
+function cardFor(title: string): HTMLElement {
+  const card = screen.getByText(title).closest('[role="option"]');
+  if (!card) throw new Error(`No card titled "${title}"`);
+  return card as HTMLElement;
+}
+
+function quickDoneButtonFor(title: string): HTMLElement {
+  return within(cardFor(title)).getByRole("button", { name: "Đánh dấu hoàn thành" });
+}
+
 describe("TaskBoardPage", () => {
   it("redirects a caller without tasks.list to the dashboard", async () => {
     server.use(memberCenterMe(["tasks.create"]));
@@ -303,14 +314,18 @@ describe("TaskBoardPage", () => {
     renderBoardPage();
     await screen.findByRole("listbox", { name: "Cần làm" });
 
-    const card = screen.getByText("Soạn đề kiểm tra giữa kỳ").closest('[role="option"]');
-    expect(card).not.toBeNull();
-    fireEvent.mouseDown(card as HTMLElement, { button: 0, clientX: 10, clientY: 10 });
+    const card = cardFor("Soạn đề kiểm tra giữa kỳ");
+    fireEvent.mouseDown(card, { button: 0, clientX: 10, clientY: 10 });
     fireEvent.mouseMove(document, { clientX: 10, clientY: 40 });
     fireEvent.mouseUp(document, { clientX: 10, clientY: 40 });
 
     expect(card).not.toHaveAttribute("data-dragging");
-    expect(within(card as HTMLElement).getByRole("button", { name: "Thao tác" })).toBeDisabled();
+    expect(quickDoneButtonFor("Soạn đề kiểm tra giữa kỳ")).toBeDisabled();
+    // The menu still opens the detail view; only the move targets are gone.
+    await userEvent.setup().click(within(card).getByRole("button", { name: "Thao tác" }));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByRole("menuitem", { name: "Mở chi tiết" })).toBeInTheDocument();
+    expect(within(menu).queryByRole("menuitem", { name: "Đang làm" })).not.toBeInTheDocument();
   });
 
   it("deletes a task from the form modal after confirming", async () => {
@@ -417,21 +432,43 @@ describe("TaskBoardPage", () => {
   });
 
   describe("quick done", () => {
-    it("moves a task to the done column through its quick-done checkbox", async () => {
+    it("moves a task to the done column through its quick-done button", async () => {
       const user = userEvent.setup();
       signInAs(testPrimaryTeacher);
       renderBoardPage();
       await screen.findByRole("listbox", { name: "Cần làm" });
 
-      await user.click(
-        screen.getByRole("checkbox", { name: 'Đánh dấu "Soạn đề kiểm tra giữa kỳ" là xong' }),
-      );
+      await user.click(quickDoneButtonFor("Soạn đề kiểm tra giữa kỳ"));
 
       await waitFor(() => {
         const doneColumn = screen.getByRole("listbox", { name: "Hoàn thành" });
         expect(within(doneColumn).getByText("Soạn đề kiểm tra giữa kỳ")).toBeInTheDocument();
       });
-      expect(await screen.findByText("Đã đánh dấu xong")).toBeInTheDocument();
+      expect(
+        await screen.findByText('Đã chuyển "Soạn đề kiểm tra giữa kỳ" sang Hoàn thành'),
+      ).toBeInTheDocument();
+      // A finished card has nothing left to quick-done.
+      expect(
+        within(cardFor("Soạn đề kiểm tra giữa kỳ")).queryByRole("button", {
+          name: "Đánh dấu hoàn thành",
+        }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("activates the quick-done button from the keyboard without opening the card", async () => {
+      const user = userEvent.setup();
+      signInAs(testPrimaryTeacher);
+      renderBoardPage();
+      await screen.findByRole("listbox", { name: "Cần làm" });
+
+      quickDoneButtonFor("Soạn đề kiểm tra giữa kỳ").focus();
+      await user.keyboard("{Enter}");
+
+      await waitFor(() => {
+        const doneColumn = screen.getByRole("listbox", { name: "Hoàn thành" });
+        expect(within(doneColumn).getByText("Soạn đề kiểm tra giữa kỳ")).toBeInTheDocument();
+      });
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
 
     it("moves the task back to its original column when the undo toast action is clicked", async () => {
@@ -440,9 +477,7 @@ describe("TaskBoardPage", () => {
       renderBoardPage();
       await screen.findByRole("listbox", { name: "Cần làm" });
 
-      await user.click(
-        screen.getByRole("checkbox", { name: 'Đánh dấu "Soạn đề kiểm tra giữa kỳ" là xong' }),
-      );
+      await user.click(quickDoneButtonFor("Soạn đề kiểm tra giữa kỳ"));
       await waitFor(() => {
         const doneColumn = screen.getByRole("listbox", { name: "Hoàn thành" });
         expect(within(doneColumn).getByText("Soạn đề kiểm tra giữa kỳ")).toBeInTheDocument();
@@ -454,6 +489,7 @@ describe("TaskBoardPage", () => {
         const todoColumn = screen.getByRole("listbox", { name: "Cần làm" });
         expect(within(todoColumn).getByText("Soạn đề kiểm tra giữa kỳ")).toBeInTheDocument();
       });
+      expect(await screen.findByText("Đã hoàn tác")).toBeInTheDocument();
     });
   });
 

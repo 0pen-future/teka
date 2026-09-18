@@ -16,7 +16,6 @@ export interface TaskColumnProps {
   tasks: AppTask[];
   columns: AppColumn[];
   assigneeNameFor: (assigneeId: string | null) => string | null;
-  currentUserId: string | undefined;
   canCreate: boolean;
   canMove: boolean;
   /** True while a dragged card hovers anywhere over this column. */
@@ -46,7 +45,6 @@ export function TaskColumn({
   tasks,
   columns,
   assigneeNameFor,
-  currentUserId,
   canCreate,
   canMove,
   isDropTarget,
@@ -140,7 +138,6 @@ export function TaskColumn({
                 task={task}
                 columns={columns}
                 assigneeName={assigneeNameFor(task.assigneeId)}
-                isAssignedToMe={currentUserId !== undefined && task.assigneeId === currentUserId}
                 onOpen={() => onOpenTask(task.id)}
                 onMove={(columnId) => onMoveTask(task.id, columnId)}
                 onQuickDone={() => onQuickDone(task.id)}

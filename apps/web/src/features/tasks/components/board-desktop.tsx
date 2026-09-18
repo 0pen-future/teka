@@ -13,7 +13,6 @@ export interface BoardDesktopProps {
   columns: AppColumn[];
   tasksByColumn: Map<ColumnId, AppTask[]>;
   assigneeNameFor: (assigneeId: string | null) => string | null;
-  currentUserId: string | undefined;
   canCreate: boolean;
   canMove: boolean;
   /** True when an active board filter, not a genuinely empty column, explains an empty column. */
@@ -35,7 +34,6 @@ export function BoardDesktop({
   columns,
   tasksByColumn,
   assigneeNameFor,
-  currentUserId,
   canCreate,
   canMove,
   filtering,
@@ -104,7 +102,6 @@ export function BoardDesktop({
                 tasks={tasksByColumn.get(column.id) ?? []}
                 columns={columns}
                 assigneeNameFor={assigneeNameFor}
-                currentUserId={currentUserId}
                 canCreate={canCreate}
                 canMove={canMove}
                 isDropTarget={activeTask !== null && dnd.overColumnId === column.id}
@@ -128,7 +125,6 @@ export function BoardDesktop({
           <TaskCardPreview
             task={activeTask}
             assigneeName={assigneeNameFor(activeTask.assigneeId)}
-            isAssignedToMe={currentUserId !== undefined && activeTask.assigneeId === currentUserId}
           />
         ) : null}
       </DragOverlay>

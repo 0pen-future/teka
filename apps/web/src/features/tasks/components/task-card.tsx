@@ -1,6 +1,7 @@
 import { useDndMonitor } from "@dnd-kit/core";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { CalendarIcon, CheckIcon, ClockIcon, TriangleAlertIcon } from "lucide-react";
 import { useMemo, useRef, type ComponentProps, type CSSProperties, type ReactNode } from "react";
 
 import { HvBadge } from "@/components/hv";
@@ -9,12 +10,12 @@ import { cn, formatDateTime } from "@/lib/utils";
 
 import type { BoardDndData } from "../hooks/use-board-dnd";
 import type { AppColumn, AppTask } from "../hooks/use-tasks-data-source";
-import { dueState } from "../lib/due-state";
+import { dueState, type DueStateKind } from "../lib/due-state";
 import { textFromHtml } from "../lib/rich-text";
 import { ActionsMenu } from "./actions-menu";
 import { AssigneeAvatar } from "./assignee-avatar";
 import { CardControlBarrier } from "./card-control-barrier";
-import { QuickDoneCheckbox } from "./quick-done-checkbox";
+import { QuickDoneButton } from "./quick-done-button";
 import { PRIORITY_LABELS, PRIORITY_VARIANTS, taskCardSurfaceClassName } from "./task-card-styles";
 
 /**
@@ -28,6 +29,13 @@ import { PRIORITY_LABELS, PRIORITY_VARIANTS, taskCardSurfaceClassName } from "./
  */
 const CLICK_SUPPRESSION_MS = 300;
 
+const DUE_ICONS: Record<Exclude<DueStateKind, "none">, typeof CalendarIcon> = {
+  overdue: TriangleAlertIcon,
+  today: ClockIcon,
+  tomorrow: CalendarIcon,
+  upcoming: CalendarIcon,
+};
+
 export interface TaskCardBodyProps {
   task: AppTask;
   assigneeName: string | null;
@@ -38,45 +46,62 @@ export interface TaskCardBodyProps {
    */
   actions?: ReactNode;
   /**
-   * Slot for the "Xong" quick-done checkbox, rendered at the card's leading
-   * edge. Unset on the drag-overlay preview, same reasoning as `actions`.
+   * Slot for the quick-done button hanging over the card's leading edge.
+   * Unset on the drag-overlay preview, same reasoning as `actions`.
    */
   quickDone?: ReactNode;
 }
 
 /**
- * Header row + badges, shared by the live card and the drag-overlay
- * preview. `xong dd/mm` uses `formatDateTime` (completedAt is an RFC3339
+ * Header row + chips, shared by the live card and the drag-overlay
+ * preview. `Xong dd/MM` uses `formatDateTime` (completedAt is an RFC3339
  * instant, not a bare DATE) and keeps only the leading `dd/MM` slice, since
  * the exact time of completion doesn't matter here.
  */
 export function TaskCardBody({ task, assigneeName, actions, quickDone }: TaskCardBodyProps) {
   const done = task.completedAt !== null;
+  const completedLabel = task.completedAt ? formatDateTime(task.completedAt).slice(0, 5) : null;
   const due = useMemo(() => dueState(task), [task]);
   const preview = useMemo(() => textFromHtml(task.description), [task.description]);
+  const DueIcon = due.kind === "none" ? null : DUE_ICONS[due.kind];
   return (
     <>
-      <div className="flex items-start gap-2">
-        {quickDone}
-        {assigneeName ? <AssigneeAvatar name={assigneeName} className="mt-0.5" /> : null}
-        <p className="min-w-0 flex-1 text-[13.5px] font-bold text-ink-900">{task.title}</p>
+      {quickDone}
+      <div className="flex items-start gap-1.5">
+        <p
+          className={cn(
+            "min-w-0 flex-1 font-body text-[14.5px] font-extrabold leading-[1.3] text-ink-900 [overflow-wrap:anywhere]",
+            done && "line-through decoration-ink-300 decoration-[1.5px]",
+          )}
+        >
+          {due.kind === "overdue" ? (
+            <span
+              aria-hidden
+              className="mr-1.5 inline-block size-2 rounded-full bg-coral-400 align-middle"
+            />
+          ) : null}
+          {task.title}
+        </p>
+        {assigneeName ? <AssigneeAvatar name={assigneeName} size="sm" /> : null}
         {actions}
       </div>
       {preview ? (
-        <p className="mt-1 line-clamp-2 text-[12px] leading-snug text-ink-500">{preview}</p>
+        <p className="mt-1 line-clamp-2 text-[13px] leading-[1.45] text-ink-500">{preview}</p>
       ) : null}
-      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+      <div className="mt-2.5 flex flex-wrap items-center gap-1.5 empty:hidden">
         {task.priority !== "none" ? (
-          <HvBadge size="sm" variant={PRIORITY_VARIANTS[task.priority]}>
+          <HvBadge size="sm" dot variant={PRIORITY_VARIANTS[task.priority]}>
             {PRIORITY_LABELS[task.priority]}
           </HvBadge>
         ) : null}
-        {done ? (
+        {completedLabel ? (
           <HvBadge size="sm" variant="success">
-            Xong {formatDateTime(task.completedAt!).slice(0, 5)}
+            <CheckIcon aria-hidden className="size-3" />
+            Xong {completedLabel}
           </HvBadge>
-        ) : task.dueOn ? (
+        ) : task.dueOn && DueIcon ? (
           <HvBadge size="sm" variant={due.variant}>
+            <DueIcon aria-hidden className="size-3" />
             {due.label}
           </HvBadge>
         ) : null}
@@ -89,10 +114,9 @@ export interface TaskCardProps {
   task: AppTask;
   columns: AppColumn[];
   assigneeName: string | null;
-  isAssignedToMe: boolean;
   onOpen: () => void;
   onMove: (columnId: ColumnId) => void;
-  /** Moves the task to the first "done" column; a no-op once it's already done (the checkbox disables itself). */
+  /** Moves the task to the first "done" column; the button only renders while the task is still open. */
   onQuickDone: () => void;
   moveDisabled?: boolean;
   /** Skip the sort transition under `prefers-reduced-motion` (read once by `useBoardDnd`). */
@@ -116,7 +140,6 @@ export function TaskCard({
   task,
   columns,
   assigneeName,
-  isAssignedToMe,
   onOpen,
   onMove,
   onQuickDone,
@@ -162,6 +185,10 @@ export function TaskCard({
       {...getTaskProps({ ref: setNodeRef, ...listeners })}
       onClick={handleClick}
       onKeyDown={(event) => {
+        // Only the card itself opens on Enter/Space; a focused nested button
+        // (quick-done, actions menu) keeps its native activation, since
+        // `CardControlBarrier` stops pointer events but not keyboard ones.
+        if (event.target !== event.currentTarget) return;
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           onOpen();
@@ -171,8 +198,9 @@ export function TaskCard({
       data-dragging={isDragging || undefined}
       className={cn(
         "group",
-        taskCardSurfaceClassName(task, isAssignedToMe),
-        "cursor-pointer outline-none focus-visible:ring-4 focus-visible:ring-mint-100",
+        taskCardSurfaceClassName(task),
+        "cursor-pointer outline-none hover:-translate-y-px hover:shadow-md",
+        "focus-visible:ring-4 focus-visible:ring-mint-100",
         !moveDisabled && "cursor-grab active:cursor-grabbing",
         isDragging && "opacity-40",
       )}
@@ -181,16 +209,13 @@ export function TaskCard({
         task={task}
         assigneeName={assigneeName}
         quickDone={
-          // Same barrier reasoning as `actions` below: a click or press on
-          // the checkbox must not open the card or start a drag.
-          <CardControlBarrier>
-            <QuickDoneCheckbox
-              checked={task.completedAt !== null}
-              onCheckedChange={onQuickDone}
-              disabled={moveDisabled}
-              label={`Đánh dấu "${task.title}" là xong`}
-            />
-          </CardControlBarrier>
+          task.completedAt === null ? (
+            // Same barrier reasoning as `actions` below: a click or press on
+            // the button must not open the card or start a drag.
+            <CardControlBarrier className="contents">
+              <QuickDoneButton onDone={onQuickDone} disabled={moveDisabled} />
+            </CardControlBarrier>
+          ) : null
         }
         actions={
           // The barrier keeps the menu from opening the card (click) or
@@ -200,7 +225,8 @@ export function TaskCard({
               currentColumnId={task.columnId}
               columns={columns}
               onMove={onMove}
-              disabled={moveDisabled}
+              onOpen={onOpen}
+              moveDisabled={moveDisabled}
             />
           </CardControlBarrier>
         }

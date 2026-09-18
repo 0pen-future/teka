@@ -42,7 +42,6 @@ function renderBoard(
       columns={columns}
       tasksByColumn={tasksByColumn}
       assigneeNameFor={() => null}
-      currentUserId={undefined}
       canCreate={false}
       canMove={false}
       filtering={false}
@@ -120,7 +119,6 @@ describe("BoardMobile", () => {
         columns={[makeColumn("c2", "Đang làm", 1)]}
         tasksByColumn={new Map([[asColumnId("c2"), []]])}
         assigneeNameFor={() => null}
-        currentUserId={undefined}
         canCreate={false}
         canMove={false}
         filtering={false}

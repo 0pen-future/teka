@@ -16,7 +16,6 @@ export interface BoardMobileProps {
   columns: AppColumn[];
   tasksByColumn: Map<ColumnId, AppTask[]>;
   assigneeNameFor: (assigneeId: string | null) => string | null;
-  currentUserId: string | undefined;
   canCreate: boolean;
   canMove: boolean;
   /** True when an active board filter, not a genuinely empty column, explains an empty column. */
@@ -39,7 +38,6 @@ export function BoardMobile({
   columns,
   tasksByColumn,
   assigneeNameFor,
-  currentUserId,
   canCreate,
   canMove,
   filtering,
@@ -100,7 +98,6 @@ export function BoardMobile({
           tasks={tasksByColumn.get(active.id) ?? []}
           columns={columns}
           assigneeNameFor={assigneeNameFor}
-          currentUserId={currentUserId}
           canCreate={canCreate}
           canMove={canMove}
           isDropTarget={activeTask !== null && dnd.overColumnId === active.id}
@@ -118,9 +115,6 @@ export function BoardMobile({
             <TaskCardPreview
               task={activeTask}
               assigneeName={assigneeNameFor(activeTask.assigneeId)}
-              isAssignedToMe={
-                currentUserId !== undefined && activeTask.assigneeId === currentUserId
-              }
             />
           ) : null}
         </DragOverlay>

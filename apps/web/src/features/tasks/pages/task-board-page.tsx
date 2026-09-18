@@ -161,34 +161,33 @@ export function TaskBoardPage() {
     setFormTarget({ defaultColumnId: columnId });
   };
 
-  const handleMoveTask = (taskId: TaskId, columnId: ColumnId) => {
-    moveAndAnnounce(taskId, columnId, 0);
-  };
-
   /**
-   * "Xong" checkbox: moves the task to the first "done" column (by column
-   * order) and offers a 6s undo back to where it was, mirroring the
-   * delete/restore toast in `task-form-modal.tsx`. A no-op if the board has
-   * no done column at all.
+   * Menu move and quick-done both land the task at the top of `columnId`
+   * and offer a 6s undo back to where it was, mirroring the delete/restore
+   * toast in `task-form-modal.tsx`. Drag drops go through `moveAndAnnounce`
+   * instead: the pointer already shows where the card went.
    */
-  const handleQuickDone = (taskId: TaskId) => {
+  const moveWithUndo = (taskId: TaskId, columnId: ColumnId) => {
     const task = kanban.board.tasks.find((candidate) => candidate.id === taskId);
-    const doneColumn = [...kanban.board.columns]
-      .sort((a, b) => a.order - b.order)
-      .find((column) => column.isDone);
-    if (!task || !doneColumn) return;
+    const target = kanban.board.columns.find((column) => column.id === columnId);
+    if (!task || !target) return;
     const fromColumnId = task.columnId;
-    void kanban.moveTask(taskId, doneColumn.id, 0).then(
+    void kanban.moveTask(taskId, columnId, 0).then(
       () => {
-        setAnnouncement(`Đã đánh dấu "${task.title}" là xong. Nhấn Hoàn tác trong 6 giây.`);
-        hvToast("Đã đánh dấu xong", {
+        setAnnouncement(
+          `Đã chuyển "${task.title}" sang cột ${target.name}. Nhấn Hoàn tác trong 6 giây.`,
+        );
+        hvToast(`Đã chuyển "${task.title}" sang ${target.name}`, {
           variant: "success",
           duration: 6000,
           action: {
             label: "Hoàn tác",
             onClick: () => {
               void kanban.moveTask(taskId, fromColumnId, 0).then(
-                () => setAnnouncement(`Đã hoàn tác, chuyển "${task.title}" về cột trước đó.`),
+                () => {
+                  setAnnouncement(`Đã hoàn tác, chuyển "${task.title}" về cột trước đó.`);
+                  hvToast("Đã hoàn tác", { variant: "success" });
+                },
                 (error: unknown) => hvToast(kanbanErrorToastMessage(error), { variant: "danger" }),
               );
             },
@@ -200,6 +199,16 @@ export function TaskBoardPage() {
         setAnnouncement(KEYBOARD_MESSAGES.moveFailed);
       },
     );
+  };
+
+  const handleMoveTask = moveWithUndo;
+
+  /** The card's check button: first "done" column by order; a no-op if the board has none. */
+  const handleQuickDone = (taskId: TaskId) => {
+    const doneColumn = [...kanban.board.columns]
+      .sort((a, b) => a.order - b.order)
+      .find((column) => column.isDone);
+    if (doneColumn) moveWithUndo(taskId, doneColumn.id);
   };
 
   const handleToggleCollapse = (columnId: ColumnId) => {
@@ -226,7 +235,6 @@ export function TaskBoardPage() {
       columns={board.columns}
       tasksByColumn={kanban.tasksByColumn}
       assigneeNameFor={assigneeNameFor}
-      currentUserId={currentUserId}
       canCreate={canCreate}
       canMove={canEdit}
       filtering={filtering}
@@ -245,7 +253,6 @@ export function TaskBoardPage() {
       columns={board.columns}
       tasksByColumn={kanban.tasksByColumn}
       assigneeNameFor={assigneeNameFor}
-      currentUserId={currentUserId}
       canCreate={canCreate}
       canMove={canEdit}
       filtering={filtering}
