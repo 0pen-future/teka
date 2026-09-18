@@ -44,7 +44,10 @@ lint exceptions for that folder live in `eslint.config.js`.
 Feature UI reaches for these before raw shadcn or one-off markup:
 
 - Layout and feedback: `HvCard`, `HvModal` (`size` md/lg/xl; every size is a
-  bottom sheet below `sm`), `HvConfirmDialog` for single-action confirmations,
+  bottom sheet below `sm`; `stickyFooter` opts md/lg into the same fixed
+  header/footer + scrolling body layout "xl" always uses, for a form whose
+  footer must stay reachable while the body grows, e.g. the task detail
+  modal), `HvConfirmDialog` for single-action confirmations,
   `HvNotice` (`tone` info/warning/danger; danger defaults to `role="alert"`),
   `HvStateBlock` for the loading/empty/error trio instead of hand-written
   "Đang tải…" text, `hvToast` for transient results.
@@ -145,6 +148,23 @@ blocks it everywhere else); cards show a text-only preview via
 `textFromHtml`. The form counts characters the way the server does
 (`plainTextLength`: text only, entities decoded) so the 2000-character limit
 trips on exactly the input the API would reject.
+
+**Board filters are server-side (task board).** `GET /tasks/board` takes
+`filter` (`all|mine|overdue|today|unassigned`), `assignee` (a teacher id,
+ANDed on top of `filter`), and `today` (the client's local date, since
+"overdue"/"today" must match the caller's calendar day, not the server's);
+the client never re-filters a fetched board client-side. `filter=all` — the
+default — is omitted from the request entirely rather than sent explicitly
+(`tasks-api.ts#getBoard`). `useBoardUrlState` (`tasks/hooks`) persists
+`filter`/`assignee`/plus which columns are collapsed in the URL via
+`useSearchParams`, dropping any param that is back at its default so a
+plain `/tasks` never carries redundant query string; `BoardFilterBar` (status
+chips + a per-teacher chip carrying the open-task count) renders only for
+`tasks.view_all` holders — everyone else sees `BoardSummary`'s plain task/
+overdue/today counts instead, since the filter bar's teacher chips only make
+sense center-wide. A drag performed while a filter is active still computes
+its drop position against the currently *visible* (filtered) column order
+(`use-tasks-data-source.ts#moveTask`), not the full unfiltered column.
 
 ## Testing
 

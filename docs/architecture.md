@@ -42,11 +42,18 @@ can be extracted later without a rewrite:
   selectors, hook with prop getters, keyboard navigation, pure drop-position
   helpers). It has no drag layer of its own: pointer drag-and-drop is an
   opt-in adapter in the `tasks` feature (`hooks/use-board-dnd.ts`, dnd-kit)
-  that maps drop events onto the lib's position helpers. The lib may import
+  that maps drop events onto the lib's position helpers. `KanbanBoard`/
+  `KanbanAction`/the selectors are generic over the column shape
+  (`TColumn extends KanbanColumn`, defaulted to the lib's own `KanbanColumn`),
+  so a host can carry extra column fields (Teka: `color`) through the lib's
+  state without the lib itself knowing what they mean. The lib may import
   only `react`; an ESLint `no-restricted-imports` override in
   [eslint.config.js](../apps/web/eslint.config.js) enforces that. The `tasks`
-  feature adapts TanStack Query data into the lib's data-source contract and
-  owns every design-system component.
+  feature adapts TanStack Query data into the lib's data-source contract,
+  layers server-side board filtering (a `filter`/`assignee` query, not a
+  client-side re-filter — see `docs/api-guidelines.md`'s "Tasks board
+  (kanban)" section) and column collapse/color on top through its own
+  URL-persisted state, and owns every design-system component.
 
 Neither package may import from a feature, shared infrastructure, or the other
 app. Each has a README describing its ports and the extraction procedure.

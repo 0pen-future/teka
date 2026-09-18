@@ -420,6 +420,44 @@ Features never import another feature's repository. Cross-feature calls go
 service→service through an interface the consumer defines — e.g. `auth`
 declares `AccountService` with only the `teachers.Service` methods it needs.
 
+## Tasks board (kanban)
+
+`internal/features/tasks/` adapts the framework-free `pkg/kanban` core (see
+[architecture.md](architecture.md)) to Teka's tenancy and auth. Two
+capabilities beyond the plain CRUD routes:
+
+- **`GET /tasks/board?filter=&assignee=&today=`** — `filter` is one of
+  `all|mine|overdue|today|unassigned` (an absent or `all` value applies no
+  filter); `assignee` is a teacher id that ANDs an extra assignee predicate on
+  top of whatever `filter` already implies (and always overrides `filter`'s
+  own assignee predicate, e.g. `filter=unassigned&assignee=<id>` drops
+  "unassigned" and just filters by that assignee — see `boardFilterFrom` in
+  `service.go`); `today` is the calendar date "overdue"/"today" compare
+  against, defaulting to the server's current UTC date when omitted, but a
+  client should always send its own local date since the caller's calendar
+  day is what a due date is judged against. `filter=mine` does **not** imply
+  `OpenOnly` — a task assigned to the caller still shows once it is done —
+  while `overdue`/`today`/`unassigned` all imply `OpenOnly` (only
+  `completed_at IS NULL` tasks match). The response's `counts` block
+  (`BoardCountsResponse`: `all`, `mine`, `overdue`, `today`, `unassigned`,
+  `by_assignee`) summarizes only the caller's *visible*, open task set —
+  independent of the request's own `filter`/`assignee` — so chip counts stay
+  stable as the caller changes filters; `by_assignee` omits any teacher with
+  a zero count. `scope` in the response (`"center"` for an owner or a
+  `tasks.view_all` holder, `"mine"` otherwise) only labels which visibility
+  rule applied — it does not affect chip counts.
+- **`POST /tasks/:id/restore`** — reverses a soft-delete, reviving the task
+  in its original column/position/completion state, and returns the revived
+  `TaskResponse` (200). Gated by the same route policy and `CanWriteTask`
+  (owner or creator) ownership check as `DELETE /tasks/:id` itself.
+
+Both columns (`ColumnResponse.color`, `CreateColumnRequest`/
+`UpdateColumnRequest.color`) and moving a task (`POST /tasks/:id/move`,
+`MoveTaskRequest{column_id, after_task_id}` — an absent/null `after_task_id`
+lands the task at the top of the column) follow the same envelope/validation
+conventions as every other feature; `color` is one of `none|sky|sun|mint`,
+defaulting to `none` when omitted on create.
+
 ## Pagination
 
 List endpoints parse `page`, `per_page` (default 20, max 100), and `sort`
