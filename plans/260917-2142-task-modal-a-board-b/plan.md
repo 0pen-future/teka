@@ -1,7 +1,7 @@
 ---
 title: "Task board: Modal phương án A + Bảng phương án B"
 description: "Triển khai hai phương án UX từ report ui-redesign-260917-2117: modal công việc gọn (A) và bảng điều phối cho quản lý (B) — gồm migration màu cột, lọc + đếm phía server cho GET /tasks/board, endpoint khôi phục việc, kit hv, web."
-status: pending
+status: done
 priority: P1
 effort: "7d"
 tags: [tasks, kanban, web, api, migration, design-system]
@@ -48,6 +48,7 @@ Report UX `plans/reports/ui-redesign-260917-2117-task-board-and-task-modal.html`
 | 4 | [Bảng · sửa lỗi phương án A (card, cột, header)](./phase-04-board-a-card-column-fixes.md) | 1d | Done |
 | 5 | [Bảng · Phương án B (lọc, Xong nhanh, cột màu/thu gọn, URL)](./phase-05-board-b-dieu-phoi-filters-quick-done.md) | 2d | Done |
 | 6 | [E2E, docs, ship](./phase-06-e2e-docs-ship.md) | 1d | Done (chờ push + PR) |
+| 7 | [Khớp 100% UI với report: Modal A + Bảng B](./phase-07-design-fidelity-modal-a-board-b.md) | 1d | Done |
 
 ## Success Criteria
 
@@ -80,6 +81,7 @@ Không còn. Ba câu hỏi ban đầu đã được user chốt ngày 2026-09-17
 
 - 2026-09-17 · Tier Full (6 phase) · Kiểm chứng bằng grep/sed trên source: `ports.go:111` (`Get` tasks), `service.go:340-348` (`DeleteTask`→`SoftDelete`), `task_repository.go:238-251` (`MoveAllToColumn` gom soft-deleted), core `CreateColumn(ctx,tenant,actor,name,isDone)` có 1 caller adapter (`tasks/service.go:100`), routespec tests `TestMutatingRoutesHaveAnAuditSource`/`TestLookupFindsEveryDeclaredRoute`, migration mới nhất `000023`, `isOverdue` dùng `toISOString()` (`task-card-styles.ts:25`), `useSearchParams` đã dùng ở collections/notifications/sessions, token `ink-500 #5b756c`/`sky-50 #eaf5fb`/`sun-100 #fff4d6`, make targets `test-api-unit|test-api|lint-api|api-docs|test-web|lint-web|e2e-isolated|migrate-up|migrate-down` tồn tại, 4 spec e2e `tasks-board*`. Sửa sau kiểm: số dòng D2/D8, rủi ro "cột đã xoá" hạ xuống đã đóng, tên file integration test API.
 - 2026-09-17 · Cập nhật theo quyết định user (D3, D11, D12). Kiểm chứng thêm: `handler.go:56-67` không đọc query param nào; `service.go:87-91` echo scope từ policy; `task_repository.go:32-71` `ListBoard` dùng `row_number() OVER (PARTITION BY column_id)` — predicate lọc chèn được vào `WHERE` của subquery; `policy.go:47-49` `CanMoveTask` gồm assignee; `routespec.go:380` move cần `tasks.edit`; `task-board-page.test.tsx:85-107` hai test segmented cần thay; MSW `tasks-handlers.ts:154-156` đọc `scope` → đổi sang `filter`/`assignee`/`today`; `sessions/service.go:556-565` là tiền lệ đọc `teachers.Timezone` — **không** tái dùng cho board (cross-feature), client gửi `today` thay thế.
+- 2026-09-18 · Phase 7 (khớp 100% UI Modal A + Bảng B) hoàn tất. Gate: `npx vitest run src/features/tasks src/lib/kanban` 192/192, `make lint-web test-web` 0 lỗi (6 warning react-compiler có sẵn) + 865 pass / 3 skipped, `npm run typecheck` xanh, `make e2e-isolated E2E_ARGS="tasks-board"` 8/8 (lần chạy đầu 3 đỏ: list cột có `overflow-y-auto` cắt nút Xong nhanh nhô 15px khỏi mép card — bỏ theo `.col-list` của report; spec `tasks-board` click tiêu đề trùng text toast "Đã chuyển…" — đổi sang locator `card(column(...))`). Thay đổi a11y có chủ đích theo report: Xong nhanh là `button` (không còn checkbox), chip lọc dùng `aria-pressed` (không còn radiogroup), xác nhận xoá/bỏ thay đổi là `alertdialog`. Review subagent (`plans/reports/code-review-260918-1416-phase-07-design-fidelity-modal-a-board-b.md`): 1 critical (panel xác nhận không chặn focus → `inert` form + footer), 3 high (toast mô tả đè lỗi HTML cap, `maxLength` chặn toast tiêu đề, chip "Bỏ hạn" pressed mặc định), 3 low (fade `cream-100`, đổi tên `quick-done-button.tsx`, thứ tự rail) — đã sửa hết, thêm 3 unit test (195 pass), e2e chạy lại 8/8. Tương phản avatar giữ theo spec report (ghi nhận). Push + PR vẫn chờ user duyệt.
 - Chưa kiểm (để lúc triển khai): icon lucide `MoreHorizontalIcon`/`Columns2Icon`/`ChevronsLeftIcon` (node_modules bị chặn đọc), tỉ lệ tương phản chính xác (script ở Phase 5 bước 12).
 
 <!-- slug: task-modal-a-board-b -->
