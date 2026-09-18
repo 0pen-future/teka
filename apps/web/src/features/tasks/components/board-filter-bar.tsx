@@ -1,7 +1,10 @@
-import { HvChip, HvSelect } from "@/components/hv";
+import type { ReactNode } from "react";
 
-import { assigneeChips, isFiltering, type AssigneeDirectoryEntry } from "../lib/board-filters";
+import { cn } from "@/lib/utils";
+
+import { assigneeChips, type AssigneeDirectoryEntry } from "../lib/board-filters";
 import { BOARD_FILTERS, type BoardCounts, type BoardFilterValue } from "../schemas/task-schemas";
+import { AssigneeAvatar } from "./assignee-avatar";
 
 const STATUS_LABELS: Record<BoardFilterValue, string> = {
   all: "Tất cả",
@@ -11,8 +14,40 @@ const STATUS_LABELS: Record<BoardFilterValue, string> = {
   unassigned: "Chưa giao",
 };
 
-/** Chips beyond this many collapse into the overflow `HvSelect`. */
-const MAX_ASSIGNEE_CHIPS = 8;
+interface FilterChipProps {
+  pressed: boolean;
+  /** Draws the chip in coral while idle — "Quá hạn" with something behind it. */
+  warn?: boolean;
+  count: number;
+  leading?: ReactNode;
+  onClick: () => void;
+  children: string;
+}
+
+/** One `aria-pressed` toggle; the label and count are sibling text nodes so the accessible name reads "Quá hạn 3". */
+function FilterChip({ pressed, warn = false, count, leading, onClick, children }: FilterChipProps) {
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      onClick={onClick}
+      className={cn(
+        "inline-flex min-h-9 items-center gap-1.5 rounded-full border-[1.5px] border-line-200 bg-white px-3",
+        "font-body text-[13px] font-bold text-ink-500 transition-colors hover:border-line-300 hover:text-ink-900",
+        "focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-mint-100",
+        pressed && "border-ink-900 bg-ink-900 text-white hover:border-ink-900 hover:text-white",
+        !pressed &&
+          warn &&
+          "border-coral-300 text-coral-600 hover:border-coral-300 hover:text-coral-600",
+      )}
+    >
+      {leading}
+      {children}
+      {/* Explicit space so the accessible name reads "Quá hạn 3", not "Quá hạn3"; the flex gap swallows it visually. */}{" "}
+      <span className="tabular-nums opacity-75">{count}</span>
+    </button>
+  );
+}
 
 export interface BoardFilterBarProps {
   filter: BoardFilterValue;
@@ -27,6 +62,10 @@ export interface BoardFilterBarProps {
  * switching either re-fetches `GET /tasks/board` with the new params rather
  * than filtering the already-loaded board client-side. Only rendered for
  * `canViewAll` holders — a teacher's own board has nothing to narrow.
+ *
+ * There is no separate "clear" control: pressing a status chip again (or
+ * "Tất cả") drops back to the full board, and a teacher chip toggles off on
+ * its second click.
  */
 export function BoardFilterBar({
   filter,
@@ -36,9 +75,10 @@ export function BoardFilterBar({
   onChange,
 }: BoardFilterBarProps) {
   const chips = assigneeChips(counts.by_assignee, members);
-  const visibleChips = chips.slice(0, MAX_ASSIGNEE_CHIPS);
-  const overflowChips = chips.slice(MAX_ASSIGNEE_CHIPS);
-  const overflowSelected = overflowChips.some((chip) => chip.teacherId === assignee);
+
+  const toggleStatus = (value: BoardFilterValue) => {
+    onChange({ filter: filter === value && value !== "all" ? "all" : value });
+  };
 
   const toggleAssignee = (teacherId: string) => {
     onChange({ assignee: assignee === teacherId ? "" : teacherId });
@@ -46,70 +86,34 @@ export function BoardFilterBar({
 
   return (
     <div role="group" aria-label="Bộ lọc nhanh" className="flex flex-wrap items-center gap-1.5">
-      <div
-        role="radiogroup"
-        aria-label="Trạng thái"
-        className="flex flex-wrap items-center gap-1.5"
-      >
-        {BOARD_FILTERS.map((value) => (
-          <HvChip
-            key={value}
-            role="radio"
-            size="sm"
-            pressed={filter === value}
-            count={counts[value]}
-            onClick={() => onChange({ filter: value })}
-          >
-            {STATUS_LABELS[value]}
-          </HvChip>
-        ))}
-      </div>
-      {visibleChips.length > 0 ? (
-        <>
-          <span aria-hidden className="mx-0.5 h-5 w-px bg-line-200" />
-          <div
-            role="radiogroup"
-            aria-label="Giáo viên"
-            className="flex flex-wrap items-center gap-1.5"
-          >
-            {visibleChips.map((chip) => (
-              <HvChip
-                key={chip.teacherId}
-                role="radio"
-                size="sm"
-                pressed={assignee === chip.teacherId}
-                count={chip.count}
-                onClick={() => toggleAssignee(chip.teacherId)}
-              >
-                {chip.label}
-              </HvChip>
-            ))}
-          </div>
-        </>
-      ) : null}
-      {overflowChips.length > 0 ? (
-        <HvSelect
-          sheetTitle="Lọc theo giáo viên"
-          aria-label="Lọc theo giáo viên khác"
-          placeholder="Khác…"
-          value={overflowSelected ? assignee : ""}
-          onValueChange={(value) => onChange({ assignee: value })}
-          options={overflowChips.map((chip) => ({
-            value: chip.teacherId,
-            label: chip.label,
-            meta: String(chip.count),
-          }))}
-          className="min-h-8 min-w-0 px-2.5 text-[12px]"
-        />
-      ) : null}
-      {isFiltering({ filter, assignee }) ? (
-        <button
-          type="button"
-          onClick={() => onChange({ filter: "all", assignee: "" })}
-          className="ml-auto rounded-full px-2.5 py-1 text-[12px] font-bold text-ink-500 hover:bg-cream-100 hover:text-ink-900"
+      {BOARD_FILTERS.map((value) => (
+        <FilterChip
+          key={value}
+          pressed={filter === value}
+          warn={value === "overdue" && counts.overdue > 0}
+          count={counts[value]}
+          onClick={() => toggleStatus(value)}
         >
-          Xoá lọc
-        </button>
+          {STATUS_LABELS[value]}
+        </FilterChip>
+      ))}
+      {chips.length > 0 ? (
+        <>
+          <span aria-hidden className="mx-1 h-[22px] w-[1.5px] bg-line-300" />
+          {chips.map((chip) => (
+            <FilterChip
+              key={chip.teacherId}
+              pressed={assignee === chip.teacherId}
+              count={chip.count}
+              leading={
+                <AssigneeAvatar name={chip.label} size="xs" decorative className="-ml-1.5" />
+              }
+              onClick={() => toggleAssignee(chip.teacherId)}
+            >
+              {chip.label}
+            </FilterChip>
+          ))}
+        </>
       ) : null}
     </div>
   );

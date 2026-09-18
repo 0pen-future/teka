@@ -395,10 +395,16 @@ describe("TaskBoardPage", () => {
       const { router } = renderBoardPage();
       await screen.findByRole("listbox", { name: "Cần làm" });
 
-      await user.click(screen.getByRole("radio", { name: /^Quá hạn/ }));
+      const chip = screen.getByRole("button", { name: /^Quá hạn/ });
+      expect(chip).toHaveAttribute("aria-pressed", "false");
+      await user.click(chip);
 
       await waitFor(() => expect(boardFilterRequests.at(-1)).toBe("overdue"));
       expect(router.state.location.search).toContain("filter=overdue");
+      expect(screen.getByRole("button", { name: /^Quá hạn/ })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
     });
 
     it("re-requests the board with the chosen assignee, then clears it on a second click", async () => {
@@ -407,27 +413,36 @@ describe("TaskBoardPage", () => {
       renderBoardPage();
       await screen.findByRole("listbox", { name: "Cần làm" });
 
-      const chip = await screen.findByRole("radio", { name: /^Cô Lan/ });
+      const chip = await screen.findByRole("button", { name: /^Cô Lan \d+$/ });
       await user.click(chip);
       await waitFor(() => expect(boardAssigneeRequests.at(-1)).toBe(testPrimaryTeacher.id));
+      expect(chip).toHaveAttribute("aria-pressed", "true");
 
       await user.click(chip);
       await waitFor(() => expect(boardAssigneeRequests.at(-1)).toBe(""));
+      expect(chip).toHaveAttribute("aria-pressed", "false");
     });
 
-    it("clears the active filter through the 'Xoá lọc' button", async () => {
+    it("drops back to 'Tất cả' when the pressed status chip is clicked again", async () => {
       const user = userEvent.setup();
       signInAs(testPrimaryTeacher);
       renderBoardPage();
       await screen.findByRole("listbox", { name: "Cần làm" });
 
-      await user.click(screen.getByRole("radio", { name: /^Hôm nay/ }));
+      await user.click(screen.getByRole("button", { name: /^Hôm nay/ }));
       await waitFor(() => expect(boardFilterRequests.at(-1)).toBe("today"));
 
-      await user.click(screen.getByRole("button", { name: "Xoá lọc" }));
+      await user.click(screen.getByRole("button", { name: /^Hôm nay/ }));
 
       await waitFor(() => expect(boardFilterRequests.at(-1)).toBe("all"));
-      expect(screen.queryByRole("button", { name: "Xoá lọc" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /^Tất cả/ })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      expect(screen.getByRole("button", { name: /^Hôm nay/ })).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
     });
   });
 

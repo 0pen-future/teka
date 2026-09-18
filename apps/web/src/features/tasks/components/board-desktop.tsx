@@ -29,7 +29,7 @@ export interface BoardDesktopProps {
   getTaskProps: (taskId: TaskId, extra?: TaskPropsExtra) => Record<string, unknown>;
 }
 
-/** Every column renders side by side; a 4th+ column scrolls horizontally rather than wrapping or shrinking below 230px. */
+/** Every column renders side by side at 272px; a 4th+ column scrolls horizontally rather than wrapping or shrinking. */
 export function BoardDesktop({
   columns,
   tasksByColumn,
@@ -51,40 +51,47 @@ export function BoardDesktop({
   const { activeTask } = dnd;
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [canScrollRight, setCanScrollRight] = useState(false);
+  const [canScroll, setCanScroll] = useState({ left: false, right: false });
 
-  const updateCanScrollRight = useCallback(() => {
+  const updateCanScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
-    // >1px tolerance so sub-pixel rounding at the end of the scroll range
-    // doesn't leave the fade stuck visibly on.
-    setCanScrollRight(el.scrollWidth - el.clientWidth - el.scrollLeft > 1);
+    // >1px tolerance so sub-pixel rounding at either end of the scroll range
+    // doesn't leave a fade stuck visibly on.
+    const left = el.scrollLeft > 1;
+    const right = el.scrollWidth - el.clientWidth - el.scrollLeft > 1;
+    setCanScroll((prev) => (prev.left === left && prev.right === right ? prev : { left, right }));
   }, []);
 
   useEffect(() => {
-    updateCanScrollRight();
+    updateCanScroll();
     const el = scrollRef.current;
     // jsdom has no ResizeObserver by default outside the test setup stub.
     if (!el || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(updateCanScrollRight);
+    const observer = new ResizeObserver(updateCanScroll);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [columns.length, updateCanScrollRight]);
+  }, [columns.length, updateCanScroll]);
 
   return (
     <DndContext {...dnd.contextProps}>
       <div
-        data-can-scroll-right={canScrollRight || undefined}
+        data-can-scroll-left={canScroll.left || undefined}
+        data-can-scroll-right={canScroll.right || undefined}
         className={[
-          "relative after:pointer-events-none after:absolute after:inset-y-0 after:right-0",
-          "after:w-8 after:bg-gradient-to-l after:from-cream-50 after:to-transparent",
+          "relative",
+          "before:pointer-events-none before:absolute before:inset-y-0 before:left-0 before:z-[1]",
+          "before:w-8 before:bg-gradient-to-r before:from-cream-100 before:to-transparent",
+          "before:opacity-0 before:transition-opacity data-[can-scroll-left]:before:opacity-100",
+          "after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:z-[1]",
+          "after:w-8 after:bg-gradient-to-l after:from-cream-100 after:to-transparent",
           "after:opacity-0 after:transition-opacity data-[can-scroll-right]:after:opacity-100",
         ].join(" ")}
       >
         <div
           ref={scrollRef}
-          onScroll={updateCanScrollRight}
-          className="flex gap-3 overflow-x-auto overscroll-x-contain pb-2 [scroll-snap-type:x_proximity]"
+          onScroll={updateCanScroll}
+          className="flex gap-3 overflow-x-auto overscroll-x-contain px-0.5 pb-3 pt-0.5 [scroll-snap-type:x_proximity]"
         >
           {sorted.map((column) =>
             collapsed.has(column.id) ? (
@@ -114,7 +121,7 @@ export function BoardDesktop({
                 onCollapse={() => onToggleCollapse(column.id)}
                 getColumnProps={() => getColumnProps(column.id)}
                 getTaskProps={getTaskProps}
-                className="min-w-[230px] w-[280px] shrink-0 [scroll-snap-align:start]"
+                className="w-[272px] shrink-0 [scroll-snap-align:start]"
               />
             ),
           )}

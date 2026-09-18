@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 
 import type { BoardDndData } from "../hooks/use-board-dnd";
 import type { AppColumn, AppTask } from "../hooks/use-tasks-data-source";
-import { COLUMN_DOT, COLUMN_TINT } from "../lib/column-colors";
+import { columnTintClassName } from "../lib/column-colors";
 import { TaskCard } from "./task-card";
 
 export interface TaskColumnProps {
@@ -33,6 +33,9 @@ export interface TaskColumnProps {
   onCollapse?: () => void;
   className?: string;
 }
+
+const HEADER_BUTTON =
+  "inline-flex size-9 shrink-0 items-center justify-center rounded-full text-ink-500 transition-colors hover:bg-white hover:text-ink-900 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-mint-100";
 
 /**
  * One kanban column: header (name, count, done marker) plus its task list.
@@ -66,46 +69,42 @@ export function TaskColumn({
     <div
       data-over={isDropTarget || undefined}
       className={cn(
-        "flex min-h-0 flex-col rounded-[16px] border border-line-200 p-2.5 transition-colors",
-        COLUMN_TINT[column.color],
-        isDropTarget && "border-mint-400 ring-2 ring-mint-100",
+        "flex min-h-[360px] flex-col rounded-[16px] p-2 transition-[box-shadow,background-color]",
+        columnTintClassName(column),
+        isDropTarget && "shadow-[0_0_0_2px_var(--color-mint-400),0_0_0_6px_var(--color-mint-100)]",
         className,
       )}
     >
-      <div className="flex items-center justify-between gap-2 px-1 pb-2">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <span
-            aria-hidden
-            className={cn("size-2.5 shrink-0 rounded-full", COLUMN_DOT[column.color])}
-          />
+      <div className="flex items-center justify-between gap-1.5 pb-2 pl-2 pr-1 pt-1">
+        <div className="flex min-w-0 items-center gap-[7px] text-[15px] font-extrabold text-ink-900">
           {column.isDone ? (
             <CheckIcon aria-hidden className="size-4 shrink-0 text-mint-600" />
           ) : null}
-          <p className="truncate text-[13.5px] font-extrabold text-ink-900">{column.name}</p>
-          <span className="shrink-0 rounded-full bg-white px-1.5 py-0.5 text-[11px] font-bold text-ink-500">
+          <p className="truncate">{column.name}</p>
+          <span className="shrink-0 rounded-full bg-white px-2 py-[3px] font-body text-[11.5px] font-extrabold tabular-nums text-ink-500">
             {tasks.length}
           </span>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {canCreate ? (
-            <button
-              type="button"
-              onClick={() => onCreateTask(column.id)}
-              aria-label={`Thêm việc vào ${column.name}`}
-              className="inline-flex size-10 shrink-0 items-center justify-center rounded-full text-ink-500 hover:bg-white hover:text-mint-600"
-            >
-              <PlusIcon aria-hidden className="size-4" />
-            </button>
-          ) : null}
+        <div className="flex shrink-0 items-center gap-0.5">
           {onCollapse ? (
             <button
               type="button"
               onClick={onCollapse}
               aria-expanded
               aria-label={`Thu gọn cột ${column.name}`}
-              className="hidden size-10 shrink-0 items-center justify-center rounded-full text-ink-500 hover:bg-white hover:text-mint-600 min-[900px]:inline-flex"
+              className={HEADER_BUTTON}
             >
-              <ChevronLeftIcon aria-hidden className="size-4" />
+              <ChevronLeftIcon aria-hidden className="size-[18px]" />
+            </button>
+          ) : null}
+          {canCreate ? (
+            <button
+              type="button"
+              onClick={() => onCreateTask(column.id)}
+              aria-label={`Thêm việc vào ${column.name}`}
+              className={HEADER_BUTTON}
+            >
+              <PlusIcon aria-hidden className="size-[18px]" />
             </button>
           ) : null}
         </div>
@@ -114,19 +113,24 @@ export function TaskColumn({
         <div
           {...getColumnProps()}
           ref={setNodeRef}
-          className="flex min-h-[60px] flex-1 flex-col gap-2 overflow-y-auto"
+          className="flex min-h-[80px] flex-1 flex-col gap-2 rounded-[12px]"
         >
           {tasks.length === 0 ? (
-            <div className="flex min-h-[96px] flex-col items-center justify-center gap-2 rounded-[12px] border-2 border-dashed border-line-200 px-2 py-3">
-              <p className="text-center text-[12px] text-ink-500">
-                {filtering ? "Không có việc khớp lọc" : "Chưa có việc"}
-              </p>
+            <div
+              className={cn(
+                "flex min-h-[120px] flex-1 flex-col items-center justify-center gap-1.5 rounded-[12px]",
+                "border-2 border-dashed border-line-300 px-3 py-5 text-center text-[13px] text-ink-500",
+                isDropTarget && "border-mint-400 bg-mint-50",
+              )}
+            >
+              <p>{filtering ? "Không có việc khớp bộ lọc" : "Chưa có việc"}</p>
               {canCreate && !filtering ? (
                 <button
                   type="button"
                   onClick={() => onCreateTask(column.id)}
-                  className="rounded-md px-2 py-1 text-[12px] font-bold text-mint-600 hover:bg-white"
+                  className="inline-flex min-h-9 items-center gap-1.5 rounded-[var(--radius-md)] px-3 font-display text-[14px] font-bold text-mint-600 hover:bg-mint-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-mint-100"
                 >
+                  <PlusIcon aria-hidden className="size-4" />
                   Thêm việc
                 </button>
               ) : null}

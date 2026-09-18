@@ -16,8 +16,8 @@ export interface AssigneeDirectoryEntry {
  * Joins `counts.by_assignee` (teacher id + count) against the member
  * directory for a display name, dropping any teacher with no open tasks —
  * the chip strip is "who has work right now", not the full roster. Sorted
- * by count (busiest first) so the board-filter-bar's 8-chip cap keeps the
- * teachers actually worth filtering by.
+ * by count (busiest first) so the teachers with the most on their plate
+ * lead the strip.
  */
 export function assigneeChips(
   byAssignee: readonly { teacher_id: string; count: number }[],
@@ -34,7 +34,7 @@ export function assigneeChips(
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "vi"));
 }
 
-/** Whether the board's current filter/assignee state narrows the view at all — drives the "Xoá lọc" button and the columns' empty-state copy. */
+/** Whether the board's current filter/assignee state narrows the view at all — drives the columns' empty-state copy. */
 export function isFiltering(state: { filter: BoardFilterValue; assignee: string }): boolean {
   return state.filter !== "all" || state.assignee !== "";
 }
