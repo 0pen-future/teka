@@ -1,7 +1,7 @@
 ---
 phase: 6
 title: "E2E, a11y, docs, gates và ship"
-status: pending
+status: done
 priority: P1
 effort: "1d"
 dependencies: [3, 4, 5]
@@ -61,12 +61,12 @@ docs đúng "bề mặt sở hữu nhỏ nhất", chạy đủ gate, chia commit
 
 ## Todo
 
-- [ ] e2e dispatch spec (8 case) + sửa tasks-board.spec (dirty guard, Hoàn tác, assignee đổi Cột)
-- [ ] e2e xanh trên stack isolated
-- [ ] a11y checklist thủ công
-- [ ] Docs 5 file cập nhật, link kiểm
-- [ ] Toàn bộ gate xanh
-- [ ] Commit theo phase + PR
+- [x] e2e dispatch spec (8 case) + sửa tasks-board.spec (dirty guard, Hoàn tác, assignee đổi Cột, điều hướng bàn phím)
+- [x] e2e xanh trên stack isolated (8/8 spec `tasks-board*` PASS trên `teka-e2e`)
+- [~] a11y checklist thủ công — phần tự động hoá được đã có e2e (roving tabindex, `[`/`]`, live region); VoiceOver/NVDA + 375/1280px còn chờ reviewer (checklist trong PR). Phát hiện a11y gap có sẵn: không "Xong nhanh" được bằng bàn phím (`TaskCard.onKeyDown` chặn Space/Enter) — nêu trong PR, không vá ở phase này.
+- [x] Docs 5 file cập nhật (frontend-guidelines, api-guidelines, architecture sửa lần này; 2 README lib đã commit ở Phase 1/5), link kiểm
+- [x] Toàn bộ gate xanh (lint-api, test-api-unit, api-docs, test-api, lint-web, test-web, e2e-isolated)
+- [~] Commit theo phase (2 commit test+docs đã tạo, qua lefthook) — push + PR user tự xử lý (auth split, đã hỏi 2026-09-18)
 
 ## Success Criteria
 

@@ -167,3 +167,34 @@ Sửa
 ## Next Steps
 
 Phase 6: e2e cho lọc/quick-done/collapse, a11y check, docs, gates, ship.
+
+## Validation Log
+
+Tỷ lệ tương phản WCAG 2.1, tính bằng công thức luminance chuẩn (sRGB → linear,
+`(L1+0.05)/(L2+0.05)`) trên đúng mã hex trong `apps/web/src/styles/tokens/colors.css`:
+
+Chữ trên nền tint cột (ngưỡng AA văn bản thường ≥ 4.5:1):
+
+| Chữ | cream-100 `#f4f8f3` | sky-50 `#eaf5fb` | sun-100 `#fff4d6` | mint-50 `#e9f7f1` |
+| --- | --- | --- | --- | --- |
+| ink-500 `#5b756c` | 4.65:1 PASS | 4.51:1 PASS | 4.56:1 PASS | 4.53:1 PASS |
+| ink-700 `#27433b` | 10.02:1 PASS | 9.71:1 PASS | 9.82:1 PASS | 9.75:1 PASS |
+| ink-900 `#1c3a31` | 11.52:1 PASS | 11.16:1 PASS | 11.28:1 PASS | 11.21:1 PASS |
+
+Cả bốn tint đều đạt ngưỡng cho chữ phụ `ink-500` (thấp nhất là `sky-50` ở
+4.51:1), nên không cần đổi sang `ink-600` cho bất kỳ nền nào — dự phòng nêu ở
+mục Key Insights không cần dùng tới.
+
+Dấu tick trắng trên chấm màu `COLUMN_DOT` (thành phần phi văn bản, ngưỡng
+WCAG 1.4.11 ≥ 3:1):
+
+| Chấm màu | Trắng trên nền |
+| --- | --- |
+| ink-500 (none) `#5b756c` | 4.99:1 PASS |
+| sky-500 `#2d7aa0` | 4.77:1 PASS |
+| sun-600 `#b87d00` | 3.52:1 PASS |
+| mint-600 `#2e8d6e` | 4.08:1 PASS |
+
+`COLUMN_DOT.none` ban đầu dự tính `ink-300 #aab9b1` (quá nhạt, dưới 3:1) —
+đã đổi sang `ink-500` trước khi viết `column-colors.ts` nên bảng trên phản
+ánh giá trị đang dùng trong code, không phải giá trị dự phòng.

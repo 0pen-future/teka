@@ -42,12 +42,12 @@ Report UX `plans/reports/ui-redesign-260917-2117-task-board-and-task-modal.html`
 
 | # | Phase (thứ tự 1→6; Phase 1 `apps/api` và Phase 2 `components/hv` chạy song song được) | Effort | Status |
 |---|-------|--------|--------|
-| 1 | [API + migration: màu cột, lọc/đếm board, khôi phục việc](./phase-01-api-migration-column-color-restore.md) | 1.5d | Pending |
-| 2 | [Kit hv: footer dính, segmented nowrap, HvChip](./phase-02-hv-kit-modal-footer-segmented.md) | 0.5d | Pending |
-| 3 | [Modal · Phương án A](./phase-03-modal-a-form-gon.md) | 1d | Pending |
-| 4 | [Bảng · sửa lỗi phương án A (card, cột, header)](./phase-04-board-a-card-column-fixes.md) | 1d | Pending |
-| 5 | [Bảng · Phương án B (lọc, Xong nhanh, cột màu/thu gọn, URL)](./phase-05-board-b-dieu-phoi-filters-quick-done.md) | 2d | Pending |
-| 6 | [E2E, docs, ship](./phase-06-e2e-docs-ship.md) | 1d | Pending |
+| 1 | [API + migration: màu cột, lọc/đếm board, khôi phục việc](./phase-01-api-migration-column-color-restore.md) | 1.5d | Done |
+| 2 | [Kit hv: footer dính, segmented nowrap, HvChip](./phase-02-hv-kit-modal-footer-segmented.md) | 0.5d | Done |
+| 3 | [Modal · Phương án A](./phase-03-modal-a-form-gon.md) | 1d | Done |
+| 4 | [Bảng · sửa lỗi phương án A (card, cột, header)](./phase-04-board-a-card-column-fixes.md) | 1d | Done |
+| 5 | [Bảng · Phương án B (lọc, Xong nhanh, cột màu/thu gọn, URL)](./phase-05-board-b-dieu-phoi-filters-quick-done.md) | 2d | Done |
+| 6 | [E2E, docs, ship](./phase-06-e2e-docs-ship.md) | 1d | Done (chờ push + PR) |
 
 ## Success Criteria
 
