@@ -72,11 +72,11 @@ test("task board flow: add a column, create, move, fold the column away, delete"
   await expect(column(page, "Hoàn thành").getByText(taskTitle)).toBeVisible();
 
   // 6. Delete the task from its detail form.
-  await page.getByText(taskTitle).click();
+  await card(column(page, "Hoàn thành"), taskTitle).click();
   const detail = page.getByRole("dialog", { name: "Chi tiết công việc" });
   await detail.getByRole("button", { name: "Xoá" }).click();
   await page
-    .getByRole("dialog", { name: "Xoá công việc này?" })
+    .getByRole("alertdialog", { name: "Xoá công việc này?" })
     .getByRole("button", { name: "Xoá" })
     .click();
   // The success toast repeats the title, so only the board proves the removal.
@@ -106,9 +106,11 @@ test("task detail modal: dirty guard on close, delete undo, and an assignee's co
   const detail = page.getByRole("dialog", { name: "Chi tiết công việc" });
   await detail.getByLabel("Tiêu đề").fill(`${dirtyGuardTitle} đã sửa`);
   await page.keyboard.press("Escape");
-  const discardDialog = page.getByRole("dialog", { name: "Bỏ thay đổi?" });
+  const discardDialog = page.getByRole("alertdialog", { name: "Bỏ thay đổi chưa lưu?" });
   await expect(discardDialog).toBeVisible();
-  await expect(discardDialog).toContainText("Các thay đổi chưa lưu sẽ mất.");
+  await expect(discardDialog).toContainText(
+    "Tiêu đề, mô tả hoặc thuộc tính bạn vừa sửa sẽ không được giữ.",
+  );
 
   // "Tiếp tục sửa" cancels the discard and returns to the still-open, still-dirty form.
   await discardDialog.getByRole("button", { name: "Tiếp tục sửa" }).click();
@@ -136,7 +138,7 @@ test("task detail modal: dirty guard on close, delete undo, and an assignee's co
   await card(todo, restoreTitle).click();
   await detail.getByRole("button", { name: "Xoá" }).click();
   await page
-    .getByRole("dialog", { name: "Xoá công việc này?" })
+    .getByRole("alertdialog", { name: "Xoá công việc này?" })
     .getByRole("button", { name: "Xoá" })
     .click();
   await expect(detail).toBeHidden();
@@ -159,7 +161,7 @@ test("task detail modal: dirty guard on close, delete undo, and an assignee's co
   try {
     await loginAsMember(memberPage);
     await memberPage.goto("/tasks");
-    await memberPage.getByText(assigneeTitle).click();
+    await card(column(memberPage, "Cần làm"), assigneeTitle).click();
     const memberDetail = memberPage.getByRole("dialog", { name: "Chi tiết công việc" });
     await expect(memberDetail).toBeVisible();
     await expect(memberDetail.getByLabel("Tiêu đề")).toBeDisabled();
@@ -197,14 +199,10 @@ test("board keyboard navigation: roving tabindex, and [ ] moves the focused card
   // wording/cadence itself still needs a manual VoiceOver/NVDA pass — see
   // the PR's manual checklist.
   //
-  // Space-activating the nested "Xong" checkbox is deliberately NOT covered
-  // here: `TaskCard`'s own `onKeyDown` (task-card.tsx) intercepts Enter/Space
-  // as soon as the event bubbles past `CardControlBarrier` — which only
-  // stops `click`/`mousedown`/`touchstart`, not `keydown` — and opens the
-  // task detail dialog instead of letting the checkbox's native Space
-  // activation run. A keyboard/screen-reader user cannot quick-done a task
-  // by focusing the checkbox and pressing Space or Enter today; flagged to
-  // the team as a pre-existing a11y gap rather than patched here.
+  // Keyboard activation of the nested quick-done / menu buttons is covered
+  // by the unit suite (`task-board-page.test.tsx`): `TaskCard`'s `onKeyDown`
+  // only treats Enter/Space as "open" when the card itself is the target, so
+  // a focused nested button keeps its native activation.
   const suffix = Date.now();
   const firstTitle = `E2E Phím A ${suffix}`;
   const secondTitle = `E2E Phím B ${suffix}`;

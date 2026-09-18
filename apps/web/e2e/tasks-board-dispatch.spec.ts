@@ -108,7 +108,7 @@ test("board filter bar dispatches: status/teacher chips, quick-done, collapse, c
   await page.reload();
   await expect(page).toHaveURL(/[?&]filter=overdue(&|$)/);
   await expect(card(todo, overdueTitle)).toBeVisible();
-  await expect(filterChip(page, "Quá hạn")).toHaveAttribute("aria-checked", "true");
+  await expect(filterChip(page, "Quá hạn")).toHaveAttribute("aria-pressed", "true");
 
   // 2. Teacher chip "Thầy Minh": label carries the seeded open-task count,
   // clicking it sets `?assignee=`.
@@ -136,7 +136,7 @@ test("board filter bar dispatches: status/teacher chips, quick-done, collapse, c
   // the URL/DOM settle instead of waiting on a network round trip.
   await minhChip.click();
   await expect(page).not.toHaveURL(/[?&]assignee=/);
-  await expect(minhChip).toHaveAttribute("aria-checked", "false");
+  await expect(minhChip).toHaveAttribute("aria-pressed", "false");
 
   // 3. "Của tôi" shows the caller's own DONE task in "Hoàn thành".
   const mineChip = filterChip(page, "Của tôi");
@@ -162,13 +162,15 @@ test("board filter bar dispatches: status/teacher chips, quick-done, collapse, c
   await expect.poll(() => topCardTitles(doing, 3)).toEqual([mineA, mineB, mineC]);
   await dragTo(page, card(doing, mineC), card(doing, mineB));
   await expect.poll(() => topCardTitles(doing, 3)).toEqual([mineA, mineC, mineB]);
+  // There is no separate "clear" control: pressing the active chip again
+  // drops back to "Tất cả".
   const clearedResponse = waitForBoard(page);
-  await page.getByRole("button", { name: "Xoá lọc" }).click();
+  await filterChip(page, "Của tôi").click();
   await clearedResponse;
   await expect(page).not.toHaveURL(/[?&]filter=/);
   await expect.poll(() => topCardTitles(doing, 4)).toEqual([mineA, mineC, otherX, mineB]);
 
-  // 5. Quick-done checkbox moves the card to "Hoàn thành"; "Hoàn tác" restores it.
+  // 5. The card's quick-done button moves it to "Hoàn thành"; "Hoàn tác" restores it.
   await quickDone(card(todo, quickDoneTitle)).click();
   await expect(card(done, quickDoneTitle)).toBeVisible();
   await expect(todo.getByText(quickDoneTitle)).toHaveCount(0);
@@ -199,7 +201,7 @@ test("board filter bar dispatches: status/teacher chips, quick-done, collapse, c
   await page.keyboard.press("Escape");
   await expect(settings).toBeHidden();
   await expect(todoOuter).toHaveClass(/bg-sun-100/);
-  await expect(todoOuter).not.toHaveClass(/bg-cream-100/);
+  await expect(todoOuter).not.toHaveClass(/bg-cream-200/);
 
   // 8. A member without `tasks.view_all` sees no quick-filter group and a
   // Board-A-style subtitle instead of the center-wide filter bar.

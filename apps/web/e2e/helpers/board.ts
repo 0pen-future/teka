@@ -10,18 +10,18 @@ function escapeRegExp(value: string): string {
 }
 
 /**
- * A `BoardFilterBar` chip (status or teacher) by its label. The label and its
- * `count` render as sibling nodes inside the `HvChip` button, so the browser's
- * accessible-name computation joins them with a space (e.g. "Quá hạn 1"); this
- * matches a `^label \d+$` regex rather than the literal text.
+ * A `BoardFilterBar` chip (status or teacher) by its label. Each chip is an
+ * `aria-pressed` button whose accessible name is the label followed by its
+ * count (e.g. "Quá hạn 1"); this matches a `^label \d+$` regex rather than
+ * the literal text.
  */
 export function filterChip(page: Page, name: string) {
-  return page.getByRole("radio", { name: new RegExp(`^${escapeRegExp(name)} \\d+$`) });
+  return page.getByRole("button", { name: new RegExp(`^${escapeRegExp(name)} \\d+$`) });
 }
 
-/** The quick-done checkbox at a card's leading edge; caller clicks or asserts its `aria-checked`. */
+/** The quick-done button hanging over a card's leading edge; only rendered while the task is open. */
 export function quickDone(taskCard: Locator) {
-  return taskCard.getByRole("checkbox");
+  return taskCard.getByRole("button", { name: "Đánh dấu hoàn thành" });
 }
 
 /**
