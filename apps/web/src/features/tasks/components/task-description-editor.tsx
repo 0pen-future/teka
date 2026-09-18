@@ -53,7 +53,8 @@ function editorAttributes(
     "aria-multiline": "true",
     "aria-labelledby": props.labelId,
     "aria-invalid": String(props.invalid),
-    class: "prose-task min-h-[96px] px-3 py-2.5 text-[14.5px] text-ink-700 outline-none",
+    class:
+      "prose-task min-h-[96px] px-3 py-2.5 text-[14.5px] text-ink-700 outline-none focus:shadow-none",
   };
   if (props.describedBy) attributes["aria-describedby"] = props.describedBy;
   return attributes;
@@ -188,8 +189,10 @@ export function TaskDescriptionEditor({
         }
       }}
       className={cn(
-        "rounded-[14px] border border-line-200 bg-white focus-within:border-mint-400",
-        invalid && "border-coral-400",
+        // Focus shows on the wrapper border, like the search field on the
+        // student records page; the global :focus-visible ring is off inside.
+        "rounded-[14px] border-2 border-line-200 bg-white transition-colors",
+        invalid ? "border-coral-400" : "focus-within:border-mint-400",
       )}
     >
       <Toolbar
@@ -261,7 +264,7 @@ export function TaskDescriptionEditor({
                 closeLinkPanel();
               }
             }}
-            className="min-w-0 flex-1 rounded-[10px] border border-line-200 px-2 py-1.5 text-[13px] text-ink-700 outline-none focus-visible:border-mint-400 aria-invalid:border-coral-400"
+            className="min-w-0 flex-1 rounded-[10px] border border-line-200 px-2 py-1.5 text-[13px] text-ink-700 outline-none focus:shadow-none focus-visible:border-mint-400 aria-invalid:border-coral-400"
           />
           <button type="button" onClick={applyLink} className={linkActionClassName}>
             Áp dụng

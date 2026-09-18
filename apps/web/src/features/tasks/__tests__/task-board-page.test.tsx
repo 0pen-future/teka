@@ -323,7 +323,7 @@ describe("TaskBoardPage", () => {
     const dialog = await screen.findByRole("dialog", { name: "Chi tiết công việc" });
     await user.click(within(dialog).getByRole("button", { name: "Xoá" }));
 
-    const confirmDialog = await screen.findByRole("dialog", { name: "Xoá công việc này?" });
+    const confirmDialog = await screen.findByRole("alertdialog", { name: "Xoá công việc này?" });
     await user.click(within(confirmDialog).getByRole("button", { name: "Xoá" }));
 
     await waitFor(() => {

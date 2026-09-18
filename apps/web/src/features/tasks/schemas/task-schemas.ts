@@ -130,8 +130,16 @@ export interface MoveTaskRequest {
 
 // --- Task form (react-hook-form + Zod) ---
 
+/** Title length cap shared by the schema and the form's own input trimming. */
+export const TITLE_MAX_LENGTH = 200;
+export const TITLE_TOO_LONG_MESSAGE = "Tiêu đề tối đa 200 ký tự";
+
 export const taskFormSchema = z.object({
-  title: z.string().trim().min(1, "Vui lòng nhập tiêu đề").max(200, "Tiêu đề tối đa 200 ký tự"),
+  title: z
+    .string()
+    .trim()
+    .min(1, "Vui lòng nhập tiêu đề")
+    .max(TITLE_MAX_LENGTH, TITLE_TOO_LONG_MESSAGE),
   description: z
     .string()
     .max(20000, "Mô tả quá dài, hãy bỏ bớt định dạng")

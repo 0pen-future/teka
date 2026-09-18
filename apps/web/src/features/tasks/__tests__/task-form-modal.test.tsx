@@ -161,7 +161,8 @@ describe("TaskFormModal footer, context row and delete flow", () => {
     const user = userEvent.setup();
     const { dialog } = await openTask(user, "Soạn đề kiểm tra giữa kỳ");
 
-    expect(within(dialog).getByText("Cần làm · Cô Lan · Tạo 10/09")).toBeInTheDocument();
+    const eyebrow = within(dialog).getByText("Cô Lan tạo 10/09/2026").parentElement;
+    expect(eyebrow).toHaveTextContent(/^Cần làm\s*Cô Lan tạo 10\/09\/2026$/);
   });
 
   it("orders the footer as Xoá, Huỷ, Lưu", async () => {
@@ -192,11 +193,44 @@ describe("TaskFormModal footer, context row and delete flow", () => {
     expect(within(dialog).getByText("Chưa lưu")).toBeInTheDocument();
 
     await user.click(within(dialog).getByRole("button", { name: "Huỷ" }));
-    const confirm = await screen.findByRole("dialog", { name: "Bỏ thay đổi?" });
+    const confirm = await screen.findByRole("alertdialog", { name: "Bỏ thay đổi chưa lưu?" });
     await user.click(within(confirm).getByRole("button", { name: "Tiếp tục sửa" }));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
 
     expect(screen.getByRole("dialog", { name: "Chi tiết công việc" })).toBeInTheDocument();
     expect(within(dialog).getByLabelText("Tiêu đề")).toHaveValue("Soạn đề kiểm tra giữa kỳ!");
+  });
+
+  it("takes the form and footer out of the tab order while a confirm panel covers them", async () => {
+    const user = userEvent.setup();
+    const { dialog } = await openTask(user, "Soạn đề kiểm tra giữa kỳ");
+    const save = within(dialog).getByRole("button", { name: "Lưu" });
+    const title = within(dialog).getByLabelText("Tiêu đề");
+    expect(save.closest("[inert]")).toBeNull();
+    expect(title.closest("[inert]")).toBeNull();
+
+    await user.click(within(dialog).getByRole("button", { name: "Xoá" }));
+    const confirm = await screen.findByRole("alertdialog", { name: "Xoá công việc này?" });
+    expect(within(confirm).getByRole("button", { name: "Giữ lại" })).toHaveFocus();
+    expect(save.closest("[inert]")).not.toBeNull();
+    expect(title.closest("[inert]")).not.toBeNull();
+    expect(confirm.closest("[inert]")).toBeNull();
+
+    await user.click(within(confirm).getByRole("button", { name: "Giữ lại" }));
+    expect(save.closest("[inert]")).toBeNull();
+    expect(title.closest("[inert]")).toBeNull();
+  });
+
+  it("trims a pasted title at 200 characters and says so in a toast", async () => {
+    const user = userEvent.setup();
+    const { dialog } = await openTask(user, "Soạn đề kiểm tra giữa kỳ");
+    const title = within(dialog).getByLabelText("Tiêu đề");
+
+    await user.clear(title);
+    await user.paste("x".repeat(230));
+
+    expect(title).toHaveValue("x".repeat(200));
+    expect(await screen.findByText("Tiêu đề tối đa 200 ký tự")).toBeInTheDocument();
   });
 
   it("closes without asking on Escape once a confirmed discard is chosen", async () => {
@@ -205,7 +239,7 @@ describe("TaskFormModal footer, context row and delete flow", () => {
     await user.type(within(dialog).getByLabelText("Tiêu đề"), "!");
 
     await user.keyboard("{Escape}");
-    const confirm = await screen.findByRole("dialog", { name: "Bỏ thay đổi?" });
+    const confirm = await screen.findByRole("alertdialog", { name: "Bỏ thay đổi chưa lưu?" });
     await user.click(within(confirm).getByRole("button", { name: "Bỏ thay đổi" }));
 
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
@@ -246,13 +280,13 @@ describe("TaskFormModal footer, context row and delete flow", () => {
     const { dialog } = await openTask(user, "Soạn đề kiểm tra giữa kỳ");
 
     await user.click(within(dialog).getByRole("button", { name: "Xoá" }));
-    const confirmDialog = await screen.findByRole("dialog", { name: "Xoá công việc này?" });
+    const confirmDialog = await screen.findByRole("alertdialog", { name: "Xoá công việc này?" });
     await user.click(within(confirmDialog).getByRole("button", { name: "Xoá" }));
 
     await waitFor(() =>
       expect(screen.queryByText("Soạn đề kiểm tra giữa kỳ")).not.toBeInTheDocument(),
     );
-    expect(await screen.findByText("Đã xoá công việc")).toBeInTheDocument();
+    expect(await screen.findByText('Đã xoá "Soạn đề kiểm tra giữa kỳ"')).toBeInTheDocument();
     const undoButton = screen.getByRole("button", { name: "Hoàn tác" });
 
     await user.click(undoButton);
@@ -280,6 +314,16 @@ describe("TaskFormModal quick due chips", () => {
     await user.click(within(dialog).getByRole("button", { name: "Hôm nay" }));
 
     expect(within(dialog).getByLabelText("Hạn")).toHaveValue("2026-09-18");
+  });
+
+  it("renders the chips as plain actions with no pressed state, even when Hạn is empty", async () => {
+    const user = userEvent.setup();
+    const { dialog } = await openTask(user, "Soạn đề kiểm tra giữa kỳ");
+    await user.clear(within(dialog).getByLabelText("Hạn"));
+
+    for (const name of ["Hôm nay", "Ngày mai", "Thứ 2 tới", "Bỏ hạn"]) {
+      expect(within(dialog).getByRole("button", { name })).not.toHaveAttribute("aria-pressed");
+    }
   });
 
   it("sets Hạn to next Monday from the Thứ 2 tới chip", async () => {
