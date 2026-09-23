@@ -171,6 +171,21 @@ var routePolicySnapshot = []RoutePolicy{
 	{Method: "GET", Path: "/api/v1/library/lessons/:lid", Kind: PolicyPermission, Key: "library.read"},
 	{Method: "PUT", Path: "/api/v1/library/lessons/:lid", Kind: PolicyPermission, Key: "library.edit"},
 	{Method: "DELETE", Path: "/api/v1/library/lessons/:lid", Kind: PolicyPermission, Key: "library.edit"},
+	{Method: "GET", Path: "/api/v1/library/versions/:vid", Kind: PolicyPermission, Key: "library.read"},
+	{Method: "PUT", Path: "/api/v1/library/versions/:vid/log-fields", Kind: PolicyPermission, Key: "library.edit"},
+	{Method: "PUT", Path: "/api/v1/library/versions/:vid/score-set", Kind: PolicyPermission, Key: "library.edit"},
+	{Method: "PUT", Path: "/api/v1/library/lessons/:lid/materials", Kind: PolicyPermission, Key: "library.edit"},
+	{Method: "PUT", Path: "/api/v1/library/lessons/:lid/exercises", Kind: PolicyPermission, Key: "library.edit"},
+	{Method: "GET", Path: "/api/v1/library/materials", Kind: PolicyPermission, Key: "library.read"},
+	{Method: "POST", Path: "/api/v1/library/materials", Kind: PolicyPermission, Key: "library.edit"},
+	{Method: "GET", Path: "/api/v1/library/materials/:id", Kind: PolicyPermission, Key: "library.read"},
+	{Method: "PUT", Path: "/api/v1/library/materials/:id", Kind: PolicyPermission, Key: "library.edit"},
+	{Method: "DELETE", Path: "/api/v1/library/materials/:id", Kind: PolicyPermission, Key: "library.edit"},
+	{Method: "GET", Path: "/api/v1/library/exercises", Kind: PolicyPermission, Key: "library.read"},
+	{Method: "POST", Path: "/api/v1/library/exercises", Kind: PolicyPermission, Key: "library.edit"},
+	{Method: "GET", Path: "/api/v1/library/exercises/:id", Kind: PolicyPermission, Key: "library.read"},
+	{Method: "PUT", Path: "/api/v1/library/exercises/:id", Kind: PolicyPermission, Key: "library.edit"},
+	{Method: "DELETE", Path: "/api/v1/library/exercises/:id", Kind: PolicyPermission, Key: "library.edit"},
 }
 
 // TestRoutePolicySnapshotUnchanged proves routePolicies still classifies

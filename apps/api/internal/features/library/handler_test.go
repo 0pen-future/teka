@@ -132,6 +132,21 @@ func TestAllRoutesRequireAuth(t *testing.T) {
 		{http.MethodGet, "/api/v1/library/lessons/" + someID},
 		{http.MethodPut, "/api/v1/library/lessons/" + someID},
 		{http.MethodDelete, "/api/v1/library/lessons/" + someID},
+		{http.MethodGet, "/api/v1/library/versions/" + someID},
+		{http.MethodPut, "/api/v1/library/versions/" + someID + "/log-fields"},
+		{http.MethodPut, "/api/v1/library/versions/" + someID + "/score-set"},
+		{http.MethodPut, "/api/v1/library/lessons/" + someID + "/materials"},
+		{http.MethodPut, "/api/v1/library/lessons/" + someID + "/exercises"},
+		{http.MethodGet, "/api/v1/library/materials"},
+		{http.MethodPost, "/api/v1/library/materials"},
+		{http.MethodGet, "/api/v1/library/materials/" + someID},
+		{http.MethodPut, "/api/v1/library/materials/" + someID},
+		{http.MethodDelete, "/api/v1/library/materials/" + someID},
+		{http.MethodGet, "/api/v1/library/exercises"},
+		{http.MethodPost, "/api/v1/library/exercises"},
+		{http.MethodGet, "/api/v1/library/exercises/" + someID},
+		{http.MethodPut, "/api/v1/library/exercises/" + someID},
+		{http.MethodDelete, "/api/v1/library/exercises/" + someID},
 	}
 	for _, route := range routes {
 		w, env := do(t, r, route.method, route.path, "", "")
@@ -317,5 +332,196 @@ func TestPermissionsOverHTTP(t *testing.T) {
 	w, env = do(t, r, http.MethodGet, "/api/v1/library/templates", "", stranger)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("member without library.read: got %d %+v", w.Code, env)
+	}
+}
+
+func TestItemsAndAttachmentsOverHTTP(t *testing.T) {
+	r, d := newHTTPTest(t)
+	owner := mintToken(t, d.owner)
+	reader := mintToken(t, d.reader)
+
+	w, env := do(t, r, http.MethodPost, "/api/v1/library/templates", `{"code":"ly-8","name":"Lý 8"}`, owner)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create template: %d %+v", w.Code, env)
+	}
+	tpl := decode[TemplateResponse](t, env)
+	_, env = do(t, r, http.MethodGet, "/api/v1/library/templates/"+tpl.ID.String()+"/versions", "", owner)
+	vid := decode[[]VersionResponse](t, env)[0].ID.String()
+	w, env = do(t, r, http.MethodPost, "/api/v1/library/versions/"+vid+"/lessons", `{"title":"Buổi 1"}`, owner)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create lesson: %d %+v", w.Code, env)
+	}
+	lid := decode[LessonResponse](t, env).ID.String()
+
+	// Materials and exercises: create, list with filter, update, get.
+	w, env = do(t, r, http.MethodPost, "/api/v1/library/materials",
+		`{"title":"Video Ôm","kind":"video","url":"https://example.com/om","tags":[" điện ","điện",""]}`, owner)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create material: %d %+v", w.Code, env)
+	}
+	mat := decode[MaterialResponse](t, env)
+	if len(mat.Tags) != 1 || mat.Tags[0] != "điện" {
+		t.Fatalf("tags must be cleaned, got %+v", mat.Tags)
+	}
+	w, env = do(t, r, http.MethodPost, "/api/v1/library/materials", `{"title":"Slide","kind":"doc"}`, owner)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create material 2: %d %+v", w.Code, env)
+	}
+	mat2 := decode[MaterialResponse](t, env)
+	w, env = do(t, r, http.MethodGet, "/api/v1/library/materials?q=video&sort=-created_at", "", reader)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list materials: %d %+v", w.Code, env)
+	}
+	if list := decode[[]MaterialResponse](t, env); len(list) != 1 || list[0].ID != mat.ID {
+		t.Fatalf("filtered list %+v", list)
+	}
+	w, env = do(t, r, http.MethodPut, "/api/v1/library/materials/"+mat.ID.String(),
+		`{"title":"Video định luật Ôm","kind":"video","url":"https://example.com/om"}`, owner)
+	if w.Code != http.StatusOK || decode[MaterialResponse](t, env).Title != "Video định luật Ôm" {
+		t.Fatalf("update material: %d %+v", w.Code, env)
+	}
+	w, env = do(t, r, http.MethodGet, "/api/v1/library/materials/"+mat.ID.String(), "", reader)
+	if w.Code != http.StatusOK || decode[MaterialResponse](t, env).Tags == nil {
+		t.Fatalf("get material: %d %+v", w.Code, env)
+	}
+
+	w, env = do(t, r, http.MethodPost, "/api/v1/library/exercises", `{"title":"Bài tập 1","difficulty":3}`, owner)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create exercise: %d %+v", w.Code, env)
+	}
+	ex := decode[ExerciseResponse](t, env)
+	w, env = do(t, r, http.MethodGet, "/api/v1/library/exercises", "", reader)
+	if w.Code != http.StatusOK || len(decode[[]ExerciseResponse](t, env)) != 1 {
+		t.Fatalf("list exercises: %d %+v", w.Code, env)
+	}
+	w, env = do(t, r, http.MethodPut, "/api/v1/library/exercises/"+ex.ID.String(), `{"title":"Bài tập 1","difficulty":5}`, owner)
+	if w.Code != http.StatusOK || *decode[ExerciseResponse](t, env).Difficulty != 5 {
+		t.Fatalf("update exercise: %d %+v", w.Code, env)
+	}
+	w, env = do(t, r, http.MethodGet, "/api/v1/library/exercises/"+ex.ID.String(), "", reader)
+	if w.Code != http.StatusOK {
+		t.Fatalf("get exercise: %d %+v", w.Code, env)
+	}
+
+	// Attach as bare arrays; lesson detail exposes the links.
+	w, env = do(t, r, http.MethodPut, "/api/v1/library/lessons/"+lid+"/materials",
+		`[{"material_id":"`+mat2.ID.String()+`","shared_with_students":true},{"material_id":"`+mat.ID.String()+`"}]`, owner)
+	if w.Code != http.StatusOK {
+		t.Fatalf("set materials: %d %+v", w.Code, env)
+	}
+	links := decode[[]LessonMaterialResponse](t, env)
+	if len(links) != 2 || links[0].ID != mat2.ID || !links[0].SharedWithStudents || links[1].Position != 2 {
+		t.Fatalf("material links %+v", links)
+	}
+	w, env = do(t, r, http.MethodPut, "/api/v1/library/lessons/"+lid+"/exercises",
+		`[{"exercise_id":"`+ex.ID.String()+`"}]`, owner)
+	if w.Code != http.StatusOK || len(decode[[]LessonExerciseResponse](t, env)) != 1 {
+		t.Fatalf("set exercises: %d %+v", w.Code, env)
+	}
+	w, env = do(t, r, http.MethodGet, "/api/v1/library/lessons/"+lid, "", reader)
+	if w.Code != http.StatusOK {
+		t.Fatalf("get lesson: %d %+v", w.Code, env)
+	}
+	if detail := decode[LessonDetailResponse](t, env); len(detail.Materials) != 2 || len(detail.Exercises) != 1 {
+		t.Fatalf("lesson detail %+v", detail)
+	}
+
+	// Linked items cannot be deleted; unlink then delete works.
+	w, env = do(t, r, http.MethodDelete, "/api/v1/library/materials/"+mat.ID.String(), "", owner)
+	if w.Code != http.StatusConflict || env.Error == nil || env.Error.Code != CodeMaterialInUse {
+		t.Fatalf("delete linked material: %d %+v", w.Code, env)
+	}
+	w, env = do(t, r, http.MethodDelete, "/api/v1/library/exercises/"+ex.ID.String(), "", owner)
+	if w.Code != http.StatusConflict || env.Error == nil || env.Error.Code != CodeExerciseInUse {
+		t.Fatalf("delete linked exercise: %d %+v", w.Code, env)
+	}
+	w, env = do(t, r, http.MethodPut, "/api/v1/library/lessons/"+lid+"/exercises", `[]`, owner)
+	if w.Code != http.StatusOK || len(decode[[]LessonExerciseResponse](t, env)) != 0 {
+		t.Fatalf("clear exercises: %d %+v", w.Code, env)
+	}
+	w, env = do(t, r, http.MethodDelete, "/api/v1/library/exercises/"+ex.ID.String(), "", owner)
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete exercise: %d %+v", w.Code, env)
+	}
+	w, env = do(t, r, http.MethodGet, "/api/v1/library/exercises/"+ex.ID.String(), "", owner)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("deleted exercise must be 404: %d %+v", w.Code, env)
+	}
+
+	// Log fields and score set on the version, surfaced by the version detail.
+	w, env = do(t, r, http.MethodPut, "/api/v1/library/versions/"+vid+"/log-fields",
+		`[{"label":"Mức độ hiểu bài","kind":"select","options":["Tốt","Khá"],"required":true},{"label":"Ghi chú","kind":"text","options":["bỏ"]}]`, owner)
+	if w.Code != http.StatusOK {
+		t.Fatalf("set log fields: %d %+v", w.Code, env)
+	}
+	fields := decode[[]LogFieldResponse](t, env)
+	if len(fields) != 2 || fields[0].Position != 1 || len(fields[0].Options) != 2 || len(fields[1].Options) != 0 {
+		t.Fatalf("log fields %+v", fields)
+	}
+	w, env = do(t, r, http.MethodPut, "/api/v1/library/versions/"+vid+"/score-set",
+		`[{"key":"mid","label":"Giữa kỳ","max":10,"weight":0.4},{"key":"final","label":"Cuối kỳ","max":10,"weight":0.6}]`, owner)
+	if w.Code != http.StatusOK || len(decode[[]ScoreComponent](t, env)) != 2 {
+		t.Fatalf("set score set: %d %+v", w.Code, env)
+	}
+	w, env = do(t, r, http.MethodGet, "/api/v1/library/versions/"+vid, "", reader)
+	if w.Code != http.StatusOK {
+		t.Fatalf("get version: %d %+v", w.Code, env)
+	}
+	version := decode[VersionDetailResponse](t, env)
+	if len(version.ScoreSet) != 2 || len(version.LogFields) != 2 || len(version.Lessons) != 1 || len(version.Lessons[0].Materials) != 2 {
+		t.Fatalf("version detail %+v", version)
+	}
+
+	// Readers cannot write anything new.
+	for _, tc := range []struct{ method, path, body string }{
+		{http.MethodPost, "/api/v1/library/materials", `{"title":"x","kind":"link"}`},
+		{http.MethodPut, "/api/v1/library/lessons/" + lid + "/materials", `[]`},
+		{http.MethodPut, "/api/v1/library/versions/" + vid + "/log-fields", `[]`},
+		{http.MethodPut, "/api/v1/library/versions/" + vid + "/score-set", `[]`},
+		{http.MethodDelete, "/api/v1/library/materials/" + mat2.ID.String(), ""},
+	} {
+		if w, env := do(t, r, tc.method, tc.path, tc.body, reader); w.Code != http.StatusForbidden {
+			t.Fatalf("%s %s: reader must get 403, got %d %+v", tc.method, tc.path, w.Code, env)
+		}
+	}
+}
+
+func TestItemValidationOverHTTP(t *testing.T) {
+	r, d := newHTTPTest(t)
+	owner := mintToken(t, d.owner)
+	someID := uuid.NewString()
+
+	cases := []struct {
+		name, method, path, body string
+		status                   int
+		code                     string
+	}{
+		{"material without kind", http.MethodPost, "/api/v1/library/materials", `{"title":"x"}`, http.StatusUnprocessableEntity, apperror.CodeValidation},
+		{"material bad kind", http.MethodPost, "/api/v1/library/materials", `{"title":"x","kind":"pdf"}`, http.StatusUnprocessableEntity, apperror.CodeValidation},
+		{"material script url", http.MethodPost, "/api/v1/library/materials", `{"title":"x","kind":"link","url":"javascript:alert(1)"}`, http.StatusUnprocessableEntity, apperror.CodeValidation},
+		{"exercise difficulty out of range", http.MethodPost, "/api/v1/library/exercises", `{"title":"x","difficulty":6}`, http.StatusUnprocessableEntity, apperror.CodeValidation},
+		{"materials body not an array", http.MethodPut, "/api/v1/library/lessons/" + someID + "/materials", `{"material_id":"` + someID + `"}`, http.StatusBadRequest, apperror.CodeBadRequest},
+		{"materials element without id", http.MethodPut, "/api/v1/library/lessons/" + someID + "/materials", `[{"shared_with_students":true}]`, http.StatusUnprocessableEntity, apperror.CodeValidation},
+		{"log field bad kind", http.MethodPut, "/api/v1/library/versions/" + someID + "/log-fields", `[{"label":"x","kind":"date"}]`, http.StatusUnprocessableEntity, apperror.CodeValidation},
+		{"select without options", http.MethodPut, "/api/v1/library/versions/" + someID + "/log-fields", `[{"label":"x","kind":"select"}]`, http.StatusUnprocessableEntity, apperror.CodeValidation},
+		{"score component without max", http.MethodPut, "/api/v1/library/versions/" + someID + "/score-set", `[{"key":"a","label":"A"}]`, http.StatusUnprocessableEntity, apperror.CodeValidation},
+		{"score key with spaces", http.MethodPut, "/api/v1/library/versions/" + someID + "/score-set", `[{"key":"giữa kỳ","label":"A","max":10}]`, http.StatusUnprocessableEntity, apperror.CodeValidation},
+		{"unknown version detail", http.MethodGet, "/api/v1/library/versions/" + someID, "", http.StatusNotFound, apperror.CodeNotFound},
+		{"malformed material id", http.MethodGet, "/api/v1/library/materials/nope", "", http.StatusNotFound, apperror.CodeNotFound},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w, env := do(t, r, tc.method, tc.path, tc.body, owner)
+			if w.Code != tc.status || env.Error == nil || env.Error.Code != tc.code {
+				t.Fatalf("want %d %s, got %d %+v", tc.status, tc.code, w.Code, env)
+			}
+		})
+	}
+
+	// Element failures name the row so an editor can highlight it.
+	_, env := do(t, r, http.MethodPut, "/api/v1/library/versions/"+someID+"/log-fields",
+		`[{"label":"ok","kind":"text"},{"label":"","kind":"date"}]`, owner)
+	if env.Error == nil || env.Error.Fields["1.label"] == "" || env.Error.Fields["1.kind"] == "" || env.Error.Fields["0.label"] != "" {
+		t.Fatalf("want indexed field errors, got %+v", env.Error)
 	}
 }

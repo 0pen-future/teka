@@ -405,3 +405,285 @@ func TestConcurrentLessonWritesKeepPositionsContiguous(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, writers+1, next.Position)
 }
+
+func (f fixture) material(t *testing.T, sc authctx.Scope, title string) *library.MaterialResponse {
+	t.Helper()
+	url := "https://example.com/" + title
+	out, err := f.svc.CreateMaterial(context.Background(), sc, library.MaterialRequest{Title: title, Kind: library.MaterialKindLink, URL: &url})
+	require.NoError(t, err)
+	return out
+}
+
+func (f fixture) exercise(t *testing.T, sc authctx.Scope, title string) *library.ExerciseResponse {
+	t.Helper()
+	out, err := f.svc.CreateExercise(context.Background(), sc, library.ExerciseRequest{Title: title})
+	require.NoError(t, err)
+	return out
+}
+
+func materialInputs(ids ...uuid.UUID) []library.LessonMaterialInput {
+	out := make([]library.LessonMaterialInput, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, library.LessonMaterialInput{MaterialID: id})
+	}
+	return out
+}
+
+func TestLessonAttachmentsAreReplacedAndBlockDeletes(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	tpl := f.template(t, f.owner, "HOA-9")
+	v1 := f.draft(t, f.owner, tpl.ID)
+	lesson := f.lesson(t, f.owner, v1.ID, "Buổi 1")
+	m1 := f.material(t, f.owner, "Slide")
+	m2 := f.material(t, f.owner, "Video")
+	ex := f.exercise(t, f.owner, "Bài 1")
+
+	links, err := f.svc.SetLessonMaterials(ctx, f.owner, lesson.ID, []library.LessonMaterialInput{
+		{MaterialID: m2.ID, SharedWithStudents: true}, {MaterialID: m1.ID},
+	})
+	require.NoError(t, err)
+	require.Len(t, links, 2)
+	require.Equal(t, m2.ID, links[0].ID)
+	require.True(t, links[0].SharedWithStudents)
+	require.Equal(t, 2, links[1].Position)
+
+	// Idempotent: the same body again yields the same rows, no duplicate key.
+	again, err := f.svc.SetLessonMaterials(ctx, f.owner, lesson.ID, []library.LessonMaterialInput{
+		{MaterialID: m2.ID, SharedWithStudents: true}, {MaterialID: m1.ID},
+	})
+	require.NoError(t, err)
+	require.Equal(t, links, again)
+
+	// Reorder and drop one; positions are renumbered from 1.
+	links, err = f.svc.SetLessonMaterials(ctx, f.owner, lesson.ID, materialInputs(m1.ID))
+	require.NoError(t, err)
+	require.Len(t, links, 1)
+	require.Equal(t, m1.ID, links[0].ID)
+	require.Equal(t, 1, links[0].Position)
+	require.False(t, links[0].SharedWithStudents)
+
+	exLinks, err := f.svc.SetLessonExercises(ctx, f.owner, lesson.ID, []library.LessonExerciseInput{{ExerciseID: ex.ID}})
+	require.NoError(t, err)
+	require.Len(t, exLinks, 1)
+
+	detail, err := f.svc.GetLesson(ctx, f.owner, lesson.ID)
+	require.NoError(t, err)
+	require.Len(t, detail.Materials, 1)
+	require.Len(t, detail.Exercises, 1)
+
+	// Linked items stay put; a free one goes.
+	requireStatus(t, f.svc.DeleteMaterial(ctx, f.owner, m1.ID), http.StatusConflict, library.CodeMaterialInUse)
+	requireStatus(t, f.svc.DeleteExercise(ctx, f.owner, ex.ID), http.StatusConflict, library.CodeExerciseInUse)
+	require.NoError(t, f.svc.DeleteMaterial(ctx, f.owner, m2.ID))
+	_, err = f.svc.GetMaterial(ctx, f.owner, m2.ID)
+	requireStatus(t, err, http.StatusNotFound, "")
+	rows, total, err := f.svc.ListMaterials(ctx, f.owner, library.ListFilter{}, pagination.Params{Page: 1, PerPage: 20})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Equal(t, m1.ID, rows[0].ID)
+
+	// A soft-deleted material is no longer attachable.
+	_, err = f.svc.SetLessonMaterials(ctx, f.owner, lesson.ID, materialInputs(m1.ID, m2.ID))
+	requireStatus(t, err, http.StatusUnprocessableEntity, apperror.CodeValidation)
+}
+
+func TestAttachmentsRespectCenterAndVersionLock(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	tpl := f.template(t, f.owner, "SU-7")
+	v1 := f.draft(t, f.owner, tpl.ID)
+	lesson := f.lesson(t, f.owner, v1.ID, "Buổi 1")
+	mine := f.material(t, f.owner, "Của tôi")
+	theirs := f.material(t, f.outsider, "Của họ")
+	theirEx := f.exercise(t, f.outsider, "Bài của họ")
+
+	_, err := f.svc.SetLessonMaterials(ctx, f.owner, lesson.ID, materialInputs(mine.ID, theirs.ID))
+	requireStatus(t, err, http.StatusUnprocessableEntity, apperror.CodeValidation)
+	_, err = f.svc.SetLessonExercises(ctx, f.owner, lesson.ID, []library.LessonExerciseInput{{ExerciseID: theirEx.ID}})
+	requireStatus(t, err, http.StatusUnprocessableEntity, apperror.CodeValidation)
+	_, err = f.svc.GetMaterial(ctx, f.owner, theirs.ID)
+	requireStatus(t, err, http.StatusNotFound, "")
+	_, err = f.svc.SetLessonMaterials(ctx, f.outsider, lesson.ID, materialInputs(theirs.ID))
+	requireStatus(t, err, http.StatusNotFound, "")
+
+	_, err = f.svc.SetLessonMaterials(ctx, f.owner, lesson.ID, materialInputs(mine.ID))
+	require.NoError(t, err)
+	fields, err := f.svc.SetLogFields(ctx, f.owner, v1.ID, []library.LogFieldInput{
+		{Label: "Hiểu bài", Kind: library.LogFieldSelect, Options: []string{"Tốt", " Khá ", "Tốt"}, Required: true},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"Tốt", "Khá"}, []string(fields[0].Options))
+	set, err := f.svc.SetScoreSet(ctx, f.owner, v1.ID, []library.ScoreComponentInput{{Key: "final", Label: "Cuối kỳ", Max: 10, Weight: 1}})
+	require.NoError(t, err)
+	require.Len(t, set, 1)
+
+	_, err = f.svc.Publish(ctx, f.owner, v1.ID)
+	require.NoError(t, err)
+	_, err = f.svc.SetLessonMaterials(ctx, f.owner, lesson.ID, materialInputs(mine.ID))
+	requireStatus(t, err, http.StatusConflict, library.CodeVersionLocked)
+	_, err = f.svc.SetLessonExercises(ctx, f.owner, lesson.ID, nil)
+	requireStatus(t, err, http.StatusConflict, library.CodeVersionLocked)
+	_, err = f.svc.SetLogFields(ctx, f.owner, v1.ID, nil)
+	requireStatus(t, err, http.StatusConflict, library.CodeVersionLocked)
+	_, err = f.svc.SetScoreSet(ctx, f.owner, v1.ID, nil)
+	requireStatus(t, err, http.StatusConflict, library.CodeVersionLocked)
+	// Still linked by the published version, so the material cannot go.
+	requireStatus(t, f.svc.DeleteMaterial(ctx, f.owner, mine.ID), http.StatusConflict, library.CodeMaterialInUse)
+
+	// The new draft inherits attachments, log fields and score set as its own rows.
+	v2, err := f.svc.CreateVersion(ctx, f.owner, tpl.ID, library.CreateVersionRequest{})
+	require.NoError(t, err)
+	detail, err := f.svc.GetVersion(ctx, f.owner, v2.ID)
+	require.NoError(t, err)
+	require.Len(t, detail.Lessons, 1)
+	require.Len(t, detail.Lessons[0].Materials, 1)
+	require.Equal(t, mine.ID, detail.Lessons[0].Materials[0].ID)
+	require.Len(t, detail.LogFields, 1)
+	require.NotEqual(t, fields[0].ID, detail.LogFields[0].ID)
+	require.Equal(t, set, detail.ScoreSet)
+
+	published, err := f.svc.GetVersion(ctx, f.owner, v1.ID)
+	require.NoError(t, err)
+	require.Len(t, published.LogFields, 1)
+	require.Equal(t, set, published.ScoreSet)
+	_, err = f.svc.GetVersion(ctx, f.outsider, v1.ID)
+	requireStatus(t, err, http.StatusNotFound, "")
+}
+
+// lockMaterialRow opens a transaction that holds the material's row the way
+// an in-flight write does, runs prepare inside it, and returns the commit.
+func lockMaterialRow(t *testing.T, db *gorm.DB, materialID uuid.UUID, strength string, prepare func(tx *gorm.DB)) func() {
+	t.Helper()
+	tx := db.Begin()
+	require.NoError(t, tx.Error)
+	require.NoError(t, tx.Exec(`SELECT 1 FROM library_materials WHERE id = ? FOR `+strength, materialID).Error)
+	prepare(tx)
+	return func() { require.NoError(t, tx.Commit().Error) }
+}
+
+func TestDeleteAndAttachSerialiseOnTheItemRow(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	tpl := f.template(t, f.owner, "HOA-9")
+	v1 := f.draft(t, f.owner, tpl.ID)
+	lesson := f.lesson(t, f.owner, v1.ID, "Buổi 1")
+	m := f.material(t, f.owner, "Slide")
+
+	// An attach in flight has read the material (shared lock) and written
+	// the link; the delete that arrives meanwhile waits, then sees the link.
+	release := lockMaterialRow(t, f.db, m.ID, "SHARE", func(tx *gorm.DB) {
+		require.NoError(t, tx.Exec(`
+			INSERT INTO template_lesson_materials (lesson_id, material_id, center_id, shared_with_students, position)
+			VALUES (?, ?, ?, FALSE, 1)`, lesson.ID, m.ID, f.owner.CenterID).Error)
+	})
+	done := make(chan error, 1)
+	go func() { done <- f.svc.DeleteMaterial(ctx, f.owner, m.ID) }()
+	select {
+	case err := <-done:
+		t.Fatalf("delete must wait for the attach, returned %v", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	release()
+	requireStatus(t, <-done, http.StatusConflict, library.CodeMaterialInUse)
+	detail, err := f.svc.GetLesson(ctx, f.owner, lesson.ID)
+	require.NoError(t, err)
+	require.Len(t, detail.Materials, 1)
+
+	// The mirror image: a delete in flight holds the row; the attach that
+	// arrives meanwhile waits and then finds no live material.
+	m2 := f.material(t, f.owner, "Video")
+	release = lockMaterialRow(t, f.db, m2.ID, "UPDATE", func(tx *gorm.DB) {
+		require.NoError(t, tx.Exec(`UPDATE library_materials SET deleted_at = now() WHERE id = ?`, m2.ID).Error)
+	})
+	attached := make(chan error, 1)
+	go func() {
+		_, err := f.svc.SetLessonMaterials(ctx, f.owner, lesson.ID, materialInputs(m.ID, m2.ID))
+		attached <- err
+	}()
+	select {
+	case err := <-attached:
+		t.Fatalf("attach must wait for the delete, returned %v", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	release()
+	requireStatus(t, <-attached, http.StatusUnprocessableEntity, apperror.CodeValidation)
+	detail, err = f.svc.GetLesson(ctx, f.owner, lesson.ID)
+	require.NoError(t, err)
+	require.Len(t, detail.Materials, 1)
+	require.Equal(t, m.ID, detail.Materials[0].ID)
+}
+
+func TestLinksOfDeletedTemplatesDoNotBlockItemDeletes(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	tpl := f.template(t, f.owner, "HOA-9")
+	v1 := f.draft(t, f.owner, tpl.ID)
+	lesson := f.lesson(t, f.owner, v1.ID, "Buổi 1")
+	m := f.material(t, f.owner, "Slide")
+	ex := f.exercise(t, f.owner, "Bài 1")
+	_, err := f.svc.SetLessonMaterials(ctx, f.owner, lesson.ID, materialInputs(m.ID))
+	require.NoError(t, err)
+	_, err = f.svc.SetLessonExercises(ctx, f.owner, lesson.ID, []library.LessonExerciseInput{{ExerciseID: ex.ID}})
+	require.NoError(t, err)
+
+	err = f.svc.DeleteMaterial(ctx, f.owner, m.ID)
+	requireStatus(t, err, http.StatusConflict, library.CodeMaterialInUse)
+	require.Contains(t, err.Error(), "gỡ khỏi")
+
+	_, err = f.svc.Publish(ctx, f.owner, v1.ID)
+	require.NoError(t, err)
+	err = f.svc.DeleteMaterial(ctx, f.owner, m.ID)
+	requireStatus(t, err, http.StatusConflict, library.CodeMaterialInUse)
+	require.Contains(t, err.Error(), "đã phát hành")
+	err = f.svc.DeleteExercise(ctx, f.owner, ex.ID)
+	requireStatus(t, err, http.StatusConflict, library.CodeExerciseInUse)
+	require.Contains(t, err.Error(), "đã phát hành")
+
+	// A second, live template keeps its own hold on the item.
+	other := f.template(t, f.owner, "HOA-10")
+	v2 := f.draft(t, f.owner, other.ID)
+	otherLesson := f.lesson(t, f.owner, v2.ID, "Buổi 1")
+	_, err = f.svc.SetLessonMaterials(ctx, f.owner, otherLesson.ID, materialInputs(m.ID))
+	require.NoError(t, err)
+
+	require.NoError(t, f.svc.DeleteTemplate(ctx, f.owner, tpl.ID))
+	err = f.svc.DeleteMaterial(ctx, f.owner, m.ID)
+	requireStatus(t, err, http.StatusConflict, library.CodeMaterialInUse)
+	require.Contains(t, err.Error(), "gỡ khỏi")
+	require.NoError(t, f.svc.DeleteExercise(ctx, f.owner, ex.ID))
+
+	require.NoError(t, f.svc.DeleteTemplate(ctx, f.owner, other.ID))
+	require.NoError(t, f.svc.DeleteMaterial(ctx, f.owner, m.ID))
+	_, err = f.svc.GetMaterial(ctx, f.owner, m.ID)
+	requireStatus(t, err, http.StatusNotFound, "")
+}
+
+func TestAttachToLessonDeletedMeanwhileIsNotFound(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	tpl := f.template(t, f.owner, "HOA-9")
+	v1 := f.draft(t, f.owner, tpl.ID)
+	lesson := f.lesson(t, f.owner, v1.ID, "Buổi 1")
+	m := f.material(t, f.owner, "Slide")
+
+	// A lesson delete in flight holds the version row; the attach that
+	// resolved the lesson before the lock must not insert a dangling link.
+	tx := f.db.Begin()
+	require.NoError(t, tx.Error)
+	require.NoError(t, tx.Exec(`SELECT 1 FROM program_template_versions WHERE id = ? FOR UPDATE`, v1.ID).Error)
+	require.NoError(t, tx.Exec(`DELETE FROM template_lessons WHERE id = ?`, lesson.ID).Error)
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.svc.SetLessonMaterials(ctx, f.owner, lesson.ID, materialInputs(m.ID))
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("attach must wait for the version lock, returned %v", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	require.NoError(t, tx.Commit().Error)
+	requireStatus(t, <-done, http.StatusNotFound, "")
+	require.NoError(t, f.svc.DeleteMaterial(ctx, f.owner, m.ID))
+}

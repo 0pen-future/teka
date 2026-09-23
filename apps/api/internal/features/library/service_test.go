@@ -22,15 +22,27 @@ type fakeRepo struct {
 	templates map[uuid.UUID]*Template
 	versions  map[uuid.UUID]*Version
 	lessons   map[uuid.UUID]*Lesson
+	materials map[uuid.UUID]*Material
+	exercises map[uuid.UUID]*Exercise
+	// lessonMaterials and lessonExercises are keyed by lesson id,
+	// logFields by version id; each list is kept in position order.
+	lessonMaterials map[uuid.UUID][]LessonMaterial
+	lessonExercises map[uuid.UUID][]LessonExercise
+	logFields       map[uuid.UUID][]LogField
 	// locks counts LockVersion calls so tests can assert a write took the lock.
 	locks int
 }
 
 func newFakeRepo() *fakeRepo {
 	return &fakeRepo{
-		templates: map[uuid.UUID]*Template{},
-		versions:  map[uuid.UUID]*Version{},
-		lessons:   map[uuid.UUID]*Lesson{},
+		templates:       map[uuid.UUID]*Template{},
+		versions:        map[uuid.UUID]*Version{},
+		lessons:         map[uuid.UUID]*Lesson{},
+		materials:       map[uuid.UUID]*Material{},
+		exercises:       map[uuid.UUID]*Exercise{},
+		lessonMaterials: map[uuid.UUID][]LessonMaterial{},
+		lessonExercises: map[uuid.UUID][]LessonExercise{},
+		logFields:       map[uuid.UUID][]LogField{},
 	}
 }
 
@@ -317,6 +329,16 @@ func (d *testDeps) memberWith(keys ...string) authctx.Scope {
 
 func requireAppError(t *testing.T, err error, status int, code string) {
 	t.Helper()
+	appErr := appErrorOf(t, err, status)
+	if code != "" && appErr.Code != code {
+		t.Fatalf("want code %s, got %s", code, appErr.Code)
+	}
+}
+
+// appErrorOf asserts the status and hands the error back so a test can inspect
+// its details.
+func appErrorOf(t *testing.T, err error, status int) *apperror.AppError {
+	t.Helper()
 	var appErr *apperror.AppError
 	if !errors.As(err, &appErr) {
 		t.Fatalf("want *apperror.AppError with status %d, got %v", status, err)
@@ -324,9 +346,7 @@ func requireAppError(t *testing.T, err error, status int, code string) {
 	if appErr.Status != status {
 		t.Fatalf("want status %d, got %d (%s: %s)", status, appErr.Status, appErr.Code, appErr.Message)
 	}
-	if code != "" && appErr.Code != code {
-		t.Fatalf("want code %s, got %s", code, appErr.Code)
-	}
+	return appErr
 }
 
 func str(s string) *string { return &s }

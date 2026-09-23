@@ -2,10 +2,12 @@ package library
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"github.com/google/uuid"
 
 	"teka/apps/api/internal/shared/apperror"
@@ -450,7 +452,7 @@ func (h *Handler) reorderLessons(c *gin.Context) {
 //	@Tags			library
 //	@Produce		json
 //	@Param			lid	path		string	true	"lesson id"
-//	@Success		200	{object}	response.Envelope{data=LessonResponse}
+//	@Success		200	{object}	response.Envelope{data=LessonDetailResponse}
 //	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
 //	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}
 //	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}
@@ -482,7 +484,7 @@ func (h *Handler) getLesson(c *gin.Context) {
 //	@Produce		json
 //	@Param			lid		path		string			true	"lesson id"
 //	@Param			body	body		LessonRequest	true	"lesson"
-//	@Success		200		{object}	response.Envelope{data=LessonResponse}
+//	@Success		200		{object}	response.Envelope{data=LessonDetailResponse}
 //	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
 //	@Failure		403		{object}	response.Envelope{error=response.ErrorBody}
 //	@Failure		404		{object}	response.Envelope{error=response.ErrorBody}
@@ -536,6 +538,528 @@ func (h *Handler) deleteLesson(c *gin.Context) {
 		return
 	}
 	if err := h.svc.DeleteLesson(c.Request.Context(), sc, lid); err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, gin.H{"deleted": true})
+}
+
+// bindArray decodes a bare JSON array body. Element validation failures are
+// reported as 422 keyed by "<index>.<field>", matching the keys the service
+// uses for its own per-row checks; anything else is a 400.
+func bindArray[T any](c *gin.Context) ([]T, bool) {
+	var items []T
+	if err := c.ShouldBindJSON(&items); err != nil {
+		var elementErrs binding.SliceValidationError
+		if appErr := validation.Elements(items); errors.As(err, &elementErrs) && appErr != nil {
+			response.Err(c, appErr)
+		} else {
+			response.Err(c, validation.BindError(err))
+		}
+		return nil, false
+	}
+	return items, true
+}
+
+// itemSorts whitelists the public sort keys for the material and exercise
+// lists; both tables share the column names.
+var itemSorts = map[string]string{
+	"title":      "title",
+	"created_at": "created_at",
+}
+
+// getVersion returns a version with everything a class would inherit.
+//
+//	@Summary		Get a template version
+//	@Description	The version with its score set, log fields and lessons, each lesson with its attached materials and exercises.
+//	@Tags			library
+//	@Produce		json
+//	@Param			vid	path		string	true	"version id"
+//	@Success		200	{object}	response.Envelope{data=VersionDetailResponse}
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/library/versions/{vid} [get]
+func (h *Handler) getVersion(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	vid, ok := pathID(c, "vid", "template version")
+	if !ok {
+		return
+	}
+	out, err := h.svc.GetVersion(c.Request.Context(), sc, vid)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, out)
+}
+
+// setLogFields replaces a version's session-log fields.
+//
+//	@Summary		Replace the log fields of a version
+//	@Description	Wholesale replace, body order is the position. A select field needs at least one option. 409 VERSION_LOCKED unless the version is a draft.
+//	@Tags			library
+//	@Accept			json
+//	@Produce		json
+//	@Param			vid		path		string			true	"version id"
+//	@Param			body	body		[]LogFieldInput	true	"log fields; [] clears"
+//	@Success		200		{object}	response.Envelope{data=[]LogFieldResponse}
+//	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		409		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/library/versions/{vid}/log-fields [put]
+func (h *Handler) setLogFields(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	vid, ok := pathID(c, "vid", "template version")
+	if !ok {
+		return
+	}
+	items, ok := bindArray[LogFieldInput](c)
+	if !ok {
+		return
+	}
+	out, err := h.svc.SetLogFields(c.Request.Context(), sc, vid, items)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, out)
+}
+
+// setScoreSet replaces a version's score components.
+//
+//	@Summary		Replace the score set of a version
+//	@Description	Wholesale replace. Keys are lowercase identifiers unique within the set; max must be positive. 409 VERSION_LOCKED unless the version is a draft.
+//	@Tags			library
+//	@Accept			json
+//	@Produce		json
+//	@Param			vid		path		string					true	"version id"
+//	@Param			body	body		[]ScoreComponentInput	true	"score components; [] clears"
+//	@Success		200		{object}	response.Envelope{data=[]ScoreComponent}
+//	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		409		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/library/versions/{vid}/score-set [put]
+func (h *Handler) setScoreSet(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	vid, ok := pathID(c, "vid", "template version")
+	if !ok {
+		return
+	}
+	items, ok := bindArray[ScoreComponentInput](c)
+	if !ok {
+		return
+	}
+	out, err := h.svc.SetScoreSet(c.Request.Context(), sc, vid, items)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, out)
+}
+
+// setLessonMaterials replaces the materials attached to a lesson.
+//
+//	@Summary		Replace the materials of a template lesson
+//	@Description	Wholesale replace, body order is the display order. Every id must be a live material of the center. 409 VERSION_LOCKED unless the lesson's version is a draft.
+//	@Tags			library
+//	@Accept			json
+//	@Produce		json
+//	@Param			lid		path		string					true	"lesson id"
+//	@Param			body	body		[]LessonMaterialInput	true	"materials; [] clears"
+//	@Success		200		{object}	response.Envelope{data=[]LessonMaterialResponse}
+//	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		409		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/library/lessons/{lid}/materials [put]
+func (h *Handler) setLessonMaterials(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	lid, ok := pathID(c, "lid", "template lesson")
+	if !ok {
+		return
+	}
+	items, ok := bindArray[LessonMaterialInput](c)
+	if !ok {
+		return
+	}
+	out, err := h.svc.SetLessonMaterials(c.Request.Context(), sc, lid, items)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, out)
+}
+
+// setLessonExercises replaces the exercises attached to a lesson.
+//
+//	@Summary		Replace the exercises of a template lesson
+//	@Description	Wholesale replace, body order is the display order. Every id must be a live exercise of the center. 409 VERSION_LOCKED unless the lesson's version is a draft.
+//	@Tags			library
+//	@Accept			json
+//	@Produce		json
+//	@Param			lid		path		string					true	"lesson id"
+//	@Param			body	body		[]LessonExerciseInput	true	"exercises; [] clears"
+//	@Success		200		{object}	response.Envelope{data=[]LessonExerciseResponse}
+//	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		409		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/library/lessons/{lid}/exercises [put]
+func (h *Handler) setLessonExercises(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	lid, ok := pathID(c, "lid", "template lesson")
+	if !ok {
+		return
+	}
+	items, ok := bindArray[LessonExerciseInput](c)
+	if !ok {
+		return
+	}
+	out, err := h.svc.SetLessonExercises(c.Request.Context(), sc, lid, items)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, out)
+}
+
+// listMaterials pages the center's materials.
+//
+//	@Summary		List library materials
+//	@Description	Live materials of the caller's center. q matches the title.
+//	@Tags			library
+//	@Produce		json
+//	@Param			q			query		string	false	"title fragment"
+//	@Param			page		query		int		false	"page (default 1)"
+//	@Param			per_page	query		int		false	"page size (default 20, max 100)"
+//	@Param			sort		query		string	false	"title | created_at, prefix - for descending"
+//	@Success		200			{object}	response.Envelope{data=[]MaterialResponse,meta=response.Meta}
+//	@Failure		401			{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403			{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/library/materials [get]
+func (h *Handler) listMaterials(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	params := pagination.Parse(c, "title", itemSorts)
+	filter := ListFilter{Q: strings.TrimSpace(c.Query("q"))}
+	rows, total, err := h.svc.ListMaterials(c.Request.Context(), sc, filter, params)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.List(c, rows, params.Meta(total))
+}
+
+// createMaterial adds a material.
+//
+//	@Summary		Create a library material
+//	@Tags			library
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body		MaterialRequest	true	"material"
+//	@Success		201		{object}	response.Envelope{data=MaterialResponse}
+//	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/library/materials [post]
+func (h *Handler) createMaterial(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	var req MaterialRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Err(c, validation.BindError(err))
+		return
+	}
+	out, err := h.svc.CreateMaterial(c.Request.Context(), sc, req)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusCreated, out)
+}
+
+// getMaterial returns one material.
+//
+//	@Summary		Get a library material
+//	@Tags			library
+//	@Produce		json
+//	@Param			id	path		string	true	"material id"
+//	@Success		200	{object}	response.Envelope{data=MaterialResponse}
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/library/materials/{id} [get]
+func (h *Handler) getMaterial(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	id, ok := pathID(c, "id", "library material")
+	if !ok {
+		return
+	}
+	out, err := h.svc.GetMaterial(c.Request.Context(), sc, id)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, out)
+}
+
+// updateMaterial replaces a material's fields.
+//
+//	@Summary		Update a library material
+//	@Description	Replaces every field. Lessons linking the material see the change at once.
+//	@Tags			library
+//	@Accept			json
+//	@Produce		json
+//	@Param			id		path		string			true	"material id"
+//	@Param			body	body		MaterialRequest	true	"material"
+//	@Success		200		{object}	response.Envelope{data=MaterialResponse}
+//	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/library/materials/{id} [put]
+func (h *Handler) updateMaterial(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	id, ok := pathID(c, "id", "library material")
+	if !ok {
+		return
+	}
+	var req MaterialRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Err(c, validation.BindError(err))
+		return
+	}
+	out, err := h.svc.UpdateMaterial(c.Request.Context(), sc, id, req)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, out)
+}
+
+// deleteMaterial soft-deletes an unlinked material.
+//
+//	@Summary		Delete a library material
+//	@Description	409 MATERIAL_IN_USE while any template lesson still links it.
+//	@Tags			library
+//	@Produce		json
+//	@Param			id	path		string	true	"material id"
+//	@Success		200	{object}	response.Envelope{data=object}
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		409	{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/library/materials/{id} [delete]
+func (h *Handler) deleteMaterial(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	id, ok := pathID(c, "id", "library material")
+	if !ok {
+		return
+	}
+	if err := h.svc.DeleteMaterial(c.Request.Context(), sc, id); err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, gin.H{"deleted": true})
+}
+
+// listExercises pages the center's exercises.
+//
+//	@Summary		List library exercises
+//	@Description	Live exercises of the caller's center. q matches the title.
+//	@Tags			library
+//	@Produce		json
+//	@Param			q			query		string	false	"title fragment"
+//	@Param			page		query		int		false	"page (default 1)"
+//	@Param			per_page	query		int		false	"page size (default 20, max 100)"
+//	@Param			sort		query		string	false	"title | created_at, prefix - for descending"
+//	@Success		200			{object}	response.Envelope{data=[]ExerciseResponse,meta=response.Meta}
+//	@Failure		401			{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403			{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/library/exercises [get]
+func (h *Handler) listExercises(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	params := pagination.Parse(c, "title", itemSorts)
+	filter := ListFilter{Q: strings.TrimSpace(c.Query("q"))}
+	rows, total, err := h.svc.ListExercises(c.Request.Context(), sc, filter, params)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.List(c, rows, params.Meta(total))
+}
+
+// createExercise adds an exercise.
+//
+//	@Summary		Create a library exercise
+//	@Tags			library
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body		ExerciseRequest	true	"exercise"
+//	@Success		201		{object}	response.Envelope{data=ExerciseResponse}
+//	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/library/exercises [post]
+func (h *Handler) createExercise(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	var req ExerciseRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Err(c, validation.BindError(err))
+		return
+	}
+	out, err := h.svc.CreateExercise(c.Request.Context(), sc, req)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusCreated, out)
+}
+
+// getExercise returns one exercise.
+//
+//	@Summary		Get a library exercise
+//	@Tags			library
+//	@Produce		json
+//	@Param			id	path		string	true	"exercise id"
+//	@Success		200	{object}	response.Envelope{data=ExerciseResponse}
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/library/exercises/{id} [get]
+func (h *Handler) getExercise(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	id, ok := pathID(c, "id", "library exercise")
+	if !ok {
+		return
+	}
+	out, err := h.svc.GetExercise(c.Request.Context(), sc, id)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, out)
+}
+
+// updateExercise replaces an exercise's fields.
+//
+//	@Summary		Update a library exercise
+//	@Description	Replaces every field. Lessons linking the exercise see the change at once.
+//	@Tags			library
+//	@Accept			json
+//	@Produce		json
+//	@Param			id		path		string			true	"exercise id"
+//	@Param			body	body		ExerciseRequest	true	"exercise"
+//	@Success		200		{object}	response.Envelope{data=ExerciseResponse}
+//	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/library/exercises/{id} [put]
+func (h *Handler) updateExercise(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	id, ok := pathID(c, "id", "library exercise")
+	if !ok {
+		return
+	}
+	var req ExerciseRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Err(c, validation.BindError(err))
+		return
+	}
+	out, err := h.svc.UpdateExercise(c.Request.Context(), sc, id, req)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, out)
+}
+
+// deleteExercise soft-deletes an unlinked exercise.
+//
+//	@Summary		Delete a library exercise
+//	@Description	409 EXERCISE_IN_USE while any template lesson still links it.
+//	@Tags			library
+//	@Produce		json
+//	@Param			id	path		string	true	"exercise id"
+//	@Success		200	{object}	response.Envelope{data=object}
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		409	{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/library/exercises/{id} [delete]
+func (h *Handler) deleteExercise(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	id, ok := pathID(c, "id", "library exercise")
+	if !ok {
+		return
+	}
+	if err := h.svc.DeleteExercise(c.Request.Context(), sc, id); err != nil {
 		response.Err(c, err)
 		return
 	}

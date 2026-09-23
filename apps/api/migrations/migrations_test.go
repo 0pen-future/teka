@@ -39,6 +39,8 @@ var domainTables = []string{
 	"task_columns", "tasks",
 	"class_invitations",
 	"program_templates", "program_template_versions", "template_lessons",
+	"library_materials", "library_exercises", "template_lesson_materials",
+	"template_lesson_exercises", "template_log_fields",
 }
 
 // centerTables is every business table 000007 re-keyed to the center tenant.
@@ -322,10 +324,10 @@ func TestDownFoldsPersonalChannelIntoManual(t *testing.T) {
 		 VALUES (?, ?, ?, ?, 'zalo_personal')`,
 		notifID, f.teacherID, f.centerID, f.statementID).Error)
 
-	// Roll back through 000005 (zalo_personal_mapping): twenty-three steps
-	// now that the additive 000008-000027 sit on top of the migrations this
+	// Roll back through 000005 (zalo_personal_mapping): twenty-four steps
+	// now that the additive 000008-000028 sit on top of the migrations this
 	// test predates.
-	require.NoError(t, database.MigrateDown(m, 23))
+	require.NoError(t, database.MigrateDown(m, 24))
 
 	var channel string
 	require.NoError(t, db.Raw(
@@ -2487,4 +2489,104 @@ func TestProgramTemplatesSchemaInvariants(t *testing.T) {
 	var n int64
 	require.NoError(t, db.Raw(`SELECT count(*) FROM template_lessons WHERE version_id = ?`, draftID).Scan(&n).Error)
 	require.Zero(t, n)
+}
+
+func TestLibraryItemsSchemaInvariants(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+
+	db := openDB(t, url)
+	a := seedNotificationParents(t, db, "+84900001701")
+	b := seedNotificationParents(t, db, "+84900001702")
+
+	templateID, versionID, lessonID := uuid.New(), uuid.New(), uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO program_templates (id, center_id, code, name) VALUES (?, ?, 'CT01', 'Toán 6')`,
+		templateID, a.centerID).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO program_template_versions (id, template_id, center_id, version_no) VALUES (?, ?, ?, 1)`,
+		versionID, templateID, a.centerID).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO template_lessons (id, version_id, center_id, position, title) VALUES (?, ?, ?, 1, 'Buổi 1')`,
+		lessonID, versionID, a.centerID).Error)
+
+	// A version starts with an empty score set, never NULL.
+	var scoreSet string
+	require.NoError(t, db.Raw(`SELECT score_set::text FROM program_template_versions WHERE id = ?`, versionID).Scan(&scoreSet).Error)
+	require.Equal(t, "[]", scoreSet)
+
+	materialID, foreignMaterialID := uuid.New(), uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO library_materials (id, center_id, title, kind, url) VALUES (?, ?, 'SGK Toán 6', 'link', 'https://example.com/sgk')`,
+		materialID, a.centerID).Error)
+	require.Error(t, db.Exec(
+		`INSERT INTO library_materials (center_id, title, kind) VALUES (?, 'Sai loại', 'file')`,
+		a.centerID).Error, "material kind is constrained")
+	require.NoError(t, db.Exec(
+		`INSERT INTO library_materials (id, center_id, title) VALUES (?, ?, 'Của trung tâm khác')`,
+		foreignMaterialID, b.centerID).Error)
+
+	exerciseID := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO library_exercises (id, center_id, title, difficulty) VALUES (?, ?, 'Bài 1', 3)`,
+		exerciseID, a.centerID).Error)
+	require.Error(t, db.Exec(
+		`INSERT INTO library_exercises (center_id, title, difficulty) VALUES (?, 'Quá khó', 9)`,
+		a.centerID).Error, "difficulty is 1..5")
+
+	require.NoError(t, db.Exec(
+		`INSERT INTO template_lesson_materials (lesson_id, material_id, center_id, shared_with_students, position) VALUES (?, ?, ?, TRUE, 1)`,
+		lessonID, materialID, a.centerID).Error)
+	require.Error(t, db.Exec(
+		`INSERT INTO template_lesson_materials (lesson_id, material_id, center_id, position) VALUES (?, ?, ?, 2)`,
+		lessonID, materialID, a.centerID).Error, "a material is linked to a lesson at most once")
+	require.Error(t, db.Exec(
+		`INSERT INTO template_lesson_materials (lesson_id, material_id, center_id, position) VALUES (?, ?, ?, 2)`,
+		lessonID, foreignMaterialID, a.centerID).Error, "a link must not reach a material of another center")
+	require.Error(t, db.Exec(
+		`INSERT INTO template_lesson_materials (lesson_id, material_id, center_id, position) VALUES (?, ?, ?, 2)`,
+		lessonID, foreignMaterialID, b.centerID).Error, "a link must not reach a lesson of another center")
+	require.NoError(t, db.Exec(
+		`INSERT INTO template_lesson_exercises (lesson_id, exercise_id, center_id, position) VALUES (?, ?, ?, 1)`,
+		lessonID, exerciseID, a.centerID).Error)
+
+	first, second := uuid.New(), uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO template_log_fields (id, version_id, center_id, position, label, kind) VALUES (?, ?, ?, 1, 'Ghi chú', 'text'), (?, ?, ?, 2, 'Điểm danh', 'checkbox')`,
+		first, versionID, a.centerID, second, versionID, a.centerID).Error)
+	require.Error(t, db.Exec(
+		`INSERT INTO template_log_fields (version_id, center_id, position, label, kind) VALUES (?, ?, 2, 'Trùng vị trí', 'text')`,
+		versionID, a.centerID).Error, "log-field positions are unique within a version")
+	require.Error(t, db.Exec(
+		`INSERT INTO template_log_fields (version_id, center_id, position, label, kind) VALUES (?, ?, 3, 'Sai loại', 'date')`,
+		versionID, a.centerID).Error, "log-field kind is constrained")
+	require.Error(t, db.Exec(
+		`INSERT INTO template_log_fields (version_id, center_id, position, label, kind) VALUES (?, ?, 3, 'Sai trung tâm', 'text')`,
+		versionID, b.centerID).Error, "a log field must not point at a version of another center")
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(`UPDATE template_log_fields SET position = 2 WHERE id = ?`, first).Error; err != nil {
+			return err
+		}
+		return tx.Exec(`UPDATE template_log_fields SET position = 1 WHERE id = ?`, second).Error
+	}), "a swap inside one transaction must not trip the deferred unique")
+
+	// Hard-deleting the template cascades to the links and log fields but
+	// leaves the center-wide material and exercise rows alone.
+	require.NoError(t, db.Exec(`DELETE FROM program_templates WHERE id = ?`, templateID).Error)
+	var n int64
+	require.NoError(t, db.Raw(`SELECT count(*) FROM template_lesson_materials WHERE lesson_id = ?`, lessonID).Scan(&n).Error)
+	require.Zero(t, n)
+	require.NoError(t, db.Raw(`SELECT count(*) FROM template_lesson_exercises WHERE lesson_id = ?`, lessonID).Scan(&n).Error)
+	require.Zero(t, n)
+	require.NoError(t, db.Raw(`SELECT count(*) FROM template_log_fields WHERE version_id = ?`, versionID).Scan(&n).Error)
+	require.Zero(t, n)
+	require.NoError(t, db.Raw(`SELECT count(*) FROM library_materials WHERE id = ?`, materialID).Scan(&n).Error)
+	require.Equal(t, int64(1), n)
+	require.NoError(t, db.Raw(`SELECT count(*) FROM library_exercises WHERE id = ?`, exerciseID).Scan(&n).Error)
+	require.Equal(t, int64(1), n)
 }

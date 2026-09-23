@@ -429,6 +429,34 @@ var Specs = []Spec{
 		req("template_lesson.update", "template_lesson", "lid")),
 	perm("DELETE", "/api/v1/library/lessons/:lid", authctx.PermLibraryEdit,
 		req("template_lesson.delete", "template_lesson", "lid")),
+	// Version content beyond lessons (log fields, score set) and the
+	// lesson attachments are wholesale replaces on the draft; the shared
+	// material/exercise catalogue is center-wide like templates.
+	perm("GET", "/api/v1/library/versions/:vid", authctx.PermLibraryRead, none()),
+	perm("PUT", "/api/v1/library/versions/:vid/log-fields", authctx.PermLibraryEdit,
+		req("template_version.set_log_fields", "template_version", "vid")),
+	perm("PUT", "/api/v1/library/versions/:vid/score-set", authctx.PermLibraryEdit,
+		req("template_version.set_score_set", "template_version", "vid")),
+	perm("PUT", "/api/v1/library/lessons/:lid/materials", authctx.PermLibraryEdit,
+		req("template_lesson.set_materials", "template_lesson", "lid")),
+	perm("PUT", "/api/v1/library/lessons/:lid/exercises", authctx.PermLibraryEdit,
+		req("template_lesson.set_exercises", "template_lesson", "lid")),
+	perm("GET", "/api/v1/library/materials", authctx.PermLibraryRead, none()),
+	perm("POST", "/api/v1/library/materials", authctx.PermLibraryEdit,
+		req("library_material.create", "library_material", "")),
+	perm("GET", "/api/v1/library/materials/:id", authctx.PermLibraryRead, none()),
+	perm("PUT", "/api/v1/library/materials/:id", authctx.PermLibraryEdit,
+		req("library_material.update", "library_material", "id")),
+	perm("DELETE", "/api/v1/library/materials/:id", authctx.PermLibraryEdit,
+		req("library_material.delete", "library_material", "id")),
+	perm("GET", "/api/v1/library/exercises", authctx.PermLibraryRead, none()),
+	perm("POST", "/api/v1/library/exercises", authctx.PermLibraryEdit,
+		req("library_exercise.create", "library_exercise", "")),
+	perm("GET", "/api/v1/library/exercises/:id", authctx.PermLibraryRead, none()),
+	perm("PUT", "/api/v1/library/exercises/:id", authctx.PermLibraryEdit,
+		req("library_exercise.update", "library_exercise", "id")),
+	perm("DELETE", "/api/v1/library/exercises/:id", authctx.PermLibraryEdit,
+		req("library_exercise.delete", "library_exercise", "id")),
 }
 
 // Policies returns the manifest for the server package's route-policy

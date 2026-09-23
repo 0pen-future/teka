@@ -3,6 +3,9 @@ package library
 import (
 	"context"
 	"errors"
+	neturl "net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +16,7 @@ import (
 	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/classcode"
+	"teka/apps/api/internal/shared/dbtypes"
 	"teka/apps/api/internal/shared/pagination"
 )
 
@@ -155,24 +159,84 @@ func (s *Service) CreateVersion(ctx context.Context, sc authctx.Scope, templateI
 		if err != nil {
 			return err
 		}
-		lessons, err := s.repo.ListLessons(ctx, sc, source.ID)
-		if err != nil {
-			return err
-		}
-		copies := make([]*Lesson, 0, len(lessons))
-		for i := range lessons {
-			l := lessons[i]
-			copies = append(copies, &Lesson{
-				VersionID: draft.ID, Position: l.Position, Title: l.Title,
-				Objectives: l.Objectives, DurationMin: l.DurationMin, HomeworkNote: l.HomeworkNote,
-			})
-		}
-		return s.repo.CreateLessons(ctx, sc, copies)
+		return s.copyVersionContent(ctx, sc, source, &draft)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return s.version(ctx, sc, draft.ID)
+}
+
+// copyVersionContent seeds the new draft with everything the source
+// version carries: lessons with their material and exercise links, the
+// log fields and the score set. Items are shared by reference (the same
+// center-wide material row), lessons and log fields are new rows.
+func (s *Service) copyVersionContent(ctx context.Context, sc authctx.Scope, source, draft *Version) error {
+	lessons, err := s.repo.ListLessons(ctx, sc, source.ID)
+	if err != nil {
+		return err
+	}
+	copies := make([]*Lesson, 0, len(lessons))
+	for i := range lessons {
+		l := lessons[i]
+		copies = append(copies, &Lesson{
+			VersionID: draft.ID, Position: l.Position, Title: l.Title,
+			Objectives: l.Objectives, DurationMin: l.DurationMin, HomeworkNote: l.HomeworkNote,
+		})
+	}
+	if err := s.repo.CreateLessons(ctx, sc, copies); err != nil {
+		return err
+	}
+	if len(lessons) > 0 {
+		sourceIDs := lessonIDs(lessons)
+		copyOf := make(map[uuid.UUID]uuid.UUID, len(lessons))
+		for i := range lessons {
+			copyOf[lessons[i].ID] = copies[i].ID
+		}
+		materials, err := s.repo.ListLessonMaterials(ctx, sc, sourceIDs)
+		if err != nil {
+			return err
+		}
+		mLinks := make([]LessonMaterial, 0, len(materials))
+		for _, row := range materials {
+			mLinks = append(mLinks, LessonMaterial{
+				LessonID: copyOf[row.LessonID], MaterialID: row.ID,
+				SharedWithStudents: row.SharedWithStudents, Position: row.Position,
+			})
+		}
+		if err := s.repo.CreateLessonMaterials(ctx, sc, mLinks); err != nil {
+			return err
+		}
+		exercises, err := s.repo.ListLessonExercises(ctx, sc, sourceIDs)
+		if err != nil {
+			return err
+		}
+		eLinks := make([]LessonExercise, 0, len(exercises))
+		for _, row := range exercises {
+			eLinks = append(eLinks, LessonExercise{LessonID: copyOf[row.LessonID], ExerciseID: row.ID, Position: row.Position})
+		}
+		if err := s.repo.CreateLessonExercises(ctx, sc, eLinks); err != nil {
+			return err
+		}
+	}
+	fields, err := s.repo.ListLogFields(ctx, sc, source.ID)
+	if err != nil {
+		return err
+	}
+	fieldCopies := make([]*LogField, 0, len(fields))
+	for i := range fields {
+		f := fields[i]
+		fieldCopies = append(fieldCopies, &LogField{Label: f.Label, Kind: f.Kind, Options: f.Options, Required: f.Required})
+	}
+	if len(fieldCopies) > 0 {
+		if err := s.repo.ReplaceLogFields(ctx, sc, draft.ID, fieldCopies); err != nil {
+			return err
+		}
+	}
+	if len(source.ScoreSet) > 0 {
+		return s.repo.SetScoreSet(ctx, sc, draft.ID, source.ScoreSet)
+	}
+	return nil
 }
 
 // ListVersions returns the template's versions, newest first.
@@ -250,8 +314,8 @@ func (s *Service) ListLessons(ctx context.Context, sc authctx.Scope, versionID u
 	return lessonResponses(rows), nil
 }
 
-// GetLesson returns one lesson.
-func (s *Service) GetLesson(ctx context.Context, sc authctx.Scope, lessonID uuid.UUID) (*LessonResponse, error) {
+// GetLesson returns one lesson with its attached materials and exercises.
+func (s *Service) GetLesson(ctx context.Context, sc authctx.Scope, lessonID uuid.UUID) (*LessonDetailResponse, error) {
 	if err := authctx.Require(sc, authctx.PermLibraryRead); err != nil {
 		return nil, err
 	}
@@ -259,8 +323,43 @@ func (s *Service) GetLesson(ctx context.Context, sc authctx.Scope, lessonID uuid
 	if err != nil {
 		return nil, notFound(err, "template lesson")
 	}
-	out := lessonResponse(l)
-	return &out, nil
+	details, err := s.lessonDetails(ctx, sc, []Lesson{*l})
+	if err != nil {
+		return nil, err
+	}
+	return &details[0], nil
+}
+
+// lessonDetails decorates lessons with their attachments in two bulk
+// reads, so a version detail costs the same number of queries as one lesson.
+func (s *Service) lessonDetails(ctx context.Context, sc authctx.Scope, lessons []Lesson) ([]LessonDetailResponse, error) {
+	ids := lessonIDs(lessons)
+	materials, err := s.repo.ListLessonMaterials(ctx, sc, ids)
+	if err != nil {
+		return nil, err
+	}
+	exercises, err := s.repo.ListLessonExercises(ctx, sc, ids)
+	if err != nil {
+		return nil, err
+	}
+	byLessonM := make(map[uuid.UUID][]LessonMaterialRow, len(lessons))
+	for _, row := range materials {
+		byLessonM[row.LessonID] = append(byLessonM[row.LessonID], row)
+	}
+	byLessonE := make(map[uuid.UUID][]LessonExerciseRow, len(lessons))
+	for _, row := range exercises {
+		byLessonE[row.LessonID] = append(byLessonE[row.LessonID], row)
+	}
+	out := make([]LessonDetailResponse, 0, len(lessons))
+	for i := range lessons {
+		l := &lessons[i]
+		out = append(out, LessonDetailResponse{
+			LessonResponse: lessonResponse(l),
+			Materials:      lessonMaterialResponses(byLessonM[l.ID]),
+			Exercises:      lessonExerciseResponses(byLessonE[l.ID]),
+		})
+	}
+	return out, nil
 }
 
 // CreateLesson appends a lesson to a draft version.
@@ -283,11 +382,16 @@ func (s *Service) CreateLesson(ctx context.Context, sc authctx.Scope, versionID 
 	if err != nil {
 		return nil, err
 	}
-	return s.GetLesson(ctx, sc, created.ID)
+	l, err := s.repo.GetLesson(ctx, sc, created.ID)
+	if err != nil {
+		return nil, notFound(err, "template lesson")
+	}
+	out := lessonResponse(l)
+	return &out, nil
 }
 
 // UpdateLesson replaces a lesson's content; its version must be a draft.
-func (s *Service) UpdateLesson(ctx context.Context, sc authctx.Scope, lessonID uuid.UUID, req LessonRequest) (*LessonResponse, error) {
+func (s *Service) UpdateLesson(ctx context.Context, sc authctx.Scope, lessonID uuid.UUID, req LessonRequest) (*LessonDetailResponse, error) {
 	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
 		return nil, err
 	}
@@ -456,4 +560,493 @@ func sameIDSet(want, got []uuid.UUID) bool {
 		delete(seen, id)
 	}
 	return len(seen) == 0
+}
+
+// GetVersion returns a version with its score set, log fields and lessons
+// including attachments.
+func (s *Service) GetVersion(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) (*VersionDetailResponse, error) {
+	if err := authctx.Require(sc, authctx.PermLibraryRead); err != nil {
+		return nil, err
+	}
+	row, err := s.repo.GetVersion(ctx, sc, versionID)
+	if err != nil {
+		return nil, notFound(err, "template version")
+	}
+	fields, err := s.repo.ListLogFields(ctx, sc, versionID)
+	if err != nil {
+		return nil, err
+	}
+	lessons, err := s.repo.ListLessons(ctx, sc, versionID)
+	if err != nil {
+		return nil, err
+	}
+	details, err := s.lessonDetails(ctx, sc, lessons)
+	if err != nil {
+		return nil, err
+	}
+	return &VersionDetailResponse{
+		VersionResponse: versionResponse(row),
+		ScoreSet:        scoreSet(row.ScoreSet),
+		LogFields:       logFieldResponses(fields),
+		Lessons:         details,
+	}, nil
+}
+
+// CreateMaterial adds a center-wide material.
+func (s *Service) CreateMaterial(ctx context.Context, sc authctx.Scope, req MaterialRequest) (*MaterialResponse, error) {
+	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
+		return nil, err
+	}
+	m, err := materialFrom(req)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.CreateMaterial(ctx, sc, m); err != nil {
+		return nil, err
+	}
+	return s.GetMaterial(ctx, sc, m.ID)
+}
+
+// GetMaterial returns one material.
+func (s *Service) GetMaterial(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*MaterialResponse, error) {
+	if err := authctx.Require(sc, authctx.PermLibraryRead); err != nil {
+		return nil, err
+	}
+	m, err := s.repo.GetMaterial(ctx, sc, id)
+	if err != nil {
+		return nil, notFound(err, "library material")
+	}
+	out := materialResponse(m)
+	return &out, nil
+}
+
+// ListMaterials pages the center's live materials.
+func (s *Service) ListMaterials(ctx context.Context, sc authctx.Scope, f ListFilter, p pagination.Params) ([]MaterialResponse, int64, error) {
+	if err := authctx.Require(sc, authctx.PermLibraryRead); err != nil {
+		return nil, 0, err
+	}
+	rows, total, err := s.repo.ListMaterials(ctx, sc, f, p)
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]MaterialResponse, 0, len(rows))
+	for i := range rows {
+		out = append(out, materialResponse(&rows[i]))
+	}
+	return out, total, nil
+}
+
+// UpdateMaterial replaces every field of a material. Lessons linking it
+// see the change at once: the link is by reference.
+func (s *Service) UpdateMaterial(ctx context.Context, sc authctx.Scope, id uuid.UUID, req MaterialRequest) (*MaterialResponse, error) {
+	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
+		return nil, err
+	}
+	m, err := materialFrom(req)
+	if err != nil {
+		return nil, err
+	}
+	m.ID = id
+	if err := s.repo.UpdateMaterial(ctx, sc, m); err != nil {
+		return nil, notFound(err, "library material")
+	}
+	return s.GetMaterial(ctx, sc, id)
+}
+
+// DeleteMaterial soft-deletes a material that no lesson of a live
+// template links any more; 409 MATERIAL_IN_USE otherwise, whatever the
+// version's status. Links kept by a deleted template do not count: they
+// are unreachable, and the template cannot be restored.
+func (s *Service) DeleteMaterial(ctx context.Context, sc authctx.Scope, id uuid.UUID) error {
+	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
+		return err
+	}
+	return s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		// The row lock orders this delete against an attach in flight,
+		// which holds the material shared until its link is committed.
+		if _, err := s.repo.LockMaterial(ctx, sc, id); err != nil {
+			return notFound(err, "library material")
+		}
+		u, err := s.repo.MaterialUsage(ctx, sc, id)
+		if err != nil {
+			return err
+		}
+		if u.Released > 0 {
+			return errMaterialInReleased()
+		}
+		if u.Draft > 0 {
+			return errMaterialInUse()
+		}
+		return notFound(s.repo.SoftDeleteMaterial(ctx, sc, id), "library material")
+	})
+}
+
+// CreateExercise adds a center-wide exercise.
+func (s *Service) CreateExercise(ctx context.Context, sc authctx.Scope, req ExerciseRequest) (*ExerciseResponse, error) {
+	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
+		return nil, err
+	}
+	e := exerciseFrom(req)
+	if err := s.repo.CreateExercise(ctx, sc, e); err != nil {
+		return nil, err
+	}
+	return s.GetExercise(ctx, sc, e.ID)
+}
+
+// GetExercise returns one exercise.
+func (s *Service) GetExercise(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*ExerciseResponse, error) {
+	if err := authctx.Require(sc, authctx.PermLibraryRead); err != nil {
+		return nil, err
+	}
+	e, err := s.repo.GetExercise(ctx, sc, id)
+	if err != nil {
+		return nil, notFound(err, "library exercise")
+	}
+	out := exerciseResponse(e)
+	return &out, nil
+}
+
+// ListExercises pages the center's live exercises.
+func (s *Service) ListExercises(ctx context.Context, sc authctx.Scope, f ListFilter, p pagination.Params) ([]ExerciseResponse, int64, error) {
+	if err := authctx.Require(sc, authctx.PermLibraryRead); err != nil {
+		return nil, 0, err
+	}
+	rows, total, err := s.repo.ListExercises(ctx, sc, f, p)
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]ExerciseResponse, 0, len(rows))
+	for i := range rows {
+		out = append(out, exerciseResponse(&rows[i]))
+	}
+	return out, total, nil
+}
+
+// UpdateExercise replaces every field of an exercise.
+func (s *Service) UpdateExercise(ctx context.Context, sc authctx.Scope, id uuid.UUID, req ExerciseRequest) (*ExerciseResponse, error) {
+	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
+		return nil, err
+	}
+	e := exerciseFrom(req)
+	e.ID = id
+	if err := s.repo.UpdateExercise(ctx, sc, e); err != nil {
+		return nil, notFound(err, "library exercise")
+	}
+	return s.GetExercise(ctx, sc, id)
+}
+
+// DeleteExercise soft-deletes an exercise no lesson of a live template
+// links any more; 409 EXERCISE_IN_USE otherwise, like DeleteMaterial.
+func (s *Service) DeleteExercise(ctx context.Context, sc authctx.Scope, id uuid.UUID) error {
+	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
+		return err
+	}
+	return s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		if _, err := s.repo.LockExercise(ctx, sc, id); err != nil {
+			return notFound(err, "library exercise")
+		}
+		u, err := s.repo.ExerciseUsage(ctx, sc, id)
+		if err != nil {
+			return err
+		}
+		if u.Released > 0 {
+			return errExerciseInReleased()
+		}
+		if u.Draft > 0 {
+			return errExerciseInUse()
+		}
+		return notFound(s.repo.SoftDeleteExercise(ctx, sc, id), "library exercise")
+	})
+}
+
+// maxLessonItems bounds the material and exercise lists of one lesson.
+const maxLessonItems = 100
+
+// SetLessonMaterials replaces the lesson's material list with items, in
+// body order. Every id must be a live material of the center, each at
+// most once (422 otherwise); the lesson's version must be a draft.
+func (s *Service) SetLessonMaterials(ctx context.Context, sc authctx.Scope, lessonID uuid.UUID, items []LessonMaterialInput) ([]LessonMaterialResponse, error) {
+	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
+		return nil, err
+	}
+	if len(items) > maxLessonItems {
+		return nil, apperror.Invalid("Tối đa 100 học liệu cho một buổi học mẫu",
+			map[string]string{"materials": "tối đa 100 học liệu"})
+	}
+	ids := make([]uuid.UUID, 0, len(items))
+	links := make([]LessonMaterial, 0, len(items))
+	for _, it := range items {
+		ids = append(ids, it.MaterialID)
+		links = append(links, LessonMaterial{MaterialID: it.MaterialID, SharedWithStudents: it.SharedWithStudents})
+	}
+	if err := uniqueIDs(ids, "material_id", "Mỗi học liệu chỉ gắn vào buổi một lần"); err != nil {
+		return nil, err
+	}
+	var out []LessonMaterialResponse
+	err := s.lessonLinkWrite(ctx, sc, lessonID, func(ctx context.Context) error {
+		found, err := s.repo.FindMaterials(ctx, sc, ids)
+		if err != nil {
+			return err
+		}
+		if len(found) != len(ids) {
+			return apperror.Invalid("Có học liệu không tồn tại trong kho của trung tâm",
+				map[string]string{"material_id": "phải là học liệu còn hiệu lực của trung tâm"})
+		}
+		if err := s.repo.ReplaceLessonMaterials(ctx, sc, lessonID, links); err != nil {
+			return err
+		}
+		rows, err := s.repo.ListLessonMaterials(ctx, sc, []uuid.UUID{lessonID})
+		if err != nil {
+			return err
+		}
+		out = lessonMaterialResponses(rows)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// SetLessonExercises replaces the lesson's exercise list with items, in
+// body order, under the same rules as SetLessonMaterials.
+func (s *Service) SetLessonExercises(ctx context.Context, sc authctx.Scope, lessonID uuid.UUID, items []LessonExerciseInput) ([]LessonExerciseResponse, error) {
+	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
+		return nil, err
+	}
+	if len(items) > maxLessonItems {
+		return nil, apperror.Invalid("Tối đa 100 bài tập cho một buổi học mẫu",
+			map[string]string{"exercises": "tối đa 100 bài tập"})
+	}
+	ids := make([]uuid.UUID, 0, len(items))
+	links := make([]LessonExercise, 0, len(items))
+	for _, it := range items {
+		ids = append(ids, it.ExerciseID)
+		links = append(links, LessonExercise{ExerciseID: it.ExerciseID})
+	}
+	if err := uniqueIDs(ids, "exercise_id", "Mỗi bài tập chỉ gắn vào buổi một lần"); err != nil {
+		return nil, err
+	}
+	var out []LessonExerciseResponse
+	err := s.lessonLinkWrite(ctx, sc, lessonID, func(ctx context.Context) error {
+		found, err := s.repo.FindExercises(ctx, sc, ids)
+		if err != nil {
+			return err
+		}
+		if len(found) != len(ids) {
+			return apperror.Invalid("Có bài tập không tồn tại trong kho của trung tâm",
+				map[string]string{"exercise_id": "phải là bài tập còn hiệu lực của trung tâm"})
+		}
+		if err := s.repo.ReplaceLessonExercises(ctx, sc, lessonID, links); err != nil {
+			return err
+		}
+		rows, err := s.repo.ListLessonExercises(ctx, sc, []uuid.UUID{lessonID})
+		if err != nil {
+			return err
+		}
+		out = lessonExerciseResponses(rows)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// lessonLinkWrite resolves the lesson, then runs fn under its version's
+// draft lock like every other content write. The lesson is read again
+// once the lock is held: a delete committed in between would otherwise
+// surface as a foreign-key failure on the link insert instead of a 404.
+func (s *Service) lessonLinkWrite(ctx context.Context, sc authctx.Scope, lessonID uuid.UUID, fn func(ctx context.Context) error) error {
+	return s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		l, err := s.repo.GetLesson(ctx, sc, lessonID)
+		if err != nil {
+			return notFound(err, "template lesson")
+		}
+		return s.lessonWrite(ctx, sc, l.VersionID, func(ctx context.Context) error {
+			if _, err := s.repo.GetLesson(ctx, sc, lessonID); err != nil {
+				return notFound(err, "template lesson")
+			}
+			return fn(ctx)
+		})
+	})
+}
+
+// maxLogFields and maxScoreComponents bound the wholesale-replace bodies.
+const (
+	maxLogFields       = 30
+	maxScoreComponents = 20
+)
+
+// SetLogFields replaces the version's session-log fields with items, in
+// body order. A select field needs at least one option; other kinds
+// store none. The version must be a draft.
+func (s *Service) SetLogFields(ctx context.Context, sc authctx.Scope, versionID uuid.UUID, items []LogFieldInput) ([]LogFieldResponse, error) {
+	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
+		return nil, err
+	}
+	if len(items) > maxLogFields {
+		return nil, apperror.Invalid("Tối đa 30 trường nhật ký cho một phiên bản",
+			map[string]string{"log_fields": "tối đa 30 trường"})
+	}
+	rows := make([]*LogField, 0, len(items))
+	for i, it := range items {
+		label := strings.TrimSpace(it.Label)
+		if label == "" {
+			return nil, apperror.Invalid("Trường nhật ký phải có nhãn",
+				map[string]string{fieldPath(i, "label"): "không được để trống"})
+		}
+		options := dbtypes.StringList{}
+		if it.Kind == LogFieldSelect {
+			options = cleanStrings(it.Options)
+			if len(options) == 0 {
+				return nil, apperror.Invalid("Trường dạng chọn phải có ít nhất một lựa chọn",
+					map[string]string{fieldPath(i, "options"): "cần ít nhất một lựa chọn"})
+			}
+		}
+		rows = append(rows, &LogField{Label: label, Kind: it.Kind, Options: options, Required: it.Required})
+	}
+	var out []LogFieldResponse
+	err := s.lessonWrite(ctx, sc, versionID, func(ctx context.Context) error {
+		if err := s.repo.ReplaceLogFields(ctx, sc, versionID, rows); err != nil {
+			return err
+		}
+		saved, err := s.repo.ListLogFields(ctx, sc, versionID)
+		if err != nil {
+			return err
+		}
+		out = logFieldResponses(saved)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// scoreKey is the shape of a score component key: a stable identifier the
+// class grading can refer to.
+var scoreKey = regexp.MustCompile(`^[a-z0-9_]{1,30}$`)
+
+// SetScoreSet replaces the version's score components with items, in body
+// order. Keys must match scoreKey and be unique; max must be positive and
+// weight non-negative. The version must be a draft.
+func (s *Service) SetScoreSet(ctx context.Context, sc authctx.Scope, versionID uuid.UUID, items []ScoreComponentInput) ([]ScoreComponent, error) {
+	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
+		return nil, err
+	}
+	if len(items) > maxScoreComponents {
+		return nil, apperror.Invalid("Tối đa 20 thành phần điểm cho một phiên bản",
+			map[string]string{"score_set": "tối đa 20 thành phần"})
+	}
+	set := make(ScoreSet, 0, len(items))
+	seen := make(map[string]bool, len(items))
+	for i, it := range items {
+		key := strings.TrimSpace(it.Key)
+		switch {
+		case !scoreKey.MatchString(key):
+			return nil, apperror.Invalid("Khoá thành phần điểm không hợp lệ",
+				map[string]string{fieldPath(i, "key"): "chỉ gồm chữ thường, số và dấu gạch dưới, tối đa 30 ký tự"})
+		case seen[key]:
+			return nil, apperror.Invalid("Khoá thành phần điểm bị trùng",
+				map[string]string{fieldPath(i, "key"): "mỗi khoá chỉ dùng một lần"})
+		case it.Max <= 0:
+			return nil, apperror.Invalid("Điểm tối đa phải lớn hơn 0",
+				map[string]string{fieldPath(i, "max"): "phải lớn hơn 0"})
+		case it.Weight < 0:
+			return nil, apperror.Invalid("Trọng số không được âm",
+				map[string]string{fieldPath(i, "weight"): "phải từ 0 trở lên"})
+		}
+		label := strings.TrimSpace(it.Label)
+		if label == "" {
+			return nil, apperror.Invalid("Thành phần điểm phải có tên",
+				map[string]string{fieldPath(i, "label"): "không được để trống"})
+		}
+		seen[key] = true
+		set = append(set, ScoreComponent{Key: key, Label: label, Max: it.Max, Weight: it.Weight})
+	}
+	err := s.lessonWrite(ctx, sc, versionID, func(ctx context.Context) error {
+		return notFound(s.repo.SetScoreSet(ctx, sc, versionID, set), "template version")
+	})
+	if err != nil {
+		return nil, err
+	}
+	return scoreSet(set), nil
+}
+
+func materialFrom(req MaterialRequest) (*Material, error) {
+	url, err := materialURL(req.URL)
+	if err != nil {
+		return nil, err
+	}
+	return &Material{
+		Title: strings.TrimSpace(req.Title), Kind: req.Kind,
+		URL: url, Description: optionalText(req.Description),
+		Tags: cleanStrings(req.Tags),
+	}, nil
+}
+
+// materialURL trims the optional link and accepts only an absolute
+// http(s) one: the value is rendered as an href for teachers and, when
+// shared, for students, so a javascript: or data: scheme must not get in.
+func materialURL(raw *string) (*string, error) {
+	v := optionalText(raw)
+	if v == nil {
+		return nil, nil
+	}
+	u, err := neturl.Parse(*v)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil, apperror.Invalid("Đường dẫn học liệu phải là liên kết http:// hoặc https://",
+			map[string]string{"url": "phải bắt đầu bằng http:// hoặc https://"})
+	}
+	return v, nil
+}
+
+func exerciseFrom(req ExerciseRequest) *Exercise {
+	return &Exercise{
+		Title: strings.TrimSpace(req.Title), Description: optionalText(req.Description),
+		Difficulty: req.Difficulty, Tags: cleanStrings(req.Tags),
+	}
+}
+
+// cleanStrings trims each entry, drops blanks and duplicates, and keeps
+// the first occurrence's order. The result is never nil.
+func cleanStrings(in []string) dbtypes.StringList {
+	out := make(dbtypes.StringList, 0, len(in))
+	seen := make(map[string]bool, len(in))
+	for _, raw := range in {
+		v := strings.TrimSpace(raw)
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	return out
+}
+
+// scoreSet returns a non-nil slice so the wire form is always an array.
+func scoreSet(set ScoreSet) []ScoreComponent {
+	if set == nil {
+		return []ScoreComponent{}
+	}
+	return set
+}
+
+// uniqueIDs answers 422 on the named field when an id repeats.
+func uniqueIDs(ids []uuid.UUID, field, msg string) error {
+	seen := make(map[uuid.UUID]bool, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			return apperror.Invalid(msg, map[string]string{field: "bị trùng"})
+		}
+		seen[id] = true
+	}
+	return nil
+}
+
+// fieldPath names one field of the i-th body entry, the way clients
+// address list errors.
+func fieldPath(i int, field string) string {
+	return strconv.Itoa(i) + "." + field
 }
