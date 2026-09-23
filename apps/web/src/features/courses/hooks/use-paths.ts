@@ -17,6 +17,9 @@ import {
 import type { LearningPath, PathInput, StageInput } from "../schemas/paths-schemas";
 import { pathsKeys } from "./paths-keys";
 
+/** Every per-course listing; courses embed the paths that recommend them. */
+const byCoursePrefix = [...pathsKeys.all, "by-course"] as const;
+
 export function usePathsList(params: ListPathsParams = {}, enabled = true) {
   return useQuery({
     queryKey: pathsKeys.list(params),
@@ -56,6 +59,7 @@ export function useCreatePath() {
   });
 }
 
+/** A path's name and status show on the course pages that it recommends. */
 export function useUpdatePath(id: string) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -65,6 +69,7 @@ export function useUpdatePath(id: string) {
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: pathsKeys.lists() });
+      void queryClient.invalidateQueries({ queryKey: byCoursePrefix });
     },
   });
 }
@@ -78,6 +83,7 @@ export function useDeletePath() {
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: pathsKeys.lists() });
+      void queryClient.invalidateQueries({ queryKey: byCoursePrefix });
     },
   });
 }
@@ -85,6 +91,9 @@ export function useDeletePath() {
 /**
  * Stage mutations all hand back the whole path: the detail cache takes it
  * as is, and the list (its counters) plus the per-course listings refetch.
+ * A failure refetches the detail too, since a 422 or 404 usually means the
+ * stages changed under the editor and retrying from the stale view would
+ * only fail again.
  */
 function useStageMutation<TVariables>(
   pathId: string,
@@ -96,9 +105,12 @@ function useStageMutation<TVariables>(
     onSuccess: (path: LearningPath) => {
       queryClient.setQueryData(pathsKeys.detail(pathId), path);
     },
+    onError: () => {
+      void queryClient.invalidateQueries({ queryKey: pathsKeys.detail(pathId) });
+    },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: pathsKeys.lists() });
-      void queryClient.invalidateQueries({ queryKey: [...pathsKeys.all, "by-course"] });
+      void queryClient.invalidateQueries({ queryKey: byCoursePrefix });
     },
   });
 }

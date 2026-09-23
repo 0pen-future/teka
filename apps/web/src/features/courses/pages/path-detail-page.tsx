@@ -77,6 +77,8 @@ function PathWorkspace({ path }: { path: LearningPath }) {
   const navigate = useNavigate();
   const { has } = useCenterContext();
   const canEdit = has("paths.edit");
+  // Chips link into the catalog only for readers who can open it.
+  const canOpenCourse = has("courses.read");
 
   const remove = useDeletePath();
   const reorder = useReorderStages(path.id);
@@ -149,6 +151,12 @@ function PathWorkspace({ path }: { path: LearningPath }) {
         ) : null}
       </div>
 
+      {canEdit && catalog.isError ? (
+        <p role="alert" className="text-[13px] text-coral-600">
+          Không tải được danh mục khóa học. Bạn vẫn có thể gỡ khóa học đã gắn.
+        </p>
+      ) : null}
+
       {path.stages.length === 0 ? (
         <HvStateBlock
           state="empty"
@@ -173,7 +181,9 @@ function PathWorkspace({ path }: { path: LearningPath }) {
                 pathId={path.id}
                 stage={stage}
                 canEdit={canEdit}
+                canOpenCourse={canOpenCourse}
                 activeCourses={activeCourses}
+                catalogFailed={catalog.isError}
                 isFirst={index === 0}
                 isLast={index === path.stages.length - 1}
                 moving={reorder.isPending}
@@ -231,7 +241,10 @@ interface StageCardProps {
   pathId: string;
   stage: Stage;
   canEdit: boolean;
+  canOpenCourse: boolean;
   activeCourses: Course[];
+  /** The picker has nothing to offer, so it stays closed. */
+  catalogFailed: boolean;
   isFirst: boolean;
   isLast: boolean;
   moving: boolean;
@@ -243,7 +256,9 @@ function StageCard({
   pathId,
   stage,
   canEdit,
+  canOpenCourse,
   activeCourses,
+  catalogFailed,
   isFirst,
   isLast,
   moving,
@@ -296,7 +311,7 @@ function StageCard({
               variant="ghost"
               disabled={isFirst || moving}
               onClick={onMoveUp}
-              aria-label="Lên"
+              aria-label={`Đưa ${stage.name} lên`}
             >
               <ArrowUpIcon aria-hidden="true" className="size-4" />
             </HvButton>
@@ -305,14 +320,24 @@ function StageCard({
               variant="ghost"
               disabled={isLast || moving}
               onClick={onMoveDown}
-              aria-label="Xuống"
+              aria-label={`Đưa ${stage.name} xuống`}
             >
               <ArrowDownIcon aria-hidden="true" className="size-4" />
             </HvButton>
-            <HvButton size="sm" variant="ghost" onClick={() => setEditing(true)}>
+            <HvButton
+              size="sm"
+              variant="ghost"
+              onClick={() => setEditing(true)}
+              aria-label={`Sửa giai đoạn ${stage.name}`}
+            >
               Sửa
             </HvButton>
-            <HvButton size="sm" variant="ghost" onClick={() => setDeleting(true)}>
+            <HvButton
+              size="sm"
+              variant="ghost"
+              onClick={() => setDeleting(true)}
+              aria-label={`Xoá giai đoạn ${stage.name}`}
+            >
               Xoá
             </HvButton>
           </div>
@@ -331,9 +356,13 @@ function StageCard({
                 canEdit ? "pr-1" : "pr-3",
               )}
             >
-              <Link to={`/courses/${course.id}`} className="hover:text-mint-600">
-                {course.name}
-              </Link>
+              {canOpenCourse ? (
+                <Link to={`/courses/${course.id}`} className="hover:text-mint-600">
+                  {course.name}
+                </Link>
+              ) : (
+                <span>{course.name}</span>
+              )}
               <span className="font-mono text-[12px] text-ink-400">{course.code}</span>
               {course.status !== "active" ? (
                 <HvBadge variant="neutral" size="sm">
@@ -368,8 +397,8 @@ function StageCard({
             placeholder="Thêm khóa học…"
             searchNoun="khóa học"
             searchThreshold={5}
-            aria-label="Thêm khóa học"
-            disabled={full || setCourses.isPending}
+            aria-label={`Thêm khóa học vào ${stage.name}`}
+            disabled={full || catalogFailed || setCourses.isPending}
             className="min-w-[240px] max-sm:w-full"
           />
           {full ? (

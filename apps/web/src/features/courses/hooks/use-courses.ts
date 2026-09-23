@@ -14,6 +14,7 @@ import {
 } from "../api/courses-api";
 import type { Course, CourseInput, TuitionPackInput } from "../schemas/courses-schemas";
 import { coursesKeys } from "./courses-keys";
+import { pathsKeys } from "./paths-keys";
 
 export function useCoursesList(params: ListCoursesParams = {}, enabled = true) {
   return useQuery({
@@ -61,9 +62,10 @@ export function useUpdateCourse(id: string) {
       void queryClient.invalidateQueries({ queryKey: coursesKeys.lists() });
       void queryClient.invalidateQueries({ queryKey: classesKeys.courseOptions() });
       // Classes embed the course code and name, in the list and on the
-      // detail header chip alike.
+      // detail header chip alike, and so do learning path timelines.
       void queryClient.invalidateQueries({ queryKey: classesKeys.lists() });
       void queryClient.invalidateQueries({ queryKey: classesKeys.details() });
+      void queryClient.invalidateQueries({ queryKey: pathsKeys.all });
     },
   });
 }
@@ -78,11 +80,16 @@ export function useDeleteCourse() {
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: coursesKeys.lists() });
       void queryClient.invalidateQueries({ queryKey: classesKeys.courseOptions() });
+      // Path cards count live courses and timelines list them by name.
+      void queryClient.invalidateQueries({ queryKey: pathsKeys.all });
     },
   });
 }
 
-/** Archiving leaves classes attached, so only the catalog surfaces refetch. */
+/**
+ * Archiving leaves classes attached, so only the catalog surfaces refetch,
+ * plus the path timelines that badge an archived course.
+ */
 export function useArchiveCourse(id: string) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -93,6 +100,7 @@ export function useArchiveCourse(id: string) {
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: coursesKeys.lists() });
       void queryClient.invalidateQueries({ queryKey: classesKeys.courseOptions() });
+      void queryClient.invalidateQueries({ queryKey: pathsKeys.all });
     },
   });
 }

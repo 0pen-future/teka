@@ -4,7 +4,7 @@ import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
-import { API_URL, ok } from "@/test/msw/handlers";
+import { API_URL, fail, ok } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
 
@@ -108,7 +108,9 @@ describe("PathDetailPage", () => {
     await screen.findByRole("heading", { name: "Lộ trình Toán THCS" });
 
     await user.click(
-      within(stageRegion("Giai đoạn 1: Nền tảng")).getByRole("button", { name: "Sửa" }),
+      within(stageRegion("Giai đoạn 1: Nền tảng")).getByRole("button", {
+        name: "Sửa giai đoạn Nền tảng",
+      }),
     );
     const dialog = await screen.findByRole("dialog", { name: "Sửa giai đoạn" });
     const name = within(dialog).getByLabelText("Tên giai đoạn");
@@ -118,7 +120,9 @@ describe("PathDetailPage", () => {
     expect(await screen.findByRole("region", { name: "Giai đoạn 1: Khởi đầu" }));
 
     await user.click(
-      within(stageRegion("Giai đoạn 1: Khởi đầu")).getByRole("button", { name: "Xoá" }),
+      within(stageRegion("Giai đoạn 1: Khởi đầu")).getByRole("button", {
+        name: "Xoá giai đoạn Khởi đầu",
+      }),
     );
     const confirm = await screen.findByRole("dialog", { name: 'Xoá giai đoạn "Khởi đầu"?' });
     await user.click(within(confirm).getByRole("button", { name: "Xoá giai đoạn" }));
@@ -133,17 +137,19 @@ describe("PathDetailPage", () => {
     renderPage();
     await screen.findByRole("heading", { name: "Lộ trình Toán THCS" });
 
+    // Every control names its stage, so a screen reader's button list
+    // does not read as N identical "Lên"/"Xuống" entries.
     const first = stageRegion("Giai đoạn 1: Nền tảng");
-    expect(within(first).getByRole("button", { name: "Lên" })).toBeDisabled();
-    await user.click(within(first).getByRole("button", { name: "Xuống" }));
+    expect(within(first).getByRole("button", { name: "Đưa Nền tảng lên" })).toBeDisabled();
+    await user.click(within(first).getByRole("button", { name: "Đưa Nền tảng xuống" }));
 
     expect(await screen.findByRole("region", { name: "Giai đoạn 2: Nền tảng" }));
     expect(stageRegion("Giai đoạn 1: Nâng cao")).toBeInTheDocument();
     expect(stageOf(pathToan, 0).name).toBe("Nâng cao");
 
     const moved = stageRegion("Giai đoạn 2: Nền tảng");
-    expect(within(moved).getByRole("button", { name: "Xuống" })).toBeDisabled();
-    await user.click(within(moved).getByRole("button", { name: "Lên" }));
+    expect(within(moved).getByRole("button", { name: "Đưa Nền tảng xuống" })).toBeDisabled();
+    await user.click(within(moved).getByRole("button", { name: "Đưa Nền tảng lên" }));
     expect(await screen.findByRole("region", { name: "Giai đoạn 1: Nền tảng" }));
     expect(stageOf(pathToan, 0).name).toBe("Nền tảng");
   });
@@ -155,14 +161,14 @@ describe("PathDetailPage", () => {
 
     // Only active courses are offered, and Toán 6 already sits in stage 1.
     const first = stageRegion("Giai đoạn 1: Nền tảng");
-    await user.click(within(first).getByRole("combobox", { name: "Thêm khóa học" }));
+    await user.click(within(first).getByRole("combobox", { name: "Thêm khóa học vào Nền tảng" }));
     const listbox = await screen.findByRole("listbox");
     expect(within(listbox).queryByRole("option", { name: /Toán 6/ })).not.toBeInTheDocument();
     expect(within(listbox).queryByRole("option", { name: /Văn 9/ })).not.toBeInTheDocument();
     await user.keyboard("{Escape}");
 
     const second = stageRegion("Giai đoạn 2: Nâng cao");
-    await user.click(within(second).getByRole("combobox", { name: "Thêm khóa học" }));
+    await user.click(within(second).getByRole("combobox", { name: "Thêm khóa học vào Nâng cao" }));
     await user.click(
       within(await screen.findByRole("listbox")).getByRole("option", { name: /Toán 6/ }),
     );
@@ -213,6 +219,27 @@ describe("PathDetailPage", () => {
 
     expect(await screen.findByText("paths-list-stub")).toBeInTheDocument();
     expect(getPathsStore().paths.map((path) => path.id)).toEqual([pathVan.id]);
+  });
+
+  it("tells an editor without courses.read that the catalog is unavailable and keeps chips plain", async () => {
+    server.use(
+      memberWith("paths.read", "paths.edit"),
+      http.get(`${API_URL}/courses`, () =>
+        HttpResponse.json(fail("FORBIDDEN", "forbidden"), { status: 403 }),
+      ),
+    );
+    renderPage();
+    await screen.findByRole("heading", { name: "Lộ trình Toán THCS" });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Không tải được danh mục khóa học.");
+    const first = stageRegion("Giai đoạn 1: Nền tảng");
+    expect(
+      within(first).getByRole("combobox", { name: "Thêm khóa học vào Nền tảng" }),
+    ).toBeDisabled();
+    expect(within(first).getByText("Toán 6 nền tảng")).toBeInTheDocument();
+    expect(within(first).queryByRole("link", { name: "Toán 6 nền tảng" })).not.toBeInTheDocument();
+    // Removing a held course never needs the catalog.
+    expect(within(first).getByRole("button", { name: "Gỡ Toán 6 nền tảng" })).toBeInTheDocument();
   });
 
   it("hides every editing control from a member who can only read", async () => {
