@@ -63,6 +63,7 @@ func pathID(c *gin.Context, param, resource string) (uuid.UUID, bool) {
 //	@Tags			library
 //	@Produce		json
 //	@Param			q			query		string	false	"code or name fragment"
+//	@Param			has_draft	query		bool	false	"only templates with an open draft"
 //	@Param			page		query		int		false	"page (default 1)"
 //	@Param			per_page	query		int		false	"page size (default 20, max 100)"
 //	@Param			sort		query		string	false	"name | code | created_at, prefix - for descending"
@@ -77,7 +78,7 @@ func (h *Handler) listTemplates(c *gin.Context) {
 		return
 	}
 	params := pagination.Parse(c, "name", listSorts)
-	filter := ListFilter{Q: strings.TrimSpace(c.Query("q"))}
+	filter := ListFilter{Q: strings.TrimSpace(c.Query("q")), HasDraft: c.Query("has_draft") == "true"}
 	rows, total, err := h.svc.ListTemplates(c.Request.Context(), sc, filter, params)
 	if err != nil {
 		response.Err(c, err)
@@ -507,6 +508,114 @@ func (h *Handler) updateLesson(c *gin.Context) {
 		return
 	}
 	out, err := h.svc.UpdateLesson(c.Request.Context(), sc, lid, req)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, out)
+}
+
+// updateLessonPrep changes a lesson's preparation status and checklist.
+//
+//	@Summary		Update a lesson's preparation
+//	@Description	Sets the preparation status and/or replaces the checklist; an omitted field keeps its value. 409 VERSION_LOCKED when the lesson's version is not a draft.
+//	@Tags			library
+//	@Accept			json
+//	@Produce		json
+//	@Param			lid		path		string		true	"lesson id"
+//	@Param			body	body		PrepRequest	true	"preparation"
+//	@Success		200		{object}	response.Envelope{data=LessonResponse}
+//	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		409		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/library/lessons/{lid}/prep [patch]
+func (h *Handler) updateLessonPrep(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	lid, ok := pathID(c, "lid", "template lesson")
+	if !ok {
+		return
+	}
+	var req PrepRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Err(c, validation.BindError(err))
+		return
+	}
+	out, err := h.svc.UpdateLessonPrep(c.Request.Context(), sc, lid, req)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, out)
+}
+
+// updateLessonAssignment replaces a lesson's assignee and due date.
+//
+//	@Summary		Assign a lesson's preparation
+//	@Description	Replaces the assignee and due date as one block; an omitted field clears it. Needs prep.assign. 422 when the assignee is not a live member. 409 VERSION_LOCKED when the lesson's version is not a draft.
+//	@Tags			library
+//	@Accept			json
+//	@Produce		json
+//	@Param			lid		path		string				true	"lesson id"
+//	@Param			body	body		AssignmentRequest	true	"assignment"
+//	@Success		200		{object}	response.Envelope{data=LessonResponse}
+//	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		409		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/library/lessons/{lid}/assignment [patch]
+func (h *Handler) updateLessonAssignment(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	lid, ok := pathID(c, "lid", "template lesson")
+	if !ok {
+		return
+	}
+	var req AssignmentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Err(c, validation.BindError(err))
+		return
+	}
+	out, err := h.svc.UpdateLessonAssignment(c.Request.Context(), sc, lid, req)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, out)
+}
+
+// getBoard returns the preparation board of a version.
+//
+//	@Summary		Get a version's preparation board
+//	@Description	The version's lessons grouped into the four fixed preparation columns (todo, doing, review, done), each card with its assignee, due date and checklist progress.
+//	@Tags			library
+//	@Produce		json
+//	@Param			vid	path		string	true	"version id"
+//	@Success		200	{object}	response.Envelope{data=BoardResponse}
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/library/versions/{vid}/board [get]
+func (h *Handler) getBoard(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	vid, ok := pathID(c, "vid", "template version")
+	if !ok {
+		return
+	}
+	out, err := h.svc.GetBoard(c.Request.Context(), sc, vid)
 	if err != nil {
 		response.Err(c, err)
 		return

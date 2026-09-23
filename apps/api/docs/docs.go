@@ -12208,6 +12208,154 @@ const docTemplate = `{
                 }
             }
         },
+        "/library/lessons/{lid}/assignment": {
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Replaces the assignee and due date as one block; an omitted field clears it. Needs prep.assign. 422 when the assignee is not a live member. 409 VERSION_LOCKED when the lesson's version is not a draft.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "library"
+                ],
+                "summary": "Assign a lesson's preparation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "lesson id",
+                        "name": "lid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "assignment",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/library.AssignmentRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/library.LessonResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/library/lessons/{lid}/exercises": {
             "put": {
                 "security": [
@@ -12417,6 +12565,154 @@ const docTemplate = `{
                                             "items": {
                                                 "$ref": "#/definitions/library.LessonMaterialResponse"
                                             }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/library/lessons/{lid}/prep": {
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Sets the preparation status and/or replaces the checklist; an omitted field keeps its value. 409 VERSION_LOCKED when the lesson's version is not a draft.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "library"
+                ],
+                "summary": "Update a lesson's preparation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "lesson id",
+                        "name": "lid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "preparation",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/library.PrepRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/library.LessonResponse"
                                         }
                                     }
                                 }
@@ -13086,6 +13382,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "code or name fragment",
                         "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "only templates with an open draft",
+                        "name": "has_draft",
                         "in": "query"
                     },
                     {
@@ -14081,6 +14383,106 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "Conflict",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/library/versions/{vid}/board": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "The version's lessons grouped into the four fixed preparation columns (todo, doing, review, done), each card with its assignee, due date and checklist progress.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "library"
+                ],
+                "summary": "Get a version's preparation board",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "version id",
+                        "name": "vid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/library.BoardResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "allOf": [
                                 {
@@ -23597,6 +23999,96 @@ const docTemplate = `{
                 }
             }
         },
+        "library.AssignmentRequest": {
+            "type": "object",
+            "properties": {
+                "assignee_id": {
+                    "type": "string"
+                },
+                "due_date": {
+                    "type": "string"
+                }
+            }
+        },
+        "library.BoardCardResponse": {
+            "type": "object",
+            "properties": {
+                "assignee_id": {
+                    "type": "string"
+                },
+                "assignee_name": {
+                    "type": "string"
+                },
+                "checklist_done": {
+                    "type": "integer"
+                },
+                "checklist_total": {
+                    "type": "integer"
+                },
+                "due_date": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "position": {
+                    "type": "integer"
+                },
+                "prep_status": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "library.BoardColumnResponse": {
+            "type": "object",
+            "properties": {
+                "lessons": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/library.BoardCardResponse"
+                    }
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "library.BoardResponse": {
+            "type": "object",
+            "properties": {
+                "columns": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/library.BoardColumnResponse"
+                    }
+                },
+                "template": {
+                    "$ref": "#/definitions/library.TemplateResponse"
+                },
+                "version": {
+                    "$ref": "#/definitions/library.VersionResponse"
+                }
+            }
+        },
+        "library.ChecklistItem": {
+            "type": "object",
+            "required": [
+                "label"
+            ],
+            "properties": {
+                "done": {
+                    "type": "boolean"
+                },
+                "label": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "minLength": 1
+                }
+            }
+        },
         "library.CreateVersionRequest": {
             "type": "object",
             "properties": {
@@ -23667,7 +24159,19 @@ const docTemplate = `{
         "library.LessonDetailResponse": {
             "type": "object",
             "properties": {
+                "assignee_id": {
+                    "type": "string"
+                },
+                "checklist": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/library.ChecklistItem"
+                    }
+                },
                 "created_at": {
+                    "type": "string"
+                },
+                "due_date": {
                     "type": "string"
                 },
                 "duration_min": {
@@ -23696,6 +24200,9 @@ const docTemplate = `{
                 },
                 "position": {
                     "type": "integer"
+                },
+                "prep_status": {
+                    "type": "string"
                 },
                 "title": {
                     "type": "string"
@@ -23832,7 +24339,19 @@ const docTemplate = `{
         "library.LessonResponse": {
             "type": "object",
             "properties": {
+                "assignee_id": {
+                    "type": "string"
+                },
+                "checklist": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/library.ChecklistItem"
+                    }
+                },
                 "created_at": {
+                    "type": "string"
+                },
+                "due_date": {
                     "type": "string"
                 },
                 "duration_min": {
@@ -23849,6 +24368,9 @@ const docTemplate = `{
                 },
                 "position": {
                     "type": "integer"
+                },
+                "prep_status": {
+                    "type": "string"
                 },
                 "title": {
                     "type": "string"
@@ -23990,6 +24512,44 @@ const docTemplate = `{
                 }
             }
         },
+        "library.PrepRequest": {
+            "type": "object",
+            "properties": {
+                "checklist": {
+                    "type": "array",
+                    "maxItems": 50,
+                    "items": {
+                        "$ref": "#/definitions/library.ChecklistItem"
+                    }
+                },
+                "prep_status": {
+                    "type": "string",
+                    "enum": [
+                        "todo",
+                        "doing",
+                        "review",
+                        "done"
+                    ]
+                }
+            }
+        },
+        "library.PrepSummaryResponse": {
+            "type": "object",
+            "properties": {
+                "assignees": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "done_count": {
+                    "type": "integer"
+                },
+                "lesson_count": {
+                    "type": "integer"
+                }
+            }
+        },
         "library.ReorderRequest": {
             "type": "object",
             "required": [
@@ -24065,6 +24625,12 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 2000
                 },
+                "lesson_count": {
+                    "description": "LessonCount, on create only, seeds that many empty lessons\n(\"Buổi 1\"..\"Buổi N\") into the first draft so preparation can start\nbefore the content is written. Ignored on update.",
+                    "type": "integer",
+                    "maximum": 100,
+                    "minimum": 1
+                },
                 "level": {
                     "type": "string",
                     "maxLength": 100
@@ -24106,6 +24672,9 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "prep": {
+                    "$ref": "#/definitions/library.PrepSummaryResponse"
                 },
                 "published_version_no": {
                     "type": "integer"

@@ -1598,6 +1598,65 @@ definitions:
       phone_masked:
         type: string
     type: object
+  library.AssignmentRequest:
+    properties:
+      assignee_id:
+        type: string
+      due_date:
+        type: string
+    type: object
+  library.BoardCardResponse:
+    properties:
+      assignee_id:
+        type: string
+      assignee_name:
+        type: string
+      checklist_done:
+        type: integer
+      checklist_total:
+        type: integer
+      due_date:
+        type: string
+      id:
+        type: string
+      position:
+        type: integer
+      prep_status:
+        type: string
+      title:
+        type: string
+    type: object
+  library.BoardColumnResponse:
+    properties:
+      lessons:
+        items:
+          $ref: '#/definitions/library.BoardCardResponse'
+        type: array
+      status:
+        type: string
+    type: object
+  library.BoardResponse:
+    properties:
+      columns:
+        items:
+          $ref: '#/definitions/library.BoardColumnResponse'
+        type: array
+      template:
+        $ref: '#/definitions/library.TemplateResponse'
+      version:
+        $ref: '#/definitions/library.VersionResponse'
+    type: object
+  library.ChecklistItem:
+    properties:
+      done:
+        type: boolean
+      label:
+        maxLength: 200
+        minLength: 1
+        type: string
+    required:
+    - label
+    type: object
   library.CreateVersionRequest:
     properties:
       changelog:
@@ -1646,7 +1705,15 @@ definitions:
     type: object
   library.LessonDetailResponse:
     properties:
+      assignee_id:
+        type: string
+      checklist:
+        items:
+          $ref: '#/definitions/library.ChecklistItem'
+        type: array
       created_at:
+        type: string
+      due_date:
         type: string
       duration_min:
         type: integer
@@ -1666,6 +1733,8 @@ definitions:
         type: string
       position:
         type: integer
+      prep_status:
+        type: string
       title:
         type: string
       updated_at:
@@ -1756,7 +1825,15 @@ definitions:
     type: object
   library.LessonResponse:
     properties:
+      assignee_id:
+        type: string
+      checklist:
+        items:
+          $ref: '#/definitions/library.ChecklistItem'
+        type: array
       created_at:
+        type: string
+      due_date:
         type: string
       duration_min:
         type: integer
@@ -1768,6 +1845,8 @@ definitions:
         type: string
       position:
         type: integer
+      prep_status:
+        type: string
       title:
         type: string
       updated_at:
@@ -1865,6 +1944,32 @@ definitions:
       url:
         type: string
     type: object
+  library.PrepRequest:
+    properties:
+      checklist:
+        items:
+          $ref: '#/definitions/library.ChecklistItem'
+        maxItems: 50
+        type: array
+      prep_status:
+        enum:
+        - todo
+        - doing
+        - review
+        - done
+        type: string
+    type: object
+  library.PrepSummaryResponse:
+    properties:
+      assignees:
+        items:
+          type: string
+        type: array
+      done_count:
+        type: integer
+      lesson_count:
+        type: integer
+    type: object
   library.ReorderRequest:
     properties:
       lesson_ids:
@@ -1915,6 +2020,14 @@ definitions:
       description:
         maxLength: 2000
         type: string
+      lesson_count:
+        description: |-
+          LessonCount, on create only, seeds that many empty lessons
+          ("Buổi 1".."Buổi N") into the first draft so preparation can start
+          before the content is written. Ignored on update.
+        maximum: 100
+        minimum: 1
+        type: integer
       level:
         maxLength: 100
         type: string
@@ -1947,6 +2060,8 @@ definitions:
         type: string
       name:
         type: string
+      prep:
+        $ref: '#/definitions/library.PrepSummaryResponse'
       published_version_no:
         type: integer
       subject:
@@ -9990,6 +10105,87 @@ paths:
       summary: Update a template lesson
       tags:
       - library
+  /library/lessons/{lid}/assignment:
+    patch:
+      consumes:
+      - application/json
+      description: Replaces the assignee and due date as one block; an omitted field
+        clears it. Needs prep.assign. 422 when the assignee is not a live member.
+        409 VERSION_LOCKED when the lesson's version is not a draft.
+      parameters:
+      - description: lesson id
+        in: path
+        name: lid
+        required: true
+        type: string
+      - description: assignment
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/library.AssignmentRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.LessonResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Assign a lesson's preparation
+      tags:
+      - library
   /library/lessons/{lid}/exercises:
     put:
       consumes:
@@ -10158,6 +10354,87 @@ paths:
       security:
       - BearerAuth: []
       summary: Replace the materials of a template lesson
+      tags:
+      - library
+  /library/lessons/{lid}/prep:
+    patch:
+      consumes:
+      - application/json
+      description: Sets the preparation status and/or replaces the checklist; an omitted
+        field keeps its value. 409 VERSION_LOCKED when the lesson's version is not
+        a draft.
+      parameters:
+      - description: lesson id
+        in: path
+        name: lid
+        required: true
+        type: string
+      - description: preparation
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/library.PrepRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.LessonResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Update a lesson's preparation
       tags:
       - library
   /library/materials:
@@ -10465,6 +10742,10 @@ paths:
         in: query
         name: q
         type: string
+      - description: only templates with an open draft
+        in: query
+        name: has_draft
+        type: boolean
       - description: page (default 1)
         in: query
         name: page
@@ -11015,6 +11296,61 @@ paths:
       security:
       - BearerAuth: []
       summary: Archive a published version
+      tags:
+      - library
+  /library/versions/{vid}/board:
+    get:
+      description: The version's lessons grouped into the four fixed preparation columns
+        (todo, doing, review, done), each card with its assignee, due date and checklist
+        progress.
+      parameters:
+      - description: version id
+        in: path
+        name: vid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.BoardResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get a version's preparation board
       tags:
       - library
   /library/versions/{vid}/lessons:

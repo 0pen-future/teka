@@ -45,6 +45,7 @@ var optInKeys = []string{
 	PermLibraryPublish,
 	PermCoursesEdit,
 	PermPathsEdit,
+	PermPrepAssign,
 }
 
 // Keys the catalog once knew and has since retired: assignment rows for them
@@ -314,11 +315,11 @@ func TestDefaultRoleKeysPreserveLegacyBaseline(t *testing.T) {
 // The catalog version is the CAS anchor for permission-assignment writes: a
 // client that loaded the read model under an older catalog must get 409, not
 // a silent partial write. Version 4 added the tasks group, members.list, and
-// the DefaultGrant attribute. Bump it on any catalog change that alters what
-// a stored assignment means.
+// the DefaultGrant attribute; 5 added prep.assign. Bump it on any catalog
+// change that alters what a stored assignment means.
 func TestCatalogVersion(t *testing.T) {
-	if CatalogVersion != 4 {
-		t.Fatalf("catalog version must be 4 after adding the tasks group, got %d", CatalogVersion)
+	if CatalogVersion != 5 {
+		t.Fatalf("catalog version must be 5 after adding prep.assign, got %d", CatalogVersion)
 	}
 }
 

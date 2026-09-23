@@ -53,6 +53,11 @@ type TemplateRow struct {
 	PublishedVersionNo *int
 	DraftVersionNo     *int
 	VersionCount       int
+	// DraftLessonCount, DraftDoneCount and DraftAssignees summarise the
+	// preparation of the open draft; all zero when there is none.
+	DraftLessonCount int
+	DraftDoneCount   int
+	DraftAssignees   dbtypes.StringList
 }
 
 // Version is one program_template_versions row. ScoreSet is the version's
@@ -83,8 +88,21 @@ type VersionRow struct {
 	LessonCount int
 }
 
+// Preparation statuses of a template lesson, in board column order.
+const (
+	PrepTodo   = "todo"
+	PrepDoing  = "doing"
+	PrepReview = "review"
+	PrepDone   = "done"
+)
+
+// PrepStatuses lists the four fixed board columns in order.
+var PrepStatuses = []string{PrepTodo, PrepDoing, PrepReview, PrepDone}
+
 // Lesson is one template_lessons row. Position is 1-based and contiguous
-// within a version; the service renumbers on delete and reorder.
+// within a version; the service renumbers on delete and reorder. The
+// preparation fields (status, assignee, due date, checklist) belong to the
+// draft they were set on: copying a version into a new draft resets them.
 type Lesson struct {
 	ID           uuid.UUID
 	VersionID    uuid.UUID
@@ -94,8 +112,51 @@ type Lesson struct {
 	Objectives   *string
 	DurationMin  *int
 	HomeworkNote *string
+	PrepStatus   string
+	AssigneeID   *uuid.UUID
+	DueDate      *time.Time `gorm:"type:date"`
+	Checklist    Checklist
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+}
+
+// BoardCard is a lesson joined with its assignee's display name.
+type BoardCard struct {
+	Lesson
+	AssigneeName *string
+}
+
+// ChecklistItem is one preparation to-do of a lesson.
+type ChecklistItem struct {
+	Label string `json:"label" binding:"required,min=1,max=200"`
+	Done  bool   `json:"done"`
+}
+
+// Checklist maps the checklist JSONB column. A nil list writes as [] so the
+// NOT NULL DEFAULT '[]' column never sees a SQL NULL.
+type Checklist []ChecklistItem
+
+// Value marshals the list.
+func (c Checklist) Value() (driver.Value, error) {
+	if c == nil {
+		c = Checklist{}
+	}
+	return json.Marshal(c)
+}
+
+// Scan accepts the []byte/string forms the pgx/gorm stack hands over.
+func (c *Checklist) Scan(value any) error {
+	switch v := value.(type) {
+	case nil:
+		*c = nil
+		return nil
+	case []byte:
+		return json.Unmarshal(v, c)
+	case string:
+		return json.Unmarshal([]byte(v), c)
+	default:
+		return fmt.Errorf("cannot scan %T into Checklist", value)
+	}
 }
 
 // TableName maps the model onto template_lessons.

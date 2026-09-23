@@ -15,26 +15,40 @@ type TemplateRequest struct {
 	Subject     *string `json:"subject" binding:"omitempty,max=100"`
 	Level       *string `json:"level" binding:"omitempty,max=100"`
 	Description *string `json:"description" binding:"omitempty,max=2000"`
+	// LessonCount, on create only, seeds that many empty lessons
+	// ("Buổi 1".."Buổi N") into the first draft so preparation can start
+	// before the content is written. Ignored on update.
+	LessonCount *int `json:"lesson_count" binding:"omitempty,min=1,max=100"`
+}
+
+// PrepSummaryResponse summarises the preparation of a template's open draft:
+// how many lessons it has, how many are done and who is assigned.
+type PrepSummaryResponse struct {
+	LessonCount int      `json:"lesson_count"`
+	DoneCount   int      `json:"done_count"`
+	Assignees   []string `json:"assignees"`
 }
 
 // TemplateResponse is the wire form of a template with its version summary.
+// Prep is nil when the template has no draft.
 type TemplateResponse struct {
-	ID                 uuid.UUID  `json:"id"`
-	Code               string     `json:"code"`
-	Name               string     `json:"name"`
-	Subject            *string    `json:"subject"`
-	Level              *string    `json:"level"`
-	Description        *string    `json:"description"`
-	CreatedBy          *uuid.UUID `json:"created_by"`
-	PublishedVersionNo *int       `json:"published_version_no"`
-	DraftVersionNo     *int       `json:"draft_version_no"`
-	VersionCount       int        `json:"version_count"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
+	ID                 uuid.UUID            `json:"id"`
+	Code               string               `json:"code"`
+	Name               string               `json:"name"`
+	Subject            *string              `json:"subject"`
+	Level              *string              `json:"level"`
+	Description        *string              `json:"description"`
+	CreatedBy          *uuid.UUID           `json:"created_by"`
+	PublishedVersionNo *int                 `json:"published_version_no"`
+	DraftVersionNo     *int                 `json:"draft_version_no"`
+	VersionCount       int                  `json:"version_count"`
+	Prep               *PrepSummaryResponse `json:"prep"`
+	CreatedAt          time.Time            `json:"created_at"`
+	UpdatedAt          time.Time            `json:"updated_at"`
 }
 
 func templateResponse(row *TemplateRow) TemplateResponse {
-	return TemplateResponse{
+	out := TemplateResponse{
 		ID: row.ID, Code: row.Code, Name: row.Name,
 		Subject: row.Subject, Level: row.Level, Description: row.Description,
 		CreatedBy:          row.CreatedBy,
@@ -43,6 +57,14 @@ func templateResponse(row *TemplateRow) TemplateResponse {
 		VersionCount:       row.VersionCount,
 		CreatedAt:          row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}
+	if row.DraftVersionNo != nil {
+		assignees := []string(row.DraftAssignees)
+		if assignees == nil {
+			assignees = []string{}
+		}
+		out.Prep = &PrepSummaryResponse{LessonCount: row.DraftLessonCount, DoneCount: row.DraftDoneCount, Assignees: assignees}
+	}
+	return out
 }
 
 // CreateVersionRequest opens a new draft; the changelog is what changed
@@ -84,25 +106,113 @@ type LessonRequest struct {
 	HomeworkNote *string `json:"homework_note" binding:"omitempty,max=4000"`
 }
 
+// PrepRequest changes the preparation state of a lesson. Both fields are
+// optional; an omitted field keeps its current value and a present
+// checklist replaces the stored one wholesale.
+type PrepRequest struct {
+	PrepStatus *string          `json:"prep_status" binding:"omitempty,oneof=todo doing review done"`
+	Checklist  *[]ChecklistItem `json:"checklist" binding:"omitempty,max=50,dive"`
+}
+
+// AssignmentRequest replaces the assignee and due date of a lesson as one
+// block: an omitted or null field clears it. The assignee must be a live
+// member of the center; the due date is a calendar day (YYYY-MM-DD).
+type AssignmentRequest struct {
+	AssigneeID *uuid.UUID `json:"assignee_id"`
+	DueDate    *string    `json:"due_date" binding:"omitempty,datetime=2006-01-02"`
+}
+
+// dueDateLayout is the wire form of a due date: a calendar day without time.
+const dueDateLayout = "2006-01-02"
+
 // LessonResponse is the wire form of a template lesson.
 type LessonResponse struct {
-	ID           uuid.UUID `json:"id"`
-	VersionID    uuid.UUID `json:"version_id"`
-	Position     int       `json:"position"`
-	Title        string    `json:"title"`
-	Objectives   *string   `json:"objectives"`
-	DurationMin  *int      `json:"duration_min"`
-	HomeworkNote *string   `json:"homework_note"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID           uuid.UUID       `json:"id"`
+	VersionID    uuid.UUID       `json:"version_id"`
+	Position     int             `json:"position"`
+	Title        string          `json:"title"`
+	Objectives   *string         `json:"objectives"`
+	DurationMin  *int            `json:"duration_min"`
+	HomeworkNote *string         `json:"homework_note"`
+	PrepStatus   string          `json:"prep_status"`
+	AssigneeID   *uuid.UUID      `json:"assignee_id"`
+	DueDate      *string         `json:"due_date"`
+	Checklist    []ChecklistItem `json:"checklist"`
+	CreatedAt    time.Time       `json:"created_at"`
+	UpdatedAt    time.Time       `json:"updated_at"`
 }
 
 func lessonResponse(l *Lesson) LessonResponse {
+	checklist := []ChecklistItem(l.Checklist)
+	if checklist == nil {
+		checklist = []ChecklistItem{}
+	}
 	return LessonResponse{
 		ID: l.ID, VersionID: l.VersionID, Position: l.Position, Title: l.Title,
 		Objectives: l.Objectives, DurationMin: l.DurationMin, HomeworkNote: l.HomeworkNote,
+		PrepStatus: l.PrepStatus, AssigneeID: l.AssigneeID, DueDate: dueDateString(l.DueDate), Checklist: checklist,
 		CreatedAt: l.CreatedAt, UpdatedAt: l.UpdatedAt,
 	}
+}
+
+func dueDateString(d *time.Time) *string {
+	if d == nil {
+		return nil
+	}
+	s := d.Format(dueDateLayout)
+	return &s
+}
+
+// BoardResponse is the preparation board of one version: the four fixed
+// status columns, each holding its lessons by position.
+type BoardResponse struct {
+	Template TemplateResponse      `json:"template"`
+	Version  VersionResponse       `json:"version"`
+	Columns  []BoardColumnResponse `json:"columns"`
+}
+
+// BoardColumnResponse is one status column of the board.
+type BoardColumnResponse struct {
+	Status  string              `json:"status"`
+	Lessons []BoardCardResponse `json:"lessons"`
+}
+
+// BoardCardResponse is the card of one lesson on the board.
+type BoardCardResponse struct {
+	ID             uuid.UUID  `json:"id"`
+	Position       int        `json:"position"`
+	Title          string     `json:"title"`
+	PrepStatus     string     `json:"prep_status"`
+	AssigneeID     *uuid.UUID `json:"assignee_id"`
+	AssigneeName   *string    `json:"assignee_name"`
+	DueDate        *string    `json:"due_date"`
+	ChecklistDone  int        `json:"checklist_done"`
+	ChecklistTotal int        `json:"checklist_total"`
+}
+
+func boardResponse(tpl TemplateResponse, version VersionResponse, cards []BoardCard) *BoardResponse {
+	columns := make([]BoardColumnResponse, 0, len(PrepStatuses))
+	index := map[string]int{}
+	for i, status := range PrepStatuses {
+		index[status] = i
+		columns = append(columns, BoardColumnResponse{Status: status, Lessons: []BoardCardResponse{}})
+	}
+	for i := range cards {
+		card := &cards[i]
+		done := 0
+		for _, item := range card.Checklist {
+			if item.Done {
+				done++
+			}
+		}
+		col := index[card.PrepStatus]
+		columns[col].Lessons = append(columns[col].Lessons, BoardCardResponse{
+			ID: card.ID, Position: card.Position, Title: card.Title, PrepStatus: card.PrepStatus,
+			AssigneeID: card.AssigneeID, AssigneeName: card.AssigneeName, DueDate: dueDateString(card.DueDate),
+			ChecklistDone: done, ChecklistTotal: len(card.Checklist),
+		})
+	}
+	return &BoardResponse{Template: tpl, Version: version, Columns: columns}
 }
 
 func lessonResponses(rows []Lesson) []LessonResponse {

@@ -38,21 +38,22 @@ func (f fakeScopeResolver) ResolveScope(_ context.Context, teacherID uuid.UUID) 
 
 type httpDeps struct {
 	*testDeps
-	reader, editor uuid.UUID
+	reader, editor, assigner uuid.UUID
 }
 
 func newHTTPTest(t *testing.T) (*gin.Engine, *httpDeps) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	svc, deps := newTestService()
-	d := &httpDeps{testDeps: deps, reader: uuid.New(), editor: uuid.New()}
+	d := &httpDeps{testDeps: deps, reader: uuid.New(), editor: uuid.New(), assigner: uuid.New()}
 	r := gin.New()
 	jwtCfg := config.JWTConfig{Secret: handlerTestSecret, AccessTTL: 15 * time.Minute}
 	RegisterRoutes(r.Group("/api/v1"), NewHandler(svc),
 		middleware.RequireAuth(jwtCfg),
 		middleware.ResolveScope(fakeScopeResolver{center: deps.center, ownerID: deps.owner, perms: map[uuid.UUID][]string{
-			d.reader: {authctx.PermLibraryRead},
-			d.editor: {authctx.PermLibraryEdit},
+			d.reader:   {authctx.PermLibraryRead},
+			d.editor:   {authctx.PermLibraryEdit},
+			d.assigner: {authctx.PermPrepAssign},
 		}}))
 	return r, d
 }
@@ -133,6 +134,9 @@ func TestAllRoutesRequireAuth(t *testing.T) {
 		{http.MethodPut, "/api/v1/library/lessons/" + someID},
 		{http.MethodDelete, "/api/v1/library/lessons/" + someID},
 		{http.MethodGet, "/api/v1/library/versions/" + someID},
+		{http.MethodGet, "/api/v1/library/versions/" + someID + "/board"},
+		{http.MethodPatch, "/api/v1/library/lessons/" + someID + "/prep"},
+		{http.MethodPatch, "/api/v1/library/lessons/" + someID + "/assignment"},
 		{http.MethodPut, "/api/v1/library/versions/" + someID + "/log-fields"},
 		{http.MethodPut, "/api/v1/library/versions/" + someID + "/score-set"},
 		{http.MethodPut, "/api/v1/library/lessons/" + someID + "/materials"},
@@ -523,5 +527,102 @@ func TestItemValidationOverHTTP(t *testing.T) {
 		`[{"label":"ok","kind":"text"},{"label":"","kind":"date"}]`, owner)
 	if env.Error == nil || env.Error.Fields["1.label"] == "" || env.Error.Fields["1.kind"] == "" || env.Error.Fields["0.label"] != "" {
 		t.Fatalf("want indexed field errors, got %+v", env.Error)
+	}
+}
+
+func TestPrepOverHTTP(t *testing.T) {
+	r, d := newHTTPTest(t)
+	owner, reader, editor, assigner := mintToken(t, d.owner), mintToken(t, d.reader), mintToken(t, d.editor), mintToken(t, d.assigner)
+	d.repo.members[d.assigner] = "Thầy Minh"
+
+	w, env := do(t, r, http.MethodPost, "/api/v1/library/templates", `{"code":"CT01","name":"Toán 6","lesson_count":2}`, editor)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create with lesson_count: got %d %+v", w.Code, env)
+	}
+	tpl := decode[TemplateResponse](t, env)
+	if tpl.Prep == nil || tpl.Prep.LessonCount != 2 {
+		t.Fatalf("summary must show the seeded lessons, got %+v", tpl.Prep)
+	}
+	w, env = do(t, r, http.MethodPost, "/api/v1/library/templates", `{"code":"CT02","name":"Toán 7","lesson_count":0}`, editor)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("lesson_count below 1 must be rejected: got %d %+v", w.Code, env)
+	}
+
+	w, env = do(t, r, http.MethodGet, "/api/v1/library/templates?has_draft=true", "", reader)
+	if w.Code != http.StatusOK || len(decode[[]TemplateResponse](t, env)) != 1 {
+		t.Fatalf("has_draft list: got %d %+v", w.Code, env)
+	}
+	w, env = do(t, r, http.MethodGet, "/api/v1/library/templates/"+tpl.ID.String()+"/versions", "", reader)
+	if w.Code != http.StatusOK {
+		t.Fatalf("versions: got %d %+v", w.Code, env)
+	}
+	vid := decode[[]VersionResponse](t, env)[0].ID.String()
+	w, env = do(t, r, http.MethodGet, "/api/v1/library/versions/"+vid+"/lessons", "", reader)
+	if w.Code != http.StatusOK {
+		t.Fatalf("lessons: got %d %+v", w.Code, env)
+	}
+	lessons := decode[[]LessonResponse](t, env)
+	lid := lessons[0].ID.String()
+
+	prepBody := `{"prep_status":"doing","checklist":[{"label":"In phiếu","done":true},{"label":"Soạn slide"}]}`
+	w, env = do(t, r, http.MethodPatch, "/api/v1/library/lessons/"+lid+"/prep", prepBody, reader)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("reader must not change prep: got %d %+v", w.Code, env)
+	}
+	w, env = do(t, r, http.MethodPatch, "/api/v1/library/lessons/"+lid+"/prep", prepBody, editor)
+	if w.Code != http.StatusOK {
+		t.Fatalf("editor prep: got %d %+v", w.Code, env)
+	}
+	if got := decode[LessonResponse](t, env); got.PrepStatus != PrepDoing || len(got.Checklist) != 2 {
+		t.Fatalf("prep response: %+v", got)
+	}
+	w, env = do(t, r, http.MethodPatch, "/api/v1/library/lessons/"+lid+"/prep", `{"prep_status":"blocked"}`, editor)
+	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["prep_status"] == "" {
+		t.Fatalf("unknown status must fail validation on prep_status: got %d %+v", w.Code, env)
+	}
+	w, env = do(t, r, http.MethodPatch, "/api/v1/library/lessons/"+lid+"/prep", `{"checklist":[{"label":""}]}`, editor)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("blank checklist label must fail validation: got %d %+v", w.Code, env)
+	}
+
+	assignBody := `{"assignee_id":"` + d.assigner.String() + `","due_date":"2026-10-01"}`
+	w, env = do(t, r, http.MethodPatch, "/api/v1/library/lessons/"+lid+"/assignment", assignBody, editor)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("library.edit alone must not assign: got %d %+v", w.Code, env)
+	}
+	w, env = do(t, r, http.MethodPatch, "/api/v1/library/lessons/"+lid+"/assignment", assignBody, assigner)
+	if w.Code != http.StatusOK {
+		t.Fatalf("assigner: got %d %+v", w.Code, env)
+	}
+	if got := decode[LessonResponse](t, env); got.AssigneeID == nil || *got.AssigneeID != d.assigner || got.DueDate == nil || *got.DueDate != "2026-10-01" {
+		t.Fatalf("assignment response: %+v", got)
+	}
+	w, env = do(t, r, http.MethodPatch, "/api/v1/library/lessons/"+lid+"/assignment", `{"due_date":"01/10/2026"}`, owner)
+	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["due_date"] == "" {
+		t.Fatalf("malformed due_date must fail validation on due_date: got %d %+v", w.Code, env)
+	}
+	w, env = do(t, r, http.MethodPatch, "/api/v1/library/lessons/"+lid+"/assignment", `{"assignee_id":"`+uuid.NewString()+`"}`, owner)
+	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["assignee_id"] == "" {
+		t.Fatalf("non-member assignee must be a 422 on assignee_id: got %d %+v", w.Code, env)
+	}
+
+	w, env = do(t, r, http.MethodGet, "/api/v1/library/versions/"+vid+"/board", "", mintToken(t, uuid.New()))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("a member without library.read does not read the board: got %d %+v", w.Code, env)
+	}
+	w, env = do(t, r, http.MethodGet, "/api/v1/library/versions/"+vid+"/board", "", assigner)
+	if w.Code != http.StatusOK {
+		t.Fatalf("prep.assign implies library.read, so the assigner reads the board: got %d %+v", w.Code, env)
+	}
+	w, env = do(t, r, http.MethodGet, "/api/v1/library/versions/"+vid+"/board", "", reader)
+	if w.Code != http.StatusOK {
+		t.Fatalf("reader board: got %d %+v", w.Code, env)
+	}
+	board := decode[BoardResponse](t, env)
+	if len(board.Columns) != 4 || len(board.Columns[1].Lessons) != 1 || board.Columns[1].Lessons[0].AssigneeName == nil || *board.Columns[1].Lessons[0].AssigneeName != "Thầy Minh" {
+		t.Fatalf("board must group the doing card with its assignee name, got %+v", board.Columns)
+	}
+	if board.Columns[2].Lessons == nil {
+		t.Fatalf("empty columns must serialise as [] not null")
 	}
 }

@@ -326,10 +326,10 @@ func TestDownFoldsPersonalChannelIntoManual(t *testing.T) {
 		 VALUES (?, ?, ?, ?, 'zalo_personal')`,
 		notifID, f.teacherID, f.centerID, f.statementID).Error)
 
-	// Roll back through 000005 (zalo_personal_mapping): twenty-seven steps
-	// now that the additive 000008-000031 sit on top of the migrations this
+	// Roll back through 000005 (zalo_personal_mapping): twenty-eight steps
+	// now that the additive 000008-000032 sit on top of the migrations this
 	// test predates.
-	require.NoError(t, database.MigrateDown(m, 27))
+	require.NoError(t, database.MigrateDown(m, 28))
 
 	var channel string
 	require.NoError(t, db.Raw(
@@ -3207,4 +3207,90 @@ func TestClassProgramsSchemaInvariants(t *testing.T) {
 	require.Zero(t, n)
 	require.NoError(t, db.Raw(`SELECT count(*) FROM class_messages WHERE class_id = ?`, mine.classID).Scan(&n).Error)
 	require.Zero(t, n)
+}
+
+// The prep columns on template_lessons: the status CHECK and defaults, the
+// JSONB checklist, and the assignee FK that only accepts a membership of the
+// lesson's own center and clears itself when that membership is hard-deleted
+// instead of taking the lesson's content with it.
+func TestTemplateLessonPrepSchemaInvariants(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+
+	db := openDB(t, url)
+	mine := seedTeachingParents(t, db, "+84900002201")
+	theirs := seedTeachingParents(t, db, "+84900002202")
+	// teachers.center_id and center_members reference each other with a
+	// deferred FK, so the helper's rows land in one transaction.
+	helperID := uuid.New()
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(
+			`INSERT INTO user_accounts (id, role, phone) VALUES (?, 'teachers', '+84900002203')`, helperID).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(
+			`INSERT INTO teachers (id, full_name, center_id) VALUES (?, 'Thầy Minh', ?)`, helperID, mine.centerID).Error; err != nil {
+			return err
+		}
+		return tx.Exec(
+			`INSERT INTO center_members (teacher_id, center_id) VALUES (?, ?)`, helperID, mine.centerID).Error
+	}))
+
+	templateID, versionID, lessonID := uuid.New(), uuid.New(), uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO program_templates (id, center_id, code, name) VALUES (?, ?, 'TOAN9', 'Toán 9')`,
+		templateID, mine.centerID).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO program_template_versions (id, template_id, center_id, version_no, status)
+		 VALUES (?, ?, ?, 1, 'draft')`, versionID, templateID, mine.centerID).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO template_lessons (id, version_id, center_id, position, title) VALUES (?, ?, ?, 1, 'Buổi 1')`,
+		lessonID, versionID, mine.centerID).Error)
+
+	var row struct {
+		PrepStatus string
+		Checklist  string
+		AssigneeID *uuid.UUID
+		DueDate    *time.Time
+	}
+	read := func() {
+		require.NoError(t, db.Raw(
+			`SELECT prep_status, checklist::text AS checklist, assignee_id, due_date
+			 FROM template_lessons WHERE id = ?`, lessonID).Scan(&row).Error)
+	}
+	read()
+	require.Equal(t, "todo", row.PrepStatus, "a new lesson starts in todo")
+	require.Equal(t, "[]", row.Checklist, "a new lesson has an empty checklist")
+	require.Nil(t, row.AssigneeID)
+	require.Nil(t, row.DueDate)
+
+	require.Error(t, db.Exec(`UPDATE template_lessons SET prep_status = 'blocked' WHERE id = ?`, lessonID).Error,
+		"prep_status is limited to the four board columns")
+	require.NoError(t, db.Exec(
+		`UPDATE template_lessons SET prep_status = 'review', due_date = '2026-10-01',
+		 checklist = '[{"label":"Soạn slide","done":true}]' WHERE id = ?`, lessonID).Error)
+
+	// The assignee must hold a membership of the lesson's own center.
+	err = db.Exec(`UPDATE template_lessons SET assignee_id = ? WHERE id = ?`, theirs.teacherID, lessonID).Error
+	require.ErrorContains(t, err, "fk_template_lessons_assignee")
+	require.NoError(t, db.Exec(`UPDATE template_lessons SET assignee_id = ? WHERE id = ?`, helperID, lessonID).Error)
+
+	// Hard-deleting the helper's account cascades through teachers and
+	// center_members; the lesson loses its assignee but keeps its content.
+	require.NoError(t, db.Exec(`DELETE FROM user_accounts WHERE id = ?`, helperID).Error)
+	read()
+	require.Nil(t, row.AssigneeID)
+	require.Equal(t, "review", row.PrepStatus)
+	require.NotNil(t, row.DueDate)
+
+	var indexed bool
+	require.NoError(t, db.Raw(
+		`SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE tablename = 'template_lessons'
+		 AND indexname = 'idx_template_lessons_assignee')`).Scan(&indexed).Error)
+	require.True(t, indexed)
 }

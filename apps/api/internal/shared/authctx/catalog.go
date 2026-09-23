@@ -145,6 +145,7 @@ const (
 	PermLibraryRead    = "library.read"
 	PermLibraryEdit    = "library.edit"
 	PermLibraryPublish = "library.publish"
+	PermPrepAssign     = "prep.assign"
 
 	PermCoursesRead = "courses.read"
 	PermCoursesEdit = "courses.edit"
@@ -280,6 +281,7 @@ var permCatalog = []PermDef{
 	def(PermLibraryRead, PermKindCRUD, RiskLow, "Xem kho học liệu", "Xem chương trình mẫu, phiên bản và buổi học mẫu của trung tâm."),
 	optIn(PermLibraryEdit, PermKindCRUD, RiskMedium, "Soạn chương trình mẫu", "Tạo, sửa, xoá chương trình mẫu và soạn buổi học mẫu trong bản nháp."),
 	optIn(PermLibraryPublish, PermKindSpecial, RiskHigh, "Phát hành chương trình mẫu", "Phát hành một bản nháp thành phiên bản chính thức, khoá nội dung của phiên bản đó."),
+	optIn(PermPrepAssign, PermKindSpecial, RiskMedium, "Phân công chuẩn bị tài liệu", "Phân công thành viên và đặt hạn hoàn thành cho từng buổi mẫu trong bản nháp chương trình."),
 
 	def(PermCoursesRead, PermKindCRUD, RiskLow, "Xem danh mục khóa học", "Xem khóa học, gói học phí và các lớp đang mở của từng khóa học."),
 	optIn(PermCoursesEdit, PermKindCRUD, RiskMedium, "Quản lý khóa học", "Tạo, sửa, lưu trữ, xoá khóa học và thiết lập gói học phí."),
@@ -353,9 +355,10 @@ func GrantableKeys() []string {
 // deprecated data.view_center_wide alias; 3 retired the alias and the two
 // unenforced scope keys (scores/teaching view_all); 4 added the tasks group,
 // members.list, and the DefaultGrant attribute that opts tasks.manage_board
-// and members.list out of the default-role backfill. Bump on any change that
-// alters what a stored assignment means.
-const CatalogVersion = 4
+// and members.list out of the default-role backfill; 5 added prep.assign,
+// the opt-in key that assigns template-lesson preparation. Bump on any change
+// that alters what a stored assignment means.
+const CatalogVersion = 5
 
 // legacyIdentitySet is the pre-catalog identity keys: operations that were
 // permission-gated before the resource-action catalog existed. They stay out
@@ -379,12 +382,14 @@ var legacyIdentitySet = map[string]bool{
 // family in the center means reading every family's phone, invoices,
 // statements and send history, so reports.send is the read reach of those
 // four resources; it implies no write key and no payments.view_all. Editing
-// or publishing a program template is impossible without reading it, so the
-// two library write keys carry library.read. An implied key is never a write.
+// or publishing a program template is impossible without reading it, and so
+// is assigning the preparation of its lessons, so the library write keys and
+// prep.assign carry library.read. An implied key is never a write.
 var impliedKeys = map[string][]string{
 	PermReportsSend:    {PermBillingViewAll, PermStatementsViewAll, PermNotificationsViewAll, PermContactsViewAll},
 	PermLibraryEdit:    {PermLibraryRead},
 	PermLibraryPublish: {PermLibraryRead},
+	PermPrepAssign:     {PermLibraryRead},
 	PermCoursesEdit:    {PermCoursesRead},
 	PermPathsEdit:      {PermPathsRead},
 }

@@ -55,9 +55,20 @@ func (s *Service) CreateTemplate(ctx context.Context, sc authctx.Scope, req Temp
 		if err := s.repo.CreateTemplate(ctx, sc, tpl); err != nil {
 			return mapCodeClash(err)
 		}
-		return s.repo.CreateVersion(ctx, sc, &Version{
-			TemplateID: tpl.ID, VersionNo: 1, Status: StatusDraft, CreatedBy: &sc.TeacherID,
-		})
+		draft := &Version{TemplateID: tpl.ID, VersionNo: 1, Status: StatusDraft, CreatedBy: &sc.TeacherID}
+		if err := s.repo.CreateVersion(ctx, sc, draft); err != nil {
+			return err
+		}
+		if req.LessonCount == nil || *req.LessonCount <= 0 {
+			return nil
+		}
+		// Seed placeholder lessons so the preparation board has cards
+		// before anyone writes the content.
+		rows := make([]*Lesson, 0, *req.LessonCount)
+		for i := 1; i <= *req.LessonCount; i++ {
+			rows = append(rows, &Lesson{VersionID: draft.ID, Position: i, Title: "Buổi " + strconv.Itoa(i), PrepStatus: PrepTodo})
+		}
+		return s.repo.CreateLessons(ctx, sc, rows)
 	})
 	if err != nil {
 		return nil, err
@@ -454,6 +465,119 @@ func (s *Service) UpdateLesson(ctx context.Context, sc authctx.Scope, lessonID u
 		return nil, err
 	}
 	return s.GetLesson(ctx, sc, lessonID)
+}
+
+// UpdateLessonPrep changes the preparation status and/or checklist of a
+// draft lesson; both are optional and an omitted one keeps its value.
+func (s *Service) UpdateLessonPrep(ctx context.Context, sc authctx.Scope, lessonID uuid.UUID, req PrepRequest) (*LessonResponse, error) {
+	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
+		return nil, err
+	}
+	if req.PrepStatus != nil && !validPrepStatus(*req.PrepStatus) {
+		return nil, apperror.Invalid("Trạng thái chuẩn bị không hợp lệ",
+			map[string]string{"prep_status": "phải là todo, doing, review hoặc done"})
+	}
+	return s.prepWrite(ctx, sc, lessonID, func(l *Lesson) error {
+		if req.PrepStatus != nil {
+			l.PrepStatus = *req.PrepStatus
+		}
+		if req.Checklist != nil {
+			l.Checklist = Checklist(*req.Checklist)
+		}
+		if l.Checklist == nil {
+			l.Checklist = Checklist{}
+		}
+		return s.repo.UpdateLessonPrep(ctx, sc, l)
+	})
+}
+
+// UpdateLessonAssignment replaces the assignee and due date of a draft
+// lesson. The assignee must currently be a member of the center.
+func (s *Service) UpdateLessonAssignment(ctx context.Context, sc authctx.Scope, lessonID uuid.UUID, req AssignmentRequest) (*LessonResponse, error) {
+	if err := authctx.Require(sc, authctx.PermPrepAssign); err != nil {
+		return nil, err
+	}
+	var due *time.Time
+	if req.DueDate != nil {
+		d, err := time.Parse(dueDateLayout, *req.DueDate)
+		if err != nil {
+			return nil, apperror.Invalid("Hạn chuẩn bị không hợp lệ",
+				map[string]string{"due_date": "phải có dạng YYYY-MM-DD"})
+		}
+		due = &d
+	}
+	if req.AssigneeID != nil {
+		ok, err := s.repo.IsLiveMember(ctx, sc, *req.AssigneeID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, apperror.Invalid("Người được phân công không còn là thành viên của trung tâm",
+				map[string]string{"assignee_id": "phải là thành viên hiện tại của trung tâm"})
+		}
+	}
+	return s.prepWrite(ctx, sc, lessonID, func(l *Lesson) error {
+		l.AssigneeID, l.DueDate = req.AssigneeID, due
+		return s.repo.UpdateLessonAssignment(ctx, sc, l)
+	})
+}
+
+// prepWrite loads the lesson, locks its version like any content write and
+// hands the row to fn, which persists its change; the fresh row is returned.
+func (s *Service) prepWrite(ctx context.Context, sc authctx.Scope, lessonID uuid.UUID, fn func(l *Lesson) error) (*LessonResponse, error) {
+	var out *LessonResponse
+	err := s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		l, err := s.repo.GetLesson(ctx, sc, lessonID)
+		if err != nil {
+			return notFound(err, "template lesson")
+		}
+		return s.lessonWrite(ctx, sc, l.VersionID, func(ctx context.Context) error {
+			if err := notFound(fn(l), "template lesson"); err != nil {
+				return err
+			}
+			fresh, err := s.repo.GetLesson(ctx, sc, lessonID)
+			if err != nil {
+				return notFound(err, "template lesson")
+			}
+			resp := lessonResponse(fresh)
+			out = &resp
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func validPrepStatus(status string) bool {
+	for _, s := range PrepStatuses {
+		if s == status {
+			return true
+		}
+	}
+	return false
+}
+
+// GetBoard returns the preparation board of a version: its lessons grouped
+// into the four fixed status columns. Locked versions stay readable.
+func (s *Service) GetBoard(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) (*BoardResponse, error) {
+	if err := authctx.Require(sc, authctx.PermLibraryRead); err != nil {
+		return nil, err
+	}
+	version, err := s.version(ctx, sc, versionID)
+	if err != nil {
+		return nil, err
+	}
+	tpl, err := s.repo.GetTemplate(ctx, sc, version.TemplateID)
+	if err != nil {
+		return nil, notFound(err, "program template")
+	}
+	cards, err := s.repo.ListBoardCards(ctx, sc, versionID)
+	if err != nil {
+		return nil, err
+	}
+	return boardResponse(templateResponse(tpl), *version, cards), nil
 }
 
 // DeleteLesson removes a lesson from a draft and closes the position gap.

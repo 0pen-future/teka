@@ -16,9 +16,11 @@ import (
 	"teka/apps/api/internal/shared/pagination"
 )
 
-// ListFilter narrows ListTemplates. Q matches the code or name.
+// ListFilter narrows ListTemplates. Q matches the code or name; HasDraft
+// keeps only templates with an open draft.
 type ListFilter struct {
-	Q string
+	Q        string
+	HasDraft bool
 }
 
 // ItemUsage counts the lesson links of a material or exercise held by
@@ -76,6 +78,18 @@ type Repository interface {
 
 	// ListLessons returns the version's lessons by position.
 	ListLessons(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) ([]Lesson, error)
+	// ListBoardCards returns the version's lessons by position, each with
+	// its assignee's display name.
+	ListBoardCards(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) ([]BoardCard, error)
+	// UpdateLessonPrep replaces the lesson's preparation status and
+	// checklist; ErrNotFound when missing.
+	UpdateLessonPrep(ctx context.Context, sc authctx.Scope, l *Lesson) error
+	// UpdateLessonAssignment replaces the lesson's assignee and due date;
+	// ErrNotFound when missing.
+	UpdateLessonAssignment(ctx context.Context, sc authctx.Scope, l *Lesson) error
+	// IsLiveMember reports whether teacherID currently holds a live (not
+	// left) membership of the caller's center.
+	IsLiveMember(ctx context.Context, sc authctx.Scope, teacherID uuid.UUID) (bool, error)
 	// GetLesson loads one lesson of the center.
 	GetLesson(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Lesson, error)
 	// NextPosition returns max(position)+1 for the version. Call it with
@@ -178,7 +192,15 @@ const templateSummarySelect = `program_templates.*,
 	(SELECT v.version_no FROM program_template_versions v
 	  WHERE v.template_id = program_templates.id AND v.status = 'draft') AS draft_version_no,
 	(SELECT count(*) FROM program_template_versions v
-	  WHERE v.template_id = program_templates.id) AS version_count`
+	  WHERE v.template_id = program_templates.id) AS version_count,
+	(SELECT count(*) FROM template_lessons l JOIN program_template_versions v ON v.id = l.version_id
+	  WHERE v.template_id = program_templates.id AND v.status = 'draft') AS draft_lesson_count,
+	(SELECT count(*) FROM template_lessons l JOIN program_template_versions v ON v.id = l.version_id
+	  WHERE v.template_id = program_templates.id AND v.status = 'draft' AND l.prep_status = 'done') AS draft_done_count,
+	(SELECT COALESCE(json_agg(DISTINCT t.full_name), '[]'::json) FROM template_lessons l
+	  JOIN program_template_versions v ON v.id = l.version_id
+	  JOIN teachers t ON t.id = l.assignee_id
+	  WHERE v.template_id = program_templates.id AND v.status = 'draft') AS draft_assignees`
 
 // liveTemplates scopes a query to the caller's center's non-deleted templates.
 func (r *gormRepository) liveTemplates(ctx context.Context, sc authctx.Scope) *gorm.DB {
@@ -212,6 +234,10 @@ func (r *gormRepository) ListTemplates(ctx context.Context, sc authctx.Scope, f 
 	if f.Q != "" {
 		needle := likeq.Contains(f.Q)
 		q = q.Where(`(program_templates.name ILIKE ? ESCAPE '\' OR program_templates.code ILIKE ? ESCAPE '\')`, needle, needle)
+	}
+	if f.HasDraft {
+		q = q.Where(`EXISTS (SELECT 1 FROM program_template_versions v
+			WHERE v.template_id = program_templates.id AND v.status = 'draft')`)
 	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
@@ -375,6 +401,17 @@ func (r *gormRepository) ListLessons(ctx context.Context, sc authctx.Scope, vers
 	return rows, err
 }
 
+func (r *gormRepository) ListBoardCards(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) ([]BoardCard, error) {
+	var rows []BoardCard
+	err := r.lessons(ctx, sc).
+		Select("template_lessons.*, t.full_name AS assignee_name").
+		Joins("LEFT JOIN teachers t ON t.id = template_lessons.assignee_id").
+		Where("template_lessons.version_id = ?", versionID).
+		Order("template_lessons.position ASC").
+		Find(&rows).Error
+	return rows, err
+}
+
 func (r *gormRepository) GetLesson(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Lesson, error) {
 	var l Lesson
 	err := r.lessons(ctx, sc).Where("id = ?", id).Take(&l).Error
@@ -402,6 +439,9 @@ func (r *gormRepository) CreateLessons(ctx context.Context, sc authctx.Scope, ro
 			l.ID = id.New()
 		}
 		l.CenterID = sc.CenterID
+		if l.PrepStatus == "" {
+			l.PrepStatus = PrepTodo
+		}
 	}
 	return database.FromContext(ctx, r.db).Create(rows).Error
 }
@@ -420,6 +460,41 @@ func (r *gormRepository) UpdateLesson(ctx context.Context, sc authctx.Scope, l *
 		return ErrNotFound
 	}
 	return nil
+}
+
+func (r *gormRepository) UpdateLessonPrep(ctx context.Context, sc authctx.Scope, l *Lesson) error {
+	return r.updateLessonFields(ctx, sc, l.ID, map[string]any{
+		"prep_status": l.PrepStatus, "checklist": l.Checklist,
+	})
+}
+
+func (r *gormRepository) UpdateLessonAssignment(ctx context.Context, sc authctx.Scope, l *Lesson) error {
+	return r.updateLessonFields(ctx, sc, l.ID, map[string]any{
+		"assignee_id": l.AssigneeID, "due_date": l.DueDate,
+	})
+}
+
+// updateLessonFields applies fields to one lesson of the center and stamps
+// updated_at; ErrNotFound when no row matched.
+func (r *gormRepository) updateLessonFields(ctx context.Context, sc authctx.Scope, id uuid.UUID, fields map[string]any) error {
+	fields["updated_at"] = gorm.Expr("now()")
+	res := r.lessons(ctx, sc).Where("id = ?", id).Updates(fields)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *gormRepository) IsLiveMember(ctx context.Context, sc authctx.Scope, teacherID uuid.UUID) (bool, error) {
+	var exists bool
+	err := database.FromContext(ctx, r.db).
+		Raw(`SELECT EXISTS (SELECT 1 FROM center_members WHERE center_id = ? AND teacher_id = ? AND left_at IS NULL)`,
+			sc.CenterID, teacherID).
+		Scan(&exists).Error
+	return exists, err
 }
 
 func (r *gormRepository) DeleteLesson(ctx context.Context, sc authctx.Scope, id uuid.UUID) error {
