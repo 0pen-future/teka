@@ -16,6 +16,11 @@ type CurriculumResponse struct {
 	CurrentIndex int      `json:"current_index"`
 }
 
+// MaxCurriculumLessons mirrors the `max=100` binding on PutCurriculumRequest
+// for callers that build the request in-process (a class program applying a
+// template) and so never pass through HTTP binding.
+const MaxCurriculumLessons = 100
+
 // PutCurriculumRequest whole-replaces the lesson list (matches the editor
 // modal, which always saves the entire list). current_index is clamped
 // server-side into the new list's range, so a shrinking edit can never leave

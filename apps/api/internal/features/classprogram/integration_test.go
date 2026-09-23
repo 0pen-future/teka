@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"testing"
 
 	"github.com/google/uuid"
@@ -260,4 +261,48 @@ func TestOnlyTheOwnerAppliesOrRemovesWhileStaffRead(t *testing.T) {
 	requireStatus(t, err, http.StatusConflict, library.CodeTemplateInUse)
 	require.NoError(t, f.svc.Remove(ctx, f.owner, f.class.ID))
 	require.NoError(t, f.library.DeleteTemplate(ctx, f.owner, version.TemplateID))
+}
+
+func TestArchivedVersionStaysReadableButCannotBeApplied(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	version := f.publishedVersion(t, f.owner, "TOAN-6", "Bài 1", "Bài 2")
+	_, err := f.svc.Apply(ctx, f.owner, f.class.ID, classprogram.ApplyRequest{TemplateVersionID: version.ID})
+	require.NoError(t, err)
+
+	// Retiring the version in the library must not break the classes that
+	// already follow it: a released version is immutable, so its lessons stay
+	// readable through the class.
+	_, err = f.library.Archive(ctx, f.owner, version.ID)
+	require.NoError(t, err)
+
+	got, err := f.svc.Get(ctx, f.teacher, f.class.ID)
+	require.NoError(t, err)
+	require.Equal(t, library.StatusArchived, got.VersionStatus)
+	lessons, err := f.svc.Lessons(ctx, f.teacher, f.class.ID)
+	require.NoError(t, err)
+	require.Len(t, lessons, 2)
+	require.Equal(t, "Bài 2", lessons[1].Title)
+
+	// Only a published version can be applied, so re-applying the archived
+	// one (or applying it to another class) is still refused.
+	_, err = f.svc.Apply(ctx, f.owner, f.class.ID, classprogram.ApplyRequest{TemplateVersionID: version.ID, Confirm: true})
+	requireStatus(t, err, http.StatusConflict, library.CodeVersionNotPublished)
+}
+
+func TestApplyRefusesMoreLessonsThanTheCurriculumHolds(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	titles := make([]string, teaching.MaxCurriculumLessons+1)
+	for i := range titles {
+		titles[i] = "Bài " + strconv.Itoa(i+1)
+	}
+	version := f.publishedVersion(t, f.owner, "DAI", titles...)
+	_, err := f.svc.Apply(ctx, f.owner, f.class.ID, classprogram.ApplyRequest{TemplateVersionID: version.ID})
+	requireStatus(t, err, http.StatusUnprocessableEntity, classprogram.CodeTooManyLessons)
+	got, err := f.svc.Get(ctx, f.owner, f.class.ID)
+	require.NoError(t, err)
+	require.Nil(t, got)
 }

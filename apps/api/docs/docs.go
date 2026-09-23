@@ -22773,6 +22773,9 @@ const docTemplate = `{
                 },
                 "version_no": {
                     "type": "integer"
+                },
+                "version_status": {
+                    "type": "string"
                 }
             }
         },

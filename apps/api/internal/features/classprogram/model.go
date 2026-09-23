@@ -20,12 +20,14 @@ type Program struct {
 // TableName maps the model onto class_programs.
 func (Program) TableName() string { return "class_programs" }
 
-// ProgramRow is a Program joined with the applied version's number, its
-// template's identity, and the version's lesson count for display.
+// ProgramRow is a Program joined with the applied version's number and
+// status, its template's identity, and the version's lesson count for
+// display.
 type ProgramRow struct {
 	Program
-	TemplateID   uuid.UUID
-	TemplateName string
-	VersionNo    int
-	LessonCount  int
+	TemplateID    uuid.UUID
+	TemplateName  string
+	VersionNo     int
+	VersionStatus string
+	LessonCount   int
 }

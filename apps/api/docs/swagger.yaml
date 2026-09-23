@@ -1039,6 +1039,8 @@ definitions:
         type: string
       version_no:
         type: integer
+      version_status:
+        type: string
     type: object
   classstaff.AssignRequest:
     properties:

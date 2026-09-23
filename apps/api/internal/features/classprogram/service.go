@@ -35,11 +35,13 @@ type CurriculumStore interface {
 	PutCurriculum(ctx context.Context, sc authctx.Scope, classID uuid.UUID, req teaching.PutCurriculumRequest) (*teaching.CurriculumResponse, error)
 }
 
-// LibrarySource is the slice of library this feature drives: the published
-// version with its lessons, without the library.read gate. *library.Service
-// satisfies it.
+// LibrarySource is the slice of library this feature drives, without the
+// library.read gate: PublishedVersion gates what may be applied, while
+// ReleasedVersion also accepts an archived version so a class keeps reading
+// the program it already follows. *library.Service satisfies it.
 type LibrarySource interface {
 	PublishedVersion(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) (*library.VersionResponse, []library.LessonDetailResponse, error)
+	ReleasedVersion(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) (*library.VersionResponse, []library.LessonDetailResponse, error)
 }
 
 // Service applies and removes class programs.
@@ -84,7 +86,7 @@ func (s *Service) Lessons(ctx context.Context, sc authctx.Scope, classID uuid.UU
 	if row == nil {
 		return []library.LessonDetailResponse{}, nil
 	}
-	_, lessons, err := s.library.PublishedVersion(ctx, sc, row.TemplateVersionID)
+	_, lessons, err := s.library.ReleasedVersion(ctx, sc, row.TemplateVersionID)
 	if err != nil {
 		return nil, err
 	}
@@ -106,6 +108,9 @@ func (s *Service) Apply(ctx context.Context, sc authctx.Scope, classID uuid.UUID
 	_, lessons, err := s.library.PublishedVersion(ctx, sc, req.TemplateVersionID)
 	if err != nil {
 		return nil, err
+	}
+	if len(lessons) > teaching.MaxCurriculumLessons {
+		return nil, errTooManyLessons(len(lessons))
 	}
 	titles := make([]string, 0, len(lessons))
 	for _, l := range lessons {

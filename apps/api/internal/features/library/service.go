@@ -129,18 +129,28 @@ func (s *Service) DeleteTemplate(ctx context.Context, sc authctx.Scope, id uuid.
 	return notFound(s.repo.SoftDeleteTemplate(ctx, sc, id), "program template")
 }
 
-// PublishedVersion is the class-facing read port: the version plus its
-// lessons with their materials and exercises, for a class that applies it.
-// It carries no library.read gate on purpose — the caller has already
-// resolved the class through its own read port, and a teacher reading their
+// PublishedVersion returns a version with its lessons for the class-program
+// feature: the class page reads through the class's own read gate, so a
 // class's program must not need catalog access. Only a published version
 // can be applied, so a draft or archived one is a 409.
 func (s *Service) PublishedVersion(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) (*VersionResponse, []LessonDetailResponse, error) {
+	return s.versionForClass(ctx, sc, versionID, func(status string) bool { return status == StatusPublished })
+}
+
+// ReleasedVersion is PublishedVersion for reading back a version a class
+// already applies: a released (published or archived) version is immutable,
+// so retiring it in the library must not blank the class's lessons. Only a
+// draft is refused.
+func (s *Service) ReleasedVersion(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) (*VersionResponse, []LessonDetailResponse, error) {
+	return s.versionForClass(ctx, sc, versionID, func(status string) bool { return status != StatusDraft })
+}
+
+func (s *Service) versionForClass(ctx context.Context, sc authctx.Scope, versionID uuid.UUID, accept func(status string) bool) (*VersionResponse, []LessonDetailResponse, error) {
 	row, err := s.repo.GetVersion(ctx, sc, versionID)
 	if err != nil {
 		return nil, nil, notFound(err, "template version")
 	}
-	if row.Status != StatusPublished {
+	if !accept(row.Status) {
 		return nil, nil, errVersionNotPublishedForClass()
 	}
 	lessons, err := s.repo.ListLessons(ctx, sc, versionID)

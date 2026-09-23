@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"teka/apps/api/internal/features/teaching"
 	"teka/apps/api/internal/shared/apperror"
 )
 
@@ -18,6 +19,20 @@ func errCurriculumDiffers(currentCount, templateCount int) *apperror.AppError {
 	e.Fields = map[string]string{
 		"current_count":  strconv.Itoa(currentCount),
 		"template_count": strconv.Itoa(templateCount),
+	}
+	return e
+}
+
+// CodeTooManyLessons marks a template whose lesson count exceeds what a class
+// curriculum holds; applying it would leave the classbook unsaveable.
+const CodeTooManyLessons = "TEMPLATE_TOO_LONG"
+
+func errTooManyLessons(count int) *apperror.AppError {
+	e := apperror.New(CodeTooManyLessons, http.StatusUnprocessableEntity,
+		"Chương trình mẫu có "+strconv.Itoa(count)+" buổi, vượt quá "+strconv.Itoa(teaching.MaxCurriculumLessons)+" buổi mà sổ đầu bài giữ được")
+	e.Fields = map[string]string{
+		"lesson_count": strconv.Itoa(count),
+		"max_lessons":  strconv.Itoa(teaching.MaxCurriculumLessons),
 	}
 	return e
 }

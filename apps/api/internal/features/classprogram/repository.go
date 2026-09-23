@@ -39,7 +39,7 @@ func (r *gormRepository) Get(ctx context.Context, sc authctx.Scope, classID uuid
 	err := database.FromContext(ctx, r.db).
 		Table("class_programs AS p").
 		Select(`p.class_id, p.center_id, p.template_version_id, p.applied_at, p.applied_by,
-			v.template_id, v.version_no, t.name AS template_name,
+			v.template_id, v.version_no, v.status AS version_status, t.name AS template_name,
 			(SELECT count(*) FROM template_lessons l WHERE l.version_id = p.template_version_id) AS lesson_count`).
 		Joins("JOIN program_template_versions v ON v.id = p.template_version_id").
 		Joins("JOIN program_templates t ON t.id = v.template_id").
