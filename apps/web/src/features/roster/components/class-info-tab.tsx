@@ -16,6 +16,7 @@ interface ClassInfoTabProps {
   canWrite: boolean;
   isOwner: boolean;
   canReadAudit: boolean;
+  canReadLibrary: boolean;
 }
 
 function endTime(start: string, durationMin: number): string {
@@ -27,7 +28,14 @@ function endTime(start: string, durationMin: number): string {
 }
 
 /** The "Thông tin" tab: schedule, ops card, teaching team, shortcuts, program and lineage. */
-export function ClassInfoTab({ klass, today, canWrite, isOwner, canReadAudit }: ClassInfoTabProps) {
+export function ClassInfoTab({
+  klass,
+  today,
+  canWrite,
+  isOwner,
+  canReadAudit,
+  canReadLibrary,
+}: ClassInfoTabProps) {
   const staff = useClassStaff(klass.id);
   const hocVu = (staff.data ?? []).filter(
     (item) => item.ended_at === null && item.role_key === "hoc_vu",
@@ -102,7 +110,7 @@ export function ClassInfoTab({ klass, today, canWrite, isOwner, canReadAudit }: 
         </ul>
       </SectionCard>
 
-      <ClassProgramCard klass={klass} isOwner={isOwner} />
+      <ClassProgramCard klass={klass} isOwner={isOwner} canReadLibrary={canReadLibrary} />
 
       <ClassLineageCard klass={klass} canWrite={canWrite} canReadAudit={canReadAudit} />
     </div>

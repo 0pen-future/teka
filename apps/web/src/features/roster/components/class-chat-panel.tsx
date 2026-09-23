@@ -1,7 +1,7 @@
 import { Trash2Icon } from "lucide-react";
 import { useState } from "react";
 
-import { HvButton, HvNotice, HvStateBlock, hvToast } from "@/components/hv";
+import { HvButton, HvConfirmDialog, HvNotice, HvStateBlock, hvToast } from "@/components/hv";
 import { useAuthStore } from "@/features/auth";
 import { ApiError } from "@/lib/api/errors";
 import { cn, formatDateTime } from "@/lib/utils";
@@ -39,6 +39,7 @@ export function ClassChatPanel({ klass, canPost, isOwner }: ClassChatPanelProps)
   const post = usePostClassMessage(klass.id);
   const remove = useDeleteClassMessage(klass.id);
   const [draft, setDraft] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
 
   // Pages arrive newest first; the thread reads oldest first.
   const thread = (messages.data?.pages ?? []).flatMap((page) => page.items).reverse();
@@ -57,6 +58,7 @@ export function ClassChatPanel({ klass, canPost, isOwner }: ClassChatPanelProps)
 
   function deleteMessage(messageId: string) {
     remove.mutate(messageId, {
+      onSettled: () => setPendingDelete(null),
       onError: (error) =>
         hvToast(error instanceof ApiError ? error.message : "Không xoá được tin nhắn.", {
           variant: "danger",
@@ -113,9 +115,9 @@ export function ClassChatPanel({ klass, canPost, isOwner }: ClassChatPanelProps)
                 {canDelete ? (
                   <button
                     type="button"
-                    aria-label="Xoá tin nhắn"
+                    aria-label={`Xoá tin nhắn của ${message.author_name} lúc ${formatDateTime(message.created_at)}`}
                     disabled={remove.isPending}
-                    onClick={() => deleteMessage(message.id)}
+                    onClick={() => setPendingDelete(message.id)}
                     className="shrink-0 rounded-md p-1 text-ink-400 hover:text-coral-600 disabled:opacity-50"
                   >
                     <Trash2Icon aria-hidden="true" className="size-4" />
@@ -153,6 +155,21 @@ export function ClassChatPanel({ klass, canPost, isOwner }: ClassChatPanelProps)
       ) : (
         <p className="text-[13px] text-ink-400">Bạn không có quyền nhắn tin trong lớp này.</p>
       )}
+
+      <HvConfirmDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open && !remove.isPending) setPendingDelete(null);
+        }}
+        title="Xoá tin nhắn này?"
+        description="Tin nhắn sẽ biến mất khỏi chat lớp với mọi người và không khôi phục được."
+        confirmLabel="Xoá"
+        tone="danger"
+        pending={remove.isPending}
+        onConfirm={() => {
+          if (pendingDelete) deleteMessage(pendingDelete);
+        }}
+      />
     </div>
   );
 }

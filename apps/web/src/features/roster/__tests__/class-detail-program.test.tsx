@@ -53,6 +53,15 @@ const memberCenterHandler = http.get(`${API_URL}/centers/me`, () =>
   ),
 );
 
+const memberWithLibraryHandler = http.get(`${API_URL}/centers/me`, () =>
+  HttpResponse.json(
+    ok({
+      center_name: "Trung Tâm Bình Minh",
+      permissions: ["classes.read", "class_messages.post", "library.read"],
+    }),
+  ),
+);
+
 const memberWithoutPostHandler = http.get(`${API_URL}/centers/me`, () =>
   HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh", permissions: ["classes.read"] })),
 );
@@ -175,13 +184,36 @@ describe("ClassDetailPage — program, lineage and the read-through tabs", () =>
     });
 
     it("shows a member the applied program without any action", async () => {
-      server.use(memberCenterHandler);
+      server.use(memberWithLibraryHandler);
       applyProgramToStore();
       renderPage();
       const card = await screen.findByRole("region", { name: "Chương trình học" });
       expect(await within(card).findByText("Toán 6 cơ bản · v1 · 2 buổi")).toBeInTheDocument();
       expect(within(card).getByRole("link", { name: "Mở chương trình mẫu" })).toBeInTheDocument();
       expect(within(card).queryByRole("button")).not.toBeInTheDocument();
+    });
+
+    it("keeps the template link from a member without library.read", async () => {
+      server.use(memberCenterHandler);
+      applyProgramToStore();
+      renderPage();
+      const card = await screen.findByRole("region", { name: "Chương trình học" });
+      expect(await within(card).findByText("Toán 6 cơ bản · v1 · 2 buổi")).toBeInTheDocument();
+      expect(
+        within(card).queryByRole("link", { name: "Mở chương trình mẫu" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("flags a program whose version the library has since archived", async () => {
+      applyProgramToStore();
+      getRosterStore().program!.version_status = "archived";
+      renderPage();
+      const card = await screen.findByRole("region", { name: "Chương trình học" });
+      expect(await within(card).findByText("Toán 6 cơ bản · v1 · 2 buổi")).toBeInTheDocument();
+      expect(within(card).getByText("Đã lưu trữ")).toBeInTheDocument();
+      expect(within(card).getByRole("note")).toHaveTextContent(
+        "Phiên bản này đã được lưu trữ trong thư viện; lớp vẫn xem được bài, nhưng nên đổi sang phiên bản mới hơn.",
+      );
     });
   });
 
@@ -384,20 +416,43 @@ describe("ClassDetailPage — program, lineage and the read-through tabs", () =>
       expect(getRosterStore().messages).toHaveLength(1);
     });
 
-    it("lets the author delete their own message but not someone else's", async () => {
+    it("lets the author delete their own message, after confirming, but not someone else's", async () => {
       const user = userEvent.setup();
       server.use(memberCenterHandler);
       getRosterStore().messages.push({ ...messageFromMinh }, { ...messageFromLan });
       renderPage("chat");
       const items = await screen.findAllByRole("listitem");
       expect(
-        within(items[0]!).queryByRole("button", { name: "Xoá tin nhắn" }),
+        within(items[0]!).queryByRole("button", { name: /^Xoá tin nhắn/ }),
       ).not.toBeInTheDocument();
 
-      await user.click(within(items[1]!).getByRole("button", { name: "Xoá tin nhắn" }));
+      // The label names the message so screen readers can tell the buttons apart.
+      await user.click(
+        within(items[1]!).getByRole("button", { name: /^Xoá tin nhắn của Cô Lan lúc / }),
+      );
+      const dialog = await screen.findByRole("dialog");
+      expect(dialog).toHaveTextContent("Xoá tin nhắn này?");
+      expect(getRosterStore().messages).toHaveLength(2);
+
+      await user.click(within(dialog).getByRole("button", { name: "Xoá" }));
 
       await waitFor(() => expect(getRosterStore().messages).toHaveLength(1));
       expect(getRosterStore().messages[0]!.id).toBe(messageFromMinh.id);
+    });
+
+    it("keeps the message when the deletion is cancelled", async () => {
+      const user = userEvent.setup();
+      getRosterStore().messages.push({ ...messageFromLan });
+      renderPage("chat");
+      const item = await screen.findByRole("listitem");
+      await user.click(within(item).getByRole("button", { name: /^Xoá tin nhắn của Cô Lan/ }));
+      const dialog = await screen.findByRole("dialog");
+
+      await user.click(within(dialog).getByRole("button", { name: "Hủy" }));
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(getRosterStore().messages).toHaveLength(1);
+      expect(screen.getByRole("listitem")).toHaveTextContent("Đã nhận, cảm ơn thầy.");
     });
 
     it("loads older messages page by page", async () => {

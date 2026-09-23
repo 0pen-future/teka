@@ -11,6 +11,8 @@ export const classProgramSchema = z.object({
   template_id: z.string(),
   template_name: z.string(),
   version_no: z.number().int(),
+  /** The library's current status of that version; "archived" means the class should move on. */
+  version_status: z.enum(["draft", "published", "archived"]),
   lesson_count: z.number().int(),
   applied_at: z.string(),
   applied_by: z.string(),

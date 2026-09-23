@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router";
 
-import { HvButton, HvConfirmDialog, hvToast } from "@/components/hv";
-import { HvSelect } from "@/components/hv";
+import { HvButton, HvConfirmDialog, HvNotice, HvSelect, hvToast } from "@/components/hv";
 import { useTemplatesList, useVersions, versionLabel } from "@/features/library";
 import { ApiError } from "@/lib/api/errors";
 
@@ -22,6 +21,8 @@ const CURRICULUM_DIFFERS = "CURRICULUM_DIFFERS";
 interface ClassProgramCardProps {
   klass: Class;
   isOwner: boolean;
+  /** `library.read`: the template page is gated, so the link only shows to those who can open it. */
+  canReadLibrary: boolean;
 }
 
 /** The counts the API sends back when the classbook already differs from the template. */
@@ -40,7 +41,7 @@ function programErrorMessage(error: unknown, fallback: string): string {
  * an owner action because it renames the classbook's lessons; the API asks
  * for a second confirmation when the class already has a differing curriculum.
  */
-export function ClassProgramCard({ klass, isOwner }: ClassProgramCardProps) {
+export function ClassProgramCard({ klass, isOwner, canReadLibrary }: ClassProgramCardProps) {
   const program = useClassProgram(klass.id);
   const apply = useApplyClassProgram(klass.id);
   const remove = useRemoveClassProgram(klass.id);
@@ -104,16 +105,31 @@ export function ClassProgramCard({ klass, isOwner }: ClassProgramCardProps) {
         <div className="flex flex-col gap-3">
           {program.data ? (
             <div className="flex flex-col gap-1">
-              <p className="text-[14px] font-bold text-ink-900">
-                {program.data.template_name} · v{program.data.version_no} ·{" "}
-                {program.data.lesson_count} buổi
+              <p className="flex flex-wrap items-center gap-2 text-[14px] font-bold text-ink-900">
+                <span>
+                  {program.data.template_name} · v{program.data.version_no} ·{" "}
+                  {program.data.lesson_count} buổi
+                </span>
+                {program.data.version_status === "archived" ? (
+                  <span className="rounded-full bg-ink-100 px-2 py-0.5 text-[12px] font-bold text-ink-600">
+                    Đã lưu trữ
+                  </span>
+                ) : null}
               </p>
-              <Link
-                to={`/library/templates/${program.data.template_id}`}
-                className="font-display text-[13px] font-bold text-mint-600 hover:underline"
-              >
-                Mở chương trình mẫu
-              </Link>
+              {canReadLibrary ? (
+                <Link
+                  to={`/library/templates/${program.data.template_id}`}
+                  className="font-display text-[13px] font-bold text-mint-600 hover:underline"
+                >
+                  Mở chương trình mẫu
+                </Link>
+              ) : null}
+              {program.data.version_status === "archived" ? (
+                <HvNotice tone="warning">
+                  Phiên bản này đã được lưu trữ trong thư viện; lớp vẫn xem được bài, nhưng nên đổi
+                  sang phiên bản mới hơn.
+                </HvNotice>
+              ) : null}
             </div>
           ) : (
             <p className="text-[13px] text-ink-400">Lớp chưa áp dụng chương trình mẫu.</p>

@@ -131,6 +131,7 @@ export const programToan6: ClassProgram = {
   template_id: templateToan6.id,
   template_name: templateToan6.name,
   version_no: versionToan6Published.version_no,
+  version_status: "published",
   lesson_count: 2,
   applied_at: "2026-09-15T08:00:00Z",
   applied_by: primaryTeacher.id,

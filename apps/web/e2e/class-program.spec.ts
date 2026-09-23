@@ -148,7 +148,10 @@ test("owner applies a published template to a class, reads it through the tabs, 
   const message = page.getByRole("listitem").filter({ hasText: MESSAGE });
   await expect(message).toBeVisible();
   await expect(message).toContainText("Cô Lan");
-  await message.getByRole("button", { name: "Xoá tin nhắn" }).click();
+  await message.getByRole("button", { name: /^Xoá tin nhắn của Cô Lan/ }).click();
+  const deleteDialog = page.getByRole("dialog");
+  await expect(deleteDialog).toContainText("Xoá tin nhắn này?");
+  await deleteDialog.getByRole("button", { name: "Xoá", exact: true }).click();
   await expect(page.getByText("Chưa có tin nhắn nào.")).toBeVisible();
 
   // Remove: the confirmation names what stays, and the card empties again.

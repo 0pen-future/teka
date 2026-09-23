@@ -101,6 +101,7 @@ export function ClassDetailPage() {
             canWrite={canWrite}
             isOwner={isOwner}
             canReadAudit={has("audit.read")}
+            canReadLibrary={has("library.read")}
           />
         ) : tab === "students" ? (
           <ClassStudentsTab klass={klass.data} />
