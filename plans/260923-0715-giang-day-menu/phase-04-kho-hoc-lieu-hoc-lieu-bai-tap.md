@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Kho học liệu — Học liệu, Bài tập, Trường nhật ký, Bộ điểm"
-status: pending
+status: completed
 priority: P2
 effort: "2d"
 dependencies: [3]
@@ -62,3 +62,31 @@ Không backfill quyền (không key mới).
 
 ## Risks
 - Score set JSONB vs bảng — chọn JSONB vì chỉ đọc nguyên khối; nếu Phase 7 cần chấm theo key thì vẫn đủ.
+
+## Completion notes (2026-09-24)
+- Backend: migration 000028 đúng sketch (2 bảng catalog xoá mềm, 2 bảng nối ghi đè toàn bộ, `template_log_fields`
+  với `UNIQUE (version_id, position) DEFERRABLE`, cột `score_set` JSONB); `migrations_test.go` bước MigrateDown 23 → 24.
+  15 route mới trong routespec (catalog CRUD, `PUT lessons/:lid/materials|exercises`, `GET versions/:vid`,
+  `PUT versions/:vid/log-fields|score-set`) + snapshot/audit tests; mã lỗi 409 `MATERIAL_IN_USE` / `EXERCISE_IN_USE`;
+  swagger sinh lại bằng `make api-docs`.
+- Mọi ghi gắn/log-fields/score-set đi qua `WithinTx` + `LockVersion` như Phase 3, nên cùng chịu khoá publish
+  (`VERSION_LOCKED`); id học liệu/bài tập khác trung tâm → 422 trước khi chạm FK composite.
+- Helper dùng chung mới `validation.Elements[T]`: body mảng trả 422 với key `"<i>.<field>"` (gin bỏ chỉ số trong
+  `SliceValidationError`); web đọc lại bằng `lib/row-errors.ts` để tô lỗi đúng dòng.
+- Quyết định khi thực thi (ngoài sketch): `CreateVersion` sao chép cả gắn học liệu/bài tập, trường nhật ký và bộ điểm
+  của phiên bản nguồn (không chỉ buổi học) — bản nháp mới phải là bản sao đầy đủ để sửa tiếp, nếu không người dùng
+  phải gắn lại từ đầu. Xoá mềm chương trình mẫu **không** gỡ liên kết học liệu (giữ đúng plan), nhưng link của
+  template đã xoá **không còn tính là đang dùng**: xoá học liệu/bài tập chỉ bị 409 khi còn link trong template sống —
+  link nháp → "gỡ khỏi các buổi", link trong phiên bản đã phát hành/lưu trữ → thông báo riêng, không gỡ được.
+  Sửa nội dung học liệu/bài tập áp dụng cho mọi phiên bản đang tham chiếu (danh mục dùng chung, không snapshot).
+- Xoá và gắn tuần tự trên dòng mục (`FOR UPDATE` khi xoá, `FOR SHARE` khi gắn); `url` học liệu chỉ nhận
+  `http(s)://` ở cả API lẫn zod; trần 100 mục cho một lần gắn.
+- Web: tab Học liệu / Bài tập (`items-tabs.tsx`, dialog tạo/sửa, xác nhận xoá, tìm kiếm debounce), khối chọn học
+  liệu/bài tập với cờ chia sẻ trên trang buổi (`lesson-attachments.tsx`, lưu riêng từng khối), tab phụ
+  "Nhật ký & Điểm" trên chi tiết chương trình (`log-fields-editor.tsx`, `score-set-editor.tsx`, chỉ đọc khi không
+  phải nháp). Ghi catalog invalidate cả chi tiết buổi/phiên bản vì payload nhúng dòng catalog.
+- Kiểm chứng: integration library + migrations xanh (`-p 1`), `make test-api-unit`/`scopelint`/`lint` xanh; vitest
+  library 54 test (975 toàn bộ), typecheck xanh; e2e `library.spec.ts` 2/2 trên stack cô lập.
+- Review: SHIP WITH FIXES → đã sửa M1–M3, L1–L4, L6, L7 và 2 nit; L5 giữ tham chiếu theo quyết định trên.
+  Chi tiết và phương án thay thế cho M2 ở [reports/review-phase-04-260923.md](./reports/review-phase-04-260923.md)
+  mục Disposition.
