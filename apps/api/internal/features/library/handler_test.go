@@ -170,7 +170,7 @@ func TestTemplateLifecycleOverHTTP(t *testing.T) {
 		t.Fatalf("create: want 201, got %d %+v", w.Code, env)
 	}
 	tpl := decode[TemplateResponse](t, env)
-	if tpl.Code != "TOAN-6" || tpl.DraftVersionNo == nil || *tpl.DraftVersionNo != 1 {
+	if tpl.Code != "TOAN-6" || tpl.DraftVersionNo == nil || *tpl.DraftVersionNo != 1 || tpl.DraftVersionID == nil {
 		t.Fatalf("unexpected template %+v", tpl)
 	}
 

@@ -20,6 +20,7 @@ export const versionsKeys = {
   list: (templateId: string) => [...versionsKeys.all, "list", templateId] as const,
   details: () => [...versionsKeys.all, "detail"] as const,
   detail: (id: string) => [...versionsKeys.details(), id] as const,
+  board: (id: string) => [...versionsKeys.all, "board", id] as const,
 };
 
 export const lessonsKeys = {

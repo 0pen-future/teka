@@ -191,6 +191,8 @@ const templateSummarySelect = `program_templates.*,
 	  WHERE v.template_id = program_templates.id AND v.status = 'published') AS published_version_no,
 	(SELECT v.version_no FROM program_template_versions v
 	  WHERE v.template_id = program_templates.id AND v.status = 'draft') AS draft_version_no,
+	 (SELECT v.id FROM program_template_versions v
+	  WHERE v.template_id = program_templates.id AND v.status = 'draft') AS draft_version_id,
 	(SELECT count(*) FROM program_template_versions v
 	  WHERE v.template_id = program_templates.id) AS version_count,
 	(SELECT count(*) FROM template_lessons l JOIN program_template_versions v ON v.id = l.version_id

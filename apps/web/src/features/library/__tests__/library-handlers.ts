@@ -1,8 +1,10 @@
 import { http, HttpResponse } from "msw";
 
-import { API_URL, fail, listMeta, ok } from "@/test/msw/handlers";
+import { API_URL, defaultMemberDirectory, fail, listMeta, ok } from "@/test/msw/handlers";
 
 import type {
+  AssignmentInput,
+  BoardCard,
   Exercise,
   ExerciseInput,
   LessonExercise,
@@ -14,6 +16,8 @@ import type {
   LogFieldInput,
   Material,
   MaterialInput,
+  PrepInput,
+  PrepStatus,
   ProgramTemplate,
   ScoreComponent,
   ScoreComponentInput,
@@ -40,7 +44,9 @@ export const templateToan6: ProgramTemplate = {
   created_by: OWNER_ID,
   published_version_no: 1,
   draft_version_no: 2,
+  draft_version_id: "81000000-0000-4000-8000-000000000002",
   version_count: 2,
+  prep: { lesson_count: 2, done_count: 0, assignees: [] },
   created_at: "2026-09-01T08:00:00Z",
   updated_at: "2026-09-10T08:00:00Z",
 };
@@ -55,7 +61,9 @@ export const templateVan9: ProgramTemplate = {
   created_by: OWNER_ID,
   published_version_no: null,
   draft_version_no: 1,
+  draft_version_id: "81000000-0000-4000-8000-000000000003",
   version_count: 1,
+  prep: { lesson_count: 0, done_count: 0, assignees: [] },
   created_at: "2026-09-05T08:00:00Z",
   updated_at: "2026-09-05T08:00:00Z",
 };
@@ -114,6 +122,10 @@ function lesson(
     objectives: null,
     duration_min: 90,
     homework_note: null,
+    prep_status: "todo",
+    assignee_id: null,
+    due_date: null,
+    checklist: [],
     created_at: "2026-09-01T08:00:00Z",
     updated_at: "2026-09-01T08:00:00Z",
     ...extra,
@@ -137,14 +149,21 @@ export const lessonDraftSoTuNhien = lesson(
   versionToan6Draft.id,
   1,
   "Số tự nhiên",
-  { objectives: "Nhận biết tập N", homework_note: "Bài 1-5 trang 10" },
+  {
+    objectives: "Nhận biết tập N",
+    homework_note: "Bài 1-5 trang 10",
+    checklist: [
+      { label: "Soạn slide", done: true },
+      { label: "In phiếu bài tập", done: false },
+    ],
+  },
 );
 export const lessonDraftPhanSo = lesson(
   "82000000-0000-4000-8000-000000000004",
   versionToan6Draft.id,
   2,
   "Phân số",
-  { duration_min: null },
+  { duration_min: null, prep_status: "doing" },
 );
 
 // Catalog items: one material and one exercise attached to the draft's
@@ -305,18 +324,50 @@ function notFound(resource: string) {
   return HttpResponse.json(fail("NOT_FOUND", `${resource} not found`), { status: 404 });
 }
 
+function assigneeName(teacherId: string | null): string | null {
+  return defaultMemberDirectory.find((m) => m.teacher_id === teacherId)?.display_name ?? null;
+}
+
 /** Recomputes the template's summary columns the way the API's list query does. */
 function summarize(template: ProgramTemplate): ProgramTemplate {
   const versions = store.versions.filter((v) => v.template_id === template.id);
   const published = versions.find((v) => v.status === "published");
   const draft = versions.find((v) => v.status === "draft");
+  const draftLessons = draft ? store.lessons.filter((l) => l.version_id === draft.id) : [];
+  const assignees = [
+    ...new Set(draftLessons.flatMap((l) => assigneeName(l.assignee_id) ?? [])),
+  ].sort();
   return {
     ...template,
     published_version_no: published?.version_no ?? null,
     draft_version_no: draft?.version_no ?? null,
+    draft_version_id: draft?.id ?? null,
     version_count: versions.length,
+    prep: draft
+      ? {
+          lesson_count: draftLessons.length,
+          done_count: draftLessons.filter((l) => l.prep_status === "done").length,
+          assignees,
+        }
+      : null,
   };
 }
+
+function boardCard(row: TemplateLesson): BoardCard {
+  return {
+    id: row.id,
+    position: row.position,
+    title: row.title,
+    prep_status: row.prep_status,
+    assignee_id: row.assignee_id,
+    assignee_name: assigneeName(row.assignee_id),
+    due_date: row.due_date,
+    checklist_done: row.checklist.filter((item) => item.done).length,
+    checklist_total: row.checklist.length,
+  };
+}
+
+const PREP_STATUSES: PrepStatus[] = ["todo", "doing", "review", "done"];
 
 function withCount(version: TemplateVersion): TemplateVersion {
   return {
@@ -407,12 +458,15 @@ function renumber(versionId: string): TemplateLesson[] {
 
 export const libraryHandlers = [
   http.get(`${API_URL}/library/templates`, ({ request }) => {
-    const q = (new URL(request.url).searchParams.get("q") ?? "").toLowerCase();
+    const params = new URL(request.url).searchParams;
+    const q = (params.get("q") ?? "").toLowerCase();
+    const hasDraft = params.get("has_draft") === "true";
     const rows = store.templates
       .filter(
         (t) => q === "" || t.name.toLowerCase().includes(q) || t.code.toLowerCase().includes(q),
       )
-      .map(summarize);
+      .map(summarize)
+      .filter((t) => !hasDraft || t.draft_version_id !== null);
     return HttpResponse.json(ok(rows, listMeta(rows.length)));
   }),
   http.post(`${API_URL}/library/templates`, async ({ request }) => {
@@ -432,13 +486,16 @@ export const libraryHandlers = [
       created_by: OWNER_ID,
       published_version_no: null,
       draft_version_no: 1,
+      draft_version_id: null,
       version_count: 1,
+      prep: null,
       created_at: NOW,
       updated_at: NOW,
     };
     store.templates.push(template);
+    const draftId = mintId();
     store.versions.push({
-      id: mintId(),
+      id: draftId,
       template_id: template.id,
       version_no: 1,
       status: "draft",
@@ -449,7 +506,10 @@ export const libraryHandlers = [
       created_at: NOW,
       updated_at: NOW,
     });
-    return HttpResponse.json(ok(template), { status: 201 });
+    for (let position = 1; position <= (body.lesson_count ?? 0); position += 1) {
+      store.lessons.push(lesson(mintId(), draftId, position, `Buổi ${position}`));
+    }
+    return HttpResponse.json(ok(summarize(template)), { status: 201 });
   }),
   http.get(`${API_URL}/library/templates/:id`, ({ params }) => {
     const template = store.templates.find((t) => t.id === params.id);
@@ -504,7 +564,11 @@ export const libraryHandlers = [
       .sort((a, b) => b.version_no - a.version_no)[0];
     if (source) {
       for (const row of store.lessons.filter((l) => l.version_id === source.id)) {
-        const copy = { ...row, id: mintId(), version_id: version.id };
+        const copy = lesson(mintId(), version.id, row.position, row.title, {
+          objectives: row.objectives,
+          duration_min: row.duration_min,
+          homework_note: row.homework_note,
+        });
         store.lessons.push(copy);
         for (const link of store.materialLinks.filter((l) => l.lesson_id === row.id)) {
           store.materialLinks.push({ ...link, lesson_id: copy.id });
@@ -554,14 +618,13 @@ export const libraryHandlers = [
       return HttpResponse.json(fail("VERSION_LOCKED", "phiên bản đã khoá"), { status: 409 });
     }
     const body = (await request.json()) as LessonInput;
-    const row: TemplateLesson = {
-      id: mintId(),
-      version_id: version.id,
-      position: store.lessons.filter((l) => l.version_id === version.id).length + 1,
-      ...body,
-      created_at: NOW,
-      updated_at: NOW,
-    };
+    const row = lesson(
+      mintId(),
+      version.id,
+      store.lessons.filter((l) => l.version_id === version.id).length + 1,
+      body.title,
+      { ...body, created_at: NOW, updated_at: NOW },
+    );
     store.lessons.push(row);
     return HttpResponse.json(ok(row), { status: 201 });
   }),
@@ -602,6 +665,62 @@ export const libraryHandlers = [
     const body = (await request.json()) as LessonInput;
     Object.assign(row, body, { updated_at: NOW });
     return HttpResponse.json(ok(lessonDetail(row)));
+  }),
+  http.get(`${API_URL}/library/versions/:vid/board`, ({ params }) => {
+    const version = store.versions.find((v) => v.id === params.vid);
+    if (!version) return notFound("version");
+    const template = store.templates.find((t) => t.id === version.template_id);
+    if (!template) return notFound("template");
+    const rows = renumber(version.id);
+    return HttpResponse.json(
+      ok({
+        template: summarize(template),
+        version: withCount(version),
+        columns: PREP_STATUSES.map((status) => ({
+          status,
+          lessons: rows.filter((l) => l.prep_status === status).map(boardCard),
+        })),
+      }),
+    );
+  }),
+  http.patch(`${API_URL}/library/lessons/:lid/prep`, async ({ params, request }) => {
+    const row = store.lessons.find((l) => l.id === params.lid);
+    if (!row) return notFound("lesson");
+    const lock = locked(store.versions.find((v) => v.id === row.version_id));
+    if (lock) return lock;
+    const body = (await request.json()) as PrepInput;
+    const fields: Record<string, string> = {};
+    if (body.prep_status !== undefined && !PREP_STATUSES.includes(body.prep_status)) {
+      fields.prep_status = "must be one of todo doing review done";
+    }
+    if (body.checklist !== undefined) {
+      if (body.checklist.length > 50) fields.checklist = "at most 50 items";
+      body.checklist.forEach((item, index) => {
+        if (item.label.trim() === "") fields[`checklist.${index}.label`] = "label is required";
+      });
+    }
+    if (Object.keys(fields).length > 0) return validationError(fields);
+    if (body.prep_status !== undefined) row.prep_status = body.prep_status;
+    if (body.checklist !== undefined) row.checklist = body.checklist;
+    row.updated_at = NOW;
+    return HttpResponse.json(ok(row));
+  }),
+  http.patch(`${API_URL}/library/lessons/:lid/assignment`, async ({ params, request }) => {
+    const row = store.lessons.find((l) => l.id === params.lid);
+    if (!row) return notFound("lesson");
+    const lock = locked(store.versions.find((v) => v.id === row.version_id));
+    if (lock) return lock;
+    const body = (await request.json()) as AssignmentInput;
+    if (body.assignee_id !== null && assigneeName(body.assignee_id) === null) {
+      return validationError({ assignee_id: "assignee must be a member of the center" });
+    }
+    if (body.due_date !== null && !/^\d{4}-\d{2}-\d{2}$/.test(body.due_date)) {
+      return validationError({ due_date: "must be a calendar day" });
+    }
+    row.assignee_id = body.assignee_id;
+    row.due_date = body.due_date;
+    row.updated_at = NOW;
+    return HttpResponse.json(ok(row));
   }),
   http.delete(`${API_URL}/library/lessons/:lid`, ({ params }) => {
     const index = store.lessons.findIndex((l) => l.id === params.lid);

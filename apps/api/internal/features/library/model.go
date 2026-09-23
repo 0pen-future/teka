@@ -52,6 +52,7 @@ type TemplateRow struct {
 	Template
 	PublishedVersionNo *int
 	DraftVersionNo     *int
+	DraftVersionID     *uuid.UUID
 	VersionCount       int
 	// DraftLessonCount, DraftDoneCount and DraftAssignees summarise the
 	// preparation of the open draft; all zero when there is none.

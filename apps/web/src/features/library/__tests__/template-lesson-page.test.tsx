@@ -283,4 +283,49 @@ describe("TemplateLessonPage", () => {
     expect(within(materials).getByText("Chia sẻ HV")).toBeInTheDocument();
     expect(within(materials).queryByRole("checkbox")).not.toBeInTheDocument();
   });
+
+  it("edits the preparation status and checklist and saves them as one block", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const prep = await screen.findByRole("region", { name: "Chuẩn bị tài liệu" });
+    expect(within(prep).getByRole("radio", { name: "Cần làm" })).toBeChecked();
+    expect(within(prep).getByRole("checkbox", { name: "Soạn slide" })).toBeChecked();
+    expect(within(prep).getByRole("checkbox", { name: "In phiếu bài tập" })).not.toBeChecked();
+
+    await user.click(within(prep).getByRole("radio", { name: "Đang làm" }));
+    await user.click(within(prep).getByRole("checkbox", { name: "In phiếu bài tập" }));
+    await user.type(within(prep).getByLabelText("Thêm việc cần làm"), "Chuẩn bị đề{Enter}");
+    expect(within(prep).getByRole("checkbox", { name: "Chuẩn bị đề" })).not.toBeChecked();
+    await user.click(within(prep).getByRole("button", { name: "Xoá Soạn slide" }));
+    await user.click(within(prep).getByRole("button", { name: "Lưu chuẩn bị" }));
+
+    expect(await screen.findByText("Đã lưu trạng thái chuẩn bị")).toBeInTheDocument();
+    const saved = getLibraryStore().lessons.find((l) => l.id === lessonDraftSoTuNhien.id);
+    expect(saved?.prep_status).toBe("doing");
+    expect(saved?.checklist).toEqual([
+      { label: "In phiếu bài tập", done: true },
+      { label: "Chuẩn bị đề", done: false },
+    ]);
+  });
+
+  it("shows the preparation block read-only on a published lesson", async () => {
+    renderPage(lessonPublishedSoTuNhien.id);
+
+    const prep = await screen.findByRole("region", { name: "Chuẩn bị tài liệu" });
+    expect(within(prep).getByText("Cần làm")).toBeInTheDocument();
+    expect(within(prep).getByText("Chưa có việc nào")).toBeInTheDocument();
+    expect(within(prep).queryByRole("button", { name: "Lưu chuẩn bị" })).not.toBeInTheDocument();
+  });
+
+  it("shows the assignee and due date on the preparation block", async () => {
+    const row = getLibraryStore().lessons.find((l) => l.id === lessonDraftSoTuNhien.id)!;
+    row.assignee_id = testSecondaryTeacher.id;
+    row.due_date = "2026-10-01";
+    renderPage();
+
+    const prep = await screen.findByRole("region", { name: "Chuẩn bị tài liệu" });
+    expect(within(prep).getByText("Thầy Minh")).toBeInTheDocument();
+    expect(within(prep).getByText("01/10")).toBeInTheDocument();
+  });
 });

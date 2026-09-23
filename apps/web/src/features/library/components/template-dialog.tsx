@@ -3,12 +3,10 @@ import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 
 import { HvButton, HvModal } from "@/components/hv";
-import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
 import { useApiFormErrors } from "@/lib/forms/use-api-form-errors";
 
 import { useCreateTemplate, useUpdateTemplate } from "../hooks/use-library";
-import { textareaClassName } from "@/lib/forms/textarea-class";
+import { TemplateFields } from "./template-fields";
 import {
   templateFormSchema,
   toTemplateForm,
@@ -83,7 +81,6 @@ export function TemplateDialog(props: TemplateDialogProps) {
     });
   });
 
-  const { errors } = form.formState;
   return (
     <HvModal
       open={open}
@@ -102,65 +99,7 @@ export function TemplateDialog(props: TemplateDialogProps) {
       }
     >
       <form id={FORM_ID} onSubmit={(event) => void onSubmit(event)} noValidate>
-        <FieldGroup>
-          <div className="grid gap-3 sm:grid-cols-[160px_1fr]">
-            <Field data-invalid={Boolean(errors.code)}>
-              <FieldLabel htmlFor="template-code">Mã chương trình</FieldLabel>
-              <Input
-                id="template-code"
-                placeholder="VD: TOAN6"
-                autoCapitalize="characters"
-                aria-invalid={Boolean(errors.code)}
-                {...form.register("code")}
-              />
-              <FieldError errors={[errors.code]} />
-            </Field>
-            <Field data-invalid={Boolean(errors.name)}>
-              <FieldLabel htmlFor="template-name">Tên chương trình</FieldLabel>
-              <Input
-                id="template-name"
-                placeholder="VD: Toán 6 cơ bản"
-                aria-invalid={Boolean(errors.name)}
-                {...form.register("name")}
-              />
-              <FieldError errors={[errors.name]} />
-            </Field>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field data-invalid={Boolean(errors.subject)}>
-              <FieldLabel htmlFor="template-subject">Môn học</FieldLabel>
-              <Input
-                id="template-subject"
-                placeholder="VD: Toán"
-                aria-invalid={Boolean(errors.subject)}
-                {...form.register("subject")}
-              />
-              <FieldError errors={[errors.subject]} />
-            </Field>
-            <Field data-invalid={Boolean(errors.level)}>
-              <FieldLabel htmlFor="template-level">Trình độ</FieldLabel>
-              <Input
-                id="template-level"
-                placeholder="VD: Lớp 6"
-                aria-invalid={Boolean(errors.level)}
-                {...form.register("level")}
-              />
-              <FieldError errors={[errors.level]} />
-            </Field>
-          </div>
-          <Field data-invalid={Boolean(errors.description)}>
-            <FieldLabel htmlFor="template-description">Mô tả</FieldLabel>
-            <textarea
-              id="template-description"
-              rows={3}
-              className={textareaClassName}
-              aria-invalid={Boolean(errors.description)}
-              {...form.register("description")}
-            />
-            <FieldError errors={[errors.description]} />
-          </Field>
-          <FieldError errors={[errors.root]} />
-        </FieldGroup>
+        <TemplateFields form={form} />
       </form>
     </HvModal>
   );

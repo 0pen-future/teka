@@ -8,6 +8,25 @@ import { z } from "zod";
 export const templateVersionStatusSchema = z.enum(["draft", "published", "archived"]);
 export type TemplateVersionStatus = z.infer<typeof templateVersionStatusSchema>;
 
+/** Preparation states of a draft lesson, in board order (`library.PrepTodo` …). */
+export const PREP_STATUSES = ["todo", "doing", "review", "done"] as const;
+export const prepStatusSchema = z.enum(PREP_STATUSES);
+export type PrepStatus = z.infer<typeof prepStatusSchema>;
+
+export const checklistItemSchema = z.object({
+  label: z.string(),
+  done: z.boolean(),
+});
+export type ChecklistItem = z.infer<typeof checklistItemSchema>;
+
+/** `library.PrepSummaryResponse` — present only while the template has an open draft. */
+export const prepSummarySchema = z.object({
+  lesson_count: z.number().int(),
+  done_count: z.number().int(),
+  assignees: z.array(z.string()),
+});
+export type PrepSummary = z.infer<typeof prepSummarySchema>;
+
 export const programTemplateSchema = z.object({
   id: z.string(),
   code: z.string(),
@@ -18,7 +37,9 @@ export const programTemplateSchema = z.object({
   created_by: z.string().nullable(),
   published_version_no: z.number().int().nullable(),
   draft_version_no: z.number().int().nullable(),
+  draft_version_id: z.string().nullable(),
   version_count: z.number().int(),
+  prep: prepSummarySchema.nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -46,10 +67,43 @@ export const templateLessonSchema = z.object({
   objectives: z.string().nullable(),
   duration_min: z.number().int().nullable(),
   homework_note: z.string().nullable(),
+  prep_status: prepStatusSchema,
+  assignee_id: z.string().nullable(),
+  /** Calendar day `YYYY-MM-DD`, no time part. */
+  due_date: z.string().nullable(),
+  checklist: z.array(checklistItemSchema),
   created_at: z.string(),
   updated_at: z.string(),
 });
 export type TemplateLesson = z.infer<typeof templateLessonSchema>;
+
+/** `library.BoardCardResponse` — one lesson on the preparation board. */
+export const boardCardSchema = z.object({
+  id: z.string(),
+  position: z.number().int(),
+  title: z.string(),
+  prep_status: prepStatusSchema,
+  assignee_id: z.string().nullable(),
+  assignee_name: z.string().nullable(),
+  due_date: z.string().nullable(),
+  checklist_done: z.number().int(),
+  checklist_total: z.number().int(),
+});
+export type BoardCard = z.infer<typeof boardCardSchema>;
+
+export const boardColumnSchema = z.object({
+  status: prepStatusSchema,
+  lessons: z.array(boardCardSchema),
+});
+export type BoardColumn = z.infer<typeof boardColumnSchema>;
+
+/** `GET /library/versions/:vid/board` — the four fixed status columns of one version. */
+export const prepBoardSchema = z.object({
+  template: programTemplateSchema,
+  version: templateVersionSchema,
+  columns: z.array(boardColumnSchema),
+});
+export type PrepBoard = z.infer<typeof prepBoardSchema>;
 
 /** `library.TemplateRequest` — create and full-replace share one body. */
 export interface TemplateInput {
@@ -58,6 +112,20 @@ export interface TemplateInput {
   subject: string | null;
   level: string | null;
   description: string | null;
+  /** Create only: seeds "Buổi 1..N" into the opening draft (1–100). */
+  lesson_count?: number;
+}
+
+/** `library.PrepRequest` — an omitted field keeps its value; a checklist replaces the stored one. */
+export interface PrepInput {
+  prep_status?: PrepStatus;
+  checklist?: ChecklistItem[];
+}
+
+/** `library.AssignmentRequest` — a full replace: `null` clears the field. */
+export interface AssignmentInput {
+  assignee_id: string | null;
+  due_date: string | null;
 }
 
 /** `library.LessonRequest` — position is never in the body (append on create, reorder endpoint otherwise). */

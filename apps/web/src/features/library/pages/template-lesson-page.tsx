@@ -7,6 +7,7 @@ import { ApiError } from "@/lib/api/errors";
 import { useApiFormErrors } from "@/lib/forms/use-api-form-errors";
 
 import { LessonAttachments } from "../components/lesson-attachments";
+import { LessonPrepPanel } from "../components/lesson-prep-panel";
 import { LessonFields } from "../components/lesson-form";
 import { useLessonForm } from "../hooks/use-lesson-form";
 import { useLesson, useTemplate, useUpdateLesson, useVersions } from "../hooks/use-library";
@@ -107,6 +108,8 @@ function LessonView({ template, version, lesson }: LessonViewProps) {
           <LessonReadOnly lesson={lesson} />
         </>
       )}
+
+      <LessonPrepPanel key={`prep-${lesson.updated_at}`} lesson={lesson} editable={editable} />
 
       <LessonAttachments lesson={lesson} templateId={template.id} editable={editable} />
     </div>

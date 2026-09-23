@@ -200,6 +200,7 @@ describe("buildCatalogTabs", () => {
       "Thông báo",
       "Công việc",
       "Kho học liệu",
+      "Chuẩn bị tài liệu",
       "Khóa học",
       "Lộ trình học",
       "Chat lớp",

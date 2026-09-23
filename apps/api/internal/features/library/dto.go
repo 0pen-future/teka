@@ -41,6 +41,7 @@ type TemplateResponse struct {
 	CreatedBy          *uuid.UUID           `json:"created_by"`
 	PublishedVersionNo *int                 `json:"published_version_no"`
 	DraftVersionNo     *int                 `json:"draft_version_no"`
+	DraftVersionID     *uuid.UUID           `json:"draft_version_id"`
 	VersionCount       int                  `json:"version_count"`
 	Prep               *PrepSummaryResponse `json:"prep"`
 	CreatedAt          time.Time            `json:"created_at"`
@@ -54,6 +55,7 @@ func templateResponse(row *TemplateRow) TemplateResponse {
 		CreatedBy:          row.CreatedBy,
 		PublishedVersionNo: row.PublishedVersionNo,
 		DraftVersionNo:     row.DraftVersionNo,
+		DraftVersionID:     row.DraftVersionID,
 		VersionCount:       row.VersionCount,
 		CreatedAt:          row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}

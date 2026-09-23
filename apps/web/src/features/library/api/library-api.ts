@@ -3,6 +3,7 @@ import { parseArray, parseData, parseList, type Paginated } from "@/lib/api/enve
 
 import {
   exerciseSchema,
+  prepBoardSchema,
   lessonExerciseSchema,
   lessonMaterialSchema,
   logFieldSchema,
@@ -24,6 +25,9 @@ import {
   type LogFieldInput,
   type Material,
   type MaterialInput,
+  type AssignmentInput,
+  type PrepBoard,
+  type PrepInput,
   type ProgramTemplate,
   type ScoreComponent,
   type ScoreComponentInput,
@@ -41,6 +45,8 @@ export interface ListTemplatesParams {
   per_page?: number;
   /** `name` (default) | `code` | `created_at`, `-` prefix for descending. */
   sort?: string;
+  /** Only templates with an open draft (the ones with a preparation board). */
+  has_draft?: boolean;
 }
 
 /** `GET /library/templates` (`apps/api/internal/features/library/handler.go`) — center-wide, paginated. */
@@ -140,6 +146,27 @@ export async function updateLesson(id: string, input: LessonInput): Promise<Temp
 /** `DELETE /library/lessons/:lid` — the remaining lessons renumber server-side. */
 export async function deleteLesson(id: string): Promise<void> {
   await apiClient.delete(`/library/lessons/${id}`);
+}
+
+/** `GET /library/versions/:vid/board` — the preparation board; readable for every version status. */
+export async function getBoard(versionId: string): Promise<PrepBoard> {
+  const res = await apiClient.get<unknown>(`/library/versions/${versionId}/board`);
+  return parseData(prepBoardSchema, res.data);
+}
+
+/** `PATCH /library/lessons/:lid/prep` (`library.edit`) — 409 `VERSION_LOCKED` once the version is published. */
+export async function updateLessonPrep(id: string, input: PrepInput): Promise<TemplateLesson> {
+  const res = await apiClient.patch<unknown>(`/library/lessons/${id}/prep`, input);
+  return parseData(templateLessonSchema, res.data);
+}
+
+/** `PATCH /library/lessons/:lid/assignment` (`prep.assign`) — replaces assignee and due date together. */
+export async function updateLessonAssignment(
+  id: string,
+  input: AssignmentInput,
+): Promise<TemplateLesson> {
+  const res = await apiClient.patch<unknown>(`/library/lessons/${id}/assignment`, input);
+  return parseData(templateLessonSchema, res.data);
 }
 
 /**

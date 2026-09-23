@@ -24661,6 +24661,9 @@ const docTemplate = `{
                 "description": {
                     "type": "string"
                 },
+                "draft_version_id": {
+                    "type": "string"
+                },
                 "draft_version_no": {
                     "type": "integer"
                 },

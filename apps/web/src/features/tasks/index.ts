@@ -4,6 +4,8 @@
 export { tasksKeys } from "./hooks/tasks-keys";
 export { useTaskBoard } from "./hooks/use-task-board";
 export { useMemberDirectory } from "./hooks/use-member-directory";
+export { mapApiError } from "./lib/map-api-error";
+export { ActionsMenu } from "./components/actions-menu";
 export type {
   BoardCounts,
   BoardResponse,

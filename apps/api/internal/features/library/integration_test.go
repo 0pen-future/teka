@@ -150,6 +150,7 @@ func TestPublishedVersionIsLockedAndNewDraftCopiesIt(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, *row.PublishedVersionNo)
 	require.Equal(t, 2, *row.DraftVersionNo)
+	require.NotNil(t, row.DraftVersionID)
 	require.Equal(t, 2, row.VersionCount)
 }
 
@@ -741,6 +742,8 @@ func TestPrepBoardAndAssignment(t *testing.T) {
 	require.Equal(t, 0, tpl.Prep.DoneCount)
 	require.Empty(t, tpl.Prep.Assignees)
 	draft := f.draft(t, f.owner, tpl.ID)
+	require.NotNil(t, tpl.DraftVersionID)
+	require.Equal(t, draft.ID, *tpl.DraftVersionID)
 	lessons, err := f.svc.ListLessons(ctx, f.owner, draft.ID)
 	require.NoError(t, err)
 	require.Len(t, lessons, 3)

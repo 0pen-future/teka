@@ -83,6 +83,8 @@ func (f *fakeRepo) summary(t *Template) *TemplateRow {
 		case StatusDraft:
 			n := v.VersionNo
 			row.DraftVersionNo = &n
+			id := v.ID
+			row.DraftVersionID = &id
 			seen := map[string]bool{}
 			for _, l := range f.lessons {
 				if l.VersionID != v.ID {
@@ -479,7 +481,7 @@ func TestCreateTemplateOpensFirstDraft(t *testing.T) {
 	if out.Code != "CT-01" {
 		t.Errorf("code must be upper-cased, got %q", out.Code)
 	}
-	if out.DraftVersionNo == nil || *out.DraftVersionNo != 1 || out.VersionCount != 1 {
+	if out.DraftVersionNo == nil || *out.DraftVersionNo != 1 || out.VersionCount != 1 || out.DraftVersionID == nil {
 		t.Errorf("a new template must open draft v1, got %+v", out)
 	}
 	if out.PublishedVersionNo != nil {
