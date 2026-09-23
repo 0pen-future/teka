@@ -1,7 +1,7 @@
 ---
 phase: 7
 title: "Chi tiết lớp: Chương trình học, Bài tập, Tài liệu, Chat, Lịch sử lớp"
-status: pending
+status: completed
 priority: P1
 effort: "2.5d"
 dependencies: [1, 4, 5]
@@ -108,3 +108,26 @@ FK về `classes` dùng `ON DELETE CASCADE` theo khuôn 000009/000015 (chỉ ch�
 - Đụng hợp đồng `teaching` — chạy toàn bộ `make test-api` package `teaching` + web `teaching/__tests__`.
 - Số buổi thực khác số buổi mẫu là bình thường; UI phải hiện lệch rõ, không tự sinh/xoá buổi.
 - `audit_logs` đã có `entity_type`/`entity_id` (000010) — index mới chỉ bổ sung đường truy vấn theo entity; filter là additive.
+
+## Completion notes (2026-09-24)
+- Backend (`0f5c174`): migration 000031 (`class_programs`, `class_messages`, `parent_class_id` + `lineage_note` trên
+  `classes` với FK composite cùng center `ON DELETE SET NULL`, index audit theo entity, backfill `class_messages.post`
+  hai nhánh theo sổ). Hai feature điều phối `classprogram` (PUT/DELETE owner-only, GET service, `CURRICULUM_DIFFERS`
+  409 + `confirm`) và `classchat` (cursor keyset, xoá theo tác giả hoặc owner) dựng sau `teaching` và `library`;
+  `audit-logs` nhận filter `entity_type`/`entity_id`. `CatalogVersion` không đổi.
+- Web (`952f0e5`): card "Chương trình học" (picker template → phiên bản published, "Áp dụng từ khóa mẫu", dialog khi
+  sổ đầu bài đang khác, gỡ có xác nhận), card "Lịch sử lớp" + toggle "Lịch sử thay đổi" khi có `audit.read`, tab
+  Chat (`useInfiniteQuery`, composer gate `class_messages.post`), tab Bài tập và Tài liệu đọc qua lớp, tab Buổi học
+  zip với buổi mẫu và cảnh báo lệch. Ba tab bỏ trạng thái disabled.
+- Sau review (`ae5a75b`, `a390f2d`): phiên bản lưu trữ vẫn đọc được qua lớp (`library.ReleasedVersion`), field
+  `version_status` mới và badge "Đã lưu trữ"; trần 100 buổi khi áp dụng (`TEMPLATE_TOO_LONG`); xoá tin nhắn qua
+  hộp xác nhận với nhãn a11y theo tin; link thư viện chỉ hiện khi có `library.read`.
+- Lệch spec có chủ đích: `GET /program/lessons` trả đủ tài liệu, web lọc `shared_with_students` và có switch
+  "Hiện tất cả" (người đọc là nhân sự lớp); e2e nằm ở `class-program.spec.ts` mới thay vì `class-list.spec.ts`
+  (file này không tồn tại), tự tạo template và lớp qua API rồi dọn ở `afterEach`.
+- Bài học: envelope API bỏ hẳn key `data` khi payload nil nên schema web phải `.nullish()`; audit ghi bất đồng bộ
+  nên e2e phải reload đến khi thấy dòng thay vì chờ cố định.
+- Kiểm chứng: integration `classprogram`, `classchat`, `library`, `migrations` xanh (`-p 1`); `make test-api-unit`,
+  `scopelint`, `lint`, `test-web` xanh; e2e `class-program.spec.ts` xanh trên stack cô lập.
+- Để lại cho Phase 9 (review L1, L3–L6, test gaps): xem `## Disposition` trong `reports/review-phase-07-260924.md`.
+  L9 (chat tự làm mới) cần user quyết định.
