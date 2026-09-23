@@ -12,4 +12,14 @@ export const coursesRoutes: RouteObject[] = [
       Component: (await import("./pages/course-detail-page")).CourseDetailPage,
     }),
   },
+  {
+    path: "paths",
+    lazy: async () => ({
+      Component: (await import("./pages/learning-paths-page")).LearningPathsPage,
+    }),
+  },
+  {
+    path: "paths/:id",
+    lazy: async () => ({ Component: (await import("./pages/path-detail-page")).PathDetailPage }),
+  },
 ];

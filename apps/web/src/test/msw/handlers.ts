@@ -342,6 +342,20 @@ export const PERMISSION_CATALOG = [
     "Tạo, sửa, ngừng tuyển và xoá khóa học; đặt gói học phí.",
   ),
   perm(
+    "paths.read",
+    "Xem lộ trình học",
+    "crud",
+    "low",
+    "Xem lộ trình học, các giai đoạn và khóa học gợi ý trong từng giai đoạn.",
+  ),
+  perm(
+    "paths.edit",
+    "Quản lý lộ trình học",
+    "crud",
+    "medium",
+    "Tạo, sửa, xoá lộ trình học; thêm, sắp xếp giai đoạn và gán khóa học vào giai đoạn.",
+  ),
+  perm(
     "reports.send",
     "Gửi báo cáo học phí",
     "special",

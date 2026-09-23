@@ -69,8 +69,8 @@ export interface TuitionPackInput {
   price: number;
 }
 
-/** Same shape rule as the class and template codes: upper-cased before checking. */
-const courseCodePattern = /^[A-Z0-9][A-Z0-9-]*$/;
+/** Shared by course and learning path codes: upper-case letters, digits and dashes. */
+export const courseCodePattern = /^[A-Z0-9][A-Z0-9-]*$/;
 
 const optionalText = (max: number) => z.string().trim().max(max, `Tối đa ${max} ký tự`);
 

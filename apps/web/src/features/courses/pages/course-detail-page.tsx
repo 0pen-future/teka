@@ -27,7 +27,9 @@ import {
   useDeleteCourse,
   useUpdateCourse,
 } from "../hooks/use-courses";
+import { useCoursePaths } from "../hooks/use-paths";
 import { courseStatusLabel, courseStatusVariant } from "../lib/course-labels";
+import { pathStatusLabel, pathStatusVariant } from "../lib/path-labels";
 import { courseToInput, type Course } from "../schemas/courses-schemas";
 
 function apiMessage(error: unknown, fallback: string): string {
@@ -253,41 +255,90 @@ function Dash() {
 }
 
 function InfoTab({ course }: { course: Course }) {
+  const { has } = useCenterContext();
   return (
-    <div className="flex flex-col gap-4 rounded-[var(--radius-lg)] border border-line-200 bg-white p-4">
-      <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-        <Fact label="Môn học">{course.subject ?? <Dash />}</Fact>
-        <Fact label="Cấp / trình độ">{course.level ?? <Dash />}</Fact>
-        <Fact label="Đơn giá / buổi">{formatMoney(course.default_unit_price)}</Fact>
-        <Fact label="Tổng số buổi">
-          {course.total_sessions === null ? <Dash /> : `${course.total_sessions} buổi`}
-        </Fact>
-        <Fact label="Thời lượng mỗi buổi">
-          {course.duration_min === null ? <Dash /> : `${course.duration_min} phút`}
-        </Fact>
-        <Fact label="Chương trình mẫu">
-          {course.default_template ? (
-            <Link
-              to={`/library/templates/${course.default_template.template_id}`}
-              className="text-mint-600 hover:underline"
-            >
-              {course.default_template.name} · v{course.default_template.version_no}
-            </Link>
-          ) : (
-            <Dash />
-          )}
-        </Fact>
-        {/* Catalog facts count every class of the center, not only the ones
+    <>
+      <div className="flex flex-col gap-4 rounded-[var(--radius-lg)] border border-line-200 bg-white p-4">
+        <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          <Fact label="Môn học">{course.subject ?? <Dash />}</Fact>
+          <Fact label="Cấp / trình độ">{course.level ?? <Dash />}</Fact>
+          <Fact label="Đơn giá / buổi">{formatMoney(course.default_unit_price)}</Fact>
+          <Fact label="Tổng số buổi">
+            {course.total_sessions === null ? <Dash /> : `${course.total_sessions} buổi`}
+          </Fact>
+          <Fact label="Thời lượng mỗi buổi">
+            {course.duration_min === null ? <Dash /> : `${course.duration_min} phút`}
+          </Fact>
+          <Fact label="Chương trình mẫu">
+            {course.default_template ? (
+              <Link
+                to={`/library/templates/${course.default_template.template_id}`}
+                className="text-mint-600 hover:underline"
+              >
+                {course.default_template.name} · v{course.default_template.version_no}
+              </Link>
+            ) : (
+              <Dash />
+            )}
+          </Fact>
+          {/* Catalog facts count every class of the center, not only the ones
             the reader may open on the Lớp học tab. */}
-        <Fact label="Lớp đang học (toàn trung tâm)">{course.classes_running}</Fact>
-        <Fact label="Lớp sắp mở (toàn trung tâm)">{course.classes_upcoming}</Fact>
-      </dl>
-      {course.description ? (
-        <p className="max-w-[720px] text-[14px] whitespace-pre-line text-ink-700">
-          {course.description}
-        </p>
-      ) : null}
-    </div>
+          <Fact label="Lớp đang học (toàn trung tâm)">{course.classes_running}</Fact>
+          <Fact label="Lớp sắp mở (toàn trung tâm)">{course.classes_upcoming}</Fact>
+        </dl>
+        {course.description ? (
+          <p className="max-w-[720px] text-[14px] whitespace-pre-line text-ink-700">
+            {course.description}
+          </p>
+        ) : null}
+      </div>
+      {has("paths.read") ? <CoursePathsSection courseId={course.id} /> : null}
+    </>
+  );
+}
+
+/** The learning paths that recommend this course, and at which stage. */
+function CoursePathsSection({ courseId }: { courseId: string }) {
+  const paths = useCoursePaths(courseId);
+  const rows = paths.data ?? [];
+  return (
+    <section
+      aria-labelledby="course-paths-heading"
+      className="flex flex-col gap-3 rounded-[var(--radius-lg)] border border-line-200 bg-white p-4"
+    >
+      <h2 id="course-paths-heading" className={factLabelClassName}>
+        Lộ trình học
+      </h2>
+      {paths.isPending ? (
+        <p className="text-[14px] text-ink-500">Đang tải lộ trình…</p>
+      ) : paths.isError ? (
+        <p className="text-[14px] text-ink-500">Không tải được lộ trình của khóa.</p>
+      ) : rows.length === 0 ? (
+        <p className="text-[14px] text-ink-500">Chưa nằm trong lộ trình nào.</p>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {rows.map((row) => (
+            <li
+              key={`${row.id}-${row.stage_id}`}
+              className="flex flex-wrap items-center gap-2 text-[14px]"
+            >
+              <Link
+                to={`/paths/${row.id}`}
+                className="font-extrabold text-ink-900 hover:text-mint-600"
+              >
+                {row.name}
+              </Link>
+              <span className="text-ink-500">
+                Giai đoạn {row.stage_position} · {row.stage_name}
+              </span>
+              <HvBadge variant={pathStatusVariant[row.status]} size="sm" dot>
+                {pathStatusLabel[row.status]}
+              </HvBadge>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

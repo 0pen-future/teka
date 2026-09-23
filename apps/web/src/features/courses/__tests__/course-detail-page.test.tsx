@@ -18,6 +18,7 @@ import {
   getCoursesStore,
   resetCoursesStore,
 } from "./courses-handlers";
+import { pathsHandlers, pathToan, resetPathsStore } from "./paths-handlers";
 
 function renderPage(route = `/courses/${courseToan6.id}`) {
   return renderWithProviders(<CourseDetailPage />, {
@@ -46,9 +47,11 @@ async function pick(user: ReturnType<typeof userEvent.setup>, combobox: string, 
 beforeEach(() => {
   resetCoursesStore();
   resetLibraryStore();
+  resetPathsStore();
   // Course handlers go last so their `GET /classes` wins over nothing; the
-  // library handlers serve the template and version pickers.
-  server.use(...libraryHandlers, ...coursesHandlers);
+  // library handlers serve the template and version pickers and the path
+  // handlers the learning paths section of the info tab.
+  server.use(...libraryHandlers, ...pathsHandlers, ...coursesHandlers);
   signInAs(testPrimaryTeacher);
 });
 
@@ -74,6 +77,32 @@ describe("CourseDetailPage", () => {
     expect(within(info).getByText("36 buổi")).toBeInTheDocument();
     expect(within(info).getByText("90 phút")).toBeInTheDocument();
     expect(within(info).getByText("Khóa nền tảng cho học sinh mới vào lớp 6.")).toBeInTheDocument();
+  });
+
+  it("lists the learning paths that recommend the course on the info tab", async () => {
+    renderPage();
+    await screen.findByRole("heading", { name: "Toán 6 nền tảng" });
+
+    const section = await screen.findByRole("region", { name: "Lộ trình học" });
+    expect(within(section).getByRole("link", { name: "Lộ trình Toán THCS" })).toHaveAttribute(
+      "href",
+      `/paths/${pathToan.id}`,
+    );
+    expect(within(section).getByText("Giai đoạn 1 · Nền tảng")).toBeInTheDocument();
+  });
+
+  it("tells when the course sits in no path", async () => {
+    renderPage(`/courses/${courseVan9.id}`);
+    await screen.findByRole("heading", { name: "Văn 9 luyện thi" });
+    const section = await screen.findByRole("region", { name: "Lộ trình học" });
+    expect(within(section).getByText("Chưa nằm trong lộ trình nào.")).toBeInTheDocument();
+  });
+
+  it("hides the learning paths section from a member without paths.read", async () => {
+    server.use(memberWith("courses.read"));
+    renderPage();
+    await screen.findByRole("heading", { name: "Toán 6 nền tảng" });
+    expect(screen.queryByRole("region", { name: "Lộ trình học" })).not.toBeInTheDocument();
   });
 
   it("shows the not-found block for an unknown course", async () => {
