@@ -5,10 +5,11 @@ import { ApiError } from "@/lib/api/errors";
 
 interface ApiFormErrorOptions<T extends FieldValues> {
   /**
-   * Where a CONFLICT error should land. The API reports duplicates (e.g.
-   * "phone already registered") as CONFLICT with a plain message, not as a
-   * field-level VALIDATION_ERROR, but users should still see it on the input
-   * that caused it.
+   * Where a 409 conflict should land. The API reports duplicates (e.g.
+   * "phone already registered", a taken code) with a plain message under
+   * CONFLICT or a feature code such as CODE_TAKEN, not as a field-level
+   * VALIDATION_ERROR, but users should still see it on the input that
+   * caused it.
    */
   conflictField?: Path<T>;
 }
@@ -19,7 +20,9 @@ interface ApiFormErrorOptions<T extends FieldValues> {
  * falls back to a form-level root error for everything else.
  */
 export function useApiFormErrors<T extends FieldValues>(
-  form: UseFormReturn<T>,
+  // Only the two members used, so a form whose zod schema transforms its
+  // output (`useForm<Input, unknown, Output>`) is accepted as well.
+  form: Pick<UseFormReturn<T, unknown, FieldValues>, "getValues" | "setError">,
   options?: ApiFormErrorOptions<T>,
 ): (error: unknown) => void {
   return (error: unknown) => {
@@ -38,7 +41,7 @@ export function useApiFormErrors<T extends FieldValues>(
       }
       return;
     }
-    if (error.code === "CONFLICT" && options?.conflictField) {
+    if (error.status === 409 && options?.conflictField) {
       form.setError(options.conflictField, { type: "server", message: error.message });
       return;
     }

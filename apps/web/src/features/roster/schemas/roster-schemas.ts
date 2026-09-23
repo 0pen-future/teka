@@ -171,6 +171,29 @@ export const classPhases = ["upcoming", "running", "ended", "archived"] as const
 export const classPhaseSchema = z.enum(classPhases);
 export type ClassPhase = z.infer<typeof classPhaseSchema>;
 
+/** The course chip embedded in a class: enough to label it and link to `/courses/:id`. */
+export const courseRefSchema = z.object({
+  id: z.string(),
+  code: z.string(),
+  name: z.string(),
+});
+
+export type CourseRef = z.infer<typeof courseRefSchema>;
+
+/**
+ * The slice of `courses.CourseResponse` the class dialog's picker needs.
+ * Roster owns this lookup so it never imports the courses feature (which
+ * imports roster for the class list on the course page).
+ */
+export const courseOptionSchema = z.object({
+  id: z.string(),
+  code: z.string(),
+  name: z.string(),
+  default_unit_price: z.number().int(),
+});
+
+export type CourseOption = z.infer<typeof courseOptionSchema>;
+
 /**
  * `classes.ClassResponse`. `default_unit_price` is integer đồng, never a
  * decimal. `my_staff_roles` is the caller's own active class-staff role keys
@@ -206,6 +229,8 @@ export const classSchema = z.object({
    * (`classes.PhaseOf`); the client only renders it and never recomputes it.
    */
   phase: classPhaseSchema.default("running"),
+  /** The course the class is attached to (`classes.CourseRefResponse`); null when none. */
+  course: courseRefSchema.nullable().default(null),
 });
 
 export type Class = z.infer<typeof classSchema>;
@@ -232,6 +257,8 @@ export const classCreateInputSchema = z.object({
   end_date: z.union([dateField, z.literal("")]).optional(),
   default_unit_price: z.number().int().min(0, "Học phí không được âm"),
   schedules: z.array(scheduleInputSchema).min(1, "Chọn ít nhất một buổi trong tuần"),
+  /** A live course of the center; absent means no course. */
+  course_id: z.string().optional(),
 });
 
 export type ClassCreateInput = z.infer<typeof classCreateInputSchema>;
@@ -261,6 +288,8 @@ export const classUpdateInputSchema = z.object({
   recruiting: z.boolean().optional(),
   /** Replaces the stored note; `""` clears it. */
   note: z.string().trim().max(1000, "Tối đa 1000 ký tự").optional(),
+  /** Same patch rule: absent keeps the course, `""` detaches, an id attaches. */
+  course_id: z.string().optional(),
 });
 
 export type ClassUpdateInput = z.infer<typeof classUpdateInputSchema>;
@@ -386,12 +415,14 @@ export const classDialogInputSchema = z.object({
   default_unit_price: z.number().int().min(0, "Học phí không được âm"),
   slots: classSlotsField,
   duration_min: z.number().int().min(1, "Thời lượng phải lớn hơn 0"),
+  /** Picked course id; `""` means the class stays unattached. */
+  course_id: z.string(),
 });
 
 export type ClassDialogInput = z.infer<typeof classDialogInputSchema>;
 
 export function toClassCreateInput(values: ClassDialogInput): ClassCreateInput {
-  const { slots, duration_min, ...rest } = values;
+  const { slots, duration_min, course_id, ...rest } = values;
   // One wire row per (weekday, time) pair; two slots naming the same pair
   // would otherwise duplicate a session generator server-side.
   const seen = new Set<string>();
@@ -409,7 +440,7 @@ export function toClassCreateInput(values: ClassDialogInput): ClassCreateInput {
       });
     }
   }
-  return { ...rest, schedules };
+  return course_id === "" ? { ...rest, schedules } : { ...rest, schedules, course_id };
 }
 
 /** `enrollments.EnrollmentResponse`. `unit_price` is integer đồng. */

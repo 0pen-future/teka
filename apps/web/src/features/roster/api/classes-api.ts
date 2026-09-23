@@ -4,6 +4,7 @@ import { parseData, parseList, type Paginated } from "@/lib/api/envelope";
 import {
   classSchema,
   classStatsSchema,
+  courseOptionSchema,
   reassignTeacherResponseSchema,
   scheduleSchema,
   type Class,
@@ -11,6 +12,7 @@ import {
   type ClassPhase,
   type ClassStats,
   type ClassUpdateInput,
+  type CourseOption,
   type ReassignTeacherResponse,
   type Schedule,
   type ScheduleInput,
@@ -29,6 +31,8 @@ export interface ListClassesParams {
   shift?: ClassShift;
   /** Exact tag membership. */
   tag?: string;
+  /** Only the classes attached to this course. */
+  course_id?: string;
   page?: number;
   per_page?: number;
   sort?: string;
@@ -38,6 +42,18 @@ export interface ListClassesParams {
 export async function listClasses(params: ListClassesParams = {}): Promise<Paginated<Class>> {
   const res = await apiClient.get<unknown>("/classes", { params });
   return parseList(classSchema, res.data);
+}
+
+/**
+ * `GET /courses?status=active` reduced to picker rows. Roster keeps its own
+ * lookup so the class dialog can offer a course without importing the
+ * courses feature; the full catalog lives there.
+ */
+export async function listCourseOptions(): Promise<CourseOption[]> {
+  const res = await apiClient.get<unknown>("/courses", {
+    params: { status: "active", per_page: 100, sort: "name" },
+  });
+  return parseList(courseOptionSchema, res.data).items;
 }
 
 /** `GET /classes/stats` — per-phase counts over the classes the caller can read. */

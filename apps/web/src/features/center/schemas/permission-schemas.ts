@@ -83,6 +83,7 @@ const RESOURCE_LABELS: Record<string, string> = {
   notifications: "Thông báo",
   tasks: "Công việc",
   library: "Kho học liệu",
+  courses: "Khóa học",
   reports: "Báo cáo",
   members: "Thành viên",
   center: "Trung tâm",

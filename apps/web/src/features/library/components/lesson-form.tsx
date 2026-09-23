@@ -7,7 +7,7 @@ import { useApiFormErrors } from "@/lib/forms/use-api-form-errors";
 
 import { EMPTY_LESSON_FORM, useLessonForm, type LessonForm } from "../hooks/use-lesson-form";
 import { useCreateLesson } from "../hooks/use-library";
-import { textareaClassName } from "../lib/textarea-class";
+import { textareaClassName } from "@/lib/forms/textarea-class";
 import { toLessonInput, type TemplateLesson } from "../schemas/library-schemas";
 
 interface LessonFieldsProps {

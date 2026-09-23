@@ -41,6 +41,7 @@ export const classMath: Class = {
   recruiting: false,
   note: null,
   phase: "running",
+  course: null,
 };
 
 export const classEnglish: Class = {
@@ -60,6 +61,7 @@ export const classEnglish: Class = {
   recruiting: false,
   note: null,
   phase: "running",
+  course: null,
 };
 
 /** No sessions fell in the fixture period — never produces a collections/invoice row. */
@@ -80,6 +82,7 @@ export const classEmpty: Class = {
   recruiting: false,
   note: null,
   phase: "running",
+  course: null,
 };
 
 // --- Contacts ---

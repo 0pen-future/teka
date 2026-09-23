@@ -66,6 +66,35 @@ describe("ClassDetailPage", () => {
     );
   });
 
+  it("links the course chip to the catalog when the class is attached to a course", async () => {
+    getRosterStore().classes[0]!.course = {
+      id: "90000000-0000-4000-8000-000000000001",
+      code: "TOAN-6",
+      name: "Toán 6 nền tảng",
+    };
+    renderPage();
+    expect(await screen.findByRole("heading", { name: "Toán 6A" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Khóa: TOAN-6 · Toán 6 nền tảng" })).toHaveAttribute(
+      "href",
+      "/courses/90000000-0000-4000-8000-000000000001",
+    );
+  });
+
+  it("shows the course as plain text when the member cannot open the catalog", async () => {
+    server.use(memberCenterHandler);
+    getRosterStore().classes[0]!.course = {
+      id: "90000000-0000-4000-8000-000000000001",
+      code: "TOAN-6",
+      name: "Toán 6 nền tảng",
+    };
+    renderPage();
+    expect(await screen.findByRole("heading", { name: "Toán 6A" })).toBeInTheDocument();
+    expect(screen.getByText("Khóa: TOAN-6 · Toán 6 nền tảng")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Khóa: TOAN-6 · Toán 6 nền tảng" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows the not-found block for an unknown class", async () => {
     server.use(
       http.get(`${API_URL}/classes/:id`, () =>

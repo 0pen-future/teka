@@ -9,7 +9,7 @@ import { useApiFormErrors } from "@/lib/forms/use-api-form-errors";
 
 import { useCreateExercise, useUpdateExercise } from "../hooks/use-library";
 import { formatDifficulty } from "../lib/library-labels";
-import { textareaClassName } from "../lib/textarea-class";
+import { textareaClassName } from "@/lib/forms/textarea-class";
 import {
   exerciseFormSchema,
   toExerciseForm,

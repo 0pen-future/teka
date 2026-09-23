@@ -33,6 +33,8 @@ export const classesKeys = {
   details: () => [...classesKeys.all, "detail"] as const,
   detail: (id: string) => [...classesKeys.details(), id] as const,
   stats: () => [...classesKeys.all, "stats"] as const,
+  /** Active-course picker rows for the class dialog; a course write elsewhere refetches on mount. */
+  courseOptions: () => [...classesKeys.all, "course-options"] as const,
 };
 
 export const enrollmentsKeys = {

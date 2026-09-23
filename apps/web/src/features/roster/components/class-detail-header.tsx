@@ -2,6 +2,7 @@ import { ArrowLeftIcon, CopyIcon } from "lucide-react";
 import { Link } from "react-router";
 
 import { HvBadge, hvToast } from "@/components/hv";
+import { useCenterContext } from "@/features/teaching";
 import { copyToClipboard } from "@/lib/utils";
 
 import { phaseLabel, phaseVariant } from "../lib/class-labels";
@@ -14,6 +15,12 @@ interface ClassDetailHeaderProps {
 
 /** Back link, name, code with a copy button, phase badge and the settings shortcut. */
 export function ClassDetailHeader({ klass, canWrite }: ClassDetailHeaderProps) {
+  const { has } = useCenterContext();
+  // The catalog page is gated on courses.read; without it the chip informs
+  // instead of linking somewhere the member would bounce off.
+  const canOpenCourse = has("courses.read");
+  const courseChipClassName =
+    "inline-flex items-center gap-1 rounded-full bg-sky-50 px-2.5 py-0.5 font-display text-[12px] font-bold text-sky-700";
   async function handleCopy() {
     const copied = await copyToClipboard(klass.code);
     if (copied) {
@@ -51,6 +58,18 @@ export function ClassDetailHeader({ klass, canWrite }: ClassDetailHeaderProps) {
               <CopyIcon aria-hidden="true" className="size-3.5" />
               Sao chép
             </button>
+            {klass.course && canOpenCourse ? (
+              <Link
+                to={`/courses/${klass.course.id}`}
+                className={`${courseChipClassName} hover:bg-sky-100`}
+              >
+                Khóa: {klass.course.code} · {klass.course.name}
+              </Link>
+            ) : klass.course ? (
+              <span className={courseChipClassName}>
+                Khóa: {klass.course.code} · {klass.course.name}
+              </span>
+            ) : null}
           </div>
         </div>
         {canWrite ? (

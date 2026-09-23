@@ -16,3 +16,5 @@ export type {
   TemplateVersionStatus,
 } from "./schemas/library-schemas";
 export { defaultVersion, versionLabel, versionStatusLabel } from "./lib/library-labels";
+export { rowErrorsFromApi } from "./lib/row-errors";
+export type { RowErrors } from "./lib/row-errors";

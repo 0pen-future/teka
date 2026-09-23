@@ -91,7 +91,8 @@ describe("ClassListPage", () => {
     expect(within(first).getByText("Khối 6")).toBeInTheDocument();
     expect(within(first).getByText("Đang học")).toBeInTheDocument();
     expect(within(first).getByText("05/01/2026")).toBeInTheDocument();
-    expect(within(first).getByText("—")).toBeInTheDocument();
+    // Neither a course nor an end date: both cells fall back to a dash.
+    expect(within(first).getAllByText("—")).toHaveLength(2);
 
     const second = rows[1]!;
     expect(within(second).getByText("Đã kết thúc")).toBeInTheDocument();

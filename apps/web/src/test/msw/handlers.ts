@@ -328,6 +328,20 @@ export const PERMISSION_CATALOG = [
     "Phát hành một bản nháp thành phiên bản chính thức, khoá nội dung của phiên bản đó.",
   ),
   perm(
+    "courses.read",
+    "Xem danh mục khóa học",
+    "crud",
+    "low",
+    "Xem khóa học, gói học phí và lớp thuộc khóa.",
+  ),
+  perm(
+    "courses.edit",
+    "Quản lý khóa học",
+    "crud",
+    "medium",
+    "Tạo, sửa, ngừng tuyển và xoá khóa học; đặt gói học phí.",
+  ),
+  perm(
     "reports.send",
     "Gửi báo cáo học phí",
     "special",

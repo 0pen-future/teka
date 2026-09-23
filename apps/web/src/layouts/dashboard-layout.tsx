@@ -1,4 +1,5 @@
 import {
+  BookMarkedIcon,
   BookOpenIcon,
   BookUserIcon,
   Building2Icon,
@@ -101,6 +102,7 @@ function useNavGroups(): NavGroup[] {
         // already scopes the list to the caller's own rows.
         { label: "Lời mời nhận lớp", to: "/class-invitations", Icon: MailPlusIcon },
         { label: "Kho học liệu", to: "/library", Icon: LibraryBigIcon, perm: "library.read" },
+        { label: "Danh mục khóa học", to: "/courses", Icon: BookMarkedIcon, perm: "courses.read" },
       ],
     },
     {
@@ -193,6 +195,7 @@ const OVERFLOW_LABELS = new Set([
   "Danh sách lớp học",
   "Lời mời nhận lớp",
   "Kho học liệu",
+  "Danh mục khóa học",
   "Chốt sổ",
   "Gửi thông báo",
   "Phụ huynh",
@@ -217,6 +220,7 @@ const OVERFLOW_PATH_PREFIXES = [
   "/classes",
   "/class-invitations",
   "/library",
+  "/courses",
   "/records",
   "/billing",
   "/notifications",

@@ -31,6 +31,7 @@ export function ClassTable({ classes, today, onOpen }: ClassTableProps) {
           <tr>
             <th className={headCellClassName}>Lớp</th>
             <th className={headCellClassName}>Mã lớp</th>
+            <th className={headCellClassName}>Khóa học</th>
             <th className={headCellClassName}>Lịch học</th>
             <th className={headCellClassName}>Thẻ</th>
             <th className={headCellClassName}>Trạng thái</th>
@@ -59,6 +60,15 @@ export function ClassTable({ classes, today, onOpen }: ClassTableProps) {
               </td>
               <td className={cn(cellClassName, "font-mono text-[13px] text-ink-700")}>
                 {klass.code || "—"}
+              </td>
+              <td className={cellClassName}>
+                {klass.course ? (
+                  <HvBadge variant="info" size="sm" title={klass.course.name}>
+                    {klass.course.code}
+                  </HvBadge>
+                ) : (
+                  <span className="text-ink-400">—</span>
+                )}
               </td>
               <td className={cn(cellClassName, "text-ink-500")}>
                 {formatScheduleLabel(klass.schedules, today) || "Chưa có lịch"}

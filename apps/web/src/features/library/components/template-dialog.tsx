@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { useApiFormErrors } from "@/lib/forms/use-api-form-errors";
 
 import { useCreateTemplate, useUpdateTemplate } from "../hooks/use-library";
-import { textareaClassName } from "../lib/textarea-class";
+import { textareaClassName } from "@/lib/forms/textarea-class";
 import {
   templateFormSchema,
   toTemplateForm,

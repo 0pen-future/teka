@@ -35,7 +35,7 @@ import {
   useVersions,
 } from "../hooks/use-library";
 import { defaultVersion, versionLabel } from "../lib/library-labels";
-import { textareaClassName } from "../lib/textarea-class";
+import { textareaClassName } from "@/lib/forms/textarea-class";
 import type { ProgramTemplate, TemplateLesson, TemplateVersion } from "../schemas/library-schemas";
 
 function apiMessage(error: unknown, fallback: string): string {

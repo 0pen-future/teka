@@ -44,6 +44,7 @@ export const fixtureClass: Class = {
   recruiting: false,
   note: null,
   phase: "running",
+  course: null,
 };
 
 function buildRosterTemplate(): AttendanceRow[] {

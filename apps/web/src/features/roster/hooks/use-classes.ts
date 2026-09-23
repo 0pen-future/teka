@@ -9,6 +9,7 @@ import {
   getClass,
   getClassStats,
   listClasses,
+  listCourseOptions,
   reassignTeacher,
   updateClass,
   updateSchedule,
@@ -37,6 +38,16 @@ export function useClass(id: string | undefined) {
 }
 
 /** Per-phase counts for the class list's status chips. */
+/** The center's active courses for the class dialog; fetched only while the dialog is open. */
+export function useCourseOptions(enabled: boolean) {
+  return useQuery({
+    queryKey: classesKeys.courseOptions(),
+    queryFn: listCourseOptions,
+    enabled,
+    staleTime: 0,
+  });
+}
+
 export function useClassStats() {
   return useQuery({
     queryKey: classesKeys.stats(),

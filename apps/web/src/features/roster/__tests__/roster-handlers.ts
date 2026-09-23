@@ -91,6 +91,24 @@ export const classWithSchedule: Class = {
   recruiting: false,
   note: null,
   phase: "running",
+  course: null,
+};
+
+/**
+ * Active-course rows for the class dialog's picker (`GET /courses`), shaped
+ * like `courses.CourseResponse` only as far as the roster lookup reads them.
+ */
+export const courseOptionToan = {
+  id: "90000000-0000-4000-8000-000000000001",
+  code: "TOAN-6",
+  name: "Toán 6 nền tảng",
+  default_unit_price: 180000,
+};
+export const courseOptionVan = {
+  id: "90000000-0000-4000-8000-000000000002",
+  code: "VAN-9",
+  name: "Văn 9 luyện thi",
+  default_unit_price: 200000,
 };
 
 /**
@@ -287,6 +305,12 @@ function shiftOf(startTime: string): "morning" | "afternoon" | "evening" {
 }
 
 /** Treats an empty-string form value the same as an absent one (`??` alone would not). */
+/** The chip a class carries for the picked course; unknown or blank ids leave it unattached. */
+function courseRefOf(courseId: string | undefined): Class["course"] {
+  const course = [courseOptionToan, courseOptionVan].find((option) => option.id === courseId);
+  return course ? { id: course.id, code: course.code, name: course.name } : null;
+}
+
 function orNull(value: string | null | undefined): string | null {
   if (!value) {
     return null;
@@ -472,10 +496,12 @@ export const rosterHandlers = [
     const weekday = url.searchParams.get("weekday");
     const shift = url.searchParams.get("shift");
     const tag = url.searchParams.get("tag");
+    const courseId = url.searchParams.get("course_id");
     const items = store.classes
       .filter((klass) => {
         if (status && status !== "all" && klass.status !== status) return false;
         if (phase && klass.phase !== phase) return false;
+        if (courseId && klass.course?.id !== courseId) return false;
         if (q && !klass.name.toLowerCase().includes(q) && !klass.code.toLowerCase().includes(q)) {
           return false;
         }
@@ -518,6 +544,7 @@ export const rosterHandlers = [
       code?: string;
       tags?: string[];
       note?: string;
+      course_id?: string;
     };
     const klass: Class = {
       id: nextId("class-"),
@@ -547,6 +574,7 @@ export const rosterHandlers = [
       created_at: new Date().toISOString(),
       my_staff_roles: [],
       student_count: 0,
+      course: courseRefOf(body.course_id),
     };
     store.classes.push(klass);
     return HttpResponse.json(ok(klass), { status: 201 });
@@ -565,6 +593,7 @@ export const rosterHandlers = [
       tags?: string[];
       recruiting?: boolean;
       note?: string;
+      course_id?: string;
     };
     klass.name = body.name;
     klass.start_date = body.start_date;
@@ -575,7 +604,13 @@ export const rosterHandlers = [
     if (body.tags !== undefined) klass.tags = body.tags;
     if (body.recruiting !== undefined) klass.recruiting = body.recruiting;
     if (body.note !== undefined) klass.note = orNull(body.note);
+    // Same patch rule as the API: absent keeps, "" detaches, an id attaches.
+    if (body.course_id !== undefined) klass.course = courseRefOf(body.course_id);
     return HttpResponse.json(ok(withStudentCount(klass)));
+  }),
+  http.get(`${API_URL}/courses`, () => {
+    const items = [courseOptionToan, courseOptionVan];
+    return HttpResponse.json(ok(items, listMeta(items.length)));
   }),
   http.put(`${API_URL}/classes/:id/teacher`, async ({ params, request }) => {
     const klass = store.classes.find((item) => item.id === params.id);

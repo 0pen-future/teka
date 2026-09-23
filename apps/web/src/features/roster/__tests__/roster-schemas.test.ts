@@ -18,10 +18,21 @@ function dialogInput(slots: ClassDialogInput["slots"]): ClassDialogInput {
     default_unit_price: 150_000,
     slots,
     duration_min: 90,
+    course_id: "",
   };
 }
 
 describe("toClassCreateInput", () => {
+  it("omits course_id when no course was picked and passes it through otherwise", () => {
+    const blank = toClassCreateInput(dialogInput([{ start_time: "18:00", days: [1] }]));
+    expect("course_id" in blank).toBe(false);
+    const attached = toClassCreateInput({
+      ...dialogInput([{ start_time: "18:00", days: [1] }]),
+      course_id: "90000000-0000-4000-8000-000000000001",
+    });
+    expect(attached.course_id).toBe("90000000-0000-4000-8000-000000000001");
+  });
+
   it("flattens slots into one schedule row per (weekday, time) pair", () => {
     const input = toClassCreateInput(
       dialogInput([

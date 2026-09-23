@@ -1,15 +1,15 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useForm } from "react-hook-form";
 
-import { HvButton, HvModal } from "@/components/hv";
+import { HvButton, HvModal, HvSelect } from "@/components/hv";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useApiFormErrors } from "@/lib/forms/use-api-form-errors";
 
 import { MoneyInput } from "./money-input";
 import { ScheduleSlotsEditor } from "./schedule-slots-editor";
-import { useCreateClass } from "../hooks/use-classes";
+import { useCreateClass, useCourseOptions } from "../hooks/use-classes";
 import { emptySlot, weeklySessionCount } from "../lib/schedule-diff";
 import {
   classDialogInputSchema,
@@ -32,8 +32,11 @@ function toCreateDefaults(): ClassDialogInput {
     default_unit_price: 0,
     slots: [emptySlot()],
     duration_min: 90,
+    course_id: "",
   };
 }
+
+const NO_COURSE_OPTION = { value: "", label: "Không gắn khóa học" };
 
 /**
  * `ClassDialog` (prototype `modalClass`) — create-only. It gathers the class
@@ -49,6 +52,7 @@ export function ClassDialog({ open, onOpenChange }: ClassDialogProps) {
   });
   const createMutation = useCreateClass();
   const handleCreateApiError = useApiFormErrors(createForm);
+  const courseOptions = useCourseOptions(open);
 
   useEffect(() => {
     if (open) {
@@ -69,6 +73,26 @@ export function ClassDialog({ open, onOpenChange }: ClassDialogProps) {
 
   const { errors } = createForm.formState;
   const slots = createForm.watch("slots");
+  const courseId = createForm.watch("course_id");
+  const courses = courseOptions.data ?? [];
+  /** The price the dialog itself last put in the field; null until a course prefilled one. */
+  const lastPrefill = useRef<number | null>(null);
+
+  function handleCoursePick(nextId: string) {
+    createForm.setValue("course_id", nextId, { shouldDirty: true, shouldValidate: true });
+    const course = courses.find((option) => option.id === nextId);
+    // Prefill the price from the course while the field still holds nothing
+    // but a prefill (blank, or the previous course's price), so a price the
+    // teacher typed on purpose survives a course change.
+    const current = createForm.getValues("default_unit_price");
+    if (course && (current === 0 || current === lastPrefill.current)) {
+      lastPrefill.current = course.default_unit_price;
+      createForm.setValue("default_unit_price", course.default_unit_price, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+    }
+  }
   return (
     <HvModal
       open={open}
@@ -105,6 +129,29 @@ export function ClassDialog({ open, onOpenChange }: ClassDialogProps) {
               {...createForm.register("name")}
             />
             <FieldError errors={[errors.name]} />
+          </Field>
+          <Field data-invalid={Boolean(errors.course_id)}>
+            <FieldLabel htmlFor="class-course">Khóa học</FieldLabel>
+            <HvSelect
+              id="class-course"
+              aria-label="Khóa học"
+              value={courseId}
+              onValueChange={handleCoursePick}
+              options={[
+                NO_COURSE_OPTION,
+                ...courses.map((course) => ({
+                  value: course.id,
+                  label: course.name,
+                  meta: course.code,
+                })),
+              ]}
+              sheetTitle="Chọn khóa học"
+              placeholder="Không gắn khóa học"
+              searchNoun="khóa học"
+              aria-invalid={Boolean(errors.course_id)}
+              disabled={courseOptions.isPending}
+            />
+            <FieldError errors={[errors.course_id]} />
           </Field>
           <Field data-invalid={Boolean(errors.slots)}>
             <div className="flex items-baseline gap-2">

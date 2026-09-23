@@ -9,7 +9,7 @@ import { useApiFormErrors } from "@/lib/forms/use-api-form-errors";
 
 import { useCreateMaterial, useUpdateMaterial } from "../hooks/use-library";
 import { materialKindLabel } from "../lib/library-labels";
-import { textareaClassName } from "../lib/textarea-class";
+import { textareaClassName } from "@/lib/forms/textarea-class";
 import {
   materialFormSchema,
   materialKindSchema,
