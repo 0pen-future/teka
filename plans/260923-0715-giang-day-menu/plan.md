@@ -56,7 +56,7 @@ trong "Scout trước khi làm").
 | 2 | [Lời mời nhận lớp + Đội ngũ giảng dạy](./phase-02-loi-moi-nhan-lop.md) | 1.5d | Completed |
 | 3 | [Kho học liệu: Chương trình mẫu, phiên bản, Buổi học mẫu](./phase-03-kho-hoc-lieu-chuong-trinh-mau.md) | 2d | Completed |
 | 4 | [Kho học liệu: học liệu, bài tập, log fields, bộ điểm](./phase-04-kho-hoc-lieu-hoc-lieu-bai-tap.md) | 2d | Completed |
-| 5 | [Danh mục khóa học + Chi tiết khóa học](./phase-05-danh-muc-khoa-hoc.md) | 1.5d | Pending |
+| 5 | [Danh mục khóa học + Chi tiết khóa học](./phase-05-danh-muc-khoa-hoc.md) | 1.5d | Completed |
 | 6 | [Lộ trình học](./phase-06-lo-trinh-hoc.md) | 1d | Pending |
 | 7 | [Chi tiết lớp học: Chương trình học, Bài tập, Tài liệu, Chat, Lịch sử](./phase-07-chi-tiet-lop-chuong-trinh-tab.md) | 2.5d | Pending |
 | 8 | [Chuẩn bị tài liệu (bảng chuẩn bị trên bản nháp, web-only)](./phase-08-chuan-bi-tai-lieu.md) | 1.5d | Pending |

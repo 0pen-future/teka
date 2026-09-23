@@ -1,7 +1,7 @@
 ---
 phase: 5
 title: "Danh mục khóa học & Chi tiết khóa học"
-status: pending
+status: completed
 priority: P1
 effort: "1.5d"
 dependencies: [1, 3]
@@ -68,3 +68,29 @@ CREATE INDEX idx_classes_course ON classes (course_id) WHERE deleted_at IS NULL;
 ## Risks
 - Vòng import feature: `courses` → `roster` và `roster` → `courses`? Tránh: roster chỉ nhận `course` embed từ API,
   không import `courses`; `courses` import `useClassesList` qua `@/features/roster/index.ts`.
+
+## Completion notes (2026-09-24)
+- Backend: migration 000029 theo sketch, nhưng FK `classes.course_id` và `courses.default_template_version_id`
+  dùng `ON DELETE SET NULL` thay vì CASCADE: xoá khóa hay phiên bản không bao giờ kéo theo lớp hay khóa.
+  Xoá khóa còn lớp gắn → 409 `COURSE_IN_USE`; lưu trữ không chạm lớp. `courses.read` là quyền mặc định có
+  backfill (`rbac_backfill_rows`), `courses.edit` opt-in; baseline 60 key và `CatalogVersion` không đổi.
+  7 route mới trong routespec + snapshot/audit test; swagger sinh lại bằng `make api-docs`.
+- Gắn lớp ↔ khóa: `course_id` là con trỏ với quy tắc patch (nil giữ, `""` gỡ, uuid gắn) và không có tag `uuid`
+  ở binding vì validator v10 coi con trỏ tới `""` là có giá trị; service tự parse. `default_unit_price` chỉ được
+  bỏ trống khi có `course_id` (chép giá khóa). Khóa `archived` không nhận lớp mới, nhưng lớp đã gắn gửi lại đúng
+  id vẫn lưu được.
+- Ghi đồng thời: xoá khóa / ghi gói học phí khoá dòng `FOR UPDATE` trong tx; gắn lớp tra khóa `FOR SHARE` trong
+  cùng tx ghi lớp, nên không lớp sống nào trỏ vào khóa đã xoá (integration chạy race 8 vòng).
+- Template mặc định: chỉ kiểm tra "đã phát hành trong trung tâm" khi id đổi; gửi lại id đang lưu không bị chặn
+  dù phiên bản đã lưu trữ. Embed `default_template` trả `status` thật; template đã xoá mềm → embed null, id giữ
+  nguyên và UI gợi ý chọn lại (không tự ghi đè dữ liệu người dùng).
+- Web: `features/courses` (danh sách, chi tiết 4 tab, dialog, editor gói học phí); roster nhận `course` embed và
+  lookup khóa qua `listCourseOptions` của chính roster (không import `courses`, tránh vòng import). Helper
+  `useApiFormErrors` đưa 409 bất kỳ có `field` về đúng trường; `textareaClassName` chuyển sang `src/lib/forms/`.
+  Bộ đếm lớp trên tab Thông tin ghi rõ "toàn trung tâm" (quyết định giữ đếm toàn trung tâm, xem review L4).
+  Picker chương trình mẫu cần `library.read`; chip khóa trên header lớp cần `courses.read` mới thành link.
+- Kiểm chứng: integration courses + classes + migrations xanh (`-p 1`); `make test-api-unit`/`scopelint`/`lint`
+  xanh; vitest 1006 pass (courses 2 trang + dialog lớp + header lớp), typecheck xanh; e2e `courses.spec.ts` 1/1
+  trên stack cô lập, dọn dữ liệu qua API trong `afterEach`.
+- Review: SHIP WITH FIXES → đã sửa M1–M3, L1–L3, L5, L6 và 2 nit; L4 giữ đếm toàn trung tâm kèm nhãn UI.
+  Chi tiết ở [reports/review-phase-05-260924.md](./reports/review-phase-05-260924.md) mục Disposition.
