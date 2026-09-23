@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Kho học liệu — Chương trình mẫu & Buổi học mẫu"
-status: pending
+status: completed
 priority: P1
 effort: "2d"
 dependencies: [1]
@@ -69,6 +69,24 @@ template_lessons (id PK, version_id NOT NULL, center_id NOT NULL, position INT, 
 - Nav "Kho học liệu" `/library` perm `library.read`; `OVERFLOW_LABELS` + `OVERFLOW_PATH_PREFIXES`; mount trong `app/router.tsx`;
   thêm `library` vào `RESOURCE_LABELS` (`permission-schemas.ts:70`) để trang phân quyền hiển thị nhóm key mới. <!-- Red Team S1 F7, F14 -->
 - MSW: mirror key `library.*` trong catalog fixture (không đổi `CATALOG_VERSION` — D5).
+
+## Completion notes (2026-09-23)
+- Backend: package `library` (model, repo, service, handler, routes, errors), migration 000027 (3 bảng + backfill `library.read`
+  step label `library_role_defaults` / `library_member_defaults`), 15 route mới trong routespec + snapshot/audit/enforce tests, catalog thêm 3 key
+  (`library.read` def, `library.edit`/`library.publish` optIn, implied ⇒ read), `CatalogVersion` giữ 4, swagger sinh lại.
+- Web: `/library` (tabs), `/library/templates/:id`, `/library/templates/:id/lessons/:lessonId`, nav + overflow,
+  `RESOURCE_LABELS.library`, MSW mirror 3 key, 3 suite vitest (32 test), e2e `library.spec.ts` xanh trên stack cô lập.
+- Quyết định khi thực thi (khác hoặc ngoài sketch):
+  - `created_by` nullable, `ON DELETE SET NULL` — xoá tài khoản không kéo theo mất chương trình mẫu của trung tâm.
+  - Archive gate `library.edit` (đúng sketch); sort whitelist `name|code|created_at` (thêm `code`, superset của spec).
+  - Không thêm 000027 vào `backfill_parity_test`: test đó chỉ đóng băng 000018 (plan dòng 73); backfill 000027 được
+    kiểm qua integration up/down/up + đếm dòng theo step label.
+  - Tab "Buổi học mẫu" không có prototype → làm trình duyệt chỉ đọc: chọn chương trình → buổi của phiên bản mặc định
+    (published mới nhất, không thì draft). Sửa buổi vẫn đi qua trang chi tiết chương trình.
+  - Hai trang chi tiết chờ `isResolved` của `useCenterContext()` trước khi render để nút soạn/publish không "nhảy" vào
+    muộn và editor không remount đè lên bản chỉ đọc.
+  - Test thứ tự tab ở `center-schemas.test.ts` cập nhật vì `library` là nhóm nghiệp vụ mới (catalog lớn lên có chủ đích).
+- Review: [reports/review-phase-03-260923.md](./reports/review-phase-03-260923.md) — SHIP WITH FIXES; H1/M1/L1/L2/L3/L4/L6 và các nit đã sửa (L4 đổi nguồn sao chép bản nháp sang phiên bản released gần nhất, ghi rõ trong Disposition), L5/L7 giữ có lý do, nit down-migration chỉ ghi nhận.
 
 ## Verification
 - `make test-api-unit`, `make test-api` package `library`; test publish lock; test copy lessons sang draft; test reorder giữ unique.
