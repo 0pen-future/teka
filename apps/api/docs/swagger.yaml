@@ -857,6 +857,88 @@ definitions:
     - start_time
     - weekday
     type: object
+  classinvites.ConfirmResponse:
+    properties:
+      assigned_at:
+        type: string
+      class_id:
+        type: string
+      class_name:
+        type: string
+      id:
+        type: string
+      invited_by:
+        type: string
+      invited_by_name:
+        type: string
+      message:
+        type: string
+      moved_planned_sessions:
+        type: integer
+      reminded_at:
+        type: string
+      responded_at:
+        type: string
+      role_key:
+        type: string
+      role_label:
+        type: string
+      sent_at:
+        type: string
+      status:
+        type: string
+      teacher_id:
+        type: string
+      teacher_name:
+        type: string
+    type: object
+  classinvites.InvitationResponse:
+    properties:
+      assigned_at:
+        type: string
+      class_id:
+        type: string
+      class_name:
+        type: string
+      id:
+        type: string
+      invited_by:
+        type: string
+      invited_by_name:
+        type: string
+      message:
+        type: string
+      reminded_at:
+        type: string
+      responded_at:
+        type: string
+      role_key:
+        type: string
+      role_label:
+        type: string
+      sent_at:
+        type: string
+      status:
+        type: string
+      teacher_id:
+        type: string
+      teacher_name:
+        type: string
+    type: object
+  classinvites.SendRequest:
+    properties:
+      message:
+        maxLength: 500
+        type: string
+      role_key:
+        maxLength: 32
+        type: string
+      teacher_id:
+        type: string
+    required:
+    - role_key
+    - teacher_id
+    type: object
   classstaff.AssignRequest:
     properties:
       role_key:
@@ -4392,6 +4474,365 @@ paths:
       summary: Replace a role's permission set (owner-only)
       tags:
       - centers
+  /class-invitations:
+    get:
+      description: The owner sees every invitation of the center; a member sees only
+        invitations addressed to them. Optional status and class_id filters never
+        widen visibility.
+      parameters:
+      - description: pending | accepted | declined | cancelled | assigned
+        in: query
+        name: status
+        type: string
+      - description: class id
+        in: query
+        name: class_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/classinvites.InvitationResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List class invitations
+      tags:
+      - class-invitations
+  /class-invitations/{id}/accept:
+    post:
+      description: Invitee only; pending → accepted. Writes no class_staff row — the
+        owner completes the assignment with confirm. Another member's invitation is
+        a 404.
+      parameters:
+      - description: invitation id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classinvites.InvitationResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: no longer pending
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Accept a class invitation
+      tags:
+      - class-invitations
+  /class-invitations/{id}/cancel:
+    post:
+      description: Owner only; pending | accepted → cancelled.
+      parameters:
+      - description: invitation id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classinvites.InvitationResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: already ended
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Cancel a class invitation
+      tags:
+      - class-invitations
+  /class-invitations/{id}/confirm:
+    post:
+      description: Owner only; pending | accepted → assigned. A giao_vien invitation
+        is a class handoff (the current teacher's stint closes and future planned
+        sessions move); any other role becomes a staff assignment. Both happen in
+        one transaction with the status change. 409 when the center is busy with another
+        operation, 422 MEMBER_INACTIVE when the invitee has left.
+      parameters:
+      - description: invitation id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classinvites.ConfirmResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Confirm a class invitation (GV nhận lớp)
+      tags:
+      - class-invitations
+  /class-invitations/{id}/decline:
+    post:
+      description: Invitee only; pending → declined.
+      parameters:
+      - description: invitation id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classinvites.InvitationResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: no longer pending
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Decline a class invitation
+      tags:
+      - class-invitations
+  /class-invitations/{id}/remind:
+    post:
+      description: Owner only; sets reminded_at = now() on a pending invitation. No
+        message is sent.
+      parameters:
+      - description: invitation id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classinvites.InvitationResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: not pending
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Remind an invitee
+      tags:
+      - class-invitations
   /classes:
     get:
       description: 'status filters the list: active (default), archived, or all. The
@@ -4910,6 +5351,89 @@ paths:
       summary: Search enrollable students
       tags:
       - enrollments
+  /classes/{id}/invitations:
+    post:
+      consumes:
+      - application/json
+      description: Owner only. Proposes a role (giao_vien, tro_giang, hoc_vu) to an
+        active member of the center. No class_staff stint is written until the owner
+        confirms. 422 SELF_INVITE when inviting oneself, 422 MEMBER_INACTIVE when
+        the invitee is not an active member, 409 when a pending invitation exists
+        or the person already holds that role.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: invitee, role and optional message
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/classinvites.SendRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classinvites.InvitationResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Invite a member to a class role
+      tags:
+      - class-invitations
   /classes/{id}/lesson-plans:
     get:
       description: Every saved giáo án of the class, ordered by lesson index, submitter

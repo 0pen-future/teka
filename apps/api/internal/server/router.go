@@ -21,6 +21,7 @@ import (
 	"teka/apps/api/internal/features/billing"
 	"teka/apps/api/internal/features/centers"
 	"teka/apps/api/internal/features/classes"
+	"teka/apps/api/internal/features/classinvites"
 	"teka/apps/api/internal/features/classstaff"
 	"teka/apps/api/internal/features/collections"
 	"teka/apps/api/internal/features/contacts"
@@ -202,6 +203,16 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, log *slog.Logger,
 	// planned sessions through sessionsSvc, in one transaction.
 	handoffSvc := handoff.NewService(classesSvc, sessionsSvc, centersSvc, classStaffRepo, centerLocker, txMgr)
 	handoff.RegisterRoutes(v1, handoff.NewHandler(handoffSvc), authChain...)
+
+	// classinvites lets the owner propose a class role to a member. It owns
+	// only class_invitations: confirming writes the stint through classStaffSvc
+	// (tro_giang/hoc_vu) or handoffSvc (giao_vien) inside its own transaction,
+	// so it mounts after both. centersSvc calls back into it to cancel a
+	// departing member's open invitations during RemoveMember.
+	classInvitesSvc := classinvites.NewService(classinvites.NewRepository(db), classesSvc, centersSvc,
+		classStaffRepo, classStaffSvc, handoffSvc, txMgr)
+	classinvites.RegisterRoutes(v1, classinvites.NewHandler(classInvitesSvc), authChain...)
+	centersSvc.SetClassInviteCanceller(classInvitesSvc)
 
 	// attendance consumes enrollments and sessions through consumer
 	// interfaces (RosterSource, SessionStore) rather than their repository

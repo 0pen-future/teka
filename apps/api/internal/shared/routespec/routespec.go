@@ -180,6 +180,23 @@ var Specs = []Spec{
 	classified("DELETE", "/api/v1/classes/:id/staff/:staffId", KindOwnerOnly,
 		req("class.staff.remove", "class_staff", "staffId")),
 	classified("PUT", "/api/v1/classes/:id/teacher", KindOwnerOnly, req("class.teacher.reassign", "class", "id")),
+	// Class invitations: the owner proposes a class role to a member; the
+	// invitee answers. Send/cancel/remind/confirm are owner gates; list and
+	// the invitee's accept/decline are decided in the service (an owner sees
+	// the whole center, a member only their own rows), so they stay service-
+	// classified rather than behind a catalog key.
+	classified("POST", "/api/v1/classes/:id/invitations", KindOwnerOnly, req("class_invitation.send", "class", "id")),
+	classified("GET", "/api/v1/class-invitations", KindService, none()),
+	classified("POST", "/api/v1/class-invitations/:id/accept", KindService,
+		req("class_invitation.accept", "class_invitation", "id")),
+	classified("POST", "/api/v1/class-invitations/:id/decline", KindService,
+		req("class_invitation.decline", "class_invitation", "id")),
+	classified("POST", "/api/v1/class-invitations/:id/cancel", KindOwnerOnly,
+		req("class_invitation.cancel", "class_invitation", "id")),
+	classified("POST", "/api/v1/class-invitations/:id/remind", KindOwnerOnly,
+		req("class_invitation.remind", "class_invitation", "id")),
+	classified("POST", "/api/v1/class-invitations/:id/confirm", KindOwnerOnly,
+		req("class_invitation.confirm", "class_invitation", "id")),
 	classified("POST", "/api/v1/classes/:id/lesson-plans/:index/approve", KindOwnerOnly,
 		req("lesson_plan.approve", "class", "id")),
 	classified("POST", "/api/v1/classes/:id/lesson-plans/:index/request-redo", KindOwnerOnly,
