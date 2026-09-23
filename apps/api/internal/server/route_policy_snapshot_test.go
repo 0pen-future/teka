@@ -193,6 +193,17 @@ var routePolicySnapshot = []RoutePolicy{
 	{Method: "DELETE", Path: "/api/v1/courses/:id", Kind: PolicyPermission, Key: "courses.edit"},
 	{Method: "POST", Path: "/api/v1/courses/:id/archive", Kind: PolicyPermission, Key: "courses.edit"},
 	{Method: "PUT", Path: "/api/v1/courses/:id/tuition-packs", Kind: PolicyPermission, Key: "courses.edit"},
+	{Method: "GET", Path: "/api/v1/courses/:id/paths", Kind: PolicyPermission, Key: "paths.read"},
+	{Method: "GET", Path: "/api/v1/paths", Kind: PolicyPermission, Key: "paths.read"},
+	{Method: "POST", Path: "/api/v1/paths", Kind: PolicyPermission, Key: "paths.edit"},
+	{Method: "GET", Path: "/api/v1/paths/:id", Kind: PolicyPermission, Key: "paths.read"},
+	{Method: "PUT", Path: "/api/v1/paths/:id", Kind: PolicyPermission, Key: "paths.edit"},
+	{Method: "DELETE", Path: "/api/v1/paths/:id", Kind: PolicyPermission, Key: "paths.edit"},
+	{Method: "POST", Path: "/api/v1/paths/:id/stages", Kind: PolicyPermission, Key: "paths.edit"},
+	{Method: "PUT", Path: "/api/v1/paths/:id/stages/order", Kind: PolicyPermission, Key: "paths.edit"},
+	{Method: "PUT", Path: "/api/v1/paths/:id/stages/:sid", Kind: PolicyPermission, Key: "paths.edit"},
+	{Method: "DELETE", Path: "/api/v1/paths/:id/stages/:sid", Kind: PolicyPermission, Key: "paths.edit"},
+	{Method: "PUT", Path: "/api/v1/paths/:id/stages/:sid/courses", Kind: PolicyPermission, Key: "paths.edit"},
 }
 
 // TestRoutePolicySnapshotUnchanged proves routePolicies still classifies

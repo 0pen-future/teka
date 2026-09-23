@@ -49,6 +49,12 @@ type Repository interface {
 	SoftDelete(ctx context.Context, sc authctx.Scope, id uuid.UUID) error
 	// LiveClassCount counts the non-deleted classes attached to the course.
 	LiveClassCount(ctx context.Context, sc authctx.Scope, id uuid.UUID) (int64, error)
+	// PathCount counts the stages of live learning paths that recommend
+	// the course.
+	PathCount(ctx context.Context, sc authctx.Scope, id uuid.UUID) (int64, error)
+	// ListPaths returns the stages of live learning paths that recommend
+	// the course, ordered by path name then stage position.
+	ListPaths(ctx context.Context, sc authctx.Scope, id uuid.UUID) ([]CoursePath, error)
 	// FindTemplateVersion loads one program template version of the center
 	// (any status) with its template's code and name; ErrNotFound when the
 	// version is outside the center or its template was deleted.
@@ -186,6 +192,32 @@ func (r *gormRepository) LiveClassCount(ctx context.Context, sc authctx.Scope, i
 		Where("classes.center_id = ? AND classes.course_id = ? AND classes.deleted_at IS NULL", sc.CenterID, id).
 		Count(&n).Error
 	return n, err
+}
+
+// stageLinks joins the course's stage links with their live paths. The
+// paths package owns those tables and imports nothing from here, so the
+// join names them directly rather than through its models.
+func (r *gormRepository) stageLinks(ctx context.Context, sc authctx.Scope, courseID uuid.UUID) *gorm.DB {
+	return database.FromContext(ctx, r.db).
+		Table("path_stage_courses psc").
+		Joins("JOIN path_stages ps ON ps.id = psc.stage_id AND ps.center_id = psc.center_id").
+		Joins("JOIN learning_paths lp ON lp.id = ps.path_id AND lp.center_id = ps.center_id AND lp.deleted_at IS NULL").
+		Where("psc.center_id = ? AND psc.course_id = ?", sc.CenterID, courseID)
+}
+
+func (r *gormRepository) PathCount(ctx context.Context, sc authctx.Scope, id uuid.UUID) (int64, error) {
+	var n int64
+	err := r.stageLinks(ctx, sc, id).Count(&n).Error
+	return n, err
+}
+
+func (r *gormRepository) ListPaths(ctx context.Context, sc authctx.Scope, id uuid.UUID) ([]CoursePath, error) {
+	var rows []CoursePath
+	err := r.stageLinks(ctx, sc, id).
+		Select("lp.id, lp.code, lp.name, lp.status, ps.id AS stage_id, ps.name AS stage_name, ps.position AS stage_position").
+		Order("lp.name, lp.id, ps.position").
+		Scan(&rows).Error
+	return rows, err
 }
 
 func (r *gormRepository) FindTemplateVersion(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) (*TemplateVersionRef, error) {

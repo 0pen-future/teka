@@ -26,6 +26,9 @@ type fakeRepo struct {
 	// classes counts live classes per course id, standing in for the rows
 	// the SQL counts.
 	classes map[uuid.UUID]fakeClassCount
+	// paths lists the learning path stages each course sits in, standing in
+	// for the rows the SQL joins.
+	paths map[uuid.UUID][]CoursePath
 }
 
 type fakeVersion struct {
@@ -43,6 +46,7 @@ func newFakeRepo() *fakeRepo {
 		packs:    map[uuid.UUID][]TuitionPack{},
 		versions: map[uuid.UUID]*fakeVersion{},
 		classes:  map[uuid.UUID]fakeClassCount{},
+		paths:    map[uuid.UUID][]CoursePath{},
 	}
 }
 
@@ -160,6 +164,14 @@ func (f *fakeRepo) SoftDelete(_ context.Context, sc authctx.Scope, id uuid.UUID)
 func (f *fakeRepo) LiveClassCount(_ context.Context, _ authctx.Scope, id uuid.UUID) (int64, error) {
 	n := f.classes[id]
 	return int64(n.running + n.upcoming), nil
+}
+
+func (f *fakeRepo) PathCount(_ context.Context, _ authctx.Scope, id uuid.UUID) (int64, error) {
+	return int64(len(f.paths[id])), nil
+}
+
+func (f *fakeRepo) ListPaths(_ context.Context, _ authctx.Scope, id uuid.UUID) ([]CoursePath, error) {
+	return f.paths[id], nil
 }
 
 func (f *fakeRepo) FindTemplateVersion(_ context.Context, sc authctx.Scope, versionID uuid.UUID) (*TemplateVersionRef, error) {
@@ -554,5 +566,50 @@ func TestPermissionsAndCenterBoundary(t *testing.T) {
 	// The outsider may reuse the code in its own center.
 	if _, err := svc.Create(context.Background(), outsider, CourseRequest{Code: "A1", Name: "x"}); err != nil {
 		t.Fatalf("codes are per center: %v", err)
+	}
+}
+
+func TestDeleteIsRefusedWhileACourseSitsInAPath(t *testing.T) {
+	svc, d := newTestService()
+	sc := d.ownerScope()
+	c := mustCourse(t, svc, sc, "A1")
+	d.repo.paths[c.ID] = []CoursePath{{ID: uuid.New(), Code: "LT-6", Name: "Lộ trình 6", Status: "active",
+		StageID: uuid.New(), StageName: "Nền tảng", StagePosition: 1}}
+	err := svc.Delete(context.Background(), sc, c.ID)
+	requireAppError(t, err, http.StatusConflict, CodeCourseInPath)
+	// Archiving stays open: the path keeps showing the course as archived.
+	if _, err := svc.Archive(context.Background(), sc, c.ID); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	delete(d.repo.paths, c.ID)
+	if err := svc.Delete(context.Background(), sc, c.ID); err != nil {
+		t.Fatalf("delete once detached: %v", err)
+	}
+}
+
+func TestListPathsNeedsPathsReadAndALiveCourse(t *testing.T) {
+	svc, d := newTestService()
+	sc := d.ownerScope()
+	c := mustCourse(t, svc, sc, "A1")
+	stage := uuid.New()
+	d.repo.paths[c.ID] = []CoursePath{{ID: uuid.New(), Code: "LT-6", Name: "Lộ trình 6", Status: "draft",
+		StageID: stage, StageName: "Nền tảng", StagePosition: 2}}
+
+	out, err := svc.ListPaths(context.Background(), sc, c.ID)
+	if err != nil || len(out) != 1 || out[0].StageID != stage || out[0].StagePosition != 2 || out[0].Code != "LT-6" {
+		t.Fatalf("list paths: %v %+v", err, out)
+	}
+	_, err = svc.ListPaths(context.Background(), d.memberWith(authctx.PermCoursesRead), c.ID)
+	requireAppError(t, err, http.StatusForbidden, "")
+	if _, err := svc.ListPaths(context.Background(), d.memberWith(authctx.PermCoursesRead, authctx.PermPathsRead), c.ID); err != nil {
+		t.Fatalf("courses.read + paths.read must list: %v", err)
+	}
+	_, err = svc.ListPaths(context.Background(), d.memberWith(authctx.PermPathsRead), c.ID)
+	requireAppError(t, err, http.StatusForbidden, "")
+	_, err = svc.ListPaths(context.Background(), sc, uuid.New())
+	requireAppError(t, err, http.StatusNotFound, "")
+	other := mustCourse(t, svc, sc, "B1")
+	if out, err := svc.ListPaths(context.Background(), sc, other.ID); err != nil || out == nil || len(out) != 0 {
+		t.Fatalf("a course outside every path must list []: %v %+v", err, out)
 	}
 }

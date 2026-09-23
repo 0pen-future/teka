@@ -155,8 +155,34 @@ func (s *Service) Delete(ctx context.Context, sc authctx.Scope, id uuid.UUID) er
 		if n > 0 {
 			return errCourseInUse()
 		}
+		inPaths, err := s.repo.PathCount(ctx, sc, id)
+		if err != nil {
+			return err
+		}
+		if inPaths > 0 {
+			return errCourseInPath()
+		}
 		return notFound(s.repo.SoftDelete(ctx, sc, id))
 	})
+}
+
+// ListPaths returns the learning path stages that recommend the course.
+// It reads both the catalog and the paths, so it needs both read keys.
+func (s *Service) ListPaths(ctx context.Context, sc authctx.Scope, id uuid.UUID) ([]CoursePathResponse, error) {
+	if err := authctx.Require(sc, authctx.PermCoursesRead); err != nil {
+		return nil, err
+	}
+	if err := authctx.Require(sc, authctx.PermPathsRead); err != nil {
+		return nil, err
+	}
+	if _, err := s.repo.Get(ctx, sc, id); err != nil {
+		return nil, notFound(err)
+	}
+	rows, err := s.repo.ListPaths(ctx, sc, id)
+	if err != nil {
+		return nil, err
+	}
+	return coursePathResponses(rows), nil
 }
 
 // SetTuitionPacks replaces the course's whole pack list; [] clears it.

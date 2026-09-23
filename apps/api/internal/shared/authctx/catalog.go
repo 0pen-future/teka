@@ -149,6 +149,9 @@ const (
 	PermCoursesRead = "courses.read"
 	PermCoursesEdit = "courses.edit"
 
+	PermPathsRead = "paths.read"
+	PermPathsEdit = "paths.edit"
+
 	PermMembersList = "members.list"
 )
 
@@ -279,6 +282,9 @@ var permCatalog = []PermDef{
 	def(PermCoursesRead, PermKindCRUD, RiskLow, "Xem danh mục khóa học", "Xem khóa học, gói học phí và các lớp đang mở của từng khóa học."),
 	optIn(PermCoursesEdit, PermKindCRUD, RiskMedium, "Quản lý khóa học", "Tạo, sửa, lưu trữ, xoá khóa học và thiết lập gói học phí."),
 
+	def(PermPathsRead, PermKindCRUD, RiskLow, "Xem lộ trình học", "Xem lộ trình học, các giai đoạn và khóa học gợi ý trong từng giai đoạn."),
+	optIn(PermPathsEdit, PermKindCRUD, RiskMedium, "Quản lý lộ trình học", "Tạo, sửa, xoá lộ trình học; thêm, sắp xếp giai đoạn và gán khóa học vào giai đoạn."),
+
 	def(PermReportsSend, PermKindSpecial, RiskHigh, "Gửi báo cáo học phí", "Gửi thông báo học phí hàng loạt và theo dõi lượt gửi."),
 	def(PermMembersManage, PermKindSpecial, RiskHigh, "Quản lý thành viên", "Gỡ thành viên khỏi trung tâm."),
 	optIn(PermMembersList, PermKindCRUD, RiskLow, "Xem danh bạ thành viên", "Xem danh sách thành viên và vai trò trong trung tâm, không gồm số điện thoại hay email."),
@@ -376,6 +382,7 @@ var impliedKeys = map[string][]string{
 	PermLibraryEdit:    {PermLibraryRead},
 	PermLibraryPublish: {PermLibraryRead},
 	PermCoursesEdit:    {PermCoursesRead},
+	PermPathsEdit:      {PermPathsRead},
 }
 
 // DefaultRoleKeys returns the baseline permission set every system role (and,

@@ -324,10 +324,10 @@ func TestDownFoldsPersonalChannelIntoManual(t *testing.T) {
 		 VALUES (?, ?, ?, ?, 'zalo_personal')`,
 		notifID, f.teacherID, f.centerID, f.statementID).Error)
 
-	// Roll back through 000005 (zalo_personal_mapping): twenty-five steps
-	// now that the additive 000008-000029 sit on top of the migrations this
+	// Roll back through 000005 (zalo_personal_mapping): twenty-six steps
+	// now that the additive 000008-000030 sit on top of the migrations this
 	// test predates.
-	require.NoError(t, database.MigrateDown(m, 25))
+	require.NoError(t, database.MigrateDown(m, 26))
 
 	var channel string
 	require.NoError(t, db.Raw(
@@ -2412,8 +2412,8 @@ func TestProgramTemplatesBackfillGrantsLibraryRead(t *testing.T) {
 		require.Falsef(t, got[gone], "table %s must be dropped by the down migration", gone)
 	}
 	require.NoError(t, database.MigrateUp(m))
-	require.Equal(t, map[string]bool{"library.read": true, "courses.read": true}, memberGrants(roleless),
-		"the later course catalog backfill stacks its own read key on top")
+	require.Equal(t, map[string]bool{"library.read": true, "courses.read": true, "paths.read": true}, memberGrants(roleless),
+		"the later course catalog and learning path backfills stack their own read keys on top")
 }
 
 // The schema itself enforces the library invariants the service relies on:
@@ -2797,4 +2797,195 @@ func TestCoursesSchemaInvariants(t *testing.T) {
 	require.Zero(t, n)
 	require.NoError(t, db.Raw(`SELECT count(*) FROM classes WHERE id = ? AND course_id IS NULL`, classID).Scan(&n).Error)
 	require.Equal(t, int64(1), n, "the class survives with its course reference cleared")
+}
+
+// Every live system role and every live role-less member gets exactly
+// paths.read; the opt-in paths.edit is never backfilled. Down removes only
+// the ledgered rows and drops the three tables.
+func TestLearningPathsBackfillGrantsPathsRead(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+	require.NoError(t, m.Migrate(29))
+
+	db := openDB(t, url)
+	live := seedNotificationParents(t, db, "+84900001901")
+	member := func(phone string, roleID *uuid.UUID, closed bool) uuid.UUID {
+		teacherID := uuid.New()
+		require.NoError(t, db.Exec(
+			`INSERT INTO user_accounts (id, role, phone) VALUES (?, 'teachers', ?)`,
+			teacherID, phone).Error)
+		leftAt := "NULL"
+		if closed {
+			leftAt = "now()"
+		}
+		require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec(
+				`INSERT INTO teachers (id, full_name, center_id) VALUES (?, 'Giáo Viên', ?)`,
+				teacherID, live.centerID).Error; err != nil {
+				return err
+			}
+			return tx.Exec(fmt.Sprintf(
+				`INSERT INTO center_members (teacher_id, center_id, role_id, left_at)
+				 VALUES (?, ?, ?, %s)`, leftAt),
+				teacherID, live.centerID, roleID).Error
+		}))
+		return teacherID
+	}
+	roleless := member("+84900001902", nil, false)
+	former := member("+84900001903", nil, true)
+	roleID := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO center_roles (id, center_id, key, name) VALUES (?, ?, 'giao_vien', 'Giáo viên')`,
+		roleID, live.centerID).Error)
+	roled := member("+84900001904", &roleID, false)
+	denied := member("+84900001906", nil, false)
+	require.NoError(t, db.Exec(
+		`INSERT INTO center_member_permissions (teacher_id, center_id, permission_key, allowed)
+		 VALUES (?, ?, 'paths.read', FALSE)`, denied, live.centerID).Error)
+
+	retired := seedNotificationParents(t, db, "+84900001905")
+	require.NoError(t, db.Exec(
+		`UPDATE centers SET deleted_at = now() WHERE id = ?`, retired.centerID).Error)
+
+	require.NoError(t, database.MigrateUp(m))
+
+	memberGrants := func(teacherID uuid.UUID) map[string]bool {
+		var rows []struct {
+			PermissionKey string
+			Allowed       bool
+		}
+		require.NoError(t, db.Raw(
+			`SELECT permission_key, allowed FROM center_member_permissions
+			 WHERE teacher_id = ? AND center_id = ? AND permission_key LIKE 'paths.%'`,
+			teacherID, live.centerID).Scan(&rows).Error)
+		out := map[string]bool{}
+		for _, r := range rows {
+			out[r.PermissionKey] = r.Allowed
+		}
+		return out
+	}
+	require.Equal(t, map[string]bool{"paths.read": true}, memberGrants(roleless),
+		"a role-less live member gets exactly paths.read")
+	require.Equal(t, map[string]bool{"paths.read": false}, memberGrants(denied),
+		"an existing deny must survive the backfill")
+	require.Empty(t, memberGrants(former))
+	require.Empty(t, memberGrants(roled))
+	require.Empty(t, memberGrants(live.teacherID))
+
+	var roleKeys []string
+	require.NoError(t, db.Raw(
+		`SELECT permission_key FROM center_role_permissions WHERE role_id = ? AND permission_key LIKE 'paths.%'`,
+		roleID).Scan(&roleKeys).Error)
+	require.Equal(t, []string{"paths.read"}, roleKeys)
+
+	var n int64
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM center_role_permissions rp
+		 JOIN center_roles cr ON cr.id = rp.role_id
+		 WHERE cr.center_id = ?`, retired.centerID).Scan(&n).Error)
+	require.Zero(t, n, "a retired center's roles receive nothing")
+
+	// Down removes exactly the ledgered rows — the pre-existing deny stays —
+	// and drops the three tables; a second up must be clean.
+	require.NoError(t, m.Migrate(29))
+	require.Empty(t, memberGrants(roleless))
+	require.Equal(t, map[string]bool{"paths.read": false}, memberGrants(denied))
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM center_role_permissions WHERE role_id = ? AND permission_key LIKE 'paths.%'`,
+		roleID).Scan(&n).Error)
+	require.Zero(t, n)
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM rbac_backfill_rows WHERE step LIKE 'paths_%'`).Scan(&n).Error)
+	require.Zero(t, n)
+	got := nameSet(t, db, `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`)
+	for _, gone := range []string{"learning_paths", "path_stages", "path_stage_courses"} {
+		require.Falsef(t, got[gone], "table %s must be dropped by the down migration", gone)
+	}
+	require.NoError(t, database.MigrateUp(m))
+	require.Equal(t, map[string]bool{"paths.read": true}, memberGrants(roleless))
+}
+
+// The schema itself enforces the learning path invariants the service
+// relies on: unique codes among live paths only, a stage never belongs to a
+// path of another center, a stage never lists a course of another center or
+// the same course twice, stage positions unique per path but swappable in
+// one transaction, and hard-deleting a path or a course takes its stage
+// rows with it.
+func TestLearningPathsSchemaInvariants(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+
+	db := openDB(t, url)
+	a := seedNotificationParents(t, db, "+84900002001")
+	b := seedNotificationParents(t, db, "+84900002002")
+
+	pathID := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO learning_paths (id, center_id, code, name) VALUES (?, ?, 'LT-TOAN', 'Lộ trình Toán THCS')`,
+		pathID, a.centerID).Error)
+	require.Error(t, db.Exec(
+		`INSERT INTO learning_paths (center_id, code, name) VALUES (?, 'LT-TOAN', 'Trùng mã')`,
+		a.centerID).Error, "codes are unique among live paths of a center")
+	require.NoError(t, db.Exec(
+		`INSERT INTO learning_paths (center_id, code, name) VALUES (?, 'LT-TOAN', 'Cùng mã, khác trung tâm')`,
+		b.centerID).Error)
+	require.Error(t, db.Exec(
+		`INSERT INTO learning_paths (center_id, code, name, status) VALUES (?, 'LT-X', 'Sai trạng thái', 'open')`,
+		a.centerID).Error)
+
+	stage1, stage2 := uuid.New(), uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO path_stages (id, path_id, center_id, position, name) VALUES (?, ?, ?, 1, 'Nền tảng'), (?, ?, ?, 2, 'Nâng cao')`,
+		stage1, pathID, a.centerID, stage2, pathID, a.centerID).Error)
+	require.Error(t, db.Exec(
+		`INSERT INTO path_stages (path_id, center_id, position, name) VALUES (?, ?, 3, 'Trung tâm khác')`,
+		pathID, b.centerID).Error, "a stage cannot claim a path of another center")
+	require.Error(t, db.Exec(
+		`INSERT INTO path_stages (path_id, center_id, position, name) VALUES (?, ?, 2, 'Trùng vị trí')`,
+		pathID, a.centerID).Error, "positions are unique per path once the statement commits")
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(`UPDATE path_stages SET position = 2 WHERE id = ?`, stage1).Error; err != nil {
+			return err
+		}
+		return tx.Exec(`UPDATE path_stages SET position = 1 WHERE id = ?`, stage2).Error
+	}), "the deferred unique lets a swap land in one transaction")
+
+	courseA, courseB := uuid.New(), uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO courses (id, center_id, code, name) VALUES (?, ?, 'KH01', 'Toán 6'), (?, ?, 'KH02', 'Toán 7')`,
+		courseA, a.centerID, courseB, b.centerID).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO path_stage_courses (stage_id, course_id, center_id, position) VALUES (?, ?, ?, 1)`,
+		stage1, courseA, a.centerID).Error)
+	require.Error(t, db.Exec(
+		`INSERT INTO path_stage_courses (stage_id, course_id, center_id, position) VALUES (?, ?, ?, 2)`,
+		stage1, courseA, a.centerID).Error, "a stage lists a course at most once")
+	require.Error(t, db.Exec(
+		`INSERT INTO path_stage_courses (stage_id, course_id, center_id, position) VALUES (?, ?, ?, 2)`,
+		stage1, courseB, b.centerID).Error, "a stage never lists a course of another center")
+	require.Error(t, db.Exec(
+		`INSERT INTO path_stage_courses (stage_id, course_id, center_id, position) VALUES (?, ?, ?, 2)`,
+		stage1, courseB, a.centerID).Error, "the course's own center must match too")
+
+	// Deleting the course hard drops its stage rows, not the stage; deleting
+	// the path drops its stages and their rows.
+	require.NoError(t, db.Exec(`DELETE FROM courses WHERE id = ?`, courseA).Error)
+	var n int64
+	require.NoError(t, db.Raw(`SELECT count(*) FROM path_stage_courses WHERE stage_id = ?`, stage1).Scan(&n).Error)
+	require.Zero(t, n)
+	require.NoError(t, db.Raw(`SELECT count(*) FROM path_stages WHERE path_id = ?`, pathID).Scan(&n).Error)
+	require.Equal(t, int64(2), n)
+	require.NoError(t, db.Exec(`DELETE FROM learning_paths WHERE id = ?`, pathID).Error)
+	require.NoError(t, db.Raw(`SELECT count(*) FROM path_stages WHERE path_id = ?`, pathID).Scan(&n).Error)
+	require.Zero(t, n)
 }

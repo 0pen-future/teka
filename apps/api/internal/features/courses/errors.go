@@ -20,6 +20,9 @@ const (
 	// CodeCourseInUse: live classes still point at the course, so it
 	// cannot be deleted; archive it instead.
 	CodeCourseInUse = "COURSE_IN_USE"
+	// CodeCourseInPath: a live learning path still recommends the course,
+	// so it cannot be deleted; remove it from the path or archive it.
+	CodeCourseInPath = "COURSE_IN_PATH"
 )
 
 func errCodeTaken() *apperror.AppError {
@@ -35,4 +38,9 @@ func errCourseArchived() *apperror.AppError {
 func errCourseInUse() *apperror.AppError {
 	return apperror.New(CodeCourseInUse, http.StatusConflict,
 		"Khóa học đang có lớp gắn vào, hãy lưu trữ thay vì xoá")
+}
+
+func errCourseInPath() *apperror.AppError {
+	return apperror.New(CodeCourseInPath, http.StatusConflict,
+		"Khóa học đang nằm trong lộ trình học, hãy gỡ khỏi lộ trình hoặc lưu trữ thay vì xoá")
 }

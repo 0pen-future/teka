@@ -19,6 +19,7 @@ import (
 	"teka/apps/api/internal/features/classstaff"
 	"teka/apps/api/internal/features/courses"
 	"teka/apps/api/internal/features/library"
+	"teka/apps/api/internal/features/paths"
 	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/pagination"
@@ -373,4 +374,43 @@ func TestMemberNeedsCoursesEditToWrite(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, total)
 	require.Empty(t, rows)
+}
+
+func TestDeleteIsGuardedByLearningPaths(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	c := f.course(t, f.owner, "TOAN-6")
+	pathSvc := paths.NewService(paths.NewRepository(f.db), database.NewTxManager(f.db))
+	p, err := pathSvc.Create(ctx, f.owner, paths.PathRequest{Code: "LT-6", Name: "Lộ trình lớp 6", Status: paths.StatusActive})
+	require.NoError(t, err)
+	p, err = pathSvc.CreateStage(ctx, f.owner, p.ID, paths.StageRequest{Name: "Nền tảng"})
+	require.NoError(t, err)
+	p, err = pathSvc.CreateStage(ctx, f.owner, p.ID, paths.StageRequest{Name: "Nâng cao"})
+	require.NoError(t, err)
+	for _, st := range p.Stages {
+		_, err = pathSvc.SetStageCourses(ctx, f.owner, p.ID, st.ID, paths.StageCoursesRequest{CourseIDs: []uuid.UUID{c.ID}})
+		require.NoError(t, err)
+	}
+
+	got, err := f.svc.ListPaths(ctx, f.owner, c.ID)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	require.Equal(t, "LT-6", got[0].Code)
+	require.Equal(t, paths.StatusActive, got[0].Status)
+	require.Equal(t, "Nền tảng", got[0].StageName)
+	require.Equal(t, 1, got[0].StagePosition)
+	require.Equal(t, 2, got[1].StagePosition)
+	// The path is invisible from another center.
+	_, err = f.svc.ListPaths(ctx, f.outsider, c.ID)
+	requireStatus(t, err, http.StatusNotFound, "")
+
+	err = f.svc.Delete(ctx, f.owner, c.ID)
+	requireStatus(t, err, http.StatusConflict, courses.CodeCourseInPath)
+
+	// A soft-deleted path no longer holds the course.
+	require.NoError(t, pathSvc.Delete(ctx, f.owner, p.ID))
+	got, err = f.svc.ListPaths(ctx, f.owner, c.ID)
+	require.NoError(t, err)
+	require.Empty(t, got)
+	require.NoError(t, f.svc.Delete(ctx, f.owner, c.ID))
 }

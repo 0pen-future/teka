@@ -1144,6 +1144,23 @@ definitions:
     - zalo_name
     - zalo_user_id
     type: object
+  courses.CoursePathResponse:
+    properties:
+      code:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      stage_id:
+        type: string
+      stage_name:
+        type: string
+      stage_position:
+        type: integer
+      status:
+        type: string
+    type: object
   courses.CourseRequest:
     properties:
       code:
@@ -2110,6 +2127,114 @@ definitions:
         items:
           $ref: '#/definitions/notifications.SendPreviewContact'
         type: array
+    type: object
+  paths.PathRequest:
+    properties:
+      code:
+        maxLength: 20
+        minLength: 2
+        type: string
+      description:
+        maxLength: 2000
+        type: string
+      name:
+        maxLength: 200
+        minLength: 1
+        type: string
+      status:
+        enum:
+        - draft
+        - active
+        - archived
+        type: string
+    required:
+    - code
+    - name
+    type: object
+  paths.PathResponse:
+    properties:
+      code:
+        type: string
+      course_count:
+        type: integer
+      created_at:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      stage_count:
+        type: integer
+      stages:
+        items:
+          $ref: '#/definitions/paths.StageResponse'
+        type: array
+      status:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  paths.ReorderRequest:
+    properties:
+      stage_ids:
+        items:
+          type: string
+        minItems: 1
+        type: array
+    required:
+    - stage_ids
+    type: object
+  paths.StageCourseResponse:
+    properties:
+      code:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      position:
+        type: integer
+      status:
+        type: string
+    type: object
+  paths.StageCoursesRequest:
+    properties:
+      course_ids:
+        items:
+          type: string
+        maxItems: 20
+        type: array
+    required:
+    - course_ids
+    type: object
+  paths.StageRequest:
+    properties:
+      goal:
+        maxLength: 2000
+        type: string
+      name:
+        maxLength: 200
+        minLength: 1
+        type: string
+    required:
+    - name
+    type: object
+  paths.StageResponse:
+    properties:
+      courses:
+        items:
+          $ref: '#/definitions/paths.StageCourseResponse'
+        type: array
+      goal:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      position:
+        type: integer
     type: object
   payments.AllocationResponse:
     properties:
@@ -7838,7 +7963,8 @@ paths:
   /courses/{id}:
     delete:
       description: 'Soft delete: the code becomes reusable. Refused with 409 COURSE_IN_USE
-        while live classes point at the course — archive it instead.'
+        while live classes point at the course, or 409 COURSE_IN_PATH while a live
+        learning path recommends it — archive it instead.'
       parameters:
       - description: course id
         in: path
@@ -8089,6 +8215,62 @@ paths:
       security:
       - BearerAuth: []
       summary: Archive a course
+      tags:
+      - courses
+  /courses/{id}/paths:
+    get:
+      description: One row per stage of a live learning path that recommends the course,
+        ordered by path then stage position. Needs courses.read and paths.read.
+      parameters:
+      - description: course id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/courses.CoursePathResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List the learning paths a course belongs to
       tags:
       - courses
   /courses/{id}/tuition-packs:
@@ -11241,6 +11423,677 @@ paths:
       summary: Mark notifications sent
       tags:
       - notifications
+  /paths:
+    get:
+      description: Live learning paths of the caller's center, each with its stages
+        and recommended courses. q matches code or name.
+      parameters:
+      - description: draft | active | archived
+        in: query
+        name: status
+        type: string
+      - description: code or name fragment
+        in: query
+        name: q
+        type: string
+      - description: page (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: page size (default 20, max 100)
+        in: query
+        name: per_page
+        type: integer
+      - description: name | code | status | created_at, prefix - for descending
+        in: query
+        name: sort
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/paths.PathResponse'
+                  type: array
+                meta:
+                  $ref: '#/definitions/response.Meta'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List learning paths
+      tags:
+      - paths
+    post:
+      consumes:
+      - application/json
+      description: The code is upper-cased and must be unique among the center's live
+        paths (409 CODE_TAKEN). Status defaults to draft.
+      parameters:
+      - description: learning path
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/paths.PathRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/paths.PathResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Create a learning path
+      tags:
+      - paths
+  /paths/{id}:
+    delete:
+      description: 'Soft delete: the code becomes reusable and the stages go with
+        the path. Courses are never touched.'
+      parameters:
+      - description: learning path id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a learning path
+      tags:
+      - paths
+    get:
+      parameters:
+      - description: learning path id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/paths.PathResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get a learning path
+      tags:
+      - paths
+    put:
+      consumes:
+      - application/json
+      description: Full replace of the path's own fields; a blank status keeps the
+        stored one. Stages have their own endpoints.
+      parameters:
+      - description: learning path id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: learning path
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/paths.PathRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/paths.PathResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Update a learning path
+      tags:
+      - paths
+  /paths/{id}/stages:
+    post:
+      consumes:
+      - application/json
+      description: Appends a stage after the last one and returns the whole path.
+      parameters:
+      - description: learning path id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: stage
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/paths.StageRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/paths.PathResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Add a stage
+      tags:
+      - paths
+  /paths/{id}/stages/{sid}:
+    delete:
+      description: Removes the stage with its course links; the remaining stages keep
+        positions 1..n.
+      parameters:
+      - description: learning path id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: stage id
+        in: path
+        name: sid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/paths.PathResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a stage
+      tags:
+      - paths
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: learning path id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: stage id
+        in: path
+        name: sid
+        required: true
+        type: string
+      - description: stage
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/paths.StageRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/paths.PathResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Update a stage
+      tags:
+      - paths
+  /paths/{id}/stages/{sid}/courses:
+    put:
+      consumes:
+      - application/json
+      description: Wholesale replace in body order; [] clears the list. Every id must
+        be a live course of the center (422 otherwise); at most 20 per stage.
+      parameters:
+      - description: learning path id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: stage id
+        in: path
+        name: sid
+        required: true
+        type: string
+      - description: course ids; [] clears
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/paths.StageCoursesRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/paths.PathResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Replace a stage's courses
+      tags:
+      - paths
+  /paths/{id}/stages/order:
+    put:
+      consumes:
+      - application/json
+      description: stage_ids must list every stage of the path exactly once (422 otherwise);
+        positions are assigned in that order.
+      parameters:
+      - description: learning path id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: new order
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/paths.ReorderRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/paths.PathResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Reorder stages
+      tags:
+      - paths
   /payments:
     get:
       parameters:

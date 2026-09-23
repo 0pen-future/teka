@@ -152,6 +152,14 @@ var actionSnapshot = []struct {
 	{"DELETE", "/api/v1/courses/:id", ActionSpec{Action: "course.delete", EntityType: "course", IDParam: "id"}},
 	{"POST", "/api/v1/courses/:id/archive", ActionSpec{Action: "course.archive", EntityType: "course", IDParam: "id"}},
 	{"PUT", "/api/v1/courses/:id/tuition-packs", ActionSpec{Action: "course.set_tuition_packs", EntityType: "course", IDParam: "id"}},
+	{"POST", "/api/v1/paths", ActionSpec{Action: "learning_path.create", EntityType: "learning_path", IDParam: ""}},
+	{"PUT", "/api/v1/paths/:id", ActionSpec{Action: "learning_path.update", EntityType: "learning_path", IDParam: "id"}},
+	{"DELETE", "/api/v1/paths/:id", ActionSpec{Action: "learning_path.delete", EntityType: "learning_path", IDParam: "id"}},
+	{"POST", "/api/v1/paths/:id/stages", ActionSpec{Action: "path_stage.create", EntityType: "learning_path", IDParam: "id"}},
+	{"PUT", "/api/v1/paths/:id/stages/order", ActionSpec{Action: "path_stage.reorder", EntityType: "learning_path", IDParam: "id"}},
+	{"PUT", "/api/v1/paths/:id/stages/:sid", ActionSpec{Action: "path_stage.update", EntityType: "path_stage", IDParam: "sid"}},
+	{"DELETE", "/api/v1/paths/:id/stages/:sid", ActionSpec{Action: "path_stage.delete", EntityType: "path_stage", IDParam: "sid"}},
+	{"PUT", "/api/v1/paths/:id/stages/:sid/courses", ActionSpec{Action: "path_stage.set_courses", EntityType: "path_stage", IDParam: "sid"}},
 }
 
 // TestActionSnapshotUnchanged proves LookupAction still resolves every

@@ -86,3 +86,15 @@ type TemplateVersionRef struct {
 	TemplateCode string
 	TemplateName string
 }
+
+// CoursePath is one learning path stage that recommends the course, joined
+// with its path; a course listed in two stages yields two rows.
+type CoursePath struct {
+	ID            uuid.UUID
+	Code          string
+	Name          string
+	Status        string
+	StageID       uuid.UUID
+	StageName     string
+	StagePosition int
+}

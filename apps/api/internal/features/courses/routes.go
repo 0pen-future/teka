@@ -12,4 +12,5 @@ func RegisterRoutes(rg *gin.RouterGroup, h *Handler, auth ...gin.HandlerFunc) {
 	g.DELETE("/:id", h.delete)
 	g.POST("/:id/archive", h.archive)
 	g.PUT("/:id/tuition-packs", h.setTuitionPacks)
+	g.GET("/:id/paths", h.listPaths)
 }

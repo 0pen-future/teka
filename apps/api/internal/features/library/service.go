@@ -17,6 +17,7 @@ import (
 	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/classcode"
 	"teka/apps/api/internal/shared/dbtypes"
+	"teka/apps/api/internal/shared/idset"
 	"teka/apps/api/internal/shared/pagination"
 )
 
@@ -446,7 +447,7 @@ func (s *Service) ReorderLessons(ctx context.Context, sc authctx.Scope, versionI
 		if err != nil {
 			return err
 		}
-		if !sameIDSet(lessonIDs(current), req.LessonIDs) {
+		if !idset.Same(lessonIDs(current), req.LessonIDs) {
 			return apperror.Invalid("Thứ tự phải liệt kê đúng mỗi buổi học mẫu của phiên bản một lần",
 				map[string]string{"lesson_ids": "phải chứa đúng mọi buổi học của phiên bản, mỗi buổi một lần"})
 		}
@@ -541,25 +542,6 @@ func lessonIDs(rows []Lesson) []uuid.UUID {
 		ids[i] = rows[i].ID
 	}
 	return ids
-}
-
-// sameIDSet reports whether want and got hold the same ids, each exactly
-// once.
-func sameIDSet(want, got []uuid.UUID) bool {
-	if len(want) != len(got) {
-		return false
-	}
-	seen := make(map[uuid.UUID]bool, len(want))
-	for _, id := range want {
-		seen[id] = true
-	}
-	for _, id := range got {
-		if !seen[id] {
-			return false
-		}
-		delete(seen, id)
-	}
-	return len(seen) == 0
 }
 
 // GetVersion returns a version with its score set, log fields and lessons

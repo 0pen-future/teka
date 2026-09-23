@@ -198,7 +198,7 @@ func (h *Handler) update(c *gin.Context) {
 // delete soft-deletes a course.
 //
 //	@Summary		Delete a course
-//	@Description	Soft delete: the code becomes reusable. Refused with 409 COURSE_IN_USE while live classes point at the course — archive it instead.
+//	@Description	Soft delete: the code becomes reusable. Refused with 409 COURSE_IN_USE while live classes point at the course, or 409 COURSE_IN_PATH while a live learning path recommends it — archive it instead.
 //	@Tags			courses
 //	@Produce		json
 //	@Param			id	path		string	true	"course id"
@@ -292,6 +292,36 @@ func (h *Handler) setTuitionPacks(c *gin.Context) {
 		return
 	}
 	out, err := h.svc.SetTuitionPacks(c.Request.Context(), sc, id, items)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, out)
+}
+
+// listPaths returns the learning path stages that recommend the course.
+//
+//	@Summary		List the learning paths a course belongs to
+//	@Description	One row per stage of a live learning path that recommends the course, ordered by path then stage position. Needs courses.read and paths.read.
+//	@Tags			courses
+//	@Produce		json
+//	@Param			id	path		string	true	"course id"
+//	@Success		200	{object}	response.Envelope{data=[]CoursePathResponse}
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/courses/{id}/paths [get]
+func (h *Handler) listPaths(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	id, ok := pathID(c)
+	if !ok {
+		return
+	}
+	out, err := h.svc.ListPaths(c.Request.Context(), sc, id)
 	if err != nil {
 		response.Err(c, err)
 		return

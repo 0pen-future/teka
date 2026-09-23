@@ -51,7 +51,7 @@ func newHTTPTest(t *testing.T) (*gin.Engine, *httpDeps) {
 	RegisterRoutes(r.Group("/api/v1"), NewHandler(svc),
 		middleware.RequireAuth(jwtCfg),
 		middleware.ResolveScope(fakeScopeResolver{center: deps.center, ownerID: deps.owner, perms: map[uuid.UUID][]string{
-			d.reader: {authctx.PermCoursesRead},
+			d.reader: {authctx.PermCoursesRead, authctx.PermPathsRead},
 			d.editor: {authctx.PermCoursesEdit},
 		}}))
 	return r, d
@@ -124,6 +124,7 @@ func TestAllRoutesRequireAuth(t *testing.T) {
 		{http.MethodDelete, "/api/v1/courses/" + someID},
 		{http.MethodPost, "/api/v1/courses/" + someID + "/archive"},
 		{http.MethodPut, "/api/v1/courses/" + someID + "/tuition-packs"},
+		{http.MethodGet, "/api/v1/courses/" + someID + "/paths"},
 	}
 	for _, rt := range routes {
 		w, _ := do(t, r, rt.method, rt.path, "", "")
@@ -209,6 +210,27 @@ func TestCourseLifecycleOverHTTP(t *testing.T) {
 		t.Fatalf("delete in use: %d %s", w.Code, w.Body.String())
 	}
 	delete(d.repo.classes, created.ID)
+
+	w, _ = do(t, r, http.MethodGet, "/api/v1/courses/"+created.ID.String()+"/paths", "", reader)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"data":[]`) {
+		t.Fatalf("paths of a course outside every path: %d %s", w.Code, w.Body.String())
+	}
+	// courses.edit alone does not open the learning paths.
+	w, _ = do(t, r, http.MethodGet, "/api/v1/courses/"+created.ID.String()+"/paths", "", editor)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("editor without paths.read: want 403, got %d", w.Code)
+	}
+	d.repo.paths[created.ID] = []CoursePath{{ID: uuid.New(), Code: "LT-6", Name: "Lộ trình 6", Status: "active",
+		StageID: uuid.New(), StageName: "Nền tảng", StagePosition: 1}}
+	w, env = do(t, r, http.MethodGet, "/api/v1/courses/"+created.ID.String()+"/paths", "", reader)
+	if w.Code != http.StatusOK || len(decode[[]CoursePathResponse](t, env)) != 1 || !strings.Contains(w.Body.String(), `"stage_position":1`) {
+		t.Fatalf("paths of a course: %d %s", w.Code, w.Body.String())
+	}
+	w, env = do(t, r, http.MethodDelete, "/api/v1/courses/"+created.ID.String(), "", editor)
+	if w.Code != http.StatusConflict || env.Error.Code != CodeCourseInPath {
+		t.Fatalf("delete while in a path: %d %s", w.Code, w.Body.String())
+	}
+	delete(d.repo.paths, created.ID)
 	w, _ = do(t, r, http.MethodDelete, "/api/v1/courses/"+created.ID.String(), "", editor)
 	if w.Code != http.StatusOK {
 		t.Fatalf("delete: %d %s", w.Code, w.Body.String())

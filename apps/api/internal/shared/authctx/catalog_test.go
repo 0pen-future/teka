@@ -44,6 +44,7 @@ var optInKeys = []string{
 	PermLibraryEdit,
 	PermLibraryPublish,
 	PermCoursesEdit,
+	PermPathsEdit,
 }
 
 // Keys the catalog once knew and has since retired: assignment rows for them
@@ -256,8 +257,8 @@ func TestEffectiveKeysCoversCatalogInOrder(t *testing.T) {
 // already — granting them would escalate).
 func TestDefaultRoleKeysPreserveLegacyBaseline(t *testing.T) {
 	defaults := DefaultRoleKeys()
-	if len(defaults) != 60 {
-		t.Fatalf("default baseline must hold the 60 operational keys, got %d", len(defaults))
+	if len(defaults) != 61 {
+		t.Fatalf("default baseline must hold the 61 operational keys, got %d", len(defaults))
 	}
 	inDefaults := map[string]bool{}
 	for _, key := range defaults {

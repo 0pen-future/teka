@@ -103,6 +103,28 @@ func courseResponse(row *CourseRow, packs []TuitionPack) CourseResponse {
 	return out
 }
 
+// CoursePathResponse is one stage of a learning path that recommends the
+// course, for the "Lộ trình" section of the course detail.
+type CoursePathResponse struct {
+	ID            uuid.UUID `json:"id"`
+	Code          string    `json:"code"`
+	Name          string    `json:"name"`
+	Status        string    `json:"status"`
+	StageID       uuid.UUID `json:"stage_id"`
+	StageName     string    `json:"stage_name"`
+	StagePosition int       `json:"stage_position"`
+}
+
+// coursePathResponses maps rows onto the wire shape; always non-nil so a
+// course outside every path serialises as [].
+func coursePathResponses(rows []CoursePath) []CoursePathResponse {
+	out := make([]CoursePathResponse, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, CoursePathResponse(r))
+	}
+	return out
+}
+
 // packResponses returns a non-nil slice so the wire form is always an array.
 func packResponses(rows []TuitionPack) []TuitionPackResponse {
 	out := make([]TuitionPackResponse, 0, len(rows))
