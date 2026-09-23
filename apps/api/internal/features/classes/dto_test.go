@@ -17,7 +17,7 @@ func TestFromModelCarriesPhaseAndTags(t *testing.T) {
 		Status:    StatusActive,
 	}
 	resp := FromModel(class)
-	if resp.Code != "TOAN8" || resp.Phase != PhaseOf(class, today()) {
+	if resp.Code != "TOAN8" || resp.Phase != PhaseOf(class, Today()) {
 		t.Fatalf("code and phase must map, got %+v", resp)
 	}
 	body, err := json.Marshal(resp)

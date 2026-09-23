@@ -147,6 +147,11 @@ var actionSnapshot = []struct {
 	{"POST", "/api/v1/library/exercises", ActionSpec{Action: "library_exercise.create", EntityType: "library_exercise", IDParam: ""}},
 	{"PUT", "/api/v1/library/exercises/:id", ActionSpec{Action: "library_exercise.update", EntityType: "library_exercise", IDParam: "id"}},
 	{"DELETE", "/api/v1/library/exercises/:id", ActionSpec{Action: "library_exercise.delete", EntityType: "library_exercise", IDParam: "id"}},
+	{"POST", "/api/v1/courses", ActionSpec{Action: "course.create", EntityType: "course", IDParam: ""}},
+	{"PUT", "/api/v1/courses/:id", ActionSpec{Action: "course.update", EntityType: "course", IDParam: "id"}},
+	{"DELETE", "/api/v1/courses/:id", ActionSpec{Action: "course.delete", EntityType: "course", IDParam: "id"}},
+	{"POST", "/api/v1/courses/:id/archive", ActionSpec{Action: "course.archive", EntityType: "course", IDParam: "id"}},
+	{"PUT", "/api/v1/courses/:id/tuition-packs", ActionSpec{Action: "course.set_tuition_packs", EntityType: "course", IDParam: "id"}},
 }
 
 // TestActionSnapshotUnchanged proves LookupAction still resolves every

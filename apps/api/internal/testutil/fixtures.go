@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"teka/apps/api/internal/features/attendance"
 	"teka/apps/api/internal/features/centers"
@@ -425,6 +426,11 @@ func WithClassEndDate(d time.Time) ClassOption {
 	return func(c *classes.Class) { c.EndDate = &d }
 }
 
+// WithClassCourse attaches the fixture class to a course of its center.
+func WithClassCourse(courseID uuid.UUID) ClassOption {
+	return func(c *classes.Class) { c.CourseID = &courseID }
+}
+
 // Class inserts a classes row for the teacher directly (bypassing the
 // service). Defaults: active, opens 2026-01-05, 100 000 đồng per session.
 func Class(t *testing.T, db *gorm.DB, teacherID uuid.UUID, opts ...ClassOption) *classes.Class {
@@ -446,7 +452,7 @@ func Class(t *testing.T, db *gorm.DB, teacherID uuid.UUID, opts ...ClassOption) 
 	if c.Code == "" {
 		c.Code = classcode.Generate()
 	}
-	if err := db.Omit("Schedules").Create(c).Error; err != nil {
+	if err := db.Omit(clause.Associations).Create(c).Error; err != nil {
 		t.Fatalf("insert fixture class %s: %v", c.Name, err)
 	}
 	// Mirror the classes create hook: every class is born with its teacher's

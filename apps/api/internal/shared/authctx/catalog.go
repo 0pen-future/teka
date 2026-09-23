@@ -146,6 +146,9 @@ const (
 	PermLibraryEdit    = "library.edit"
 	PermLibraryPublish = "library.publish"
 
+	PermCoursesRead = "courses.read"
+	PermCoursesEdit = "courses.edit"
+
 	PermMembersList = "members.list"
 )
 
@@ -273,6 +276,9 @@ var permCatalog = []PermDef{
 	optIn(PermLibraryEdit, PermKindCRUD, RiskMedium, "Soạn chương trình mẫu", "Tạo, sửa, xoá chương trình mẫu và soạn buổi học mẫu trong bản nháp."),
 	optIn(PermLibraryPublish, PermKindSpecial, RiskHigh, "Phát hành chương trình mẫu", "Phát hành một bản nháp thành phiên bản chính thức, khoá nội dung của phiên bản đó."),
 
+	def(PermCoursesRead, PermKindCRUD, RiskLow, "Xem danh mục khóa học", "Xem khóa học, gói học phí và các lớp đang mở của từng khóa học."),
+	optIn(PermCoursesEdit, PermKindCRUD, RiskMedium, "Quản lý khóa học", "Tạo, sửa, lưu trữ, xoá khóa học và thiết lập gói học phí."),
+
 	def(PermReportsSend, PermKindSpecial, RiskHigh, "Gửi báo cáo học phí", "Gửi thông báo học phí hàng loạt và theo dõi lượt gửi."),
 	def(PermMembersManage, PermKindSpecial, RiskHigh, "Quản lý thành viên", "Gỡ thành viên khỏi trung tâm."),
 	optIn(PermMembersList, PermKindCRUD, RiskLow, "Xem danh bạ thành viên", "Xem danh sách thành viên và vai trò trong trung tâm, không gồm số điện thoại hay email."),
@@ -369,6 +375,7 @@ var impliedKeys = map[string][]string{
 	PermReportsSend:    {PermBillingViewAll, PermStatementsViewAll, PermNotificationsViewAll, PermContactsViewAll},
 	PermLibraryEdit:    {PermLibraryRead},
 	PermLibraryPublish: {PermLibraryRead},
+	PermCoursesEdit:    {PermCoursesRead},
 }
 
 // DefaultRoleKeys returns the baseline permission set every system role (and,

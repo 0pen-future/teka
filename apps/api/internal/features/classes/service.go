@@ -74,17 +74,16 @@ func (s *Service) CreateAnchored(ctx context.Context, a authctx.Anchor, req Crea
 	}
 
 	class := &Class{
-		ID:               id.New(),
-		TeacherID:        a.TeacherID,
-		CenterID:         a.CenterID,
-		Name:             req.Name,
-		StartDate:        startDate,
-		EndDate:          endDate,
-		DefaultUnitPrice: *req.DefaultUnitPrice,
-		Status:           StatusActive,
-		Code:             code,
-		Tags:             tagList(req.Tags),
-		Note:             noteValue(req.Note),
+		ID:        id.New(),
+		TeacherID: a.TeacherID,
+		CenterID:  a.CenterID,
+		Name:      req.Name,
+		StartDate: startDate,
+		EndDate:   endDate,
+		Status:    StatusActive,
+		Code:      code,
+		Tags:      tagList(req.Tags),
+		Note:      noteValue(req.Note),
 	}
 	schedules := make([]Schedule, len(req.Schedules))
 	for i, sr := range req.Schedules {
@@ -96,6 +95,23 @@ func (s *Service) CreateAnchored(ctx context.Context, a authctx.Anchor, req Crea
 	}
 
 	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		// The course is resolved (and share-locked) inside the write
+		// transaction so a concurrent course delete cannot slip between
+		// the lookup and the insert.
+		course, err := s.resolveCourse(ctx, a, req.CourseID, nil)
+		if err != nil {
+			return err
+		}
+		// The price is required unless a course supplies its default.
+		unitPrice, err := unitPriceFor(req.DefaultUnitPrice, course)
+		if err != nil {
+			return err
+		}
+		class.DefaultUnitPrice = unitPrice
+		class.Course = course
+		if course != nil {
+			class.CourseID = &course.ID
+		}
 		if err := s.repo.CreateWithSchedules(ctx, class, schedules); err != nil {
 			return err
 		}
@@ -357,10 +373,69 @@ func (s *Service) Update(ctx context.Context, sc authctx.Scope, classID uuid.UUI
 	if req.Note != nil {
 		class.Note = noteValue(req.Note)
 	}
-	if err := s.repo.Update(ctx, class); err != nil {
+	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		if req.CourseID != nil {
+			// Resolved under the same transaction as the write so the
+			// share lock on the course holds until the class row lands.
+			course, err := s.resolveCourse(ctx, authctx.Anchor{TeacherID: class.TeacherID, CenterID: class.CenterID}, req.CourseID, class.CourseID)
+			if err != nil {
+				return err
+			}
+			class.Course, class.CourseID = course, nil
+			if course != nil {
+				class.CourseID = &course.ID
+			}
+		}
+		return s.repo.Update(ctx, class)
+	})
+	if err != nil {
 		return nil, codeConflictOr(err, class.Code)
 	}
 	return class, nil
+}
+
+// resolveCourse turns a request's course_id into the center's course row:
+// nil or blank means no course; anything else must name a live course of
+// the anchor's center, else 422 on the course_id field. The field carries
+// no uuid binding tag (a pointer to "" would fail it), so the shape is
+// checked here and a bad one is the same 422. An archived course takes no
+// new class: current is the class's stored course id, and resending it is
+// not a new attachment, so an already-attached class keeps saving.
+func (s *Service) resolveCourse(ctx context.Context, a authctx.Anchor, raw *string, current *uuid.UUID) (*CourseRef, error) {
+	if raw == nil || strings.TrimSpace(*raw) == "" {
+		return nil, nil
+	}
+	invalid := apperror.Invalid("Khóa học không tồn tại trong trung tâm",
+		map[string]string{"course_id": "phải là khóa học còn hiệu lực của trung tâm"})
+	courseID, err := uuid.Parse(strings.TrimSpace(*raw))
+	if err != nil {
+		return nil, invalid
+	}
+	course, err := s.repo.FindCourse(ctx, a, courseID)
+	if errors.Is(err, ErrCourseNotFound) {
+		return nil, invalid
+	}
+	if err != nil {
+		return nil, err
+	}
+	if course.Status == courseStatusArchived && (current == nil || *current != course.ID) {
+		return nil, apperror.Invalid("Khóa học đã ngừng tuyển, không gắn lớp mới",
+			map[string]string{"course_id": "khóa học đã ngừng tuyển"})
+	}
+	return course, nil
+}
+
+// unitPriceFor picks the class's per-session price: the request's own value
+// wins, then the course's default; with neither the field is required.
+func unitPriceFor(requested *int64, course *CourseRef) (int64, error) {
+	if requested != nil {
+		return *requested, nil
+	}
+	if course != nil {
+		return course.DefaultUnitPrice, nil
+	}
+	return 0, apperror.Invalid("validation failed",
+		map[string]string{"default_unit_price": "required unless course_id is set"})
 }
 
 // Stats buckets the classes the caller can read by phase on today. It

@@ -4,7 +4,7 @@ import "time"
 
 // Phase values: the display state a class is in, derived from status and the
 // opening/closing dates rather than stored. This file is the single source
-// of truth — PhaseOf for a loaded row, phasePredicate for the SQL filter and
+// of truth — PhaseOf for a loaded row, PhasePredicate for the SQL filter and
 // stats — and the web only renders the phase the API returns.
 const (
 	PhaseUpcoming = "upcoming"
@@ -45,11 +45,11 @@ func PhaseOf(c *Class, today time.Time) string {
 	return PhaseRunning
 }
 
-// phasePredicate returns the SQL fragment and its bound argument selecting
+// PhasePredicate returns the SQL fragment and its bound argument selecting
 // classes in phase on the given day — the same rules PhaseOf applies in Go,
 // expressed once so the list filter and the stats counters cannot drift.
 // ok is false for an unknown phase.
-func phasePredicate(phase string, today time.Time) (frag string, args []any, ok bool) {
+func PhasePredicate(phase string, today time.Time) (frag string, args []any, ok bool) {
 	day := dateOnly(today)
 	switch phase {
 	case PhaseArchived:
@@ -94,11 +94,11 @@ func ShiftBounds(shift string) (from, to TimeOfDay, ok bool) {
 	}
 }
 
-// today is the calendar date phases are judged against: the centre's wall
+// Today is the calendar date phases are judged against: the centre's wall
 // clock (teachers.DefaultTimezone) rather than the server's UTC clock, so a
 // class opening tomorrow does not read as "running" from 17:00 VN onwards.
 // It is a date at UTC midnight, comparable with the DATE columns.
-func today() time.Time {
+func Today() time.Time {
 	return dateOnly(time.Now().In(vietnam))
 }
 

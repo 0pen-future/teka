@@ -428,6 +428,7 @@ func TestListRejectsUnknownFilterValues(t *testing.T) {
 		"?shift=night":  "shift",
 		"?phase=paused": "phase",
 		"?status=bogus": "status",
+		"?course_id=x":  "course_id",
 	}
 	for query, field := range cases {
 		w, env := do(t, r, http.MethodGet, "/api/v1/classes"+query, "", token)
@@ -594,5 +595,69 @@ func TestStatsRoute(t *testing.T) {
 	var out ClassStatsResponse
 	if w.Code != http.StatusOK || json.Unmarshal(env.Data, &out) != nil || out != (ClassStatsResponse{}) {
 		t.Fatalf("stats must be tenant scoped, got %d %+v", w.Code, env)
+	}
+}
+
+// course_id on create binds as a uuid, the response embeds the course as
+// {id, code, name} (null without one), and the list filters on it.
+func TestCourseAttachmentOverHTTP(t *testing.T) {
+	r, repo := newClassesHTTPTest(t)
+	teacher := uuid.New()
+	token := mintToken(t, teacher)
+	course := repo.addCourse(teacher, "TOAN-6", 180_000)
+
+	w, env := do(t, r, http.MethodPost, "/api/v1/classes", `{
+		"name": "Toán 6A", "start_date": "2026-01-05", "course_id": "not-a-uuid",
+		"schedules": [{"weekday": 2, "start_time": "18:00", "duration_min": 90}]
+	}`, token)
+	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["course_id"] == "" {
+		t.Fatalf("malformed course_id: want 422 on course_id, got %d %+v", w.Code, env)
+	}
+
+	attached := createClass(t, r, token, `{
+		"name": "Toán 6A", "start_date": "2026-01-05", "course_id": "`+course.ID.String()+`",
+		"schedules": [{"weekday": 2, "start_time": "18:00", "duration_min": 90}]
+	}`)
+	if attached.Course == nil || attached.Course.ID != course.ID || attached.Course.Code != "TOAN-6" || attached.DefaultUnitPrice != 180_000 {
+		t.Fatalf("attached class must embed the course and copy its price, got %+v", attached)
+	}
+	plain := createClass(t, r, token, `{
+		"name": "Văn 6", "start_date": "2026-01-05", "default_unit_price": 100000,
+		"schedules": [{"weekday": 3, "start_time": "18:00", "duration_min": 90}]
+	}`)
+	if plain.Course != nil {
+		t.Fatalf("class without course must carry null, got %+v", plain.Course)
+	}
+	w, _ = do(t, r, http.MethodGet, "/api/v1/classes/"+plain.ID.String(), "", token)
+	if !strings.Contains(w.Body.String(), `"course":null`) {
+		t.Fatalf("course must serialise as null: %s", w.Body.String())
+	}
+
+	ids := listIDs(t, r, token, "?course_id="+course.ID.String())
+	if len(ids) != 1 || ids[0] != attached.ID {
+		t.Fatalf("course_id filter: want only the attached class, got %v", ids)
+	}
+	if got := listIDs(t, r, token, ""); len(got) != 2 {
+		t.Fatalf("unfiltered list: want 2, got %d", len(got))
+	}
+
+	// The patch rule must survive binding: "" detaches, garbage is a 422 on
+	// the field, and a blank course_id on create means "no course".
+	w, env = do(t, r, http.MethodPut, "/api/v1/classes/"+attached.ID.String(),
+		`{"name": "Toán 6A", "start_date": "2026-01-05", "default_unit_price": 180000, "course_id": ""}`, token)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"course":null`) {
+		t.Fatalf("empty course_id must detach: got %d %s", w.Code, w.Body.String())
+	}
+	w, env = do(t, r, http.MethodPut, "/api/v1/classes/"+attached.ID.String(),
+		`{"name": "Toán 6A", "start_date": "2026-01-05", "default_unit_price": 180000, "course_id": "x"}`, token)
+	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["course_id"] == "" {
+		t.Fatalf("malformed course_id on update: want 422 on course_id, got %d %+v", w.Code, env)
+	}
+	blank := createClass(t, r, token, `{
+		"name": "Lý 6", "start_date": "2026-01-05", "default_unit_price": 100000, "course_id": "",
+		"schedules": [{"weekday": 4, "start_time": "18:00", "duration_min": 90}]
+	}`)
+	if blank.Course != nil {
+		t.Fatalf("blank course_id on create must mean no course, got %+v", blank.Course)
 	}
 }

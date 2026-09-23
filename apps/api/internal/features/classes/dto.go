@@ -28,11 +28,17 @@ type ScheduleRequest struct {
 // DefaultUnitPrice is a pointer so a legitimately free class (0 đồng, allowed
 // by the CHECK) passes binding:"required".
 type CreateClassRequest struct {
-	Name             string            `json:"name" binding:"required,min=1,max=100"`
-	StartDate        string            `json:"start_date" binding:"required,datetime=2006-01-02"`
-	EndDate          string            `json:"end_date" binding:"omitempty,datetime=2006-01-02"`
-	DefaultUnitPrice *int64            `json:"default_unit_price" binding:"required,min=0"`
+	Name      string `json:"name" binding:"required,min=1,max=100"`
+	StartDate string `json:"start_date" binding:"required,datetime=2006-01-02"`
+	EndDate   string `json:"end_date" binding:"omitempty,datetime=2006-01-02"`
+	// DefaultUnitPrice may be left out only when course_id is set: the
+	// class then copies the course's default price.
+	DefaultUnitPrice *int64            `json:"default_unit_price" binding:"omitempty,min=0"`
 	Schedules        []ScheduleRequest `json:"schedules" binding:"required,min=1,dive"`
+	// CourseID attaches the class to a live course of the same center;
+	// blank or absent means no course. No uuid tag: the validator treats a
+	// pointer to "" as present and would fail it, so the service parses.
+	CourseID *string `json:"course_id"`
 	// Code is the display code (mã lớp); blank or absent means "mint one".
 	// Its shape is checked by the service via classcode.Valid so the message
 	// lands on this field either way.
@@ -55,6 +61,18 @@ type UpdateClassRequest struct {
 	Recruiting       *bool     `json:"recruiting"`
 	// Note replaces the stored note; an empty string clears it.
 	Note *string `json:"note" binding:"omitempty,max=1000"`
+	// CourseID follows the same patch rule: nil keeps the stored course, an
+	// empty string detaches it, a uuid attaches that course. Untagged for
+	// the same reason as on create: "" must reach the service.
+	CourseID *string `json:"course_id"`
+}
+
+// CourseRefResponse is the course a class is attached to, as embedded in
+// ClassResponse: enough for a chip that links to the catalog.
+type CourseRefResponse struct {
+	ID   uuid.UUID `json:"id"`
+	Code string    `json:"code"`
+	Name string    `json:"name"`
 }
 
 // ClassStatsResponse counts the classes the caller can read, bucketed by the
@@ -119,8 +137,10 @@ type ClassResponse struct {
 	// applies for active=true, so a picker showing this count matches the
 	// rows that endpoint lists. Like MyStaffRoles it is filled only by the
 	// readable GET paths; every other producer leaves it 0.
-	StudentCount int       `json:"student_count"`
-	CreatedAt    time.Time `json:"created_at"`
+	StudentCount int `json:"student_count"`
+	// Course is the attached course, null when the class has none.
+	Course    *CourseRefResponse `json:"course"`
+	CreatedAt time.Time          `json:"created_at"`
 }
 
 // FromSchedule maps a schedule row onto the response DTO.
@@ -156,11 +176,19 @@ func FromModel(class *Class) ClassResponse {
 		Tags:             tags,
 		Recruiting:       class.Recruiting,
 		Note:             class.Note,
-		Phase:            PhaseOf(class, today()),
+		Phase:            PhaseOf(class, Today()),
 		Schedules:        schedules,
 		MyStaffRoles:     []string{},
+		Course:           courseRef(class.Course),
 		CreatedAt:        class.CreatedAt,
 	}
+}
+
+func courseRef(ref *CourseRef) *CourseRefResponse {
+	if ref == nil {
+		return nil
+	}
+	return &CourseRefResponse{ID: ref.ID, Code: ref.Code, Name: ref.Name}
 }
 
 // FromModelWithRoles is FromModel plus the caller's active staff roles. Kept

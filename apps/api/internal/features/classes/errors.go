@@ -14,6 +14,9 @@ var (
 	// ErrCodeTaken means another live class in the center already carries the
 	// requested code; surfaces as 409 CLASS_CODE_TAKEN.
 	ErrCodeTaken = errors.New("class code already taken")
+	// ErrCourseNotFound means the requested course_id is not a live course
+	// of the class's center; surfaces as 422 on the course_id field.
+	ErrCourseNotFound = errors.New("course not found")
 )
 
 // CodeClassCodeTaken is the wire error code for ErrCodeTaken, distinct from

@@ -25,6 +25,7 @@ import (
 	"teka/apps/api/internal/features/classstaff"
 	"teka/apps/api/internal/features/collections"
 	"teka/apps/api/internal/features/contacts"
+	"teka/apps/api/internal/features/courses"
 	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/features/grading"
 	"teka/apps/api/internal/features/handoff"
@@ -219,6 +220,7 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, log *slog.Logger,
 	// published versions are immutable. It has no dependency on classes yet;
 	// binding a class to a version comes with the class detail work.
 	library.RegisterRoutes(v1, library.NewHandler(library.NewService(library.NewRepository(db), txMgr)), authChain...)
+	courses.RegisterRoutes(v1, courses.NewHandler(courses.NewService(courses.NewRepository(db), txMgr)), authChain...)
 
 	// attendance consumes enrollments and sessions through consumer
 	// interfaces (RosterSource, SessionStore) rather than their repository

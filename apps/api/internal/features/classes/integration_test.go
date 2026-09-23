@@ -873,3 +873,95 @@ func TestClassCodeIsUniquePerCenterThroughTheIndex(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// insertCourse seeds a catalog course directly so this package's tests do not
+// depend on the courses service; the classes side only reads the row.
+func insertCourse(t *testing.T, db *gorm.DB, centerID uuid.UUID, code string, price int64) uuid.UUID {
+	t.Helper()
+	courseID := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO courses (id, center_id, code, name, status, default_unit_price)
+		 VALUES (?, ?, ?, ?, 'active', ?)`,
+		courseID, centerID, code, "Khóa "+code, price,
+	).Error)
+	return courseID
+}
+
+func TestCourseLinkStaysInsideCenterAndCopiesPrice(t *testing.T) {
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
+	other, _ := testutil.Teacher(t, db)
+	scOther := testutil.ScopeFor(t, db, other.ID)
+
+	mine := insertCourse(t, db, sc.CenterID, "TOAN-8", 180_000)
+	foreign := insertCourse(t, db, scOther.CenterID, "TOAN-8", 90_000)
+
+	req := createRequest()
+	req.DefaultUnitPrice = nil
+	req.CourseID = strPtr(foreign.String())
+	_, err := svc.Create(ctx, sc, req)
+	var appErr *apperror.AppError
+	require.ErrorAs(t, err, &appErr, "another center's course is rejected before insert")
+	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
+	require.Contains(t, appErr.Fields, "course_id")
+
+	req.CourseID = nil
+	_, err = svc.Create(ctx, sc, req)
+	require.ErrorAs(t, err, &appErr, "no course and no price is a validation error")
+	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
+	require.Contains(t, appErr.Fields, "default_unit_price")
+
+	req.CourseID = strPtr(mine.String())
+	attached, err := svc.Create(ctx, sc, req)
+	require.NoError(t, err)
+	require.Equal(t, int64(180_000), attached.DefaultUnitPrice, "price copied from the course")
+	require.NotNil(t, attached.CourseID)
+	require.Equal(t, mine, *attached.CourseID)
+
+	got, err := svc.Get(ctx, sc, attached.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.Course, "GET preloads the course reference")
+	require.Equal(t, "TOAN-8", got.Course.Code)
+	require.Equal(t, "Khóa TOAN-8", got.Course.Name)
+
+	plain, err := svc.Create(ctx, sc, createRequest())
+	require.NoError(t, err)
+	require.Nil(t, plain.CourseID)
+
+	rows, total, err := svc.List(ctx, sc, classes.ListFilter{CourseID: &mine}, listParams(t))
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total, "course_id filter narrows to attached classes")
+	require.Equal(t, attached.ID, rows[0].ID)
+	require.NotNil(t, rows[0].Course)
+
+	explicit := createRequest()
+	explicit.CourseID = strPtr(mine.String())
+	explicit.DefaultUnitPrice = int64Ptr(200_000)
+	own, err := svc.Create(ctx, sc, explicit)
+	require.NoError(t, err)
+	require.Equal(t, int64(200_000), own.DefaultUnitPrice, "an explicit price wins over the course default")
+
+	detached, err := svc.Update(ctx, sc, attached.ID, classes.UpdateClassRequest{
+		Name: "Toán 8", StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(180_000), CourseID: strPtr(""),
+	})
+	require.NoError(t, err)
+	require.Nil(t, detached.CourseID, "an empty course_id detaches")
+	require.Nil(t, detached.Course)
+
+	kept, err := svc.Update(ctx, sc, own.ID, classes.UpdateClassRequest{
+		Name: "Toán 8", StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(200_000),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, kept.CourseID, "an absent course_id keeps the stored course")
+
+	_, err = svc.Update(ctx, sc, own.ID, classes.UpdateClassRequest{
+		Name: "Toán 8", StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(200_000), CourseID: strPtr(foreign.String()),
+	})
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
+
+	_, _, err = svc.List(ctx, scOther, classes.ListFilter{CourseID: &mine}, listParams(t))
+	require.NoError(t, err, "filtering by a foreign course just yields nothing")
+}

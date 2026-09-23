@@ -663,6 +663,10 @@ definitions:
     properties:
       code:
         type: string
+      course:
+        allOf:
+        - $ref: '#/definitions/classes.CourseRefResponse'
+        description: Course is the attached course, null when the class has none.
       created_at:
         type: string
       default_unit_price:
@@ -729,6 +733,15 @@ definitions:
       upcoming:
         type: integer
     type: object
+  classes.CourseRefResponse:
+    properties:
+      code:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+    type: object
   classes.CreateClassRequest:
     properties:
       code:
@@ -738,7 +751,16 @@ definitions:
           lands on this field either way.
         maxLength: 20
         type: string
+      course_id:
+        description: |-
+          CourseID attaches the class to a live course of the same center;
+          blank or absent means no course. No uuid tag: the validator treats a
+          pointer to "" as present and would fail it, so the service parses.
+        type: string
       default_unit_price:
+        description: |-
+          DefaultUnitPrice may be left out only when course_id is set: the
+          class then copies the course's default price.
         minimum: 0
         type: integer
       end_date:
@@ -763,7 +785,6 @@ definitions:
         maxItems: 10
         type: array
     required:
-    - default_unit_price
     - name
     - schedules
     - start_date
@@ -808,6 +829,12 @@ definitions:
     properties:
       code:
         maxLength: 20
+        type: string
+      course_id:
+        description: |-
+          CourseID follows the same patch rule: nil keeps the stored course, an
+          empty string detaches it, a uuid attaches that course. Untagged for
+          the same reason as on create: "" must reach the service.
         type: string
       default_unit_price:
         minimum: 0
@@ -1116,6 +1143,134 @@ definitions:
     required:
     - zalo_name
     - zalo_user_id
+    type: object
+  courses.CourseRequest:
+    properties:
+      code:
+        maxLength: 20
+        minLength: 2
+        type: string
+      default_template_version_id:
+        type: string
+      default_unit_price:
+        minimum: 0
+        type: integer
+      description:
+        maxLength: 2000
+        type: string
+      duration_min:
+        maximum: 1440
+        minimum: 1
+        type: integer
+      level:
+        maxLength: 100
+        type: string
+      name:
+        maxLength: 200
+        minLength: 1
+        type: string
+      status:
+        description: Status left blank means draft on create and "keep as stored"
+          on update.
+        enum:
+        - draft
+        - active
+        - archived
+        type: string
+      subject:
+        maxLength: 100
+        type: string
+      total_sessions:
+        maximum: 1000
+        minimum: 1
+        type: integer
+    required:
+    - code
+    - name
+    type: object
+  courses.CourseResponse:
+    properties:
+      classes_running:
+        type: integer
+      classes_upcoming:
+        type: integer
+      code:
+        type: string
+      created_at:
+        type: string
+      default_template:
+        $ref: '#/definitions/courses.DefaultTemplateResponse'
+      default_template_version_id:
+        type: string
+      default_unit_price:
+        type: integer
+      description:
+        type: string
+      duration_min:
+        type: integer
+      id:
+        type: string
+      level:
+        type: string
+      name:
+        type: string
+      status:
+        type: string
+      subject:
+        type: string
+      total_sessions:
+        type: integer
+      tuition_packs:
+        items:
+          $ref: '#/definitions/courses.TuitionPackResponse'
+        type: array
+      updated_at:
+        type: string
+    type: object
+  courses.DefaultTemplateResponse:
+    properties:
+      code:
+        type: string
+      name:
+        type: string
+      status:
+        type: string
+      template_id:
+        type: string
+      version_id:
+        type: string
+      version_no:
+        type: integer
+    type: object
+  courses.TuitionPackInput:
+    properties:
+      name:
+        maxLength: 100
+        minLength: 1
+        type: string
+      price:
+        minimum: 0
+        type: integer
+      sessions:
+        maximum: 1000
+        minimum: 1
+        type: integer
+    required:
+    - name
+    - sessions
+    type: object
+  courses.TuitionPackResponse:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+      position:
+        type: integer
+      price:
+        type: integer
+      sessions:
+        type: integer
     type: object
   enrollments.CreateRequest:
     properties:
@@ -5280,6 +5435,10 @@ paths:
         in: query
         name: phase
         type: string
+      - description: only classes attached to this course
+        in: query
+        name: course_id
+        type: string
       - description: page number
         in: query
         name: page
@@ -7537,6 +7696,476 @@ paths:
       summary: Map contact to a Zalo friend
       tags:
       - contacts
+  /courses:
+    get:
+      description: Live courses of the caller's center with running/upcoming class
+        counters and tuition packs. q matches code or name.
+      parameters:
+      - description: draft | active | archived
+        in: query
+        name: status
+        type: string
+      - description: code or name fragment
+        in: query
+        name: q
+        type: string
+      - description: page (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: page size (default 20, max 100)
+        in: query
+        name: per_page
+        type: integer
+      - description: name | code | status | created_at, prefix - for descending
+        in: query
+        name: sort
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/courses.CourseResponse'
+                  type: array
+                meta:
+                  $ref: '#/definitions/response.Meta'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List courses
+      tags:
+      - courses
+    post:
+      consumes:
+      - application/json
+      description: The code is upper-cased and must be unique among the center's live
+        courses (409 CODE_TAKEN). default_template_version_id must be a published
+        version of the center's library (422).
+      parameters:
+      - description: course
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/courses.CourseRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/courses.CourseResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Create a course
+      tags:
+      - courses
+  /courses/{id}:
+    delete:
+      description: 'Soft delete: the code becomes reusable. Refused with 409 COURSE_IN_USE
+        while live classes point at the course — archive it instead.'
+      parameters:
+      - description: course id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a course
+      tags:
+      - courses
+    get:
+      parameters:
+      - description: course id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/courses.CourseResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get a course
+      tags:
+      - courses
+    put:
+      consumes:
+      - application/json
+      description: Full replace of the course's own fields; tuition packs have their
+        own endpoint.
+      parameters:
+      - description: course id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: course
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/courses.CourseRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/courses.CourseResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Update a course
+      tags:
+      - courses
+  /courses/{id}/archive:
+    post:
+      description: Moves the course to archived; classes attached to it keep running.
+        409 COURSE_ARCHIVED when it already is.
+      parameters:
+      - description: course id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/courses.CourseResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Archive a course
+      tags:
+      - courses
+  /courses/{id}/tuition-packs:
+    put:
+      consumes:
+      - application/json
+      description: Wholesale replace, positions assigned in body order; [] clears
+        the list. At most 20 packs.
+      parameters:
+      - description: course id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: tuition packs; [] clears
+        in: body
+        name: body
+        required: true
+        schema:
+          items:
+            $ref: '#/definitions/courses.TuitionPackInput'
+          type: array
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/courses.TuitionPackResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Replace a course's tuition packs
+      tags:
+      - courses
   /enrollments:
     get:
       parameters:

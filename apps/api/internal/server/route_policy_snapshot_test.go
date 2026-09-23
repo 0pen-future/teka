@@ -186,6 +186,13 @@ var routePolicySnapshot = []RoutePolicy{
 	{Method: "GET", Path: "/api/v1/library/exercises/:id", Kind: PolicyPermission, Key: "library.read"},
 	{Method: "PUT", Path: "/api/v1/library/exercises/:id", Kind: PolicyPermission, Key: "library.edit"},
 	{Method: "DELETE", Path: "/api/v1/library/exercises/:id", Kind: PolicyPermission, Key: "library.edit"},
+	{Method: "GET", Path: "/api/v1/courses", Kind: PolicyPermission, Key: "courses.read"},
+	{Method: "POST", Path: "/api/v1/courses", Kind: PolicyPermission, Key: "courses.edit"},
+	{Method: "GET", Path: "/api/v1/courses/:id", Kind: PolicyPermission, Key: "courses.read"},
+	{Method: "PUT", Path: "/api/v1/courses/:id", Kind: PolicyPermission, Key: "courses.edit"},
+	{Method: "DELETE", Path: "/api/v1/courses/:id", Kind: PolicyPermission, Key: "courses.edit"},
+	{Method: "POST", Path: "/api/v1/courses/:id/archive", Kind: PolicyPermission, Key: "courses.edit"},
+	{Method: "PUT", Path: "/api/v1/courses/:id/tuition-packs", Kind: PolicyPermission, Key: "courses.edit"},
 }
 
 // TestRoutePolicySnapshotUnchanged proves routePolicies still classifies

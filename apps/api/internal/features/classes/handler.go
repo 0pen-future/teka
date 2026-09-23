@@ -99,6 +99,7 @@ func (h *Handler) create(c *gin.Context) {
 //	@Param			shift		query		string	false	"morning, afternoon, or evening"
 //	@Param			tag			query		string	false	"exact tag"
 //	@Param			phase		query		string	false	"upcoming, running, ended, or archived"
+//	@Param			course_id	query		string	false	"only classes attached to this course"
 //	@Param			page		query		int		false	"page number"
 //	@Param			per_page	query		int		false	"page size (max 100)"
 //	@Param			sort		query		string	false	"name, start_date, or created_at; - prefix for desc"
@@ -171,6 +172,14 @@ func parseListFilter(c *gin.Context) (ListFilter, bool) {
 	default:
 		fields["phase"] = "must be one of: upcoming, running, ended, archived"
 	}
+	if raw := c.Query("course_id"); raw != "" {
+		courseID, err := uuid.Parse(raw)
+		if err != nil {
+			fields["course_id"] = "must be a uuid"
+		} else {
+			filter.CourseID = &courseID
+		}
+	}
 	if len(fields) > 0 {
 		response.Err(c, apperror.Invalid("validation failed", fields))
 		return ListFilter{}, false
@@ -193,7 +202,7 @@ func (h *Handler) stats(c *gin.Context) {
 	if !ok {
 		return
 	}
-	stats, err := h.svc.Stats(c.Request.Context(), sc, today())
+	stats, err := h.svc.Stats(c.Request.Context(), sc, Today())
 	if err != nil {
 		response.Err(c, err)
 		return

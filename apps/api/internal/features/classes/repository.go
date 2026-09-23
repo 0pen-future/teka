@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/shared/authctx"
@@ -30,6 +31,8 @@ type ListFilter struct {
 	Weekday *int16
 	Shift   string
 	Tag     string
+	// CourseID narrows to the classes attached to one course.
+	CourseID *uuid.UUID
 }
 
 // Repository is the persistence contract for classes and their schedules; the
@@ -70,6 +73,10 @@ type Repository interface {
 	// than a constraint error. Center-wide on purpose: the index is per
 	// center, not per teacher, so a member's probe must see the owner's rows.
 	CodeExists(ctx context.Context, a authctx.Anchor, code string, exceptID uuid.UUID) (bool, error)
+	// FindCourse resolves a live course of the anchor's center, whatever
+	// its status: an archived course still anchors the classes it already
+	// has. ErrCourseNotFound when missing or of another center.
+	FindCourse(ctx context.Context, a authctx.Anchor, courseID uuid.UUID) (*CourseRef, error)
 
 	AddSchedule(ctx context.Context, s *Schedule) error
 	GetSchedule(ctx context.Context, sc authctx.Scope, classID, scheduleID uuid.UUID) (*Schedule, error)
@@ -220,9 +227,10 @@ func preloadSchedules(db *gorm.DB) *gorm.DB {
 
 func (r *gormRepository) CreateWithSchedules(ctx context.Context, class *Class, schedules []Schedule) error {
 	db := database.FromContext(ctx, r.db)
-	// Omit the association: schedule rows are inserted explicitly below with
-	// ids and teacher ids already set.
-	if err := db.Omit("Schedules").Create(class).Error; err != nil {
+	// Omit the associations: schedule rows are inserted explicitly below with
+	// ids and teacher ids already set, and the course is a reference the
+	// classes feature never writes.
+	if err := db.Omit(clause.Associations).Create(class).Error; err != nil {
 		return err
 	}
 	if len(schedules) == 0 {
@@ -234,7 +242,7 @@ func (r *gormRepository) CreateWithSchedules(ctx context.Context, class *Class, 
 func (r *gormRepository) GetByID(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Class, error) {
 	var class Class
 	err := r.scoped(ctx, sc).
-		Preload("Schedules", preloadSchedules).
+		Preload("Schedules", preloadSchedules).Preload("Course", "deleted_at IS NULL").
 		Take(&class, "classes.id = ?", id).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrNotFound
@@ -248,7 +256,7 @@ func (r *gormRepository) GetByID(ctx context.Context, sc authctx.Scope, id uuid.
 func (r *gormRepository) GetWritableByID(ctx context.Context, sc authctx.Scope, id uuid.UUID, roles []string) (*Class, error) {
 	var class Class
 	err := r.writeScoped(ctx, sc, roles).
-		Preload("Schedules", preloadSchedules).
+		Preload("Schedules", preloadSchedules).Preload("Course", "deleted_at IS NULL").
 		Take(&class, "classes.id = ?", id).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrNotFound
@@ -262,7 +270,7 @@ func (r *gormRepository) GetWritableByID(ctx context.Context, sc authctx.Scope, 
 func (r *gormRepository) GetReadableByID(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Class, error) {
 	var class Class
 	err := r.readScoped(ctx, sc).
-		Preload("Schedules", preloadSchedules).
+		Preload("Schedules", preloadSchedules).Preload("Course", "deleted_at IS NULL").
 		Take(&class, "classes.id = ?", id).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrNotFound
@@ -301,7 +309,10 @@ func (r *gormRepository) list(q *gorm.DB, filter ListFilter, p pagination.Params
 		}
 		q = q.Where("classes.tags @> ?::jsonb", string(tag))
 	}
-	today := today()
+	if filter.CourseID != nil {
+		q = q.Where("classes.course_id = ?", *filter.CourseID)
+	}
+	today := Today()
 	if filter.Weekday != nil || filter.Shift != "" {
 		slot := `EXISTS (SELECT 1 FROM class_schedules s
 			WHERE s.class_id = classes.id AND s.deleted_at IS NULL
@@ -321,7 +332,7 @@ func (r *gormRepository) list(q *gorm.DB, filter ListFilter, p pagination.Params
 		}
 		q = q.Where(slot+")", args...)
 	}
-	if frag, args, ok := phasePredicate(filter.Phase, today); ok {
+	if frag, args, ok := PhasePredicate(filter.Phase, today); ok {
 		q = q.Where(frag, args...)
 	}
 
@@ -330,7 +341,7 @@ func (r *gormRepository) list(q *gorm.DB, filter ListFilter, p pagination.Params
 		return nil, 0, err
 	}
 	var rows []Class
-	err := q.Preload("Schedules", preloadSchedules).Scopes(p.Scope).Find(&rows).Error
+	err := q.Preload("Schedules", preloadSchedules).Preload("Course", "deleted_at IS NULL").Scopes(p.Scope).Find(&rows).Error
 	if err != nil {
 		return nil, 0, err
 	}
@@ -338,7 +349,25 @@ func (r *gormRepository) list(q *gorm.DB, filter ListFilter, p pagination.Params
 }
 
 func (r *gormRepository) Update(ctx context.Context, class *Class) error {
-	return database.FromContext(ctx, r.db).Omit("Schedules").Save(class).Error
+	return database.FromContext(ctx, r.db).Omit(clause.Associations).Save(class).Error
+}
+
+func (r *gormRepository) FindCourse(ctx context.Context, a authctx.Anchor, courseID uuid.UUID) (*CourseRef, error) {
+	var ref CourseRef
+	// FOR SHARE: a course delete locks the row FOR UPDATE, so an attach that
+	// runs inside the class's write transaction either waits for the delete
+	// (and then misses the row) or holds the delete off until it commits.
+	err := database.FromContext(ctx, r.db).
+		Clauses(clause.Locking{Strength: "SHARE"}).
+		Where("courses.center_id = ? AND courses.deleted_at IS NULL", a.CenterID).
+		Take(&ref, "courses.id = ?", courseID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrCourseNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &ref, nil
 }
 
 func (r *gormRepository) Archive(ctx context.Context, sc authctx.Scope, id uuid.UUID) error {
@@ -416,7 +445,7 @@ func (r *gormRepository) CountReadableByPhase(ctx context.Context, sc authctx.Sc
 	selectSQL := "COUNT(*) AS all_count, SUM(CASE WHEN classes.recruiting THEN 1 ELSE 0 END) AS recruiting"
 	var args []any
 	for _, phase := range []string{PhaseUpcoming, PhaseRunning, PhaseEnded, PhaseArchived} {
-		frag, phaseArgs, _ := phasePredicate(phase, today)
+		frag, phaseArgs, _ := PhasePredicate(phase, today)
 		selectSQL += ", SUM(CASE WHEN " + frag + " THEN 1 ELSE 0 END) AS " + phase
 		args = append(args, phaseArgs...)
 	}

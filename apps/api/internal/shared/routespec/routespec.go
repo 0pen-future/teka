@@ -457,6 +457,18 @@ var Specs = []Spec{
 		req("library_exercise.update", "library_exercise", "id")),
 	perm("DELETE", "/api/v1/library/exercises/:id", authctx.PermLibraryEdit,
 		req("library_exercise.delete", "library_exercise", "id")),
+	perm("GET", "/api/v1/courses", authctx.PermCoursesRead, none()),
+	perm("POST", "/api/v1/courses", authctx.PermCoursesEdit,
+		req("course.create", "course", "")),
+	perm("GET", "/api/v1/courses/:id", authctx.PermCoursesRead, none()),
+	perm("PUT", "/api/v1/courses/:id", authctx.PermCoursesEdit,
+		req("course.update", "course", "id")),
+	perm("DELETE", "/api/v1/courses/:id", authctx.PermCoursesEdit,
+		req("course.delete", "course", "id")),
+	perm("POST", "/api/v1/courses/:id/archive", authctx.PermCoursesEdit,
+		req("course.archive", "course", "id")),
+	perm("PUT", "/api/v1/courses/:id/tuition-packs", authctx.PermCoursesEdit,
+		req("course.set_tuition_packs", "course", "id")),
 }
 
 // Policies returns the manifest for the server package's route-policy

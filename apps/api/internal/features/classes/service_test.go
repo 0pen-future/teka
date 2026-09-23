@@ -3,6 +3,7 @@ package classes
 import (
 	"context"
 	"errors"
+	"net/http"
 	"regexp"
 	"slices"
 	"sort"
@@ -35,10 +36,29 @@ type fakeSchedule struct {
 type fakeRepository struct {
 	classes         map[uuid.UUID]*fakeClass
 	schedules       map[uuid.UUID]*fakeSchedule
-	openEnrollments map[uuid.UUID]int64 // classID -> open enrollment count
-	failCreate      error               // forces CreateWithSchedules to fail
-	failUpdate      error               // forces Update to fail
-	codeCollisions  int                 // CodeExists reports a hit this many times first
+	openEnrollments map[uuid.UUID]int64      // classID -> open enrollment count
+	failCreate      error                    // forces CreateWithSchedules to fail
+	failUpdate      error                    // forces Update to fail
+	codeCollisions  int                      // CodeExists reports a hit this many times first
+	courses         map[uuid.UUID]*CourseRef // live courses per id, with their center
+	courseCenters   map[uuid.UUID]uuid.UUID
+}
+
+// addCourse registers a live course of center so FindCourse resolves it.
+func (f *fakeRepository) addCourse(center uuid.UUID, code string, price int64) *CourseRef {
+	ref := &CourseRef{ID: uuid.New(), Code: code, Name: "Khóa " + code, Status: "active", DefaultUnitPrice: price}
+	f.courses[ref.ID] = ref
+	f.courseCenters[ref.ID] = center
+	return ref
+}
+
+func (f *fakeRepository) FindCourse(_ context.Context, a authctx.Anchor, courseID uuid.UUID) (*CourseRef, error) {
+	ref, ok := f.courses[courseID]
+	if !ok || f.courseCenters[courseID] != a.CenterID {
+		return nil, ErrCourseNotFound
+	}
+	cp := *ref
+	return &cp, nil
 }
 
 func newFakeRepository() *fakeRepository {
@@ -46,6 +66,8 @@ func newFakeRepository() *fakeRepository {
 		classes:         map[uuid.UUID]*fakeClass{},
 		schedules:       map[uuid.UUID]*fakeSchedule{},
 		openEnrollments: map[uuid.UUID]int64{},
+		courses:         map[uuid.UUID]*CourseRef{},
+		courseCenters:   map[uuid.UUID]uuid.UUID{},
 	}
 }
 
@@ -150,7 +172,7 @@ func (f *fakeRepository) GetWritableByID(ctx context.Context, sc authctx.Scope, 
 }
 
 func (f *fakeRepository) List(_ context.Context, sc authctx.Scope, filter ListFilter, _ pagination.Params) ([]Class, int64, error) {
-	today := today()
+	today := Today()
 	var out []Class
 	for _, c := range f.classes {
 		if !visibleClass(c, sc) {
@@ -166,6 +188,9 @@ func (f *fakeRepository) List(_ context.Context, sc authctx.Scope, filter ListFi
 			continue
 		}
 		if filter.Tag != "" && !slices.Contains(c.Tags, filter.Tag) {
+			continue
+		}
+		if filter.CourseID != nil && (c.CourseID == nil || *c.CourseID != *filter.CourseID) {
 			continue
 		}
 		row := c.Class
@@ -923,3 +948,145 @@ func TestStatsFollowReadScopeAndPhase(t *testing.T) {
 
 func strPtr(v string) *string { return &v }
 func boolPtr(v bool) *bool    { return &v }
+
+// A class attached to a course copies the course's default price when the
+// request leaves its own out; without a course the price stays required.
+func TestCreateWithCourseCopiesDefaultPrice(t *testing.T) {
+	svc, repo := newTestService()
+	sc := memberScope()
+	course := repo.addCourse(sc.CenterID, "TOAN-6", 180_000)
+
+	req := validCreateRequest()
+	req.DefaultUnitPrice = nil
+	_, err := svc.Create(context.Background(), sc, req)
+	appErr := appErrorOf(t, err, http.StatusUnprocessableEntity)
+	if appErr.Fields["default_unit_price"] == "" {
+		t.Fatalf("price without course must be required, got %+v", appErr.Fields)
+	}
+
+	req.CourseID = strPtr(course.ID.String())
+	class, err := svc.Create(context.Background(), sc, req)
+	if err != nil {
+		t.Fatalf("create with course: %v", err)
+	}
+	if class.CourseID == nil || *class.CourseID != course.ID || class.DefaultUnitPrice != 180_000 {
+		t.Fatalf("class must copy the course price, got %+v", class)
+	}
+	if class.Course == nil || class.Course.Code != "TOAN-6" {
+		t.Fatalf("created class must carry the course ref for its response, got %+v", class.Course)
+	}
+
+	// An explicit price wins over the course default.
+	req.DefaultUnitPrice = int64Ptr(120_000)
+	req.Code = strPtr("TOAN6B")
+	class, err = svc.Create(context.Background(), sc, req)
+	if err != nil || class.DefaultUnitPrice != 120_000 {
+		t.Fatalf("explicit price must win: %v %+v", err, class)
+	}
+}
+
+// course_id must name a live course of the class's own center; another
+// center's course or an unknown id is a 422 on the field, never a 500 and
+// never a silent attach.
+func TestCreateRejectsForeignOrUnknownCourse(t *testing.T) {
+	svc, repo := newTestService()
+	sc := memberScope()
+	foreign := repo.addCourse(id.New(), "VAN-6", 1)
+
+	for name, raw := range map[string]string{"foreign": foreign.ID.String(), "unknown": id.New().String()} {
+		req := validCreateRequest()
+		req.CourseID = &raw
+		_, err := svc.Create(context.Background(), sc, req)
+		appErr := appErrorOf(t, err, http.StatusUnprocessableEntity)
+		if appErr.Fields["course_id"] == "" {
+			t.Fatalf("%s: want a course_id field message, got %+v", name, appErr.Fields)
+		}
+	}
+	if len(repo.classes) != 0 {
+		t.Fatalf("a refused course must leave no class behind, got %d", len(repo.classes))
+	}
+}
+
+// Update follows the patch rule: nil keeps the stored course, "" detaches,
+// a uuid attaches — and the same center check applies.
+func TestUpdateAttachesAndDetachesCourse(t *testing.T) {
+	svc, repo := newTestService()
+	sc := memberScope()
+	course := repo.addCourse(sc.CenterID, "TOAN-6", 1)
+	class, err := svc.Create(context.Background(), sc, validCreateRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	upd := UpdateClassRequest{Name: class.Name, StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000)}
+
+	upd.CourseID = strPtr(course.ID.String())
+	got, err := svc.Update(context.Background(), sc, class.ID, upd)
+	if err != nil || got.CourseID == nil || *got.CourseID != course.ID || got.Course == nil {
+		t.Fatalf("attach: %v %+v", err, got)
+	}
+
+	upd.CourseID = nil
+	got, err = svc.Update(context.Background(), sc, class.ID, upd)
+	if err != nil || got.CourseID == nil {
+		t.Fatalf("nil must keep the course: %v %+v", err, got)
+	}
+
+	upd.CourseID = strPtr(id.New().String())
+	_, err = svc.Update(context.Background(), sc, class.ID, upd)
+	if appErr := appErrorOf(t, err, http.StatusUnprocessableEntity); appErr.Fields["course_id"] == "" {
+		t.Fatalf("unknown course must land on course_id: %+v", appErr.Fields)
+	}
+
+	upd.CourseID = strPtr("")
+	got, err = svc.Update(context.Background(), sc, class.ID, upd)
+	if err != nil || got.CourseID != nil || got.Course != nil {
+		t.Fatalf("blank must detach: %v %+v", err, got)
+	}
+}
+
+func TestArchivedCourseTakesNoNewClasses(t *testing.T) {
+	svc, repo := newTestService()
+	sc := memberScope()
+	course := repo.addCourse(sc.CenterID, "TOAN-6", 1)
+	req := validCreateRequest()
+	req.CourseID = strPtr(course.ID.String())
+	class, err := svc.Create(context.Background(), sc, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	course.Status = courseStatusArchived
+
+	_, err = svc.Create(context.Background(), sc, req)
+	if appErr := appErrorOf(t, err, http.StatusUnprocessableEntity); appErr.Fields["course_id"] == "" {
+		t.Fatalf("an archived course takes no new class: %+v", appErr.Fields)
+	}
+
+	// A class already on the course keeps it through an unrelated edit that
+	// resends the same id, and another archived course is refused.
+	upd := UpdateClassRequest{Name: "Đổi tên", StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(1), CourseID: strPtr(course.ID.String())}
+	got, err := svc.Update(context.Background(), sc, class.ID, upd)
+	if err != nil || got.CourseID == nil || *got.CourseID != course.ID {
+		t.Fatalf("resending the stored archived course must be accepted: %v %+v", err, got)
+	}
+	other := repo.addCourse(sc.CenterID, "VAN-6", 1)
+	other.Status = courseStatusArchived
+	upd.CourseID = strPtr(other.ID.String())
+	_, err = svc.Update(context.Background(), sc, class.ID, upd)
+	if appErr := appErrorOf(t, err, http.StatusUnprocessableEntity); appErr.Fields["course_id"] == "" {
+		t.Fatalf("moving to an archived course must be refused: %+v", appErr.Fields)
+	}
+}
+
+// appErrorOf asserts err is an AppError with status and hands it back so a
+// test can inspect its field messages.
+func appErrorOf(t *testing.T, err error, status int) *apperror.AppError {
+	t.Helper()
+	var appErr *apperror.AppError
+	if !errors.As(err, &appErr) {
+		t.Fatalf("want *apperror.AppError with status %d, got %v", status, err)
+	}
+	if appErr.Status != status {
+		t.Fatalf("want status %d, got %d (%s: %s)", status, appErr.Status, appErr.Code, appErr.Message)
+	}
+	return appErr
+}

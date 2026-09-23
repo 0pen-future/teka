@@ -48,13 +48,40 @@ type Class struct {
 	// Recruiting flags a class still taking enrolments (cần tuyển sinh).
 	Recruiting bool
 	// Note is the operational note shown on the class detail; nil = none.
-	Note      *string
+	Note *string
+	// CourseID links the class to a course of the same center (nullable);
+	// Course carries the embedded {id, code, name} when preloaded.
+	CourseID  *uuid.UUID
+	Course    *CourseRef `gorm:"foreignKey:CourseID;references:ID"`
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	DeletedAt gorm.DeletedAt
 	// Schedules holds the class's live schedule rows when preloaded.
 	Schedules []Schedule `gorm:"foreignKey:ClassID"`
 }
+
+// CourseRef is the slice of a course row a class embeds: enough to render
+// a chip and link to the catalog, nothing the class could edit. The
+// classes feature reads it and never writes it; the courses feature owns
+// the table.
+type CourseRef struct {
+	ID   uuid.UUID `gorm:"primaryKey"`
+	Code string
+	Name string
+	// Status is the course's catalog status; an archived course (ngừng
+	// tuyển) takes no new class but keeps the ones it has.
+	Status string
+	// DefaultUnitPrice is the course's price a new class copies when its
+	// request leaves default_unit_price out.
+	DefaultUnitPrice int64
+}
+
+// courseStatusArchived mirrors the courses feature's archived status; the
+// constant lives here because courses imports classes, not the reverse.
+const courseStatusArchived = "archived"
+
+// TableName maps the reference onto the courses table.
+func (CourseRef) TableName() string { return "courses" }
 
 // TableName pins the table explicitly so a later model rename cannot silently
 // break the mapping.

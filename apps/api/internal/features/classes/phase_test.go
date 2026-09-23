@@ -88,11 +88,11 @@ func TestShiftBoundsMatchShiftOf(t *testing.T) {
 func TestPhasePredicateRejectsUnknownPhase(t *testing.T) {
 	today := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
 	for _, phase := range []string{PhaseUpcoming, PhaseRunning, PhaseEnded, PhaseArchived} {
-		if _, _, ok := phasePredicate(phase, today); !ok {
-			t.Errorf("phasePredicate(%q) must resolve", phase)
+		if _, _, ok := PhasePredicate(phase, today); !ok {
+			t.Errorf("PhasePredicate(%q) must resolve", phase)
 		}
 	}
-	if _, _, ok := phasePredicate("paused", today); ok {
+	if _, _, ok := PhasePredicate("paused", today); ok {
 		t.Fatal("unknown phase must not resolve")
 	}
 }
