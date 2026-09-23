@@ -85,6 +85,7 @@ const RESOURCE_LABELS: Record<string, string> = {
   library: "Kho học liệu",
   courses: "Khóa học",
   paths: "Lộ trình học",
+  class_messages: "Chat lớp",
   reports: "Báo cáo",
   members: "Thành viên",
   center: "Trung tâm",

@@ -42,6 +42,8 @@ export const classMath: Class = {
   note: null,
   phase: "running",
   course: null,
+  parent_class_id: null,
+  lineage_note: null,
 };
 
 export const classEnglish: Class = {
@@ -62,6 +64,8 @@ export const classEnglish: Class = {
   note: null,
   phase: "running",
   course: null,
+  parent_class_id: null,
+  lineage_note: null,
 };
 
 /** No sessions fell in the fixture period — never produces a collections/invoice row. */
@@ -83,6 +87,8 @@ export const classEmpty: Class = {
   note: null,
   phase: "running",
   course: null,
+  parent_class_id: null,
+  lineage_note: null,
 };
 
 // --- Contacts ---

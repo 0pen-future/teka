@@ -231,6 +231,9 @@ export const classSchema = z.object({
   phase: classPhaseSchema.default("running"),
   /** The course the class is attached to (`classes.CourseRefResponse`); null when none. */
   course: courseRefSchema.nullable().default(null),
+  /** The class this one split off from or continues (lịch sử lớp); null when it stands alone. */
+  parent_class_id: z.string().nullable().default(null),
+  lineage_note: z.string().nullable().default(null),
 });
 
 export type Class = z.infer<typeof classSchema>;
@@ -290,9 +293,20 @@ export const classUpdateInputSchema = z.object({
   note: z.string().trim().max(1000, "Tối đa 1000 ký tự").optional(),
   /** Same patch rule: absent keeps the course, `""` detaches, an id attaches. */
   course_id: z.string().optional(),
+  /** Same patch rule for the lineage link and its note. */
+  parent_class_id: z.string().optional(),
+  lineage_note: z.string().trim().max(1000, "Tối đa 1000 ký tự").optional(),
 });
 
 export type ClassUpdateInput = z.infer<typeof classUpdateInputSchema>;
+
+/** Form shape of the lineage card: the parent picker (`""` = none) and the note. */
+export const classLineageInputSchema = z.object({
+  parent_class_id: z.string(),
+  lineage_note: z.string().trim().max(1000, "Tối đa 1000 ký tự"),
+});
+
+export type ClassLineageInput = z.infer<typeof classLineageInputSchema>;
 
 /**
  * Form shape of the operational card on the class detail ("Thông tin vận
@@ -329,6 +343,21 @@ export function toClassUpdateInput(klass: Class, values: Partial<ClassOpsInput>)
   }
   if (values.note !== undefined && values.note !== (klass.note ?? "")) {
     input.note = values.note;
+  }
+  return input;
+}
+
+/** `PUT /classes/:id` body for a lineage edit: base fields plus only the lineage fields that changed. */
+export function toClassLineageUpdateInput(
+  klass: Class,
+  values: ClassLineageInput,
+): ClassUpdateInput {
+  const input = toClassUpdateInput(klass, {});
+  if (values.parent_class_id !== (klass.parent_class_id ?? "")) {
+    input.parent_class_id = values.parent_class_id;
+  }
+  if (values.lineage_note !== (klass.lineage_note ?? "")) {
+    input.lineage_note = values.lineage_note;
   }
   return input;
 }

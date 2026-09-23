@@ -1,6 +1,7 @@
 export { teachingRoutes } from "./routes";
 export { useCenterContext, type CenterContext } from "./hooks/use-center-context";
 export { usePendingPlanCount } from "./hooks/use-review-queue";
+export { teachingKeys } from "./hooks/teaching-keys";
 export {
   lessonPlanKey,
   personalNoteKey,

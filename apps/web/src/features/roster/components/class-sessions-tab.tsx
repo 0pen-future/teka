@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
 
-import { HvBadge, HvStateBlock, type HvBadgeVariant } from "@/components/hv";
+import { HvBadge, HvNotice, HvStateBlock, type HvBadgeVariant } from "@/components/hv";
 import { listClassSessions, sessionsKeys, type Session } from "@/features/attendance";
 import { cn } from "@/lib/utils";
 
+import { useClassProgram, useClassProgramLessons } from "../hooks/use-class-program";
 import { addDays, isScheduledSession, OPEN_ENDED_HORIZON_DAYS } from "../lib/class-sessions";
 import { formatFullDate, formatWeekday } from "../lib/roster-format";
 import type { Class } from "../schemas/roster-schemas";
@@ -32,11 +33,15 @@ interface ClassSessionsTabProps {
 
 /**
  * Every session of the class, oldest first, with its source (timetable or
- * manual). Read-only on purpose: browsing a class must never materialise
- * sessions, which the pending-attendance and period-close flows would then
- * pick up. Generation stays with the classbook and the calendar.
+ * manual) and, when a program is applied, the template lesson it lines up
+ * with: the n-th session that is not cancelled gets the n-th lesson.
+ * Read-only on purpose: browsing a class must never materialise sessions,
+ * which the pending-attendance and period-close flows would then pick up.
+ * Generation stays with the classbook and the calendar.
  */
 export function ClassSessionsTab({ klass, today }: ClassSessionsTabProps) {
+  const program = useClassProgram(klass.id);
+  const lessons = useClassProgramLessons(klass.id, Boolean(program.data));
   const window = {
     from: klass.start_date,
     to: klass.end_date ?? addDays(today, OPEN_ENDED_HORIZON_DAYS),
@@ -53,6 +58,19 @@ export function ClassSessionsTab({ klass, today }: ClassSessionsTabProps) {
       a.session_date.localeCompare(b.session_date) ||
       (a.start_time ?? "").localeCompare(b.start_time ?? ""),
   );
+  const orderedLessons = [...(lessons.data ?? [])].sort((a, b) => a.position - b.position);
+  const lessonTitleBySession = new Map<string, string>();
+  let countable = 0;
+  for (const session of sessions) {
+    if (session.status === "cancelled") continue;
+    const lesson = orderedLessons[countable];
+    if (lesson) lessonTitleBySession.set(session.id, lesson.title);
+    countable += 1;
+  }
+  const mismatch =
+    program.data && lessons.data && countable !== orderedLessons.length
+      ? { sessions: countable, lessons: orderedLessons.length }
+      : null;
 
   return (
     <div className="flex flex-col gap-3">
@@ -60,13 +78,28 @@ export function ClassSessionsTab({ klass, today }: ClassSessionsTabProps) {
         <h2 className="font-display text-[16px] font-bold text-ink-900">
           Buổi học ({sessions.length})
         </h2>
-        <Link
-          to={`/classbook?class_id=${klass.id}`}
-          className="font-display text-[13px] font-bold text-mint-600 hover:underline"
-        >
-          Điểm danh & nhận xét →
-        </Link>
+        <div className="flex flex-wrap items-center gap-3">
+          <Link
+            to={`/classbook?class_id=${klass.id}`}
+            className="font-display text-[13px] font-bold text-mint-600 hover:underline"
+          >
+            Sổ đầu bài
+          </Link>
+          <Link
+            to={`/classbook?class_id=${klass.id}`}
+            className="font-display text-[13px] font-bold text-mint-600 hover:underline"
+          >
+            Điểm danh & nhận xét →
+          </Link>
+        </div>
       </div>
+
+      {mismatch ? (
+        <HvNotice tone="warning">
+          Lớp có {mismatch.sessions} buổi thực (không tính buổi huỷ) nhưng chương trình mẫu có{" "}
+          {mismatch.lessons} buổi. Danh sách buổi không tự sinh hay xoá theo chương trình.
+        </HvNotice>
+      ) : null}
 
       {isPending ? (
         <HvStateBlock state="loading" title="Đang tải buổi học" />
@@ -86,6 +119,7 @@ export function ClassSessionsTab({ klass, today }: ClassSessionsTabProps) {
                 <th className={headCellClassName}>Giờ</th>
                 <th className={headCellClassName}>Trạng thái</th>
                 <th className={headCellClassName}>Học viên</th>
+                <th className={headCellClassName}>Buổi mẫu</th>
                 <th className={headCellClassName}>Nguồn</th>
               </tr>
             </thead>
@@ -111,6 +145,9 @@ export function ClassSessionsTab({ klass, today }: ClassSessionsTabProps) {
                       ) : null}
                     </td>
                     <td className={cn(cellClassName, "text-ink-500")}>{session.student_count}</td>
+                    <td className={cn(cellClassName, "text-ink-700")}>
+                      {lessonTitleBySession.get(session.id) ?? "—"}
+                    </td>
                     <td className={cn(cellClassName, "text-ink-500")}>
                       {isScheduledSession(session, klass.schedules) ? "Lịch tuần" : "Thêm tay"}
                     </td>

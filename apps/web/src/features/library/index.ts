@@ -9,12 +9,22 @@ export {
   useVersions,
   versionsKeys,
 } from "./hooks/use-library";
+export { templateLessonDetailSchema } from "./schemas/library-schemas";
 export type {
+  LessonExercise,
+  LessonMaterial,
   ProgramTemplate,
   TemplateLesson,
+  TemplateLessonDetail,
   TemplateVersion,
   TemplateVersionStatus,
 } from "./schemas/library-schemas";
-export { defaultVersion, versionLabel, versionStatusLabel } from "./lib/library-labels";
+export {
+  defaultVersion,
+  formatDifficulty,
+  materialKindLabel,
+  versionLabel,
+  versionStatusLabel,
+} from "./lib/library-labels";
 export { rowErrorsFromApi } from "./lib/row-errors";
 export type { RowErrors } from "./lib/row-errors";

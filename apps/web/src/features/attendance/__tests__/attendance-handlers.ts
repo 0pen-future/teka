@@ -45,6 +45,8 @@ export const fixtureClass: Class = {
   note: null,
   phase: "running",
   course: null,
+  parent_class_id: null,
+  lineage_note: null,
 };
 
 function buildRosterTemplate(): AttendanceRow[] {

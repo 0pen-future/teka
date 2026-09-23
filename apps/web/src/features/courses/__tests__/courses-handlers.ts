@@ -96,6 +96,8 @@ export const classToan6A: Class = {
   note: null,
   phase: "running",
   course: { id: courseToan6.id, code: courseToan6.code, name: courseToan6.name },
+  parent_class_id: null,
+  lineage_note: null,
 };
 
 interface CoursesStore {

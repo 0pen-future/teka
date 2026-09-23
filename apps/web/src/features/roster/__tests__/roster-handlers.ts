@@ -1,10 +1,22 @@
 import { http, HttpResponse } from "msw";
 
 import type { AttendanceRow, Session } from "@/features/attendance";
-import { API_URL, fail, listMeta, ok } from "@/test/msw/handlers";
+import type { AuditLog } from "@/features/audit";
+import {
+  exerciseBai1,
+  exerciseBai2,
+  lessonPublishedPhanSo,
+  lessonPublishedSoTuNhien,
+  materialSlide,
+  materialVideo,
+  templateToan6,
+  versionToan6Published,
+} from "@/features/library/__tests__/library-handlers";
+import { API_URL, fail, listMeta, ok, primaryTeacher } from "@/test/msw/handlers";
 
 type AttendanceStatus = NonNullable<AttendanceRow["status"]>;
 
+import type { ClassLesson, ClassMessage, ClassProgram } from "../schemas/class-program-schemas";
 import type {
   Class,
   ClassInvitation,
@@ -92,6 +104,87 @@ export const classWithSchedule: Class = {
   note: null,
   phase: "running",
   course: null,
+  parent_class_id: null,
+  lineage_note: null,
+};
+
+/** A second, ended class the lineage card can point at as the parent. */
+export const classParentToan5: Class = {
+  ...classWithSchedule,
+  id: "70000000-0000-4000-8000-000000000002",
+  name: "Toán 5B",
+  code: "TOAN5B",
+  start_date: "2025-01-06",
+  end_date: "2025-12-20",
+  phase: "ended",
+  tags: [],
+  schedules: [],
+};
+
+/**
+ * The published Toán 6 version applied to a class, as `GET /classes/:id/program`
+ * answers it; the lessons read through are the library fixtures' published rows
+ * with their materials (one shared, one not) and exercises.
+ */
+export const programToan6: ClassProgram = {
+  template_version_id: versionToan6Published.id,
+  template_id: templateToan6.id,
+  template_name: templateToan6.name,
+  version_no: versionToan6Published.version_no,
+  lesson_count: 2,
+  applied_at: "2026-09-15T08:00:00Z",
+  applied_by: primaryTeacher.id,
+};
+
+export const programLessonsToan6: ClassLesson[] = [
+  {
+    ...lessonPublishedSoTuNhien,
+    materials: [
+      { ...materialSlide, shared_with_students: false, position: 1 },
+      { ...materialVideo, shared_with_students: true, position: 2 },
+    ],
+    exercises: [{ ...exerciseBai1, position: 1 }],
+  },
+  {
+    ...lessonPublishedPhanSo,
+    materials: [],
+    exercises: [{ ...exerciseBai2, position: 1 }],
+  },
+];
+
+export const messageFromMinh: ClassMessage = {
+  id: "76000000-0000-4000-8000-000000000001",
+  class_id: classWithSchedule.id,
+  author_id: "73000000-0000-4000-8000-000000000002",
+  author_name: "Thầy Minh",
+  body: "Tuần này kiểm tra 15 phút nhé.",
+  created_at: "2026-09-20T08:00:00Z",
+};
+
+export const messageFromLan: ClassMessage = {
+  id: "76000000-0000-4000-8000-000000000002",
+  class_id: classWithSchedule.id,
+  author_id: primaryTeacher.id,
+  author_name: primaryTeacher.full_name,
+  body: "Đã nhận, cảm ơn thầy.",
+  created_at: "2026-09-21T08:00:00Z",
+};
+
+export const auditLogClassUpdate: AuditLog = {
+  id: "77000000-0000-4000-8000-000000000001",
+  occurred_at: "2026-09-22T09:30:00Z",
+  actor_user_id: primaryTeacher.id,
+  actor_name: primaryTeacher.full_name,
+  actor_role: "owner",
+  action: "class.update",
+  method: "PUT",
+  path: `/api/v1/classes/${classWithSchedule.id}`,
+  entity_type: "class",
+  entity_id: classWithSchedule.id,
+  status_code: 200,
+  ip: "127.0.0.1",
+  user_agent: "vitest",
+  metadata: null,
 };
 
 /**
@@ -277,6 +370,18 @@ export function seedRosterStore() {
     // sessionId → studentId → explicit attendance status; wins over `absences`
     // so tests can stage `late`/`excused` rows the boolean list cannot express.
     attendanceStatus: {} as Record<string, Record<string, AttendanceStatus>>,
+    // The applied template version, if any; tests set `programToan6` to
+    // exercise the read-through tabs. `curriculumDiffers` stages the 409 an
+    // apply gets while the class keeps a different lesson list.
+    program: null as ClassProgram | null,
+    programLessons: [] as ClassLesson[],
+    curriculumDiffers: false,
+    // courseId → default template version the course recommends.
+    courseDefaultVersion: {} as Record<string, string | null>,
+    // Newest last; the handler reverses and pages them.
+    messages: [] as ClassMessage[],
+    messagesPageSize: 20,
+    auditLogs: [] as AuditLog[],
   };
 }
 
@@ -575,6 +680,8 @@ export const rosterHandlers = [
       my_staff_roles: [],
       student_count: 0,
       course: courseRefOf(body.course_id),
+      parent_class_id: null,
+      lineage_note: null,
     };
     store.classes.push(klass);
     return HttpResponse.json(ok(klass), { status: 201 });
@@ -594,6 +701,8 @@ export const rosterHandlers = [
       recruiting?: boolean;
       note?: string;
       course_id?: string;
+      parent_class_id?: string;
+      lineage_note?: string;
     };
     klass.name = body.name;
     klass.start_date = body.start_date;
@@ -606,6 +715,8 @@ export const rosterHandlers = [
     if (body.note !== undefined) klass.note = orNull(body.note);
     // Same patch rule as the API: absent keeps, "" detaches, an id attaches.
     if (body.course_id !== undefined) klass.course = courseRefOf(body.course_id);
+    if (body.parent_class_id !== undefined) klass.parent_class_id = orNull(body.parent_class_id);
+    if (body.lineage_note !== undefined) klass.lineage_note = orNull(body.lineage_note);
     return HttpResponse.json(ok(withStudentCount(klass)));
   }),
   http.get(`${API_URL}/courses`, () => {
@@ -978,6 +1089,118 @@ export const rosterHandlers = [
     invitation.status = "assigned";
     invitation.assigned_at = now;
     return HttpResponse.json(ok({ ...invitation, moved_planned_sessions: moved }));
+  }),
+
+  // --- Class program (template version applied to the class) ---
+  http.get(`${API_URL}/classes/:id/program`, ({ params }) => {
+    if (!store.classes.some((item) => item.id === params.id)) {
+      return HttpResponse.json(fail("NOT_FOUND", "class not found"), { status: 404 });
+    }
+    // The real envelope drops `data` for a nil payload instead of sending null.
+    return HttpResponse.json(store.program ? ok(store.program) : { success: true });
+  }),
+  http.get(`${API_URL}/classes/:id/program/lessons`, ({ params }) => {
+    if (!store.classes.some((item) => item.id === params.id)) {
+      return HttpResponse.json(fail("NOT_FOUND", "class not found"), { status: 404 });
+    }
+    return HttpResponse.json(ok(store.program ? store.programLessons : []));
+  }),
+  http.put(`${API_URL}/classes/:id/program`, async ({ params, request }) => {
+    if (!store.classes.some((item) => item.id === params.id)) {
+      return HttpResponse.json(fail("NOT_FOUND", "class not found"), { status: 404 });
+    }
+    const body = (await request.json()) as { template_version_id: string; confirm?: boolean };
+    if (store.curriculumDiffers && !body.confirm) {
+      return HttpResponse.json(
+        fail("CURRICULUM_DIFFERS", "Chương trình hiện tại của lớp khác với chương trình mẫu", {
+          current_count: "3",
+          template_count: "2",
+        }),
+        { status: 409 },
+      );
+    }
+    store.program = { ...programToan6, template_version_id: body.template_version_id };
+    store.programLessons = programLessonsToan6.map((lesson) => ({ ...lesson }));
+    store.curriculumDiffers = false;
+    return HttpResponse.json(ok(store.program));
+  }),
+  http.delete(`${API_URL}/classes/:id/program`, ({ params }) => {
+    if (!store.classes.some((item) => item.id === params.id) || store.program === null) {
+      return HttpResponse.json(fail("NOT_FOUND", "program not found"), { status: 404 });
+    }
+    store.program = null;
+    store.programLessons = [];
+    return HttpResponse.json(ok({ deleted: true }));
+  }),
+  http.get(`${API_URL}/courses/:id`, ({ params }) => {
+    const course = [courseOptionToan, courseOptionVan].find((item) => item.id === params.id);
+    if (!course) {
+      return HttpResponse.json(fail("NOT_FOUND", "course not found"), { status: 404 });
+    }
+    return HttpResponse.json(
+      ok({
+        ...course,
+        default_template_version_id: store.courseDefaultVersion[course.id] ?? null,
+      }),
+    );
+  }),
+
+  // --- Class chat ---
+  http.get(`${API_URL}/classes/:id/messages`, ({ params, request }) => {
+    if (!store.classes.some((item) => item.id === params.id)) {
+      return HttpResponse.json(fail("NOT_FOUND", "class not found"), { status: 404 });
+    }
+    const before = new URL(request.url).searchParams.get("before");
+    const newestFirst = [...store.messages].reverse();
+    const start = before ? newestFirst.findIndex((item) => item.id === before) + 1 : 0;
+    const page = newestFirst.slice(start, start + store.messagesPageSize);
+    const hasMore = start + page.length < newestFirst.length;
+    return HttpResponse.json(
+      ok({ items: page, next_cursor: hasMore ? page[page.length - 1]!.id : "" }),
+    );
+  }),
+  http.post(`${API_URL}/classes/:id/messages`, async ({ params, request }) => {
+    if (!store.classes.some((item) => item.id === params.id)) {
+      return HttpResponse.json(fail("NOT_FOUND", "class not found"), { status: 404 });
+    }
+    const body = (await request.json()) as { body: string };
+    if (body.body.trim() === "") {
+      return HttpResponse.json(
+        fail("VALIDATION_ERROR", "Dữ liệu không hợp lệ", { body: "Bắt buộc nhập nội dung" }),
+        { status: 422 },
+      );
+    }
+    const message: ClassMessage = {
+      id: nextId("76000000-0000-4000-8000-"),
+      class_id: String(params.id),
+      author_id: primaryTeacher.id,
+      author_name: primaryTeacher.full_name,
+      body: body.body,
+      created_at: new Date().toISOString(),
+    };
+    store.messages.push(message);
+    return HttpResponse.json(ok(message), { status: 201 });
+  }),
+  http.delete(`${API_URL}/classes/:id/messages/:mid`, ({ params }) => {
+    const index = store.messages.findIndex((item) => item.id === params.mid);
+    if (index === -1) {
+      return HttpResponse.json(fail("NOT_FOUND", "message not found"), { status: 404 });
+    }
+    store.messages.splice(index, 1);
+    return HttpResponse.json(ok({ deleted: true }));
+  }),
+
+  // --- Change history of one record ---
+  http.get(`${API_URL}/audit-logs`, ({ request }) => {
+    const url = new URL(request.url);
+    const entityType = url.searchParams.get("entity_type");
+    const entityId = url.searchParams.get("entity_id");
+    const items = store.auditLogs.filter(
+      (log) =>
+        (!entityType || log.entity_type === entityType) &&
+        (!entityId || log.entity_id === entityId),
+    );
+    return HttpResponse.json(ok({ items, next_cursor: "" }));
   }),
 ];
 

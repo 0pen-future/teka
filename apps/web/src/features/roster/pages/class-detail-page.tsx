@@ -5,37 +5,38 @@ import { HvSegmented, HvStateBlock, type HvSegmentedOption } from "@/components/
 import { useCenterContext } from "@/features/teaching";
 import { ApiError } from "@/lib/api/errors";
 
+import { ClassChatPanel } from "../components/class-chat-panel";
 import { ClassDetailHeader } from "../components/class-detail-header";
+import { ClassDocumentsTab } from "../components/class-documents-tab";
+import { ClassHomeworkTab } from "../components/class-homework-tab";
 import { ClassInfoTab } from "../components/class-info-tab";
 import { ClassSessionsTab } from "../components/class-sessions-tab";
 import { ClassStudentsTab } from "../components/class-students-tab";
 import { useClass } from "../hooks/use-classes";
 import { canWriteClass } from "../lib/class-permissions";
 
-const liveTabs = ["info", "students", "sessions"] as const;
-type LiveTab = (typeof liveTabs)[number];
+const tabs = ["info", "students", "sessions", "chat", "homework", "documents"] as const;
+type Tab = (typeof tabs)[number];
 
-const tabSchema = z.enum(liveTabs).catch("info");
-
-const LATER_PHASE_HINT = "Có ở phase sau";
+const tabSchema = z.enum(tabs).catch("info");
 
 const tabOptions: HvSegmentedOption<string>[] = [
   { value: "info", label: "Thông tin" },
   { value: "students", label: "Học viên" },
   { value: "sessions", label: "Buổi học" },
-  { value: "chat", label: "Chat", disabled: true, title: LATER_PHASE_HINT },
-  { value: "homework", label: "Bài tập", disabled: true, title: LATER_PHASE_HINT },
-  { value: "documents", label: "Tài liệu", disabled: true, title: LATER_PHASE_HINT },
+  { value: "chat", label: "Chat" },
+  { value: "homework", label: "Bài tập" },
+  { value: "documents", label: "Tài liệu" },
 ];
 
 const TAB_ID_BASE = "class-detail";
 
-/** `/classes/:id` — header, tabs and the three tabs that already have data. */
+/** `/classes/:id` — header and the six tabs of a class. */
 export function ClassDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab: LiveTab = tabSchema.parse(searchParams.get("tab") ?? undefined);
-  const { isOwner } = useCenterContext();
+  const tab: Tab = tabSchema.parse(searchParams.get("tab") ?? undefined);
+  const { isOwner, has } = useCenterContext();
   const klass = useClass(id);
   const today = new Date().toISOString().slice(0, 10);
 
@@ -94,11 +95,27 @@ export function ClassDetailPage() {
         aria-labelledby={`${TAB_ID_BASE}-tab-${tab}`}
       >
         {tab === "info" ? (
-          <ClassInfoTab klass={klass.data} today={today} canWrite={canWrite} isOwner={isOwner} />
+          <ClassInfoTab
+            klass={klass.data}
+            today={today}
+            canWrite={canWrite}
+            isOwner={isOwner}
+            canReadAudit={has("audit.read")}
+          />
         ) : tab === "students" ? (
           <ClassStudentsTab klass={klass.data} />
-        ) : (
+        ) : tab === "sessions" ? (
           <ClassSessionsTab klass={klass.data} today={today} />
+        ) : tab === "chat" ? (
+          <ClassChatPanel
+            klass={klass.data}
+            canPost={has("class_messages.post")}
+            isOwner={isOwner}
+          />
+        ) : tab === "homework" ? (
+          <ClassHomeworkTab klass={klass.data} />
+        ) : (
+          <ClassDocumentsTab klass={klass.data} />
         )}
       </div>
     </div>

@@ -4,7 +4,9 @@ import { useClassStaff } from "../hooks/use-class-staff";
 import { formatScheduleLabel, formatWeekday } from "../lib/roster-format";
 import { activeSchedules } from "../lib/schedule-diff";
 import type { Class } from "../schemas/roster-schemas";
+import { ClassLineageCard } from "./class-lineage-card";
 import { ClassOpsCard } from "./class-ops-card";
+import { ClassProgramCard } from "./class-program-card";
 import { ClassTeamSection } from "./class-team-section";
 import { SectionCard, StaffList } from "./section-card";
 
@@ -13,6 +15,7 @@ interface ClassInfoTabProps {
   today: string;
   canWrite: boolean;
   isOwner: boolean;
+  canReadAudit: boolean;
 }
 
 function endTime(start: string, durationMin: number): string {
@@ -23,8 +26,8 @@ function endTime(start: string, durationMin: number): string {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
-/** The "Thông tin" tab: schedule, ops card, teaching team, shortcuts and the later-phase placeholders. */
-export function ClassInfoTab({ klass, today, canWrite, isOwner }: ClassInfoTabProps) {
+/** The "Thông tin" tab: schedule, ops card, teaching team, shortcuts, program and lineage. */
+export function ClassInfoTab({ klass, today, canWrite, isOwner, canReadAudit }: ClassInfoTabProps) {
   const staff = useClassStaff(klass.id);
   const hocVu = (staff.data ?? []).filter(
     (item) => item.ended_at === null && item.role_key === "hoc_vu",
@@ -99,13 +102,9 @@ export function ClassInfoTab({ klass, today, canWrite, isOwner }: ClassInfoTabPr
         </ul>
       </SectionCard>
 
-      <SectionCard title="Chương trình học">
-        <p className="text-[13px] text-ink-400">Lớp chưa có buổi học trong chương trình.</p>
-      </SectionCard>
+      <ClassProgramCard klass={klass} isOwner={isOwner} />
 
-      <SectionCard title="Lịch sử lớp">
-        <p className="text-[13px] text-ink-400">Chưa có sự kiện nào được ghi lại.</p>
-      </SectionCard>
+      <ClassLineageCard klass={klass} canWrite={canWrite} canReadAudit={canReadAudit} />
     </div>
   );
 }

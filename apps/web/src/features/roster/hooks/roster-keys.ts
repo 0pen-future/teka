@@ -58,3 +58,17 @@ export const classInvitationsKeys = {
   lists: () => [...classInvitationsKeys.all, "list"] as const,
   list: (params: ListClassInvitationsParams) => [...classInvitationsKeys.lists(), params] as const,
 };
+
+export const classProgramKeys = {
+  all: ["roster", "classProgram"] as const,
+  detail: (classId: string) => [...classProgramKeys.all, "detail", classId] as const,
+  lessons: (classId: string) => [...classProgramKeys.all, "lessons", classId] as const,
+  /** The course's default template version, read for "Áp dụng từ khóa mẫu". */
+  courseDefault: (courseId: string) =>
+    [...classProgramKeys.all, "course-default", courseId] as const,
+};
+
+export const classMessagesKeys = {
+  all: ["roster", "classMessages"] as const,
+  list: (classId: string) => [...classMessagesKeys.all, "list", classId] as const,
+};

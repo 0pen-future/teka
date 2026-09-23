@@ -356,6 +356,13 @@ export const PERMISSION_CATALOG = [
     "Tạo, sửa, xoá lộ trình học; thêm, sắp xếp giai đoạn và gán khóa học vào giai đoạn.",
   ),
   perm(
+    "class_messages.post",
+    "Nhắn tin trong lớp",
+    "special",
+    "low",
+    "Gửi tin nhắn nội bộ trong các lớp mình đang phụ trách; chủ trung tâm nhắn được mọi lớp.",
+  ),
+  perm(
     "reports.send",
     "Gửi báo cáo học phí",
     "special",

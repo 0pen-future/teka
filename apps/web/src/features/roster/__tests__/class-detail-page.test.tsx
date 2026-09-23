@@ -118,13 +118,11 @@ describe("ClassDetailPage", () => {
     expect(await screen.findByText("Đã sao chép mã lớp")).toBeInTheDocument();
   });
 
-  it("keeps Chat, Bài tập and Tài liệu tabs disabled with the later-phase hint", async () => {
+  it("opens on the Thông tin tab with every tab enabled", async () => {
     renderPage();
     await screen.findByRole("heading", { name: "Toán 6A" });
-    for (const name of ["Chat", "Bài tập", "Tài liệu"]) {
-      const tab = screen.getByRole("tab", { name });
-      expect(tab).toBeDisabled();
-      expect(tab).toHaveAttribute("title", "Có ở phase sau");
+    for (const name of ["Thông tin", "Học viên", "Buổi học", "Chat", "Bài tập", "Tài liệu"]) {
+      expect(screen.getByRole("tab", { name })).toBeEnabled();
     }
     expect(screen.getByRole("tab", { name: "Thông tin" })).toHaveAttribute("aria-selected", "true");
   });
@@ -160,7 +158,7 @@ describe("ClassDetailPage", () => {
 
       expect(screen.getByText("Lịch sử lớp")).toBeInTheDocument();
       expect(screen.getByText("Chương trình học")).toBeInTheDocument();
-      expect(screen.getByText("Lớp chưa có buổi học trong chương trình.")).toBeInTheDocument();
+      expect(await screen.findByText("Lớp chưa áp dụng chương trình mẫu.")).toBeInTheDocument();
     });
 
     it("lists the teaching staff and the hoc_vu staff as the class contact", async () => {
