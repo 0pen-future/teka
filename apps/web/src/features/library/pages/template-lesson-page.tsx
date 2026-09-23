@@ -6,6 +6,7 @@ import { useCenterContext } from "@/features/teaching";
 import { ApiError } from "@/lib/api/errors";
 import { useApiFormErrors } from "@/lib/forms/use-api-form-errors";
 
+import { LessonAttachments } from "../components/lesson-attachments";
 import { LessonFields } from "../components/lesson-form";
 import { useLessonForm } from "../hooks/use-lesson-form";
 import { useLesson, useTemplate, useUpdateLesson, useVersions } from "../hooks/use-library";
@@ -15,6 +16,7 @@ import {
   toLessonInput,
   type ProgramTemplate,
   type TemplateLesson,
+  type TemplateLessonDetail,
   type TemplateVersion,
 } from "../schemas/library-schemas";
 
@@ -63,7 +65,7 @@ export function TemplateLessonPage() {
 interface LessonViewProps {
   template: ProgramTemplate;
   version: TemplateVersion;
-  lesson: TemplateLesson;
+  lesson: TemplateLessonDetail;
 }
 
 function LessonView({ template, version, lesson }: LessonViewProps) {
@@ -105,6 +107,8 @@ function LessonView({ template, version, lesson }: LessonViewProps) {
           <LessonReadOnly lesson={lesson} />
         </>
       )}
+
+      <LessonAttachments lesson={lesson} templateId={template.id} editable={editable} />
     </div>
   );
 }

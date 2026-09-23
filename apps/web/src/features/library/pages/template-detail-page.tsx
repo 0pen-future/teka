@@ -7,9 +7,11 @@ import {
   HvConfirmDialog,
   HvModal,
   HvNotice,
+  HvSegmented,
   HvSelect,
   HvStateBlock,
   hvToast,
+  type HvSegmentedOption,
 } from "@/components/hv";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { useCenterContext } from "@/features/teaching";
@@ -17,6 +19,8 @@ import { ApiError } from "@/lib/api/errors";
 
 import { LessonDialog } from "../components/lesson-form";
 import { LessonsTable } from "../components/lessons-table";
+import { LogFieldsEditor, LogFieldsReadOnly } from "../components/log-fields-editor";
+import { ScoreSetEditor, ScoreSetReadOnly } from "../components/score-set-editor";
 import { TemplateDialog } from "../components/template-dialog";
 import {
   useArchiveVersion,
@@ -27,6 +31,7 @@ import {
   usePublishVersion,
   useReorderLessons,
   useTemplate,
+  useVersionDetail,
   useVersions,
 } from "../hooks/use-library";
 import { defaultVersion, versionLabel } from "../lib/library-labels";
@@ -36,6 +41,15 @@ import type { ProgramTemplate, TemplateLesson, TemplateVersion } from "../schema
 function apiMessage(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
 }
+
+type Section = "lessons" | "grading";
+
+const sectionOptions: HvSegmentedOption<Section>[] = [
+  { value: "lessons", label: "Buổi học" },
+  { value: "grading", label: "Nhật ký & Điểm" },
+];
+
+const SECTION_ID_BASE = "template-section";
 
 /**
  * `/library/templates/:id` — one template, its version picker and the
@@ -116,6 +130,7 @@ function TemplateWorkspace({ template, versions }: TemplateWorkspaceProps) {
   const [addingLesson, setAddingLesson] = useState(false);
   const [lessonToDelete, setLessonToDelete] = useState<TemplateLesson | null>(null);
   const [changelog, setChangelog] = useState("");
+  const [section, setSection] = useState<Section>("lessons");
   const changelogId = useId();
 
   function selectVersion(versionNo: number) {
@@ -228,50 +243,72 @@ function TemplateWorkspace({ template, versions }: TemplateWorkspaceProps) {
         </HvNotice>
       ) : null}
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="font-display text-[18px] font-extrabold text-ink-900">Buổi học mẫu</h2>
-        {authoring && selected ? (
-          <HvButton size="sm" onClick={() => setAddingLesson(true)}>
-            Thêm buổi học
-          </HvButton>
-        ) : null}
-      </div>
+      <HvSegmented
+        variant="tabs"
+        idBase={SECTION_ID_BASE}
+        aria-label="Nội dung phiên bản"
+        options={sectionOptions}
+        value={section}
+        onValueChange={setSection}
+      />
 
-      {!selected ? (
-        <HvStateBlock state="empty" title="Chương trình này chưa có phiên bản nào." />
-      ) : lessons.isPending ? (
-        <HvStateBlock state="loading" title="Đang tải buổi học" />
-      ) : lessons.isError ? (
-        <HvStateBlock
-          state="error"
-          title="Không tải được buổi học"
-          action={
-            <HvButton size="sm" variant="ghost" onClick={() => void lessons.refetch()}>
-              Thử lại
-            </HvButton>
-          }
-        />
-      ) : lessonRows.length === 0 ? (
-        <HvStateBlock
-          state="empty"
-          title="Phiên bản này chưa có buổi học nào."
-          description={authoring ? "Thêm buổi đầu tiên bằng nút Thêm buổi học." : undefined}
-        />
-      ) : (
-        <LessonsTable
-          lessons={lessonRows}
-          templateId={template.id}
-          editing={
-            authoring
-              ? {
-                  pending: reorder.isPending || removeLesson.isPending,
-                  onMove: moveLesson,
-                  onDelete: setLessonToDelete,
+      <div
+        role="tabpanel"
+        id={`${SECTION_ID_BASE}-panel-${section}`}
+        aria-labelledby={`${SECTION_ID_BASE}-tab-${section}`}
+        className="flex flex-col gap-4"
+      >
+        {section === "lessons" ? (
+          <>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="font-display text-[18px] font-extrabold text-ink-900">Buổi học mẫu</h2>
+              {authoring && selected ? (
+                <HvButton size="sm" onClick={() => setAddingLesson(true)}>
+                  Thêm buổi học
+                </HvButton>
+              ) : null}
+            </div>
+
+            {!selected ? (
+              <HvStateBlock state="empty" title="Chương trình này chưa có phiên bản nào." />
+            ) : lessons.isPending ? (
+              <HvStateBlock state="loading" title="Đang tải buổi học" />
+            ) : lessons.isError ? (
+              <HvStateBlock
+                state="error"
+                title="Không tải được buổi học"
+                action={
+                  <HvButton size="sm" variant="ghost" onClick={() => void lessons.refetch()}>
+                    Thử lại
+                  </HvButton>
                 }
-              : undefined
-          }
-        />
-      )}
+              />
+            ) : lessonRows.length === 0 ? (
+              <HvStateBlock
+                state="empty"
+                title="Phiên bản này chưa có buổi học nào."
+                description={authoring ? "Thêm buổi đầu tiên bằng nút Thêm buổi học." : undefined}
+              />
+            ) : (
+              <LessonsTable
+                lessons={lessonRows}
+                templateId={template.id}
+                editing={
+                  authoring
+                    ? {
+                        pending: reorder.isPending || removeLesson.isPending,
+                        onMove: moveLesson,
+                        onDelete: setLessonToDelete,
+                      }
+                    : undefined
+                }
+              />
+            )}
+          </>
+        ) : (
+          <GradingPanel version={selected} templateId={template.id} authoring={authoring} />
+        )}
+      </div>
 
       {canEdit ? (
         <>
@@ -433,5 +470,67 @@ function TemplateWorkspace({ template, versions }: TemplateWorkspaceProps) {
         </>
       ) : null}
     </div>
+  );
+}
+
+interface GradingPanelProps {
+  version: TemplateVersion | undefined;
+  templateId: string;
+  authoring: boolean;
+}
+
+/**
+ * The version's log fields and score set. Editors are keyed on the
+ * server's copy so a save (or a version switch) starts them fresh.
+ */
+function GradingPanel({ version, templateId, authoring }: GradingPanelProps) {
+  const detail = useVersionDetail(version?.id);
+
+  if (!version) {
+    return <HvStateBlock state="empty" title="Chương trình này chưa có phiên bản nào." />;
+  }
+  if (detail.isPending) {
+    return <HvStateBlock state="loading" title="Đang tải nhật ký và cơ cấu điểm" />;
+  }
+  if (detail.isError) {
+    return (
+      <HvStateBlock
+        state="error"
+        title="Không tải được nhật ký và cơ cấu điểm"
+        action={
+          <HvButton size="sm" variant="ghost" onClick={() => void detail.refetch()}>
+            Thử lại
+          </HvButton>
+        }
+      />
+    );
+  }
+
+  const { log_fields: logFields, score_set: scoreSet } = detail.data;
+  const logFieldsKey = logFields.map((f) => f.id).join(",");
+  const scoreSetKey = scoreSet.map((c) => `${c.key}:${c.label}:${c.max}:${c.weight}`).join(",");
+  return (
+    <>
+      {authoring ? (
+        <LogFieldsEditor
+          key={`${version.id}:${logFieldsKey}`}
+          versionId={version.id}
+          templateId={templateId}
+          fields={logFields}
+        />
+      ) : (
+        <LogFieldsReadOnly fields={logFields} />
+      )}
+      {authoring ? (
+        <ScoreSetEditor
+          key={`${version.id}:${scoreSetKey}`}
+          versionId={version.id}
+          templateId={templateId}
+          components={scoreSet}
+        />
+      ) : (
+        <ScoreSetReadOnly components={scoreSet} />
+      )}
+    </>
   );
 }

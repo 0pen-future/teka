@@ -16,36 +16,38 @@ import { Input } from "@/components/ui/input";
 import { useCenterContext } from "@/features/teaching";
 import { cn } from "@/lib/utils";
 
+import { ExercisesTab, MaterialsTab } from "../components/items-tabs";
 import { LessonsTable } from "../components/lessons-table";
 import { TemplateDialog } from "../components/template-dialog";
 import { useLessons, useTemplatesList, useVersions } from "../hooks/use-library";
 import { defaultVersion, versionLabel, versionStatusVariant } from "../lib/library-labels";
 import type { ProgramTemplate } from "../schemas/library-schemas";
 
-const liveTabs = ["templates", "lessons"] as const;
-type LiveTab = (typeof liveTabs)[number];
+const tabs = ["templates", "lessons", "materials", "exercises"] as const;
+type Tab = (typeof tabs)[number];
 
-const tabSchema = z.enum(liveTabs).catch("templates");
+const tabSchema = z.enum(tabs).catch("templates");
 
-const LATER_PHASE_HINT = "Có ở phase sau";
-
-const tabOptions: HvSegmentedOption<string>[] = [
+const tabOptions: HvSegmentedOption<Tab>[] = [
   { value: "templates", label: "Chương trình mẫu" },
   { value: "lessons", label: "Buổi học mẫu" },
-  { value: "materials", label: "Học liệu", disabled: true, title: LATER_PHASE_HINT },
-  { value: "homework", label: "Bài tập", disabled: true, title: LATER_PHASE_HINT },
+  { value: "materials", label: "Học liệu" },
+  { value: "exercises", label: "Bài tập" },
 ];
 
 const TAB_ID_BASE = "library";
 
-/** `/library` — the center's program-template catalog and a browser for one version's lessons. */
+/**
+ * `/library` — the center's program-template catalog, a browser for one
+ * version's lessons, and the shared material and exercise catalogs.
+ */
 export function LibraryPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab: LiveTab = tabSchema.parse(searchParams.get("tab") ?? undefined);
+  const tab: Tab = tabSchema.parse(searchParams.get("tab") ?? undefined);
   const { has, isResolved } = useCenterContext();
   const canEdit = has("library.edit");
 
-  function selectTab(next: string) {
+  function selectTab(next: Tab) {
     const params = new URLSearchParams(searchParams);
     if (next === "templates") {
       params.delete("tab");
@@ -82,8 +84,12 @@ export function LibraryPage() {
           <HvStateBlock state="loading" title="Đang tải kho học liệu" />
         ) : tab === "templates" ? (
           <TemplatesTab canEdit={canEdit} />
-        ) : (
+        ) : tab === "lessons" ? (
           <LessonsTab />
+        ) : tab === "materials" ? (
+          <MaterialsTab canEdit={canEdit} />
+        ) : (
+          <ExercisesTab canEdit={canEdit} />
         )}
       </div>
     </div>

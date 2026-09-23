@@ -1,6 +1,11 @@
 import type { HvBadgeVariant } from "@/components/hv";
 
-import type { TemplateVersion, TemplateVersionStatus } from "../schemas/library-schemas";
+import type {
+  LogFieldKind,
+  MaterialKind,
+  TemplateVersion,
+  TemplateVersionStatus,
+} from "../schemas/library-schemas";
 
 export const versionStatusLabel: Record<TemplateVersionStatus, string> = {
   draft: "Bản nháp",
@@ -33,4 +38,22 @@ export function defaultVersion(versions: TemplateVersion[]): TemplateVersion | u
 
 export function formatDuration(minutes: number | null): string {
   return minutes === null ? "—" : `${minutes} phút`;
+}
+
+export const materialKindLabel: Record<MaterialKind, string> = {
+  link: "Liên kết",
+  doc: "Tài liệu",
+  video: "Video",
+  other: "Khác",
+};
+
+export const logFieldKindLabel: Record<LogFieldKind, string> = {
+  text: "Văn bản",
+  number: "Số",
+  select: "Chọn một",
+  checkbox: "Đánh dấu",
+};
+
+export function formatDifficulty(difficulty: number | null): string {
+  return difficulty === null ? "—" : `Mức ${difficulty}`;
 }

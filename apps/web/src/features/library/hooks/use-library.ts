@@ -2,26 +2,55 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 
 import {
   archiveVersion,
+  createExercise,
   createLesson,
+  createMaterial,
   createTemplate,
   createVersion,
+  deleteExercise,
   deleteLesson,
+  deleteMaterial,
   deleteTemplate,
   getLesson,
   getTemplate,
+  getVersion,
+  listExercises,
   listLessons,
+  listMaterials,
   listTemplates,
   listVersions,
   publishVersion,
   reorderLessons,
+  setLessonExercises,
+  setLessonMaterials,
+  setLogFields,
+  setScoreSet,
+  updateExercise,
   updateLesson,
+  updateMaterial,
   updateTemplate,
+  type ListItemsParams,
   type ListTemplatesParams,
 } from "../api/library-api";
-import type { LessonInput, TemplateInput } from "../schemas/library-schemas";
-import { lessonsKeys, templatesKeys, versionsKeys } from "./library-keys";
+import type {
+  ExerciseInput,
+  LessonExerciseInput,
+  LessonInput,
+  LessonMaterialInput,
+  LogFieldInput,
+  MaterialInput,
+  ScoreComponentInput,
+  TemplateInput,
+} from "../schemas/library-schemas";
+import {
+  exercisesKeys,
+  lessonsKeys,
+  materialsKeys,
+  templatesKeys,
+  versionsKeys,
+} from "./library-keys";
 
-export { lessonsKeys, templatesKeys, versionsKeys };
+export { exercisesKeys, lessonsKeys, materialsKeys, templatesKeys, versionsKeys };
 
 export function useTemplatesList(params: ListTemplatesParams = {}, enabled = true) {
   return useQuery({
@@ -181,4 +210,148 @@ export function useUpdateLesson(id: string, versionId: string, templateId: strin
       void queryClient.invalidateQueries({ queryKey: versionsKeys.list(templateId) });
     },
   });
+}
+
+/**
+ * A version's own content: score set, log fields and lesson details. Read
+ * separately from the version list because it is only needed by the
+ * grading panel of one version at a time.
+ */
+export function useVersionDetail(versionId: string | undefined) {
+  return useQuery({
+    queryKey: versionsKeys.detail(versionId ?? ""),
+    queryFn: () => getVersion(versionId ?? ""),
+    enabled: Boolean(versionId),
+  });
+}
+
+/**
+ * Wholesale replace of one version-level list. Settled, not success: a
+ * 409 VERSION_LOCKED means the version was published under the author, and
+ * refetching the versions is what swaps the editor for the read-only view.
+ */
+function useVersionContentWrite<TVars, TData>(
+  versionId: string,
+  templateId: string,
+  mutationFn: (vars: TVars) => Promise<TData>,
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: versionsKeys.detail(versionId) });
+      void queryClient.invalidateQueries({ queryKey: versionsKeys.list(templateId) });
+    },
+  });
+}
+
+export function useSetLogFields(versionId: string, templateId: string) {
+  return useVersionContentWrite(versionId, templateId, (items: LogFieldInput[]) =>
+    setLogFields(versionId, items),
+  );
+}
+
+export function useSetScoreSet(versionId: string, templateId: string) {
+  return useVersionContentWrite(versionId, templateId, (items: ScoreComponentInput[]) =>
+    setScoreSet(versionId, items),
+  );
+}
+
+/** Attachment writes change the lesson detail and the version's lesson details alike. */
+function useLessonAttachmentWrite<TVars, TData>(
+  lessonId: string,
+  versionId: string,
+  templateId: string,
+  mutationFn: (vars: TVars) => Promise<TData>,
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: lessonsKeys.detail(lessonId) });
+      void queryClient.invalidateQueries({ queryKey: versionsKeys.detail(versionId) });
+      void queryClient.invalidateQueries({ queryKey: versionsKeys.list(templateId) });
+    },
+  });
+}
+
+export function useSetLessonMaterials(lessonId: string, versionId: string, templateId: string) {
+  return useLessonAttachmentWrite(lessonId, versionId, templateId, (items: LessonMaterialInput[]) =>
+    setLessonMaterials(lessonId, items),
+  );
+}
+
+export function useSetLessonExercises(lessonId: string, versionId: string, templateId: string) {
+  return useLessonAttachmentWrite(lessonId, versionId, templateId, (items: LessonExerciseInput[]) =>
+    setLessonExercises(lessonId, items),
+  );
+}
+
+export function useMaterialsList(params: ListItemsParams = {}, enabled = true) {
+  return useQuery({
+    queryKey: materialsKeys.list(params),
+    queryFn: () => listMaterials(params),
+    enabled,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useExercisesList(params: ListItemsParams = {}, enabled = true) {
+  return useQuery({
+    queryKey: exercisesKeys.list(params),
+    queryFn: () => listExercises(params),
+    enabled,
+    placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * Catalog writes: the list refetches, and because lessons embed the
+ * catalog row (title, kind, tags) every cached lesson and version detail
+ * goes stale too. Delete cannot be undone by a refetch, so 409 IN_USE is
+ * left to the caller to surface.
+ */
+function useCatalogWrite<TVars, TData>(
+  listsKey: readonly unknown[],
+  mutationFn: (vars: TVars) => Promise<TData>,
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    // onSettled: a failed write (a 409 on delete, a lost response) still
+    // means the cache may be behind the server.
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: listsKey });
+      void queryClient.invalidateQueries({ queryKey: lessonsKeys.details() });
+      void queryClient.invalidateQueries({ queryKey: versionsKeys.details() });
+    },
+  });
+}
+
+export function useCreateMaterial() {
+  return useCatalogWrite(materialsKeys.lists(), (input: MaterialInput) => createMaterial(input));
+}
+
+export function useUpdateMaterial(id: string) {
+  return useCatalogWrite(materialsKeys.lists(), (input: MaterialInput) =>
+    updateMaterial(id, input),
+  );
+}
+
+export function useDeleteMaterial() {
+  return useCatalogWrite(materialsKeys.lists(), (id: string) => deleteMaterial(id));
+}
+
+export function useCreateExercise() {
+  return useCatalogWrite(exercisesKeys.lists(), (input: ExerciseInput) => createExercise(input));
+}
+
+export function useUpdateExercise(id: string) {
+  return useCatalogWrite(exercisesKeys.lists(), (input: ExerciseInput) =>
+    updateExercise(id, input),
+  );
+}
+
+export function useDeleteExercise() {
+  return useCatalogWrite(exercisesKeys.lists(), (id: string) => deleteExercise(id));
 }

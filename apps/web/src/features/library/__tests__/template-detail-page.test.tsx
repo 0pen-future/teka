@@ -4,7 +4,7 @@ import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
-import { API_URL, ok } from "@/test/msw/handlers";
+import { API_URL, fail, ok } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import {
   renderWithProviders,
@@ -315,5 +315,148 @@ describe("TemplateDetailPage as a member", () => {
 
     expect(screen.getByRole("button", { name: "Phát hành" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Thêm buổi học" })).not.toBeInTheDocument();
+  });
+});
+
+describe("TemplateDetailPage log fields and score set", () => {
+  async function openGrading(user: ReturnType<typeof userEvent.setup>) {
+    await screen.findByRole("combobox", { name: "Phiên bản" });
+    await user.click(screen.getByRole("tab", { name: "Nhật ký & Điểm" }));
+  }
+
+  it("edits the draft's log fields: add a select field, drop options of a text field, reorder", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await openGrading(user);
+
+    const fields = await screen.findByRole("region", { name: "Trường nhật ký" });
+    expect(within(fields).getByRole("textbox", { name: "Nhãn trường 1" })).toHaveValue(
+      "Ghi chú buổi học",
+    );
+    expect(
+      within(fields).queryByRole("textbox", { name: "Tuỳ chọn trường 1" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(within(fields).getByRole("button", { name: "Thêm trường" }));
+    await user.type(within(fields).getByRole("textbox", { name: "Nhãn trường 2" }), "Thái độ");
+    await user.click(within(fields).getByRole("combobox", { name: /Loại trường 2/ }));
+    await user.click(
+      within(await screen.findByRole("listbox")).getByRole("option", { name: "Chọn một" }),
+    );
+    await user.type(
+      within(fields).getByRole("textbox", { name: "Tuỳ chọn trường 2" }),
+      "Tốt, Khá, Cần cố gắng",
+    );
+    await user.click(within(fields).getByRole("checkbox", { name: "Bắt buộc trường 2" }));
+    await user.click(within(fields).getByRole("button", { name: "Chuyển lên trường 2" }));
+    expect(within(fields).getByRole("textbox", { name: "Nhãn trường 1" })).toHaveValue("Thái độ");
+    await user.click(within(fields).getByRole("button", { name: "Lưu trường nhật ký" }));
+
+    expect(await screen.findByText("Đã lưu trường nhật ký")).toBeInTheDocument();
+    expect(
+      getLibraryStore()
+        .logFields.filter((f) => f.version_id === versionToan6Draft.id)
+        .map((f) => [f.position, f.label, f.kind, f.options, f.required]),
+    ).toEqual([
+      [1, "Thái độ", "select", ["Tốt", "Khá", "Cần cố gắng"], true],
+      [2, "Ghi chú buổi học", "text", [], false],
+    ]);
+  });
+
+  it("rejects a select field without options before calling the API", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await openGrading(user);
+
+    const fields = await screen.findByRole("region", { name: "Trường nhật ký" });
+    await user.click(within(fields).getByRole("button", { name: "Thêm trường" }));
+    await user.click(within(fields).getByRole("combobox", { name: /Loại trường 2/ }));
+    await user.click(
+      within(await screen.findByRole("listbox")).getByRole("option", { name: "Chọn một" }),
+    );
+    await user.click(within(fields).getByRole("button", { name: "Lưu trường nhật ký" }));
+
+    expect(await within(fields).findByText("Bắt buộc nhập nhãn")).toBeInTheDocument();
+    expect(within(fields).getByText("Nhập ít nhất một tuỳ chọn")).toBeInTheDocument();
+    expect(
+      getLibraryStore().logFields.filter((f) => f.version_id === versionToan6Draft.id),
+    ).toHaveLength(1);
+  });
+
+  it("edits the score set and maps a server error onto its row", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await openGrading(user);
+
+    const scores = await screen.findByRole("region", { name: "Cơ cấu điểm" });
+    expect(within(scores).getByRole("textbox", { name: "Mã thành phần 1" })).toHaveValue("hw");
+    expect(within(scores).getByRole("spinbutton", { name: "Trọng số 2" })).toHaveValue(0.6);
+
+    await user.click(within(scores).getByRole("button", { name: "Xoá thành phần 1" }));
+    expect(within(scores).getByRole("textbox", { name: "Mã thành phần 1" })).toHaveValue("kt");
+    await user.click(within(scores).getByRole("button", { name: "Thêm thành phần" }));
+    await user.type(within(scores).getByRole("textbox", { name: "Mã thành phần 2" }), "kt");
+    await user.type(within(scores).getByRole("textbox", { name: "Tên thành phần 2" }), "Cuối kỳ");
+    await user.clear(within(scores).getByRole("spinbutton", { name: "Điểm tối đa 2" }));
+    await user.type(within(scores).getByRole("spinbutton", { name: "Điểm tối đa 2" }), "100");
+    await user.click(within(scores).getByRole("button", { name: "Lưu cơ cấu điểm" }));
+    expect(await within(scores).findByText("Mã bị trùng")).toBeInTheDocument();
+
+    await user.clear(within(scores).getByRole("textbox", { name: "Mã thành phần 2" }));
+    await user.type(within(scores).getByRole("textbox", { name: "Mã thành phần 2" }), "ck");
+    server.use(
+      http.put(`${API_URL}/library/versions/:vid/score-set`, () =>
+        HttpResponse.json(
+          fail("VALIDATION_ERROR", "validation failed", { "1.weight": "weight is too large" }),
+          { status: 422 },
+        ),
+      ),
+    );
+    await user.click(within(scores).getByRole("button", { name: "Lưu cơ cấu điểm" }));
+    expect(await within(scores).findByText("weight is too large")).toBeInTheDocument();
+
+    server.use(...libraryHandlers);
+    await user.click(within(scores).getByRole("button", { name: "Lưu cơ cấu điểm" }));
+    expect(await screen.findByText("Đã lưu cơ cấu điểm")).toBeInTheDocument();
+    expect(getLibraryStore().scoreSets[versionToan6Draft.id]).toEqual([
+      { key: "kt", label: "Kiểm tra", max: 10, weight: 0.6 },
+      { key: "ck", label: "Cuối kỳ", max: 100, weight: 0 },
+    ]);
+  });
+
+  it("shows the published version's log fields and score set read-only", async () => {
+    const user = userEvent.setup();
+    renderPage(`/library/templates/${templateToan6.id}?v=1`);
+    await openGrading(user);
+
+    const fields = await screen.findByRole("region", { name: "Trường nhật ký" });
+    expect(within(fields).getByText("Mức độ tập trung")).toBeInTheDocument();
+    expect(within(fields).getByText("Chọn một")).toBeInTheDocument();
+    expect(within(fields).getByText("Tốt, Khá")).toBeInTheDocument();
+    expect(within(fields).getByText("Bắt buộc")).toBeInTheDocument();
+    expect(within(fields).queryByRole("textbox")).not.toBeInTheDocument();
+    expect(
+      within(fields).queryByRole("button", { name: "Lưu trường nhật ký" }),
+    ).not.toBeInTheDocument();
+
+    const scores = screen.getByRole("region", { name: "Cơ cấu điểm" });
+    expect(within(scores).getByText("Kiểm tra")).toBeInTheDocument();
+    expect(
+      within(scores).queryByRole("button", { name: "Lưu cơ cấu điểm" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps the lessons section as the default and switches back to it", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("row", { name: /Số tự nhiên/ });
+    expect(screen.getByRole("tab", { name: "Buổi học" })).toHaveAttribute("aria-selected", "true");
+
+    await user.click(screen.getByRole("tab", { name: "Nhật ký & Điểm" }));
+    expect(await screen.findByRole("region", { name: "Cơ cấu điểm" })).toBeInTheDocument();
+    expect(screen.queryByRole("row", { name: /Số tự nhiên/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Buổi học" }));
+    expect(await screen.findByRole("row", { name: /Số tự nhiên/ })).toBeInTheDocument();
   });
 });

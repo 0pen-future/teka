@@ -4,7 +4,7 @@ import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
-import { API_URL, fail, ok } from "@/test/msw/handlers";
+import { API_URL, fail, listMeta, ok } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import {
   renderWithProviders,
@@ -15,10 +15,14 @@ import {
 
 import { TemplateLessonPage } from "../pages/template-lesson-page";
 import {
+  exerciseBai1,
+  exerciseBai2,
   getLibraryStore,
   lessonDraftSoTuNhien,
   lessonPublishedSoTuNhien,
   libraryHandlers,
+  materialSlide,
+  materialVideo,
   resetLibraryStore,
   templateToan6,
   versionToan6Draft,
@@ -163,5 +167,120 @@ describe("TemplateLessonPage", () => {
     expect(await screen.findByText(/Phiên bản v2 đã phát hành/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Lưu" })).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Mục tiêu" })).not.toBeInTheDocument();
+  });
+
+  it("attaches materials with the share flag and exercises, saving each block separately", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("heading", { name: "Buổi 1 · Số tự nhiên" });
+
+    const materials = await screen.findByRole("region", { name: "Học liệu" });
+    expect(within(materials).getByRole("checkbox", { name: "Slide số tự nhiên" })).toBeChecked();
+    expect(
+      within(materials).getByRole("checkbox", { name: "Chia sẻ Slide số tự nhiên với học viên" }),
+    ).toBeChecked();
+    expect(within(materials).getByRole("checkbox", { name: "Video phân số" })).not.toBeChecked();
+    expect(
+      within(materials).queryByRole("checkbox", { name: "Chia sẻ Video phân số với học viên" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(within(materials).getByRole("checkbox", { name: "Video phân số" }));
+    await user.click(
+      within(materials).getByRole("checkbox", { name: "Chia sẻ Slide số tự nhiên với học viên" }),
+    );
+    await user.click(within(materials).getByRole("button", { name: "Lưu học liệu" }));
+
+    expect(await screen.findByText("Đã lưu học liệu của buổi")).toBeInTheDocument();
+    expect(
+      getLibraryStore()
+        .materialLinks.filter((l) => l.lesson_id === lessonDraftSoTuNhien.id)
+        .map((l) => [l.material_id, l.shared_with_students, l.position]),
+    ).toEqual([
+      [materialSlide.id, false, 1],
+      [materialVideo.id, false, 2],
+    ]);
+
+    const exercises = screen.getByRole("region", { name: "Bài tập" });
+    expect(within(exercises).getByRole("checkbox", { name: "Bài 1: Tập hợp" })).toBeChecked();
+    await user.click(within(exercises).getByRole("checkbox", { name: "Bài 1: Tập hợp" }));
+    await user.click(within(exercises).getByRole("checkbox", { name: "Bài 2: So sánh phân số" }));
+    await user.click(within(exercises).getByRole("button", { name: "Lưu bài tập" }));
+
+    expect(await screen.findByText("Đã lưu bài tập của buổi")).toBeInTheDocument();
+    expect(
+      getLibraryStore()
+        .exerciseLinks.filter((l) => l.lesson_id === lessonDraftSoTuNhien.id)
+        .map((l) => l.exercise_id),
+    ).toEqual([exerciseBai2.id]);
+    expect(getLibraryStore().exerciseLinks.some((l) => l.exercise_id === exerciseBai1.id)).toBe(
+      false,
+    );
+  });
+
+  it("narrows the material picker with the search box", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    const materials = await screen.findByRole("region", { name: "Học liệu" });
+    await within(materials).findByRole("checkbox", { name: "Video phân số" });
+
+    await user.type(within(materials).getByRole("searchbox", { name: "Tìm học liệu" }), "slide");
+
+    await waitFor(() => {
+      expect(
+        within(materials).queryByRole("checkbox", { name: "Video phân số" }),
+      ).not.toBeInTheDocument();
+    });
+    expect(within(materials).getByRole("checkbox", { name: "Slide số tự nhiên" })).toBeChecked();
+  });
+
+  it("keeps an attached material the catalog page no longer lists so it can be unticked", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(`${API_URL}/library/materials`, () =>
+        HttpResponse.json(ok([materialVideo], listMeta(1, 1, 100))),
+      ),
+    );
+    renderPage();
+    const materials = await screen.findByRole("region", { name: "Học liệu" });
+    await within(materials).findByRole("checkbox", { name: "Video phân số" });
+
+    const attached = within(materials).getByRole("checkbox", { name: "Slide số tự nhiên" });
+    expect(attached).toBeChecked();
+    await user.click(attached);
+    await user.click(within(materials).getByRole("button", { name: "Lưu học liệu" }));
+
+    expect(await screen.findByText("Đã lưu học liệu của buổi")).toBeInTheDocument();
+    expect(
+      getLibraryStore().materialLinks.filter((l) => l.lesson_id === lessonDraftSoTuNhien.id),
+    ).toEqual([]);
+  });
+
+  it("lists the attachments read-only on a published lesson", async () => {
+    renderPage(lessonPublishedSoTuNhien.id);
+    await screen.findByText(/Phiên bản v1 đã phát hành/);
+
+    const materials = await screen.findByRole("region", { name: "Học liệu" });
+    expect(within(materials).getByText("Slide số tự nhiên")).toBeInTheDocument();
+    expect(within(materials).getByText("Tài liệu")).toBeInTheDocument();
+    expect(within(materials).queryByText("Chia sẻ HV")).not.toBeInTheDocument();
+    expect(within(materials).queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(
+      within(materials).queryByRole("button", { name: "Lưu học liệu" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole("region", { name: "Bài tập" })).getByText("Chưa gắn bài tập."),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the shared badge for a reader without library.edit", async () => {
+    server.use(memberWith("library.read"));
+    signInAs(testSecondaryTeacher);
+    renderPage();
+    await screen.findByText("Bạn không có quyền soạn buổi học mẫu.");
+
+    const materials = await screen.findByRole("region", { name: "Học liệu" });
+    expect(within(materials).getByText("Slide số tự nhiên")).toBeInTheDocument();
+    expect(within(materials).getByText("Chia sẻ HV")).toBeInTheDocument();
+    expect(within(materials).queryByRole("checkbox")).not.toBeInTheDocument();
   });
 });

@@ -2,14 +2,36 @@ import { apiClient } from "@/lib/api/client";
 import { parseArray, parseData, parseList, type Paginated } from "@/lib/api/envelope";
 
 import {
+  exerciseSchema,
+  lessonExerciseSchema,
+  lessonMaterialSchema,
+  logFieldSchema,
+  materialSchema,
   programTemplateSchema,
+  scoreComponentSchema,
+  templateLessonDetailSchema,
   templateLessonSchema,
   templateVersionSchema,
+  versionDetailSchema,
+  type Exercise,
+  type ExerciseInput,
+  type LessonExercise,
+  type LessonExerciseInput,
   type LessonInput,
+  type LessonMaterial,
+  type LessonMaterialInput,
+  type LogField,
+  type LogFieldInput,
+  type Material,
+  type MaterialInput,
   type ProgramTemplate,
+  type ScoreComponent,
+  type ScoreComponentInput,
   type TemplateInput,
   type TemplateLesson,
+  type TemplateLessonDetail,
   type TemplateVersion,
+  type VersionDetail,
 } from "../schemas/library-schemas";
 
 export interface ListTemplatesParams {
@@ -104,17 +126,110 @@ export async function reorderLessons(
   return parseArray(templateLessonSchema, res.data);
 }
 
-export async function getLesson(id: string): Promise<TemplateLesson> {
+/** `GET /library/lessons/:lid` — the lesson with its attached materials and exercises. */
+export async function getLesson(id: string): Promise<TemplateLessonDetail> {
   const res = await apiClient.get<unknown>(`/library/lessons/${id}`);
-  return parseData(templateLessonSchema, res.data);
+  return parseData(templateLessonDetailSchema, res.data);
 }
 
-export async function updateLesson(id: string, input: LessonInput): Promise<TemplateLesson> {
+export async function updateLesson(id: string, input: LessonInput): Promise<TemplateLessonDetail> {
   const res = await apiClient.put<unknown>(`/library/lessons/${id}`, input);
-  return parseData(templateLessonSchema, res.data);
+  return parseData(templateLessonDetailSchema, res.data);
 }
 
 /** `DELETE /library/lessons/:lid` — the remaining lessons renumber server-side. */
 export async function deleteLesson(id: string): Promise<void> {
   await apiClient.delete(`/library/lessons/${id}`);
+}
+
+/**
+ * `PUT /library/lessons/:lid/materials` — replaces the lesson's attachments
+ * wholesale; body order becomes the display order. An unknown material id
+ * is a 422 keyed `<index>.material_id`; a locked version answers 409.
+ */
+export async function setLessonMaterials(
+  lessonId: string,
+  items: LessonMaterialInput[],
+): Promise<LessonMaterial[]> {
+  const res = await apiClient.put<unknown>(`/library/lessons/${lessonId}/materials`, items);
+  return parseArray(lessonMaterialSchema, res.data);
+}
+
+export async function setLessonExercises(
+  lessonId: string,
+  items: LessonExerciseInput[],
+): Promise<LessonExercise[]> {
+  const res = await apiClient.put<unknown>(`/library/lessons/${lessonId}/exercises`, items);
+  return parseArray(lessonExerciseSchema, res.data);
+}
+
+/** `GET /library/versions/:vid` — the version with its score set, log fields and lesson details. */
+export async function getVersion(versionId: string): Promise<VersionDetail> {
+  const res = await apiClient.get<unknown>(`/library/versions/${versionId}`);
+  return parseData(versionDetailSchema, res.data);
+}
+
+/** `PUT /library/versions/:vid/log-fields` — wholesale replace, draft only (409 `VERSION_LOCKED`). */
+export async function setLogFields(versionId: string, items: LogFieldInput[]): Promise<LogField[]> {
+  const res = await apiClient.put<unknown>(`/library/versions/${versionId}/log-fields`, items);
+  return parseArray(logFieldSchema, res.data);
+}
+
+/** `PUT /library/versions/:vid/score-set` — wholesale replace; a repeated key is a 422 on `<index>.key`. */
+export async function setScoreSet(
+  versionId: string,
+  items: ScoreComponentInput[],
+): Promise<ScoreComponent[]> {
+  const res = await apiClient.put<unknown>(`/library/versions/${versionId}/score-set`, items);
+  return parseArray(scoreComponentSchema, res.data);
+}
+
+export interface ListItemsParams {
+  /** Substring of the title; the API escapes wildcards. */
+  q?: string;
+  page?: number;
+  per_page?: number;
+  /** `title` (default) | `created_at`, `-` prefix for descending. */
+  sort?: string;
+}
+
+/** `GET /library/materials` — the center's material catalog, paginated. */
+export async function listMaterials(params: ListItemsParams = {}): Promise<Paginated<Material>> {
+  const res = await apiClient.get<unknown>("/library/materials", { params });
+  return parseList(materialSchema, res.data);
+}
+
+export async function createMaterial(input: MaterialInput): Promise<Material> {
+  const res = await apiClient.post<unknown>("/library/materials", input);
+  return parseData(materialSchema, res.data);
+}
+
+export async function updateMaterial(id: string, input: MaterialInput): Promise<Material> {
+  const res = await apiClient.put<unknown>(`/library/materials/${id}`, input);
+  return parseData(materialSchema, res.data);
+}
+
+/** `DELETE /library/materials/:id` — refused with 409 `MATERIAL_IN_USE` while any lesson links it. */
+export async function deleteMaterial(id: string): Promise<void> {
+  await apiClient.delete(`/library/materials/${id}`);
+}
+
+export async function listExercises(params: ListItemsParams = {}): Promise<Paginated<Exercise>> {
+  const res = await apiClient.get<unknown>("/library/exercises", { params });
+  return parseList(exerciseSchema, res.data);
+}
+
+export async function createExercise(input: ExerciseInput): Promise<Exercise> {
+  const res = await apiClient.post<unknown>("/library/exercises", input);
+  return parseData(exerciseSchema, res.data);
+}
+
+export async function updateExercise(id: string, input: ExerciseInput): Promise<Exercise> {
+  const res = await apiClient.put<unknown>(`/library/exercises/${id}`, input);
+  return parseData(exerciseSchema, res.data);
+}
+
+/** `DELETE /library/exercises/:id` — refused with 409 `EXERCISE_IN_USE` while any lesson links it. */
+export async function deleteExercise(id: string): Promise<void> {
+  await apiClient.delete(`/library/exercises/${id}`);
 }
