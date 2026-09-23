@@ -1,44 +1,18 @@
-import { useId } from "react";
 import { Link } from "react-router";
-
-import { HvBadge, HvButton, HvCard } from "@/components/hv";
 
 import { useClassStaff } from "../hooks/use-class-staff";
 import { formatScheduleLabel, formatWeekday } from "../lib/roster-format";
 import { activeSchedules } from "../lib/schedule-diff";
-import type { Class, ClassStaff } from "../schemas/roster-schemas";
+import type { Class } from "../schemas/roster-schemas";
 import { ClassOpsCard } from "./class-ops-card";
-
-const LATER_PHASE_HINT = "Có ở phase sau";
+import { ClassTeamSection } from "./class-team-section";
+import { SectionCard, StaffList } from "./section-card";
 
 interface ClassInfoTabProps {
   klass: Class;
   today: string;
   canWrite: boolean;
   isOwner: boolean;
-}
-
-function SectionCard({
-  title,
-  action,
-  children,
-}: {
-  title: string;
-  action?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  const headingId = useId();
-  return (
-    <HvCard role="region" aria-labelledby={headingId}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 id={headingId} className="font-display text-[16px] font-bold text-ink-900">
-          {title}
-        </h2>
-        {action}
-      </div>
-      <div className="mt-3">{children}</div>
-    </HvCard>
-  );
 }
 
 function endTime(start: string, durationMin: number): string {
@@ -49,11 +23,12 @@ function endTime(start: string, durationMin: number): string {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
-/** The "Thông tin" tab: schedule, ops card, staff, shortcuts and the later-phase placeholders. */
+/** The "Thông tin" tab: schedule, ops card, teaching team, shortcuts and the later-phase placeholders. */
 export function ClassInfoTab({ klass, today, canWrite, isOwner }: ClassInfoTabProps) {
   const staff = useClassStaff(klass.id);
-  const activeStaff = (staff.data ?? []).filter((item) => item.ended_at === null);
-  const hocVu = activeStaff.filter((item) => item.role_key === "hoc_vu");
+  const hocVu = (staff.data ?? []).filter(
+    (item) => item.ended_at === null && item.role_key === "hoc_vu",
+  );
   const schedules = activeSchedules(klass.schedules, today).sort(
     (a, b) =>
       mondayFirst(a.weekday) - mondayFirst(b.weekday) || a.start_time.localeCompare(b.start_time),
@@ -89,21 +64,7 @@ export function ClassInfoTab({ klass, today, canWrite, isOwner }: ClassInfoTabPr
 
       <ClassOpsCard klass={klass} canWrite={canWrite} />
 
-      <SectionCard
-        title="Đội ngũ giảng dạy"
-        action={
-          <HvButton size="sm" variant="ghost" disabled title={LATER_PHASE_HINT}>
-            Mời thành viên
-          </HvButton>
-        }
-      >
-        <StaffList
-          staff={activeStaff}
-          isPending={staff.isPending}
-          isError={staff.isError}
-          emptyText="Lớp chưa có giáo viên."
-        />
-      </SectionCard>
+      <ClassTeamSection klass={klass} isOwner={isOwner} />
 
       <SectionCard title="Nhân viên phụ trách">
         <StaffList
@@ -146,40 +107,6 @@ export function ClassInfoTab({ klass, today, canWrite, isOwner }: ClassInfoTabPr
         <p className="text-[13px] text-ink-400">Chưa có sự kiện nào được ghi lại.</p>
       </SectionCard>
     </div>
-  );
-}
-
-function StaffList({
-  staff,
-  isPending,
-  isError,
-  emptyText,
-}: {
-  staff: ClassStaff[];
-  isPending: boolean;
-  isError: boolean;
-  emptyText: string;
-}) {
-  if (isPending) {
-    return <p className="text-[13px] text-ink-400">Đang tải…</p>;
-  }
-  if (isError) {
-    return <p className="text-[13px] text-coral-600">Không tải được nhân sự lớp.</p>;
-  }
-  if (staff.length === 0) {
-    return <p className="text-[13px] text-ink-400">{emptyText}</p>;
-  }
-  return (
-    <ul className="flex flex-col gap-2">
-      {staff.map((item) => (
-        <li key={item.id} className="flex items-center justify-between gap-2 text-[14px]">
-          <span className="font-bold text-ink-900">{item.teacher_name}</span>
-          <HvBadge variant="neutral" size="sm">
-            {item.role_label}
-          </HvBadge>
-        </li>
-      ))}
-    </ul>
   );
 }
 

@@ -149,7 +149,7 @@ describe("ClassDetailPage", () => {
       const team = await screen.findByRole("region", { name: "Đội ngũ giảng dạy" });
       expect(await within(team).findByText("Cô Lan")).toBeInTheDocument();
       expect(within(team).getByText("Cô Hoa")).toBeInTheDocument();
-      expect(within(team).getByRole("button", { name: "Mời thành viên" })).toBeDisabled();
+      expect(within(team).getByRole("button", { name: "+ Mời GV" })).toBeEnabled();
 
       const contact = screen.getByRole("region", { name: "Nhân viên phụ trách" });
       expect(within(contact).getByText("Cô Hoa")).toBeInTheDocument();

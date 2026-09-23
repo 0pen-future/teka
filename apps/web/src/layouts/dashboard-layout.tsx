@@ -10,6 +10,7 @@ import {
   IdCardIcon,
   KanbanIcon,
   LogOutIcon,
+  MailPlusIcon,
   ShieldCheckIcon,
   SlidersHorizontalIcon,
   type LucideProps,
@@ -95,6 +96,9 @@ function useNavGroups(): NavGroup[] {
           Icon: GraduationCapIcon,
           perm: "classes.list",
         },
+        // No perm: every member can receive an invitation, and the API
+        // already scopes the list to the caller's own rows.
+        { label: "Lời mời nhận lớp", to: "/class-invitations", Icon: MailPlusIcon },
       ],
     },
     {
@@ -185,6 +189,7 @@ const OVERFLOW_LABELS = new Set([
   "Quản lý lớp học",
   "Hồ sơ học sinh",
   "Danh sách lớp học",
+  "Lời mời nhận lớp",
   "Chốt sổ",
   "Gửi thông báo",
   "Phụ huynh",
@@ -207,6 +212,7 @@ const OVERFLOW_LABELS = new Set([
 const OVERFLOW_PATH_PREFIXES = [
   "/classbook",
   "/classes",
+  "/class-invitations",
   "/records",
   "/billing",
   "/notifications",

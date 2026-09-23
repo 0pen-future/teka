@@ -4,6 +4,7 @@
  * cache invalidation graph in the phase's Architecture section) without
  * importing from one another.
  */
+import type { ListClassInvitationsParams } from "../api/class-invitations-api";
 import type { ListClassesParams } from "../api/classes-api";
 import type { ListContactsParams } from "../api/contacts-api";
 import type { ListEnrollmentsParams } from "../api/enrollments-api";
@@ -48,4 +49,10 @@ export const classStaffKeys = {
   all: ["roster", "classStaff"] as const,
   lists: () => [...classStaffKeys.all, "list"] as const,
   list: (classId: string) => [...classStaffKeys.lists(), classId] as const,
+};
+
+export const classInvitationsKeys = {
+  all: ["roster", "classInvitations"] as const,
+  lists: () => [...classInvitationsKeys.all, "list"] as const,
+  list: (params: ListClassInvitationsParams) => [...classInvitationsKeys.lists(), params] as const,
 };

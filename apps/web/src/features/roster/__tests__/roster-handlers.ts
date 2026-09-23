@@ -7,6 +7,7 @@ type AttendanceStatus = NonNullable<AttendanceRow["status"]>;
 
 import type {
   Class,
+  ClassInvitation,
   ClassStaff,
   Contact,
   Enrollment,
@@ -168,6 +169,65 @@ function makeSession(day: number, status: Session["status"]): Session {
   };
 }
 
+// --- Class invitations ---
+// One pending tro_giang invite (Cô Hương) and one accepted giao_vien invite
+// (Thầy Nam) on the seeded class: the accepted giao_vien row is the one whose
+// owner confirm hands the class over from Cô Lan.
+
+export const invitationPendingTroGiang: ClassInvitation = {
+  id: "a0000000-0000-4000-8000-000000000001",
+  class_id: classWithSchedule.id,
+  class_name: classWithSchedule.name,
+  teacher_id: staffCandidateTroGiang.id,
+  teacher_name: staffCandidateTroGiang.full_name,
+  role_key: "tro_giang",
+  role_label: "Trợ giảng",
+  status: "pending",
+  invited_by: classWithSchedule.teacher_id,
+  invited_by_name: "Cô Lan",
+  message: "Nhờ cô hỗ trợ lớp tối thứ ba nhé.",
+  sent_at: "2026-09-20T08:00:00Z",
+  reminded_at: null,
+  responded_at: null,
+  assigned_at: null,
+};
+
+export const invitationAcceptedGiaoVien: ClassInvitation = {
+  id: "a0000000-0000-4000-8000-000000000002",
+  class_id: classWithSchedule.id,
+  class_name: classWithSchedule.name,
+  teacher_id: staffCandidateHocVu.id,
+  teacher_name: staffCandidateHocVu.full_name,
+  role_key: "giao_vien",
+  role_label: "Giáo viên",
+  status: "accepted",
+  invited_by: classWithSchedule.teacher_id,
+  invited_by_name: "Cô Lan",
+  message: null,
+  sent_at: "2026-09-18T08:00:00Z",
+  reminded_at: null,
+  responded_at: "2026-09-19T09:30:00Z",
+  assigned_at: null,
+};
+
+export const invitationDeclined: ClassInvitation = {
+  id: "a0000000-0000-4000-8000-000000000003",
+  class_id: classWithSchedule.id,
+  class_name: classWithSchedule.name,
+  teacher_id: "73000000-0000-4000-8000-000000000004",
+  teacher_name: "Cô Hoa",
+  role_key: "hoc_vu",
+  role_label: "Học vụ",
+  status: "declined",
+  invited_by: classWithSchedule.teacher_id,
+  invited_by_name: "Cô Lan",
+  message: null,
+  sent_at: "2026-09-10T08:00:00Z",
+  reminded_at: null,
+  responded_at: "2026-09-11T10:00:00Z",
+  assigned_at: null,
+};
+
 // --- In-memory store, reset before each test in the suite's beforeEach ---
 
 export function seedRosterStore() {
@@ -178,6 +238,11 @@ export function seedRosterStore() {
     })),
     classes: [{ ...classWithSchedule, schedules: [{ ...classSchedule }] }],
     classStaff: [{ ...classStaffGiaoVien }],
+    classInvitations: [
+      { ...invitationPendingTroGiang },
+      { ...invitationAcceptedGiaoVien },
+      { ...invitationDeclined },
+    ],
     enrollments: [{ ...enrollmentActive }],
     // Four countable sessions this month plus one cancelled — the BUỔI T{m}
     // column must skip the cancelled one.
@@ -762,4 +827,142 @@ export const rosterHandlers = [
     enrollment.ended_on = orToday(body.ended_on);
     return HttpResponse.json(ok(enrollment));
   }),
+
+  // --- Class invitations ---
+  // Mirrors `classinvites.Service`: members only ever see rows addressed to
+  // them, the owner sees every row; the invitee answers, the owner cancels,
+  // reminds and confirms. Confirm writes the stint the API would — a
+  // giao_vien confirm closes the old teacher's stint and repoints the class.
+  http.get(`${API_URL}/class-invitations`, ({ request }) => {
+    const url = new URL(request.url);
+    const status = url.searchParams.get("status");
+    const classId = url.searchParams.get("class_id");
+    const items = store.classInvitations.filter(
+      (item) => (!status || item.status === status) && (!classId || item.class_id === classId),
+    );
+    return HttpResponse.json(ok(items));
+  }),
+  http.post(`${API_URL}/classes/:classId/invitations`, async ({ params, request }) => {
+    const body = (await request.json()) as {
+      teacher_id: string;
+      role_key: string;
+      message?: string | null;
+    };
+    const klass = store.classes.find((item) => item.id === params.classId);
+    if (!klass) {
+      return HttpResponse.json(fail("NOT_FOUND", "class not found"), { status: 404 });
+    }
+    if (body.teacher_id === klass.teacher_id) {
+      return HttpResponse.json(fail("SELF_INVITE", "không thể tự mời chính mình"), {
+        status: 422,
+      });
+    }
+    const pending = store.classInvitations.some(
+      (item) =>
+        item.class_id === klass.id &&
+        item.teacher_id === body.teacher_id &&
+        item.status === "pending",
+    );
+    if (pending) {
+      return HttpResponse.json(fail("CONFLICT", "thành viên này đã có lời mời đang chờ"), {
+        status: 409,
+      });
+    }
+    const invitation: ClassInvitation = {
+      id: nextId("invitation-"),
+      class_id: klass.id,
+      class_name: klass.name,
+      teacher_id: body.teacher_id,
+      teacher_name: staffMemberNames[body.teacher_id] ?? "Thành viên",
+      role_key: body.role_key,
+      role_label: STAFF_ROLE_LABELS[body.role_key] ?? body.role_key,
+      status: "pending",
+      invited_by: klass.teacher_id,
+      invited_by_name: "Cô Lan",
+      message: body.message ?? null,
+      sent_at: new Date().toISOString(),
+      reminded_at: null,
+      responded_at: null,
+      assigned_at: null,
+    };
+    store.classInvitations.push(invitation);
+    return HttpResponse.json(ok(invitation), { status: 201 });
+  }),
+  http.post(`${API_URL}/class-invitations/:id/accept`, ({ params }) =>
+    transitionInvitation(String(params.id), ["pending"], "accepted"),
+  ),
+  http.post(`${API_URL}/class-invitations/:id/decline`, ({ params }) =>
+    transitionInvitation(String(params.id), ["pending"], "declined"),
+  ),
+  http.post(`${API_URL}/class-invitations/:id/cancel`, ({ params }) =>
+    transitionInvitation(String(params.id), ["pending", "accepted"], "cancelled"),
+  ),
+  http.post(`${API_URL}/class-invitations/:id/remind`, ({ params }) => {
+    const invitation = store.classInvitations.find((item) => item.id === params.id);
+    if (invitation?.status !== "pending") {
+      return HttpResponse.json(fail("CONFLICT", "lời mời không còn chờ"), { status: 409 });
+    }
+    invitation.reminded_at = new Date().toISOString();
+    return HttpResponse.json(ok(invitation));
+  }),
+  http.post(`${API_URL}/class-invitations/:id/confirm`, ({ params }) => {
+    const invitation = store.classInvitations.find((item) => item.id === params.id);
+    if (!invitation || !["pending", "accepted"].includes(invitation.status)) {
+      return HttpResponse.json(fail("CONFLICT", "lời mời không còn hiệu lực"), { status: 409 });
+    }
+    const now = new Date().toISOString();
+    let moved = 0;
+    if (invitation.role_key === "giao_vien") {
+      const klass = store.classes.find((item) => item.id === invitation.class_id);
+      for (const stint of store.classStaff) {
+        if (
+          stint.class_id === invitation.class_id &&
+          stint.role_key === "giao_vien" &&
+          stint.ended_at === null
+        ) {
+          stint.ended_at = now;
+        }
+      }
+      if (klass) {
+        klass.teacher_id = invitation.teacher_id;
+      }
+      moved = store.sessions.filter(
+        (session) => session.class_id === invitation.class_id && session.status === "planned",
+      ).length;
+    }
+    store.classStaff.push({
+      id: nextId("staff-"),
+      class_id: invitation.class_id,
+      teacher_id: invitation.teacher_id,
+      teacher_name: invitation.teacher_name,
+      role_key: invitation.role_key,
+      role_label: invitation.role_label,
+      started_at: now,
+      ended_at: null,
+    });
+    invitation.status = "assigned";
+    invitation.assigned_at = now;
+    return HttpResponse.json(ok({ ...invitation, moved_planned_sessions: moved }));
+  }),
 ];
+
+const STAFF_ROLE_LABELS: Record<string, string> = {
+  giao_vien: "Giáo viên",
+  hoc_vu: "Học vụ",
+  tro_giang: "Trợ giảng",
+};
+
+function transitionInvitation(id: string, from: string[], to: ClassInvitation["status"]) {
+  const invitation = store.classInvitations.find((item) => item.id === id);
+  if (!invitation) {
+    return HttpResponse.json(fail("NOT_FOUND", "invitation not found"), { status: 404 });
+  }
+  if (!from.includes(invitation.status)) {
+    return HttpResponse.json(fail("CONFLICT", "lời mời không còn ở trạng thái này"), {
+      status: 409,
+    });
+  }
+  invitation.status = to;
+  invitation.responded_at = new Date().toISOString();
+  return HttpResponse.json(ok(invitation));
+}

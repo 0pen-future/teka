@@ -469,3 +469,64 @@ export function endEnrollmentInputSchema(startedOn: string) {
 }
 
 export type EndEnrollmentInput = z.infer<ReturnType<typeof endEnrollmentInputSchema>>;
+
+/**
+ * `classinvites.InvitationResponse` (`apps/api/internal/features/classinvites/dto.go`).
+ * An invitation moves pending → accepted/declined (invitee) → assigned
+ * (owner confirm writes the stint) or cancelled (owner, or the member left
+ * the center). `role_label` is the API's Vietnamese copy of `role_key`.
+ */
+export const classInvitationStatuses = [
+  "pending",
+  "accepted",
+  "declined",
+  "cancelled",
+  "assigned",
+] as const;
+
+export type ClassInvitationStatus = (typeof classInvitationStatuses)[number];
+
+export const classInvitationSchema = z.object({
+  id: z.string(),
+  class_id: z.string(),
+  class_name: z.string(),
+  teacher_id: z.string(),
+  teacher_name: z.string(),
+  role_key: z.string(),
+  role_label: z.string(),
+  status: z.enum(classInvitationStatuses),
+  invited_by: z.string(),
+  invited_by_name: z.string(),
+  message: z.string().nullable(),
+  sent_at: z.string(),
+  reminded_at: z.string().nullable(),
+  responded_at: z.string().nullable(),
+  assigned_at: z.string().nullable(),
+});
+
+export type ClassInvitation = z.infer<typeof classInvitationSchema>;
+
+/**
+ * `classinvites.ConfirmResponse` — the assigned invitation plus what the
+ * stint write moved: a giao_vien confirm is a handoff and carries the
+ * class's future planned sessions to the new teacher.
+ */
+export const classInvitationConfirmSchema = classInvitationSchema.extend({
+  moved_planned_sessions: z.number().int(),
+});
+
+export type ClassInvitationConfirm = z.infer<typeof classInvitationConfirmSchema>;
+
+/** Roles an invitation may propose — unlike direct staff assignment, giao_vien is allowed. */
+export const invitableStaffRoleKeys = ["giao_vien", "tro_giang", "hoc_vu"] as const;
+
+export type InvitableStaffRoleKey = (typeof invitableStaffRoleKeys)[number];
+
+/** `classinvites.SendRequest` (`POST /classes/:id/invitations`). */
+export const classInvitationSendInputSchema = z.object({
+  teacher_id: z.string().min(1, "Bắt buộc chọn thành viên"),
+  role_key: z.enum(invitableStaffRoleKeys),
+  message: z.string().trim().max(500, "Tối đa 500 ký tự").optional(),
+});
+
+export type ClassInvitationSendInput = z.infer<typeof classInvitationSendInputSchema>;
