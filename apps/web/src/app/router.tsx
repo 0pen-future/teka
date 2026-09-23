@@ -12,6 +12,7 @@ import { dashboardRoutes } from "@/features/dashboard/routes";
 import { invitationRoutes } from "@/features/invitation";
 import { profileRoutes } from "@/features/profile/routes";
 import { reportsRoutes } from "@/features/reports";
+import { libraryRoutes } from "@/features/library/routes";
 import { rosterRoutes } from "@/features/roster/routes";
 import { statementRoutes } from "@/features/statement";
 import { tasksRoutes } from "@/features/tasks/routes";
@@ -44,6 +45,7 @@ export const router = createBrowserRouter([
           ...dashboardRoutes,
           ...teachingRoutes,
           ...rosterRoutes,
+          ...libraryRoutes,
           ...attendanceRoutes,
           ...billingRoutes,
           ...collectionsRoutes,

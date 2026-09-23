@@ -307,6 +307,27 @@ export const PERMISSION_CATALOG = [
   ),
   perm("tasks.view_all", "Xem mọi công việc", "scope", "high", SCOPE_DESC),
   perm(
+    "library.read",
+    "Xem kho học liệu",
+    "crud",
+    "low",
+    "Xem chương trình mẫu, phiên bản và buổi học mẫu của trung tâm.",
+  ),
+  perm(
+    "library.edit",
+    "Soạn chương trình mẫu",
+    "crud",
+    "medium",
+    "Tạo, sửa, xoá chương trình mẫu và soạn buổi học mẫu trong bản nháp.",
+  ),
+  perm(
+    "library.publish",
+    "Phát hành chương trình mẫu",
+    "special",
+    "high",
+    "Phát hành một bản nháp thành phiên bản chính thức, khoá nội dung của phiên bản đó.",
+  ),
+  perm(
     "reports.send",
     "Gửi báo cáo học phí",
     "special",

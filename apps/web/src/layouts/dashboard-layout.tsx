@@ -9,6 +9,7 @@ import {
   HistoryIcon,
   IdCardIcon,
   KanbanIcon,
+  LibraryBigIcon,
   LogOutIcon,
   MailPlusIcon,
   ShieldCheckIcon,
@@ -99,6 +100,7 @@ function useNavGroups(): NavGroup[] {
         // No perm: every member can receive an invitation, and the API
         // already scopes the list to the caller's own rows.
         { label: "Lời mời nhận lớp", to: "/class-invitations", Icon: MailPlusIcon },
+        { label: "Kho học liệu", to: "/library", Icon: LibraryBigIcon, perm: "library.read" },
       ],
     },
     {
@@ -190,6 +192,7 @@ const OVERFLOW_LABELS = new Set([
   "Hồ sơ học sinh",
   "Danh sách lớp học",
   "Lời mời nhận lớp",
+  "Kho học liệu",
   "Chốt sổ",
   "Gửi thông báo",
   "Phụ huynh",
@@ -213,6 +216,7 @@ const OVERFLOW_PATH_PREFIXES = [
   "/classbook",
   "/classes",
   "/class-invitations",
+  "/library",
   "/records",
   "/billing",
   "/notifications",
