@@ -142,6 +142,10 @@ const (
 	PermTasksManageBoard = "tasks.manage_board"
 	PermTasksViewAll     = "tasks.view_all"
 
+	PermLibraryRead    = "library.read"
+	PermLibraryEdit    = "library.edit"
+	PermLibraryPublish = "library.publish"
+
 	PermMembersList = "members.list"
 )
 
@@ -265,6 +269,10 @@ var permCatalog = []PermDef{
 	optIn(PermTasksManageBoard, PermKindSpecial, RiskHigh, "Cấu hình cột bảng công việc", "Tạo, đổi tên, sắp xếp hoặc xoá cột của bảng công việc."),
 	viewAll(PermTasksViewAll, "Xem mọi công việc"),
 
+	def(PermLibraryRead, PermKindCRUD, RiskLow, "Xem kho học liệu", "Xem chương trình mẫu, phiên bản và buổi học mẫu của trung tâm."),
+	optIn(PermLibraryEdit, PermKindCRUD, RiskMedium, "Soạn chương trình mẫu", "Tạo, sửa, xoá chương trình mẫu và soạn buổi học mẫu trong bản nháp."),
+	optIn(PermLibraryPublish, PermKindSpecial, RiskHigh, "Phát hành chương trình mẫu", "Phát hành một bản nháp thành phiên bản chính thức, khoá nội dung của phiên bản đó."),
+
 	def(PermReportsSend, PermKindSpecial, RiskHigh, "Gửi báo cáo học phí", "Gửi thông báo học phí hàng loạt và theo dõi lượt gửi."),
 	def(PermMembersManage, PermKindSpecial, RiskHigh, "Quản lý thành viên", "Gỡ thành viên khỏi trung tâm."),
 	optIn(PermMembersList, PermKindCRUD, RiskLow, "Xem danh bạ thành viên", "Xem danh sách thành viên và vai trò trong trung tâm, không gồm số điện thoại hay email."),
@@ -348,15 +356,19 @@ var legacyIdentitySet = map[string]bool{
 	PermTeachingReviewQueue: true,
 }
 
-// impliedKeys maps a special key to the scope keys it carries for READS
-// only. They live in the effective PermSet (so EffectiveKeys exposes them to
-// clients and CenterWideFor honours them) but are never written to the
-// database: a role that stores reports.send stores exactly that. Sending a
-// report to every family in the center means reading every family's phone,
-// invoices, statements and send history, so reports.send is the read reach
-// of those four resources; it implies no write key and no payments.view_all.
+// impliedKeys maps a key to the READ keys it carries. They live in the
+// effective PermSet (so EffectiveKeys exposes them to clients and
+// CenterWideFor honours them) but are never written to the database: a role
+// that stores reports.send stores exactly that. Sending a report to every
+// family in the center means reading every family's phone, invoices,
+// statements and send history, so reports.send is the read reach of those
+// four resources; it implies no write key and no payments.view_all. Editing
+// or publishing a program template is impossible without reading it, so the
+// two library write keys carry library.read. An implied key is never a write.
 var impliedKeys = map[string][]string{
-	PermReportsSend: {PermBillingViewAll, PermStatementsViewAll, PermNotificationsViewAll, PermContactsViewAll},
+	PermReportsSend:    {PermBillingViewAll, PermStatementsViewAll, PermNotificationsViewAll, PermContactsViewAll},
+	PermLibraryEdit:    {PermLibraryRead},
+	PermLibraryPublish: {PermLibraryRead},
 }
 
 // DefaultRoleKeys returns the baseline permission set every system role (and,

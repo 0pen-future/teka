@@ -83,6 +83,30 @@ func TestBuildPermSetImpliesReadKeysForReportsSend(t *testing.T) {
 	}
 }
 
+// Editing or publishing a program template is impossible without reading
+// it, so the two library write keys carry library.read the way reports.send
+// carries its read reach: a deny on library.read alone does not narrow a
+// holder of library.edit; only denying the write key does.
+func TestBuildPermSetImpliesReadForLibraryWrites(t *testing.T) {
+	for _, write := range []string{PermLibraryEdit, PermLibraryPublish} {
+		set := BuildPermSet(nil, []string{write}, []string{PermLibraryRead})
+		if !set.HasKey(write) || !set.HasKey(PermLibraryRead) {
+			t.Errorf("%s must imply library.read even when that key is denied, got %v", write, set)
+		}
+		if len(set) != 2 {
+			t.Errorf("%s must imply exactly library.read, got %v", write, set)
+		}
+		denied := BuildPermSet(nil, []string{write}, []string{write})
+		if len(denied) != 0 {
+			t.Errorf("denying %s must drop it and its implied read, got %v", write, denied)
+		}
+	}
+	read := BuildPermSet(nil, []string{PermLibraryRead}, nil)
+	if read.HasKey(PermLibraryEdit) || read.HasKey(PermLibraryPublish) {
+		t.Error("library.read must not imply a write key in reverse")
+	}
+}
+
 func TestHasAndCenterWideFor(t *testing.T) {
 	owner := Scope{IsOwner: true}
 	if !owner.Has("anything.at.all") || !owner.CenterWideFor(PermClassesViewAll) || !owner.WriteWide() {

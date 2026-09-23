@@ -127,6 +127,16 @@ var actionSnapshot = []struct {
 	{"POST", "/api/v1/tasks/:id/move", ActionSpec{Action: "task.move", EntityType: "task", IDParam: "id"}},
 	{"DELETE", "/api/v1/tasks/:id", ActionSpec{Action: "task.delete", EntityType: "task", IDParam: "id"}},
 	{"POST", "/api/v1/tasks/:id/restore", ActionSpec{Action: "task.restore", EntityType: "task", IDParam: "id"}},
+	{"POST", "/api/v1/library/templates", ActionSpec{Action: "program_template.create", EntityType: "program_template", IDParam: ""}},
+	{"PUT", "/api/v1/library/templates/:id", ActionSpec{Action: "program_template.update", EntityType: "program_template", IDParam: "id"}},
+	{"DELETE", "/api/v1/library/templates/:id", ActionSpec{Action: "program_template.delete", EntityType: "program_template", IDParam: "id"}},
+	{"POST", "/api/v1/library/templates/:id/versions", ActionSpec{Action: "template_version.create", EntityType: "program_template", IDParam: "id"}},
+	{"POST", "/api/v1/library/versions/:vid/publish", ActionSpec{Action: "template_version.publish", EntityType: "template_version", IDParam: "vid"}},
+	{"POST", "/api/v1/library/versions/:vid/archive", ActionSpec{Action: "template_version.archive", EntityType: "template_version", IDParam: "vid"}},
+	{"POST", "/api/v1/library/versions/:vid/lessons", ActionSpec{Action: "template_lesson.create", EntityType: "template_version", IDParam: "vid"}},
+	{"PUT", "/api/v1/library/versions/:vid/lessons/order", ActionSpec{Action: "template_lesson.reorder", EntityType: "template_version", IDParam: "vid"}},
+	{"PUT", "/api/v1/library/lessons/:lid", ActionSpec{Action: "template_lesson.update", EntityType: "template_lesson", IDParam: "lid"}},
+	{"DELETE", "/api/v1/library/lessons/:lid", ActionSpec{Action: "template_lesson.delete", EntityType: "template_lesson", IDParam: "lid"}},
 }
 
 // TestActionSnapshotUnchanged proves LookupAction still resolves every

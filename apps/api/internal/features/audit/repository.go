@@ -6,6 +6,8 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+
+	"teka/apps/api/internal/shared/likeq"
 )
 
 // Repository persists audit rows.
@@ -26,10 +28,6 @@ func (r *Repository) InsertBatch(ctx context.Context, rows []Log) error {
 	}
 	return r.db.WithContext(ctx).Create(&rows).Error
 }
-
-// likeEscaper neutralizes LIKE metacharacters in the user-supplied action
-// prefix so "class_" cannot match "classX".
-var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
 // List returns one page of audit rows visible to the given center, newest
 // first, resolving the actor's display name only for the surviving page.
@@ -68,7 +66,7 @@ func listSQL(spec ListSpec) (string, []any) {
 	}
 	if spec.ActionPrefix != "" {
 		cond.WriteString(` AND a.action LIKE ? ESCAPE '\'`)
-		condArgs = append(condArgs, likeEscaper.Replace(spec.ActionPrefix)+"%")
+		condArgs = append(condArgs, likeq.Prefix(spec.ActionPrefix))
 	}
 	if !spec.From.IsZero() {
 		cond.WriteString(" AND a.occurred_at >= ?")

@@ -38,6 +38,7 @@ var domainTables = []string{
 	"rbac_backfill_rows", "rbac_backfill_ledger",
 	"task_columns", "tasks",
 	"class_invitations",
+	"program_templates", "program_template_versions", "template_lessons",
 }
 
 // centerTables is every business table 000007 re-keyed to the center tenant.
@@ -321,10 +322,10 @@ func TestDownFoldsPersonalChannelIntoManual(t *testing.T) {
 		 VALUES (?, ?, ?, ?, 'zalo_personal')`,
 		notifID, f.teacherID, f.centerID, f.statementID).Error)
 
-	// Roll back through 000005 (zalo_personal_mapping): twenty-two steps now
-	// that the additive 000008-000026 sit on top of the migrations this test
-	// predates.
-	require.NoError(t, database.MigrateDown(m, 22))
+	// Roll back through 000005 (zalo_personal_mapping): twenty-three steps
+	// now that the additive 000008-000027 sit on top of the migrations this
+	// test predates.
+	require.NoError(t, database.MigrateDown(m, 23))
 
 	var channel string
 	require.NoError(t, db.Raw(
@@ -2033,7 +2034,9 @@ func TestTaskBoardBackfillGrantsRoleLessMemberCRUD(t *testing.T) {
 	require.NoError(t, db.Exec(
 		`UPDATE centers SET deleted_at = now() WHERE id = ?`, retired.centerID).Error)
 
-	require.NoError(t, database.MigrateUp(m))
+	// Stop at 000022 itself: later migrations backfill their own default
+	// keys (000027 adds library.read) and would blur this count.
+	require.NoError(t, m.Migrate(22))
 
 	taskKeys := []string{"tasks.create", "tasks.list", "tasks.read", "tasks.edit", "tasks.delete"}
 	memberGrants := func(teacherID uuid.UUID) map[string]bool {
@@ -2298,4 +2301,190 @@ func TestClassCatalogBackfillAssignsUniqueCodes(t *testing.T) {
 		require.Falsef(t, cols[gone], "column %s must be dropped by the down migration", gone)
 	}
 	require.NoError(t, database.MigrateUp(m))
+}
+
+// Every live system role and every live role-less member gets exactly
+// library.read; the two opt-in write keys are never backfilled. Down removes
+// only the ledgered rows and drops the three tables.
+func TestProgramTemplatesBackfillGrantsLibraryRead(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+	require.NoError(t, m.Migrate(26))
+
+	db := openDB(t, url)
+	live := seedNotificationParents(t, db, "+84900001501")
+	member := func(phone string, roleID *uuid.UUID, closed bool) uuid.UUID {
+		teacherID := uuid.New()
+		require.NoError(t, db.Exec(
+			`INSERT INTO user_accounts (id, role, phone) VALUES (?, 'teachers', ?)`,
+			teacherID, phone).Error)
+		leftAt := "NULL"
+		if closed {
+			leftAt = "now()"
+		}
+		require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec(
+				`INSERT INTO teachers (id, full_name, center_id) VALUES (?, 'Giáo Viên', ?)`,
+				teacherID, live.centerID).Error; err != nil {
+				return err
+			}
+			return tx.Exec(fmt.Sprintf(
+				`INSERT INTO center_members (teacher_id, center_id, role_id, left_at)
+				 VALUES (?, ?, ?, %s)`, leftAt),
+				teacherID, live.centerID, roleID).Error
+		}))
+		return teacherID
+	}
+	roleless := member("+84900001502", nil, false)
+	former := member("+84900001503", nil, true)
+	roleID := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO center_roles (id, center_id, key, name) VALUES (?, ?, 'giao_vien', 'Giáo viên')`,
+		roleID, live.centerID).Error)
+	roled := member("+84900001504", &roleID, false)
+	// A member the owner already granted the read key keeps that row, and a
+	// standing deny wins over the backfill grant.
+	denied := member("+84900001506", nil, false)
+	require.NoError(t, db.Exec(
+		`INSERT INTO center_member_permissions (teacher_id, center_id, permission_key, allowed)
+		 VALUES (?, ?, 'library.read', FALSE)`, denied, live.centerID).Error)
+
+	retired := seedNotificationParents(t, db, "+84900001505")
+	require.NoError(t, db.Exec(
+		`UPDATE centers SET deleted_at = now() WHERE id = ?`, retired.centerID).Error)
+
+	require.NoError(t, database.MigrateUp(m))
+
+	memberGrants := func(teacherID uuid.UUID) map[string]bool {
+		var rows []struct {
+			PermissionKey string
+			Allowed       bool
+		}
+		require.NoError(t, db.Raw(
+			`SELECT permission_key, allowed FROM center_member_permissions
+			 WHERE teacher_id = ? AND center_id = ?`, teacherID, live.centerID).Scan(&rows).Error)
+		out := map[string]bool{}
+		for _, r := range rows {
+			out[r.PermissionKey] = r.Allowed
+		}
+		return out
+	}
+	require.Equal(t, map[string]bool{"library.read": true}, memberGrants(roleless),
+		"a role-less live member gets exactly library.read")
+	require.Equal(t, map[string]bool{"library.read": false}, memberGrants(denied),
+		"an existing deny must survive the backfill")
+	require.Empty(t, memberGrants(former))
+	require.Empty(t, memberGrants(roled))
+	require.Empty(t, memberGrants(live.teacherID))
+
+	var roleKeys []string
+	require.NoError(t, db.Raw(
+		`SELECT permission_key FROM center_role_permissions WHERE role_id = ?`, roleID).Scan(&roleKeys).Error)
+	require.Equal(t, []string{"library.read"}, roleKeys)
+
+	var n int64
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM center_role_permissions rp
+		 JOIN center_roles cr ON cr.id = rp.role_id
+		 WHERE cr.center_id = ?`, retired.centerID).Scan(&n).Error)
+	require.Zero(t, n, "a retired center's roles receive nothing")
+
+	// Down removes exactly the ledgered rows — the pre-existing deny stays —
+	// and drops the tables; a second up must be clean.
+	require.NoError(t, m.Migrate(26))
+	require.Empty(t, memberGrants(roleless))
+	require.Equal(t, map[string]bool{"library.read": false}, memberGrants(denied))
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM center_role_permissions WHERE role_id = ?`, roleID).Scan(&n).Error)
+	require.Zero(t, n)
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM rbac_backfill_rows WHERE step LIKE 'library_%'`).Scan(&n).Error)
+	require.Zero(t, n)
+	got := nameSet(t, db, `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`)
+	for _, gone := range []string{"program_templates", "program_template_versions", "template_lessons"} {
+		require.Falsef(t, got[gone], "table %s must be dropped by the down migration", gone)
+	}
+	require.NoError(t, database.MigrateUp(m))
+	require.Equal(t, map[string]bool{"library.read": true}, memberGrants(roleless))
+}
+
+// The schema itself enforces the library invariants the service relies on:
+// one draft per template, unique codes among live templates only, lesson
+// positions unique per version but swappable inside one transaction, and no
+// row pointing across centers.
+func TestProgramTemplatesSchemaInvariants(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+
+	db := openDB(t, url)
+	a := seedNotificationParents(t, db, "+84900001601")
+	b := seedNotificationParents(t, db, "+84900001602")
+
+	templateID := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO program_templates (id, center_id, code, name, created_by) VALUES (?, ?, 'CT01', 'Toán 6', ?)`,
+		templateID, a.centerID, a.teacherID).Error)
+	require.Error(t, db.Exec(
+		`INSERT INTO program_templates (center_id, code, name) VALUES (?, 'CT01', 'Trùng mã')`,
+		a.centerID).Error, "codes are unique among live templates of a center")
+	require.NoError(t, db.Exec(
+		`INSERT INTO program_templates (center_id, code, name) VALUES (?, 'CT01', 'Mã trùng ở trung tâm khác')`,
+		b.centerID).Error)
+	require.NoError(t, db.Exec(
+		`UPDATE program_templates SET deleted_at = now() WHERE id = ?`, templateID).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO program_templates (center_id, code, name) VALUES (?, 'CT01', 'Dùng lại mã sau xoá mềm')`,
+		a.centerID).Error)
+	require.NoError(t, db.Exec(
+		`UPDATE program_templates SET deleted_at = NULL, code = 'CT02' WHERE id = ?`, templateID).Error)
+
+	require.Error(t, db.Exec(
+		`INSERT INTO program_template_versions (template_id, center_id, version_no) VALUES (?, ?, 1)`,
+		templateID, b.centerID).Error, "a version must not point at a template of another center")
+
+	draftID := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO program_template_versions (id, template_id, center_id, version_no) VALUES (?, ?, ?, 1)`,
+		draftID, templateID, a.centerID).Error)
+	require.Error(t, db.Exec(
+		`INSERT INTO program_template_versions (template_id, center_id, version_no) VALUES (?, ?, 2)`,
+		templateID, a.centerID).Error, "at most one draft per template")
+	require.NoError(t, db.Exec(
+		`UPDATE program_template_versions SET status = 'published', published_at = now() WHERE id = ?`, draftID).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO program_template_versions (template_id, center_id, version_no) VALUES (?, ?, 2)`,
+		templateID, a.centerID).Error, "a new draft is allowed once the previous one is published")
+
+	first, second := uuid.New(), uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO template_lessons (id, version_id, center_id, position, title) VALUES (?, ?, ?, 1, 'Buổi 1'), (?, ?, ?, 2, 'Buổi 2')`,
+		first, draftID, a.centerID, second, draftID, a.centerID).Error)
+	require.Error(t, db.Exec(
+		`INSERT INTO template_lessons (version_id, center_id, position, title) VALUES (?, ?, 2, 'Trùng vị trí')`,
+		draftID, a.centerID).Error, "positions are unique within a version")
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(`UPDATE template_lessons SET position = 2 WHERE id = ?`, first).Error; err != nil {
+			return err
+		}
+		return tx.Exec(`UPDATE template_lessons SET position = 1 WHERE id = ?`, second).Error
+	}), "a swap inside one transaction must not trip the deferred unique")
+	require.Error(t, db.Exec(
+		`INSERT INTO template_lessons (version_id, center_id, position, title) VALUES (?, ?, 9, 'Sai trung tâm')`,
+		draftID, b.centerID).Error, "a lesson must not point at a version of another center")
+
+	// Hard-deleting the template cascades through versions to lessons.
+	require.NoError(t, db.Exec(`DELETE FROM program_templates WHERE id = ?`, templateID).Error)
+	var n int64
+	require.NoError(t, db.Raw(`SELECT count(*) FROM template_lessons WHERE version_id = ?`, draftID).Scan(&n).Error)
+	require.Zero(t, n)
 }

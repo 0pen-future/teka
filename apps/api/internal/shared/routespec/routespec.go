@@ -398,6 +398,37 @@ var Specs = []Spec{
 	perm("POST", "/api/v1/tasks/:id/move", authctx.PermTasksEdit, req("task.move", "task", "id")),
 	perm("DELETE", "/api/v1/tasks/:id", authctx.PermTasksDelete, req("task.delete", "task", "id")),
 	perm("POST", "/api/v1/tasks/:id/restore", authctx.PermTasksDelete, req("task.restore", "task", "id")),
+
+	// Program-template library. Reads sit behind library.read, drafting
+	// behind library.edit, and publishing behind library.publish (a
+	// separate opt-in because it freezes content for every class that
+	// later binds to the version). Templates are :id, versions :vid and
+	// lessons :lid so each audit row points at the entity it changed.
+	perm("GET", "/api/v1/library/templates", authctx.PermLibraryRead, none()),
+	perm("POST", "/api/v1/library/templates", authctx.PermLibraryEdit,
+		req("program_template.create", "program_template", "")),
+	perm("GET", "/api/v1/library/templates/:id", authctx.PermLibraryRead, none()),
+	perm("PUT", "/api/v1/library/templates/:id", authctx.PermLibraryEdit,
+		req("program_template.update", "program_template", "id")),
+	perm("DELETE", "/api/v1/library/templates/:id", authctx.PermLibraryEdit,
+		req("program_template.delete", "program_template", "id")),
+	perm("GET", "/api/v1/library/templates/:id/versions", authctx.PermLibraryRead, none()),
+	perm("POST", "/api/v1/library/templates/:id/versions", authctx.PermLibraryEdit,
+		req("template_version.create", "program_template", "id")),
+	perm("POST", "/api/v1/library/versions/:vid/publish", authctx.PermLibraryPublish,
+		req("template_version.publish", "template_version", "vid")),
+	perm("POST", "/api/v1/library/versions/:vid/archive", authctx.PermLibraryEdit,
+		req("template_version.archive", "template_version", "vid")),
+	perm("GET", "/api/v1/library/versions/:vid/lessons", authctx.PermLibraryRead, none()),
+	perm("POST", "/api/v1/library/versions/:vid/lessons", authctx.PermLibraryEdit,
+		req("template_lesson.create", "template_version", "vid")),
+	perm("PUT", "/api/v1/library/versions/:vid/lessons/order", authctx.PermLibraryEdit,
+		req("template_lesson.reorder", "template_version", "vid")),
+	perm("GET", "/api/v1/library/lessons/:lid", authctx.PermLibraryRead, none()),
+	perm("PUT", "/api/v1/library/lessons/:lid", authctx.PermLibraryEdit,
+		req("template_lesson.update", "template_lesson", "lid")),
+	perm("DELETE", "/api/v1/library/lessons/:lid", authctx.PermLibraryEdit,
+		req("template_lesson.delete", "template_lesson", "lid")),
 }
 
 // Policies returns the manifest for the server package's route-policy

@@ -36,12 +36,13 @@ var expectedScopeKeys = []string{
 	PermTasksViewAll,
 }
 
-// The two catalog v4 keys an owner must assign explicitly: DefaultGrant is
-// false, so the compatibility backfill and the default-role baseline never
-// carry them.
+// The keys an owner must assign explicitly: DefaultGrant is false, so the
+// compatibility backfill and the default-role baseline never carry them.
 var optInKeys = []string{
 	PermTasksManageBoard,
 	PermMembersList,
+	PermLibraryEdit,
+	PermLibraryPublish,
 }
 
 // Keys the catalog once knew and has since retired: assignment rows for them
@@ -254,8 +255,8 @@ func TestEffectiveKeysCoversCatalogInOrder(t *testing.T) {
 // already — granting them would escalate).
 func TestDefaultRoleKeysPreserveLegacyBaseline(t *testing.T) {
 	defaults := DefaultRoleKeys()
-	if len(defaults) != 58 {
-		t.Fatalf("default baseline must hold the 58 operational keys, got %d", len(defaults))
+	if len(defaults) != 59 {
+		t.Fatalf("default baseline must hold the 59 operational keys, got %d", len(defaults))
 	}
 	inDefaults := map[string]bool{}
 	for _, key := range defaults {

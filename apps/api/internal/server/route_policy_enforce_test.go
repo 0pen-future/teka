@@ -115,7 +115,10 @@ func TestPolicyFullGrantMemberStopsAtOwnerOnly(t *testing.T) {
 
 // Each permission route demands exactly its own key: holding every other
 // grantable key still yields 403 (so list never implies read, read never
-// implies edit), and holding only that key yields 200.
+// implies edit), and holding only that key yields 200. The only keys left
+// out of "every other" are the ones the catalog declares to carry the
+// route's key (a write such as library.edit carries library.read); the
+// catalog tests pin that an implied key is always a read.
 func TestPolicyPermissionRoutesRequireExactKey(t *testing.T) {
 	grantable := authctx.GrantableKeys()
 	for _, p := range authedManifestRoutes() {
@@ -124,7 +127,7 @@ func TestPolicyPermissionRoutesRequireExactKey(t *testing.T) {
 		}
 		allBut := make([]string, 0, len(grantable)-1)
 		for _, k := range grantable {
-			if k != p.Key {
+			if k != p.Key && !memberScope(k).Has(p.Key) {
 				allBut = append(allBut, k)
 			}
 		}

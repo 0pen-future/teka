@@ -30,6 +30,7 @@ import (
 	"teka/apps/api/internal/features/handoff"
 	"teka/apps/api/internal/features/imports"
 	"teka/apps/api/internal/features/invitations"
+	"teka/apps/api/internal/features/library"
 	"teka/apps/api/internal/features/notifications"
 	"teka/apps/api/internal/features/payments"
 	"teka/apps/api/internal/features/sessions"
@@ -213,6 +214,11 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, log *slog.Logger,
 		classStaffRepo, classStaffSvc, handoffSvc, txMgr)
 	classinvites.RegisterRoutes(v1, classinvites.NewHandler(classInvitesSvc), authChain...)
 	centersSvc.SetClassInviteCanceller(classInvitesSvc)
+
+	// library holds the center's program templates: versioned curricula whose
+	// published versions are immutable. It has no dependency on classes yet;
+	// binding a class to a version comes with the class detail work.
+	library.RegisterRoutes(v1, library.NewHandler(library.NewService(library.NewRepository(db), txMgr)), authChain...)
 
 	// attendance consumes enrollments and sessions through consumer
 	// interfaces (RosterSource, SessionStore) rather than their repository

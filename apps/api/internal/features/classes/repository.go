@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +12,7 @@ import (
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/classscope"
+	"teka/apps/api/internal/shared/likeq"
 	"teka/apps/api/internal/shared/pagination"
 )
 
@@ -281,10 +281,6 @@ func (r *gormRepository) List(ctx context.Context, sc authctx.Scope, filter List
 	return r.list(r.scoped(ctx, sc), filter, p)
 }
 
-// likeEscaper makes a user string safe inside ILIKE ... ESCAPE '\': the
-// three metacharacters are escaped so "100%" or "a_b" match literally.
-var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-
 func (r *gormRepository) list(q *gorm.DB, filter ListFilter, p pagination.Params) ([]Class, int64, error) {
 	q = q.Model(&Class{})
 	if filter.Status != "" {
@@ -293,7 +289,7 @@ func (r *gormRepository) list(q *gorm.DB, filter ListFilter, p pagination.Params
 		q = q.Where("classes.status = ?", filter.Status)
 	}
 	if filter.Q != "" {
-		needle := "%" + likeEscaper.Replace(filter.Q) + "%"
+		needle := likeq.Contains(filter.Q)
 		q = q.Where(`(classes.name ILIKE ? ESCAPE '\' OR classes.code ILIKE ? ESCAPE '\')`, needle, needle)
 	}
 	if filter.Tag != "" {
