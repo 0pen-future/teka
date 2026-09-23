@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Lời mời nhận lớp"
-status: pending
+status: completed
 priority: P1
 effort: "1.5d"
 dependencies: [1]
@@ -101,6 +101,12 @@ Modify: `routespec.go`, `server/route_policy_snapshot_test.go`, `audit/action_te
 (dựng `classinvites` **sau** `handoff` :203 và `classstaff`; inject `handoff.Service`, `classstaff.Service`, `MemberChecker`),
 `centers` remove-member (hủy lời mời), `handlers.ts` (fixtures), `dashboard-layout.tsx`, `roster/routes.tsx`,
 `class-info-tab.tsx`. **Không đụng `catalog.go`.**
+
+## Completion notes (2026-09-23)
+- Backend: `classinvites` (model, repo, service, handler, routes), migration 000026, 7 route mới trong routespec + snapshot/audit tests, hook `ClassInviteCanceller` trong `centers.RemoveMember`, swagger sinh lại.
+- Web: `/class-invitations`, `ClassTeamSection` thay placeholder, `InviteTeacherDialog`, `ConfirmInvitationDialog`, nav + overflow, MSW fixtures, 2 suite vitest mới, e2e `class-invitations.spec.ts`.
+- Review: [reports/review-phase-02-260923.md](./reports/review-phase-02-260923.md) — SHIP WITH FIXES; M1/M2/M3/L1/L3/L5/L6 và nit message đã sửa, L2/L4 giữ nguyên có lý do.
+- Lệch spec đã chốt: accept của thành viên đã rời trả 404 (kiểm `IsActiveMember` trong `respond`), đúng verification (6).
 
 ## Verification
 - `make test-api-unit` (manifest, snapshot, audit action), `make test-api` package `classinvites`, `handoff`, `classstaff`, `centers`.
