@@ -496,6 +496,11 @@ export function makeClass(overrides: Record<string, unknown> = {}) {
     end_date: null,
     default_unit_price: 60000,
     status: "active",
+    code: `L${String(classCounter).padStart(5, "0")}`,
+    tags: [],
+    recruiting: false,
+    note: null,
+    phase: "running",
     schedules: [
       {
         id: `21000000-0000-4000-8000-${String(classCounter).padStart(12, "0")}`,
@@ -967,6 +972,13 @@ export const handlers = [
   ),
   // Dashboard aggregation defaults: an empty roster with nothing billed.
   http.get(`${API_URL}/classes`, () => HttpResponse.json(ok([], listMeta(0)))),
+  // Registered before any `/classes/:id` handler: MSW matches in order and
+  // would otherwise read "stats" as a class id.
+  http.get(`${API_URL}/classes/stats`, () =>
+    HttpResponse.json(
+      ok({ all: 0, upcoming: 0, running: 0, ended: 0, archived: 0, recruiting: 0 }),
+    ),
+  ),
   http.get(`${API_URL}/classes/:id/sessions`, () => HttpResponse.json(ok([]))),
   // Teaching defaults: nothing saved yet. Stateful round-trip handlers live in
   // `@/features/teaching/__tests__/teaching-handlers.ts`; tests that write

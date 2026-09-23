@@ -7,6 +7,7 @@ import {
   createClass,
   deleteSchedule,
   getClass,
+  getClassStats,
   listClasses,
   reassignTeacher,
   updateClass,
@@ -35,12 +36,25 @@ export function useClass(id: string | undefined) {
   });
 }
 
+/** Per-phase counts for the class list's status chips. */
+export function useClassStats() {
+  return useQuery({
+    queryKey: classesKeys.stats(),
+    queryFn: getClassStats,
+  });
+}
+
+/**
+ * Create and update invalidate every class query, not just the lists: the
+ * stats counts move with a new class or a recruiting/date edit, and the
+ * detail must reflect an edit made from the list.
+ */
 export function useCreateClass() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: ClassCreateInput) => createClass(input),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: classesKeys.lists() });
+      void queryClient.invalidateQueries({ queryKey: classesKeys.all });
     },
   });
 }
@@ -50,8 +64,7 @@ export function useUpdateClass(id: string) {
   return useMutation({
     mutationFn: (input: ClassUpdateInput) => updateClass(id, input),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: classesKeys.lists() });
-      void queryClient.invalidateQueries({ queryKey: classesKeys.detail(id) });
+      void queryClient.invalidateQueries({ queryKey: classesKeys.all });
     },
   });
 }

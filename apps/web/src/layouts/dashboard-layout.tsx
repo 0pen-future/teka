@@ -5,6 +5,7 @@ import {
   ClipboardCheckIcon,
   EllipsisIcon,
   FileSpreadsheetIcon,
+  GraduationCapIcon,
   HistoryIcon,
   IdCardIcon,
   KanbanIcon,
@@ -83,6 +84,17 @@ function useNavGroups(): NavGroup[] {
         { label: "Quản lý lớp học", to: "/classbook", Icon: BookOpenIcon, perm: "classes.list" },
         { label: "Hồ sơ học sinh", to: "/records", Icon: IdCardIcon, perm: "students.list" },
         { label: "Phụ huynh", to: "/contacts", Icon: BookUserIcon, perm: "contacts.list" },
+      ],
+    },
+    {
+      header: "Giảng dạy",
+      entries: [
+        {
+          label: "Danh sách lớp học",
+          to: "/classes",
+          Icon: GraduationCapIcon,
+          perm: "classes.list",
+        },
       ],
     },
     {
@@ -172,6 +184,7 @@ function useNavGroups(): NavGroup[] {
 const OVERFLOW_LABELS = new Set([
   "Quản lý lớp học",
   "Hồ sơ học sinh",
+  "Danh sách lớp học",
   "Chốt sổ",
   "Gửi thông báo",
   "Phụ huynh",
@@ -193,6 +206,7 @@ const OVERFLOW_LABELS = new Set([
  */
 const OVERFLOW_PATH_PREFIXES = [
   "/classbook",
+  "/classes",
   "/records",
   "/billing",
   "/notifications",

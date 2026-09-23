@@ -39,6 +39,11 @@ export const fixtureClass: Class = {
   created_at: "2026-01-01T08:00:00Z",
   my_staff_roles: [],
   student_count: 0,
+  code: "",
+  tags: [],
+  recruiting: false,
+  note: null,
+  phase: "running",
 };
 
 function buildRosterTemplate(): AttendanceRow[] {

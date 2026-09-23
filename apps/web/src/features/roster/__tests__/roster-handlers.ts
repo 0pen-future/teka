@@ -85,6 +85,11 @@ export const classWithSchedule: Class = {
   created_at: "2026-01-01T08:00:00Z",
   my_staff_roles: [],
   student_count: 0,
+  code: "TOAN6A",
+  tags: ["Toán", "Khối 6"],
+  recruiting: false,
+  note: null,
+  phase: "running",
 };
 
 /**
@@ -207,6 +212,13 @@ let idCounter = 0;
 function nextId(prefix: string) {
   idCounter += 1;
   return `${prefix}${String(idCounter).padStart(8, "0")}`;
+}
+
+/** Mirrors the API's shift bounds: before 12:00 morning, before 17:30 afternoon, else evening. */
+function shiftOf(startTime: string): "morning" | "afternoon" | "evening" {
+  if (startTime < "12:00") return "morning";
+  if (startTime < "17:30") return "afternoon";
+  return "evening";
 }
 
 /** Treats an empty-string form value the same as an absent one (`??` alone would not). */
@@ -390,13 +402,40 @@ export const rosterHandlers = [
   http.get(`${API_URL}/classes`, ({ request }) => {
     const url = new URL(request.url);
     const status = url.searchParams.get("status");
+    const phase = url.searchParams.get("phase");
+    const q = url.searchParams.get("q")?.toLowerCase() ?? "";
+    const weekday = url.searchParams.get("weekday");
+    const shift = url.searchParams.get("shift");
+    const tag = url.searchParams.get("tag");
     const items = store.classes
       .filter((klass) => {
-        if (!status || status === "all") return true;
-        return klass.status === status;
+        if (status && status !== "all" && klass.status !== status) return false;
+        if (phase && klass.phase !== phase) return false;
+        if (q && !klass.name.toLowerCase().includes(q) && !klass.code.toLowerCase().includes(q)) {
+          return false;
+        }
+        if (tag && !klass.tags.includes(tag)) return false;
+        if (weekday || shift) {
+          return klass.schedules.some(
+            (schedule) =>
+              (!weekday || String(schedule.weekday) === weekday) &&
+              (!shift || shiftOf(schedule.start_time) === shift),
+          );
+        }
+        return true;
       })
       .map(withStudentCount);
     return HttpResponse.json(ok(items, listMeta(items.length)));
+  }),
+  // Before `/classes/:id`, which would otherwise swallow "stats" as an id.
+  http.get(`${API_URL}/classes/stats`, () => {
+    const counts = { all: 0, upcoming: 0, running: 0, ended: 0, archived: 0, recruiting: 0 };
+    for (const klass of store.classes) {
+      counts.all += 1;
+      counts[klass.phase] += 1;
+      if (klass.recruiting) counts.recruiting += 1;
+    }
+    return HttpResponse.json(ok(counts));
   }),
   http.get(`${API_URL}/classes/:id`, ({ params }) => {
     const klass = store.classes.find((item) => item.id === params.id);
@@ -408,13 +447,26 @@ export const rosterHandlers = [
   http.post(`${API_URL}/classes`, async ({ request }) => {
     const body = (await request.json()) as Omit<
       Class,
-      "id" | "status" | "schedules" | "created_at"
+      "id" | "status" | "schedules" | "created_at" | "code" | "tags" | "note" | "phase"
     > & {
       schedules: Omit<Schedule, "id">[];
+      code?: string;
+      tags?: string[];
+      note?: string;
     };
     const klass: Class = {
       id: nextId("class-"),
       name: body.name,
+      code:
+        (body.code ?? "").trim() !== ""
+          ? body.code!
+          : `L${String(store.classes.length + 1).padStart(5, "0")}`,
+      tags: body.tags ?? [],
+      recruiting: false,
+      note: orNull(body.note),
+      // The fixture never dates a new class into the past, so it opens as
+      // upcoming unless it starts today or earlier.
+      phase: body.start_date <= new Date().toISOString().slice(0, 10) ? "running" : "upcoming",
       // The API assigns a new class to the creating teacher; the fixture
       // roster runs under one owner, so a single stable id stands in.
       teacher_id: "73000000-0000-4000-8000-000000000001",
@@ -444,12 +496,21 @@ export const rosterHandlers = [
       start_date: string;
       end_date?: string;
       default_unit_price: number;
+      code?: string;
+      tags?: string[];
+      recruiting?: boolean;
+      note?: string;
     };
     klass.name = body.name;
     klass.start_date = body.start_date;
     klass.end_date = orNull(body.end_date);
     klass.default_unit_price = body.default_unit_price;
-    return HttpResponse.json(ok(klass));
+    // Catalog fields are pointers server-side: absent means unchanged.
+    if (body.code !== undefined) klass.code = body.code;
+    if (body.tags !== undefined) klass.tags = body.tags;
+    if (body.recruiting !== undefined) klass.recruiting = body.recruiting;
+    if (body.note !== undefined) klass.note = orNull(body.note);
+    return HttpResponse.json(ok(withStudentCount(klass)));
   }),
   http.put(`${API_URL}/classes/:id/teacher`, async ({ params, request }) => {
     const klass = store.classes.find((item) => item.id === params.id);

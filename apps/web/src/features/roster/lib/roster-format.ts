@@ -92,3 +92,12 @@ export function formatScheduleLabel(schedules: Schedule[], today: string): strin
     })
     .join(", ");
 }
+
+/** "05/01/2026" for a DATE column value; anything unparsable passes through. */
+export function formatFullDate(isoDate: string): string {
+  const [year, month, day] = isoDate.split("-");
+  if (!year || !month || !day) {
+    return isoDate;
+  }
+  return `${day}/${month}/${year}`;
+}

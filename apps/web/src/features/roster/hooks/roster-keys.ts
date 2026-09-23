@@ -31,6 +31,7 @@ export const classesKeys = {
   list: (params: ListClassesParams) => [...classesKeys.lists(), params] as const,
   details: () => [...classesKeys.all, "detail"] as const,
   detail: (id: string) => [...classesKeys.details(), id] as const,
+  stats: () => [...classesKeys.all, "stats"] as const,
 };
 
 export const enrollmentsKeys = {

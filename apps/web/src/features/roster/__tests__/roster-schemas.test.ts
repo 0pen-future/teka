@@ -5,6 +5,8 @@ import {
   classSchema,
   classSettingsInputSchema,
   toClassCreateInput,
+  toClassUpdateInput,
+  type Class,
   type ClassDialogInput,
 } from "../schemas/roster-schemas";
 
@@ -115,5 +117,79 @@ describe("khung-giờ slot validation", () => {
       ]),
     );
     expect(result.success).toBe(true);
+  });
+});
+
+describe("classSchema catalog fields", () => {
+  it("defaults the catalog fields for a response that predates them", () => {
+    const parsed = classSchema.parse({
+      id: "c1",
+      name: "Toán 9C",
+      teacher_id: "t1",
+      start_date: "2026-08-05",
+      end_date: null,
+      default_unit_price: 150_000,
+      status: "active",
+      schedules: [],
+      created_at: "2026-08-01T00:00:00Z",
+    });
+    expect(parsed.code).toBe("");
+    expect(parsed.tags).toEqual([]);
+    expect(parsed.recruiting).toBe(false);
+    expect(parsed.note).toBeNull();
+    expect(parsed.phase).toBe("running");
+  });
+});
+
+describe("toClassUpdateInput", () => {
+  const klass: Class = classSchema.parse({
+    id: "c1",
+    name: "Toán 9C",
+    teacher_id: "t1",
+    start_date: "2026-08-05",
+    end_date: "2026-12-20",
+    default_unit_price: 150_000,
+    status: "active",
+    schedules: [],
+    created_at: "2026-08-01T00:00:00Z",
+    code: "TOAN9C",
+    tags: ["Toán", "Khối 9"],
+    recruiting: false,
+    note: "Phòng 201",
+    phase: "running",
+  });
+
+  it("copies the required base fields and adds only the catalog fields that changed", () => {
+    expect(toClassUpdateInput(klass, { recruiting: true })).toEqual({
+      name: "Toán 9C",
+      start_date: "2026-08-05",
+      end_date: "2026-12-20",
+      default_unit_price: 150_000,
+      recruiting: true,
+    });
+  });
+
+  it("omits every catalog field when nothing differs from the class", () => {
+    const body = toClassUpdateInput(klass, {
+      recruiting: false,
+      tags: ["Toán", "Khối 9"],
+      note: "Phòng 201",
+    });
+    expect(body).not.toHaveProperty("recruiting");
+    expect(body).not.toHaveProperty("tags");
+    expect(body).not.toHaveProperty("note");
+    expect(body).not.toHaveProperty("code");
+  });
+
+  it("sends an empty note to clear it and an empty end_date for an open-ended class", () => {
+    const openEnded = { ...klass, end_date: null };
+    expect(toClassUpdateInput(openEnded, { note: "", tags: ["Toán"] })).toEqual({
+      name: "Toán 9C",
+      start_date: "2026-08-05",
+      end_date: "",
+      default_unit_price: 150_000,
+      note: "",
+      tags: ["Toán"],
+    });
   });
 });

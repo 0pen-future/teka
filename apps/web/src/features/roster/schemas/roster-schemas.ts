@@ -166,6 +166,11 @@ const classSlotsField = z
     });
   });
 
+/** The lifecycle bucket the API assigns a class; the list filter and stats use the same values. */
+export const classPhases = ["upcoming", "running", "ended", "archived"] as const;
+export const classPhaseSchema = z.enum(classPhases);
+export type ClassPhase = z.infer<typeof classPhaseSchema>;
+
 /**
  * `classes.ClassResponse`. `default_unit_price` is integer đồng, never a
  * decimal. `my_staff_roles` is the caller's own active class-staff role keys
@@ -187,9 +192,35 @@ export const classSchema = z.object({
   my_staff_roles: z.array(z.string()).default([]),
   /** Open enrollments on the class — what `GET /enrollments?active=true` lists. */
   student_count: z.number().int().nonnegative().default(0),
+  // Catalog fields. They default rather than require so a cached or older
+  // response that predates them still parses.
+  /** Display code (mã lớp), unique per center among live classes. */
+  code: z.string().default(""),
+  tags: z.array(z.string()).default([]),
+  /** Still taking enrolments (cần tuyển sinh). */
+  recruiting: z.boolean().default(false),
+  /** Operational note shown on the class detail; null when none. */
+  note: z.string().nullable().default(null),
+  /**
+   * Derived server-side from status and the dates against today
+   * (`classes.PhaseOf`); the client only renders it and never recomputes it.
+   */
+  phase: classPhaseSchema.default("running"),
 });
 
 export type Class = z.infer<typeof classSchema>;
+
+/** `classes.ClassStatsResponse` (`GET /classes/stats`): counts within the caller's read scope. */
+export const classStatsSchema = z.object({
+  all: z.number().int().nonnegative(),
+  upcoming: z.number().int().nonnegative(),
+  running: z.number().int().nonnegative(),
+  ended: z.number().int().nonnegative(),
+  archived: z.number().int().nonnegative(),
+  recruiting: z.number().int().nonnegative(),
+});
+
+export type ClassStats = z.infer<typeof classStatsSchema>;
 
 /**
  * `classes.CreateClassRequest` — schedules are required atomically; a class
@@ -205,15 +236,77 @@ export const classCreateInputSchema = z.object({
 
 export type ClassCreateInput = z.infer<typeof classCreateInputSchema>;
 
-/** `classes.UpdateClassRequest` — schedules and status are separate endpoints. */
+const classCodeField = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .regex(/^[A-Z0-9-]{2,20}$/, "Mã lớp gồm 2–20 ký tự chữ, số hoặc gạch ngang");
+
+const classTagsField = z
+  .array(z.string().trim().min(1).max(30, "Mỗi thẻ tối đa 30 ký tự"))
+  .max(10, "Tối đa 10 thẻ");
+
+/**
+ * `classes.UpdateClassRequest` — schedules and status are separate endpoints.
+ * The catalog fields are pointers server-side: a key left out means "keep",
+ * so callers send only what they changed (see `toClassUpdateInput`).
+ */
 export const classUpdateInputSchema = z.object({
   name: z.string().trim().min(1, "Bắt buộc nhập tên lớp").max(100, "Tối đa 100 ký tự"),
   start_date: dateField,
   end_date: z.union([dateField, z.literal("")]).optional(),
   default_unit_price: z.number().int().min(0, "Học phí không được âm"),
+  code: classCodeField.optional(),
+  tags: classTagsField.optional(),
+  recruiting: z.boolean().optional(),
+  /** Replaces the stored note; `""` clears it. */
+  note: z.string().trim().max(1000, "Tối đa 1000 ký tự").optional(),
 });
 
 export type ClassUpdateInput = z.infer<typeof classUpdateInputSchema>;
+
+/**
+ * Form shape of the operational card on the class detail ("Thông tin vận
+ * hành"): the recruiting flag, the tag list and the note. Dates and price
+ * stay on the settings screen.
+ */
+export const classOpsInputSchema = z.object({
+  recruiting: z.boolean(),
+  tags: classTagsField,
+  note: z.string().trim().max(1000, "Tối đa 1000 ký tự"),
+});
+
+export type ClassOpsInput = z.infer<typeof classOpsInputSchema>;
+
+/**
+ * Builds the `PUT /classes/:id` body for an operational edit: the required
+ * base fields copied from the class unchanged, plus only the catalog fields
+ * whose value differs from what the class already holds. Sending an
+ * unchanged `tags` would still be harmless, but sending an unchanged `code`
+ * from a stale read could clobber a rename made elsewhere — hence the diff.
+ */
+export function toClassUpdateInput(klass: Class, values: Partial<ClassOpsInput>): ClassUpdateInput {
+  const input: ClassUpdateInput = {
+    name: klass.name,
+    start_date: klass.start_date,
+    end_date: klass.end_date ?? "",
+    default_unit_price: klass.default_unit_price,
+  };
+  if (values.recruiting !== undefined && values.recruiting !== klass.recruiting) {
+    input.recruiting = values.recruiting;
+  }
+  if (values.tags !== undefined && !sameTags(values.tags, klass.tags)) {
+    input.tags = values.tags;
+  }
+  if (values.note !== undefined && values.note !== (klass.note ?? "")) {
+    input.note = values.note;
+  }
+  return input;
+}
+
+function sameTags(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((tag, index) => tag === b[index]);
+}
 
 /**
  * `handoff.ReassignResponse` (`PUT /classes/:id/teacher`). `teacher_id` is the
