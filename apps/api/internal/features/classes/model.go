@@ -51,11 +51,16 @@ type Class struct {
 	Note *string
 	// CourseID links the class to a course of the same center (nullable);
 	// Course carries the embedded {id, code, name} when preloaded.
-	CourseID  *uuid.UUID
-	Course    *CourseRef `gorm:"foreignKey:CourseID;references:ID"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	DeletedAt gorm.DeletedAt
+	CourseID *uuid.UUID
+	Course   *CourseRef `gorm:"foreignKey:CourseID;references:ID"`
+	// ParentClassID links a class split off from or continuing another
+	// class of the same center (lịch sử lớp); LineageNote explains the
+	// relation. Both are optional and only ever set through update.
+	ParentClassID *uuid.UUID
+	LineageNote   *string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	DeletedAt     gorm.DeletedAt
 	// Schedules holds the class's live schedule rows when preloaded.
 	Schedules []Schedule `gorm:"foreignKey:ClassID"`
 }

@@ -5,6 +5,7 @@ package migrations_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,6 +42,7 @@ var domainTables = []string{
 	"program_templates", "program_template_versions", "template_lessons",
 	"library_materials", "library_exercises", "template_lesson_materials",
 	"template_lesson_exercises", "template_log_fields",
+	"class_programs", "class_messages",
 }
 
 // centerTables is every business table 000007 re-keyed to the center tenant.
@@ -324,10 +326,10 @@ func TestDownFoldsPersonalChannelIntoManual(t *testing.T) {
 		 VALUES (?, ?, ?, ?, 'zalo_personal')`,
 		notifID, f.teacherID, f.centerID, f.statementID).Error)
 
-	// Roll back through 000005 (zalo_personal_mapping): twenty-six steps
-	// now that the additive 000008-000030 sit on top of the migrations this
+	// Roll back through 000005 (zalo_personal_mapping): twenty-seven steps
+	// now that the additive 000008-000031 sit on top of the migrations this
 	// test predates.
-	require.NoError(t, database.MigrateDown(m, 26))
+	require.NoError(t, database.MigrateDown(m, 27))
 
 	var channel string
 	require.NoError(t, db.Raw(
@@ -2412,8 +2414,8 @@ func TestProgramTemplatesBackfillGrantsLibraryRead(t *testing.T) {
 		require.Falsef(t, got[gone], "table %s must be dropped by the down migration", gone)
 	}
 	require.NoError(t, database.MigrateUp(m))
-	require.Equal(t, map[string]bool{"library.read": true, "courses.read": true, "paths.read": true}, memberGrants(roleless),
-		"the later course catalog and learning path backfills stack their own read keys on top")
+	require.Equal(t, map[string]bool{"library.read": true, "courses.read": true, "paths.read": true, "class_messages.post": true}, memberGrants(roleless),
+		"the later course catalog, learning path and class chat backfills stack their own default keys on top")
 }
 
 // The schema itself enforces the library invariants the service relies on:
@@ -2987,5 +2989,222 @@ func TestLearningPathsSchemaInvariants(t *testing.T) {
 	require.Equal(t, int64(2), n)
 	require.NoError(t, db.Exec(`DELETE FROM learning_paths WHERE id = ?`, pathID).Error)
 	require.NoError(t, db.Raw(`SELECT count(*) FROM path_stages WHERE path_id = ?`, pathID).Scan(&n).Error)
+	require.Zero(t, n)
+}
+
+// Every live system role and every live role-less member gets exactly
+// class_messages.post (the default-granted class chat key). Down removes only
+// the ledgered rows, drops class_programs and class_messages, and takes the
+// class lineage columns and the audit entity index with it.
+func TestClassProgramsBackfillGrantsClassMessagesPost(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+	require.NoError(t, m.Migrate(30))
+
+	db := openDB(t, url)
+	live := seedNotificationParents(t, db, "+84900002001")
+	member := func(phone string, roleID *uuid.UUID, closed bool) uuid.UUID {
+		teacherID := uuid.New()
+		require.NoError(t, db.Exec(
+			`INSERT INTO user_accounts (id, role, phone) VALUES (?, 'teachers', ?)`,
+			teacherID, phone).Error)
+		leftAt := "NULL"
+		if closed {
+			leftAt = "now()"
+		}
+		require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec(
+				`INSERT INTO teachers (id, full_name, center_id) VALUES (?, 'Giáo Viên', ?)`,
+				teacherID, live.centerID).Error; err != nil {
+				return err
+			}
+			return tx.Exec(fmt.Sprintf(
+				`INSERT INTO center_members (teacher_id, center_id, role_id, left_at)
+				 VALUES (?, ?, ?, %s)`, leftAt),
+				teacherID, live.centerID, roleID).Error
+		}))
+		return teacherID
+	}
+	roleless := member("+84900002002", nil, false)
+	former := member("+84900002003", nil, true)
+	roleID := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO center_roles (id, center_id, key, name) VALUES (?, ?, 'giao_vien', 'Giáo viên')`,
+		roleID, live.centerID).Error)
+	roled := member("+84900002004", &roleID, false)
+	denied := member("+84900002006", nil, false)
+	require.NoError(t, db.Exec(
+		`INSERT INTO center_member_permissions (teacher_id, center_id, permission_key, allowed)
+		 VALUES (?, ?, 'class_messages.post', FALSE)`, denied, live.centerID).Error)
+
+	retired := seedNotificationParents(t, db, "+84900002005")
+	require.NoError(t, db.Exec(
+		`UPDATE centers SET deleted_at = now() WHERE id = ?`, retired.centerID).Error)
+
+	require.NoError(t, database.MigrateUp(m))
+
+	memberGrants := func(teacherID uuid.UUID) map[string]bool {
+		var rows []struct {
+			PermissionKey string
+			Allowed       bool
+		}
+		require.NoError(t, db.Raw(
+			`SELECT permission_key, allowed FROM center_member_permissions
+			 WHERE teacher_id = ? AND center_id = ? AND permission_key LIKE 'class_messages.%'`,
+			teacherID, live.centerID).Scan(&rows).Error)
+		out := map[string]bool{}
+		for _, r := range rows {
+			out[r.PermissionKey] = r.Allowed
+		}
+		return out
+	}
+	require.Equal(t, map[string]bool{"class_messages.post": true}, memberGrants(roleless),
+		"a role-less live member gets exactly class_messages.post")
+	require.Equal(t, map[string]bool{"class_messages.post": false}, memberGrants(denied),
+		"an existing deny must survive the backfill")
+	require.Empty(t, memberGrants(former))
+	require.Empty(t, memberGrants(roled))
+	require.Empty(t, memberGrants(live.teacherID))
+
+	var roleKeys []string
+	require.NoError(t, db.Raw(
+		`SELECT permission_key FROM center_role_permissions WHERE role_id = ? AND permission_key LIKE 'class_messages.%'`,
+		roleID).Scan(&roleKeys).Error)
+	require.Equal(t, []string{"class_messages.post"}, roleKeys)
+
+	var n int64
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM center_role_permissions rp
+		 JOIN center_roles cr ON cr.id = rp.role_id
+		 WHERE cr.center_id = ?`, retired.centerID).Scan(&n).Error)
+	require.Zero(t, n, "a retired center's roles receive nothing")
+
+	columns := func() map[string]bool {
+		return nameSet(t, db, `SELECT column_name FROM information_schema.columns
+			WHERE table_schema = 'public' AND table_name = 'classes'`)
+	}
+	indexes := func() map[string]bool {
+		return nameSet(t, db, `SELECT indexname FROM pg_indexes WHERE schemaname = 'public'`)
+	}
+	require.True(t, columns()["parent_class_id"])
+	require.True(t, columns()["lineage_note"])
+	require.True(t, indexes()["idx_audit_logs_entity"])
+
+	// Down removes exactly the ledgered rows — the pre-existing deny stays —
+	// drops the two tables, the lineage columns and the entity index; a
+	// second up must be clean.
+	require.NoError(t, m.Migrate(30))
+	require.Empty(t, memberGrants(roleless))
+	require.Equal(t, map[string]bool{"class_messages.post": false}, memberGrants(denied))
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM center_role_permissions WHERE role_id = ? AND permission_key LIKE 'class_messages.%'`,
+		roleID).Scan(&n).Error)
+	require.Zero(t, n)
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM rbac_backfill_rows WHERE step LIKE 'class_messages_%'`).Scan(&n).Error)
+	require.Zero(t, n)
+	got := nameSet(t, db, `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`)
+	for _, gone := range []string{"class_programs", "class_messages"} {
+		require.Falsef(t, got[gone], "table %s must be dropped by the down migration", gone)
+	}
+	require.False(t, columns()["parent_class_id"])
+	require.False(t, columns()["lineage_note"])
+	require.False(t, indexes()["idx_audit_logs_entity"])
+	require.NoError(t, database.MigrateUp(m))
+	require.Equal(t, map[string]bool{"class_messages.post": true}, memberGrants(roleless))
+}
+
+// The schema itself enforces the class program and class chat invariants the
+// services rely on: one program per class, a program never points at a
+// template version of another center, a message never belongs to a class of
+// another center, message bodies are capped, a class never descends from a
+// class of another center, and hard-deleting a class takes its program and
+// messages with it.
+func TestClassProgramsSchemaInvariants(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+
+	db := openDB(t, url)
+	mine := seedTeachingParents(t, db, "+84900002101")
+	theirs := seedTeachingParents(t, db, "+84900002102")
+
+	version := func(f teachingFixture) uuid.UUID {
+		templateID, versionID := uuid.New(), uuid.New()
+		require.NoError(t, db.Exec(
+			`INSERT INTO program_templates (id, center_id, code, name) VALUES (?, ?, 'TOAN9', 'Toán 9')`,
+			templateID, f.centerID).Error)
+		require.NoError(t, db.Exec(
+			`INSERT INTO program_template_versions (id, template_id, center_id, version_no, status, published_at)
+			 VALUES (?, ?, ?, 1, 'published', now())`,
+			versionID, templateID, f.centerID).Error)
+		return versionID
+	}
+	myVersion := version(mine)
+	theirVersion := version(theirs)
+
+	// A program row must reference a version of its own center.
+	require.Error(t, db.Exec(
+		`INSERT INTO class_programs (class_id, center_id, template_version_id, applied_by)
+		 VALUES (?, ?, ?, ?)`, mine.classID, mine.centerID, theirVersion, mine.teacherID).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO class_programs (class_id, center_id, template_version_id, applied_by)
+		 VALUES (?, ?, ?, ?)`, mine.classID, mine.centerID, myVersion, mine.teacherID).Error)
+	// ... and a class carries at most one program.
+	require.Error(t, db.Exec(
+		`INSERT INTO class_programs (class_id, center_id, template_version_id, applied_by)
+		 VALUES (?, ?, ?, ?)`, mine.classID, mine.centerID, myVersion, mine.teacherID).Error)
+	// The applier must be a member of the same center.
+	require.Error(t, db.Exec(
+		`INSERT INTO class_programs (class_id, center_id, template_version_id, applied_by)
+		 VALUES (?, ?, ?, ?)`, theirs.classID, theirs.centerID, theirVersion, mine.teacherID).Error)
+
+	// Messages: same-center class only, body capped at 2000 characters.
+	require.Error(t, db.Exec(
+		`INSERT INTO class_messages (center_id, class_id, author_id, body)
+		 VALUES (?, ?, ?, 'xin chào')`, theirs.centerID, mine.classID, theirs.teacherID).Error)
+	require.Error(t, db.Exec(
+		`INSERT INTO class_messages (center_id, class_id, author_id, body)
+		 VALUES (?, ?, ?, ?)`, mine.centerID, mine.classID, mine.teacherID, strings.Repeat("a", 2001)).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO class_messages (center_id, class_id, author_id, body)
+		 VALUES (?, ?, ?, ?)`, mine.centerID, mine.classID, mine.teacherID, strings.Repeat("a", 2000)).Error)
+
+	// Lineage: a class may only descend from a class of its own center.
+	require.Error(t, db.Exec(
+		`UPDATE classes SET parent_class_id = ? WHERE id = ?`, theirs.classID, mine.classID).Error)
+	parentID := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price, code)
+		 VALUES (?, ?, ?, 'Lớp Toán 8', '2025-01-06', 100000, 'TOAN8')`,
+		parentID, mine.teacherID, mine.centerID).Error)
+	require.NoError(t, db.Exec(
+		`UPDATE classes SET parent_class_id = ?, lineage_note = 'Lên lớp 9' WHERE id = ?`, parentID, mine.classID).Error)
+	// Hard-deleting the parent clears the pointer instead of taking the child.
+	require.NoError(t, db.Exec(`DELETE FROM classes WHERE id = ?`, parentID).Error)
+	var row struct {
+		ParentClassID *uuid.UUID
+		LineageNote   *string
+	}
+	require.NoError(t, db.Raw(
+		`SELECT parent_class_id, lineage_note FROM classes WHERE id = ?`, mine.classID).Scan(&row).Error)
+	require.Nil(t, row.ParentClassID)
+	require.NotNil(t, row.LineageNote)
+
+	// Hard-deleting the class takes its program and messages with it.
+	var n int64
+	require.NoError(t, db.Exec(`DELETE FROM classes WHERE id = ?`, mine.classID).Error)
+	require.NoError(t, db.Raw(`SELECT count(*) FROM class_programs WHERE class_id = ?`, mine.classID).Scan(&n).Error)
+	require.Zero(t, n)
+	require.NoError(t, db.Raw(`SELECT count(*) FROM class_messages WHERE class_id = ?`, mine.classID).Scan(&n).Error)
 	require.Zero(t, n)
 }

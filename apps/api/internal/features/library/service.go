@@ -119,7 +119,40 @@ func (s *Service) DeleteTemplate(ctx context.Context, sc authctx.Scope, id uuid.
 	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
 		return err
 	}
+	inUse, err := s.repo.TemplateInUse(ctx, sc, id)
+	if err != nil {
+		return err
+	}
+	if inUse {
+		return errTemplateInUse()
+	}
 	return notFound(s.repo.SoftDeleteTemplate(ctx, sc, id), "program template")
+}
+
+// PublishedVersion is the class-facing read port: the version plus its
+// lessons with their materials and exercises, for a class that applies it.
+// It carries no library.read gate on purpose — the caller has already
+// resolved the class through its own read port, and a teacher reading their
+// class's program must not need catalog access. Only a published version
+// can be applied, so a draft or archived one is a 409.
+func (s *Service) PublishedVersion(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) (*VersionResponse, []LessonDetailResponse, error) {
+	row, err := s.repo.GetVersion(ctx, sc, versionID)
+	if err != nil {
+		return nil, nil, notFound(err, "template version")
+	}
+	if row.Status != StatusPublished {
+		return nil, nil, errVersionNotPublishedForClass()
+	}
+	lessons, err := s.repo.ListLessons(ctx, sc, versionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	details, err := s.lessonDetails(ctx, sc, lessons)
+	if err != nil {
+		return nil, nil, err
+	}
+	version := versionResponse(row)
+	return &version, details, nil
 }
 
 // CreateVersion opens a new draft numbered after the highest existing

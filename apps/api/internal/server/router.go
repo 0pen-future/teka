@@ -20,8 +20,10 @@ import (
 	"teka/apps/api/internal/features/auth"
 	"teka/apps/api/internal/features/billing"
 	"teka/apps/api/internal/features/centers"
+	"teka/apps/api/internal/features/classchat"
 	"teka/apps/api/internal/features/classes"
 	"teka/apps/api/internal/features/classinvites"
+	"teka/apps/api/internal/features/classprogram"
 	"teka/apps/api/internal/features/classstaff"
 	"teka/apps/api/internal/features/collections"
 	"teka/apps/api/internal/features/contacts"
@@ -218,9 +220,11 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, log *slog.Logger,
 	centersSvc.SetClassInviteCanceller(classInvitesSvc)
 
 	// library holds the center's program templates: versioned curricula whose
-	// published versions are immutable. It has no dependency on classes yet;
-	// binding a class to a version comes with the class detail work.
-	library.RegisterRoutes(v1, library.NewHandler(library.NewService(library.NewRepository(db), txMgr)), authChain...)
+	// published versions are immutable. It has no dependency on classes;
+	// classprogram (below) binds a class to one of its published versions
+	// through library's PublishedVersion read port.
+	librarySvc := library.NewService(library.NewRepository(db), txMgr)
+	library.RegisterRoutes(v1, library.NewHandler(librarySvc), authChain...)
 	courses.RegisterRoutes(v1, courses.NewHandler(courses.NewService(courses.NewRepository(db), txMgr)), authChain...)
 	paths.RegisterRoutes(v1, paths.NewHandler(paths.NewService(paths.NewRepository(db), txMgr)), authChain...)
 
@@ -240,6 +244,20 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, log *slog.Logger,
 	// transaction via txMgr.
 	teachingSvc := teaching.NewService(teaching.NewRepository(db), classesSvc, sessionsSvc, enrollmentsSvc, txMgr)
 	teaching.RegisterRoutes(v1, teaching.NewHandler(teachingSvc), authChain...)
+
+	// classprogram applies a published library version to a class and copies
+	// its lesson titles into the teaching curriculum, so it sits above
+	// classes (read gate), teaching (curriculum) and library (published
+	// version), each consumed through its own interface; the row upsert and
+	// the curriculum write commit together via txMgr.
+	classprogramSvc := classprogram.NewService(classprogram.NewRepository(db), classesSvc, teachingSvc, librarySvc, txMgr)
+	classprogram.RegisterRoutes(v1, classprogram.NewHandler(classprogramSvc), authChain...)
+
+	// classchat is the class's internal chat. Its gate is "owner or active
+	// class_staff stint": classes resolves the class, classStaffRepo answers
+	// the stint question.
+	classchatSvc := classchat.NewService(classchat.NewRepository(db), classesSvc, classStaffRepo)
+	classchat.RegisterRoutes(v1, classchat.NewHandler(classchatSvc), authChain...)
 
 	// grading (component score sets + per-session scores) consumes the same
 	// three services through its own consumer interfaces; class/session

@@ -25,10 +25,14 @@ type ListQuery struct {
 	ActorID uuid.UUID
 	// Action filters by prefix, e.g. "class." matches class.create.
 	Action string
-	From   time.Time
-	To     time.Time
-	Cursor string
-	Limit  int
+	// EntityType and EntityID match exactly; together they narrow the trail
+	// to one record's history (the class detail's "Lịch sử thay đổi").
+	EntityType string
+	EntityID   string
+	From       time.Time
+	To         time.Time
+	Cursor     string
+	Limit      int
 }
 
 // ListSpec is the normalized repository query: visibility center, clamped
@@ -38,6 +42,8 @@ type ListSpec struct {
 	CenterID     uuid.UUID
 	ActorID      uuid.UUID
 	ActionPrefix string
+	EntityType   string
+	EntityID     string
 	From         time.Time
 	To           time.Time
 	CursorAt     time.Time
@@ -87,6 +93,8 @@ func (s *Service) List(ctx context.Context, sc authctx.Scope, q ListQuery) ([]Ro
 		CenterID:     sc.CenterID,
 		ActorID:      q.ActorID,
 		ActionPrefix: q.Action,
+		EntityType:   q.EntityType,
+		EntityID:     q.EntityID,
 		From:         q.From,
 		To:           q.To,
 		// One extra row proves or disproves a next page without a COUNT.

@@ -67,6 +67,9 @@ type Repository interface {
 	// CountReadableByPhase buckets every class the caller can read (the same
 	// port ListReadable uses) by its phase on today, in one query.
 	CountReadableByPhase(ctx context.Context, sc authctx.Scope, today time.Time) (ClassStatsResponse, error)
+	// LiveClassInCenter reports whether a live (non-deleted) class with this
+	// id exists in the anchor's center — the parent-class validation.
+	LiveClassInCenter(ctx context.Context, a authctx.Anchor, classID uuid.UUID) (bool, error)
 	// CodeExists reports whether a live class in the anchor's center other
 	// than exceptID already carries code — the partial unique index's
 	// predicate, checked ahead of the insert so the caller gets a 409 rather
@@ -350,6 +353,16 @@ func (r *gormRepository) list(q *gorm.DB, filter ListFilter, p pagination.Params
 
 func (r *gormRepository) Update(ctx context.Context, class *Class) error {
 	return database.FromContext(ctx, r.db).Omit(clause.Associations).Save(class).Error
+}
+
+func (r *gormRepository) LiveClassInCenter(ctx context.Context, a authctx.Anchor, classID uuid.UUID) (bool, error) {
+	var exists bool
+	err := database.FromContext(ctx, r.db).
+		Raw(`SELECT EXISTS (
+			SELECT 1 FROM classes
+			WHERE id = ? AND center_id = ? AND deleted_at IS NULL)`, classID, a.CenterID).
+		Scan(&exists).Error
+	return exists, err
 }
 
 func (r *gormRepository) FindCourse(ctx context.Context, a authctx.Anchor, courseID uuid.UUID) (*CourseRef, error) {

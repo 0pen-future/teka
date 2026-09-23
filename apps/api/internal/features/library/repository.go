@@ -46,6 +46,9 @@ type Repository interface {
 	UpdateTemplate(ctx context.Context, sc authctx.Scope, t *Template) error
 	// SoftDeleteTemplate stamps deleted_at; ErrNotFound when missing.
 	SoftDeleteTemplate(ctx context.Context, sc authctx.Scope, id uuid.UUID) error
+	// TemplateInUse reports whether any class of the center applies one of
+	// the template's versions (a class_programs row).
+	TemplateInUse(ctx context.Context, sc authctx.Scope, id uuid.UUID) (bool, error)
 
 	// CreateVersion inserts a version; gorm.ErrDuplicatedKey when the
 	// template already has a draft (uq_program_template_versions_draft).
@@ -251,6 +254,17 @@ func (r *gormRepository) SoftDeleteTemplate(ctx context.Context, sc authctx.Scop
 		return ErrNotFound
 	}
 	return nil
+}
+
+func (r *gormRepository) TemplateInUse(ctx context.Context, sc authctx.Scope, id uuid.UUID) (bool, error) {
+	var inUse bool
+	err := database.FromContext(ctx, r.db).
+		Raw(`SELECT EXISTS (
+			SELECT 1 FROM class_programs p
+			JOIN program_template_versions v ON v.id = p.template_version_id
+			WHERE p.center_id = ? AND v.template_id = ?)`, sc.CenterID, id).
+		Scan(&inUse).Error
+	return inUse, err
 }
 
 const versionSelect = `program_template_versions.*,

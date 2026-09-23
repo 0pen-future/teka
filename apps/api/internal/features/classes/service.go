@@ -373,6 +373,16 @@ func (s *Service) Update(ctx context.Context, sc authctx.Scope, classID uuid.UUI
 	if req.Note != nil {
 		class.Note = noteValue(req.Note)
 	}
+	if req.LineageNote != nil {
+		class.LineageNote = noteValue(req.LineageNote)
+	}
+	if req.ParentClassID != nil {
+		parentID, err := s.resolveParentClass(ctx, authctx.Anchor{TeacherID: class.TeacherID, CenterID: class.CenterID}, req.ParentClassID, class.ID)
+		if err != nil {
+			return nil, err
+		}
+		class.ParentClassID = parentID
+	}
 	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
 		if req.CourseID != nil {
 			// Resolved under the same transaction as the write so the
@@ -423,6 +433,29 @@ func (s *Service) resolveCourse(ctx context.Context, a authctx.Anchor, raw *stri
 			map[string]string{"course_id": "khóa học đã ngừng tuyển"})
 	}
 	return course, nil
+}
+
+// resolveParentClass turns a request's parent_class_id into the linked
+// class id: blank means no parent; anything else must name a live class of
+// the anchor's center other than the class itself, else 422 on the field.
+func (s *Service) resolveParentClass(ctx context.Context, a authctx.Anchor, raw *string, selfID uuid.UUID) (*uuid.UUID, error) {
+	if raw == nil || strings.TrimSpace(*raw) == "" {
+		return nil, nil
+	}
+	invalid := apperror.Invalid("Lớp gốc không tồn tại trong trung tâm",
+		map[string]string{"parent_class_id": "phải là lớp còn hiệu lực của trung tâm, khác lớp hiện tại"})
+	parentID, err := uuid.Parse(strings.TrimSpace(*raw))
+	if err != nil || parentID == selfID {
+		return nil, invalid
+	}
+	exists, err := s.repo.LiveClassInCenter(ctx, a, parentID)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, invalid
+	}
+	return &parentID, nil
 }
 
 // unitPriceFor picks the class's per-session price: the request's own value

@@ -180,6 +180,22 @@ var Specs = []Spec{
 	classified("DELETE", "/api/v1/classes/:id/staff/:staffId", KindOwnerOnly,
 		req("class.staff.remove", "class_staff", "staffId")),
 	classified("PUT", "/api/v1/classes/:id/teacher", KindOwnerOnly, req("class.teacher.reassign", "class", "id")),
+	// Class program: applying or removing a program template on a class
+	// rewrites the class's curriculum, so both are owner gates; reading the
+	// applied program and its lessons follows the class read port (any
+	// stint, ended included) and is decided in the service.
+	classified("GET", "/api/v1/classes/:id/program", KindService, none()),
+	classified("GET", "/api/v1/classes/:id/program/lessons", KindService, none()),
+	classified("PUT", "/api/v1/classes/:id/program", KindOwnerOnly, req("class_program.apply", "class", "id")),
+	classified("DELETE", "/api/v1/classes/:id/program", KindOwnerOnly, req("class_program.remove", "class", "id")),
+	// Class chat: reading is the owner or an OPEN stint (ended stints lose
+	// the room), decided in the service; posting needs the catalog key on
+	// top of that gate; a message is retracted by its author or the owner.
+	classified("GET", "/api/v1/classes/:id/messages", KindService, none()),
+	perm("POST", "/api/v1/classes/:id/messages", authctx.PermClassMessagesPost,
+		req("class_message.post", "class", "id")),
+	classified("DELETE", "/api/v1/classes/:id/messages/:mid", KindService,
+		req("class_message.delete", "class_message", "mid")),
 	// Class invitations: the owner proposes a class role to a member; the
 	// invitee answers. Send/cancel/remind/confirm are owner gates; list and
 	// the invitee's accept/decline are decided in the service (an owner sees

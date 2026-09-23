@@ -52,6 +52,11 @@ func (f *fakeRepository) addCourse(center uuid.UUID, code string, price int64) *
 	return ref
 }
 
+func (f *fakeRepository) LiveClassInCenter(_ context.Context, a authctx.Anchor, classID uuid.UUID) (bool, error) {
+	c, ok := f.classes[classID]
+	return ok && !c.deleted && c.CenterID == a.CenterID, nil
+}
+
 func (f *fakeRepository) FindCourse(_ context.Context, a authctx.Anchor, courseID uuid.UUID) (*CourseRef, error) {
 	ref, ok := f.courses[courseID]
 	if !ok || f.courseCenters[courseID] != a.CenterID {
@@ -1041,6 +1046,69 @@ func TestUpdateAttachesAndDetachesCourse(t *testing.T) {
 	got, err = svc.Update(context.Background(), sc, class.ID, upd)
 	if err != nil || got.CourseID != nil || got.Course != nil {
 		t.Fatalf("blank must detach: %v %+v", err, got)
+	}
+}
+
+// Update follows the same patch rule for the lineage fields: nil keeps,
+// "" detaches, a uuid must name a live class of the same center other than
+// the class itself, else 422 on parent_class_id.
+func TestUpdateSetsAndClearsParentClass(t *testing.T) {
+	svc, _ := newTestService()
+	sc := memberScope()
+	parent, err := svc.Create(context.Background(), sc, validCreateRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	class, err := svc.Create(context.Background(), sc, validCreateRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	upd := UpdateClassRequest{Name: class.Name, StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000)}
+
+	upd.ParentClassID = strPtr(parent.ID.String())
+	upd.LineageNote = strPtr("Tách từ lớp cũ")
+	got, err := svc.Update(context.Background(), sc, class.ID, upd)
+	if err != nil || got.ParentClassID == nil || *got.ParentClassID != parent.ID || got.LineageNote == nil || *got.LineageNote != "Tách từ lớp cũ" {
+		t.Fatalf("attach parent: %v %+v", err, got)
+	}
+
+	upd.ParentClassID, upd.LineageNote = nil, nil
+	got, err = svc.Update(context.Background(), sc, class.ID, upd)
+	if err != nil || got.ParentClassID == nil || got.LineageNote == nil {
+		t.Fatalf("nil must keep the lineage: %v %+v", err, got)
+	}
+
+	upd.ParentClassID = strPtr(class.ID.String())
+	_, err = svc.Update(context.Background(), sc, class.ID, upd)
+	if appErr := appErrorOf(t, err, http.StatusUnprocessableEntity); appErr.Fields["parent_class_id"] == "" {
+		t.Fatalf("a class cannot be its own parent: %+v", appErr.Fields)
+	}
+
+	upd.ParentClassID = strPtr(id.New().String())
+	_, err = svc.Update(context.Background(), sc, class.ID, upd)
+	if appErr := appErrorOf(t, err, http.StatusUnprocessableEntity); appErr.Fields["parent_class_id"] == "" {
+		t.Fatalf("unknown parent must land on parent_class_id: %+v", appErr.Fields)
+	}
+
+	other := ownerScope()
+	theirs, err := svc.Create(context.Background(), other, validCreateRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	upd.ParentClassID = strPtr(theirs.ID.String())
+	_, err = svc.Update(context.Background(), sc, class.ID, upd)
+	if appErr := appErrorOf(t, err, http.StatusUnprocessableEntity); appErr.Fields["parent_class_id"] == "" {
+		t.Fatalf("another center's class cannot be the parent: %+v", appErr.Fields)
+	}
+
+	upd.ParentClassID, upd.LineageNote = strPtr(""), strPtr("")
+	got, err = svc.Update(context.Background(), sc, class.ID, upd)
+	if err != nil || got.ParentClassID != nil || got.LineageNote != nil {
+		t.Fatalf("blank must detach and clear the note: %v %+v", err, got)
+	}
+	resp := FromModel(got)
+	if resp.ParentClassID != nil || resp.LineageNote != nil {
+		t.Fatalf("response must mirror the cleared lineage: %+v", resp)
 	}
 }
 

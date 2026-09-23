@@ -160,6 +160,10 @@ var actionSnapshot = []struct {
 	{"PUT", "/api/v1/paths/:id/stages/:sid", ActionSpec{Action: "path_stage.update", EntityType: "path_stage", IDParam: "sid"}},
 	{"DELETE", "/api/v1/paths/:id/stages/:sid", ActionSpec{Action: "path_stage.delete", EntityType: "path_stage", IDParam: "sid"}},
 	{"PUT", "/api/v1/paths/:id/stages/:sid/courses", ActionSpec{Action: "path_stage.set_courses", EntityType: "path_stage", IDParam: "sid"}},
+	{"PUT", "/api/v1/classes/:id/program", ActionSpec{Action: "class_program.apply", EntityType: "class", IDParam: "id"}},
+	{"DELETE", "/api/v1/classes/:id/program", ActionSpec{Action: "class_program.remove", EntityType: "class", IDParam: "id"}},
+	{"POST", "/api/v1/classes/:id/messages", ActionSpec{Action: "class_message.post", EntityType: "class", IDParam: "id"}},
+	{"DELETE", "/api/v1/classes/:id/messages/:mid", ActionSpec{Action: "class_message.delete", EntityType: "class_message", IDParam: "mid"}},
 }
 
 // TestActionSnapshotUnchanged proves LookupAction still resolves every

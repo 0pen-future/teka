@@ -31,6 +31,8 @@ type fakeRepo struct {
 	logFields       map[uuid.UUID][]LogField
 	// locks counts LockVersion calls so tests can assert a write took the lock.
 	locks int
+	// inUse marks templates a class applies (class_programs rows).
+	inUse map[uuid.UUID]bool
 }
 
 func newFakeRepo() *fakeRepo {
@@ -43,6 +45,7 @@ func newFakeRepo() *fakeRepo {
 		lessonMaterials: map[uuid.UUID][]LessonMaterial{},
 		lessonExercises: map[uuid.UUID][]LessonExercise{},
 		logFields:       map[uuid.UUID][]LogField{},
+		inUse:           map[uuid.UUID]bool{},
 	}
 }
 
@@ -112,6 +115,10 @@ func (f *fakeRepo) UpdateTemplate(_ context.Context, sc authctx.Scope, t *Templa
 	cur.Code, cur.Name, cur.Subject, cur.Level, cur.Description = t.Code, t.Name, t.Subject, t.Level, t.Description
 	cur.UpdatedAt = nowUTC()
 	return nil
+}
+
+func (f *fakeRepo) TemplateInUse(_ context.Context, sc authctx.Scope, id uuid.UUID) (bool, error) {
+	return f.inUse[id] && f.templates[id] != nil && f.templates[id].CenterID == sc.CenterID, nil
 }
 
 func (f *fakeRepo) SoftDeleteTemplate(_ context.Context, sc authctx.Scope, id uuid.UUID) error {

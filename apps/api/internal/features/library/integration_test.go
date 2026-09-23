@@ -221,6 +221,46 @@ func TestTemplateCodeIsUniquePerLiveCenter(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// A template whose version a class applied cannot be deleted (409), and the
+// class-facing read port hands out a published version without library.read
+// while refusing drafts and cross-center ids.
+func TestTemplateInUseByClassBlocksDeleteAndPublishedPortReads(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	tpl := f.template(t, f.owner, "TOAN-6")
+	draft := f.draft(t, f.owner, tpl.ID)
+	f.lesson(t, f.owner, draft.ID, "Buổi 1")
+	f.lesson(t, f.owner, draft.ID, "Buổi 2")
+
+	_, _, err := f.svc.PublishedVersion(ctx, f.owner, draft.ID)
+	requireStatus(t, err, http.StatusConflict, library.CodeVersionNotPublished)
+
+	_, err = f.svc.Publish(ctx, f.owner, draft.ID)
+	require.NoError(t, err)
+
+	// No library.read on the member scope: the port is gated by the class,
+	// not the library.
+	member := testutil.ScopeFor(t, f.db, f.member)
+	require.False(t, member.Has(authctx.PermLibraryRead))
+	version, lessons, err := f.svc.PublishedVersion(ctx, member, draft.ID)
+	require.NoError(t, err)
+	require.Equal(t, library.StatusPublished, version.Status)
+	require.Equal(t, tpl.ID, version.TemplateID)
+	require.Len(t, lessons, 2)
+	require.Equal(t, "Buổi 1", lessons[0].Title)
+	_, _, err = f.svc.PublishedVersion(ctx, f.outsider, draft.ID)
+	requireStatus(t, err, http.StatusNotFound, "")
+
+	class := testutil.Class(t, f.db, f.owner.TeacherID)
+	require.NoError(t, f.db.Exec(`
+		INSERT INTO class_programs (class_id, center_id, template_version_id, applied_by)
+		VALUES (?, ?, ?, ?)`, class.ID, f.owner.CenterID, draft.ID, f.owner.TeacherID).Error)
+	requireStatus(t, f.svc.DeleteTemplate(ctx, f.owner, tpl.ID), http.StatusConflict, library.CodeTemplateInUse)
+
+	require.NoError(t, f.db.Exec(`DELETE FROM class_programs WHERE class_id = ?`, class.ID).Error)
+	require.NoError(t, f.svc.DeleteTemplate(ctx, f.owner, tpl.ID))
+}
+
 func TestCrossCenterRowsAreNotFound(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()

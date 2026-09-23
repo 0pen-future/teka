@@ -257,8 +257,8 @@ func TestEffectiveKeysCoversCatalogInOrder(t *testing.T) {
 // already — granting them would escalate).
 func TestDefaultRoleKeysPreserveLegacyBaseline(t *testing.T) {
 	defaults := DefaultRoleKeys()
-	if len(defaults) != 61 {
-		t.Fatalf("default baseline must hold the 61 operational keys, got %d", len(defaults))
+	if len(defaults) != 62 {
+		t.Fatalf("default baseline must hold the 62 operational keys, got %d", len(defaults))
 	}
 	inDefaults := map[string]bool{}
 	for _, key := range defaults {

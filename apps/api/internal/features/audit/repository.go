@@ -68,6 +68,14 @@ func listSQL(spec ListSpec) (string, []any) {
 		cond.WriteString(` AND a.action LIKE ? ESCAPE '\'`)
 		condArgs = append(condArgs, likeq.Prefix(spec.ActionPrefix))
 	}
+	if spec.EntityType != "" {
+		cond.WriteString(" AND a.entity_type = ?")
+		condArgs = append(condArgs, spec.EntityType)
+	}
+	if spec.EntityID != "" {
+		cond.WriteString(" AND a.entity_id = ?")
+		condArgs = append(condArgs, spec.EntityID)
+	}
 	if !spec.From.IsZero() {
 		cond.WriteString(" AND a.occurred_at >= ?")
 		condArgs = append(condArgs, spec.From)

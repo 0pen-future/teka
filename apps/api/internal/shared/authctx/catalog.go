@@ -152,6 +152,8 @@ const (
 	PermPathsRead = "paths.read"
 	PermPathsEdit = "paths.edit"
 
+	PermClassMessagesPost = "class_messages.post"
+
 	PermMembersList = "members.list"
 )
 
@@ -284,6 +286,8 @@ var permCatalog = []PermDef{
 
 	def(PermPathsRead, PermKindCRUD, RiskLow, "Xem lộ trình học", "Xem lộ trình học, các giai đoạn và khóa học gợi ý trong từng giai đoạn."),
 	optIn(PermPathsEdit, PermKindCRUD, RiskMedium, "Quản lý lộ trình học", "Tạo, sửa, xoá lộ trình học; thêm, sắp xếp giai đoạn và gán khóa học vào giai đoạn."),
+
+	def(PermClassMessagesPost, PermKindSpecial, RiskLow, "Nhắn tin trong lớp", "Gửi tin nhắn nội bộ trong các lớp mình đang phụ trách; chủ trung tâm nhắn được mọi lớp."),
 
 	def(PermReportsSend, PermKindSpecial, RiskHigh, "Gửi báo cáo học phí", "Gửi thông báo học phí hàng loạt và theo dõi lượt gửi."),
 	def(PermMembersManage, PermKindSpecial, RiskHigh, "Quản lý thành viên", "Gỡ thành viên khỏi trung tâm."),

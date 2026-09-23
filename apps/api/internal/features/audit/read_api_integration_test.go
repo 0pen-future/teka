@@ -218,6 +218,70 @@ func TestListFilters(t *testing.T) {
 // timestamps through 50/50/20 pages, proving the (occurred_at, id) keyset
 // neither skips nor repeats rows even when the timestamp alone cannot order
 // them.
+// TestListEntityFilters proves the entity_type/entity_id pair narrows the
+// trail to one record's history — the class detail's "Lịch sử thay đổi" —
+// and that either half alone still filters.
+func TestListEntityFilters(t *testing.T) {
+	db := testutil.StartPostgres(t)
+	ctx := context.Background()
+	svc := audit.NewService(audit.NewRepository(db))
+	owner, teacher := testutil.Teacher(t, db)
+	classA, classB := id.New().String(), id.New().String()
+
+	seedLog(t, db, func(l *audit.Log) {
+		l.CenterID = &teacher.CenterID
+		l.ActorUserID = &owner.ID
+		l.EntityID = classA
+	})
+	seedLog(t, db, func(l *audit.Log) {
+		l.CenterID = &teacher.CenterID
+		l.ActorUserID = &owner.ID
+		l.Action = "class.update"
+		l.EntityID = classA
+		l.OccurredAt = time.Date(2026, 8, 27, 10, 0, 0, 0, time.UTC)
+	})
+	seedLog(t, db, func(l *audit.Log) {
+		l.CenterID = &teacher.CenterID
+		l.ActorUserID = &owner.ID
+		l.Action = "class.update"
+		l.EntityID = classB
+	})
+	seedLog(t, db, func(l *audit.Log) {
+		l.CenterID = &teacher.CenterID
+		l.ActorUserID = &owner.ID
+		l.Action = "class_message.post"
+		l.EntityType = "class_message"
+		l.EntityID = classA
+	})
+
+	sc := testutil.ScopeFor(t, db, owner.ID)
+	rows, _, err := svc.List(ctx, sc, audit.ListQuery{EntityType: "class", EntityID: classA})
+	require.NoError(t, err)
+	require.Equal(t, []string{"class.update", "class.create"}, actionsOf(rows))
+
+	rows, _, err = svc.List(ctx, sc, audit.ListQuery{EntityType: "class_message"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"class_message.post"}, actionsOf(rows))
+
+	rows, _, err = svc.List(ctx, sc, audit.ListQuery{EntityID: classB})
+	require.NoError(t, err)
+	require.Equal(t, []string{"class.update"}, actionsOf(rows))
+
+	// The HTTP surface passes both through as plain strings.
+	r := gin.New()
+	r.Use(func(c *gin.Context) { authctx.SetScope(c, sc); c.Next() })
+	audit.RegisterRoutes(r.Group("/api/v1"), audit.NewHandler(svc))
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/audit-logs?entity_type=class&entity_id="+classA, nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var env struct {
+		Data audit.ListResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env))
+	require.Len(t, env.Data.Items, 2)
+}
+
 func TestListKeysetPaginationStable(t *testing.T) {
 	db := testutil.StartPostgres(t)
 	ctx := context.Background()

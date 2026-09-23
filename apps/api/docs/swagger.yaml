@@ -659,6 +659,38 @@ definitions:
       teacher:
         $ref: '#/definitions/centers.MemberResponse'
     type: object
+  classchat.ListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/classchat.MessageResponse'
+        type: array
+      next_cursor:
+        type: string
+    type: object
+  classchat.MessageResponse:
+    properties:
+      author_id:
+        type: string
+      author_name:
+        type: string
+      body:
+        type: string
+      class_id:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+    type: object
+  classchat.PostRequest:
+    properties:
+      body:
+        maxLength: 2000
+        type: string
+    required:
+    - body
+    type: object
   classes.ClassResponse:
     properties:
       code:
@@ -675,6 +707,8 @@ definitions:
         type: string
       id:
         type: string
+      lineage_note:
+        type: string
       my_staff_roles:
         description: |-
           MyStaffRoles lists the CALLER's active class_staff role keys on this
@@ -687,6 +721,11 @@ definitions:
       name:
         type: string
       note:
+        type: string
+      parent_class_id:
+        description: |-
+          ParentClassID and LineageNote describe the class's place in its
+          lineage (lịch sử lớp); both null when the class stands alone.
         type: string
       phase:
         description: |-
@@ -841,6 +880,9 @@ definitions:
         type: integer
       end_date:
         type: string
+      lineage_note:
+        maxLength: 1000
+        type: string
       name:
         maxLength: 100
         minLength: 1
@@ -848,6 +890,12 @@ definitions:
       note:
         description: Note replaces the stored note; an empty string clears it.
         maxLength: 1000
+        type: string
+      parent_class_id:
+        description: |-
+          ParentClassID and LineageNote follow the same patch rule: nil keeps,
+          "" clears, a uuid links a live class of the same center (never the
+          class itself). Untagged for the same reason as course_id.
         type: string
       recruiting:
         type: boolean
@@ -965,6 +1013,32 @@ definitions:
     required:
     - role_key
     - teacher_id
+    type: object
+  classprogram.ApplyRequest:
+    properties:
+      confirm:
+        type: boolean
+      template_version_id:
+        type: string
+    required:
+    - template_version_id
+    type: object
+  classprogram.ProgramResponse:
+    properties:
+      applied_at:
+        type: string
+      applied_by:
+        type: string
+      lesson_count:
+        type: integer
+      template_id:
+        type: string
+      template_name:
+        type: string
+      template_version_id:
+        type: string
+      version_no:
+        type: integer
     type: object
   classstaff.AssignRequest:
     properties:
@@ -3153,6 +3227,14 @@ paths:
       - description: action prefix, e.g. class. or auth.login
         in: query
         name: action
+        type: string
+      - description: exact entity type, e.g. class
+        in: query
+        name: entity_type
+        type: string
+      - description: exact entity id, e.g. a class id
+        in: query
+        name: entity_id
         type: string
       - description: RFC3339 lower bound on occurred_at
         in: query
@@ -6639,6 +6721,434 @@ paths:
       summary: Month batch read of session notes and marks
       tags:
       - teaching
+  /classes/{id}/messages:
+    get:
+      description: Internal class chat, newest first. Pass before=<id of the oldest
+        shown message> for the next page; next_cursor is empty on the last one. Readable
+        by the owner and teachers currently on the class.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 'message id cursor: only older messages'
+        in: query
+        name: before
+        type: string
+      - description: page size, default 20, max 50
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classchat.ListResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List class messages
+      tags:
+      - classes
+    post:
+      consumes:
+      - application/json
+      description: Needs class_messages.post and an active stint on the class (the
+        owner always qualifies). Body is trimmed, max 2000 characters.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: message
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/classchat.PostRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classchat.MessageResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Post a class message
+      tags:
+      - classes
+  /classes/{id}/messages/{mid}:
+    delete:
+      description: Soft-deletes the message. Only its author or the center owner may
+        retract it.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: message id
+        in: path
+        name: mid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Retract a class message
+      tags:
+      - classes
+  /classes/{id}/program:
+    delete:
+      description: Owner only. Drops the link to the template version; the class curriculum
+        and lesson plans stay as they are.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Remove the class's program
+      tags:
+      - classes
+    get:
+      description: The published template version the class applies, or null when
+        none is applied. Readable by the owner and any teacher with a stint on the
+        class.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classprogram.ProgramResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get the class's applied program
+      tags:
+      - classes
+    put:
+      consumes:
+      - application/json
+      description: Owner only. Copies the version's lesson titles into the class curriculum.
+        When the class already keeps a different lesson list the call returns 409
+        CURRICULUM_DIFFERS (fields.current_count / fields.template_count) until re-sent
+        with confirm=true; the curriculum pointer and every lesson plan are kept.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: version to apply
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/classprogram.ApplyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classprogram.ProgramResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Apply a program template version to the class
+      tags:
+      - classes
+  /classes/{id}/program/lessons:
+    get:
+      description: Lessons of the applied template version with their materials and
+        exercises, in position order; an empty list when the class applies no program.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/library.LessonDetailResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List the applied program's lessons
+      tags:
+      - classes
   /classes/{id}/schedules:
     post:
       consumes:

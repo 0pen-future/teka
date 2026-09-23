@@ -32,6 +32,9 @@ const (
 	CodeMaterialInUse = "MATERIAL_IN_USE"
 	// CodeExerciseInUse: a lesson of a live template still links the exercise.
 	CodeExerciseInUse = "EXERCISE_IN_USE"
+	// CodeTemplateInUse: a class applies one of the template's versions, so
+	// the template cannot be deleted while that program stays in place.
+	CodeTemplateInUse = "TEMPLATE_IN_USE"
 )
 
 func errVersionLocked() *apperror.AppError {
@@ -77,4 +80,14 @@ func errMaterialInReleased() *apperror.AppError {
 func errExerciseInReleased() *apperror.AppError {
 	return apperror.New(CodeExerciseInUse, http.StatusConflict,
 		"Bài tập đang dùng trong phiên bản đã phát hành hoặc lưu trữ của chương trình mẫu, không thể xoá")
+}
+
+func errVersionNotPublishedForClass() *apperror.AppError {
+	return apperror.New(CodeVersionNotPublished, http.StatusConflict,
+		"Chỉ phiên bản đã phát hành mới áp dụng được cho lớp")
+}
+
+func errTemplateInUse() *apperror.AppError {
+	return apperror.New(CodeTemplateInUse, http.StatusConflict,
+		"Chương trình mẫu đang được lớp áp dụng, hãy gỡ chương trình khỏi lớp trước khi xoá")
 }

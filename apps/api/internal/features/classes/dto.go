@@ -65,6 +65,11 @@ type UpdateClassRequest struct {
 	// empty string detaches it, a uuid attaches that course. Untagged for
 	// the same reason as on create: "" must reach the service.
 	CourseID *string `json:"course_id"`
+	// ParentClassID and LineageNote follow the same patch rule: nil keeps,
+	// "" clears, a uuid links a live class of the same center (never the
+	// class itself). Untagged for the same reason as course_id.
+	ParentClassID *string `json:"parent_class_id"`
+	LineageNote   *string `json:"lineage_note" binding:"omitempty,max=1000"`
 }
 
 // CourseRefResponse is the course a class is attached to, as embedded in
@@ -139,8 +144,12 @@ type ClassResponse struct {
 	// readable GET paths; every other producer leaves it 0.
 	StudentCount int `json:"student_count"`
 	// Course is the attached course, null when the class has none.
-	Course    *CourseRefResponse `json:"course"`
-	CreatedAt time.Time          `json:"created_at"`
+	Course *CourseRefResponse `json:"course"`
+	// ParentClassID and LineageNote describe the class's place in its
+	// lineage (lịch sử lớp); both null when the class stands alone.
+	ParentClassID *uuid.UUID `json:"parent_class_id"`
+	LineageNote   *string    `json:"lineage_note"`
+	CreatedAt     time.Time  `json:"created_at"`
 }
 
 // FromSchedule maps a schedule row onto the response DTO.
@@ -180,6 +189,8 @@ func FromModel(class *Class) ClassResponse {
 		Schedules:        schedules,
 		MyStaffRoles:     []string{},
 		Course:           courseRef(class.Course),
+		ParentClassID:    class.ParentClassID,
+		LineageNote:      class.LineageNote,
 		CreatedAt:        class.CreatedAt,
 	}
 }
