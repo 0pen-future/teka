@@ -453,3 +453,44 @@ func TestCrossTenantGetIs404(t *testing.T) {
 		t.Fatalf("cross-tenant get must be 404, got %d %+v", w.Code, env)
 	}
 }
+
+// readonly=true lists the rows already on file without generating any, and
+// a value that is not a boolean is a validation error rather than silently
+// falling back to the generating path.
+func TestListRangeReadonlyServesExistingRowsOnly(t *testing.T) {
+	r, deps := newSessionsHTTPTest(t)
+	teacherID, classID := setUpClass(deps)
+	token := mintToken(t, teacherID)
+	base := "/api/v1/classes/" + classID.String() + "/sessions?from=2026-01-01&to=2026-01-31"
+
+	w, env := do(t, r, http.MethodGet, base+"&readonly=oops", "", token)
+	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["readonly"] == "" {
+		t.Fatalf("non-boolean readonly must be 422 on the readonly field, got %d %+v", w.Code, env)
+	}
+
+	w, env = do(t, r, http.MethodGet, base+"&readonly=true", "", token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d %+v", w.Code, env)
+	}
+	var rows []SessionResponse
+	if err := json.Unmarshal(env.Data, &rows); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if len(rows) != 0 || len(deps.repo.rows) != 0 {
+		t.Fatalf("readonly must not generate: got %d rows returned, %d stored", len(rows), len(deps.repo.rows))
+	}
+
+	if w, env = do(t, r, http.MethodGet, base, "", token); w.Code != http.StatusOK {
+		t.Fatalf("generate: want 200, got %d %+v", w.Code, env)
+	}
+	w, env = do(t, r, http.MethodGet, base+"&readonly=true", "", token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d %+v", w.Code, env)
+	}
+	if err := json.Unmarshal(env.Data, &rows); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if len(rows) != 4 {
+		t.Fatalf("readonly must return the 4 generated Tuesdays, got %d", len(rows))
+	}
+}

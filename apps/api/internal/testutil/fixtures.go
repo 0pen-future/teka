@@ -20,6 +20,7 @@ import (
 	"teka/apps/api/internal/features/students"
 	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/shared/authctx"
+	"teka/apps/api/internal/shared/classcode"
 	"teka/apps/api/internal/shared/id"
 )
 
@@ -404,6 +405,26 @@ func WithClassUnitPrice(price int64) ClassOption {
 	return func(c *classes.Class) { c.DefaultUnitPrice = price }
 }
 
+// WithClassCode sets the fixture class's display code (mã lớp).
+func WithClassCode(code string) ClassOption {
+	return func(c *classes.Class) { c.Code = code }
+}
+
+// WithClassTags replaces the fixture class's tags.
+func WithClassTags(tags ...string) ClassOption {
+	return func(c *classes.Class) { c.Tags = append(c.Tags[:0:0], tags...) }
+}
+
+// WithClassRecruiting marks the fixture class as recruiting (cần tuyển sinh) or not.
+func WithClassRecruiting(recruiting bool) ClassOption {
+	return func(c *classes.Class) { c.Recruiting = recruiting }
+}
+
+// WithClassEndDate sets the fixture class's closing date (ngày kết thúc).
+func WithClassEndDate(d time.Time) ClassOption {
+	return func(c *classes.Class) { c.EndDate = &d }
+}
+
 // Class inserts a classes row for the teacher directly (bypassing the
 // service). Defaults: active, opens 2026-01-05, 100 000 đồng per session.
 func Class(t *testing.T, db *gorm.DB, teacherID uuid.UUID, opts ...ClassOption) *classes.Class {
@@ -419,6 +440,11 @@ func Class(t *testing.T, db *gorm.DB, teacherID uuid.UUID, opts ...ClassOption) 
 	}
 	for _, opt := range opts {
 		opt(c)
+	}
+	// Every live class carries a center-unique code (NOT NULL + partial
+	// unique index); mint one like the service does unless an option set it.
+	if c.Code == "" {
+		c.Code = classcode.Generate()
 	}
 	if err := db.Omit("Schedules").Create(c).Error; err != nil {
 		t.Fatalf("insert fixture class %s: %v", c.Name, err)

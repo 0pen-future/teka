@@ -661,6 +661,8 @@ definitions:
     type: object
   classes.ClassResponse:
     properties:
+      code:
+        type: string
       created_at:
         type: string
       default_unit_price:
@@ -680,6 +682,15 @@ definitions:
         type: array
       name:
         type: string
+      note:
+        type: string
+      phase:
+        description: |-
+          Phase is derived from status and the dates against today (see
+          PhaseOf); the client renders it and never recomputes it.
+        type: string
+      recruiting:
+        type: boolean
       schedules:
         items:
           $ref: '#/definitions/classes.ScheduleResponse'
@@ -696,11 +707,37 @@ definitions:
           rows that endpoint lists. Like MyStaffRoles it is filled only by the
           readable GET paths; every other producer leaves it 0.
         type: integer
+      tags:
+        items:
+          type: string
+        type: array
       teacher_id:
         type: string
     type: object
+  classes.ClassStatsResponse:
+    properties:
+      all:
+        type: integer
+      archived:
+        type: integer
+      ended:
+        type: integer
+      recruiting:
+        type: integer
+      running:
+        type: integer
+      upcoming:
+        type: integer
+    type: object
   classes.CreateClassRequest:
     properties:
+      code:
+        description: |-
+          Code is the display code (mã lớp); blank or absent means "mint one".
+          Its shape is checked by the service via classcode.Valid so the message
+          lands on this field either way.
+        maxLength: 20
+        type: string
       default_unit_price:
         minimum: 0
         type: integer
@@ -710,6 +747,9 @@ definitions:
         maxLength: 100
         minLength: 1
         type: string
+      note:
+        maxLength: 1000
+        type: string
       schedules:
         items:
           $ref: '#/definitions/classes.ScheduleRequest'
@@ -717,6 +757,11 @@ definitions:
         type: array
       start_date:
         type: string
+      tags:
+        items:
+          type: string
+        maxItems: 10
+        type: array
     required:
     - default_unit_price
     - name
@@ -761,6 +806,9 @@ definitions:
     type: object
   classes.UpdateClassRequest:
     properties:
+      code:
+        maxLength: 20
+        type: string
       default_unit_price:
         minimum: 0
         type: integer
@@ -770,8 +818,19 @@ definitions:
         maxLength: 100
         minLength: 1
         type: string
+      note:
+        description: Note replaces the stored note; an empty string clears it.
+        maxLength: 1000
+        type: string
+      recruiting:
+        type: boolean
       start_date:
         type: string
+      tags:
+        items:
+          type: string
+        maxItems: 10
+        type: array
     required:
     - default_unit_price
     - name
@@ -4335,11 +4394,34 @@ paths:
       - centers
   /classes:
     get:
-      description: 'status filters the list: active (default), archived, or all.'
+      description: 'status filters the list: active (default), archived, or all. The
+        other filters combine with AND: q matches name or code, weekday/shift match
+        a timetable row still in effect, tag matches one tag exactly, phase is derived
+        from the dates.'
       parameters:
       - description: active (default), archived, or all
         in: query
         name: status
+        type: string
+      - description: substring of name or code, case-insensitive
+        in: query
+        name: q
+        type: string
+      - description: 0 (Sunday) to 6
+        in: query
+        name: weekday
+        type: integer
+      - description: morning, afternoon, or evening
+        in: query
+        name: shift
+        type: string
+      - description: exact tag
+        in: query
+        name: tag
+        type: string
+      - description: upcoming, running, ended, or archived
+        in: query
+        name: phase
         type: string
       - description: page number
         in: query
@@ -4396,7 +4478,8 @@ paths:
       consumes:
       - application/json
       description: Schedules are required — a class without a timetable generates
-        no sessions.
+        no sessions. A blank code is generated; a code another live class in the center
+        uses is refused with 409 CLASS_CODE_TAKEN.
       parameters:
       - description: class fields with schedules
         in: body
@@ -4418,6 +4501,15 @@ paths:
               type: object
         "401":
           description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: class code already taken
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'
@@ -4531,8 +4623,9 @@ paths:
     put:
       consumes:
       - application/json
-      description: Edits name, dates, and default price; schedules and status have
-        their own endpoints.
+      description: Edits name, dates, and default price (full replace); code, tags,
+        recruiting and note are optional and keep their stored value when absent.
+        Schedules and status have their own endpoints.
       parameters:
       - description: class id
         in: path
@@ -4568,6 +4661,15 @@ paths:
               type: object
         "404":
           description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: class code already taken
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'
@@ -5662,9 +5764,11 @@ paths:
         effective schedules, then returns every session in the range — including cancelled
         ones. Idempotent: calling it again with an overlapping range never duplicates
         a row. Range is capped at 400 days — comfortably above the 62-day window a
-        month-calendar view needs. Each session carries attendance_summary (per-status
-        counts over its live attendance records), null until the session''s attendance
-        is confirmed.'
+        month-calendar view needs. With readonly=true nothing is generated: only sessions
+        already on file are returned, and the range is bounded only by order (to must
+        not precede from). Each session carries attendance_summary (per-status counts
+        over its live attendance records), null until the session''s attendance is
+        confirmed.'
       parameters:
       - description: class id
         in: path
@@ -5681,6 +5785,11 @@ paths:
         name: to
         required: true
         type: string
+      - description: true returns only sessions already on file, never generating;
+          range cap does not apply
+        in: query
+        name: readonly
+        type: boolean
       produces:
       - application/json
       responses:
@@ -5714,7 +5823,7 @@ paths:
                   $ref: '#/definitions/response.ErrorBody'
               type: object
         "422":
-          description: range too large or to before from
+          description: range too large, to before from, or readonly not a boolean
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'
@@ -6086,6 +6195,36 @@ paths:
       security:
       - BearerAuth: []
       summary: Bàn giao lớp cho giáo viên khác
+      tags:
+      - classes
+  /classes/stats:
+    get:
+      description: Counts every class the caller can read, bucketed by phase on today,
+        plus how many are recruiting.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classes.ClassStatsResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Class stats
       tags:
       - classes
   /contacts:

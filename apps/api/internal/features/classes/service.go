@@ -4,13 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/shared/authctx"
+	"teka/apps/api/internal/shared/classcode"
+	"teka/apps/api/internal/shared/dbtypes"
 	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/shared/pagination"
 )
@@ -63,6 +68,11 @@ func (s *Service) CreateAnchored(ctx context.Context, a authctx.Anchor, req Crea
 		return nil, err
 	}
 
+	code, err := s.resolveCode(ctx, a, req.Code, uuid.Nil)
+	if err != nil {
+		return nil, err
+	}
+
 	class := &Class{
 		ID:               id.New(),
 		TeacherID:        a.TeacherID,
@@ -72,6 +82,9 @@ func (s *Service) CreateAnchored(ctx context.Context, a authctx.Anchor, req Crea
 		EndDate:          endDate,
 		DefaultUnitPrice: *req.DefaultUnitPrice,
 		Status:           StatusActive,
+		Code:             code,
+		Tags:             tagList(req.Tags),
+		Note:             noteValue(req.Note),
 	}
 	schedules := make([]Schedule, len(req.Schedules))
 	for i, sr := range req.Schedules {
@@ -91,10 +104,88 @@ func (s *Service) CreateAnchored(ctx context.Context, a authctx.Anchor, req Crea
 		return s.staff.SyncPrimaryTeacher(ctx, class.ID, class.CenterID, class.TeacherID)
 	})
 	if err != nil {
-		return nil, err
+		return nil, codeConflictOr(err, class.Code)
 	}
 	class.Schedules = schedules
 	return class, nil
+}
+
+// codeAttempts bounds the generate-and-probe loop for a blank code. With
+// 32^6 values per center a second collision is already implausible, so three
+// misses mean something other than chance is wrong and the caller is told.
+const codeAttempts = 3
+
+// resolveCode returns the code a class row should carry: the requested one,
+// checked for shape and for a clash with another live class in the center
+// (exceptID excludes the row being edited), or a freshly minted one when the
+// request left it blank. A clash — explicit or after every generate attempt
+// — is ErrCodeTaken wrapped as a 409 so the form can point at its code field.
+func (s *Service) resolveCode(ctx context.Context, a authctx.Anchor, requested *string, exceptID uuid.UUID) (string, error) {
+	if requested != nil && strings.TrimSpace(*requested) != "" {
+		code := strings.TrimSpace(*requested)
+		if !classcode.Valid(code) {
+			return "", apperror.Invalid("validation failed",
+				map[string]string{"code": "must be 2-20 characters of A-Z, 0-9 or -"})
+		}
+		taken, err := s.repo.CodeExists(ctx, a, code, exceptID)
+		if err != nil {
+			return "", err
+		}
+		if taken {
+			return "", codeTakenError(code)
+		}
+		return code, nil
+	}
+	for range codeAttempts {
+		code := classcode.Generate()
+		taken, err := s.repo.CodeExists(ctx, a, code, exceptID)
+		if err != nil {
+			return "", err
+		}
+		if !taken {
+			return code, nil
+		}
+	}
+	return "", codeTakenError("")
+}
+
+func codeTakenError(code string) error {
+	msg := "could not allocate a free class code; retry or choose one"
+	appErr := apperror.New(CodeClassCodeTaken, http.StatusConflict, msg)
+	if code != "" {
+		msg = fmt.Sprintf("class code %q is already used by another class in this center", code)
+		appErr = apperror.New(CodeClassCodeTaken, http.StatusConflict, msg)
+		appErr.Fields = map[string]string{"code": msg}
+	}
+	appErr.Err = ErrCodeTaken
+	return appErr
+}
+
+// codeConflictOr maps a duplicate-key error from the class insert or update
+// to the same 409 the CodeExists probe produces. The probe and the partial
+// unique index on (center_id, code) can disagree under a concurrent write of
+// the same code; the index is the authority, and its refusal must read as
+// "code taken", not as an internal failure.
+func codeConflictOr(err error, code string) error {
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return codeTakenError(code)
+	}
+	return err
+}
+
+// tagList copies the request tags into the JSONB list, never nil so the
+// column always holds an array.
+func tagList(tags []string) dbtypes.StringList {
+	out := make(dbtypes.StringList, 0, len(tags))
+	return append(out, tags...)
+}
+
+// noteValue stores a blank note as NULL rather than an empty string.
+func noteValue(note *string) *string {
+	if note == nil || *note == "" {
+		return nil
+	}
+	return note
 }
 
 // scheduleFromRequest builds a schedule row, defaulting effective_from to the
@@ -247,10 +338,36 @@ func (s *Service) Update(ctx context.Context, sc authctx.Scope, classID uuid.UUI
 	class.StartDate = startDate
 	class.EndDate = endDate
 	class.DefaultUnitPrice = *req.DefaultUnitPrice
+	// The catalog fields patch: nil keeps the stored value, a present pointer
+	// replaces it whole. A blank code also keeps the stored one — a class
+	// never goes back to having no code.
+	if req.Code != nil && strings.TrimSpace(*req.Code) != "" {
+		code, err := s.resolveCode(ctx, authctx.Anchor{TeacherID: class.TeacherID, CenterID: class.CenterID}, req.Code, class.ID)
+		if err != nil {
+			return nil, err
+		}
+		class.Code = code
+	}
+	if req.Tags != nil {
+		class.Tags = tagList(*req.Tags)
+	}
+	if req.Recruiting != nil {
+		class.Recruiting = *req.Recruiting
+	}
+	if req.Note != nil {
+		class.Note = noteValue(req.Note)
+	}
 	if err := s.repo.Update(ctx, class); err != nil {
-		return nil, err
+		return nil, codeConflictOr(err, class.Code)
 	}
 	return class, nil
+}
+
+// Stats buckets the classes the caller can read by phase on today. It
+// shares ListReadable's port, so the chips never count a class the list
+// would not show.
+func (s *Service) Stats(ctx context.Context, sc authctx.Scope, today time.Time) (ClassStatsResponse, error) {
+	return s.repo.CountReadableByPhase(ctx, sc, today)
 }
 
 // Archive flips the class to archived — the normal end-of-term action, and

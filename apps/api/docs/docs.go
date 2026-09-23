@@ -3654,7 +3654,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "status filters the list: active (default), archived, or all.",
+                "description": "status filters the list: active (default), archived, or all. The other filters combine with AND: q matches name or code, weekday/shift match a timetable row still in effect, tag matches one tag exactly, phase is derived from the dates.",
                 "produces": [
                     "application/json"
                 ],
@@ -3667,6 +3667,36 @@ const docTemplate = `{
                         "type": "string",
                         "description": "active (default), archived, or all",
                         "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "substring of name or code, case-insensitive",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "0 (Sunday) to 6",
+                        "name": "weekday",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "morning, afternoon, or evening",
+                        "name": "shift",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "exact tag",
+                        "name": "tag",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "upcoming, running, ended, or archived",
+                        "name": "phase",
                         "in": "query"
                     },
                     {
@@ -3757,7 +3787,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Schedules are required — a class without a timetable generates no sessions.",
+                "description": "Schedules are required — a class without a timetable generates no sessions. A blank code is generated; a code another live class in the center uses is refused with 409 CLASS_CODE_TAKEN.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3816,8 +3846,81 @@ const docTemplate = `{
                             ]
                         }
                     },
+                    "409": {
+                        "description": "class code already taken",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
                     "422": {
                         "description": "validation failed",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/classes/stats": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Counts every class the caller can read, bucketed by phase on today, plus how many are recruiting.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "classes"
+                ],
+                "summary": "Class stats",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/classes.ClassStatsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "allOf": [
                                 {
@@ -3923,7 +4026,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Edits name, dates, and default price; schedules and status have their own endpoints.",
+                "description": "Edits name, dates, and default price (full replace); code, tags, recruiting and note are optional and keep their stored value when absent. Schedules and status have their own endpoints.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3991,6 +4094,24 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "409": {
+                        "description": "class code already taken",
                         "schema": {
                             "allOf": [
                                 {
@@ -6029,7 +6150,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Generates any session rows missing for [from, to] from the class's effective schedules, then returns every session in the range — including cancelled ones. Idempotent: calling it again with an overlapping range never duplicates a row. Range is capped at 400 days — comfortably above the 62-day window a month-calendar view needs. Each session carries attendance_summary (per-status counts over its live attendance records), null until the session's attendance is confirmed.",
+                "description": "Generates any session rows missing for [from, to] from the class's effective schedules, then returns every session in the range — including cancelled ones. Idempotent: calling it again with an overlapping range never duplicates a row. Range is capped at 400 days — comfortably above the 62-day window a month-calendar view needs. With readonly=true nothing is generated: only sessions already on file are returned, and the range is bounded only by order (to must not precede from). Each session carries attendance_summary (per-status counts over its live attendance records), null until the session's attendance is confirmed.",
                 "produces": [
                     "application/json"
                 ],
@@ -6058,6 +6179,12 @@ const docTemplate = `{
                         "name": "to",
                         "in": "query",
                         "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "true returns only sessions already on file, never generating; range cap does not apply",
+                        "name": "readonly",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -6119,7 +6246,7 @@ const docTemplate = `{
                         }
                     },
                     "422": {
-                        "description": "range too large or to before from",
+                        "description": "range too large, to before from, or readonly not a boolean",
                         "schema": {
                             "allOf": [
                                 {
@@ -14702,6 +14829,9 @@ const docTemplate = `{
         "classes.ClassResponse": {
             "type": "object",
             "properties": {
+                "code": {
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -14724,6 +14854,16 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "note": {
+                    "type": "string"
+                },
+                "phase": {
+                    "description": "Phase is derived from status and the dates against today (see\nPhaseOf); the client renders it and never recomputes it.",
+                    "type": "string"
+                },
+                "recruiting": {
+                    "type": "boolean"
+                },
                 "schedules": {
                     "type": "array",
                     "items": {
@@ -14740,8 +14880,37 @@ const docTemplate = `{
                     "description": "StudentCount is the number of enrollments still open on the class\n(ended_on IS NULL, not deleted) — the same predicate GET /enrollments\napplies for active=true, so a picker showing this count matches the\nrows that endpoint lists. Like MyStaffRoles it is filled only by the\nreadable GET paths; every other producer leaves it 0.",
                     "type": "integer"
                 },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "teacher_id": {
                     "type": "string"
+                }
+            }
+        },
+        "classes.ClassStatsResponse": {
+            "type": "object",
+            "properties": {
+                "all": {
+                    "type": "integer"
+                },
+                "archived": {
+                    "type": "integer"
+                },
+                "ended": {
+                    "type": "integer"
+                },
+                "recruiting": {
+                    "type": "integer"
+                },
+                "running": {
+                    "type": "integer"
+                },
+                "upcoming": {
+                    "type": "integer"
                 }
             }
         },
@@ -14754,6 +14923,11 @@ const docTemplate = `{
                 "start_date"
             ],
             "properties": {
+                "code": {
+                    "description": "Code is the display code (mã lớp); blank or absent means \"mint one\".\nIts shape is checked by the service via classcode.Valid so the message\nlands on this field either way.",
+                    "type": "string",
+                    "maxLength": 20
+                },
                 "default_unit_price": {
                     "type": "integer",
                     "minimum": 0
@@ -14766,6 +14940,10 @@ const docTemplate = `{
                     "maxLength": 100,
                     "minLength": 1
                 },
+                "note": {
+                    "type": "string",
+                    "maxLength": 1000
+                },
                 "schedules": {
                     "type": "array",
                     "minItems": 1,
@@ -14775,6 +14953,13 @@ const docTemplate = `{
                 },
                 "start_date": {
                     "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "maxItems": 10,
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
@@ -14838,6 +15023,10 @@ const docTemplate = `{
                 "start_date"
             ],
             "properties": {
+                "code": {
+                    "type": "string",
+                    "maxLength": 20
+                },
                 "default_unit_price": {
                     "type": "integer",
                     "minimum": 0
@@ -14850,8 +15039,23 @@ const docTemplate = `{
                     "maxLength": 100,
                     "minLength": 1
                 },
+                "note": {
+                    "description": "Note replaces the stored note; an empty string clears it.",
+                    "type": "string",
+                    "maxLength": 1000
+                },
+                "recruiting": {
+                    "type": "boolean"
+                },
                 "start_date": {
                     "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "maxItems": 10,
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },

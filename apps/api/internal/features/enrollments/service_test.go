@@ -213,6 +213,20 @@ func (f *fakeRepository) ActiveOn(_ context.Context, sc authctx.Scope, classID u
 	return out, nil
 }
 
+func (f *fakeRepository) ActiveInRange(_ context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]Enrollment, error) {
+	var out []Enrollment
+	for _, e := range f.rows {
+		if !visibleEnrollment(e, sc) || e.ClassID != classID {
+			continue
+		}
+		if e.StartedOn.After(to) || (e.EndedOn != nil && e.EndedOn.Before(from)) {
+			continue
+		}
+		out = append(out, e.Enrollment)
+	}
+	return out, nil
+}
+
 // ActiveOnClass mirrors ActiveOn but center-only, matching the real
 // repository's centerScoped port: no teacher filter, so a caller with no
 // stint on the class (a teaching assistant, in billing's reconciliation

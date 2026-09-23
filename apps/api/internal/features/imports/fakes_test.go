@@ -12,6 +12,7 @@ import (
 	"teka/apps/api/internal/features/enrollments"
 	"teka/apps/api/internal/features/students"
 	"teka/apps/api/internal/shared/authctx"
+	"teka/apps/api/internal/shared/classcode"
 )
 
 // fakeRoster stands in for the four roster services this feature drives. It
@@ -125,6 +126,10 @@ func (f *fakeRoster) CreateAnchored(_ context.Context, a authctx.Anchor, req cla
 		EndDate:          end,
 		DefaultUnitPrice: *req.DefaultUnitPrice,
 		Status:           classes.StatusActive,
+		Code:             classcode.Generate(),
+	}
+	if req.Code != nil {
+		row.Code = *req.Code
 	}
 	f.classRows = append(f.classRows, row)
 	for _, s := range req.Schedules {

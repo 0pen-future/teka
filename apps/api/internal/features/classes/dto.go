@@ -33,15 +33,40 @@ type CreateClassRequest struct {
 	EndDate          string            `json:"end_date" binding:"omitempty,datetime=2006-01-02"`
 	DefaultUnitPrice *int64            `json:"default_unit_price" binding:"required,min=0"`
 	Schedules        []ScheduleRequest `json:"schedules" binding:"required,min=1,dive"`
+	// Code is the display code (mã lớp); blank or absent means "mint one".
+	// Its shape is checked by the service via classcode.Valid so the message
+	// lands on this field either way.
+	Code *string  `json:"code" binding:"omitempty,max=20"`
+	Tags []string `json:"tags" binding:"omitempty,max=10,dive,max=30"`
+	Note *string  `json:"note" binding:"omitempty,max=1000"`
 }
 
 // UpdateClassRequest edits the class's own fields; schedules are a
-// sub-resource and status changes go through archive.
+// sub-resource and status changes go through archive. The original fields
+// keep their full-replace contract; the catalog fields below are pointers
+// where nil means "leave as stored", so a toggle can send only itself.
 type UpdateClassRequest struct {
-	Name             string `json:"name" binding:"required,min=1,max=100"`
-	StartDate        string `json:"start_date" binding:"required,datetime=2006-01-02"`
-	EndDate          string `json:"end_date" binding:"omitempty,datetime=2006-01-02"`
-	DefaultUnitPrice *int64 `json:"default_unit_price" binding:"required,min=0"`
+	Name             string    `json:"name" binding:"required,min=1,max=100"`
+	StartDate        string    `json:"start_date" binding:"required,datetime=2006-01-02"`
+	EndDate          string    `json:"end_date" binding:"omitempty,datetime=2006-01-02"`
+	DefaultUnitPrice *int64    `json:"default_unit_price" binding:"required,min=0"`
+	Code             *string   `json:"code" binding:"omitempty,max=20"`
+	Tags             *[]string `json:"tags" binding:"omitempty,max=10,dive,max=30"`
+	Recruiting       *bool     `json:"recruiting"`
+	// Note replaces the stored note; an empty string clears it.
+	Note *string `json:"note" binding:"omitempty,max=1000"`
+}
+
+// ClassStatsResponse counts the classes the caller can read, bucketed by the
+// same phase rule the list filter applies; All is the total across buckets
+// and Recruiting counts across every phase.
+type ClassStatsResponse struct {
+	All        int64 `json:"all"`
+	Upcoming   int64 `json:"upcoming"`
+	Running    int64 `json:"running"`
+	Ended      int64 `json:"ended"`
+	Archived   int64 `json:"archived"`
+	Recruiting int64 `json:"recruiting"`
 }
 
 // UpdateScheduleRequest edits one schedule row in place. The intended use is
@@ -69,14 +94,21 @@ type ScheduleResponse struct {
 // ClassResponse is the public class shape; default_unit_price is an integer
 // number of đồng, never a decimal.
 type ClassResponse struct {
-	ID               uuid.UUID          `json:"id"`
-	Name             string             `json:"name"`
-	TeacherID        uuid.UUID          `json:"teacher_id"`
-	StartDate        string             `json:"start_date"`
-	EndDate          *string            `json:"end_date"`
-	DefaultUnitPrice int64              `json:"default_unit_price"`
-	Status           string             `json:"status"`
-	Schedules        []ScheduleResponse `json:"schedules"`
+	ID               uuid.UUID `json:"id"`
+	Name             string    `json:"name"`
+	TeacherID        uuid.UUID `json:"teacher_id"`
+	StartDate        string    `json:"start_date"`
+	EndDate          *string   `json:"end_date"`
+	DefaultUnitPrice int64     `json:"default_unit_price"`
+	Status           string    `json:"status"`
+	Code             string    `json:"code"`
+	Tags             []string  `json:"tags"`
+	Recruiting       bool      `json:"recruiting"`
+	Note             *string   `json:"note"`
+	// Phase is derived from status and the dates against today (see
+	// PhaseOf); the client renders it and never recomputes it.
+	Phase     string             `json:"phase"`
+	Schedules []ScheduleResponse `json:"schedules"`
 	// MyStaffRoles lists the CALLER's active class_staff role keys on this
 	// class — per-caller data, so only the readable GET paths fill it (via
 	// FromModelWithRoles); every other producer, the dashboard included,
@@ -110,6 +142,8 @@ func FromModel(class *Class) ClassResponse {
 	for i := range class.Schedules {
 		schedules = append(schedules, FromSchedule(&class.Schedules[i]))
 	}
+	tags := make([]string, 0, len(class.Tags))
+	tags = append(tags, class.Tags...)
 	return ClassResponse{
 		ID:               class.ID,
 		Name:             class.Name,
@@ -118,6 +152,11 @@ func FromModel(class *Class) ClassResponse {
 		EndDate:          formatDatePtr(class.EndDate),
 		DefaultUnitPrice: class.DefaultUnitPrice,
 		Status:           class.Status,
+		Code:             class.Code,
+		Tags:             tags,
+		Recruiting:       class.Recruiting,
+		Note:             class.Note,
+		Phase:            PhaseOf(class, today()),
 		Schedules:        schedules,
 		MyStaffRoles:     []string{},
 		CreatedAt:        class.CreatedAt,

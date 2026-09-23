@@ -107,6 +107,7 @@ func TestAllRoutesRequireAuth(t *testing.T) {
 	routes := []struct{ method, path string }{
 		{http.MethodPost, "/api/v1/classes"},
 		{http.MethodGet, "/api/v1/classes"},
+		{http.MethodGet, "/api/v1/classes/stats"},
 		{http.MethodGet, "/api/v1/classes/" + someID},
 		{http.MethodPut, "/api/v1/classes/" + someID},
 		{http.MethodPost, "/api/v1/classes/" + someID + "/archive"},
@@ -378,5 +379,220 @@ func TestListIsTenantScoped(t *testing.T) {
 	}
 	if len(rows) != 0 {
 		t.Fatalf("another teacher's list must be empty, got %+v", rows)
+	}
+}
+
+// createClass posts body and decodes the created class.
+func createClass(t *testing.T, r *gin.Engine, token, body string) ClassResponse {
+	t.Helper()
+	w, env := do(t, r, http.MethodPost, "/api/v1/classes", body, token)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: got %d %+v", w.Code, env)
+	}
+	var created ClassResponse
+	if err := json.Unmarshal(env.Data, &created); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	return created
+}
+
+// listIDs fetches the list with query and returns the ids in page order.
+func listIDs(t *testing.T, r *gin.Engine, token, query string) []uuid.UUID {
+	t.Helper()
+	w, env := do(t, r, http.MethodGet, "/api/v1/classes"+query, "", token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list %q: got %d %+v", query, w.Code, env)
+	}
+	var rows []ClassResponse
+	if err := json.Unmarshal(env.Data, &rows); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	ids := make([]uuid.UUID, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	return ids
+}
+
+// Filter parameters outside their enums are rejected up front with a field
+// message, never silently ignored — a UI chip that sent a typo would
+// otherwise show the unfiltered list as if it matched.
+func TestListRejectsUnknownFilterValues(t *testing.T) {
+	r, _ := newClassesHTTPTest(t)
+	token := mintToken(t, uuid.New())
+
+	cases := map[string]string{
+		"?weekday=7":    "weekday",
+		"?weekday=-1":   "weekday",
+		"?weekday=mon":  "weekday",
+		"?shift=night":  "shift",
+		"?phase=paused": "phase",
+		"?status=bogus": "status",
+	}
+	for query, field := range cases {
+		w, env := do(t, r, http.MethodGet, "/api/v1/classes"+query, "", token)
+		if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields[field] == "" {
+			t.Fatalf("%s: want 422 with a %s field message, got %d %+v", query, field, w.Code, env)
+		}
+	}
+}
+
+// q matches name or code case-insensitively, weekday/shift look at the
+// class's still-effective timetable, tag matches one element exactly, and
+// phase is derived from the dates — all combinable.
+func TestListFiltersByQueryTimetableTagAndPhase(t *testing.T) {
+	r, _ := newClassesHTTPTest(t)
+	token := mintToken(t, uuid.New())
+
+	evening := createClass(t, r, token, `{
+		"name": "Toán 8", "code": "TOAN8", "tags": ["Toán", "Khối 8"],
+		"start_date": "2026-01-05", "default_unit_price": 150000,
+		"schedules": [{"weekday": 2, "start_time": "18:00", "duration_min": 90}]
+	}`)
+	morning := createClass(t, r, token, `{
+		"name": "Văn 9", "code": "VAN9", "tags": ["Văn"],
+		"start_date": "2026-10-01", "default_unit_price": 150000,
+		"schedules": [{"weekday": 6, "start_time": "08:00", "duration_min": 90}]
+	}`)
+
+	want := func(query string, ids ...uuid.UUID) {
+		t.Helper()
+		got := listIDs(t, r, token, query)
+		if len(got) != len(ids) {
+			t.Fatalf("%s: want %d rows, got %v", query, len(ids), got)
+		}
+		for i := range ids {
+			if got[i] != ids[i] {
+				t.Fatalf("%s: want %v, got %v", query, ids, got)
+			}
+		}
+	}
+	want("?q=toan8", evening.ID)
+	want("?q=v%C4%83n", morning.ID)
+	want("?q=zzz")
+	want("?weekday=2", evening.ID)
+	want("?weekday=2&shift=evening", evening.ID)
+	want("?weekday=2&shift=morning")
+	want("?shift=morning", morning.ID)
+	want("?tag=Kh%E1%BB%91i%208", evening.ID)
+	want("?tag=Khối")
+	want("?phase=running", evening.ID)
+	want("?phase=upcoming", morning.ID)
+	want("?phase=upcoming&q=toan")
+}
+
+// A code the center already uses is a 409 with its own error code so the
+// form can attach the message to the code field; the malformed shape is a
+// plain 422.
+func TestCreateCodeConflictsAndValidation(t *testing.T) {
+	r, _ := newClassesHTTPTest(t)
+	token := mintToken(t, uuid.New())
+
+	body := `{"name": "Toán 8", "code": "TOAN8", "start_date": "2026-01-05", "default_unit_price": 150000,
+		"schedules": [{"weekday": 2, "start_time": "18:00", "duration_min": 90}]}`
+	created := createClass(t, r, token, body)
+	if created.Code != "TOAN8" || created.Phase != PhaseRunning || created.Tags == nil {
+		t.Fatalf("response must carry code, phase and a non-null tags list, got %+v", created)
+	}
+
+	w, env := do(t, r, http.MethodPost, "/api/v1/classes", body, token)
+	if w.Code != http.StatusConflict || env.Error == nil || env.Error.Code != CodeClassCodeTaken {
+		t.Fatalf("want 409 %s, got %d %+v", CodeClassCodeTaken, w.Code, env)
+	}
+
+	bad := strings.Replace(body, `"TOAN8"`, `"toán 8"`, 1)
+	w, env = do(t, r, http.MethodPost, "/api/v1/classes", bad, token)
+	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["code"] == "" {
+		t.Fatalf("want 422 on code, got %d %+v", w.Code, env)
+	}
+
+	tooMany := strings.Replace(body, `"code": "TOAN8",`, `"code": "TOAN8B", "tags": ["1","2","3","4","5","6","7","8","9","10","11"],`, 1)
+	w, env = do(t, r, http.MethodPost, "/api/v1/classes", tooMany, token)
+	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["tags"] == "" {
+		t.Fatalf("want 422 on tags, got %d %+v", w.Code, env)
+	}
+}
+
+// PUT keeps its full-replace contract for the original fields (name is
+// still required) while the catalog fields patch: a body naming only
+// recruiting leaves code, tags and note untouched.
+func TestUpdatePatchesCatalogFieldsOnly(t *testing.T) {
+	r, _ := newClassesHTTPTest(t)
+	token := mintToken(t, uuid.New())
+
+	created := createClass(t, r, token, `{
+		"name": "Toán 8", "code": "TOAN8", "tags": ["Toán"], "note": "Phòng 201",
+		"start_date": "2026-01-05", "default_unit_price": 150000,
+		"schedules": [{"weekday": 2, "start_time": "18:00", "duration_min": 90}]
+	}`)
+	path := "/api/v1/classes/" + created.ID.String()
+
+	w, env := do(t, r, http.MethodPut, path, `{"recruiting": true}`, token)
+	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["name"] == "" {
+		t.Fatalf("original fields stay required, want 422 on name, got %d %+v", w.Code, env)
+	}
+
+	w, env = do(t, r, http.MethodPut, path, `{"name": "Toán 8", "start_date": "2026-01-05", "default_unit_price": 150000, "recruiting": true}`, token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update: got %d %+v", w.Code, env)
+	}
+	var updated ClassResponse
+	if err := json.Unmarshal(env.Data, &updated); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if !updated.Recruiting || updated.Code != "TOAN8" || len(updated.Tags) != 1 || updated.Note == nil || *updated.Note != "Phòng 201" {
+		t.Fatalf("absent catalog fields must be kept, got %+v", updated)
+	}
+}
+
+// stats is its own route ahead of /:id, counts through the caller's read
+// scope, and reflects a recruiting toggle immediately.
+func TestStatsRoute(t *testing.T) {
+	r, _ := newClassesHTTPTest(t)
+	token := mintToken(t, uuid.New())
+
+	stats := func() ClassStatsResponse {
+		t.Helper()
+		w, env := do(t, r, http.MethodGet, "/api/v1/classes/stats", "", token)
+		if w.Code != http.StatusOK {
+			t.Fatalf("stats: got %d %+v", w.Code, env)
+		}
+		var out ClassStatsResponse
+		if err := json.Unmarshal(env.Data, &out); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		return out
+	}
+	if got := stats(); got != (ClassStatsResponse{}) {
+		t.Fatalf("empty center must count zeros, got %+v", got)
+	}
+
+	created := createClass(t, r, token, validCreateBody)
+	if got := stats(); got.All != 1 || got.Running != 1 || got.Recruiting != 0 {
+		t.Fatalf("one running class: got %+v", got)
+	}
+
+	w, env := do(t, r, http.MethodPut, "/api/v1/classes/"+created.ID.String(),
+		`{"name": "Toán 8", "start_date": "2026-01-05", "default_unit_price": 150000, "recruiting": true}`, token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update: got %d %+v", w.Code, env)
+	}
+	if got := stats(); got.Recruiting != 1 {
+		t.Fatalf("recruiting toggle must count, got %+v", got)
+	}
+
+	if w, env = do(t, r, http.MethodPost, "/api/v1/classes/"+created.ID.String()+"/archive", "", token); w.Code != http.StatusOK {
+		t.Fatalf("archive: got %d %+v", w.Code, env)
+	}
+	if got := stats(); got.All != 1 || got.Archived != 1 || got.Running != 0 {
+		t.Fatalf("archived class must move buckets, got %+v", got)
+	}
+
+	// Another caller's center must not leak into the count.
+	other := mintToken(t, uuid.New())
+	w, env = do(t, r, http.MethodGet, "/api/v1/classes/stats", "", other)
+	var out ClassStatsResponse
+	if w.Code != http.StatusOK || json.Unmarshal(env.Data, &out) != nil || out != (ClassStatsResponse{}) {
+		t.Fatalf("stats must be tenant scoped, got %d %+v", w.Code, env)
 	}
 }

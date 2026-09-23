@@ -11,4 +11,11 @@ var (
 	// ErrHasOpenEnrollments blocks soft-deleting a class that students are
 	// still enrolled in; archiving is the suggested action instead.
 	ErrHasOpenEnrollments = errors.New("class has open enrollments")
+	// ErrCodeTaken means another live class in the center already carries the
+	// requested code; surfaces as 409 CLASS_CODE_TAKEN.
+	ErrCodeTaken = errors.New("class code already taken")
 )
+
+// CodeClassCodeTaken is the wire error code for ErrCodeTaken, distinct from
+// the generic CONFLICT so a form can attach the message to its code field.
+const CodeClassCodeTaken = "CLASS_CODE_TAKEN"

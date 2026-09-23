@@ -67,6 +67,9 @@ type TeacherSource interface {
 // satisfies this.
 type EnrollmentSource interface {
 	ActiveOn(ctx context.Context, sc authctx.Scope, classID uuid.UUID, on time.Time) ([]enrollments.Enrollment, error)
+	// ActiveInRange is the batched form a range listing uses: one read for
+	// the whole window, counted per session date in memory.
+	ActiveInRange(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]enrollments.Enrollment, error)
 }
 
 // Detail is a session enriched with its class name and the size of the
@@ -228,6 +231,46 @@ func (s *Service) ListRangeReadable(ctx context.Context, sc authctx.Scope, class
 			return nil, err
 		}
 		details = append(details, *detail)
+	}
+	return details, nil
+}
+
+// ListRangeExisting returns a class's sessions already on file in [from, to]
+// without materialising any: the port a read-only view of the timetable (a
+// class detail page, a history scroll) uses so browsing never inserts rows
+// the pending-attendance and period-close flows would then have to account
+// for. Because nothing is generated, the range is bounded only by order, not
+// by the generation cap. Student counts come from one batched roster read.
+func (s *Service) ListRangeExisting(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]Detail, error) {
+	if to.Before(from) {
+		return nil, apperror.Invalid("validation failed", map[string]string{"to": "must not be before from"})
+	}
+	if _, _, err := s.classes.GetReadableWithRoles(ctx, sc, classID); err != nil {
+		return nil, err
+	}
+	listed, err := s.repo.ListByClassAndRangeReadable(ctx, sc, classID, from, to)
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+	if len(listed) == 0 {
+		return []Detail{}, nil
+	}
+	roster, err := s.enrollments.ActiveInRange(ctx, sc, classID, from, to)
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+	details := make([]Detail, 0, len(listed))
+	for i := range listed {
+		on := listed[i].SessionDate
+		count := 0
+		for j := range roster {
+			e := &roster[j]
+			if e.StartedOn.After(on) || (e.EndedOn != nil && e.EndedOn.Before(on)) {
+				continue
+			}
+			count++
+		}
+		details = append(details, Detail{Row: listed[i], StudentCount: count})
 	}
 	return details, nil
 }

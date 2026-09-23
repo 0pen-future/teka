@@ -345,12 +345,17 @@ func TestClassWithNoTeacherIsAnchoredOnTheOwner(t *testing.T) {
 
 	// A bare uuid.UUID destination skips its sql.Scanner, so the id lands in
 	// a struct field — the same shape testutil.ScopeFor scans into.
-	var row struct{ TeacherID uuid.UUID }
+	var row struct {
+		TeacherID uuid.UUID
+		Code      string
+	}
 	require.NoError(t, r.db.Raw(
-		"SELECT teacher_id FROM classes WHERE center_id = ? AND name = 'Lớp chưa phân công'", r.owner.CenterID,
+		"SELECT teacher_id, code FROM classes WHERE center_id = ? AND name = 'Lớp chưa phân công'", r.owner.CenterID,
 	).Scan(&row).Error)
 	require.Equal(t, r.owner.TeacherID, row.TeacherID,
 		"a class with nobody assigned belongs to the owner, who is a teacher too")
+	require.Regexp(t, `^[A-Z0-9-]{2,20}$`, row.Code,
+		"an imported class is minted a display code like one created by hand")
 }
 
 // TestGrantedMemberImportAnchorsEverythingOnTheOwner runs the import as a

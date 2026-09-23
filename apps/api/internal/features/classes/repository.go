@@ -2,7 +2,9 @@ package classes
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,8 +18,18 @@ import (
 
 // ListFilter narrows the class list. Status is one of StatusActive,
 // StatusArchived, or "" for every non-deleted class regardless of status.
+// Every other field is optional and they combine with AND: Phase is one of
+// the Phase* constants judged against today; Q matches name or code
+// case-insensitively as a substring; Weekday and Shift look for a timetable
+// row still effective today (Shift is one of the Shift* constants); Tag
+// matches one tag element exactly.
 type ListFilter struct {
-	Status string
+	Status  string
+	Phase   string
+	Q       string
+	Weekday *int16
+	Shift   string
+	Tag     string
 }
 
 // Repository is the persistence contract for classes and their schedules; the
@@ -49,6 +61,15 @@ type Repository interface {
 	// class ids in one grouped query, keyed by class id (absent key = 0),
 	// narrowed to the enrollments the caller could list.
 	CountActiveEnrollmentsByClass(ctx context.Context, sc authctx.Scope, classIDs []uuid.UUID) (map[uuid.UUID]int64, error)
+	// CountReadableByPhase buckets every class the caller can read (the same
+	// port ListReadable uses) by its phase on today, in one query.
+	CountReadableByPhase(ctx context.Context, sc authctx.Scope, today time.Time) (ClassStatsResponse, error)
+	// CodeExists reports whether a live class in the anchor's center other
+	// than exceptID already carries code — the partial unique index's
+	// predicate, checked ahead of the insert so the caller gets a 409 rather
+	// than a constraint error. Center-wide on purpose: the index is per
+	// center, not per teacher, so a member's probe must see the owner's rows.
+	CodeExists(ctx context.Context, a authctx.Anchor, code string, exceptID uuid.UUID) (bool, error)
 
 	AddSchedule(ctx context.Context, s *Schedule) error
 	GetSchedule(ctx context.Context, sc authctx.Scope, classID, scheduleID uuid.UUID) (*Schedule, error)
@@ -260,12 +281,52 @@ func (r *gormRepository) List(ctx context.Context, sc authctx.Scope, filter List
 	return r.list(r.scoped(ctx, sc), filter, p)
 }
 
+// likeEscaper makes a user string safe inside ILIKE ... ESCAPE '\': the
+// three metacharacters are escaped so "100%" or "a_b" match literally.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
 func (r *gormRepository) list(q *gorm.DB, filter ListFilter, p pagination.Params) ([]Class, int64, error) {
 	q = q.Model(&Class{})
 	if filter.Status != "" {
 		// The default active-only list matches the idx_classes_teacher
 		// partial-index predicate (deleted_at IS NULL AND status = 'active').
 		q = q.Where("classes.status = ?", filter.Status)
+	}
+	if filter.Q != "" {
+		needle := "%" + likeEscaper.Replace(filter.Q) + "%"
+		q = q.Where(`(classes.name ILIKE ? ESCAPE '\' OR classes.code ILIKE ? ESCAPE '\')`, needle, needle)
+	}
+	if filter.Tag != "" {
+		// Bound as a JSON array so the containment check matches one whole
+		// element; a raw string could never be built into the predicate.
+		tag, err := json.Marshal([]string{filter.Tag})
+		if err != nil {
+			return nil, 0, err
+		}
+		q = q.Where("classes.tags @> ?::jsonb", string(tag))
+	}
+	today := today()
+	if filter.Weekday != nil || filter.Shift != "" {
+		slot := `EXISTS (SELECT 1 FROM class_schedules s
+			WHERE s.class_id = classes.id AND s.deleted_at IS NULL
+			  AND (s.effective_to IS NULL OR s.effective_to >= ?)`
+		args := []any{today}
+		if filter.Weekday != nil {
+			slot += " AND s.weekday = ?"
+			args = append(args, *filter.Weekday)
+		}
+		if from, to, ok := ShiftBounds(filter.Shift); ok {
+			slot += " AND s.start_time >= ?"
+			args = append(args, from)
+			if to != "" {
+				slot += " AND s.start_time < ?"
+				args = append(args, to)
+			}
+		}
+		q = q.Where(slot+")", args...)
+	}
+	if frag, args, ok := phasePredicate(filter.Phase, today); ok {
+		q = q.Where(frag, args...)
 	}
 
 	var total int64
@@ -350,6 +411,53 @@ func (r *gormRepository) CountActiveEnrollmentsByClass(ctx context.Context, sc a
 		counts[row.ClassID] = row.N
 	}
 	return counts, nil
+}
+
+// CountReadableByPhase runs the four phase predicates as SUM(CASE ...) arms
+// over readScoped — the one place classes.view_all may widen a read — so the
+// chips on the list page count exactly the rows the list would show.
+func (r *gormRepository) CountReadableByPhase(ctx context.Context, sc authctx.Scope, today time.Time) (ClassStatsResponse, error) {
+	selectSQL := "COUNT(*) AS all_count, SUM(CASE WHEN classes.recruiting THEN 1 ELSE 0 END) AS recruiting"
+	var args []any
+	for _, phase := range []string{PhaseUpcoming, PhaseRunning, PhaseEnded, PhaseArchived} {
+		frag, phaseArgs, _ := phasePredicate(phase, today)
+		selectSQL += ", SUM(CASE WHEN " + frag + " THEN 1 ELSE 0 END) AS " + phase
+		args = append(args, phaseArgs...)
+	}
+	var row struct {
+		AllCount   int64
+		Upcoming   int64
+		Running    int64
+		Ended      int64
+		Archived   int64
+		Recruiting int64
+	}
+	err := r.readScoped(ctx, sc).Model(&Class{}).
+		Select(selectSQL, args...).
+		Scan(&row).Error
+	if err != nil {
+		return ClassStatsResponse{}, err
+	}
+	return ClassStatsResponse{
+		All:        row.AllCount,
+		Upcoming:   row.Upcoming,
+		Running:    row.Running,
+		Ended:      row.Ended,
+		Archived:   row.Archived,
+		Recruiting: row.Recruiting,
+	}, nil
+}
+
+// CodeExists probes the partial unique index's predicate: live rows in the
+// center, minus the row being edited. Not routed through scoped: the index
+// spans the whole center, so a member must be told about the owner's code
+// too, or their insert would fail on the constraint instead.
+func (r *gormRepository) CodeExists(ctx context.Context, a authctx.Anchor, code string, exceptID uuid.UUID) (bool, error) {
+	var n int64
+	err := database.FromContext(ctx, r.db).Model(&Class{}).
+		Where("classes.center_id = ? AND classes.code = ? AND classes.id <> ?", a.CenterID, code, exceptID).
+		Count(&n).Error
+	return n > 0, err
 }
 
 func (r *gormRepository) AddSchedule(ctx context.Context, s *Schedule) error {

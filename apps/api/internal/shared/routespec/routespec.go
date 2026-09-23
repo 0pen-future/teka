@@ -220,6 +220,7 @@ var Specs = []Spec{
 	// Classes and schedules.
 	perm("POST", "/api/v1/classes", authctx.PermClassesCreate, req("class.create", "class", "")),
 	perm("GET", "/api/v1/classes", authctx.PermClassesList, none()),
+	perm("GET", "/api/v1/classes/stats", authctx.PermClassesList, none()),
 	perm("GET", "/api/v1/classes/:id", authctx.PermClassesRead, none()),
 	perm("GET", "/api/v1/classes/:id/staff", authctx.PermClassesRead, none()),
 	perm("PUT", "/api/v1/classes/:id", authctx.PermClassesEdit, req("class.update", "class", "id")),

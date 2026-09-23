@@ -3,11 +3,15 @@ package classes
 import (
 	"context"
 	"errors"
+	"regexp"
+	"slices"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/shared/authctx"
@@ -33,6 +37,8 @@ type fakeRepository struct {
 	schedules       map[uuid.UUID]*fakeSchedule
 	openEnrollments map[uuid.UUID]int64 // classID -> open enrollment count
 	failCreate      error               // forces CreateWithSchedules to fail
+	failUpdate      error               // forces Update to fail
+	codeCollisions  int                 // CodeExists reports a hit this many times first
 }
 
 func newFakeRepository() *fakeRepository {
@@ -144,6 +150,7 @@ func (f *fakeRepository) GetWritableByID(ctx context.Context, sc authctx.Scope, 
 }
 
 func (f *fakeRepository) List(_ context.Context, sc authctx.Scope, filter ListFilter, _ pagination.Params) ([]Class, int64, error) {
+	today := today()
 	var out []Class
 	for _, c := range f.classes {
 		if !visibleClass(c, sc) {
@@ -152,15 +159,95 @@ func (f *fakeRepository) List(_ context.Context, sc authctx.Scope, filter ListFi
 		if filter.Status != "" && c.Status != filter.Status {
 			continue
 		}
+		if filter.Phase != "" && PhaseOf(&c.Class, today) != filter.Phase {
+			continue
+		}
+		if filter.Q != "" && !containsFold(c.Name, filter.Q) && !containsFold(c.Code, filter.Q) {
+			continue
+		}
+		if filter.Tag != "" && !slices.Contains(c.Tags, filter.Tag) {
+			continue
+		}
 		row := c.Class
 		row.Schedules = f.liveSchedules(c.ID)
+		if (filter.Weekday != nil || filter.Shift != "") && !hasEffectiveSlot(row.Schedules, filter, today) {
+			continue
+		}
 		out = append(out, row)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, int64(len(out)), nil
 }
 
+func containsFold(haystack, needle string) bool {
+	return strings.Contains(strings.ToLower(haystack), strings.ToLower(needle))
+}
+
+// hasEffectiveSlot mirrors the SQL EXISTS over class_schedules: a slot still
+// effective today (open-ended or ending on/after today) on the requested
+// weekday and within the requested shift band.
+func hasEffectiveSlot(schedules []Schedule, filter ListFilter, today time.Time) bool {
+	for _, s := range schedules {
+		if s.EffectiveTo != nil && s.EffectiveTo.Before(today) {
+			continue
+		}
+		if filter.Weekday != nil && s.Weekday != *filter.Weekday {
+			continue
+		}
+		if filter.Shift != "" && ShiftOf(s.StartTime) != filter.Shift {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// CountReadableByPhase mirrors the SQL SUM(CASE ...) over the same phase
+// predicate the list filter applies, so the two can never disagree here.
+func (f *fakeRepository) CountReadableByPhase(_ context.Context, sc authctx.Scope, today time.Time) (ClassStatsResponse, error) {
+	var stats ClassStatsResponse
+	for _, c := range f.classes {
+		if !visibleClass(c, sc) {
+			continue
+		}
+		stats.All++
+		switch PhaseOf(&c.Class, today) {
+		case PhaseUpcoming:
+			stats.Upcoming++
+		case PhaseRunning:
+			stats.Running++
+		case PhaseEnded:
+			stats.Ended++
+		case PhaseArchived:
+			stats.Archived++
+		}
+		if c.Recruiting {
+			stats.Recruiting++
+		}
+	}
+	return stats, nil
+}
+
+// CodeExists mirrors the partial unique index: live rows only, whole center,
+// the row being edited excluded. codeCollisions forces the first N probes to
+// report a hit so the generate-and-retry loop can be exercised.
+func (f *fakeRepository) CodeExists(_ context.Context, a authctx.Anchor, code string, exceptID uuid.UUID) (bool, error) {
+	if f.codeCollisions > 0 {
+		f.codeCollisions--
+		return true, nil
+	}
+	for _, c := range f.classes {
+		if !c.deleted && c.CenterID == a.CenterID && c.ID != exceptID && c.Code == code {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (f *fakeRepository) Update(_ context.Context, class *Class) error {
+	if f.failUpdate != nil {
+		return f.failUpdate
+	}
 	stored := *class
 	stored.Schedules = nil
 	f.classes[class.ID] = &fakeClass{Class: stored}
@@ -321,6 +408,36 @@ func TestCreatePropagatesRepositoryFailure(t *testing.T) {
 	}
 	if len(repo.classes) != 0 {
 		t.Fatalf("failed create must leave no class behind, got %d", len(repo.classes))
+	}
+}
+
+// The pre-insert CodeExists probe and the partial unique index can disagree
+// under a concurrent create or update of the same code; the index wins, and
+// its duplicate-key error must surface as the same 409 the probe produces
+// rather than as a 500.
+func TestDuplicateKeyFromIndexIsCodeTakenConflict(t *testing.T) {
+	svc, repo := newTestService()
+	sc := memberScope()
+
+	req := validCreateRequest()
+	req.Code = strPtr("TOAN8")
+	repo.failCreate = gorm.ErrDuplicatedKey
+	_, err := svc.Create(context.Background(), sc, req)
+	var appErr *apperror.AppError
+	if !errors.As(err, &appErr) || appErr.Status != 409 || appErr.Code != CodeClassCodeTaken || !errors.Is(err, ErrCodeTaken) {
+		t.Fatalf("duplicate key on create must be 409 %s, got %v", CodeClassCodeTaken, err)
+	}
+
+	repo.failCreate = nil
+	class, err := svc.Create(context.Background(), sc, req)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	repo.failUpdate = gorm.ErrDuplicatedKey
+	patch := UpdateClassRequest{Name: "Toán 8", StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000), Code: strPtr("TOAN9")}
+	_, err = svc.Update(context.Background(), sc, class.ID, patch)
+	if !errors.As(err, &appErr) || appErr.Status != 409 || appErr.Code != CodeClassCodeTaken || appErr.Fields["code"] == "" {
+		t.Fatalf("duplicate key on update must be 409 %s on the code field, got %v", CodeClassCodeTaken, err)
 	}
 }
 
@@ -608,3 +725,201 @@ func TestScheduleExistsKeysOnEffectiveFrom(t *testing.T) {
 		t.Fatalf("another weekday must not match, got exists=%v err=%v", exists, err)
 	}
 }
+
+// Every class is born with a display code: a blank request gets one minted
+// by classcode.Generate, distinct per class, and tags never serialise as null.
+func TestCreateGeneratesCodeWhenBlank(t *testing.T) {
+	svc, _ := newTestService()
+	sc := memberScope()
+
+	first, err := svc.Create(context.Background(), sc, validCreateRequest())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	second, err := svc.Create(context.Background(), sc, validCreateRequest())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	generated := regexp.MustCompile(`^L[0-9A-HJKMNP-TV-Z]{6}$`)
+	if !generated.MatchString(first.Code) || !generated.MatchString(second.Code) {
+		t.Fatalf("generated codes must be L + 6 Crockford chars, got %q and %q", first.Code, second.Code)
+	}
+	if first.Code == second.Code {
+		t.Fatalf("two classes must not share a generated code: %q", first.Code)
+	}
+	if first.Tags == nil || len(first.Tags) != 0 {
+		t.Fatalf("tags must default to an empty list, got %#v", first.Tags)
+	}
+}
+
+// A generated code that collides is re-rolled, up to a bounded number of
+// attempts; exhausting them surfaces as the same conflict an explicit
+// duplicate does rather than an opaque failure.
+func TestCreateRetriesGeneratedCodeCollisions(t *testing.T) {
+	svc, repo := newTestService()
+	sc := memberScope()
+
+	repo.codeCollisions = 2
+	if _, err := svc.Create(context.Background(), sc, validCreateRequest()); err != nil {
+		t.Fatalf("two collisions must be absorbed by retries, got %v", err)
+	}
+
+	repo.codeCollisions = 10
+	_, err := svc.Create(context.Background(), sc, validCreateRequest())
+	if !errors.Is(err, ErrCodeTaken) {
+		t.Fatalf("exhausted retries must report the code as taken, got %v", err)
+	}
+	if repo.codeCollisions != 10-3 {
+		t.Fatalf("want exactly 3 generate attempts, %d probes were left unused", repo.codeCollisions)
+	}
+}
+
+// An explicit code is kept as given, is unique among the center's live
+// classes, and may repeat in another center — the index is per center.
+func TestCreateExplicitCodeUniquePerCenter(t *testing.T) {
+	svc, _ := newTestService()
+	sc := memberScope()
+
+	req := validCreateRequest()
+	req.Code = strPtr("TOAN8")
+	class, err := svc.Create(context.Background(), sc, req)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if class.Code != "TOAN8" {
+		t.Fatalf("explicit code must be stored verbatim, got %q", class.Code)
+	}
+
+	_, err = svc.Create(context.Background(), sc, req)
+	var appErr *apperror.AppError
+	if !errors.As(err, &appErr) || appErr.Status != 409 || appErr.Code != CodeClassCodeTaken || !errors.Is(err, ErrCodeTaken) {
+		t.Fatalf("duplicate code in the same center must be 409 %s, got %v", CodeClassCodeTaken, err)
+	}
+
+	if _, err := svc.Create(context.Background(), memberScope(), req); err != nil {
+		t.Fatalf("the same code in another center must be allowed, got %v", err)
+	}
+
+	req.Code = strPtr("toán 8")
+	_, err = svc.Create(context.Background(), sc, req)
+	if !errors.As(err, &appErr) || appErr.Status != 422 || appErr.Fields["code"] == "" {
+		t.Fatalf("a code outside ^[A-Z0-9-]{2,20}$ must be a 422 on the code field, got %v", err)
+	}
+}
+
+// Update treats the catalog fields as optional patches: a body that leaves
+// code, tags, recruiting and note out keeps what was stored, while a present
+// pointer replaces the field whole — including an empty tag list.
+func TestUpdateMergesCatalogPointers(t *testing.T) {
+	svc, _ := newTestService()
+	sc := memberScope()
+
+	req := validCreateRequest()
+	req.Code = strPtr("TOAN8")
+	req.Tags = []string{"Toán", "Khối 8"}
+	req.Note = strPtr("Phòng 201")
+	class, err := svc.Create(context.Background(), sc, req)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	base := UpdateClassRequest{Name: "Toán 8 nâng cao", StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(200_000)}
+	patch := base
+	patch.Recruiting = boolPtr(true)
+	updated, err := svc.Update(context.Background(), sc, class.ID, patch)
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.Name != "Toán 8 nâng cao" || updated.DefaultUnitPrice != 200_000 {
+		t.Fatalf("existing fields must still replace, got %+v", updated)
+	}
+	if !updated.Recruiting || updated.Code != "TOAN8" || !slices.Equal(updated.Tags, []string{"Toán", "Khối 8"}) ||
+		updated.Note == nil || *updated.Note != "Phòng 201" {
+		t.Fatalf("absent pointers must keep stored catalog fields, got %+v", updated)
+	}
+
+	patch = base
+	patch.Tags = &[]string{}
+	patch.Note = strPtr("")
+	updated, err = svc.Update(context.Background(), sc, class.ID, patch)
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if len(updated.Tags) != 0 || updated.Tags == nil {
+		t.Fatalf("an empty tag list must clear tags (never null), got %#v", updated.Tags)
+	}
+	if updated.Note != nil {
+		t.Fatalf("an empty note must clear the note, got %q", *updated.Note)
+	}
+	if !updated.Recruiting {
+		t.Fatalf("recruiting must survive a patch that does not mention it")
+	}
+
+	patch = base
+	patch.Code = strPtr("TOAN8")
+	if _, err := svc.Update(context.Background(), sc, class.ID, patch); err != nil {
+		t.Fatalf("re-sending the class's own code must not conflict with itself, got %v", err)
+	}
+
+	other := validCreateRequest()
+	other.Code = strPtr("VAN8")
+	if _, err := svc.Create(context.Background(), sc, other); err != nil {
+		t.Fatalf("create other: %v", err)
+	}
+	patch = base
+	patch.Code = strPtr("VAN8")
+	if _, err := svc.Update(context.Background(), sc, class.ID, patch); !errors.Is(err, ErrCodeTaken) {
+		t.Fatalf("taking another live class's code must conflict, got %v", err)
+	}
+}
+
+// Stats counts through the caller's read scope with the same phase rule the
+// list filter uses: a member sees only their own rows, the owner the center.
+func TestStatsFollowReadScopeAndPhase(t *testing.T) {
+	svc, repo := newTestService()
+	owner := ownerScope()
+	member := authctx.Scope{TeacherID: id.New(), CenterID: owner.CenterID}
+	today := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
+
+	seed := func(sc authctx.Scope, start, end string, recruiting bool) *Class {
+		t.Helper()
+		req := validCreateRequest()
+		req.StartDate = start
+		req.EndDate = end
+		class, err := svc.Create(context.Background(), sc, req)
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if recruiting {
+			repo.classes[class.ID].Recruiting = true
+		}
+		return class
+	}
+	seed(member, "2026-01-05", "", true)  // running, recruiting
+	seed(member, "2026-10-01", "", false) // upcoming
+	ended := seed(owner, "2026-01-05", "2026-06-30", false)
+	archived := seed(owner, "2026-01-05", "", true)
+	repo.classes[archived.ID].Status = StatusArchived
+	_ = ended
+
+	got, err := svc.Stats(context.Background(), member, today)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	want := ClassStatsResponse{All: 2, Upcoming: 1, Running: 1, Recruiting: 1}
+	if got != want {
+		t.Fatalf("member stats: want %+v, got %+v", want, got)
+	}
+
+	got, err = svc.Stats(context.Background(), owner, today)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	want = ClassStatsResponse{All: 4, Upcoming: 1, Running: 1, Ended: 1, Archived: 1, Recruiting: 2}
+	if got != want {
+		t.Fatalf("owner stats: want %+v, got %+v", want, got)
+	}
+}
+
+func strPtr(v string) *string { return &v }
+func boolPtr(v bool) *bool    { return &v }

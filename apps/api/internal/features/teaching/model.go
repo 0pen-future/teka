@@ -7,12 +7,11 @@
 package teaching
 
 import (
-	"database/sql/driver"
-	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+
+	"teka/apps/api/internal/shared/dbtypes"
 )
 
 // Lesson-plan statuses — mirrors lesson_plans.status CHECK. StatusNone is
@@ -36,34 +35,9 @@ const (
 	ActionReopen      = "reopen"
 )
 
-// StringList maps an ordered JSONB string array column (curriculum lesson
-// titles, plan activities). The whole list is always replaced at once —
-// there is no per-element addressing anywhere in the product.
-type StringList []string
-
-// Value marshals the list, writing a nil slice as [] so the JSONB columns'
-// NOT NULL DEFAULT '[]' shape never sees a SQL NULL.
-func (l StringList) Value() (driver.Value, error) {
-	if l == nil {
-		l = StringList{}
-	}
-	return json.Marshal(l)
-}
-
-// Scan accepts the []byte/string forms the pgx/gorm stack hands over.
-func (l *StringList) Scan(value any) error {
-	switch v := value.(type) {
-	case nil:
-		*l = nil
-		return nil
-	case []byte:
-		return json.Unmarshal(v, l)
-	case string:
-		return json.Unmarshal([]byte(v), l)
-	default:
-		return fmt.Errorf("cannot scan %T into StringList", value)
-	}
-}
+// StringList is the shared JSONB string-array mapper; curriculum lesson
+// titles and plan activities keep using this name.
+type StringList = dbtypes.StringList
 
 // Curriculum is a class's giáo trình: the ordered lesson titles plus the
 // progress pointer. One row per class; plans reference lessons by index, so

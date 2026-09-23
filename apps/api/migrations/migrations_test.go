@@ -320,10 +320,10 @@ func TestDownFoldsPersonalChannelIntoManual(t *testing.T) {
 		 VALUES (?, ?, ?, ?, 'zalo_personal')`,
 		notifID, f.teacherID, f.centerID, f.statementID).Error)
 
-	// Roll back through 000005 (zalo_personal_mapping): twenty steps now
-	// that the additive 000008-000024 sit on top of the migrations this test
+	// Roll back through 000005 (zalo_personal_mapping): twenty-one steps now
+	// that the additive 000008-000025 sit on top of the migrations this test
 	// predates.
-	require.NoError(t, database.MigrateDown(m, 20))
+	require.NoError(t, database.MigrateDown(m, 21))
 
 	var channel string
 	require.NoError(t, db.Raw(
@@ -618,8 +618,8 @@ func TestClassStaffIndexesEnforceInvariants(t *testing.T) {
 
 	classID := uuid.New()
 	require.NoError(t, db.Exec(
-		`INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price)
-		 VALUES (?, ?, ?, 'Lớp bất biến', '2026-01-05', 100000)`,
+		`INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price, code)
+		 VALUES (?, ?, ?, 'Lớp bất biến', '2026-01-05', 100000, 'LBB')`,
 		classID, f.teacherID, f.centerID).Error)
 	require.NoError(t, db.Exec(
 		`INSERT INTO class_staff (class_id, center_id, teacher_id, role_key)
@@ -672,8 +672,8 @@ func TestCenterGuardsRejectCrossCenterRows(t *testing.T) {
 	b := seedNotificationParents(t, db, "+84900000202")
 
 	err = db.Exec(
-		`INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price)
-		 VALUES (?, ?, ?, 'Lớp lệch center', '2026-01-05', 100000)`,
+		`INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price, code)
+		 VALUES (?, ?, ?, 'Lớp lệch center', '2026-01-05', 100000, 'LLC')`,
 		uuid.New(), a.teacherID, b.centerID).Error
 	require.ErrorContains(t, err, "fk_classes_teacher_center",
 		"a row pairing a teacher with another center must be rejected by the guard FK")
@@ -721,8 +721,8 @@ func TestTeacherLeavesCenterDataStaysBehind(t *testing.T) {
 	// b teaches a class inside a's center.
 	classID := uuid.New()
 	require.NoError(t, db.Exec(
-		`INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price)
-		 VALUES (?, ?, ?, 'Lớp Văn 8', '2026-01-05', 100000)`,
+		`INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price, code)
+		 VALUES (?, ?, ?, 'Lớp Văn 8', '2026-01-05', 100000, 'VAN8')`,
 		classID, b.teacherID, a.centerID).Error)
 
 	// b leaves, back to the personal center. The class row keeps referencing
@@ -772,8 +772,8 @@ func TestTeacherHardDeleteInOneTransaction(t *testing.T) {
 	f := seedNotificationParents(t, db, "+84900000401")
 	classID := uuid.New()
 	require.NoError(t, db.Exec(
-		`INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price)
-		 VALUES (?, ?, ?, 'Lớp Toán 9', '2026-01-05', 100000)`,
+		`INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price, code)
+		 VALUES (?, ?, ?, 'Lớp Toán 9', '2026-01-05', 100000, 'TOAN9')`,
 		classID, f.teacherID, f.centerID).Error)
 	require.NoError(t, db.Exec(
 		`INSERT INTO class_staff (class_id, center_id, teacher_id, role_key)
@@ -881,8 +881,8 @@ func seedTeachingParents(t *testing.T, db *gorm.DB, phone string) teachingFixtur
 		studentID:           uuid.New(),
 	}
 	require.NoError(t, db.Exec(
-		`INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price)
-		 VALUES (?, ?, ?, 'Lớp Toán 9', '2026-01-05', 100000)`,
+		`INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price, code)
+		 VALUES (?, ?, ?, 'Lớp Toán 9', '2026-01-05', 100000, 'TOAN9')`,
 		f.classID, f.teacherID, f.centerID).Error)
 	require.NoError(t, db.Exec(
 		`INSERT INTO class_sessions (id, teacher_id, center_id, class_id, session_date)
@@ -1558,11 +1558,11 @@ func TestClassScopedStatementsAndRuns(t *testing.T) {
 	db := openDB(t, url)
 	f := seedNotificationParents(t, db, "+84900000017")
 	classA, classB := uuid.New(), uuid.New()
-	for _, id := range []uuid.UUID{classA, classB} {
+	for i, id := range []uuid.UUID{classA, classB} {
 		require.NoError(t, db.Exec(
-			`INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price)
-			 VALUES (?, ?, ?, 'Lớp', '2026-01-05', 100000)`,
-			id, f.teacherID, f.centerID).Error)
+			`INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price, code)
+			 VALUES (?, ?, ?, 'Lớp', '2026-01-05', 100000, ?)`,
+			id, f.teacherID, f.centerID, fmt.Sprintf("L%d", i+1)).Error)
 	}
 
 	insertStatement := func(classID any, token string) error {
@@ -2214,4 +2214,87 @@ func TestTaskDescriptionWrapsLegacyPlainText(t *testing.T) {
 	require.NoError(t, m.Migrate(23))
 	require.Equal(t, "<p>x &lt; y &amp; z<br>next<br>last</p>", description(special))
 	require.Equal(t, "<p>&lt;p&gt;not a paragraph&lt;/p&gt;</p>", description(literalP))
+}
+
+// The class code backfill must be observed over pre-existing rows: step back
+// below the migration, seed classes in two centers — two of them sharing one
+// created_at so a timestamp-derived code would collide — migrate forward and
+// check every legacy class received a distinct code within its center.
+func TestClassCatalogBackfillAssignsUniqueCodes(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+	require.NoError(t, m.Migrate(24))
+
+	db := openDB(t, url)
+	first := seedNotificationParents(t, db, "+84900001401")
+	second := seedNotificationParents(t, db, "+84900001402")
+	createdAt := "2026-03-01 08:00:00+00"
+	insert := func(f notificationFixture, name string) uuid.UUID {
+		classID := uuid.New()
+		require.NoError(t, db.Exec(
+			`INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price, created_at)
+			 VALUES (?, ?, ?, ?, '2026-01-05', 100000, ?)`,
+			classID, f.teacherID, f.centerID, name, createdAt).Error)
+		return classID
+	}
+	firstA := insert(first, "Toán A")
+	firstB := insert(first, "Toán B")
+	firstC := insert(first, "Toán C")
+	secondA := insert(second, "Văn A")
+
+	require.NoError(t, database.MigrateUp(m))
+
+	codeOf := func(classID uuid.UUID) string {
+		var code string
+		require.NoError(t, db.Raw(`SELECT code FROM classes WHERE id = ?`, classID).Scan(&code).Error)
+		return code
+	}
+	firstCodes := map[string]bool{}
+	for _, classID := range []uuid.UUID{firstA, firstB, firstC} {
+		code := codeOf(classID)
+		require.Regexp(t, `^L\d{4}$`, code)
+		require.False(t, firstCodes[code], "code %s assigned twice within one center", code)
+		firstCodes[code] = true
+	}
+	require.Equal(t, "L0001", codeOf(secondA), "numbering restarts per center")
+
+	// The partial unique index guards live rows per center only.
+	dup := uuid.New()
+	require.Error(t, db.Exec(
+		`INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price, code)
+		 VALUES (?, ?, ?, 'Trùng', '2026-01-05', 100000, 'L0001')`,
+		dup, first.teacherID, first.centerID).Error, "duplicate code in one center must be rejected")
+	require.NoError(t, db.Exec(
+		`INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price, code)
+		 VALUES (?, ?, ?, 'Khác trung tâm', '2026-01-05', 100000, 'L0002')`,
+		dup, second.teacherID, second.centerID).Error, "the same code in another center is fine")
+	require.NoError(t, db.Exec(`UPDATE classes SET deleted_at = now() WHERE id = ?`, firstA).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price, code)
+		 VALUES (?, ?, ?, 'Tái dùng', '2026-01-05', 100000, ?)`,
+		uuid.New(), first.teacherID, first.centerID, codeOf(firstA)).Error,
+		"a soft-deleted class releases its code")
+
+	// The new columns carry their defaults and the down migration removes them.
+	var row struct {
+		Tags       string
+		Recruiting bool
+		Note       *string
+	}
+	require.NoError(t, db.Raw(`SELECT tags::text AS tags, recruiting, note FROM classes WHERE id = ?`, firstB).Scan(&row).Error)
+	require.Equal(t, "[]", row.Tags)
+	require.False(t, row.Recruiting)
+	require.Nil(t, row.Note)
+
+	require.NoError(t, m.Migrate(24))
+	cols := nameSet(t, db, `SELECT column_name FROM information_schema.columns WHERE table_name = 'classes'`)
+	for _, gone := range []string{"code", "tags", "recruiting", "note"} {
+		require.Falsef(t, cols[gone], "column %s must be dropped by the down migration", gone)
+	}
+	require.NoError(t, database.MigrateUp(m))
 }

@@ -126,19 +126,20 @@ func (h *Handler) pending(c *gin.Context) {
 }
 
 // listRange returns a class's sessions in [from, to], generating any missing
-// rows first.
+// rows first unless readonly=true asks for the rows already on file.
 //
 //	@Summary		List (and generate) class sessions
-//	@Description	Generates any session rows missing for [from, to] from the class's effective schedules, then returns every session in the range — including cancelled ones. Idempotent: calling it again with an overlapping range never duplicates a row. Range is capped at 400 days — comfortably above the 62-day window a month-calendar view needs. Each session carries attendance_summary (per-status counts over its live attendance records), null until the session's attendance is confirmed.
+//	@Description	Generates any session rows missing for [from, to] from the class's effective schedules, then returns every session in the range — including cancelled ones. Idempotent: calling it again with an overlapping range never duplicates a row. Range is capped at 400 days — comfortably above the 62-day window a month-calendar view needs. With readonly=true nothing is generated: only sessions already on file are returned, and the range is bounded only by order (to must not precede from). Each session carries attendance_summary (per-status counts over its live attendance records), null until the session's attendance is confirmed.
 //	@Tags			sessions
 //	@Produce		json
-//	@Param			id		path		string	true	"class id"
-//	@Param			from	query		string	true	"range start, YYYY-MM-DD"
-//	@Param			to		query		string	true	"range end, YYYY-MM-DD"
-//	@Success		200		{object}	response.Envelope{data=[]SessionResponse}
-//	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
-//	@Failure		404		{object}	response.Envelope{error=response.ErrorBody}
-//	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}	"range too large or to before from"
+//	@Param			id			path		string	true	"class id"
+//	@Param			from		query		string	true	"range start, YYYY-MM-DD"
+//	@Param			to			query		string	true	"range end, YYYY-MM-DD"
+//	@Param			readonly	query		bool	false	"true returns only sessions already on file, never generating; range cap does not apply"
+//	@Success		200			{object}	response.Envelope{data=[]SessionResponse}
+//	@Failure		401			{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		404			{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		422			{object}	response.Envelope{error=response.ErrorBody}	"range too large, to before from, or readonly not a boolean"
 //	@Security		BearerAuth
 //	@Router			/classes/{id}/sessions [get]
 func (h *Handler) listRange(c *gin.Context) {
@@ -158,8 +159,23 @@ func (h *Handler) listRange(c *gin.Context) {
 	if !ok {
 		return
 	}
+	readonly := false
+	if raw := c.Query("readonly"); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			response.Err(c, apperror.Invalid("validation failed", map[string]string{"readonly": "must be true or false"}))
+			return
+		}
+		readonly = parsed
+	}
 
-	rows, err := h.svc.ListRangeReadable(c.Request.Context(), sc, classID, from, to)
+	var rows []Detail
+	var err error
+	if readonly {
+		rows, err = h.svc.ListRangeExisting(c.Request.Context(), sc, classID, from, to)
+	} else {
+		rows, err = h.svc.ListRangeReadable(c.Request.Context(), sc, classID, from, to)
+	}
 	if err != nil {
 		response.Err(c, err)
 		return

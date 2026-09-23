@@ -132,14 +132,53 @@ func (f *fakeTeacherSource) GetByID(_ context.Context, id uuid.UUID) (*teachers.
 
 type fakeEnrollmentSource struct {
 	counts map[uuid.UUID]int // classID -> active student count
+	// rows, when set for a class, takes precedence over counts so a test can
+	// vary the roster by date.
+	rows map[uuid.UUID][]enrollments.Enrollment
+	// activeInRangeCalls counts batch roster reads so a test can prove a
+	// listing resolved its student counts in one query rather than per row.
+	activeInRangeCalls int
 }
 
 func newFakeEnrollmentSource() *fakeEnrollmentSource {
-	return &fakeEnrollmentSource{counts: map[uuid.UUID]int{}}
+	return &fakeEnrollmentSource{counts: map[uuid.UUID]int{}, rows: map[uuid.UUID][]enrollments.Enrollment{}}
 }
 
-func (f *fakeEnrollmentSource) ActiveOn(_ context.Context, _ authctx.Scope, classID uuid.UUID, _ time.Time) ([]enrollments.Enrollment, error) {
-	return make([]enrollments.Enrollment, f.counts[classID]), nil
+func (f *fakeEnrollmentSource) addEnrollment(classID uuid.UUID, startedOn time.Time, endedOn *time.Time) {
+	f.rows[classID] = append(f.rows[classID], enrollments.Enrollment{
+		ID: id.New(), ClassID: classID, StartedOn: startedOn, EndedOn: endedOn,
+	})
+}
+
+func (f *fakeEnrollmentSource) ActiveOn(_ context.Context, _ authctx.Scope, classID uuid.UUID, on time.Time) ([]enrollments.Enrollment, error) {
+	rows, ok := f.rows[classID]
+	if !ok {
+		return make([]enrollments.Enrollment, f.counts[classID]), nil
+	}
+	var out []enrollments.Enrollment
+	for _, e := range rows {
+		if e.StartedOn.After(on) || (e.EndedOn != nil && e.EndedOn.Before(on)) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}
+
+func (f *fakeEnrollmentSource) ActiveInRange(_ context.Context, _ authctx.Scope, classID uuid.UUID, from, to time.Time) ([]enrollments.Enrollment, error) {
+	f.activeInRangeCalls++
+	rows, ok := f.rows[classID]
+	if !ok {
+		return make([]enrollments.Enrollment, f.counts[classID]), nil
+	}
+	var out []enrollments.Enrollment
+	for _, e := range rows {
+		if e.StartedOn.After(to) || (e.EndedOn != nil && e.EndedOn.Before(from)) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out, nil
 }
 
 // --- fake Repository ---
@@ -855,5 +894,55 @@ func TestReassignPlannedBoundaryUsesTeacherTimezone(t *testing.T) {
 	}
 	if repo.rows[before.ID].TeacherID != oldTeacher {
 		t.Fatal("the session dated before the local boundary must keep the old teacher")
+	}
+}
+
+// A read-only listing serves an existing timetable without materialising it:
+// a viewer paging through a class's history must never insert rows, and the
+// listing must not be bounded by the generation cap because it only reads.
+func TestListRangeExistingNeverGeneratesAndCountsRosterPerDate(t *testing.T) {
+	svc, deps := newTestService()
+	ctx := context.Background()
+	teacherID := id.New()
+	sc := authctx.Scope{TeacherID: teacherID, CenterID: teacherID, IsOwner: true}
+	deps.teachers.addTeacher(teacherID, "Asia/Ho_Chi_Minh")
+	classID := deps.classes.addClass(teacherID, d("2026-01-01"), nil)
+	deps.classes.addSchedule(classID, 2, "18:00", d("2026-01-01"), nil)
+	deps.enrolls.addEnrollment(classID, d("2025-12-01"), nil)
+	left := d("2026-01-13")
+	deps.enrolls.addEnrollment(classID, d("2026-01-06"), &left)
+
+	rows, err := svc.ListRangeExisting(ctx, sc, classID, d("2026-01-01"), d("2028-01-31"))
+	if err != nil {
+		t.Fatalf("read-only listing over a range beyond the generation cap must succeed: %v", err)
+	}
+	if len(rows) != 0 || len(deps.repo.rows) != 0 {
+		t.Fatalf("read-only listing must not generate rows, got %d returned / %d stored", len(rows), len(deps.repo.rows))
+	}
+
+	if _, err := svc.ListRange(ctx, sc, classID, d("2026-01-01"), d("2026-01-31")); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	deps.enrolls.activeInRangeCalls = 0
+	rows, err = svc.ListRangeExisting(ctx, sc, classID, d("2026-01-01"), d("2026-01-31"))
+	if err != nil {
+		t.Fatalf("list existing: %v", err)
+	}
+	if len(rows) != 4 {
+		t.Fatalf("want the 4 generated Tuesdays, got %d", len(rows))
+	}
+	if deps.enrolls.activeInRangeCalls != 1 {
+		t.Fatalf("student counts must come from one batched roster read, got %d calls", deps.enrolls.activeInRangeCalls)
+	}
+	want := map[string]int{"2026-01-06": 2, "2026-01-13": 2, "2026-01-20": 1, "2026-01-27": 1}
+	for _, r := range rows {
+		key := r.SessionDate.Format("2006-01-02")
+		if r.StudentCount != want[key] {
+			t.Fatalf("%s: student_count must reflect the roster active that day, got %d want %d", key, r.StudentCount, want[key])
+		}
+	}
+
+	if _, err := svc.ListRangeExisting(ctx, sc, classID, d("2026-02-01"), d("2026-01-01")); err == nil {
+		t.Fatal("to before from must still be rejected")
 	}
 }

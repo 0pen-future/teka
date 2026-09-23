@@ -13,6 +13,8 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+
+	"teka/apps/api/internal/shared/dbtypes"
 )
 
 // Class status values, mirroring the CHECK constraint on classes.status.
@@ -38,9 +40,18 @@ type Class struct {
 	EndDate          *time.Time
 	DefaultUnitPrice int64
 	Status           string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	DeletedAt        gorm.DeletedAt
+	// Code is the class's display code (mã lớp), unique per center among
+	// live rows; classcode.Generate fills it when the creator supplies none.
+	Code string
+	// Tags is a free-form JSONB list replaced whole on every write.
+	Tags dbtypes.StringList
+	// Recruiting flags a class still taking enrolments (cần tuyển sinh).
+	Recruiting bool
+	// Note is the operational note shown on the class detail; nil = none.
+	Note      *string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt gorm.DeletedAt
 	// Schedules holds the class's live schedule rows when preloaded.
 	Schedules []Schedule `gorm:"foreignKey:ClassID"`
 }
