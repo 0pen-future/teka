@@ -115,6 +115,13 @@ func TestPublishedVersionIsLockedAndNewDraftCopiesIt(t *testing.T) {
 	_, err := f.svc.UpdateLesson(ctx, f.owner, l1.ID, library.LessonRequest{Title: "Buổi 1", Objectives: &obj, DurationMin: &dur})
 	require.NoError(t, err)
 
+	group1, err := f.svc.CreateExerciseGroup(ctx, f.owner, v1.ID, library.ExerciseGroupRequest{Name: "Nhóm A"})
+	require.NoError(t, err)
+	ex := f.exercise(t, f.owner, "Bài tập 1")
+	_, err = f.svc.SetLessonExercises(ctx, f.owner, l1.ID,
+		[]library.LessonExerciseInput{{ExerciseID: ex.ID, GroupID: &group1.ID}})
+	require.NoError(t, err)
+
 	published, err := f.svc.Publish(ctx, f.owner, v1.ID)
 	require.NoError(t, err)
 	require.Equal(t, library.StatusPublished, published.Status)
@@ -141,6 +148,22 @@ func TestPublishedVersionIsLockedAndNewDraftCopiesIt(t *testing.T) {
 	require.Equal(t, &dur, copied[0].DurationMin)
 	require.Equal(t, 1, copied[0].Position)
 	require.Equal(t, 2, copied[1].Position)
+
+	// The new draft's exercise group is a fresh row (new id), and the copied
+	// lesson's exercise link is remapped to it, not the published group.
+	groups2, err := f.svc.ListExerciseGroups(ctx, f.owner, v2.ID)
+	require.NoError(t, err)
+	require.Len(t, groups2, 1)
+	require.NotEqual(t, group1.ID, groups2[0].ID)
+	require.Equal(t, "Nhóm A", groups2[0].Name)
+
+	copiedLesson1, err := f.svc.GetLesson(ctx, f.owner, copied[0].ID)
+	require.NoError(t, err)
+	require.Len(t, copiedLesson1.Exercises, 1)
+	require.Equal(t, ex.ID, copiedLesson1.Exercises[0].ID)
+	require.NotNil(t, copiedLesson1.Exercises[0].GroupID)
+	require.Equal(t, groups2[0].ID, *copiedLesson1.Exercises[0].GroupID)
+	require.NotEqual(t, group1.ID, *copiedLesson1.Exercises[0].GroupID)
 
 	// A second open draft is refused by the partial unique index too.
 	_, err = f.svc.CreateVersion(ctx, f.owner, tpl.ID, library.CreateVersionRequest{})
@@ -448,6 +471,61 @@ func TestConcurrentLessonWritesKeepPositionsContiguous(t *testing.T) {
 	require.Equal(t, writers+1, next.Position)
 }
 
+// TestExerciseCodeGenerationIsNumericAndSerialisedUnderConcurrency proves
+// the generator against real Postgres: a caller-chosen code past the
+// four-digit width (BT-9999 -> BT-10000) must not derail the numeric
+// ordering the way a string max would, and concurrent auto-generation for
+// the same center must never collide or skip under the advisory lock.
+func TestExerciseCodeGenerationIsNumericAndSerialisedUnderConcurrency(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	wide, err := f.svc.CreateExercise(ctx, f.owner, library.ExerciseRequest{Title: "Bài rộng", Code: strPtr("BT-9999")})
+	require.NoError(t, err)
+	require.Equal(t, "BT-9999", wide.Code)
+
+	next, err := f.svc.CreateExercise(ctx, f.owner, library.ExerciseRequest{Title: "Bài kế tiếp"})
+	require.NoError(t, err)
+	require.Equal(t, "BT-10000", next.Code, "the numeric max must not rank BT-10000 below BT-9999")
+
+	// Several requests auto-generate at once for the same center: every
+	// create must succeed with a distinct, contiguous code.
+	const writers = 8
+	var wg sync.WaitGroup
+	results := make(chan string, writers)
+	errs := make(chan error, writers)
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			out, err := f.svc.CreateExercise(ctx, f.owner, library.ExerciseRequest{Title: "Bài song song"})
+			if err != nil {
+				errs <- err
+				return
+			}
+			results <- out.Code
+		}()
+	}
+	wg.Wait()
+	close(results)
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	seen := map[string]bool{}
+	for code := range results {
+		require.False(t, seen[code], "code %s generated more than once", code)
+		seen[code] = true
+	}
+	require.Len(t, seen, writers, "every concurrent auto-generation must land on its own code")
+	for n := 10001; n < 10001+writers; n++ {
+		want := "BT-" + strconv.Itoa(n)
+		require.True(t, seen[want], "expected %s among the generated codes, got %v", want, seen)
+	}
+}
+
+func strPtr(s string) *string { return &s }
+
 func (f fixture) material(t *testing.T, sc authctx.Scope, title string) *library.MaterialResponse {
 	t.Helper()
 	url := "https://example.com/" + title
@@ -530,6 +608,68 @@ func TestLessonAttachmentsAreReplacedAndBlockDeletes(t *testing.T) {
 	requireStatus(t, err, http.StatusUnprocessableEntity, apperror.CodeValidation)
 }
 
+func TestItemCountsSpanLessonsAndVersionStatuses(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	tpl := f.template(t, f.owner, "SU-5")
+	v1 := f.draft(t, f.owner, tpl.ID)
+	l1 := f.lesson(t, f.owner, v1.ID, "Buổi 1")
+	l2 := f.lesson(t, f.owner, v1.ID, "Buổi 2")
+	m := f.material(t, f.owner, "Slide")
+	ex := f.exercise(t, f.owner, "Bài 1")
+
+	_, err := f.svc.SetLessonMaterials(ctx, f.owner, l1.ID, materialInputs(m.ID))
+	require.NoError(t, err)
+	_, err = f.svc.SetLessonMaterials(ctx, f.owner, l2.ID, materialInputs(m.ID))
+	require.NoError(t, err)
+	_, err = f.svc.SetLessonExercises(ctx, f.owner, l1.ID, []library.LessonExerciseInput{{ExerciseID: ex.ID}})
+	require.NoError(t, err)
+	_, err = f.svc.SetLessonExercises(ctx, f.owner, l2.ID, []library.LessonExerciseInput{{ExerciseID: ex.ID}})
+	require.NoError(t, err)
+
+	got, err := f.svc.GetMaterial(ctx, f.owner, m.ID)
+	require.NoError(t, err)
+	require.Equal(t, 2, got.LessonCount, "one attach per lesson of the one template")
+	require.Equal(t, 1, got.TemplateCount)
+	gotEx, err := f.svc.GetExercise(ctx, f.owner, ex.ID)
+	require.NoError(t, err)
+	require.Equal(t, 2, gotEx.LessonCount)
+	require.Equal(t, 1, gotEx.TemplateCount)
+
+	// Publishing the version keeps the same lessons, so the counts hold.
+	_, err = f.svc.Publish(ctx, f.owner, v1.ID)
+	require.NoError(t, err)
+	got, err = f.svc.GetMaterial(ctx, f.owner, m.ID)
+	require.NoError(t, err)
+	require.Equal(t, 2, got.LessonCount)
+	require.Equal(t, 1, got.TemplateCount)
+
+	// A new draft copies both lessons and their attachments, so the counts
+	// now span a published version and a draft version of the same
+	// template: 4 lessons, still 1 template.
+	v2, err := f.svc.CreateVersion(ctx, f.owner, tpl.ID, library.CreateVersionRequest{})
+	require.NoError(t, err)
+	require.Equal(t, 2, v2.LessonCount)
+	got, err = f.svc.GetMaterial(ctx, f.owner, m.ID)
+	require.NoError(t, err)
+	require.Equal(t, 4, got.LessonCount, "draft and published lessons both count")
+	require.Equal(t, 1, got.TemplateCount, "still the one template")
+	gotEx, err = f.svc.GetExercise(ctx, f.owner, ex.ID)
+	require.NoError(t, err)
+	require.Equal(t, 4, gotEx.LessonCount)
+	require.Equal(t, 1, gotEx.TemplateCount)
+
+	// ListMaterials/ListExercises carry the same counts as Get.
+	rows, _, err := f.svc.ListMaterials(ctx, f.owner, library.ListFilter{}, pagination.Params{Page: 1, PerPage: 20})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, 4, rows[0].LessonCount)
+	exRows, _, err := f.svc.ListExercises(ctx, f.owner, library.ListFilter{}, pagination.Params{Page: 1, PerPage: 20})
+	require.NoError(t, err)
+	require.Len(t, exRows, 1)
+	require.Equal(t, 4, exRows[0].LessonCount)
+}
+
 func TestAttachmentsRespectCenterAndVersionLock(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -556,9 +696,12 @@ func TestAttachmentsRespectCenterAndVersionLock(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, []string{"Tốt", "Khá"}, []string(fields[0].Options))
-	set, err := f.svc.SetScoreSet(ctx, f.owner, v1.ID, []library.ScoreComponentInput{{Key: "final", Label: "Cuối kỳ", Max: 10, Weight: 1}})
+	set, err := f.svc.SetScoreSet(ctx, f.owner, v1.ID, []library.ScoreSetGroupInput{
+		{Key: "main", Title: "Bộ điểm", Components: []library.ScoreComponentInput{{Key: "final", Label: "Cuối kỳ", Max: 10, Weight: 1}}},
+	})
 	require.NoError(t, err)
 	require.Len(t, set, 1)
+	require.Len(t, set[0].Components, 1)
 
 	_, err = f.svc.Publish(ctx, f.owner, v1.ID)
 	require.NoError(t, err)

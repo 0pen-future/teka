@@ -11380,7 +11380,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Live exercises of the caller's center. q matches the title.",
+                "description": "Live exercises of the caller's center. q matches the title or code.",
                 "produces": [
                     "application/json"
                 ],
@@ -11391,8 +11391,14 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "title fragment",
+                        "description": "title or code fragment",
                         "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "only exercises with this active value",
+                        "name": "active",
                         "in": "query"
                     },
                     {
@@ -11483,6 +11489,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Code, when given, is upper-cased and must match ^[A-Za-z0-9-]+$ (409 EXERCISE_CODE_TAKEN on a clash); omitted, the next BT-0001-style code of the center is assigned.",
                 "consumes": [
                     "application/json"
                 ],
@@ -11684,7 +11691,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Replaces every field. Lessons linking the exercise see the change at once.",
+                "description": "Replaces every field. Lessons linking the exercise see the change at once. Code, when given, follows the create rule (409 EXERCISE_CODE_TAKEN on a clash); omitted, the exercise keeps its current code.",
                 "consumes": [
                     "application/json"
                 ],
@@ -11904,6 +11911,136 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "Conflict",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/library/exercises/{id}/status": {
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "An inactive exercise stays visible to a lesson that already links it and stays in the bank list by default; SetLessonExercises refuses to attach it to another lesson.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "library"
+                ],
+                "summary": "Set a library exercise's active status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "exercise id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "status",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/library.ItemStatusRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/library.ExerciseResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
                         "schema": {
                             "allOf": [
                                 {
@@ -12432,6 +12569,124 @@ const docTemplate = `{
                 }
             }
         },
+        "/library/lessons/{lid}/duplicate": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Inserts a copy right after the lesson, shifting later ones up by one position. Content (mode, unit, objectives, duration, homework note, materials, exercises) is copied; board state (prep status, assignee, due date, checklist) starts fresh. 409 VERSION_LOCKED when the lesson's version is not a draft.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "library"
+                ],
+                "summary": "Duplicate a template lesson",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "lesson id",
+                        "name": "lid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/library.DuplicateLessonResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/library/lessons/{lid}/exercises": {
             "put": {
                 "security": [
@@ -12908,6 +13163,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "title fragment",
                         "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "only materials with this active value",
+                        "name": "active",
                         "in": "query"
                     },
                     {
@@ -13419,6 +13680,136 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "Conflict",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/library/materials/{id}/status": {
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "An inactive material stays visible to a lesson that already links it and stays in the bank list by default; SetLessonMaterials refuses to attach it to another lesson.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "library"
+                ],
+                "summary": "Set a library material's active status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "material id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "status",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/library.ItemStatusRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/library.MaterialResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
                         "schema": {
                             "allOf": [
                                 {
@@ -14578,6 +14969,380 @@ const docTemplate = `{
                 }
             }
         },
+        "/library/versions/{vid}/exercise-groups": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Groups by position, each with how many lesson-exercise links point at it.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "library"
+                ],
+                "summary": "List the exercise groups of a version",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "version id",
+                        "name": "vid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/library.ExerciseGroupResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Appends the group at the next position. 409 VERSION_LOCKED when the version is not a draft.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "library"
+                ],
+                "summary": "Add an exercise group to a draft",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "version id",
+                        "name": "vid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "exercise group",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/library.ExerciseGroupRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/library.ExerciseGroupResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/library/versions/{vid}/exercise-groups/{gid}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "The lesson-exercise links that pointed at it lose their group_id instead of being deleted. 409 VERSION_LOCKED when the version is not a draft.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "library"
+                ],
+                "summary": "Delete an exercise group from a draft",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "version id",
+                        "name": "vid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "exercise group id",
+                        "name": "gid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/library/versions/{vid}/lessons": {
             "get": {
                 "security": [
@@ -14807,6 +15572,122 @@ const docTemplate = `{
                     },
                     "422": {
                         "description": "Unprocessable Entity",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Removes all lessons of the version in one call; their attachments cascade with them. 409 VERSION_LOCKED when the version is not a draft.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "library"
+                ],
+                "summary": "Delete every lesson of a draft",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "version id",
+                        "name": "vid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "allOf": [
                                 {
@@ -15256,7 +16137,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Wholesale replace. Keys are lowercase identifiers unique within the set; max must be positive. 409 VERSION_LOCKED unless the version is a draft.",
+                "description": "Wholesale replace. Group and component keys are lowercase identifiers; a component key is unique within its own group only. max must be positive. 409 VERSION_LOCKED unless the version is a draft.",
                 "consumes": [
                     "application/json"
                 ],
@@ -15276,14 +16157,14 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "score components; [] clears",
+                        "description": "score set groups; [] clears",
                         "name": "body",
                         "in": "body",
                         "required": true,
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/library.ScoreComponentInput"
+                                "$ref": "#/definitions/library.ScoreSetGroupInput"
                             }
                         }
                     }
@@ -15302,7 +16183,7 @@ const docTemplate = `{
                                         "data": {
                                             "type": "array",
                                             "items": {
-                                                "$ref": "#/definitions/library.ScoreComponent"
+                                                "$ref": "#/definitions/library.ScoreSetGroup"
                                             }
                                         }
                                     }
@@ -24185,12 +25066,107 @@ const docTemplate = `{
                 }
             }
         },
+        "library.DuplicateLessonResponse": {
+            "type": "object",
+            "properties": {
+                "assignee_id": {
+                    "type": "string"
+                },
+                "checklist": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/library.ChecklistItem"
+                    }
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "due_date": {
+                    "type": "string"
+                },
+                "duration_min": {
+                    "type": "integer"
+                },
+                "exercise_count": {
+                    "type": "integer"
+                },
+                "homework_note": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "material_count": {
+                    "type": "integer"
+                },
+                "mode": {
+                    "type": "string"
+                },
+                "objectives": {
+                    "type": "string"
+                },
+                "position": {
+                    "type": "integer"
+                },
+                "prep_status": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "unit": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "version_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "library.ExerciseGroupRequest": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "maxLength": 100
+                }
+            }
+        },
+        "library.ExerciseGroupResponse": {
+            "type": "object",
+            "properties": {
+                "exercise_count": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "position": {
+                    "type": "integer"
+                },
+                "version_id": {
+                    "type": "string"
+                }
+            }
+        },
         "library.ExerciseRequest": {
             "type": "object",
             "required": [
                 "title"
             ],
             "properties": {
+                "code": {
+                    "type": "string",
+                    "maxLength": 20
+                },
                 "description": {
                     "type": "string",
                     "maxLength": 4000
@@ -24199,6 +25175,14 @@ const docTemplate = `{
                     "type": "integer",
                     "maximum": 5,
                     "minimum": 1
+                },
+                "level": {
+                    "type": "string",
+                    "maxLength": 50
+                },
+                "skill": {
+                    "type": "string",
+                    "maxLength": 50
                 },
                 "tags": {
                     "type": "array",
@@ -24217,6 +25201,12 @@ const docTemplate = `{
         "library.ExerciseResponse": {
             "type": "object",
             "properties": {
+                "active": {
+                    "type": "boolean"
+                },
+                "code": {
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -24229,17 +25219,40 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "lesson_count": {
+                    "type": "integer"
+                },
+                "level": {
+                    "type": "string"
+                },
+                "skill": {
+                    "type": "string"
+                },
                 "tags": {
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
                 },
+                "template_count": {
+                    "type": "integer"
+                },
                 "title": {
                     "type": "string"
                 },
                 "updated_at": {
                     "type": "string"
+                }
+            }
+        },
+        "library.ItemStatusRequest": {
+            "type": "object",
+            "required": [
+                "active"
+            ],
+            "properties": {
+                "active": {
+                    "type": "boolean"
                 }
             }
         },
@@ -24264,6 +25277,9 @@ const docTemplate = `{
                 "duration_min": {
                     "type": "integer"
                 },
+                "exercise_count": {
+                    "type": "integer"
+                },
                 "exercises": {
                     "type": "array",
                     "items": {
@@ -24276,11 +25292,17 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "material_count": {
+                    "type": "integer"
+                },
                 "materials": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/library.LessonMaterialResponse"
                     }
+                },
+                "mode": {
+                    "type": "string"
                 },
                 "objectives": {
                     "type": "string"
@@ -24292,6 +25314,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "title": {
+                    "type": "string"
+                },
+                "unit": {
                     "type": "string"
                 },
                 "updated_at": {
@@ -24310,12 +25335,21 @@ const docTemplate = `{
             "properties": {
                 "exercise_id": {
                     "type": "string"
+                },
+                "group_id": {
+                    "type": "string"
                 }
             }
         },
         "library.LessonExerciseResponse": {
             "type": "object",
             "properties": {
+                "active": {
+                    "type": "boolean"
+                },
+                "code": {
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -24325,17 +25359,32 @@ const docTemplate = `{
                 "difficulty": {
                     "type": "integer"
                 },
+                "group_id": {
+                    "type": "string"
+                },
                 "id": {
+                    "type": "string"
+                },
+                "lesson_count": {
+                    "type": "integer"
+                },
+                "level": {
                     "type": "string"
                 },
                 "position": {
                     "type": "integer"
+                },
+                "skill": {
+                    "type": "string"
                 },
                 "tags": {
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
+                },
+                "template_count": {
+                    "type": "integer"
                 },
                 "title": {
                     "type": "string"
@@ -24362,6 +25411,9 @@ const docTemplate = `{
         "library.LessonMaterialResponse": {
             "type": "object",
             "properties": {
+                "active": {
+                    "type": "boolean"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -24374,6 +25426,9 @@ const docTemplate = `{
                 "kind": {
                     "type": "string"
                 },
+                "lesson_count": {
+                    "type": "integer"
+                },
                 "position": {
                     "type": "integer"
                 },
@@ -24385,6 +25440,9 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "template_count": {
+                    "type": "integer"
                 },
                 "title": {
                     "type": "string"
@@ -24412,6 +25470,13 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 4000
                 },
+                "mode": {
+                    "type": "string",
+                    "enum": [
+                        "scheduled",
+                        "self_study"
+                    ]
+                },
                 "objectives": {
                     "type": "string",
                     "maxLength": 4000
@@ -24420,6 +25485,10 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 200,
                     "minLength": 1
+                },
+                "unit": {
+                    "type": "string",
+                    "maxLength": 100
                 }
             }
         },
@@ -24444,10 +25513,19 @@ const docTemplate = `{
                 "duration_min": {
                     "type": "integer"
                 },
+                "exercise_count": {
+                    "type": "integer"
+                },
                 "homework_note": {
                     "type": "string"
                 },
                 "id": {
+                    "type": "string"
+                },
+                "material_count": {
+                    "type": "integer"
+                },
+                "mode": {
                     "type": "string"
                 },
                 "objectives": {
@@ -24460,6 +25538,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "title": {
+                    "type": "string"
+                },
+                "unit": {
                     "type": "string"
                 },
                 "updated_at": {
@@ -24481,9 +25562,11 @@ const docTemplate = `{
                     "type": "string",
                     "enum": [
                         "text",
+                        "long_text",
+                        "checkbox",
+                        "student",
                         "number",
-                        "select",
-                        "checkbox"
+                        "select"
                     ]
                 },
                 "label": {
@@ -24543,9 +25626,13 @@ const docTemplate = `{
                 "kind": {
                     "type": "string",
                     "enum": [
-                        "link",
-                        "doc",
                         "video",
+                        "audio",
+                        "image",
+                        "doc",
+                        "note",
+                        "live",
+                        "link",
                         "other"
                     ]
                 },
@@ -24570,6 +25657,9 @@ const docTemplate = `{
         "library.MaterialResponse": {
             "type": "object",
             "properties": {
+                "active": {
+                    "type": "boolean"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -24582,11 +25672,17 @@ const docTemplate = `{
                 "kind": {
                     "type": "string"
                 },
+                "lesson_count": {
+                    "type": "integer"
+                },
                 "tags": {
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
+                },
+                "template_count": {
+                    "type": "integer"
                 },
                 "title": {
                     "type": "string"
@@ -24696,6 +25792,48 @@ const docTemplate = `{
                 }
             }
         },
+        "library.ScoreSetGroup": {
+            "type": "object",
+            "properties": {
+                "components": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/library.ScoreComponent"
+                    }
+                },
+                "key": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "library.ScoreSetGroupInput": {
+            "type": "object",
+            "required": [
+                "key",
+                "title"
+            ],
+            "properties": {
+                "components": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/library.ScoreComponentInput"
+                    }
+                },
+                "key": {
+                    "type": "string",
+                    "maxLength": 30,
+                    "minLength": 1
+                },
+                "title": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "minLength": 1
+                }
+            }
+        },
         "library.TemplateRequest": {
             "type": "object",
             "required": [
@@ -24736,6 +25874,9 @@ const docTemplate = `{
         "library.TemplateResponse": {
             "type": "object",
             "properties": {
+                "class_count": {
+                    "type": "integer"
+                },
                 "code": {
                     "type": "string"
                 },
@@ -24757,6 +25898,9 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "lesson_count": {
+                    "type": "integer"
+                },
                 "level": {
                     "type": "string"
                 },
@@ -24777,6 +25921,23 @@ const docTemplate = `{
                 },
                 "version_count": {
                     "type": "integer"
+                },
+                "versions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/library.VersionRefResponse"
+                    }
+                }
+            }
+        },
+        "library.VersionClassRefResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
                 }
             }
         },
@@ -24785,6 +25946,15 @@ const docTemplate = `{
             "properties": {
                 "changelog": {
                     "type": "string"
+                },
+                "class_count": {
+                    "type": "integer"
+                },
+                "classes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/library.VersionClassRefResponse"
+                    }
                 },
                 "created_at": {
                     "type": "string"
@@ -24816,7 +25986,7 @@ const docTemplate = `{
                 "score_set": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/library.ScoreComponent"
+                        "$ref": "#/definitions/library.ScoreSetGroup"
                     }
                 },
                 "status": {
@@ -24833,11 +26003,34 @@ const docTemplate = `{
                 }
             }
         },
+        "library.VersionRefResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "version_no": {
+                    "type": "integer"
+                }
+            }
+        },
         "library.VersionResponse": {
             "type": "object",
             "properties": {
                 "changelog": {
                     "type": "string"
+                },
+                "class_count": {
+                    "type": "integer"
+                },
+                "classes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/library.VersionClassRefResponse"
+                    }
                 },
                 "created_at": {
                     "type": "string"

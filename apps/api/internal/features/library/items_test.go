@@ -2,12 +2,15 @@ package library
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/pagination"
@@ -31,21 +34,55 @@ func (f *fakeRepo) liveMaterial(sc authctx.Scope, id uuid.UUID) (*Material, bool
 	return m, true
 }
 
-func (f *fakeRepo) GetMaterial(_ context.Context, sc authctx.Scope, id uuid.UUID) (*Material, error) {
+// materialRow counts, like materialCountSelect, the live template lessons
+// linking the material and the distinct templates among them, across every
+// version status.
+func (f *fakeRepo) materialRow(sc authctx.Scope, m *Material) MaterialRow {
+	row := MaterialRow{Material: *m}
+	seen := map[uuid.UUID]bool{}
+	for lid, links := range f.lessonMaterials {
+		lesson, ok := f.lessons[lid]
+		if !ok {
+			continue
+		}
+		v, ok := f.versions[lesson.VersionID]
+		if !ok {
+			continue
+		}
+		tpl, ok := f.templates[v.TemplateID]
+		if !ok || tpl.DeletedAt != nil {
+			continue
+		}
+		for _, l := range links {
+			if l.CenterID != sc.CenterID || l.MaterialID != m.ID {
+				continue
+			}
+			row.LessonCount++
+			if !seen[tpl.ID] {
+				seen[tpl.ID] = true
+				row.TemplateCount++
+			}
+		}
+	}
+	return row
+}
+
+func (f *fakeRepo) GetMaterial(_ context.Context, sc authctx.Scope, id uuid.UUID) (*MaterialRow, error) {
 	m, ok := f.liveMaterial(sc, id)
 	if !ok {
 		return nil, ErrNotFound
 	}
-	cp := *m
-	return &cp, nil
+	row := f.materialRow(sc, m)
+	return &row, nil
 }
 
-func (f *fakeRepo) ListMaterials(_ context.Context, sc authctx.Scope, fl ListFilter, _ pagination.Params) ([]Material, int64, error) {
-	var out []Material
+func (f *fakeRepo) ListMaterials(_ context.Context, sc authctx.Scope, fl ListFilter, _ pagination.Params) ([]MaterialRow, int64, error) {
+	var out []MaterialRow
 	for _, m := range f.materials {
 		if m.CenterID == sc.CenterID && m.DeletedAt == nil &&
-			(fl.Q == "" || strings.Contains(strings.ToLower(m.Title), strings.ToLower(fl.Q))) {
-			out = append(out, *m)
+			(fl.Q == "" || strings.Contains(strings.ToLower(m.Title), strings.ToLower(fl.Q))) &&
+			(fl.Active == nil || m.Active == *fl.Active) {
+			out = append(out, f.materialRow(sc, m))
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Title < out[j].Title })
@@ -72,6 +109,16 @@ func (f *fakeRepo) UpdateMaterial(_ context.Context, sc authctx.Scope, m *Materi
 	return nil
 }
 
+func (f *fakeRepo) SetMaterialActive(_ context.Context, sc authctx.Scope, id uuid.UUID, active bool) error {
+	cur, ok := f.liveMaterial(sc, id)
+	if !ok {
+		return ErrNotFound
+	}
+	cur.Active = active
+	cur.UpdatedAt = nowUTC()
+	return nil
+}
+
 func (f *fakeRepo) SoftDeleteMaterial(_ context.Context, sc authctx.Scope, id uuid.UUID) error {
 	cur, ok := f.liveMaterial(sc, id)
 	if !ok {
@@ -82,8 +129,13 @@ func (f *fakeRepo) SoftDeleteMaterial(_ context.Context, sc authctx.Scope, id uu
 	return nil
 }
 
-func (f *fakeRepo) LockMaterial(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Material, error) {
-	return f.GetMaterial(ctx, sc, id)
+func (f *fakeRepo) LockMaterial(_ context.Context, sc authctx.Scope, id uuid.UUID) (*Material, error) {
+	m, ok := f.liveMaterial(sc, id)
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *m
+	return &cp, nil
 }
 
 // usage tallies links by the status of their version, skipping lessons
@@ -120,6 +172,11 @@ func (f *fakeRepo) MaterialUsage(_ context.Context, sc authctx.Scope, id uuid.UU
 }
 
 func (f *fakeRepo) CreateExercise(_ context.Context, sc authctx.Scope, e *Exercise) error {
+	for _, other := range f.exercises {
+		if other.CenterID == sc.CenterID && other.DeletedAt == nil && other.Code == e.Code {
+			return gorm.ErrDuplicatedKey
+		}
+	}
 	e.ID, e.CenterID = uuid.New(), sc.CenterID
 	e.CreatedAt, e.UpdatedAt = nowUTC(), nowUTC()
 	cp := *e
@@ -135,22 +192,62 @@ func (f *fakeRepo) liveExercise(sc authctx.Scope, id uuid.UUID) (*Exercise, bool
 	return e, true
 }
 
-func (f *fakeRepo) GetExercise(_ context.Context, sc authctx.Scope, id uuid.UUID) (*Exercise, error) {
+// exerciseRow mirrors materialRow for exercises.
+func (f *fakeRepo) exerciseRow(sc authctx.Scope, e *Exercise) ExerciseRow {
+	row := ExerciseRow{Exercise: *e}
+	seen := map[uuid.UUID]bool{}
+	for lid, links := range f.lessonExercises {
+		lesson, ok := f.lessons[lid]
+		if !ok {
+			continue
+		}
+		v, ok := f.versions[lesson.VersionID]
+		if !ok {
+			continue
+		}
+		tpl, ok := f.templates[v.TemplateID]
+		if !ok || tpl.DeletedAt != nil {
+			continue
+		}
+		for _, l := range links {
+			if l.CenterID != sc.CenterID || l.ExerciseID != e.ID {
+				continue
+			}
+			row.LessonCount++
+			if !seen[tpl.ID] {
+				seen[tpl.ID] = true
+				row.TemplateCount++
+			}
+		}
+	}
+	return row
+}
+
+func (f *fakeRepo) GetExercise(_ context.Context, sc authctx.Scope, id uuid.UUID) (*ExerciseRow, error) {
 	e, ok := f.liveExercise(sc, id)
 	if !ok {
 		return nil, ErrNotFound
 	}
-	cp := *e
-	return &cp, nil
+	row := f.exerciseRow(sc, e)
+	return &row, nil
 }
 
-func (f *fakeRepo) ListExercises(_ context.Context, sc authctx.Scope, fl ListFilter, _ pagination.Params) ([]Exercise, int64, error) {
-	var out []Exercise
+func (f *fakeRepo) ListExercises(_ context.Context, sc authctx.Scope, fl ListFilter, _ pagination.Params) ([]ExerciseRow, int64, error) {
+	var out []ExerciseRow
 	for _, e := range f.exercises {
-		if e.CenterID == sc.CenterID && e.DeletedAt == nil &&
-			(fl.Q == "" || strings.Contains(strings.ToLower(e.Title), strings.ToLower(fl.Q))) {
-			out = append(out, *e)
+		if e.CenterID != sc.CenterID || e.DeletedAt != nil {
+			continue
 		}
+		if fl.Q != "" {
+			needle := strings.ToLower(fl.Q)
+			if !strings.Contains(strings.ToLower(e.Title), needle) && !strings.Contains(strings.ToLower(e.Code), needle) {
+				continue
+			}
+		}
+		if fl.Active != nil && e.Active != *fl.Active {
+			continue
+		}
+		out = append(out, f.exerciseRow(sc, e))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Title < out[j].Title })
 	return out, int64(len(out)), nil
@@ -171,8 +268,47 @@ func (f *fakeRepo) UpdateExercise(_ context.Context, sc authctx.Scope, e *Exerci
 	if !ok {
 		return ErrNotFound
 	}
+	for _, other := range f.exercises {
+		if other.ID != e.ID && other.CenterID == sc.CenterID && other.DeletedAt == nil && other.Code == e.Code {
+			return gorm.ErrDuplicatedKey
+		}
+	}
 	cur.Title, cur.Description, cur.Difficulty, cur.Tags = e.Title, e.Description, e.Difficulty, e.Tags
+	cur.Code, cur.Skill, cur.Level = e.Code, e.Skill, e.Level
 	cur.UpdatedAt = nowUTC()
+	return nil
+}
+
+func (f *fakeRepo) SetExerciseActive(_ context.Context, sc authctx.Scope, id uuid.UUID, active bool) error {
+	cur, ok := f.liveExercise(sc, id)
+	if !ok {
+		return ErrNotFound
+	}
+	cur.Active = active
+	cur.UpdatedAt = nowUTC()
+	return nil
+}
+
+// NextExerciseCode mirrors the repository's BT-0001-style generator,
+// scanning every row of the center (including soft-deleted) so a code is
+// never reissued.
+func (f *fakeRepo) NextExerciseCode(_ context.Context, sc authctx.Scope) (string, error) {
+	next := 1
+	for _, e := range f.exercises {
+		if e.CenterID != sc.CenterID || !strings.HasPrefix(e.Code, exerciseCodePrefix) {
+			continue
+		}
+		if n, err := strconv.Atoi(strings.TrimPrefix(e.Code, exerciseCodePrefix)); err == nil && n >= next {
+			next = n + 1
+		}
+	}
+	return fmt.Sprintf("%s%04d", exerciseCodePrefix, next), nil
+}
+
+// LockCenterForExerciseCode is a no-op: the in-memory fake runs every call
+// on a single goroutine, so there is no concurrent writer to serialise
+// against; the real advisory lock is covered by the integration test.
+func (f *fakeRepo) LockCenterForExerciseCode(_ context.Context, _ authctx.Scope) error {
 	return nil
 }
 
@@ -186,8 +322,13 @@ func (f *fakeRepo) SoftDeleteExercise(_ context.Context, sc authctx.Scope, id uu
 	return nil
 }
 
-func (f *fakeRepo) LockExercise(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Exercise, error) {
-	return f.GetExercise(ctx, sc, id)
+func (f *fakeRepo) LockExercise(_ context.Context, sc authctx.Scope, id uuid.UUID) (*Exercise, error) {
+	e, ok := f.liveExercise(sc, id)
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *e
+	return &cp, nil
 }
 
 func (f *fakeRepo) ExerciseUsage(_ context.Context, sc authctx.Scope, id uuid.UUID) (ItemUsage, error) {
@@ -371,6 +512,45 @@ func TestMaterialLifecycleAndPermissions(t *testing.T) {
 	requireAppError(t, err, http.StatusNotFound, "")
 	err = svc.DeleteMaterial(ctx, editor, created.ID)
 	requireAppError(t, err, http.StatusNotFound, "")
+}
+
+// TestMaterialOtherKindOnlyEditableOnExistingLegacyRows covers the
+// asymmetry between creating and updating a material of the retired
+// "other" kind: it must never be chosen for a new material, but editing a
+// material that already has that kind (seeded before the kind was retired)
+// must still work as long as the kind itself is left unchanged.
+func TestMaterialOtherKindOnlyEditableOnExistingLegacyRows(t *testing.T) {
+	svc, d := newTestService()
+	ctx := context.Background()
+	sc := d.ownerScope()
+
+	_, err := svc.CreateMaterial(ctx, sc, MaterialRequest{Title: "Học liệu cũ", Kind: MaterialKindOther})
+	appErr := appErrorOf(t, err, http.StatusUnprocessableEntity)
+	if appErr.Fields["kind"] == "" {
+		t.Fatalf("creating with kind=other must be rejected, got %+v", appErr.Fields)
+	}
+
+	legacyID := uuid.New()
+	d.repo.materials[legacyID] = &Material{
+		ID: legacyID, CenterID: sc.CenterID, Title: "Học liệu cũ", Kind: MaterialKindOther, Active: true,
+		CreatedAt: nowUTC(), UpdatedAt: nowUTC(),
+	}
+
+	kept, err := svc.UpdateMaterial(ctx, sc, legacyID, MaterialRequest{Title: "Học liệu cũ (sửa)", Kind: MaterialKindOther})
+	if err != nil || kept.Kind != MaterialKindOther || kept.Title != "Học liệu cũ (sửa)" {
+		t.Fatalf("updating a legacy other-kind material while keeping its kind must succeed: %v %+v", err, kept)
+	}
+
+	otherID := uuid.New()
+	d.repo.materials[otherID] = &Material{
+		ID: otherID, CenterID: sc.CenterID, Title: "Video mới", Kind: MaterialKindVideo, Active: true,
+		CreatedAt: nowUTC(), UpdatedAt: nowUTC(),
+	}
+	_, err = svc.UpdateMaterial(ctx, sc, otherID, MaterialRequest{Title: "Video mới", Kind: MaterialKindOther})
+	appErr = appErrorOf(t, err, http.StatusUnprocessableEntity)
+	if appErr.Fields["kind"] == "" {
+		t.Fatalf("changing a non-other material to kind=other must be rejected, got %+v", appErr.Fields)
+	}
 }
 
 func TestExerciseLifecycle(t *testing.T) {
@@ -663,27 +843,49 @@ func TestScoreSetIsValidatedAndStoredOnTheVersion(t *testing.T) {
 	tpl := mustTemplate(t, svc, sc, "CT01")
 	draft := draftOf(t, svc, sc, tpl.ID)
 
-	bad := []ScoreComponentInput{{Key: "Giữa kỳ", Label: "Giữa kỳ", Max: 10, Weight: 1}}
+	bad := []ScoreSetGroupInput{{Key: "Giữa kỳ", Title: "Giữa kỳ",
+		Components: []ScoreComponentInput{{Key: "gk", Label: "Giữa kỳ", Max: 10, Weight: 1}}}}
 	_, err := svc.SetScoreSet(ctx, sc, draft.ID, bad)
 	requireAppError(t, err, http.StatusUnprocessableEntity, "")
-	dup := []ScoreComponentInput{{Key: "gk", Label: "Giữa kỳ", Max: 10}, {Key: "gk", Label: "Cuối kỳ", Max: 10}}
-	_, err = svc.SetScoreSet(ctx, sc, draft.ID, dup)
+	dupGroup := []ScoreSetGroupInput{{Key: "main", Title: "Giữa kỳ"}, {Key: "main", Title: "Cuối kỳ"}}
+	_, err = svc.SetScoreSet(ctx, sc, draft.ID, dupGroup)
 	requireAppError(t, err, http.StatusUnprocessableEntity, "")
-	_, err = svc.SetScoreSet(ctx, sc, draft.ID, []ScoreComponentInput{{Key: "gk", Label: "Giữa kỳ", Max: 0}})
+	_, err = svc.SetScoreSet(ctx, sc, draft.ID, []ScoreSetGroupInput{{Key: "main", Title: "  "}})
 	requireAppError(t, err, http.StatusUnprocessableEntity, "")
-	_, err = svc.SetScoreSet(ctx, sc, draft.ID, []ScoreComponentInput{{Key: "gk", Label: "Giữa kỳ", Max: 10, Weight: -1}})
+	dupComponent := []ScoreSetGroupInput{{Key: "main", Title: "Chính", Components: []ScoreComponentInput{
+		{Key: "gk", Label: "Giữa kỳ", Max: 10}, {Key: "gk", Label: "Cuối kỳ", Max: 10},
+	}}}
+	_, err = svc.SetScoreSet(ctx, sc, draft.ID, dupComponent)
 	requireAppError(t, err, http.StatusUnprocessableEntity, "")
-	tooMany := make([]ScoreComponentInput, 21)
-	for i := range tooMany {
-		tooMany[i] = ScoreComponentInput{Key: "k" + string(rune('a'+i)), Label: "x", Max: 1}
+	_, err = svc.SetScoreSet(ctx, sc, draft.ID,
+		[]ScoreSetGroupInput{{Key: "main", Title: "Chính", Components: []ScoreComponentInput{{Key: "gk", Label: "Giữa kỳ", Max: 0}}}})
+	requireAppError(t, err, http.StatusUnprocessableEntity, "")
+	_, err = svc.SetScoreSet(ctx, sc, draft.ID,
+		[]ScoreSetGroupInput{{Key: "main", Title: "Chính", Components: []ScoreComponentInput{{Key: "gk", Label: "Giữa kỳ", Max: 10, Weight: -1}}}})
+	requireAppError(t, err, http.StatusUnprocessableEntity, "")
+	tooManyGroups := make([]ScoreSetGroupInput, 11)
+	for i := range tooManyGroups {
+		tooManyGroups[i] = ScoreSetGroupInput{Key: "g" + string(rune('a'+i)), Title: "x"}
 	}
-	_, err = svc.SetScoreSet(ctx, sc, draft.ID, tooMany)
+	_, err = svc.SetScoreSet(ctx, sc, draft.ID, tooManyGroups)
+	requireAppError(t, err, http.StatusUnprocessableEntity, "")
+	tooManyComponents := make([]ScoreComponentInput, 21)
+	for i := range tooManyComponents {
+		tooManyComponents[i] = ScoreComponentInput{Key: "k" + string(rune('a'+i)), Label: "x", Max: 1}
+	}
+	_, err = svc.SetScoreSet(ctx, sc, draft.ID, []ScoreSetGroupInput{{Key: "main", Title: "Chính", Components: tooManyComponents}})
 	requireAppError(t, err, http.StatusUnprocessableEntity, "")
 
 	d.repo.locks = 0
-	set, err := svc.SetScoreSet(ctx, sc, draft.ID, []ScoreComponentInput{
-		{Key: "gk", Label: " Giữa kỳ ", Max: 10, Weight: 0.4},
-		{Key: "ck", Label: "Cuối kỳ", Max: 10, Weight: 0.6},
+	set, err := svc.SetScoreSet(ctx, sc, draft.ID, []ScoreSetGroupInput{
+		{Key: "main", Title: " Chính ", Components: []ScoreComponentInput{
+			{Key: "gk", Label: " Giữa kỳ ", Max: 10, Weight: 0.4},
+			{Key: "ck", Label: "Cuối kỳ", Max: 10, Weight: 0.6},
+		}},
+		{Key: "bonus", Title: "Cộng điểm", Components: []ScoreComponentInput{
+			// Same component key as group "main": uniqueness is per group, not global.
+			{Key: "gk", Label: "Điểm thưởng giữa kỳ", Max: 2},
+		}},
 	})
 	if err != nil {
 		t.Fatalf("set: %v", err)
@@ -691,12 +893,16 @@ func TestScoreSetIsValidatedAndStoredOnTheVersion(t *testing.T) {
 	if d.repo.locks != 1 {
 		t.Errorf("score-set writes must take the version lock, got %d", d.repo.locks)
 	}
-	if len(set) != 2 || set[0].Key != "gk" || set[0].Label != "Giữa kỳ" || set[1].Weight != 0.6 {
+	if len(set) != 2 || set[0].Key != "main" || set[0].Title != "Chính" || len(set[0].Components) != 2 ||
+		set[0].Components[0].Key != "gk" || set[0].Components[1].Weight != 0.6 {
 		t.Fatalf("unexpected score set %+v", set)
+	}
+	if set[1].Key != "bonus" || len(set[1].Components) != 1 || set[1].Components[0].Key != "gk" {
+		t.Fatalf("component keys must be unique per group, not globally: %+v", set[1])
 	}
 
 	detail, err := svc.GetVersion(ctx, sc, draft.ID)
-	if err != nil || len(detail.ScoreSet) != 2 || detail.ScoreSet[1].Key != "ck" {
+	if err != nil || len(detail.ScoreSet) != 2 || detail.ScoreSet[1].Key != "bonus" {
 		t.Fatalf("version detail must carry the score set: %v %+v", err, detail)
 	}
 	if _, err := svc.GetVersion(ctx, d.memberWith(), draft.ID); err == nil {
@@ -729,7 +935,9 @@ func TestNewDraftCopiesAttachmentsLogFieldsAndScoreSet(t *testing.T) {
 	if _, err := svc.SetLogFields(ctx, sc, v1.ID, []LogFieldInput{{Label: "Ghi chú", Kind: LogFieldText}}); err != nil {
 		t.Fatalf("log fields: %v", err)
 	}
-	if _, err := svc.SetScoreSet(ctx, sc, v1.ID, []ScoreComponentInput{{Key: "gk", Label: "Giữa kỳ", Max: 10, Weight: 1}}); err != nil {
+	if _, err := svc.SetScoreSet(ctx, sc, v1.ID, []ScoreSetGroupInput{
+		{Key: "main", Title: "Chính", Components: []ScoreComponentInput{{Key: "gk", Label: "Giữa kỳ", Max: 10, Weight: 1}}},
+	}); err != nil {
 		t.Fatalf("score set: %v", err)
 	}
 	if _, err := svc.Publish(ctx, sc, v1.ID); err != nil {
@@ -760,5 +968,251 @@ func TestNewDraftCopiesAttachmentsLogFieldsAndScoreSet(t *testing.T) {
 	old, err := svc.GetVersion(ctx, sc, v1.ID)
 	if err != nil || len(old.LogFields) != 1 || old.LogFields[0].ID == detail.LogFields[0].ID {
 		t.Fatalf("v1 log fields must stay as they were: %v %+v", err, old)
+	}
+}
+
+func TestExerciseCodeIsAutoGeneratedWhenOmitted(t *testing.T) {
+	svc, d := newTestService()
+	ctx := context.Background()
+	sc := d.ownerScope()
+
+	first, err := svc.CreateExercise(ctx, sc, ExerciseRequest{Title: "Bài 1"})
+	if err != nil || first.Code != "BT-0001" {
+		t.Fatalf("first generated code: %v %+v", err, first)
+	}
+	second, err := svc.CreateExercise(ctx, sc, ExerciseRequest{Title: "Bài 2"})
+	if err != nil || second.Code != "BT-0002" {
+		t.Fatalf("second generated code must not reuse the first: %v %+v", err, second)
+	}
+	// A blank code (whitespace only) is treated the same as an omitted one.
+	third, err := svc.CreateExercise(ctx, sc, ExerciseRequest{Title: "Bài 3", Code: str("   ")})
+	if err != nil || third.Code != "BT-0003" {
+		t.Fatalf("blank code must also auto-generate: %v %+v", err, third)
+	}
+}
+
+// TestExerciseCodeAutoGenerationIgnoresNonNumericCallerCodes covers a
+// caller-chosen code that shares the generator's prefix but not its
+// BT-<digits> shape: it must not derail the auto-generated sequence, and a
+// later caller-chosen numeric code must still push the sequence forward.
+func TestExerciseCodeAutoGenerationIgnoresNonNumericCallerCodes(t *testing.T) {
+	svc, d := newTestService()
+	ctx := context.Background()
+	sc := d.ownerScope()
+
+	chosen, err := svc.CreateExercise(ctx, sc, ExerciseRequest{Title: "Bài chọn tay", Code: str("BT-ABC")})
+	if err != nil || chosen.Code != "BT-ABC" {
+		t.Fatalf("caller-chosen non-numeric code must be kept as-is: %v %+v", err, chosen)
+	}
+
+	generated, err := svc.CreateExercise(ctx, sc, ExerciseRequest{Title: "Bài tự sinh"})
+	if err != nil || generated.Code != "BT-0001" {
+		t.Fatalf("auto-generation must ignore a non-numeric caller code and start at BT-0001: %v %+v", err, generated)
+	}
+
+	numeric, err := svc.CreateExercise(ctx, sc, ExerciseRequest{Title: "Bài số", Code: str("BT-0009")})
+	if err != nil || numeric.Code != "BT-0009" {
+		t.Fatalf("caller-chosen numeric code: %v %+v", err, numeric)
+	}
+	next, err := svc.CreateExercise(ctx, sc, ExerciseRequest{Title: "Bài tự sinh kế tiếp"})
+	if err != nil || next.Code != "BT-0010" {
+		t.Fatalf("auto-generation must resume after the highest numeric code seen so far: %v %+v", err, next)
+	}
+}
+
+func TestExerciseCodeExplicitIsNormalizedAndUniquePerCenter(t *testing.T) {
+	svc, d := newTestService()
+	ctx := context.Background()
+	sc := d.ownerScope()
+
+	created, err := svc.CreateExercise(ctx, sc, ExerciseRequest{Title: "Bài 1", Code: str(" bt-01 ")})
+	if err != nil || created.Code != "BT-01" {
+		t.Fatalf("code must be trimmed and upper-cased: %v %+v", err, created)
+	}
+
+	_, err = svc.CreateExercise(ctx, sc, ExerciseRequest{Title: "Bài 2", Code: str("bt-01")})
+	requireAppError(t, err, http.StatusConflict, CodeExerciseCodeTaken)
+
+	// A code outside another center does not clash.
+	other := authctx.Scope{TeacherID: uuid.New(), CenterID: uuid.New(), IsOwner: true}
+	if _, err := svc.CreateExercise(ctx, other, ExerciseRequest{Title: "Bài khác", Code: str("bt-01")}); err != nil {
+		t.Fatalf("a code of another center must not clash: %v", err)
+	}
+
+	appErr := appErrorOf(t, mustErr(svc.CreateExercise(ctx, sc, ExerciseRequest{Title: "x", Code: str("BT 01")})), http.StatusUnprocessableEntity)
+	if appErr.Fields["code"] == "" {
+		t.Fatalf("a code outside letters/digits/dashes must be rejected, got %+v", appErr.Fields)
+	}
+
+	// Updating without a code keeps the current one; updating with a taken
+	// code (of another exercise) is rejected the same way as create.
+	if _, err := svc.CreateExercise(ctx, sc, ExerciseRequest{Title: "Bài 2", Code: str("bt-02")}); err != nil {
+		t.Fatalf("create second: %v", err)
+	}
+	kept, err := svc.UpdateExercise(ctx, sc, created.ID, ExerciseRequest{Title: "Bài 1 (mới)"})
+	if err != nil || kept.Code != "BT-01" {
+		t.Fatalf("update without a code must keep the current one: %v %+v", err, kept)
+	}
+	_, err = svc.UpdateExercise(ctx, sc, created.ID, ExerciseRequest{Title: "Bài 1", Code: str("bt-02")})
+	requireAppError(t, err, http.StatusConflict, CodeExerciseCodeTaken)
+}
+
+func TestMaterialAndExerciseStatusToggle(t *testing.T) {
+	svc, d := newTestService()
+	ctx := context.Background()
+	editor := d.memberWith(authctx.PermLibraryRead, authctx.PermLibraryEdit)
+	reader := d.memberWith(authctx.PermLibraryRead)
+
+	m := mustMaterial(t, svc, editor, "Tài liệu")
+	if !m.Active {
+		t.Fatalf("a new material must start active, got %+v", m)
+	}
+	e := mustExercise(t, svc, editor, "Bài tập")
+	if !e.Active {
+		t.Fatalf("a new exercise must start active, got %+v", e)
+	}
+
+	if _, err := svc.SetMaterialStatus(ctx, reader, m.ID, false); err == nil {
+		t.Error("status change needs library.edit")
+	}
+	updated, err := svc.SetMaterialStatus(ctx, editor, m.ID, false)
+	if err != nil || updated.Active {
+		t.Fatalf("material must turn inactive: %v %+v", err, updated)
+	}
+	got, err := svc.GetMaterial(ctx, editor, m.ID)
+	if err != nil || got.Active {
+		t.Fatalf("the toggle must persist: %v %+v", err, got)
+	}
+	if _, err := svc.SetMaterialStatus(ctx, editor, uuid.New(), false); err == nil {
+		t.Error("status change on an unknown material must 404")
+	}
+
+	updatedEx, err := svc.SetExerciseStatus(ctx, editor, e.ID, false)
+	if err != nil || updatedEx.Active {
+		t.Fatalf("exercise must turn inactive: %v %+v", err, updatedEx)
+	}
+	if _, err := svc.SetExerciseStatus(ctx, reader, e.ID, true); err == nil {
+		t.Error("status change needs library.edit")
+	}
+}
+
+func TestActiveFilterOnListMaterialsAndExercises(t *testing.T) {
+	svc, d := newTestService()
+	ctx := context.Background()
+	sc := d.ownerScope()
+
+	m1 := mustMaterial(t, svc, sc, "A")
+	m2 := mustMaterial(t, svc, sc, "B")
+	if _, err := svc.SetMaterialStatus(ctx, sc, m2.ID, false); err != nil {
+		t.Fatalf("deactivate: %v", err)
+	}
+	e1 := mustExercise(t, svc, sc, "Bài 1")
+	e2 := mustExercise(t, svc, sc, "Bài 2")
+	if _, err := svc.SetExerciseStatus(ctx, sc, e2.ID, false); err != nil {
+		t.Fatalf("deactivate: %v", err)
+	}
+
+	active := true
+	list, total, err := svc.ListMaterials(ctx, sc, ListFilter{Active: &active}, pagination.Params{})
+	if err != nil || total != 1 || list[0].ID != m1.ID {
+		t.Fatalf("active=true must keep only the active material: %v total=%d list=%+v", err, total, list)
+	}
+	inactive := false
+	list, total, err = svc.ListMaterials(ctx, sc, ListFilter{Active: &inactive}, pagination.Params{})
+	if err != nil || total != 1 || list[0].ID != m2.ID {
+		t.Fatalf("active=false must keep only the inactive material: %v total=%d list=%+v", err, total, list)
+	}
+	_, total, err = svc.ListMaterials(ctx, sc, ListFilter{}, pagination.Params{})
+	if err != nil || total != 2 {
+		t.Fatalf("no filter must keep both: %v total=%d", err, total)
+	}
+
+	exList, total, err := svc.ListExercises(ctx, sc, ListFilter{Active: &active}, pagination.Params{})
+	if err != nil || total != 1 || exList[0].ID != e1.ID {
+		t.Fatalf("active=true must keep only the active exercise: %v total=%d list=%+v", err, total, exList)
+	}
+	exList, total, err = svc.ListExercises(ctx, sc, ListFilter{Active: &inactive}, pagination.Params{})
+	if err != nil || total != 1 || exList[0].ID != e2.ID {
+		t.Fatalf("active=false must keep only the inactive exercise: %v total=%d list=%+v", err, total, exList)
+	}
+}
+
+func TestExerciseSearchMatchesCode(t *testing.T) {
+	svc, d := newTestService()
+	ctx := context.Background()
+	sc := d.ownerScope()
+
+	created, err := svc.CreateExercise(ctx, sc, ExerciseRequest{Title: "Phân số", Code: str("XYZ-9")})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := svc.CreateExercise(ctx, sc, ExerciseRequest{Title: "Số học"}); err != nil {
+		t.Fatalf("create other: %v", err)
+	}
+
+	list, total, err := svc.ListExercises(ctx, sc, ListFilter{Q: "xyz-9"}, pagination.Params{})
+	if err != nil || total != 1 || list[0].ID != created.ID {
+		t.Fatalf("q must match the code case-insensitively: %v total=%d list=%+v", err, total, list)
+	}
+	list, total, err = svc.ListExercises(ctx, sc, ListFilter{Q: "phân"}, pagination.Params{})
+	if err != nil || total != 1 || list[0].ID != created.ID {
+		t.Fatalf("q must still match the title: %v total=%d list=%+v", err, total, list)
+	}
+}
+
+func TestLessonPickersRejectInactiveMaterialAndExerciseButKeepExistingLinks(t *testing.T) {
+	svc, d := newTestService()
+	ctx := context.Background()
+	sc := d.ownerScope()
+	tpl := mustTemplate(t, svc, sc, "CT01")
+	draft := draftOf(t, svc, sc, tpl.ID)
+	lesson := mustLesson(t, svc, sc, draft.ID, "Buổi 1")
+	m := mustMaterial(t, svc, sc, "A")
+	e := mustExercise(t, svc, sc, "Bài 1")
+
+	// Attach while both are still active.
+	if _, err := svc.SetLessonMaterials(ctx, sc, lesson.ID, []LessonMaterialInput{{MaterialID: m.ID}}); err != nil {
+		t.Fatalf("attach material: %v", err)
+	}
+	if _, err := svc.SetLessonExercises(ctx, sc, lesson.ID, []LessonExerciseInput{{ExerciseID: e.ID}}); err != nil {
+		t.Fatalf("attach exercise: %v", err)
+	}
+
+	if _, err := svc.SetMaterialStatus(ctx, sc, m.ID, false); err != nil {
+		t.Fatalf("deactivate material: %v", err)
+	}
+	if _, err := svc.SetExerciseStatus(ctx, sc, e.ID, false); err != nil {
+		t.Fatalf("deactivate exercise: %v", err)
+	}
+
+	// Resubmitting the same, now-inactive, already-attached item is fine.
+	rows, err := svc.SetLessonMaterials(ctx, sc, lesson.ID, []LessonMaterialInput{{MaterialID: m.ID}})
+	if err != nil || len(rows) != 1 || rows[0].ID != m.ID {
+		t.Fatalf("an already-attached inactive material must stay attachable: %v %+v", err, rows)
+	}
+	exRows, err := svc.SetLessonExercises(ctx, sc, lesson.ID, []LessonExerciseInput{{ExerciseID: e.ID}})
+	if err != nil || len(exRows) != 1 || exRows[0].ID != e.ID {
+		t.Fatalf("an already-attached inactive exercise must stay attachable: %v %+v", err, exRows)
+	}
+
+	// A fresh inactive material/exercise cannot be newly attached.
+	other := mustMaterial(t, svc, sc, "B")
+	if _, err := svc.SetMaterialStatus(ctx, sc, other.ID, false); err != nil {
+		t.Fatalf("deactivate other material: %v", err)
+	}
+	_, err = svc.SetLessonMaterials(ctx, sc, lesson.ID, []LessonMaterialInput{{MaterialID: m.ID}, {MaterialID: other.ID}})
+	appErr := appErrorOf(t, err, http.StatusUnprocessableEntity)
+	if appErr.Fields["material_id"] == "" {
+		t.Fatalf("rejecting a new inactive material must name the field, got %+v", appErr.Fields)
+	}
+
+	otherEx := mustExercise(t, svc, sc, "Bài 2")
+	if _, err := svc.SetExerciseStatus(ctx, sc, otherEx.ID, false); err != nil {
+		t.Fatalf("deactivate other exercise: %v", err)
+	}
+	_, err = svc.SetLessonExercises(ctx, sc, lesson.ID, []LessonExerciseInput{{ExerciseID: e.ID}, {ExerciseID: otherEx.ID}})
+	appErr = appErrorOf(t, err, http.StatusUnprocessableEntity)
+	if appErr.Fields["exercise_id"] == "" {
+		t.Fatalf("rejecting a new inactive exercise must name the field, got %+v", appErr.Fields)
 	}
 }

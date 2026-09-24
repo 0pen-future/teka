@@ -3,6 +3,7 @@ package library
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,11 +17,15 @@ import (
 	"teka/apps/api/internal/shared/pagination"
 )
 
-// ListFilter narrows ListTemplates. Q matches the code or name; HasDraft
-// keeps only templates with an open draft.
+// ListFilter narrows ListTemplates, ListMaterials and ListExercises. Q
+// matches the code or name (materials: title; exercises: title or code);
+// HasDraft (templates only) keeps only templates with an open draft; Active
+// (materials/exercises only), when non-nil, keeps only rows with that Active
+// value.
 type ListFilter struct {
 	Q        string
 	HasDraft bool
+	Active   *bool
 }
 
 // ItemUsage counts the lesson links of a material or exercise held by
@@ -77,6 +82,17 @@ type Repository interface {
 	LockVersion(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Version, error)
 	// ListVersions returns the template's versions, newest first.
 	ListVersions(ctx context.Context, sc authctx.Scope, templateID uuid.UUID) ([]VersionRow, error)
+	// ListVersionsFor batches ListVersions across every given template,
+	// newest-first within each template, for a caller that would otherwise
+	// call ListVersions once per template.
+	ListVersionsFor(ctx context.Context, sc authctx.Scope, templateIDs []uuid.UUID) ([]VersionRow, error)
+	// ListVersionClasses returns the classes bound to the version (at most
+	// 50, ordered by name), for the version detail response's class list.
+	ListVersionClasses(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) ([]VersionClassRef, error)
+	// ListVersionClassesFor batches ListVersionClasses across every given
+	// version, keeping the same 50-per-version cap and ordering, for a
+	// caller that would otherwise call ListVersionClasses once per version.
+	ListVersionClassesFor(ctx context.Context, sc authctx.Scope, versionIDs []uuid.UUID) ([]VersionClassLink, error)
 	// LatestReleasedVersion returns the highest non-draft version of the
 	// template (published or archived), or ErrNotFound when every version
 	// so far is a draft.
@@ -88,8 +104,9 @@ type Repository interface {
 	// center is in `from`.
 	SetVersionStatus(ctx context.Context, sc authctx.Scope, id uuid.UUID, from, to string, publishedAt *time.Time) error
 
-	// ListLessons returns the version's lessons by position.
-	ListLessons(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) ([]Lesson, error)
+	// ListLessons returns the version's lessons by position, each with its
+	// material and exercise counts.
+	ListLessons(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) ([]LessonRow, error)
 	// ListBoardCards returns the version's lessons by position, each with
 	// its assignee's display name.
 	ListBoardCards(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) ([]BoardCard, error)
@@ -106,8 +123,9 @@ type Repository interface {
 	// ListAssignees returns the caller's center's live members eligible for
 	// assignment, ordered by name.
 	ListAssignees(ctx context.Context, sc authctx.Scope) ([]AssigneeRow, error)
-	// GetLesson loads one lesson of the center.
-	GetLesson(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Lesson, error)
+	// GetLesson loads one lesson of the center with its material and
+	// exercise counts.
+	GetLesson(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*LessonRow, error)
 	// NextPosition returns max(position)+1 for the version. Call it with
 	// the version locked: two unlocked callers would compute the same slot.
 	NextPosition(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) (int, error)
@@ -121,13 +139,18 @@ type Repository interface {
 	// It must run inside a transaction: the unique on (version_id, position)
 	// is deferred, so intermediate duplicates are fine until commit.
 	SetPositions(ctx context.Context, sc authctx.Scope, versionID uuid.UUID, ids []uuid.UUID) error
+	// ClearLessons deletes every lesson of the version (cascading to its
+	// material and exercise links through their own foreign keys).
+	ClearLessons(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) error
 
 	// CreateMaterial inserts a material of the center.
 	CreateMaterial(ctx context.Context, sc authctx.Scope, m *Material) error
-	// GetMaterial loads one live material; ErrNotFound when missing.
-	GetMaterial(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Material, error)
-	// ListMaterials pages the center's live materials; Q matches the title.
-	ListMaterials(ctx context.Context, sc authctx.Scope, f ListFilter, p pagination.Params) ([]Material, int64, error)
+	// GetMaterial loads one live material with its "in use" counts;
+	// ErrNotFound when missing.
+	GetMaterial(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*MaterialRow, error)
+	// ListMaterials pages the center's live materials; Q matches the
+	// title, Active narrows by the active flag when non-nil.
+	ListMaterials(ctx context.Context, sc authctx.Scope, f ListFilter, p pagination.Params) ([]MaterialRow, int64, error)
 	// FindMaterials returns the live materials of the center among ids, in
 	// no particular order, and holds each row shared until the transaction
 	// ends so a concurrent delete waits. Fewer rows than ids means some
@@ -138,30 +161,49 @@ type Repository interface {
 	LockMaterial(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Material, error)
 	// UpdateMaterial replaces the material's fields; ErrNotFound when missing.
 	UpdateMaterial(ctx context.Context, sc authctx.Scope, m *Material) error
+	// SetMaterialActive flips the active flag; ErrNotFound when missing.
+	SetMaterialActive(ctx context.Context, sc authctx.Scope, id uuid.UUID, active bool) error
 	// SoftDeleteMaterial stamps deleted_at; ErrNotFound when missing.
 	SoftDeleteMaterial(ctx context.Context, sc authctx.Scope, id uuid.UUID) error
 	// MaterialUsage counts the lesson links of live templates that still
 	// point at the material.
 	MaterialUsage(ctx context.Context, sc authctx.Scope, id uuid.UUID) (ItemUsage, error)
 
-	// CreateExercise inserts an exercise of the center.
+	// CreateExercise inserts an exercise of the center;
+	// gorm.ErrDuplicatedKey when a live exercise of the center already
+	// uses the code (uq_library_exercises_center_code).
 	CreateExercise(ctx context.Context, sc authctx.Scope, e *Exercise) error
-	// GetExercise loads one live exercise; ErrNotFound when missing.
-	GetExercise(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Exercise, error)
-	// ListExercises pages the center's live exercises; Q matches the title.
-	ListExercises(ctx context.Context, sc authctx.Scope, f ListFilter, p pagination.Params) ([]Exercise, int64, error)
+	// GetExercise loads one live exercise with its "in use" counts;
+	// ErrNotFound when missing.
+	GetExercise(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*ExerciseRow, error)
+	// ListExercises pages the center's live exercises; Q matches the
+	// title or code, Active narrows by the active flag when non-nil.
+	ListExercises(ctx context.Context, sc authctx.Scope, f ListFilter, p pagination.Params) ([]ExerciseRow, int64, error)
 	// FindExercises returns the live exercises of the center among ids,
 	// held shared like FindMaterials.
 	FindExercises(ctx context.Context, sc authctx.Scope, ids []uuid.UUID) ([]Exercise, error)
 	// LockExercise loads one live exercise and holds its row for update.
 	LockExercise(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Exercise, error)
-	// UpdateExercise replaces the exercise's fields; ErrNotFound when missing.
+	// UpdateExercise replaces the exercise's fields;
+	// gorm.ErrDuplicatedKey on a code clash, ErrNotFound when missing.
 	UpdateExercise(ctx context.Context, sc authctx.Scope, e *Exercise) error
+	// SetExerciseActive flips the active flag; ErrNotFound when missing.
+	SetExerciseActive(ctx context.Context, sc authctx.Scope, id uuid.UUID, active bool) error
 	// SoftDeleteExercise stamps deleted_at; ErrNotFound when missing.
 	SoftDeleteExercise(ctx context.Context, sc authctx.Scope, id uuid.UUID) error
 	// ExerciseUsage counts the lesson links of live templates that still
 	// point at the exercise.
 	ExerciseUsage(ctx context.Context, sc authctx.Scope, id uuid.UUID) (ItemUsage, error)
+	// NextExerciseCode returns the next "BT-0001"-style code for the
+	// center, scanning every row (including soft-deleted) so a code is
+	// never reissued.
+	NextExerciseCode(ctx context.Context, sc authctx.Scope) (string, error)
+	// LockCenterForExerciseCode takes a transaction-scoped advisory lock
+	// keyed by the center, serialising concurrent NextExerciseCode+
+	// CreateExercise pairs so two requests never race for the same
+	// generated code. Call it inside the caller's transaction; it releases
+	// automatically on commit or rollback.
+	LockCenterForExerciseCode(ctx context.Context, sc authctx.Scope) error
 
 	// ListLessonMaterials returns the materials attached to the given
 	// lessons, ordered by lesson then position.
@@ -191,6 +233,25 @@ type Repository interface {
 	// SetScoreSet replaces the version's score set; ErrNotFound when the
 	// version is outside the center.
 	SetScoreSet(ctx context.Context, sc authctx.Scope, versionID uuid.UUID, set ScoreSet) error
+
+	// ListExerciseGroups returns the version's exercise groups by position,
+	// each with how many lesson-exercise links point at it.
+	ListExerciseGroups(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) ([]ExerciseGroupRow, error)
+	// NextGroupPosition returns max(position)+1 for the version's exercise
+	// groups. Call it with the version locked.
+	NextGroupPosition(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) (int, error)
+	// CreateExerciseGroup inserts one group.
+	CreateExerciseGroup(ctx context.Context, sc authctx.Scope, g *ExerciseGroup) error
+	// CreateExerciseGroups inserts the rows in one statement, for copying a
+	// version's groups into a new draft.
+	CreateExerciseGroups(ctx context.Context, sc authctx.Scope, rows []*ExerciseGroup) error
+	// DeleteExerciseGroup removes one group of the version; the links that
+	// pointed at it are nulled, not deleted, by its foreign key.
+	// ErrNotFound when missing.
+	DeleteExerciseGroup(ctx context.Context, sc authctx.Scope, versionID, id uuid.UUID) error
+	// FilterExistingGroupIDs returns the subset of ids that name a group of
+	// the version, for validating a lesson-exercise write's group_id.
+	FilterExistingGroupIDs(ctx context.Context, sc authctx.Scope, versionID uuid.UUID, ids []uuid.UUID) ([]uuid.UUID, error)
 }
 
 type gormRepository struct {
@@ -218,7 +279,23 @@ const templateSummarySelect = `program_templates.*,
 	(SELECT COALESCE(json_agg(DISTINCT t.full_name), '[]'::json) FROM template_lessons l
 	  JOIN program_template_versions v ON v.id = l.version_id
 	  JOIN teachers t ON t.id = l.assignee_id
-	  WHERE v.template_id = program_templates.id AND v.status = 'draft') AS draft_assignees`
+	  WHERE v.template_id = program_templates.id AND v.status = 'draft') AS draft_assignees,
+	(SELECT count(*) FROM class_programs p
+	  JOIN program_template_versions v ON v.id = p.template_version_id
+	  WHERE v.template_id = program_templates.id) AS class_count,
+	CASE WHEN EXISTS (SELECT 1 FROM program_template_versions v
+	    WHERE v.template_id = program_templates.id AND v.status = 'published')
+	  -- Multiple published versions can coexist (publish does not
+	  -- auto-archive an older one); only the newest published version's
+	  -- lessons count here, not every published version's lessons summed.
+	  THEN (SELECT count(*) FROM template_lessons l
+	    WHERE l.version_id = (
+	      SELECT v.id FROM program_template_versions v
+	      WHERE v.template_id = program_templates.id AND v.status = 'published'
+	      ORDER BY v.version_no DESC LIMIT 1))
+	  ELSE (SELECT count(*) FROM template_lessons l JOIN program_template_versions v ON v.id = l.version_id
+	    WHERE v.template_id = program_templates.id AND v.status = 'draft')
+	END AS lesson_count`
 
 // liveTemplates scopes a query to the caller's center's non-deleted templates.
 func (r *gormRepository) liveTemplates(ctx context.Context, sc authctx.Scope) *gorm.DB {
@@ -343,7 +420,9 @@ func (r *gormRepository) TemplateInUse(ctx context.Context, sc authctx.Scope, id
 
 const versionSelect = `program_template_versions.*,
 	(SELECT count(*) FROM template_lessons l
-	  WHERE l.version_id = program_template_versions.id) AS lesson_count`
+	  WHERE l.version_id = program_template_versions.id) AS lesson_count,
+	(SELECT count(*) FROM class_programs p
+	  WHERE p.template_version_id = program_template_versions.id) AS class_count`
 
 func (r *gormRepository) versions(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	return database.FromContext(ctx, r.db).
@@ -396,6 +475,54 @@ func (r *gormRepository) ListVersions(ctx context.Context, sc authctx.Scope, tem
 	return rows, err
 }
 
+func (r *gormRepository) ListVersionClasses(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) ([]VersionClassRef, error) {
+	var rows []VersionClassRef
+	err := database.FromContext(ctx, r.db).Raw(`
+		SELECT c.id AS id, c.name AS name
+		FROM class_programs p
+		JOIN classes c ON c.id = p.class_id
+		WHERE p.template_version_id = ? AND p.center_id = ?
+		ORDER BY c.name, c.id
+		LIMIT 50`,
+		versionID, sc.CenterID).Scan(&rows).Error
+	return rows, err
+}
+
+func (r *gormRepository) ListVersionsFor(ctx context.Context, sc authctx.Scope, templateIDs []uuid.UUID) ([]VersionRow, error) {
+	if len(templateIDs) == 0 {
+		return nil, nil
+	}
+	var rows []VersionRow
+	err := r.versions(ctx, sc).
+		Select(versionSelect).
+		Where("program_template_versions.template_id IN ?", templateIDs).
+		Order("program_template_versions.template_id, program_template_versions.version_no DESC").
+		Find(&rows).Error
+	return rows, err
+}
+
+func (r *gormRepository) ListVersionClassesFor(ctx context.Context, sc authctx.Scope, versionIDs []uuid.UUID) ([]VersionClassLink, error) {
+	if len(versionIDs) == 0 {
+		return nil, nil
+	}
+	var rows []VersionClassLink
+	// A plain LIMIT would cap the batch as a whole; the window function
+	// keeps the per-version cap ListVersionClasses enforces one row at a
+	// time.
+	err := database.FromContext(ctx, r.db).Raw(`
+		SELECT version_id, id, name FROM (
+			SELECT p.template_version_id AS version_id, c.id AS id, c.name AS name,
+				ROW_NUMBER() OVER (PARTITION BY p.template_version_id ORDER BY c.name, c.id) AS rn
+			FROM class_programs p
+			JOIN classes c ON c.id = p.class_id
+			WHERE p.template_version_id IN ? AND p.center_id = ?
+		) ranked
+		WHERE rn <= 50
+		ORDER BY version_id, name, id`,
+		versionIDs, sc.CenterID).Scan(&rows).Error
+	return rows, err
+}
+
 func (r *gormRepository) LatestReleasedVersion(ctx context.Context, sc authctx.Scope, templateID uuid.UUID) (*Version, error) {
 	var v Version
 	err := r.versions(ctx, sc).
@@ -440,9 +567,18 @@ func (r *gormRepository) lessons(ctx context.Context, sc authctx.Scope) *gorm.DB
 		Where("template_lessons.center_id = ?", sc.CenterID)
 }
 
-func (r *gormRepository) ListLessons(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) ([]Lesson, error) {
-	var rows []Lesson
+// lessonCountSelect adds the material and exercise counts a lesson's
+// response carries, mirroring materialCountSelect/exerciseCountSelect.
+const lessonCountSelect = `template_lessons.*,
+	(SELECT count(*) FROM template_lesson_materials lm
+	  WHERE lm.lesson_id = template_lessons.id) AS material_count,
+	(SELECT count(*) FROM template_lesson_exercises le
+	  WHERE le.lesson_id = template_lessons.id) AS exercise_count`
+
+func (r *gormRepository) ListLessons(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) ([]LessonRow, error) {
+	var rows []LessonRow
 	err := r.lessons(ctx, sc).
+		Select(lessonCountSelect).
 		Where("version_id = ?", versionID).
 		Order("position ASC").
 		Find(&rows).Error
@@ -460,13 +596,13 @@ func (r *gormRepository) ListBoardCards(ctx context.Context, sc authctx.Scope, v
 	return rows, err
 }
 
-func (r *gormRepository) GetLesson(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Lesson, error) {
-	var l Lesson
-	err := r.lessons(ctx, sc).Where("id = ?", id).Take(&l).Error
+func (r *gormRepository) GetLesson(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*LessonRow, error) {
+	var row LessonRow
+	err := r.lessons(ctx, sc).Select(lessonCountSelect).Where("id = ?", id).Take(&row).Error
 	if err != nil {
 		return nil, notFoundOr(err)
 	}
-	return &l, nil
+	return &row, nil
 }
 
 func (r *gormRepository) NextPosition(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) (int, error) {
@@ -490,6 +626,9 @@ func (r *gormRepository) CreateLessons(ctx context.Context, sc authctx.Scope, ro
 		if l.PrepStatus == "" {
 			l.PrepStatus = PrepTodo
 		}
+		if l.Mode == "" {
+			l.Mode = LessonModeScheduled
+		}
 	}
 	return database.FromContext(ctx, r.db).Create(rows).Error
 }
@@ -498,7 +637,7 @@ func (r *gormRepository) UpdateLesson(ctx context.Context, sc authctx.Scope, l *
 	res := r.lessons(ctx, sc).
 		Where("id = ?", l.ID).
 		Updates(map[string]any{
-			"title": l.Title, "objectives": l.Objectives, "duration_min": l.DurationMin,
+			"title": l.Title, "mode": l.Mode, "unit": l.Unit, "objectives": l.Objectives, "duration_min": l.DurationMin,
 			"homework_note": l.HomeworkNote, "updated_at": gorm.Expr("now()"),
 		})
 	if res.Error != nil {
@@ -585,6 +724,25 @@ func (r *gormRepository) SetPositions(ctx context.Context, sc authctx.Scope, ver
 	return nil
 }
 
+func (r *gormRepository) ClearLessons(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) error {
+	return r.lessons(ctx, sc).Where("version_id = ?", versionID).Delete(&Lesson{}).Error
+}
+
+// materialCountSelect adds the "in use" counts the bank table shows,
+// counting across every version status (draft/published/archived) to match
+// MaterialUsage's own live-template definition of "in use".
+const materialCountSelect = `library_materials.*,
+	(SELECT count(*) FROM template_lesson_materials lm
+	   JOIN template_lessons l ON l.id = lm.lesson_id
+	   JOIN program_template_versions v ON v.id = l.version_id
+	   JOIN program_templates t ON t.id = v.template_id AND t.deleted_at IS NULL
+	  WHERE lm.material_id = library_materials.id) AS lesson_count,
+	(SELECT count(DISTINCT t.id) FROM template_lesson_materials lm
+	   JOIN template_lessons l ON l.id = lm.lesson_id
+	   JOIN program_template_versions v ON v.id = l.version_id
+	   JOIN program_templates t ON t.id = v.template_id AND t.deleted_at IS NULL
+	  WHERE lm.material_id = library_materials.id) AS template_count`
+
 // materials scopes a query to the caller's center's live materials.
 func (r *gormRepository) materials(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	return database.FromContext(ctx, r.db).
@@ -600,25 +758,32 @@ func (r *gormRepository) CreateMaterial(ctx context.Context, sc authctx.Scope, m
 	return database.FromContext(ctx, r.db).Create(m).Error
 }
 
-func (r *gormRepository) GetMaterial(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Material, error) {
-	var m Material
-	if err := r.materials(ctx, sc).Where("library_materials.id = ?", id).Take(&m).Error; err != nil {
+func (r *gormRepository) GetMaterial(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*MaterialRow, error) {
+	var row MaterialRow
+	err := r.materials(ctx, sc).
+		Select(materialCountSelect).
+		Where("library_materials.id = ?", id).
+		Take(&row).Error
+	if err != nil {
 		return nil, notFoundOr(err)
 	}
-	return &m, nil
+	return &row, nil
 }
 
-func (r *gormRepository) ListMaterials(ctx context.Context, sc authctx.Scope, f ListFilter, p pagination.Params) ([]Material, int64, error) {
+func (r *gormRepository) ListMaterials(ctx context.Context, sc authctx.Scope, f ListFilter, p pagination.Params) ([]MaterialRow, int64, error) {
 	q := r.materials(ctx, sc)
 	if f.Q != "" {
 		q = q.Where(`library_materials.title ILIKE ? ESCAPE '\'`, likeq.Contains(f.Q))
+	}
+	if f.Active != nil {
+		q = q.Where("library_materials.active = ?", *f.Active)
 	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	var rows []Material
-	err := q.Scopes(p.Scope).Order("library_materials.id ASC").Find(&rows).Error
+	var rows []MaterialRow
+	err := q.Select(materialCountSelect).Scopes(p.Scope).Order("library_materials.id ASC").Find(&rows).Error
 	if err != nil {
 		return nil, 0, err
 	}
@@ -661,6 +826,13 @@ func (r *gormRepository) UpdateMaterial(ctx context.Context, sc authctx.Scope, m
 	return affected(res)
 }
 
+func (r *gormRepository) SetMaterialActive(ctx context.Context, sc authctx.Scope, id uuid.UUID, active bool) error {
+	res := r.materials(ctx, sc).
+		Where("library_materials.id = ?", id).
+		Updates(map[string]any{"active": active, "updated_at": gorm.Expr("now()")})
+	return affected(res)
+}
+
 func (r *gormRepository) SoftDeleteMaterial(ctx context.Context, sc authctx.Scope, id uuid.UUID) error {
 	res := r.materials(ctx, sc).
 		Where("library_materials.id = ?", id).
@@ -682,6 +854,19 @@ func (r *gormRepository) MaterialUsage(ctx context.Context, sc authctx.Scope, id
 	return u, err
 }
 
+// exerciseCountSelect mirrors materialCountSelect for template_lesson_exercises.
+const exerciseCountSelect = `library_exercises.*,
+	(SELECT count(*) FROM template_lesson_exercises le
+	   JOIN template_lessons l ON l.id = le.lesson_id
+	   JOIN program_template_versions v ON v.id = l.version_id
+	   JOIN program_templates t ON t.id = v.template_id AND t.deleted_at IS NULL
+	  WHERE le.exercise_id = library_exercises.id) AS lesson_count,
+	(SELECT count(DISTINCT t.id) FROM template_lesson_exercises le
+	   JOIN template_lessons l ON l.id = le.lesson_id
+	   JOIN program_template_versions v ON v.id = l.version_id
+	   JOIN program_templates t ON t.id = v.template_id AND t.deleted_at IS NULL
+	  WHERE le.exercise_id = library_exercises.id) AS template_count`
+
 // exercises scopes a query to the caller's center's live exercises.
 func (r *gormRepository) exercises(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	return database.FromContext(ctx, r.db).
@@ -697,25 +882,33 @@ func (r *gormRepository) CreateExercise(ctx context.Context, sc authctx.Scope, e
 	return database.FromContext(ctx, r.db).Create(e).Error
 }
 
-func (r *gormRepository) GetExercise(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Exercise, error) {
-	var e Exercise
-	if err := r.exercises(ctx, sc).Where("library_exercises.id = ?", id).Take(&e).Error; err != nil {
+func (r *gormRepository) GetExercise(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*ExerciseRow, error) {
+	var row ExerciseRow
+	err := r.exercises(ctx, sc).
+		Select(exerciseCountSelect).
+		Where("library_exercises.id = ?", id).
+		Take(&row).Error
+	if err != nil {
 		return nil, notFoundOr(err)
 	}
-	return &e, nil
+	return &row, nil
 }
 
-func (r *gormRepository) ListExercises(ctx context.Context, sc authctx.Scope, f ListFilter, p pagination.Params) ([]Exercise, int64, error) {
+func (r *gormRepository) ListExercises(ctx context.Context, sc authctx.Scope, f ListFilter, p pagination.Params) ([]ExerciseRow, int64, error) {
 	q := r.exercises(ctx, sc)
 	if f.Q != "" {
-		q = q.Where(`library_exercises.title ILIKE ? ESCAPE '\'`, likeq.Contains(f.Q))
+		needle := likeq.Contains(f.Q)
+		q = q.Where(`(library_exercises.title ILIKE ? ESCAPE '\' OR library_exercises.code ILIKE ? ESCAPE '\')`, needle, needle)
+	}
+	if f.Active != nil {
+		q = q.Where("library_exercises.active = ?", *f.Active)
 	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	var rows []Exercise
-	err := q.Scopes(p.Scope).Order("library_exercises.id ASC").Find(&rows).Error
+	var rows []ExerciseRow
+	err := q.Select(exerciseCountSelect).Scopes(p.Scope).Order("library_exercises.id ASC").Find(&rows).Error
 	if err != nil {
 		return nil, 0, err
 	}
@@ -751,8 +944,16 @@ func (r *gormRepository) UpdateExercise(ctx context.Context, sc authctx.Scope, e
 		Where("library_exercises.id = ?", e.ID).
 		Updates(map[string]any{
 			"title": e.Title, "description": e.Description, "difficulty": e.Difficulty,
+			"code": e.Code, "skill": e.Skill, "level": e.Level,
 			"tags": e.Tags, "updated_at": gorm.Expr("now()"),
 		})
+	return affected(res)
+}
+
+func (r *gormRepository) SetExerciseActive(ctx context.Context, sc authctx.Scope, id uuid.UUID, active bool) error {
+	res := r.exercises(ctx, sc).
+		Where("library_exercises.id = ?", id).
+		Updates(map[string]any{"active": active, "updated_at": gorm.Expr("now()")})
 	return affected(res)
 }
 
@@ -773,6 +974,46 @@ func (r *gormRepository) ExerciseUsage(ctx context.Context, sc authctx.Scope, id
 		Where("template_lesson_exercises.exercise_id = ?", id).
 		Scan(&u).Error
 	return u, err
+}
+
+// exerciseCodePrefix is the fixed prefix NextExerciseCode formats onto.
+const exerciseCodePrefix = "BT-"
+
+func (r *gormRepository) NextExerciseCode(ctx context.Context, sc authctx.Scope) (string, error) {
+	// Includes soft-deleted rows so a code is never reissued; the unique
+	// index itself is partial (live rows only), so this scan must not use
+	// the exercises() helper, which filters deleted_at.
+	//
+	// The max is computed numerically over only the codes that match the
+	// generator's own BT-<digits> shape: a caller-chosen code sharing the
+	// prefix but not that shape (e.g. "BT-ABC") must not derail the
+	// sequence, and a plain string max would rank "BT-10000" below
+	// "BT-9999" once the count passes four digits.
+	var maxN *int64
+	err := database.FromContext(ctx, r.db).
+		Model(&Exercise{}).
+		Where("center_id = ? AND code ~ ?", sc.CenterID, "^"+exerciseCodePrefix+"[0-9]+$").
+		Select("max(substring(code from '^" + exerciseCodePrefix + "([0-9]+)$')::bigint)").
+		Scan(&maxN).Error
+	if err != nil {
+		return "", err
+	}
+	next := int64(1)
+	if maxN != nil {
+		next = *maxN + 1
+	}
+	return fmt.Sprintf("%s%04d", exerciseCodePrefix, next), nil
+}
+
+func (r *gormRepository) LockCenterForExerciseCode(ctx context.Context, sc authctx.Scope) error {
+	// Blocking, not the TRY variant: contention is per-center and rare (two
+	// requests auto-generating a code for the same center at once), the
+	// held work is one scan plus one insert, and the caller's context
+	// deadline bounds the wait. The key is salted with a feature-local
+	// prefix so hashtext never collides with another feature's bare-id
+	// lock on the same center.
+	return database.FromContext(ctx, r.db).
+		Exec(`SELECT pg_advisory_xact_lock(hashtext(?::text))`, "library-exercise-code:"+sc.CenterID.String()).Error
 }
 
 // lessonMaterials scopes a query to the center's lesson↔material links.
@@ -835,7 +1076,7 @@ func (r *gormRepository) ListLessonExercises(ctx context.Context, sc authctx.Sco
 	}
 	var rows []LessonExerciseRow
 	err := r.lessonExercises(ctx, sc).
-		Select("e.*, template_lesson_exercises.lesson_id, template_lesson_exercises.position").
+		Select("e.*, template_lesson_exercises.lesson_id, template_lesson_exercises.group_id, template_lesson_exercises.position").
 		Joins("JOIN library_exercises e ON e.id = template_lesson_exercises.exercise_id").
 		Where("template_lesson_exercises.lesson_id IN ?", lessonIDs).
 		Order("template_lesson_exercises.lesson_id, template_lesson_exercises.position").
@@ -903,6 +1144,77 @@ func (r *gormRepository) SetScoreSet(ctx context.Context, sc authctx.Scope, vers
 		Where("id = ?", versionID).
 		Updates(map[string]any{"score_set": set, "updated_at": gorm.Expr("now()")})
 	return affected(res)
+}
+
+// exerciseGroupCountSelect adds how many live lesson-exercise links (of any
+// lesson in the group's version) point at each group.
+const exerciseGroupCountSelect = `template_exercise_groups.*,
+	(SELECT count(*) FROM template_lesson_exercises le
+	  WHERE le.group_id = template_exercise_groups.id) AS exercise_count`
+
+// exerciseGroups scopes a query to the center's template exercise groups.
+func (r *gormRepository) exerciseGroups(ctx context.Context, sc authctx.Scope) *gorm.DB {
+	return database.FromContext(ctx, r.db).
+		Model(&ExerciseGroup{}).
+		Where("template_exercise_groups.center_id = ?", sc.CenterID)
+}
+
+func (r *gormRepository) ListExerciseGroups(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) ([]ExerciseGroupRow, error) {
+	var rows []ExerciseGroupRow
+	err := r.exerciseGroups(ctx, sc).
+		Select(exerciseGroupCountSelect).
+		Where("template_exercise_groups.version_id = ?", versionID).
+		Order("template_exercise_groups.position ASC").
+		Find(&rows).Error
+	return rows, err
+}
+
+func (r *gormRepository) NextGroupPosition(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) (int, error) {
+	var next int
+	err := r.exerciseGroups(ctx, sc).
+		Where("template_exercise_groups.version_id = ?", versionID).
+		Select("COALESCE(max(position), 0) + 1").
+		Scan(&next).Error
+	return next, err
+}
+
+func (r *gormRepository) CreateExerciseGroup(ctx context.Context, sc authctx.Scope, g *ExerciseGroup) error {
+	if g.ID == uuid.Nil {
+		g.ID = id.New()
+	}
+	g.CenterID = sc.CenterID
+	return database.FromContext(ctx, r.db).Create(g).Error
+}
+
+func (r *gormRepository) CreateExerciseGroups(ctx context.Context, sc authctx.Scope, rows []*ExerciseGroup) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	for _, g := range rows {
+		if g.ID == uuid.Nil {
+			g.ID = id.New()
+		}
+		g.CenterID = sc.CenterID
+	}
+	return database.FromContext(ctx, r.db).Create(rows).Error
+}
+
+func (r *gormRepository) DeleteExerciseGroup(ctx context.Context, sc authctx.Scope, versionID, id uuid.UUID) error {
+	res := r.exerciseGroups(ctx, sc).
+		Where("template_exercise_groups.version_id = ? AND template_exercise_groups.id = ?", versionID, id).
+		Delete(&ExerciseGroup{})
+	return affected(res)
+}
+
+func (r *gormRepository) FilterExistingGroupIDs(ctx context.Context, sc authctx.Scope, versionID uuid.UUID, ids []uuid.UUID) ([]uuid.UUID, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var found []uuid.UUID
+	err := r.exerciseGroups(ctx, sc).
+		Where("template_exercise_groups.version_id = ? AND template_exercise_groups.id IN ?", versionID, ids).
+		Pluck("template_exercise_groups.id", &found).Error
+	return found, err
 }
 
 // affected turns a zero-row update into ErrNotFound.

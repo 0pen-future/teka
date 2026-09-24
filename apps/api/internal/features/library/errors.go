@@ -35,6 +35,8 @@ const (
 	// CodeTemplateInUse: a class applies one of the template's versions, so
 	// the template cannot be deleted while that program stays in place.
 	CodeTemplateInUse = "TEMPLATE_IN_USE"
+	// CodeExerciseCodeTaken: another live exercise of the center uses this code.
+	CodeExerciseCodeTaken = "EXERCISE_CODE_TAKEN"
 )
 
 func errVersionLocked() *apperror.AppError {
@@ -90,4 +92,9 @@ func errVersionNotPublishedForClass() *apperror.AppError {
 func errTemplateInUse() *apperror.AppError {
 	return apperror.New(CodeTemplateInUse, http.StatusConflict,
 		"Chương trình mẫu đang được lớp áp dụng, hãy gỡ chương trình khỏi lớp trước khi xoá")
+}
+
+func errExerciseCodeTaken() *apperror.AppError {
+	return apperror.New(CodeExerciseCodeTaken, http.StatusConflict,
+		"Mã bài tập đã tồn tại")
 }

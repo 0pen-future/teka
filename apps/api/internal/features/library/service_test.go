@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +31,8 @@ type fakeRepo struct {
 	lessonMaterials map[uuid.UUID][]LessonMaterial
 	lessonExercises map[uuid.UUID][]LessonExercise
 	logFields       map[uuid.UUID][]LogField
+	// groups holds template_exercise_groups rows, keyed by id.
+	groups map[uuid.UUID]*ExerciseGroup
 	// locks counts LockVersion calls so tests can assert a write took the lock.
 	locks int
 	// inUse marks templates a class applies (class_programs rows).
@@ -40,6 +43,12 @@ type fakeRepo struct {
 	// lastPrepFields is the fields map the last UpdateLessonPrep call
 	// received, so a test can assert an omitted field never reached it.
 	lastPrepFields map[string]any
+	// versionClasses stands in for the class_programs join, keyed by
+	// version id; empty unless a test populates it.
+	versionClasses map[uuid.UUID][]VersionClassRef
+	// listVersionsCalls and listVersionsForCalls count invocations so a
+	// test can assert a caller batches instead of looping per row.
+	listVersionsCalls, listVersionsForCalls int
 }
 
 func newFakeRepo() *fakeRepo {
@@ -52,8 +61,10 @@ func newFakeRepo() *fakeRepo {
 		lessonMaterials: map[uuid.UUID][]LessonMaterial{},
 		lessonExercises: map[uuid.UUID][]LessonExercise{},
 		logFields:       map[uuid.UUID][]LogField{},
+		groups:          map[uuid.UUID]*ExerciseGroup{},
 		inUse:           map[uuid.UUID]bool{},
 		members:         map[uuid.UUID]string{},
+		versionClasses:  map[uuid.UUID][]VersionClassRef{},
 	}
 }
 
@@ -72,6 +83,7 @@ func (f *fakeRepo) CreateTemplate(_ context.Context, sc authctx.Scope, t *Templa
 
 func (f *fakeRepo) summary(t *Template) *TemplateRow {
 	row := &TemplateRow{Template: *t}
+	var latestPublished *Version
 	for _, v := range f.versions {
 		if v.TemplateID != t.ID {
 			continue
@@ -82,6 +94,9 @@ func (f *fakeRepo) summary(t *Template) *TemplateRow {
 			if row.PublishedVersionNo == nil || *row.PublishedVersionNo < v.VersionNo {
 				n := v.VersionNo
 				row.PublishedVersionNo = &n
+			}
+			if latestPublished == nil || v.VersionNo > latestPublished.VersionNo {
+				latestPublished = v
 			}
 		case StatusDraft:
 			n := v.VersionNo
@@ -105,6 +120,21 @@ func (f *fakeRepo) summary(t *Template) *TemplateRow {
 				}
 			}
 			sort.Strings(row.DraftAssignees)
+		}
+	}
+	// lesson_count mirrors the SQL: the newest published version's lessons
+	// when one exists — multiple published versions can coexist without
+	// being summed together — else the draft's lessons.
+	countVersionID := row.DraftVersionID
+	if latestPublished != nil {
+		id := latestPublished.ID
+		countVersionID = &id
+	}
+	if countVersionID != nil {
+		for _, l := range f.lessons {
+			if l.VersionID == *countVersionID {
+				row.LessonCount++
+			}
 		}
 	}
 	return row
@@ -237,6 +267,7 @@ func (f *fakeRepo) LockVersion(_ context.Context, sc authctx.Scope, id uuid.UUID
 }
 
 func (f *fakeRepo) ListVersions(_ context.Context, sc authctx.Scope, templateID uuid.UUID) ([]VersionRow, error) {
+	f.listVersionsCalls++
 	var out []VersionRow
 	for _, v := range f.versions {
 		if v.CenterID == sc.CenterID && v.TemplateID == templateID {
@@ -244,6 +275,27 @@ func (f *fakeRepo) ListVersions(_ context.Context, sc authctx.Scope, templateID 
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].VersionNo > out[j].VersionNo })
+	return out, nil
+}
+
+func (f *fakeRepo) ListVersionsFor(_ context.Context, sc authctx.Scope, templateIDs []uuid.UUID) ([]VersionRow, error) {
+	f.listVersionsForCalls++
+	want := map[uuid.UUID]bool{}
+	for _, id := range templateIDs {
+		want[id] = true
+	}
+	var out []VersionRow
+	for _, v := range f.versions {
+		if v.CenterID == sc.CenterID && want[v.TemplateID] {
+			out = append(out, *f.versionRow(v))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].TemplateID != out[j].TemplateID {
+			return out[i].TemplateID.String() < out[j].TemplateID.String()
+		}
+		return out[i].VersionNo > out[j].VersionNo
+	})
 	return out, nil
 }
 
@@ -285,24 +337,34 @@ func (f *fakeRepo) SetVersionStatus(_ context.Context, sc authctx.Scope, id uuid
 	return nil
 }
 
-func (f *fakeRepo) ListLessons(_ context.Context, sc authctx.Scope, versionID uuid.UUID) ([]Lesson, error) {
-	var out []Lesson
+// lessonRow builds the LessonRow the SQL layer's subselects compute, from
+// the in-memory link maps.
+func (f *fakeRepo) lessonRow(l *Lesson) LessonRow {
+	return LessonRow{
+		Lesson:        *l,
+		MaterialCount: len(f.lessonMaterials[l.ID]),
+		ExerciseCount: len(f.lessonExercises[l.ID]),
+	}
+}
+
+func (f *fakeRepo) ListLessons(_ context.Context, sc authctx.Scope, versionID uuid.UUID) ([]LessonRow, error) {
+	var out []LessonRow
 	for _, l := range f.lessons {
 		if l.CenterID == sc.CenterID && l.VersionID == versionID {
-			out = append(out, *l)
+			out = append(out, f.lessonRow(l))
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Position < out[j].Position })
 	return out, nil
 }
 
-func (f *fakeRepo) GetLesson(_ context.Context, sc authctx.Scope, id uuid.UUID) (*Lesson, error) {
+func (f *fakeRepo) GetLesson(_ context.Context, sc authctx.Scope, id uuid.UUID) (*LessonRow, error) {
 	l, ok := f.lessons[id]
 	if !ok || l.CenterID != sc.CenterID {
 		return nil, ErrNotFound
 	}
-	cp := *l
-	return &cp, nil
+	row := f.lessonRow(l)
+	return &row, nil
 }
 
 func (f *fakeRepo) NextPosition(_ context.Context, sc authctx.Scope, versionID uuid.UUID) (int, error) {
@@ -336,7 +398,8 @@ func (f *fakeRepo) UpdateLesson(_ context.Context, sc authctx.Scope, l *Lesson) 
 	if !ok || cur.CenterID != sc.CenterID {
 		return ErrNotFound
 	}
-	cur.Title, cur.Objectives, cur.DurationMin, cur.HomeworkNote = l.Title, l.Objectives, l.DurationMin, l.HomeworkNote
+	cur.Title, cur.Mode, cur.Unit = l.Title, l.Mode, l.Unit
+	cur.Objectives, cur.DurationMin, cur.HomeworkNote = l.Objectives, l.DurationMin, l.HomeworkNote
 	cur.UpdatedAt = nowUTC()
 	return nil
 }
@@ -347,6 +410,19 @@ func (f *fakeRepo) DeleteLesson(_ context.Context, sc authctx.Scope, id uuid.UUI
 		return ErrNotFound
 	}
 	delete(f.lessons, id)
+	return nil
+}
+
+// ClearLessons deletes every lesson of the version, the same cascade the
+// SQL foreign keys give the join tables.
+func (f *fakeRepo) ClearLessons(_ context.Context, sc authctx.Scope, versionID uuid.UUID) error {
+	for id, l := range f.lessons {
+		if l.CenterID == sc.CenterID && l.VersionID == versionID {
+			delete(f.lessons, id)
+			delete(f.lessonMaterials, id)
+			delete(f.lessonExercises, id)
+		}
+	}
 	return nil
 }
 
@@ -417,7 +493,7 @@ func (f *fakeRepo) ListBoardCards(ctx context.Context, sc authctx.Scope, version
 	}
 	out := make([]BoardCard, 0, len(rows))
 	for _, l := range rows {
-		card := BoardCard{Lesson: l}
+		card := BoardCard{Lesson: l.Lesson}
 		if l.AssigneeID != nil {
 			if name, ok := f.members[*l.AssigneeID]; ok {
 				card.AssigneeName = str(name)
@@ -426,6 +502,104 @@ func (f *fakeRepo) ListBoardCards(ctx context.Context, sc authctx.Scope, version
 		out = append(out, card)
 	}
 	return out, nil
+}
+
+// ListVersionClasses reads from versionClasses, empty unless a test
+// populated it; the real per-version 50-row cap is a SQL LIMIT, so it is
+// covered by the integration test instead.
+func (f *fakeRepo) ListVersionClasses(_ context.Context, _ authctx.Scope, versionID uuid.UUID) ([]VersionClassRef, error) {
+	return f.versionClasses[versionID], nil
+}
+
+func (f *fakeRepo) ListVersionClassesFor(_ context.Context, _ authctx.Scope, versionIDs []uuid.UUID) ([]VersionClassLink, error) {
+	var out []VersionClassLink
+	for _, id := range versionIDs {
+		for _, c := range f.versionClasses[id] {
+			out = append(out, VersionClassLink{VersionID: id, ID: c.ID, Name: c.Name})
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeRepo) exerciseGroupRow(g *ExerciseGroup) ExerciseGroupRow {
+	count := 0
+	for _, links := range f.lessonExercises {
+		for _, l := range links {
+			if l.GroupID != nil && *l.GroupID == g.ID {
+				count++
+			}
+		}
+	}
+	return ExerciseGroupRow{ExerciseGroup: *g, ExerciseCount: count}
+}
+
+func (f *fakeRepo) ListExerciseGroups(_ context.Context, sc authctx.Scope, versionID uuid.UUID) ([]ExerciseGroupRow, error) {
+	var out []ExerciseGroupRow
+	for _, g := range f.groups {
+		if g.CenterID == sc.CenterID && g.VersionID == versionID {
+			out = append(out, f.exerciseGroupRow(g))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Position < out[j].Position })
+	return out, nil
+}
+
+func (f *fakeRepo) NextGroupPosition(_ context.Context, sc authctx.Scope, versionID uuid.UUID) (int, error) {
+	next := 1
+	for _, g := range f.groups {
+		if g.CenterID == sc.CenterID && g.VersionID == versionID && g.Position >= next {
+			next = g.Position + 1
+		}
+	}
+	return next, nil
+}
+
+func (f *fakeRepo) CreateExerciseGroup(_ context.Context, sc authctx.Scope, g *ExerciseGroup) error {
+	g.ID, g.CenterID = uuid.New(), sc.CenterID
+	g.CreatedAt, g.UpdatedAt = nowUTC(), nowUTC()
+	cp := *g
+	f.groups[g.ID] = &cp
+	return nil
+}
+
+func (f *fakeRepo) CreateExerciseGroups(_ context.Context, sc authctx.Scope, rows []*ExerciseGroup) error {
+	for _, g := range rows {
+		g.ID, g.CenterID = uuid.New(), sc.CenterID
+		g.CreatedAt, g.UpdatedAt = nowUTC(), nowUTC()
+		cp := *g
+		f.groups[g.ID] = &cp
+	}
+	return nil
+}
+
+// DeleteExerciseGroup mirrors the real foreign key's ON DELETE SET NULL:
+// every lesson-exercise link pointing at the group loses its group_id
+// instead of being deleted.
+func (f *fakeRepo) DeleteExerciseGroup(_ context.Context, sc authctx.Scope, versionID, id uuid.UUID) error {
+	g, ok := f.groups[id]
+	if !ok || g.CenterID != sc.CenterID || g.VersionID != versionID {
+		return ErrNotFound
+	}
+	delete(f.groups, id)
+	for lessonID, links := range f.lessonExercises {
+		for i := range links {
+			if links[i].GroupID != nil && *links[i].GroupID == id {
+				f.lessonExercises[lessonID][i].GroupID = nil
+			}
+		}
+	}
+	return nil
+}
+
+func (f *fakeRepo) FilterExistingGroupIDs(_ context.Context, sc authctx.Scope, versionID uuid.UUID, ids []uuid.UUID) ([]uuid.UUID, error) {
+	var found []uuid.UUID
+	for _, id := range ids {
+		g, ok := f.groups[id]
+		if ok && g.CenterID == sc.CenterID && g.VersionID == versionID {
+			found = append(found, id)
+		}
+	}
+	return found, nil
 }
 
 // fakeTx runs fn inline and counts outermost calls so tests can assert a
@@ -762,6 +936,47 @@ func TestNewVersionCopiesLatestPublishedLessons(t *testing.T) {
 	}
 }
 
+// TestListVersionsIncludesClassesForEveryVersion covers the ListVersions
+// endpoint filling each row's class chips from one batched call, the same
+// way GetVersion already does for a single version.
+func TestListVersionsIncludesClassesForEveryVersion(t *testing.T) {
+	svc, d := newTestService()
+	ctx := context.Background()
+	sc := d.ownerScope()
+	tpl := mustTemplate(t, svc, sc, "CT01")
+	draft := draftOf(t, svc, sc, tpl.ID)
+	mustLesson(t, svc, sc, draft.ID, "Buổi 1")
+	if _, err := svc.Publish(ctx, sc, draft.ID); err != nil {
+		t.Fatalf("publish v1: %v", err)
+	}
+	v2, err := svc.CreateVersion(ctx, sc, tpl.ID, CreateVersionRequest{})
+	if err != nil {
+		t.Fatalf("create v2: %v", err)
+	}
+
+	classA, classB := uuid.New(), uuid.New()
+	d.repo.versionClasses[draft.ID] = []VersionClassRef{{ID: classA, Name: "Lớp A"}}
+	d.repo.versionClasses[v2.ID] = []VersionClassRef{{ID: classB, Name: "Lớp B"}}
+
+	versions, err := svc.ListVersions(ctx, sc, tpl.ID)
+	if err != nil {
+		t.Fatalf("list versions: %v", err)
+	}
+	if len(versions) != 2 {
+		t.Fatalf("want 2 versions, got %d", len(versions))
+	}
+	byID := map[uuid.UUID]VersionResponse{}
+	for _, v := range versions {
+		byID[v.ID] = v
+	}
+	if v1Resp := byID[draft.ID]; len(v1Resp.Classes) != 1 || v1Resp.Classes[0].ID != classA {
+		t.Errorf("v1 must carry its own class, got %+v", v1Resp.Classes)
+	}
+	if v2Resp := byID[v2.ID]; len(v2Resp.Classes) != 1 || v2Resp.Classes[0].ID != classB {
+		t.Errorf("v2 must carry its own class, not v1's, got %+v", v2Resp.Classes)
+	}
+}
+
 func TestArchiveKeepsLessons(t *testing.T) {
 	svc, d := newTestService()
 	ctx := context.Background()
@@ -792,6 +1007,110 @@ func TestArchiveKeepsLessons(t *testing.T) {
 	tplRow, _ := svc.GetTemplate(ctx, sc, tpl.ID)
 	if tplRow.PublishedVersionNo != nil {
 		t.Errorf("an archived version is no longer the published one, got %+v", tplRow)
+	}
+}
+
+// TestTemplateLessonCountCountsOnlyTheNewestPublishedVersion covers the
+// case where two published versions coexist (publishing never auto-archives
+// an older one): the template's lesson_count must reflect only the newest
+// published version's lessons, not every published version's lessons summed.
+func TestTemplateLessonCountCountsOnlyTheNewestPublishedVersion(t *testing.T) {
+	svc, d := newTestService()
+	ctx := context.Background()
+	sc := d.ownerScope()
+	tpl := mustTemplate(t, svc, sc, "CT01")
+	draft := draftOf(t, svc, sc, tpl.ID)
+	mustLesson(t, svc, sc, draft.ID, "Buổi 1")
+	mustLesson(t, svc, sc, draft.ID, "Buổi 2")
+	if _, err := svc.Publish(ctx, sc, draft.ID); err != nil {
+		t.Fatalf("publish v1: %v", err)
+	}
+
+	v2, err := svc.CreateVersion(ctx, sc, tpl.ID, CreateVersionRequest{})
+	if err != nil {
+		t.Fatalf("create v2: %v", err)
+	}
+	v2Lessons, err := svc.ListLessons(ctx, sc, v2.ID)
+	if err != nil || len(v2Lessons) != 2 {
+		t.Fatalf("v2 copied lessons: %v (%d)", err, len(v2Lessons))
+	}
+	// Drop one of v2's copied lessons so v1 (2 lessons) and v2 (1 lesson)
+	// differ: summing both published versions (3) is distinguishable from
+	// counting only the newest (1).
+	if err := svc.DeleteLesson(ctx, sc, v2Lessons[0].ID); err != nil {
+		t.Fatalf("delete lesson: %v", err)
+	}
+	if _, err := svc.Publish(ctx, sc, v2.ID); err != nil {
+		t.Fatalf("publish v2: %v", err)
+	}
+
+	tplRow, err := svc.GetTemplate(ctx, sc, tpl.ID)
+	if err != nil {
+		t.Fatalf("get template: %v", err)
+	}
+	if tplRow.PublishedVersionNo == nil || *tplRow.PublishedVersionNo != 2 {
+		t.Fatalf("v1 and v2 must both stay published, newest is v2: %+v", tplRow)
+	}
+	if tplRow.LessonCount != 1 {
+		t.Errorf("lesson_count must count only the newest published version's lessons (1), got %d", tplRow.LessonCount)
+	}
+}
+
+// TestDuplicateLessonTruncatesATitleAtTheColumnLimit covers a source title
+// already at the 200-rune column limit: appending the "(bản sao)" suffix
+// verbatim would overflow VARCHAR(200) and 500 the request, so the
+// duplicate's title must be truncated to still fit.
+func TestDuplicateLessonTruncatesATitleAtTheColumnLimit(t *testing.T) {
+	svc, d := newTestService()
+	ctx := context.Background()
+	sc := d.ownerScope()
+	tpl := mustTemplate(t, svc, sc, "CT01")
+	draft := draftOf(t, svc, sc, tpl.ID)
+
+	longTitle := strings.Repeat("a", lessonTitleMaxLen)
+	src := mustLesson(t, svc, sc, draft.ID, longTitle)
+
+	dup, err := svc.DuplicateLesson(ctx, sc, src.ID)
+	if err != nil {
+		t.Fatalf("duplicate: %v", err)
+	}
+	runes := []rune(dup.Title)
+	if len(runes) > lessonTitleMaxLen {
+		t.Fatalf("duplicated title must not exceed %d runes, got %d: %q", lessonTitleMaxLen, len(runes), dup.Title)
+	}
+	if !strings.HasSuffix(dup.Title, duplicateTitleSuffix) {
+		t.Errorf("duplicated title must still carry the suffix, got %q", dup.Title)
+	}
+}
+
+// TestLessonUnitIsTrimmedAndBlankBecomesNull covers CreateLesson and
+// UpdateLesson storing a padded unit trimmed, and a whitespace-only or
+// omitted one as NULL rather than an empty string.
+func TestLessonUnitIsTrimmedAndBlankBecomesNull(t *testing.T) {
+	svc, d := newTestService()
+	ctx := context.Background()
+	sc := d.ownerScope()
+	tpl := mustTemplate(t, svc, sc, "CT01")
+	draft := draftOf(t, svc, sc, tpl.ID)
+
+	created, err := svc.CreateLesson(ctx, sc, draft.ID, LessonRequest{Title: "Buổi 1", Unit: str("  Unit 1  ")})
+	if err != nil || created.Unit == nil || *created.Unit != "Unit 1" {
+		t.Fatalf("create must trim unit: %v %+v", err, created)
+	}
+
+	blank, err := svc.CreateLesson(ctx, sc, draft.ID, LessonRequest{Title: "Buổi 2", Unit: str("   ")})
+	if err != nil || blank.Unit != nil {
+		t.Fatalf("create with a whitespace-only unit must store null, got %v %v", err, blank.Unit)
+	}
+
+	updated, err := svc.UpdateLesson(ctx, sc, created.ID, LessonRequest{Title: "Buổi 1", Unit: str("  Unit 2 ")})
+	if err != nil || updated.Unit == nil || *updated.Unit != "Unit 2" {
+		t.Fatalf("update must trim unit: %v %+v", err, updated)
+	}
+
+	cleared, err := svc.UpdateLesson(ctx, sc, created.ID, LessonRequest{Title: "Buổi 1"})
+	if err != nil || cleared.Unit != nil {
+		t.Fatalf("update with an omitted unit must store null, got %v %v", err, cleared.Unit)
 	}
 }
 
@@ -1006,6 +1325,7 @@ func TestListTemplatesHasDraftFilterAndPrepSummary(t *testing.T) {
 		t.Fatalf("publish: %v", err)
 	}
 
+	d.repo.listVersionsCalls, d.repo.listVersionsForCalls = 0, 0
 	all, total, err := svc.ListTemplates(ctx, sc, ListFilter{}, pagination.Params{Page: 1, PerPage: 20})
 	if err != nil || total != 2 || len(all) != 2 {
 		t.Fatalf("unfiltered list: %v total=%d len=%d", err, total, len(all))
@@ -1014,6 +1334,10 @@ func TestListTemplatesHasDraftFilterAndPrepSummary(t *testing.T) {
 		if row.ID == published.ID && row.Prep != nil {
 			t.Errorf("a template without a draft has no prep summary, got %+v", row.Prep)
 		}
+	}
+	if d.repo.listVersionsForCalls != 1 || d.repo.listVersionsCalls != 0 {
+		t.Errorf("ListTemplates must batch versions in one ListVersionsFor call instead of looping ListVersions per template, got ListVersionsFor=%d ListVersions=%d",
+			d.repo.listVersionsForCalls, d.repo.listVersionsCalls)
 	}
 
 	drafts, total, err := svc.ListTemplates(ctx, sc, ListFilter{HasDraft: true}, pagination.Params{Page: 1, PerPage: 20})

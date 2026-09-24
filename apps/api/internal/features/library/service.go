@@ -85,6 +85,11 @@ func (s *Service) GetTemplate(ctx context.Context, sc authctx.Scope, id uuid.UUI
 	if err != nil {
 		return nil, notFound(err, "program template")
 	}
+	versions, err := s.repo.ListVersions(ctx, sc, id)
+	if err != nil {
+		return nil, err
+	}
+	row.Versions = versionRefs(versions)
 	out := templateResponse(row)
 	return &out, nil
 }
@@ -98,11 +103,35 @@ func (s *Service) ListTemplates(ctx context.Context, sc authctx.Scope, f ListFil
 	if err != nil {
 		return nil, 0, err
 	}
+	ids := make([]uuid.UUID, len(rows))
+	for i := range rows {
+		ids[i] = rows[i].ID
+	}
+	versionsByTemplate, err := s.versionsByTemplate(ctx, sc, ids)
+	if err != nil {
+		return nil, 0, err
+	}
 	out := make([]TemplateResponse, 0, len(rows))
 	for i := range rows {
+		rows[i].Versions = versionRefs(versionsByTemplate[rows[i].ID])
 		out = append(out, templateResponse(&rows[i]))
 	}
 	return out, total, nil
+}
+
+// versionsByTemplate batches ListVersions across every given template id in
+// one query, grouping the rows in Go, so a caller looping over templates
+// never issues one ListVersions call per row.
+func (s *Service) versionsByTemplate(ctx context.Context, sc authctx.Scope, templateIDs []uuid.UUID) (map[uuid.UUID][]VersionRow, error) {
+	rows, err := s.repo.ListVersionsFor(ctx, sc, templateIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID][]VersionRow, len(templateIDs))
+	for _, row := range rows {
+		out[row.TemplateID] = append(out[row.TemplateID], row)
+	}
+	return out, nil
 }
 
 // UpdateTemplate replaces the template's own fields.
@@ -241,10 +270,28 @@ func (s *Service) CreateVersion(ctx context.Context, sc authctx.Scope, templateI
 }
 
 // copyVersionContent seeds the new draft with everything the source
-// version carries: lessons with their material and exercise links, the
-// log fields and the score set. Items are shared by reference (the same
-// center-wide material row), lessons and log fields are new rows.
+// version carries: exercise groups (so lesson-exercise links can point at
+// their copy), lessons with their material and exercise links, the log
+// fields and the score set. Items are shared by reference (the same
+// center-wide material row), everything else is new rows.
 func (s *Service) copyVersionContent(ctx context.Context, sc authctx.Scope, source, draft *Version) error {
+	groups, err := s.repo.ListExerciseGroups(ctx, sc, source.ID)
+	if err != nil {
+		return err
+	}
+	groupOf := make(map[uuid.UUID]uuid.UUID, len(groups))
+	if len(groups) > 0 {
+		groupCopies := make([]*ExerciseGroup, len(groups))
+		for i := range groups {
+			groupCopies[i] = &ExerciseGroup{VersionID: draft.ID, Name: groups[i].Name, Position: groups[i].Position}
+		}
+		if err := s.repo.CreateExerciseGroups(ctx, sc, groupCopies); err != nil {
+			return err
+		}
+		for i := range groups {
+			groupOf[groups[i].ID] = groupCopies[i].ID
+		}
+	}
 	lessons, err := s.repo.ListLessons(ctx, sc, source.ID)
 	if err != nil {
 		return err
@@ -253,7 +300,7 @@ func (s *Service) copyVersionContent(ctx context.Context, sc authctx.Scope, sour
 	for i := range lessons {
 		l := lessons[i]
 		copies = append(copies, &Lesson{
-			VersionID: draft.ID, Position: l.Position, Title: l.Title,
+			VersionID: draft.ID, Position: l.Position, Title: l.Title, Mode: l.Mode, Unit: l.Unit,
 			Objectives: l.Objectives, DurationMin: l.DurationMin, HomeworkNote: l.HomeworkNote,
 		})
 	}
@@ -286,7 +333,15 @@ func (s *Service) copyVersionContent(ctx context.Context, sc authctx.Scope, sour
 		}
 		eLinks := make([]LessonExercise, 0, len(exercises))
 		for _, row := range exercises {
-			eLinks = append(eLinks, LessonExercise{LessonID: copyOf[row.LessonID], ExerciseID: row.ID, Position: row.Position})
+			var newGroup *uuid.UUID
+			if row.GroupID != nil {
+				if g, ok := groupOf[*row.GroupID]; ok {
+					newGroup = &g
+				}
+			}
+			eLinks = append(eLinks, LessonExercise{
+				LessonID: copyOf[row.LessonID], ExerciseID: row.ID, GroupID: newGroup, Position: row.Position,
+			})
 		}
 		if err := s.repo.CreateLessonExercises(ctx, sc, eLinks); err != nil {
 			return err
@@ -324,9 +379,31 @@ func (s *Service) ListVersions(ctx context.Context, sc authctx.Scope, templateID
 	if err != nil {
 		return nil, err
 	}
+	versionIDs := make([]uuid.UUID, len(rows))
+	for i := range rows {
+		versionIDs[i] = rows[i].ID
+	}
+	classesByVersion, err := s.classesByVersion(ctx, sc, versionIDs)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]VersionResponse, 0, len(rows))
 	for i := range rows {
-		out = append(out, versionResponse(&rows[i]))
+		out = append(out, versionResponseWithClasses(&rows[i], classesByVersion[rows[i].ID]))
+	}
+	return out, nil
+}
+
+// classesByVersion batches ListVersionClasses across every given version id
+// in one query, grouping the rows in Go.
+func (s *Service) classesByVersion(ctx context.Context, sc authctx.Scope, versionIDs []uuid.UUID) (map[uuid.UUID][]VersionClassRef, error) {
+	links, err := s.repo.ListVersionClassesFor(ctx, sc, versionIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID][]VersionClassRef, len(versionIDs))
+	for _, link := range links {
+		out[link.VersionID] = append(out[link.VersionID], VersionClassRef{ID: link.ID, Name: link.Name})
 	}
 	return out, nil
 }
@@ -396,7 +473,7 @@ func (s *Service) GetLesson(ctx context.Context, sc authctx.Scope, lessonID uuid
 	if err != nil {
 		return nil, notFound(err, "template lesson")
 	}
-	details, err := s.lessonDetails(ctx, sc, []Lesson{*l})
+	details, err := s.lessonDetails(ctx, sc, []LessonRow{*l})
 	if err != nil {
 		return nil, err
 	}
@@ -405,7 +482,7 @@ func (s *Service) GetLesson(ctx context.Context, sc authctx.Scope, lessonID uuid
 
 // lessonDetails decorates lessons with their attachments in two bulk
 // reads, so a version detail costs the same number of queries as one lesson.
-func (s *Service) lessonDetails(ctx context.Context, sc authctx.Scope, lessons []Lesson) ([]LessonDetailResponse, error) {
+func (s *Service) lessonDetails(ctx context.Context, sc authctx.Scope, lessons []LessonRow) ([]LessonDetailResponse, error) {
 	ids := lessonIDs(lessons)
 	materials, err := s.repo.ListLessonMaterials(ctx, sc, ids)
 	if err != nil {
@@ -427,7 +504,7 @@ func (s *Service) lessonDetails(ctx context.Context, sc authctx.Scope, lessons [
 	for i := range lessons {
 		l := &lessons[i]
 		out = append(out, LessonDetailResponse{
-			LessonResponse: lessonResponse(l),
+			LessonResponse: lessonRowResponse(l),
 			Materials:      lessonMaterialResponses(byLessonM[l.ID]),
 			Exercises:      lessonExerciseResponses(byLessonE[l.ID]),
 		})
@@ -448,6 +525,7 @@ func (s *Service) CreateLesson(ctx context.Context, sc authctx.Scope, versionID 
 		}
 		created = &Lesson{
 			VersionID: versionID, Position: pos, Title: strings.TrimSpace(req.Title),
+			Mode: req.mode(), Unit: optionalText(req.Unit),
 			Objectives: req.Objectives, DurationMin: req.DurationMin, HomeworkNote: req.HomeworkNote,
 		}
 		return s.repo.CreateLessons(ctx, sc, []*Lesson{created})
@@ -459,7 +537,7 @@ func (s *Service) CreateLesson(ctx context.Context, sc authctx.Scope, versionID 
 	if err != nil {
 		return nil, notFound(err, "template lesson")
 	}
-	out := lessonResponse(l)
+	out := lessonRowResponse(l)
 	return &out, nil
 }
 
@@ -475,8 +553,9 @@ func (s *Service) UpdateLesson(ctx context.Context, sc authctx.Scope, lessonID u
 		}
 		return s.lessonWrite(ctx, sc, l.VersionID, func(ctx context.Context) error {
 			l.Title = strings.TrimSpace(req.Title)
+			l.Mode, l.Unit = req.mode(), optionalText(req.Unit)
 			l.Objectives, l.DurationMin, l.HomeworkNote = req.Objectives, req.DurationMin, req.HomeworkNote
-			return notFound(s.repo.UpdateLesson(ctx, sc, l), "template lesson")
+			return notFound(s.repo.UpdateLesson(ctx, sc, &l.Lesson), "template lesson")
 		})
 	})
 	if err != nil {
@@ -605,14 +684,14 @@ func (s *Service) prepWrite(ctx context.Context, sc authctx.Scope, lessonID uuid
 			return notFound(err, "template lesson")
 		}
 		return s.lessonWrite(ctx, sc, l.VersionID, func(ctx context.Context) error {
-			if err := notFound(fn(l), "template lesson"); err != nil {
+			if err := notFound(fn(&l.Lesson), "template lesson"); err != nil {
 				return err
 			}
 			fresh, err := s.repo.GetLesson(ctx, sc, lessonID)
 			if err != nil {
 				return notFound(err, "template lesson")
 			}
-			resp := lessonResponse(fresh)
+			resp := lessonRowResponse(fresh)
 			out = &resp
 			return nil
 		})
@@ -646,6 +725,11 @@ func (s *Service) GetBoard(ctx context.Context, sc authctx.Scope, versionID uuid
 	if err != nil {
 		return nil, notFound(err, "program template")
 	}
+	versions, err := s.repo.ListVersions(ctx, sc, tpl.ID)
+	if err != nil {
+		return nil, err
+	}
+	tpl.Versions = versionRefs(versions)
 	cards, err := s.repo.ListBoardCards(ctx, sc, versionID)
 	if err != nil {
 		return nil, err
@@ -699,6 +783,190 @@ func (s *Service) ReorderLessons(ctx context.Context, sc authctx.Scope, versionI
 	return s.ListLessons(ctx, sc, versionID)
 }
 
+// DuplicateLesson inserts a copy of a lesson right after it, shifting every
+// later lesson's position up by one. The copy carries over content — mode,
+// unit, objectives, duration, homework note, and its materials and exercise
+// links including group_id — the same distinction copyVersionContent draws.
+// It does not carry over board state: the copy starts at PrepTodo with no
+// assignee, due date or checklist. Its version must be a draft.
+func (s *Service) DuplicateLesson(ctx context.Context, sc authctx.Scope, lessonID uuid.UUID) (*DuplicateLessonResponse, error) {
+	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
+		return nil, err
+	}
+	var dupID uuid.UUID
+	err := s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		src, err := s.repo.GetLesson(ctx, sc, lessonID)
+		if err != nil {
+			return notFound(err, "template lesson")
+		}
+		return s.lessonWrite(ctx, sc, src.VersionID, func(ctx context.Context) error {
+			current, err := s.repo.ListLessons(ctx, sc, src.VersionID)
+			if err != nil {
+				return err
+			}
+			dup := &Lesson{
+				VersionID: src.VersionID, Position: src.Position + 1, Title: duplicateTitle(src.Title),
+				Mode: src.Mode, Unit: src.Unit, Objectives: src.Objectives,
+				DurationMin: src.DurationMin, HomeworkNote: src.HomeworkNote, PrepStatus: PrepTodo,
+			}
+			if err := s.repo.CreateLessons(ctx, sc, []*Lesson{dup}); err != nil {
+				return err
+			}
+			dupID = dup.ID
+			order := make([]uuid.UUID, 0, len(current)+1)
+			for _, l := range current {
+				order = append(order, l.ID)
+				if l.ID == lessonID {
+					order = append(order, dup.ID)
+				}
+			}
+			if err := s.repo.SetPositions(ctx, sc, src.VersionID, order); err != nil {
+				return err
+			}
+			materials, err := s.repo.ListLessonMaterials(ctx, sc, []uuid.UUID{lessonID})
+			if err != nil {
+				return err
+			}
+			if len(materials) > 0 {
+				links := make([]LessonMaterial, 0, len(materials))
+				for _, m := range materials {
+					links = append(links, LessonMaterial{
+						LessonID: dup.ID, MaterialID: m.ID,
+						SharedWithStudents: m.SharedWithStudents, Position: m.Position,
+					})
+				}
+				if err := s.repo.CreateLessonMaterials(ctx, sc, links); err != nil {
+					return err
+				}
+			}
+			exercises, err := s.repo.ListLessonExercises(ctx, sc, []uuid.UUID{lessonID})
+			if err != nil {
+				return err
+			}
+			if len(exercises) > 0 {
+				links := make([]LessonExercise, 0, len(exercises))
+				for _, e := range exercises {
+					links = append(links, LessonExercise{LessonID: dup.ID, ExerciseID: e.ID, GroupID: e.GroupID, Position: e.Position})
+				}
+				if err := s.repo.CreateLessonExercises(ctx, sc, links); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	fresh, err := s.repo.GetLesson(ctx, sc, dupID)
+	if err != nil {
+		return nil, notFound(err, "template lesson")
+	}
+	out := lessonRowResponse(fresh)
+	return &out, nil
+}
+
+// lessonTitleMaxLen matches LessonRequest.Title's max=200 validator tag
+// (and the template_lessons.title column), counted in runes the same way
+// go-playground's max tag counts a string.
+const lessonTitleMaxLen = 200
+
+// duplicateTitleSuffix is appended to a duplicated lesson's title.
+const duplicateTitleSuffix = " (bản sao)"
+
+// duplicateTitle builds a duplicated lesson's title, truncating the source
+// title by runes so title+suffix never exceeds lessonTitleMaxLen — a title
+// already near the column limit must not overflow it and 500 the request.
+func duplicateTitle(title string) string {
+	base := []rune(title)
+	limit := lessonTitleMaxLen - len([]rune(duplicateTitleSuffix))
+	if limit < 0 {
+		limit = 0
+	}
+	if len(base) > limit {
+		base = base[:limit]
+	}
+	return string(base) + duplicateTitleSuffix
+}
+
+// ClearLessons deletes every lesson of a draft version in one call — the
+// join tables cascade. Published and archived versions refuse (409
+// VERSION_LOCKED) the same way any other content write does.
+func (s *Service) ClearLessons(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) error {
+	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
+		return err
+	}
+	return s.lessonWrite(ctx, sc, versionID, func(ctx context.Context) error {
+		return s.repo.ClearLessons(ctx, sc, versionID)
+	})
+}
+
+// maxExerciseGroups bounds a version's exercise group list.
+const maxExerciseGroups = 30
+
+// ListExerciseGroups lists a version's exercise groups by position, each
+// with how many lesson-exercise links point at it.
+func (s *Service) ListExerciseGroups(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) ([]ExerciseGroupResponse, error) {
+	if err := authctx.Require(sc, authctx.PermLibraryRead); err != nil {
+		return nil, err
+	}
+	if _, err := s.repo.GetVersion(ctx, sc, versionID); err != nil {
+		return nil, notFound(err, "template version")
+	}
+	rows, err := s.repo.ListExerciseGroups(ctx, sc, versionID)
+	if err != nil {
+		return nil, err
+	}
+	return exerciseGroupResponses(rows), nil
+}
+
+// CreateExerciseGroup adds a group at the end of the version's group list.
+// The version must be a draft.
+func (s *Service) CreateExerciseGroup(ctx context.Context, sc authctx.Scope, versionID uuid.UUID, req ExerciseGroupRequest) (*ExerciseGroupResponse, error) {
+	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
+		return nil, err
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return nil, apperror.Invalid("Nhóm bài tập phải có tên",
+			map[string]string{"name": "không được để trống"})
+	}
+	var created *ExerciseGroup
+	err := s.lessonWrite(ctx, sc, versionID, func(ctx context.Context) error {
+		groups, err := s.repo.ListExerciseGroups(ctx, sc, versionID)
+		if err != nil {
+			return err
+		}
+		if len(groups) >= maxExerciseGroups {
+			return apperror.Invalid("Tối đa 30 nhóm bài tập cho một phiên bản",
+				map[string]string{"name": "đã đạt số nhóm tối đa"})
+		}
+		pos, err := s.repo.NextGroupPosition(ctx, sc, versionID)
+		if err != nil {
+			return err
+		}
+		created = &ExerciseGroup{VersionID: versionID, Name: name, Position: pos}
+		return s.repo.CreateExerciseGroup(ctx, sc, created)
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := exerciseGroupResponse(&ExerciseGroupRow{ExerciseGroup: *created, ExerciseCount: 0})
+	return &out, nil
+}
+
+// DeleteExerciseGroup removes a group from a draft version. The lesson-
+// exercise links that pointed at it lose their group_id (set to NULL by the
+// foreign key) instead of being deleted, so no exercise attachment is lost.
+func (s *Service) DeleteExerciseGroup(ctx context.Context, sc authctx.Scope, versionID, groupID uuid.UUID) error {
+	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
+		return err
+	}
+	return s.lessonWrite(ctx, sc, versionID, func(ctx context.Context) error {
+		return notFound(s.repo.DeleteExerciseGroup(ctx, sc, versionID, groupID), "exercise group")
+	})
+}
+
 // lessonWrite runs fn inside a transaction that holds the version's row
 // lock. The lock is what makes "published is immutable" hold under
 // concurrency: a publish that lands first leaves fn unreached (409
@@ -732,7 +1000,11 @@ func (s *Service) version(ctx context.Context, sc authctx.Scope, id uuid.UUID) (
 	if err != nil {
 		return nil, notFound(err, "template version")
 	}
-	out := versionResponse(row)
+	classes, err := s.repo.ListVersionClasses(ctx, sc, id)
+	if err != nil {
+		return nil, err
+	}
+	out := versionResponseWithClasses(row, classes)
 	return &out, nil
 }
 
@@ -767,6 +1039,40 @@ func mapCodeClash(err error) error {
 	return err
 }
 
+// exerciseCodePattern is the shape of a caller-supplied exercise code:
+// letters, digits and dashes, no length minimum (an auto-generated code is
+// always BT-0001-style, but a caller may label an exercise with anything
+// short, e.g. a single letter).
+var exerciseCodePattern = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
+
+// normalizeExerciseCode upper-cases and validates a caller-supplied exercise
+// code. A blank or omitted one returns (nil, nil): CreateExercise then
+// assigns the next generated code, and UpdateExercise keeps the exercise's
+// current one, since the column is NOT NULL and must never be blanked.
+func normalizeExerciseCode(raw *string) (*string, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	code := strings.ToUpper(strings.TrimSpace(*raw))
+	if code == "" {
+		return nil, nil
+	}
+	if !exerciseCodePattern.MatchString(code) {
+		return nil, apperror.Invalid("Mã bài tập không hợp lệ",
+			map[string]string{"code": "chỉ gồm chữ, số và dấu gạch ngang"})
+	}
+	return &code, nil
+}
+
+// mapExerciseCodeClash turns the partial unique index's violation into the
+// 409 the web client branches on.
+func mapExerciseCodeClash(err error) error {
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return errExerciseCodeTaken()
+	}
+	return err
+}
+
 // notFound maps the repository sentinel onto a 404 for the named resource
 // and passes every other error through.
 func notFound(err error, resource string) error {
@@ -776,12 +1082,22 @@ func notFound(err error, resource string) error {
 	return err
 }
 
-func lessonIDs(rows []Lesson) []uuid.UUID {
+func lessonIDs(rows []LessonRow) []uuid.UUID {
 	ids := make([]uuid.UUID, len(rows))
 	for i := range rows {
 		ids[i] = rows[i].ID
 	}
 	return ids
+}
+
+// versionRefs projects a version listing down to the compact reference
+// TemplateResponse.Versions carries.
+func versionRefs(rows []VersionRow) []VersionRef {
+	out := make([]VersionRef, len(rows))
+	for i := range rows {
+		out[i] = VersionRef{ID: rows[i].ID, VersionNo: rows[i].VersionNo, Status: rows[i].Status}
+	}
+	return out
 }
 
 // GetVersion returns a version with its score set, log fields and lessons
@@ -793,6 +1109,10 @@ func (s *Service) GetVersion(ctx context.Context, sc authctx.Scope, versionID uu
 	row, err := s.repo.GetVersion(ctx, sc, versionID)
 	if err != nil {
 		return nil, notFound(err, "template version")
+	}
+	classes, err := s.repo.ListVersionClasses(ctx, sc, versionID)
+	if err != nil {
+		return nil, err
 	}
 	fields, err := s.repo.ListLogFields(ctx, sc, versionID)
 	if err != nil {
@@ -807,7 +1127,7 @@ func (s *Service) GetVersion(ctx context.Context, sc authctx.Scope, versionID uu
 		return nil, err
 	}
 	return &VersionDetailResponse{
-		VersionResponse: versionResponse(row),
+		VersionResponse: versionResponseWithClasses(row, classes),
 		ScoreSet:        scoreSet(row.ScoreSet),
 		LogFields:       logFieldResponses(fields),
 		Lessons:         details,
@@ -818,6 +1138,10 @@ func (s *Service) GetVersion(ctx context.Context, sc authctx.Scope, versionID uu
 func (s *Service) CreateMaterial(ctx context.Context, sc authctx.Scope, req MaterialRequest) (*MaterialResponse, error) {
 	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
 		return nil, err
+	}
+	if req.Kind == MaterialKindOther {
+		return nil, apperror.Invalid("Không thể tạo học liệu mới với loại này",
+			map[string]string{"kind": "loại này chỉ còn dùng cho học liệu cũ"})
 	}
 	m, err := materialFrom(req)
 	if err != nil {
@@ -838,7 +1162,7 @@ func (s *Service) GetMaterial(ctx context.Context, sc authctx.Scope, id uuid.UUI
 	if err != nil {
 		return nil, notFound(err, "library material")
 	}
-	out := materialResponse(m)
+	out := materialBankResponse(m)
 	return &out, nil
 }
 
@@ -853,7 +1177,7 @@ func (s *Service) ListMaterials(ctx context.Context, sc authctx.Scope, f ListFil
 	}
 	out := make([]MaterialResponse, 0, len(rows))
 	for i := range rows {
-		out = append(out, materialResponse(&rows[i]))
+		out = append(out, materialBankResponse(&rows[i]))
 	}
 	return out, total, nil
 }
@@ -864,12 +1188,37 @@ func (s *Service) UpdateMaterial(ctx context.Context, sc authctx.Scope, id uuid.
 	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
 		return nil, err
 	}
+	if req.Kind == MaterialKindOther {
+		current, err := s.repo.GetMaterial(ctx, sc, id)
+		if err != nil {
+			return nil, notFound(err, "library material")
+		}
+		if current.Kind != MaterialKindOther {
+			return nil, apperror.Invalid("Không thể đổi học liệu sang loại này",
+				map[string]string{"kind": "loại này chỉ giữ lại cho học liệu cũ, không dùng để đổi sang"})
+		}
+	}
 	m, err := materialFrom(req)
 	if err != nil {
 		return nil, err
 	}
 	m.ID = id
 	if err := s.repo.UpdateMaterial(ctx, sc, m); err != nil {
+		return nil, notFound(err, "library material")
+	}
+	return s.GetMaterial(ctx, sc, id)
+}
+
+// SetMaterialStatus toggles a material's active flag. An inactive material
+// stays visible to a lesson that already links it (the link is untouched)
+// and stays in the bank list by default (ListMaterials only narrows by
+// active when the caller passes that filter); SetLessonMaterials is the
+// only place that refuses it, for a new attachment.
+func (s *Service) SetMaterialStatus(ctx context.Context, sc authctx.Scope, id uuid.UUID, active bool) (*MaterialResponse, error) {
+	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
+		return nil, err
+	}
+	if err := s.repo.SetMaterialActive(ctx, sc, id, active); err != nil {
 		return nil, notFound(err, "library material")
 	}
 	return s.GetMaterial(ctx, sc, id)
@@ -903,13 +1252,42 @@ func (s *Service) DeleteMaterial(ctx context.Context, sc authctx.Scope, id uuid.
 	})
 }
 
-// CreateExercise adds a center-wide exercise.
+// CreateExercise adds a center-wide exercise. A caller-supplied code is
+// normalized and must be unique per center (409 EXERCISE_CODE_TAKEN); an
+// omitted code is auto-generated as the next BT-0001-style code of the
+// center. Auto-generation takes a transaction-scoped advisory lock on the
+// center before reading NextExerciseCode, so two concurrent requests never
+// read the same max and race for the same generated code — the second
+// waits for the first's transaction to commit (or roll back) and then sees
+// its inserted code in its own max.
 func (s *Service) CreateExercise(ctx context.Context, sc authctx.Scope, req ExerciseRequest) (*ExerciseResponse, error) {
 	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
 		return nil, err
 	}
+	code, err := normalizeExerciseCode(req.Code)
+	if err != nil {
+		return nil, err
+	}
 	e := exerciseFrom(req)
-	if err := s.repo.CreateExercise(ctx, sc, e); err != nil {
+	if code != nil {
+		e.Code = *code
+		if err := mapExerciseCodeClash(s.repo.CreateExercise(ctx, sc, e)); err != nil {
+			return nil, err
+		}
+		return s.GetExercise(ctx, sc, e.ID)
+	}
+	createErr := s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		if err := s.repo.LockCenterForExerciseCode(ctx, sc); err != nil {
+			return err
+		}
+		next, err := s.repo.NextExerciseCode(ctx, sc)
+		if err != nil {
+			return err
+		}
+		e.Code = next
+		return s.repo.CreateExercise(ctx, sc, e)
+	})
+	if err := mapExerciseCodeClash(createErr); err != nil {
 		return nil, err
 	}
 	return s.GetExercise(ctx, sc, e.ID)
@@ -924,7 +1302,7 @@ func (s *Service) GetExercise(ctx context.Context, sc authctx.Scope, id uuid.UUI
 	if err != nil {
 		return nil, notFound(err, "library exercise")
 	}
-	out := exerciseResponse(e)
+	out := exerciseBankResponse(e)
 	return &out, nil
 }
 
@@ -939,19 +1317,48 @@ func (s *Service) ListExercises(ctx context.Context, sc authctx.Scope, f ListFil
 	}
 	out := make([]ExerciseResponse, 0, len(rows))
 	for i := range rows {
-		out = append(out, exerciseResponse(&rows[i]))
+		out = append(out, exerciseBankResponse(&rows[i]))
 	}
 	return out, total, nil
 }
 
-// UpdateExercise replaces every field of an exercise.
+// UpdateExercise replaces every field of an exercise. Code is optional like
+// the rest of the body: given, it is normalized and validated as on create
+// (409 EXERCISE_CODE_TAKEN on a clash); omitted, the exercise keeps its
+// current code, since the column is NOT NULL and a full-replace body must
+// not blank it.
 func (s *Service) UpdateExercise(ctx context.Context, sc authctx.Scope, id uuid.UUID, req ExerciseRequest) (*ExerciseResponse, error) {
 	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
 		return nil, err
 	}
+	code, err := normalizeExerciseCode(req.Code)
+	if err != nil {
+		return nil, err
+	}
 	e := exerciseFrom(req)
 	e.ID = id
-	if err := s.repo.UpdateExercise(ctx, sc, e); err != nil {
+	if code != nil {
+		e.Code = *code
+	} else {
+		current, err := s.repo.GetExercise(ctx, sc, id)
+		if err != nil {
+			return nil, notFound(err, "library exercise")
+		}
+		e.Code = current.Code
+	}
+	if err := notFound(mapExerciseCodeClash(s.repo.UpdateExercise(ctx, sc, e)), "library exercise"); err != nil {
+		return nil, err
+	}
+	return s.GetExercise(ctx, sc, id)
+}
+
+// SetExerciseStatus toggles an exercise's active flag, under the same rules
+// as SetMaterialStatus.
+func (s *Service) SetExerciseStatus(ctx context.Context, sc authctx.Scope, id uuid.UUID, active bool) (*ExerciseResponse, error) {
+	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
+		return nil, err
+	}
+	if err := s.repo.SetExerciseActive(ctx, sc, id, active); err != nil {
 		return nil, notFound(err, "library exercise")
 	}
 	return s.GetExercise(ctx, sc, id)
@@ -1005,7 +1412,7 @@ func (s *Service) SetLessonMaterials(ctx context.Context, sc authctx.Scope, less
 		return nil, err
 	}
 	var out []LessonMaterialResponse
-	err := s.lessonLinkWrite(ctx, sc, lessonID, func(ctx context.Context) error {
+	err := s.lessonLinkWrite(ctx, sc, lessonID, func(ctx context.Context, _ uuid.UUID) error {
 		found, err := s.repo.FindMaterials(ctx, sc, ids)
 		if err != nil {
 			return err
@@ -1013,6 +1420,23 @@ func (s *Service) SetLessonMaterials(ctx context.Context, sc authctx.Scope, less
 		if len(found) != len(ids) {
 			return apperror.Invalid("Có học liệu không tồn tại trong kho của trung tâm",
 				map[string]string{"material_id": "phải là học liệu còn hiệu lực của trung tâm"})
+		}
+		// An inactive material may stay attached to a lesson that already
+		// carries it, but a new attachment must not pick one up: compare
+		// against what the lesson already links before overwriting the list.
+		already, err := s.repo.ListLessonMaterials(ctx, sc, []uuid.UUID{lessonID})
+		if err != nil {
+			return err
+		}
+		attached := make(map[uuid.UUID]bool, len(already))
+		for _, row := range already {
+			attached[row.ID] = true
+		}
+		for _, m := range found {
+			if !m.Active && !attached[m.ID] {
+				return apperror.Invalid("Nội dung đã ngừng hoạt động",
+					map[string]string{"material_id": "đã ngừng hoạt động"})
+			}
 		}
 		if err := s.repo.ReplaceLessonMaterials(ctx, sc, lessonID, links); err != nil {
 			return err
@@ -1042,15 +1466,19 @@ func (s *Service) SetLessonExercises(ctx context.Context, sc authctx.Scope, less
 	}
 	ids := make([]uuid.UUID, 0, len(items))
 	links := make([]LessonExercise, 0, len(items))
+	groupIDSet := make(map[uuid.UUID]bool)
 	for _, it := range items {
 		ids = append(ids, it.ExerciseID)
-		links = append(links, LessonExercise{ExerciseID: it.ExerciseID})
+		links = append(links, LessonExercise{ExerciseID: it.ExerciseID, GroupID: it.GroupID})
+		if it.GroupID != nil {
+			groupIDSet[*it.GroupID] = true
+		}
 	}
 	if err := uniqueIDs(ids, "exercise_id", "Mỗi bài tập chỉ gắn vào buổi một lần"); err != nil {
 		return nil, err
 	}
 	var out []LessonExerciseResponse
-	err := s.lessonLinkWrite(ctx, sc, lessonID, func(ctx context.Context) error {
+	err := s.lessonLinkWrite(ctx, sc, lessonID, func(ctx context.Context, versionID uuid.UUID) error {
 		found, err := s.repo.FindExercises(ctx, sc, ids)
 		if err != nil {
 			return err
@@ -1058,6 +1486,35 @@ func (s *Service) SetLessonExercises(ctx context.Context, sc authctx.Scope, less
 		if len(found) != len(ids) {
 			return apperror.Invalid("Có bài tập không tồn tại trong kho của trung tâm",
 				map[string]string{"exercise_id": "phải là bài tập còn hiệu lực của trung tâm"})
+		}
+		if len(groupIDSet) > 0 {
+			groupIDs := make([]uuid.UUID, 0, len(groupIDSet))
+			for id := range groupIDSet {
+				groupIDs = append(groupIDs, id)
+			}
+			foundGroups, err := s.repo.FilterExistingGroupIDs(ctx, sc, versionID, groupIDs)
+			if err != nil {
+				return err
+			}
+			if len(foundGroups) != len(groupIDs) {
+				return apperror.Invalid("Có nhóm bài tập không thuộc phiên bản này",
+					map[string]string{"group_id": "phải là nhóm bài tập của phiên bản"})
+			}
+		}
+		// Same inactive-attachment rule as SetLessonMaterials.
+		already, err := s.repo.ListLessonExercises(ctx, sc, []uuid.UUID{lessonID})
+		if err != nil {
+			return err
+		}
+		attached := make(map[uuid.UUID]bool, len(already))
+		for _, row := range already {
+			attached[row.ID] = true
+		}
+		for _, e := range found {
+			if !e.Active && !attached[e.ID] {
+				return apperror.Invalid("Nội dung đã ngừng hoạt động",
+					map[string]string{"exercise_id": "đã ngừng hoạt động"})
+			}
 		}
 		if err := s.repo.ReplaceLessonExercises(ctx, sc, lessonID, links); err != nil {
 			return err
@@ -1078,8 +1535,11 @@ func (s *Service) SetLessonExercises(ctx context.Context, sc authctx.Scope, less
 // lessonLinkWrite resolves the lesson, then runs fn under its version's
 // draft lock like every other content write. The lesson is read again
 // once the lock is held: a delete committed in between would otherwise
-// surface as a foreign-key failure on the link insert instead of a 404.
-func (s *Service) lessonLinkWrite(ctx context.Context, sc authctx.Scope, lessonID uuid.UUID, fn func(ctx context.Context) error) error {
+// surface as a foreign-key failure on the link insert instead of a 404. fn
+// receives the resolved version id, so a caller that must validate a
+// version-scoped reference (an exercise group, say) does not need a second
+// lookup.
+func (s *Service) lessonLinkWrite(ctx context.Context, sc authctx.Scope, lessonID uuid.UUID, fn func(ctx context.Context, versionID uuid.UUID) error) error {
 	return s.tx.WithinTx(ctx, func(ctx context.Context) error {
 		l, err := s.repo.GetLesson(ctx, sc, lessonID)
 		if err != nil {
@@ -1089,7 +1549,7 @@ func (s *Service) lessonLinkWrite(ctx context.Context, sc authctx.Scope, lessonI
 			if _, err := s.repo.GetLesson(ctx, sc, lessonID); err != nil {
 				return notFound(err, "template lesson")
 			}
-			return fn(ctx)
+			return fn(ctx, l.VersionID)
 		})
 	})
 }
@@ -1146,46 +1606,79 @@ func (s *Service) SetLogFields(ctx context.Context, sc authctx.Scope, versionID 
 	return out, nil
 }
 
-// scoreKey is the shape of a score component key: a stable identifier the
-// class grading can refer to.
+// scoreKey is the shape of a score set or score component key: a stable
+// identifier the class grading can refer to.
 var scoreKey = regexp.MustCompile(`^[a-z0-9_]{1,30}$`)
 
-// SetScoreSet replaces the version's score components with items, in body
-// order. Keys must match scoreKey and be unique; max must be positive and
-// weight non-negative. The version must be a draft.
-func (s *Service) SetScoreSet(ctx context.Context, sc authctx.Scope, versionID uuid.UUID, items []ScoreComponentInput) ([]ScoreComponent, error) {
+// maxScoreGroups bounds the score set's own group list; maxScoreComponents
+// (declared above with the log fields' bound) applies to each group's
+// component list.
+const maxScoreGroups = 10
+
+// SetScoreSet replaces the version's score set with items, in body order.
+// A group key must match scoreKey and be unique across the set; a
+// component key must match scoreKey and be unique within its own group
+// only, so two different groups may each declare the same component key.
+// max must be positive and weight non-negative. The version must be a
+// draft.
+func (s *Service) SetScoreSet(ctx context.Context, sc authctx.Scope, versionID uuid.UUID, items []ScoreSetGroupInput) ([]ScoreSetGroup, error) {
 	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
 		return nil, err
 	}
-	if len(items) > maxScoreComponents {
-		return nil, apperror.Invalid("Tối đa 20 thành phần điểm cho một phiên bản",
-			map[string]string{"score_set": "tối đa 20 thành phần"})
+	if len(items) > maxScoreGroups {
+		return nil, apperror.Invalid("Tối đa 10 nhóm điểm cho một phiên bản",
+			map[string]string{"score_set": "tối đa 10 nhóm"})
 	}
 	set := make(ScoreSet, 0, len(items))
-	seen := make(map[string]bool, len(items))
-	for i, it := range items {
-		key := strings.TrimSpace(it.Key)
+	seenGroups := make(map[string]bool, len(items))
+	for gi, g := range items {
+		key := strings.TrimSpace(g.Key)
 		switch {
 		case !scoreKey.MatchString(key):
-			return nil, apperror.Invalid("Khoá thành phần điểm không hợp lệ",
-				map[string]string{fieldPath(i, "key"): "chỉ gồm chữ thường, số và dấu gạch dưới, tối đa 30 ký tự"})
-		case seen[key]:
-			return nil, apperror.Invalid("Khoá thành phần điểm bị trùng",
-				map[string]string{fieldPath(i, "key"): "mỗi khoá chỉ dùng một lần"})
-		case it.Max <= 0:
-			return nil, apperror.Invalid("Điểm tối đa phải lớn hơn 0",
-				map[string]string{fieldPath(i, "max"): "phải lớn hơn 0"})
-		case it.Weight < 0:
-			return nil, apperror.Invalid("Trọng số không được âm",
-				map[string]string{fieldPath(i, "weight"): "phải từ 0 trở lên"})
+			return nil, apperror.Invalid("Khoá nhóm điểm không hợp lệ",
+				map[string]string{fieldPath(gi, "key"): "chỉ gồm chữ thường, số và dấu gạch dưới, tối đa 30 ký tự"})
+		case seenGroups[key]:
+			return nil, apperror.Invalid("Khoá nhóm điểm bị trùng",
+				map[string]string{fieldPath(gi, "key"): "mỗi khoá chỉ dùng một lần"})
 		}
-		label := strings.TrimSpace(it.Label)
-		if label == "" {
-			return nil, apperror.Invalid("Thành phần điểm phải có tên",
-				map[string]string{fieldPath(i, "label"): "không được để trống"})
+		title := strings.TrimSpace(g.Title)
+		if title == "" {
+			return nil, apperror.Invalid("Nhóm điểm phải có tên",
+				map[string]string{fieldPath(gi, "title"): "không được để trống"})
 		}
-		seen[key] = true
-		set = append(set, ScoreComponent{Key: key, Label: label, Max: it.Max, Weight: it.Weight})
+		if len(g.Components) > maxScoreComponents {
+			return nil, apperror.Invalid("Tối đa 20 thành phần điểm cho một nhóm",
+				map[string]string{fieldPath(gi, "components"): "tối đa 20 thành phần"})
+		}
+		seenGroups[key] = true
+		components := make([]ScoreComponent, 0, len(g.Components))
+		seenComponents := make(map[string]bool, len(g.Components))
+		for ci, it := range g.Components {
+			path := fieldPath(gi, "components."+strconv.Itoa(ci))
+			ckey := strings.TrimSpace(it.Key)
+			switch {
+			case !scoreKey.MatchString(ckey):
+				return nil, apperror.Invalid("Khoá thành phần điểm không hợp lệ",
+					map[string]string{path + ".key": "chỉ gồm chữ thường, số và dấu gạch dưới, tối đa 30 ký tự"})
+			case seenComponents[ckey]:
+				return nil, apperror.Invalid("Khoá thành phần điểm bị trùng trong nhóm",
+					map[string]string{path + ".key": "mỗi khoá chỉ dùng một lần trong nhóm"})
+			case it.Max <= 0:
+				return nil, apperror.Invalid("Điểm tối đa phải lớn hơn 0",
+					map[string]string{path + ".max": "phải lớn hơn 0"})
+			case it.Weight < 0:
+				return nil, apperror.Invalid("Trọng số không được âm",
+					map[string]string{path + ".weight": "phải từ 0 trở lên"})
+			}
+			label := strings.TrimSpace(it.Label)
+			if label == "" {
+				return nil, apperror.Invalid("Thành phần điểm phải có tên",
+					map[string]string{path + ".label": "không được để trống"})
+			}
+			seenComponents[ckey] = true
+			components = append(components, ScoreComponent{Key: ckey, Label: label, Max: it.Max, Weight: it.Weight})
+		}
+		set = append(set, ScoreSetGroup{Key: key, Title: title, Components: components})
 	}
 	err := s.lessonWrite(ctx, sc, versionID, func(ctx context.Context) error {
 		return notFound(s.repo.SetScoreSet(ctx, sc, versionID, set), "template version")
@@ -1204,7 +1697,7 @@ func materialFrom(req MaterialRequest) (*Material, error) {
 	return &Material{
 		Title: strings.TrimSpace(req.Title), Kind: req.Kind,
 		URL: url, Description: optionalText(req.Description),
-		Tags: cleanStrings(req.Tags),
+		Tags: cleanStrings(req.Tags), Active: true,
 	}, nil
 }
 
@@ -1224,10 +1717,13 @@ func materialURL(raw *string) (*string, error) {
 	return v, nil
 }
 
+// exerciseFrom builds the row from the request; the caller assigns Code
+// separately (it depends on normalization and, on update, the existing row).
 func exerciseFrom(req ExerciseRequest) *Exercise {
 	return &Exercise{
 		Title: strings.TrimSpace(req.Title), Description: optionalText(req.Description),
-		Difficulty: req.Difficulty, Tags: cleanStrings(req.Tags),
+		Difficulty: req.Difficulty, Skill: optionalText(req.Skill), Level: optionalText(req.Level),
+		Tags: cleanStrings(req.Tags), Active: true,
 	}
 }
 
@@ -1248,9 +1744,9 @@ func cleanStrings(in []string) dbtypes.StringList {
 }
 
 // scoreSet returns a non-nil slice so the wire form is always an array.
-func scoreSet(set ScoreSet) []ScoreComponent {
+func scoreSet(set ScoreSet) []ScoreSetGroup {
 	if set == nil {
-		return []ScoreComponent{}
+		return []ScoreSetGroup{}
 	}
 	return set
 }

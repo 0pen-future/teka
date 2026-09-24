@@ -1670,8 +1670,71 @@ definitions:
         maxLength: 2000
         type: string
     type: object
+  library.DuplicateLessonResponse:
+    properties:
+      assignee_id:
+        type: string
+      checklist:
+        items:
+          $ref: '#/definitions/library.ChecklistItem'
+        type: array
+      created_at:
+        type: string
+      due_date:
+        type: string
+      duration_min:
+        type: integer
+      exercise_count:
+        type: integer
+      homework_note:
+        type: string
+      id:
+        type: string
+      material_count:
+        type: integer
+      mode:
+        type: string
+      objectives:
+        type: string
+      position:
+        type: integer
+      prep_status:
+        type: string
+      title:
+        type: string
+      unit:
+        type: string
+      updated_at:
+        type: string
+      version_id:
+        type: string
+    type: object
+  library.ExerciseGroupRequest:
+    properties:
+      name:
+        maxLength: 100
+        type: string
+    required:
+    - name
+    type: object
+  library.ExerciseGroupResponse:
+    properties:
+      exercise_count:
+        type: integer
+      id:
+        type: string
+      name:
+        type: string
+      position:
+        type: integer
+      version_id:
+        type: string
+    type: object
   library.ExerciseRequest:
     properties:
+      code:
+        maxLength: 20
+        type: string
       description:
         maxLength: 4000
         type: string
@@ -1679,6 +1742,12 @@ definitions:
         maximum: 5
         minimum: 1
         type: integer
+      level:
+        maxLength: 50
+        type: string
+      skill:
+        maxLength: 50
+        type: string
       tags:
         items:
           type: string
@@ -1693,6 +1762,10 @@ definitions:
     type: object
   library.ExerciseResponse:
     properties:
+      active:
+        type: boolean
+      code:
+        type: string
       created_at:
         type: string
       description:
@@ -1701,14 +1774,29 @@ definitions:
         type: integer
       id:
         type: string
+      lesson_count:
+        type: integer
+      level:
+        type: string
+      skill:
+        type: string
       tags:
         items:
           type: string
         type: array
+      template_count:
+        type: integer
       title:
         type: string
       updated_at:
         type: string
+    type: object
+  library.ItemStatusRequest:
+    properties:
+      active:
+        type: boolean
+    required:
+    - active
     type: object
   library.LessonDetailResponse:
     properties:
@@ -1724,6 +1812,8 @@ definitions:
         type: string
       duration_min:
         type: integer
+      exercise_count:
+        type: integer
       exercises:
         items:
           $ref: '#/definitions/library.LessonExerciseResponse'
@@ -1732,10 +1822,14 @@ definitions:
         type: string
       id:
         type: string
+      material_count:
+        type: integer
       materials:
         items:
           $ref: '#/definitions/library.LessonMaterialResponse'
         type: array
+      mode:
+        type: string
       objectives:
         type: string
       position:
@@ -1743,6 +1837,8 @@ definitions:
       prep_status:
         type: string
       title:
+        type: string
+      unit:
         type: string
       updated_at:
         type: string
@@ -1753,25 +1849,41 @@ definitions:
     properties:
       exercise_id:
         type: string
+      group_id:
+        type: string
     required:
     - exercise_id
     type: object
   library.LessonExerciseResponse:
     properties:
+      active:
+        type: boolean
+      code:
+        type: string
       created_at:
         type: string
       description:
         type: string
       difficulty:
         type: integer
+      group_id:
+        type: string
       id:
+        type: string
+      lesson_count:
+        type: integer
+      level:
         type: string
       position:
         type: integer
+      skill:
+        type: string
       tags:
         items:
           type: string
         type: array
+      template_count:
+        type: integer
       title:
         type: string
       updated_at:
@@ -1788,6 +1900,8 @@ definitions:
     type: object
   library.LessonMaterialResponse:
     properties:
+      active:
+        type: boolean
       created_at:
         type: string
       description:
@@ -1796,6 +1910,8 @@ definitions:
         type: string
       kind:
         type: string
+      lesson_count:
+        type: integer
       position:
         type: integer
       shared_with_students:
@@ -1804,6 +1920,8 @@ definitions:
         items:
           type: string
         type: array
+      template_count:
+        type: integer
       title:
         type: string
       updated_at:
@@ -1820,12 +1938,20 @@ definitions:
       homework_note:
         maxLength: 4000
         type: string
+      mode:
+        enum:
+        - scheduled
+        - self_study
+        type: string
       objectives:
         maxLength: 4000
         type: string
       title:
         maxLength: 200
         minLength: 1
+        type: string
+      unit:
+        maxLength: 100
         type: string
     required:
     - title
@@ -1844,9 +1970,15 @@ definitions:
         type: string
       duration_min:
         type: integer
+      exercise_count:
+        type: integer
       homework_note:
         type: string
       id:
+        type: string
+      material_count:
+        type: integer
+      mode:
         type: string
       objectives:
         type: string
@@ -1855,6 +1987,8 @@ definitions:
       prep_status:
         type: string
       title:
+        type: string
+      unit:
         type: string
       updated_at:
         type: string
@@ -1866,9 +2000,11 @@ definitions:
       kind:
         enum:
         - text
+        - long_text
+        - checkbox
+        - student
         - number
         - select
-        - checkbox
         type: string
       label:
         maxLength: 100
@@ -1909,9 +2045,13 @@ definitions:
         type: string
       kind:
         enum:
-        - link
-        - doc
         - video
+        - audio
+        - image
+        - doc
+        - note
+        - live
+        - link
         - other
         type: string
       tags:
@@ -1932,6 +2072,8 @@ definitions:
     type: object
   library.MaterialResponse:
     properties:
+      active:
+        type: boolean
       created_at:
         type: string
       description:
@@ -1940,10 +2082,14 @@ definitions:
         type: string
       kind:
         type: string
+      lesson_count:
+        type: integer
       tags:
         items:
           type: string
         type: array
+      template_count:
+        type: integer
       title:
         type: string
       updated_at:
@@ -2018,6 +2164,35 @@ definitions:
     - label
     - max
     type: object
+  library.ScoreSetGroup:
+    properties:
+      components:
+        items:
+          $ref: '#/definitions/library.ScoreComponent'
+        type: array
+      key:
+        type: string
+      title:
+        type: string
+    type: object
+  library.ScoreSetGroupInput:
+    properties:
+      components:
+        items:
+          $ref: '#/definitions/library.ScoreComponentInput'
+        type: array
+      key:
+        maxLength: 30
+        minLength: 1
+        type: string
+      title:
+        maxLength: 100
+        minLength: 1
+        type: string
+    required:
+    - key
+    - title
+    type: object
   library.TemplateRequest:
     properties:
       code:
@@ -2051,6 +2226,8 @@ definitions:
     type: object
   library.TemplateResponse:
     properties:
+      class_count:
+        type: integer
       code:
         type: string
       created_at:
@@ -2065,6 +2242,8 @@ definitions:
         type: integer
       id:
         type: string
+      lesson_count:
+        type: integer
       level:
         type: string
       name:
@@ -2079,11 +2258,28 @@ definitions:
         type: string
       version_count:
         type: integer
+      versions:
+        items:
+          $ref: '#/definitions/library.VersionRefResponse'
+        type: array
+    type: object
+  library.VersionClassRefResponse:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
     type: object
   library.VersionDetailResponse:
     properties:
       changelog:
         type: string
+      class_count:
+        type: integer
+      classes:
+        items:
+          $ref: '#/definitions/library.VersionClassRefResponse'
+        type: array
       created_at:
         type: string
       created_by:
@@ -2104,7 +2300,7 @@ definitions:
         type: string
       score_set:
         items:
-          $ref: '#/definitions/library.ScoreComponent'
+          $ref: '#/definitions/library.ScoreSetGroup'
         type: array
       status:
         type: string
@@ -2115,10 +2311,25 @@ definitions:
       version_no:
         type: integer
     type: object
+  library.VersionRefResponse:
+    properties:
+      id:
+        type: string
+      status:
+        type: string
+      version_no:
+        type: integer
+    type: object
   library.VersionResponse:
     properties:
       changelog:
         type: string
+      class_count:
+        type: integer
+      classes:
+        items:
+          $ref: '#/definitions/library.VersionClassRefResponse'
+        type: array
       created_at:
         type: string
       created_by:
@@ -9668,12 +9879,16 @@ paths:
       - library
   /library/exercises:
     get:
-      description: Live exercises of the caller's center. q matches the title.
+      description: Live exercises of the caller's center. q matches the title or code.
       parameters:
-      - description: title fragment
+      - description: title or code fragment
         in: query
         name: q
         type: string
+      - description: only exercises with this active value
+        in: query
+        name: active
+        type: boolean
       - description: page (default 1)
         in: query
         name: page
@@ -9728,6 +9943,9 @@ paths:
     post:
       consumes:
       - application/json
+      description: Code, when given, is upper-cased and must match ^[A-Za-z0-9-]+$
+        (409 EXERCISE_CODE_TAKEN on a clash); omitted, the next BT-0001-style code
+        of the center is assigned.
       parameters:
       - description: exercise
         in: body
@@ -9896,7 +10114,8 @@ paths:
       consumes:
       - application/json
       description: Replaces every field. Lessons linking the exercise see the change
-        at once.
+        at once. Code, when given, follows the create rule (409 EXERCISE_CODE_TAKEN
+        on a clash); omitted, the exercise keeps its current code.
       parameters:
       - description: exercise id
         in: path
@@ -9960,6 +10179,78 @@ paths:
       security:
       - BearerAuth: []
       summary: Update a library exercise
+      tags:
+      - library
+  /library/exercises/{id}/status:
+    patch:
+      consumes:
+      - application/json
+      description: An inactive exercise stays visible to a lesson that already links
+        it and stays in the bank list by default; SetLessonExercises refuses to attach
+        it to another lesson.
+      parameters:
+      - description: exercise id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: status
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/library.ItemStatusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.ExerciseResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Set a library exercise's active status
       tags:
       - library
   /library/lessons/{lid}:
@@ -10236,6 +10527,71 @@ paths:
       summary: Assign a lesson's preparation
       tags:
       - library
+  /library/lessons/{lid}/duplicate:
+    post:
+      description: Inserts a copy right after the lesson, shifting later ones up by
+        one position. Content (mode, unit, objectives, duration, homework note, materials,
+        exercises) is copied; board state (prep status, assignee, due date, checklist)
+        starts fresh. 409 VERSION_LOCKED when the lesson's version is not a draft.
+      parameters:
+      - description: lesson id
+        in: path
+        name: lid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.DuplicateLessonResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Duplicate a template lesson
+      tags:
+      - library
   /library/lessons/{lid}/exercises:
     put:
       consumes:
@@ -10495,6 +10851,10 @@ paths:
         in: query
         name: q
         type: string
+      - description: only materials with this active value
+        in: query
+        name: active
+        type: boolean
       - description: page (default 1)
         in: query
         name: page
@@ -10781,6 +11141,78 @@ paths:
       security:
       - BearerAuth: []
       summary: Update a library material
+      tags:
+      - library
+  /library/materials/{id}/status:
+    patch:
+      consumes:
+      - application/json
+      description: An inactive material stays visible to a lesson that already links
+        it and stays in the bank list by default; SetLessonMaterials refuses to attach
+        it to another lesson.
+      parameters:
+      - description: material id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: status
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/library.ItemStatusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.MaterialResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Set a library material's active status
       tags:
       - library
   /library/templates:
@@ -11403,7 +11835,272 @@ paths:
       summary: Get a version's preparation board
       tags:
       - library
+  /library/versions/{vid}/exercise-groups:
+    get:
+      description: Groups by position, each with how many lesson-exercise links point
+        at it.
+      parameters:
+      - description: version id
+        in: path
+        name: vid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/library.ExerciseGroupResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List the exercise groups of a version
+      tags:
+      - library
+    post:
+      consumes:
+      - application/json
+      description: Appends the group at the next position. 409 VERSION_LOCKED when
+        the version is not a draft.
+      parameters:
+      - description: version id
+        in: path
+        name: vid
+        required: true
+        type: string
+      - description: exercise group
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/library.ExerciseGroupRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.ExerciseGroupResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Add an exercise group to a draft
+      tags:
+      - library
+  /library/versions/{vid}/exercise-groups/{gid}:
+    delete:
+      description: The lesson-exercise links that pointed at it lose their group_id
+        instead of being deleted. 409 VERSION_LOCKED when the version is not a draft.
+      parameters:
+      - description: version id
+        in: path
+        name: vid
+        required: true
+        type: string
+      - description: exercise group id
+        in: path
+        name: gid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Delete an exercise group from a draft
+      tags:
+      - library
   /library/versions/{vid}/lessons:
+    delete:
+      description: Removes all lessons of the version in one call; their attachments
+        cascade with them. 409 VERSION_LOCKED when the version is not a draft.
+      parameters:
+      - description: version id
+        in: path
+        name: vid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Delete every lesson of a draft
+      tags:
+      - library
     get:
       parameters:
       - description: version id
@@ -11770,22 +12467,22 @@ paths:
     put:
       consumes:
       - application/json
-      description: Wholesale replace. Keys are lowercase identifiers unique within
-        the set; max must be positive. 409 VERSION_LOCKED unless the version is a
-        draft.
+      description: Wholesale replace. Group and component keys are lowercase identifiers;
+        a component key is unique within its own group only. max must be positive.
+        409 VERSION_LOCKED unless the version is a draft.
       parameters:
       - description: version id
         in: path
         name: vid
         required: true
         type: string
-      - description: score components; [] clears
+      - description: score set groups; [] clears
         in: body
         name: body
         required: true
         schema:
           items:
-            $ref: '#/definitions/library.ScoreComponentInput'
+            $ref: '#/definitions/library.ScoreSetGroupInput'
           type: array
       produces:
       - application/json
@@ -11798,7 +12495,7 @@ paths:
             - properties:
                 data:
                   items:
-                    $ref: '#/definitions/library.ScoreComponent'
+                    $ref: '#/definitions/library.ScoreSetGroup'
                   type: array
               type: object
         "401":

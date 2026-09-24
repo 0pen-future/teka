@@ -326,10 +326,10 @@ func TestDownFoldsPersonalChannelIntoManual(t *testing.T) {
 		 VALUES (?, ?, ?, ?, 'zalo_personal')`,
 		notifID, f.teacherID, f.centerID, f.statementID).Error)
 
-	// Roll back through 000005 (zalo_personal_mapping): twenty-eight steps
-	// now that the additive 000008-000032 sit on top of the migrations this
+	// Roll back through 000005 (zalo_personal_mapping): thirty steps now
+	// that the additive 000008-000034 sit on top of the migrations this
 	// test predates.
-	require.NoError(t, database.MigrateDown(m, 28))
+	require.NoError(t, database.MigrateDown(m, 30))
 
 	var channel string
 	require.NoError(t, db.Raw(
@@ -2536,10 +2536,10 @@ func TestLibraryItemsSchemaInvariants(t *testing.T) {
 
 	exerciseID := uuid.New()
 	require.NoError(t, db.Exec(
-		`INSERT INTO library_exercises (id, center_id, title, difficulty) VALUES (?, ?, 'Bài 1', 3)`,
+		`INSERT INTO library_exercises (id, center_id, title, difficulty, code) VALUES (?, ?, 'Bài 1', 3, 'BT-0001')`,
 		exerciseID, a.centerID).Error)
 	require.Error(t, db.Exec(
-		`INSERT INTO library_exercises (center_id, title, difficulty) VALUES (?, 'Quá khó', 9)`,
+		`INSERT INTO library_exercises (center_id, title, difficulty, code) VALUES (?, 'Quá khó', 9, 'BT-0002')`,
 		a.centerID).Error, "difficulty is 1..5")
 
 	require.NoError(t, db.Exec(
@@ -3293,4 +3293,212 @@ func TestTemplateLessonPrepSchemaInvariants(t *testing.T) {
 		`SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE tablename = 'template_lessons'
 		 AND indexname = 'idx_template_lessons_assignee')`).Scan(&indexed).Error)
 	require.True(t, indexed)
+}
+
+func TestLibraryBankFieldsBackfill(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	// Stop right before 000033 so the exercises below exist pre-migration,
+	// the same shape a live database would backfill from.
+	require.NoError(t, m.Steps(32))
+
+	db := openDB(t, url)
+	a := seedNotificationParents(t, db, "+84900002301")
+
+	liveID, deletedID := uuid.New(), uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO library_exercises (id, center_id, title, difficulty, created_at)
+		 VALUES (?, ?, 'Bài 1', 3, '2026-01-01T00:00:00Z')`,
+		liveID, a.centerID).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO library_exercises (id, center_id, title, difficulty, created_at, deleted_at)
+		 VALUES (?, ?, 'Bài đã xoá', 2, '2026-01-02T00:00:00Z', '2026-01-03T00:00:00Z')`,
+		deletedID, a.centerID).Error)
+
+	require.NoError(t, m.Steps(1))
+
+	var liveCode, deletedCode string
+	require.NoError(t, db.Raw(`SELECT code FROM library_exercises WHERE id = ?`, liveID).Scan(&liveCode).Error)
+	require.NoError(t, db.Raw(`SELECT code FROM library_exercises WHERE id = ?`, deletedID).Scan(&deletedCode).Error)
+	require.Equal(t, "BT-0001", liveCode, "backfill numbers by created_at within the center")
+	require.Equal(t, "BT-0002", deletedCode)
+
+	// The unique index only guards live rows: a fresh row may reuse the
+	// soft-deleted exercise's code, but not the still-live one's.
+	require.NoError(t, db.Exec(
+		`INSERT INTO library_exercises (center_id, title, code) VALUES (?, 'Trùng mã đã xoá mềm', ?)`,
+		a.centerID, deletedCode).Error, "a soft-deleted row's code is free to reuse")
+	require.Error(t, db.Exec(
+		`INSERT INTO library_exercises (center_id, title, code) VALUES (?, 'Trùng mã còn sống', ?)`,
+		a.centerID, liveCode).Error, "code is unique per center among live rows")
+
+	var active bool
+	require.NoError(t, db.Raw(`SELECT active FROM library_exercises WHERE id = ?`, liveID).Scan(&active).Error)
+	require.True(t, active, "active defaults to true")
+
+	var indexed bool
+	require.NoError(t, db.Raw(
+		`SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE tablename = 'library_exercises'
+		 AND indexname = 'uq_library_exercises_center_code')`).Scan(&indexed).Error)
+	require.True(t, indexed)
+	require.NoError(t, db.Raw(
+		`SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE tablename = 'library_exercises'
+		 AND indexname = 'idx_library_exercises_center_active')`).Scan(&indexed).Error)
+	require.True(t, indexed)
+	require.NoError(t, db.Raw(
+		`SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE tablename = 'library_materials'
+		 AND indexname = 'idx_library_materials_center_active')`).Scan(&indexed).Error)
+	require.True(t, indexed)
+
+	// The expanded kind check accepts the four new values and still rejects
+	// anything outside the set.
+	require.NoError(t, db.Exec(
+		`INSERT INTO library_materials (center_id, title, kind) VALUES (?, 'Ghi âm', 'audio')`,
+		a.centerID).Error)
+	require.Error(t, db.Exec(
+		`INSERT INTO library_materials (center_id, title, kind) VALUES (?, 'Sai loại', 'file')`,
+		a.centerID).Error, "kind stays constrained after the expansion")
+
+	// Down folds the new kinds back to "other" and drops the new columns.
+	require.NoError(t, m.Steps(-1))
+
+	var kind string
+	require.NoError(t, db.Raw(`SELECT kind FROM library_materials WHERE title = 'Ghi âm'`).Scan(&kind).Error)
+	require.Equal(t, "other", kind)
+
+	var n int64
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM information_schema.columns
+		 WHERE table_name = 'library_exercises' AND column_name IN ('code', 'skill', 'level', 'active')`).Scan(&n).Error)
+	require.Zero(t, n, "the exercise columns added by 000033 are gone")
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM information_schema.columns
+		 WHERE table_name = 'library_materials' AND column_name = 'active'`).Scan(&n).Error)
+	require.Zero(t, n, "the material active column is gone")
+}
+
+func TestTemplateVersionV5Migration(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	// Stop right before 000034 so the version/lesson/log-field rows below
+	// exist in their pre-v5 shape, the same one a live database backfills from.
+	require.NoError(t, m.Steps(33))
+
+	db := openDB(t, url)
+	a := seedNotificationParents(t, db, "+84900002401")
+
+	templateID, versionID, lessonID := uuid.New(), uuid.New(), uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO program_templates (id, center_id, code, name) VALUES (?, ?, 'CT01', 'Toán 6')`,
+		templateID, a.centerID).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO program_template_versions (id, template_id, center_id, version_no, score_set)
+		 VALUES (?, ?, ?, 1, '[{"key":"main","label":"Bài kiểm tra","max":10,"weight":1}]'::jsonb)`,
+		versionID, templateID, a.centerID).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO template_lessons (id, version_id, center_id, position, title) VALUES (?, ?, ?, 1, 'Buổi 1')`,
+		lessonID, versionID, a.centerID).Error)
+	exerciseID := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO library_exercises (id, center_id, title, difficulty, code) VALUES (?, ?, 'Bài 1', 3, 'BT-0001')`,
+		exerciseID, a.centerID).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO template_lesson_exercises (lesson_id, exercise_id, center_id, position) VALUES (?, ?, ?, 1)`,
+		lessonID, exerciseID, a.centerID).Error)
+	logFieldID := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO template_log_fields (id, version_id, center_id, position, label, kind) VALUES (?, ?, ?, 1, 'Ghi chú', 'text')`,
+		logFieldID, versionID, a.centerID).Error)
+
+	require.NoError(t, m.Steps(1))
+
+	var scoreSet string
+	require.NoError(t, db.Raw(`SELECT score_set::text FROM program_template_versions WHERE id = ?`, versionID).Scan(&scoreSet).Error)
+	require.JSONEq(t, `[{"key":"main","title":"Bộ điểm","components":[{"key":"main","label":"Bài kiểm tra","max":10,"weight":1}]}]`, scoreSet)
+
+	var mode string
+	var unit *string
+	require.NoError(t, db.Raw(`SELECT mode FROM template_lessons WHERE id = ?`, lessonID).Scan(&mode).Error)
+	require.NoError(t, db.Raw(`SELECT unit FROM template_lessons WHERE id = ?`, lessonID).Scan(&unit).Error)
+	require.Equal(t, "scheduled", mode, "existing lessons default to the scheduled mode")
+	require.Nil(t, unit)
+	require.Error(t, db.Exec(`UPDATE template_lessons SET mode = 'live' WHERE id = ?`, lessonID).Error,
+		"mode stays constrained to scheduled/self_study")
+
+	// The expanded kind check accepts the two new values and still rejects
+	// anything outside the set.
+	longTextID, studentID := uuid.New(), uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO template_log_fields (id, version_id, center_id, position, label, kind) VALUES (?, ?, ?, 2, 'Ghi chú dài', 'long_text')`,
+		longTextID, versionID, a.centerID).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO template_log_fields (id, version_id, center_id, position, label, kind) VALUES (?, ?, ?, 3, 'Học sinh', 'student')`,
+		studentID, versionID, a.centerID).Error)
+	require.Error(t, db.Exec(
+		`INSERT INTO template_log_fields (version_id, center_id, position, label, kind) VALUES (?, ?, 4, 'Sai loại', 'date')`,
+		versionID, a.centerID).Error, "kind stays constrained after the expansion")
+
+	groupID := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO template_exercise_groups (id, version_id, center_id, name, position) VALUES (?, ?, ?, 'Nhóm 1', 1)`,
+		groupID, versionID, a.centerID).Error)
+	require.Error(t, db.Exec(
+		`INSERT INTO template_exercise_groups (version_id, center_id, name, position) VALUES (?, ?, 'Trùng vị trí', 1)`,
+		versionID, a.centerID).Error, "group positions are unique within a version")
+	require.Error(t, db.Exec(
+		`UPDATE template_lesson_exercises SET group_id = ? WHERE lesson_id = ?`, uuid.New(), lessonID).Error,
+		"an unknown group id is refused")
+
+	require.NoError(t, db.Exec(`UPDATE template_lesson_exercises SET group_id = ? WHERE lesson_id = ?`, groupID, lessonID).Error)
+	var linked struct{ GroupID uuid.UUID }
+	require.NoError(t, db.Raw(`SELECT group_id FROM template_lesson_exercises WHERE lesson_id = ?`, lessonID).Scan(&linked).Error)
+	require.Equal(t, groupID, linked.GroupID)
+
+	// Deleting the group nulls the link's group_id instead of removing the
+	// lesson_exercises row.
+	require.NoError(t, db.Exec(`DELETE FROM template_exercise_groups WHERE id = ?`, groupID).Error)
+	var afterDelete struct{ GroupID *uuid.UUID }
+	require.NoError(t, db.Raw(`SELECT group_id FROM template_lesson_exercises WHERE lesson_id = ?`, lessonID).Scan(&afterDelete).Error)
+	require.Nil(t, afterDelete.GroupID)
+	var exerciseLinkCount int64
+	require.NoError(t, db.Raw(`SELECT count(*) FROM template_lesson_exercises WHERE lesson_id = ?`, lessonID).Scan(&exerciseLinkCount).Error)
+	require.Equal(t, int64(1), exerciseLinkCount, "deleting the group must not delete the lesson_exercises row")
+
+	// Down folds long_text/student back to text, unwraps the score set to
+	// its first group's components, and drops the new columns/table.
+	require.NoError(t, m.Steps(-1))
+
+	var kind string
+	require.NoError(t, db.Raw(`SELECT kind FROM template_log_fields WHERE id = ?`, longTextID).Scan(&kind).Error)
+	require.Equal(t, "text", kind)
+	require.NoError(t, db.Raw(`SELECT kind FROM template_log_fields WHERE id = ?`, studentID).Scan(&kind).Error)
+	require.Equal(t, "text", kind)
+	require.Error(t, db.Exec(
+		`INSERT INTO template_log_fields (version_id, center_id, position, label, kind) VALUES (?, ?, 5, 'Sai loại', 'long_text')`,
+		versionID, a.centerID).Error, "the down constraint no longer accepts the v5 kinds")
+
+	var downScoreSet string
+	require.NoError(t, db.Raw(`SELECT score_set::text FROM program_template_versions WHERE id = ?`, versionID).Scan(&downScoreSet).Error)
+	require.JSONEq(t, `[{"key":"main","label":"Bài kiểm tra","max":10,"weight":1}]`, downScoreSet)
+
+	var n int64
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM information_schema.tables WHERE table_name = 'template_exercise_groups'`).Scan(&n).Error)
+	require.Zero(t, n, "template_exercise_groups is dropped")
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM information_schema.columns
+		 WHERE table_name = 'template_lesson_exercises' AND column_name = 'group_id'`).Scan(&n).Error)
+	require.Zero(t, n, "group_id is dropped")
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM information_schema.columns
+		 WHERE table_name = 'template_lessons' AND column_name IN ('mode', 'unit')`).Scan(&n).Error)
+	require.Zero(t, n, "mode and unit are dropped")
 }

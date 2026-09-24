@@ -463,8 +463,11 @@ func TestItemsAndAttachmentsOverHTTP(t *testing.T) {
 		t.Fatalf("log fields %+v", fields)
 	}
 	w, env = do(t, r, http.MethodPut, "/api/v1/library/versions/"+vid+"/score-set",
-		`[{"key":"mid","label":"Giữa kỳ","max":10,"weight":0.4},{"key":"final","label":"Cuối kỳ","max":10,"weight":0.6}]`, owner)
-	if w.Code != http.StatusOK || len(decode[[]ScoreComponent](t, env)) != 2 {
+		`[{"key":"main","title":"Chính","components":[{"key":"mid","label":"Giữa kỳ","max":10,"weight":0.4},{"key":"final","label":"Cuối kỳ","max":10,"weight":0.6}]}]`, owner)
+	if w.Code != http.StatusOK {
+		t.Fatalf("set score set: %d %+v", w.Code, env)
+	}
+	if groups := decode[[]ScoreSetGroup](t, env); len(groups) != 1 || len(groups[0].Components) != 2 {
 		t.Fatalf("set score set: %d %+v", w.Code, env)
 	}
 	w, env = do(t, r, http.MethodGet, "/api/v1/library/versions/"+vid, "", reader)
@@ -472,7 +475,8 @@ func TestItemsAndAttachmentsOverHTTP(t *testing.T) {
 		t.Fatalf("get version: %d %+v", w.Code, env)
 	}
 	version := decode[VersionDetailResponse](t, env)
-	if len(version.ScoreSet) != 2 || len(version.LogFields) != 2 || len(version.Lessons) != 1 || len(version.Lessons[0].Materials) != 2 {
+	if len(version.ScoreSet) != 1 || len(version.ScoreSet[0].Components) != 2 ||
+		len(version.LogFields) != 2 || len(version.Lessons) != 1 || len(version.Lessons[0].Materials) != 2 {
 		t.Fatalf("version detail %+v", version)
 	}
 
@@ -508,8 +512,8 @@ func TestItemValidationOverHTTP(t *testing.T) {
 		{"materials element without id", http.MethodPut, "/api/v1/library/lessons/" + someID + "/materials", `[{"shared_with_students":true}]`, http.StatusUnprocessableEntity, apperror.CodeValidation},
 		{"log field bad kind", http.MethodPut, "/api/v1/library/versions/" + someID + "/log-fields", `[{"label":"x","kind":"date"}]`, http.StatusUnprocessableEntity, apperror.CodeValidation},
 		{"select without options", http.MethodPut, "/api/v1/library/versions/" + someID + "/log-fields", `[{"label":"x","kind":"select"}]`, http.StatusUnprocessableEntity, apperror.CodeValidation},
-		{"score component without max", http.MethodPut, "/api/v1/library/versions/" + someID + "/score-set", `[{"key":"a","label":"A"}]`, http.StatusUnprocessableEntity, apperror.CodeValidation},
-		{"score key with spaces", http.MethodPut, "/api/v1/library/versions/" + someID + "/score-set", `[{"key":"giữa kỳ","label":"A","max":10}]`, http.StatusUnprocessableEntity, apperror.CodeValidation},
+		{"score component without max", http.MethodPut, "/api/v1/library/versions/" + someID + "/score-set", `[{"key":"main","title":"G","components":[{"key":"a","label":"A"}]}]`, http.StatusUnprocessableEntity, apperror.CodeValidation},
+		{"score group key with spaces", http.MethodPut, "/api/v1/library/versions/" + someID + "/score-set", `[{"key":"giữa kỳ","title":"G"}]`, http.StatusUnprocessableEntity, apperror.CodeValidation},
 		{"unknown version detail", http.MethodGet, "/api/v1/library/versions/" + someID, "", http.StatusNotFound, apperror.CodeNotFound},
 		{"malformed material id", http.MethodGet, "/api/v1/library/materials/nope", "", http.StatusNotFound, apperror.CodeNotFound},
 	}
