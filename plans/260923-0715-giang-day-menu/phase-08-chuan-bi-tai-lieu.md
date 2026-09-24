@@ -1,7 +1,7 @@
 ---
 phase: 8
 title: "Chuẩn bị tài liệu (bảng chuẩn bị trên bản nháp chương trình)"
-status: pending
+status: completed
 priority: P2
 effort: "1.5d"
 dependencies: [3]
@@ -37,7 +37,7 @@ ALTER TABLE template_lessons
   ADD COLUMN assignee_id UUID NULL,
   ADD COLUMN due_date DATE NULL,
   ADD COLUMN checklist JSONB NOT NULL DEFAULT '[]'::jsonb,
-  ADD CONSTRAINT fk_template_lessons_assignee FOREIGN KEY (assignee_id, center_id) REFERENCES center_members (teacher_id, center_id) ON DELETE CASCADE; -- PK thật (000007:72)
+  ADD CONSTRAINT fk_template_lessons_assignee FOREIGN KEY (assignee_id, center_id) REFERENCES center_members (teacher_id, center_id) ON DELETE SET NULL (assignee_id); -- PK thật (000007:72); chỉ đặt NULL cột assignee_id, không xoá buổi mẫu
 CREATE INDEX idx_template_lessons_assignee ON template_lessons (assignee_id) WHERE assignee_id IS NOT NULL;
 -- down: DROP INDEX; ALTER TABLE template_lessons DROP CONSTRAINT, DROP 4 cột
 ```
@@ -47,6 +47,9 @@ Không backfill quyền (`prep.assign` optIn). <!-- Updated: Validation Session 
 - `GET /library/versions/:vid/board` → lessons nhóm theo `prep_status` (+ assignee tên, due, checklist tiến độ).
 - `PATCH /library/lessons/:lid/prep {prep_status?, checklist?}` (`library.edit`);
   `PATCH /library/lessons/:lid/assignment {assignee_id?, due_date?}` (`prep.assign`; assignee phải là thành viên đang hoạt động).
+  Thay cả khối, không phải tri-state: field bị bỏ hoặc gửi `null` đều xoá giá trị đang lưu (không giữ nguyên như tasks'
+  cách phân biệt "bỏ qua" vs "xoá"); client phải luôn gửi lại field muốn giữ. `GET /library/assignees` (`prep.assign`,
+  không cần `members.list`) trả về thành viên đang hoạt động của trung tâm cho picker phân công.
 - `POST /library/templates` nhận thêm `lesson_count` (tuỳ chọn) → tạo draft với N buổi trống `Buổi 1..N` (wizard).
 - `GET /library/templates?has_draft=true` để trang "Chuẩn bị tài liệu" liệt kê dự án đang mở.
 - Chỉ sửa được khi version `draft` (409 `VERSION_LOCKED` như Phase 3).
@@ -70,3 +73,19 @@ Không backfill quyền (`prep.assign` optIn). <!-- Updated: Validation Session 
 ## Risks
 - Phase 8 đã xác nhận trong scope (Validation S1 Q2) → đây là phase bump `CatalogVersion` duy nhất (D5). <!-- Updated: Validation Session 1 - Q2 -->
 - Cột chuẩn bị nằm trên bảng nội dung (`template_lessons`) — chấp nhận: đây là metadata của cùng thực thể, tránh bảng song song.
+
+## Completion notes (2026-09-24)
+- API (`d0c27ce`): migration `000032` thêm `prep_status`, `assignee_id`, `due_date`, `checklist` vào `template_lessons`;
+  FK `(assignee_id, center_id)` → `center_members` là `ON DELETE SET NULL (assignee_id)` (lệch sketch CASCADE có chủ đích:
+  CASCADE sẽ xoá nội dung buổi mẫu). Board, PATCH prep, PATCH assignment, `lesson_count` khi tạo template,
+  `has_draft`; `prep.assign` optIn ⇒ `library.read`; `CatalogVersion` 4→5 một lần.
+- Web (`d578cb9`): `/prep`, `/prep/:vid/board` (headless kanban), `/prep/:vid/assign`, khối chuẩn bị trên trang buổi mẫu,
+  wizard `/library/templates/new`; e2e `prep.spec.ts`.
+- Sau review (`c1781f3`, `c90e4f9`): `GET /library/assignees` gate `prep.assign` để người không có `members.list` vẫn
+  phân công được; PATCH prep chỉ ghi field có trong request; nhãn checklist trim + 422 khi rỗng; panel chuẩn bị key theo
+  `lesson.id` và chỉ gửi field đổi; ô hạn commit khi blur; wizard giữ bước 3 cho lỗi không thuộc form thông tin;
+  `/prep` cảnh báo khi vượt 100 bản nháp. Hợp đồng: PATCH assignment **thay cả hai field**.
+- Gỡ thành viên là soft-leave (`left_at`) nên FK không chạy; người đã rời vẫn là assignee cũ cho đến khi đổi. Chấp nhận,
+  phân công mới vẫn bị chặn 422.
+- Kiểm chứng: integration `library` + `migrations` (`-p 1`) xanh; `make test-api-unit`, `lint-api`, `test-web`
+  (1087 pass), `lint-web` xanh. e2e `prep.spec.ts` chạy lại cùng toàn bộ suite ở Phase 9.
