@@ -117,8 +117,11 @@ type PrepRequest struct {
 }
 
 // AssignmentRequest replaces the assignee and due date of a lesson as one
-// block: an omitted or null field clears it. The assignee must be a live
-// member of the center; the due date is a calendar day (YYYY-MM-DD).
+// block, unlike PrepRequest: there is no "keep the current value" reading of
+// an omitted field here, so a caller changing only the due date must still
+// resend the current assignee_id, or that assignee is cleared along with it.
+// The assignee must be a live member of the center; the due date is a
+// calendar day (YYYY-MM-DD).
 type AssignmentRequest struct {
 	AssigneeID *uuid.UUID `json:"assignee_id"`
 	DueDate    *string    `json:"due_date" binding:"omitempty,datetime=2006-01-02"`
@@ -126,6 +129,14 @@ type AssignmentRequest struct {
 
 // dueDateLayout is the wire form of a due date: a calendar day without time.
 const dueDateLayout = "2006-01-02"
+
+// AssigneeResponse is one live member the caller may assign a lesson to.
+// It carries only what the assign picker needs, not the phone/email a
+// members.list directory would — prep.assign does not imply members.list.
+type AssigneeResponse struct {
+	ID       uuid.UUID `json:"id"`
+	FullName string    `json:"full_name"`
+}
 
 // LessonResponse is the wire form of a template lesson.
 type LessonResponse struct {

@@ -593,6 +593,31 @@ func (h *Handler) updateLessonAssignment(c *gin.Context) {
 	response.OK(c, http.StatusOK, out)
 }
 
+// listAssignees returns the center's live members eligible for lesson
+// assignment.
+//
+//	@Summary		List assignable members for lesson preparation
+//	@Description	The center's live members a lesson can be assigned to. Needs prep.assign; unlike the member directory, this does not need members.list.
+//	@Tags			library
+//	@Produce		json
+//	@Success		200	{object}	response.Envelope{data=[]AssigneeResponse}
+//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/library/assignees [get]
+func (h *Handler) listAssignees(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	out, err := h.svc.ListAssignees(c.Request.Context(), sc)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, out)
+}
+
 // getBoard returns the preparation board of a version.
 //
 //	@Summary		Get a version's preparation board

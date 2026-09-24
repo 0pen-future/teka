@@ -179,6 +179,7 @@ var routePolicySnapshot = []RoutePolicy{
 	{Method: "GET", Path: "/api/v1/library/versions/:vid/board", Kind: PolicyPermission, Key: "library.read"},
 	{Method: "PATCH", Path: "/api/v1/library/lessons/:lid/prep", Kind: PolicyPermission, Key: "library.edit"},
 	{Method: "PATCH", Path: "/api/v1/library/lessons/:lid/assignment", Kind: PolicyPermission, Key: "prep.assign"},
+	{Method: "GET", Path: "/api/v1/library/assignees", Kind: PolicyPermission, Key: "prep.assign"},
 	{Method: "GET", Path: "/api/v1/library/materials", Kind: PolicyPermission, Key: "library.read"},
 	{Method: "POST", Path: "/api/v1/library/materials", Kind: PolicyPermission, Key: "library.edit"},
 	{Method: "GET", Path: "/api/v1/library/materials/:id", Kind: PolicyPermission, Key: "library.read"},

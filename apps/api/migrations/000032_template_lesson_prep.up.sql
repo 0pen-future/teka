@@ -3,7 +3,10 @@
 -- cố định), người được phân công, hạn hoàn thành và checklist việc cần làm.
 -- assignee_id theo khuôn tasks (000022): FK composite kèm center_id vào
 -- center_members để không gán chéo trung tâm, và ON DELETE SET NULL riêng cột
--- đó — gỡ thành viên chỉ bỏ phân công, không xoá nội dung buổi mẫu.
+-- đó — nếu dòng center_members từng bị xoá cứng thì chỉ bỏ phân công, không
+-- xoá nội dung buổi mẫu. Lưu ý: gỡ thành viên qua nghiệp vụ bình thường là
+-- soft-leave (UPDATE center_members SET left_at = now()), không xoá dòng, nên
+-- FK này thực tế không kích hoạt trong luồng gỡ thành viên thông thường.
 ALTER TABLE template_lessons
     ADD COLUMN prep_status VARCHAR(10) NOT NULL DEFAULT 'todo'
         CHECK (prep_status IN ('todo', 'doing', 'review', 'done')),

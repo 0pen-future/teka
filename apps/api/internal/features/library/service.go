@@ -468,7 +468,12 @@ func (s *Service) UpdateLesson(ctx context.Context, sc authctx.Scope, lessonID u
 }
 
 // UpdateLessonPrep changes the preparation status and/or checklist of a
-// draft lesson; both are optional and an omitted one keeps its value.
+// draft lesson; both are optional and an omitted one keeps its value. Only
+// the fields the request actually included reach the database: prepWrite
+// reads the lesson before locking its version, so that in-memory copy can
+// already be stale by the time the write lands, and writing every field
+// back unconditionally would silently clobber whichever one a concurrent
+// request just changed.
 func (s *Service) UpdateLessonPrep(ctx context.Context, sc authctx.Scope, lessonID uuid.UUID, req PrepRequest) (*LessonResponse, error) {
 	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
 		return nil, err
@@ -477,22 +482,53 @@ func (s *Service) UpdateLessonPrep(ctx context.Context, sc authctx.Scope, lesson
 		return nil, apperror.Invalid("Trạng thái chuẩn bị không hợp lệ",
 			map[string]string{"prep_status": "phải là todo, doing, review hoặc done"})
 	}
+	var checklist Checklist
+	if req.Checklist != nil {
+		var err error
+		checklist, err = normalizeChecklist(*req.Checklist)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return s.prepWrite(ctx, sc, lessonID, func(l *Lesson) error {
+		fields := map[string]any{}
 		if req.PrepStatus != nil {
-			l.PrepStatus = *req.PrepStatus
+			fields["prep_status"] = *req.PrepStatus
 		}
 		if req.Checklist != nil {
-			l.Checklist = Checklist(*req.Checklist)
+			fields["checklist"] = checklist
 		}
-		if l.Checklist == nil {
-			l.Checklist = Checklist{}
+		if len(fields) == 0 {
+			return nil
 		}
-		return s.repo.UpdateLessonPrep(ctx, sc, l)
+		return s.repo.UpdateLessonPrep(ctx, sc, l.ID, fields)
 	})
 }
 
+// normalizeChecklist trims each item's label and rejects one left blank
+// after trimming: the binding tag `required,min=1` only checks byte length,
+// so a whitespace-only label would otherwise be stored as a "done" item
+// with nothing to read.
+func normalizeChecklist(items []ChecklistItem) (Checklist, error) {
+	out := make(Checklist, len(items))
+	for i, item := range items {
+		label := strings.TrimSpace(item.Label)
+		if label == "" {
+			return nil, apperror.Invalid("Nội dung việc cần làm không được để trống",
+				map[string]string{fieldPath(i, "label"): "không được để trống"})
+		}
+		out[i] = ChecklistItem{Label: label, Done: item.Done}
+	}
+	return out, nil
+}
+
 // UpdateLessonAssignment replaces the assignee and due date of a draft
-// lesson. The assignee must currently be a member of the center.
+// lesson. The assignee must currently be a member of the center: removing a
+// member from a center is a soft-leave (center_members.left_at is stamped,
+// the row is never deleted), so IsLiveMember's left_at IS NULL check — not
+// the assignee_id FK's ON DELETE SET NULL, which only fires on a hard delete
+// of the center_members row — is what actually keeps a departed member from
+// being (re)assigned.
 func (s *Service) UpdateLessonAssignment(ctx context.Context, sc authctx.Scope, lessonID uuid.UUID, req AssignmentRequest) (*LessonResponse, error) {
 	if err := authctx.Require(sc, authctx.PermPrepAssign); err != nil {
 		return nil, err
@@ -520,6 +556,25 @@ func (s *Service) UpdateLessonAssignment(ctx context.Context, sc authctx.Scope, 
 		l.AssigneeID, l.DueDate = req.AssigneeID, due
 		return s.repo.UpdateLessonAssignment(ctx, sc, l)
 	})
+}
+
+// ListAssignees lists the center's live members eligible for lesson
+// assignment. It takes prep.assign directly rather than members.list: a
+// holder of prep.assign must be able to pick someone even without the
+// separate, broader member-directory grant.
+func (s *Service) ListAssignees(ctx context.Context, sc authctx.Scope) ([]AssigneeResponse, error) {
+	if err := authctx.Require(sc, authctx.PermPrepAssign); err != nil {
+		return nil, err
+	}
+	rows, err := s.repo.ListAssignees(ctx, sc)
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+	out := make([]AssigneeResponse, len(rows))
+	for i, row := range rows {
+		out[i] = AssigneeResponse(row)
+	}
+	return out, nil
 }
 
 // prepWrite loads the lesson, locks its version like any content write and

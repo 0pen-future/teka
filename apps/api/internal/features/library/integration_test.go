@@ -796,6 +796,19 @@ func TestPrepBoardAndAssignment(t *testing.T) {
 	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
 	require.NotEmpty(t, appErr.Fields["assignee_id"])
 
+	// A member who has since left the center (soft-leave: left_at stamped,
+	// row kept) must also be rejected — IsLiveMember's left_at IS NULL check,
+	// not the assignee_id FK, is what keeps a departed member unassignable.
+	_, leftT := testutil.Teacher(t, f.db, testutil.WithFullName("Cô Lan"))
+	testutil.JoinCenter(t, f.db, leftT.ID, f.owner.CenterID)
+	require.NoError(t, f.db.Exec(
+		`UPDATE center_members SET left_at = now() WHERE teacher_id = ? AND center_id = ? AND left_at IS NULL`,
+		leftT.ID, f.owner.CenterID).Error)
+	_, err = f.svc.UpdateLessonAssignment(ctx, assigner, lessons[0].ID, library.AssignmentRequest{AssigneeID: &leftT.ID})
+	require.True(t, errors.As(err, &appErr))
+	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
+	require.NotEmpty(t, appErr.Fields["assignee_id"])
+
 	board, err := f.svc.GetBoard(ctx, f.grant(t, f.member, authctx.PermLibraryRead), draft.ID)
 	require.NoError(t, err)
 	require.Equal(t, tpl.ID, board.Template.ID)

@@ -127,6 +127,14 @@ type BoardCard struct {
 	AssigneeName *string
 }
 
+// AssigneeRow is one live center member eligible for lesson assignment —
+// the same criterion IsLiveMember checks, projected to what the picker
+// needs to show.
+type AssigneeRow struct {
+	ID       uuid.UUID
+	FullName string
+}
+
 // ChecklistItem is one preparation to-do of a lesson.
 type ChecklistItem struct {
 	Label string `json:"label" binding:"required,min=1,max=200"`

@@ -462,6 +462,7 @@ var Specs = []Spec{
 		req("template_lesson.prep", "template_lesson", "lid")),
 	perm("PATCH", "/api/v1/library/lessons/:lid/assignment", authctx.PermPrepAssign,
 		req("template_lesson.assign", "template_lesson", "lid")),
+	perm("GET", "/api/v1/library/assignees", authctx.PermPrepAssign, none()),
 	perm("GET", "/api/v1/library/materials", authctx.PermLibraryRead, none()),
 	perm("POST", "/api/v1/library/materials", authctx.PermLibraryEdit,
 		req("library_material.create", "library_material", "")),

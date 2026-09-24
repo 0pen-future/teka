@@ -1598,6 +1598,13 @@ definitions:
       phone_masked:
         type: string
     type: object
+  library.AssigneeResponse:
+    properties:
+      full_name:
+        type: string
+      id:
+        type: string
+    type: object
   library.AssignmentRequest:
     properties:
       assignee_id:
@@ -9618,6 +9625,47 @@ paths:
       summary: Void an invoice
       tags:
       - billing
+  /library/assignees:
+    get:
+      description: The center's live members a lesson can be assigned to. Needs prep.assign;
+        unlike the member directory, this does not need members.list.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/library.AssigneeResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List assignable members for lesson preparation
+      tags:
+      - library
   /library/exercises:
     get:
       description: Live exercises of the caller's center. q matches the title.

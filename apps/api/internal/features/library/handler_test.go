@@ -626,3 +626,25 @@ func TestPrepOverHTTP(t *testing.T) {
 		t.Fatalf("empty columns must serialise as [] not null")
 	}
 }
+
+// TestListAssigneesOverHTTP proves the assign page's picker works for a
+// caller who holds prep.assign but not members.list — the member directory
+// (a separate endpoint gated on members.list) is not on the request path.
+func TestListAssigneesOverHTTP(t *testing.T) {
+	r, d := newHTTPTest(t)
+	editor, assigner := mintToken(t, d.editor), mintToken(t, d.assigner)
+	d.repo.members[d.assigner] = "Thầy Minh"
+
+	w, env := do(t, r, http.MethodGet, "/api/v1/library/assignees", "", editor)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("library.edit alone must not list assignees: got %d %+v", w.Code, env)
+	}
+	w, env = do(t, r, http.MethodGet, "/api/v1/library/assignees", "", assigner)
+	if w.Code != http.StatusOK {
+		t.Fatalf("prep.assign alone must list assignees: got %d %+v", w.Code, env)
+	}
+	got := decode[[]AssigneeResponse](t, env)
+	if len(got) != 1 || got[0].ID != d.assigner || got[0].FullName != "Thầy Minh" {
+		t.Fatalf("assignees list: %+v", got)
+	}
+}

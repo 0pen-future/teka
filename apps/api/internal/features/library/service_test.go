@@ -37,6 +37,9 @@ type fakeRepo struct {
 	// members maps live center members to their display name, standing in
 	// for the center_members/teachers join the assignment code relies on.
 	members map[uuid.UUID]string
+	// lastPrepFields is the fields map the last UpdateLessonPrep call
+	// received, so a test can assert an omitted field never reached it.
+	lastPrepFields map[string]any
 }
 
 func newFakeRepo() *fakeRepo {
@@ -333,12 +336,22 @@ func (f *fakeRepo) SetPositions(_ context.Context, sc authctx.Scope, versionID u
 	return nil
 }
 
-func (f *fakeRepo) UpdateLessonPrep(_ context.Context, sc authctx.Scope, l *Lesson) error {
-	cur, ok := f.lessons[l.ID]
+// UpdateLessonPrep applies only the given fields, exactly like the real
+// repository's `Updates(fields)`, and records the last fields map it
+// received so a test can assert a partial PATCH never carries the field it
+// left out.
+func (f *fakeRepo) UpdateLessonPrep(_ context.Context, sc authctx.Scope, id uuid.UUID, fields map[string]any) error {
+	cur, ok := f.lessons[id]
 	if !ok || cur.CenterID != sc.CenterID {
 		return ErrNotFound
 	}
-	cur.PrepStatus, cur.Checklist = l.PrepStatus, append(Checklist{}, l.Checklist...)
+	f.lastPrepFields = fields
+	if v, ok := fields["prep_status"]; ok {
+		cur.PrepStatus = v.(string)
+	}
+	if v, ok := fields["checklist"]; ok {
+		cur.Checklist = append(Checklist{}, v.(Checklist)...)
+	}
 	cur.UpdatedAt = nowUTC()
 	return nil
 }
@@ -356,6 +369,20 @@ func (f *fakeRepo) UpdateLessonAssignment(_ context.Context, sc authctx.Scope, l
 func (f *fakeRepo) IsLiveMember(_ context.Context, _ authctx.Scope, teacherID uuid.UUID) (bool, error) {
 	_, ok := f.members[teacherID]
 	return ok, nil
+}
+
+func (f *fakeRepo) ListAssignees(_ context.Context, _ authctx.Scope) ([]AssigneeRow, error) {
+	out := make([]AssigneeRow, 0, len(f.members))
+	for id, name := range f.members {
+		out = append(out, AssigneeRow{ID: id, FullName: name})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].FullName != out[j].FullName {
+			return out[i].FullName < out[j].FullName
+		}
+		return out[i].ID.String() < out[j].ID.String()
+	})
+	return out, nil
 }
 
 func (f *fakeRepo) ListBoardCards(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) ([]BoardCard, error) {
@@ -1018,6 +1045,88 @@ func TestPrepUpdatesOnlyOnDraft(t *testing.T) {
 	}
 	_, err = svc.UpdateLessonPrep(ctx, sc, lesson.ID, PrepRequest{PrepStatus: str(PrepDone)})
 	requireAppError(t, err, http.StatusConflict, CodeVersionLocked)
+}
+
+// TestPrepUpdateWritesOnlyGivenFields guards against the lost-update window
+// in prepWrite: it reads the lesson before locking its version, so a write
+// built from that in-memory copy could clobber a field a concurrent request
+// just changed. A status-only PATCH must reach the repository without a
+// checklist key, and a checklist-only PATCH without a prep_status key.
+func TestPrepUpdateWritesOnlyGivenFields(t *testing.T) {
+	svc, d := newTestService()
+	ctx := context.Background()
+	sc := d.ownerScope()
+	tpl := mustTemplate(t, svc, sc, "CT01")
+	draft := draftOf(t, svc, sc, tpl.ID)
+	lesson := mustLesson(t, svc, sc, draft.ID, "Buổi 1")
+
+	if _, err := svc.UpdateLessonPrep(ctx, sc, lesson.ID, PrepRequest{PrepStatus: str(PrepDoing)}); err != nil {
+		t.Fatalf("status-only update: %v", err)
+	}
+	if _, ok := d.repo.lastPrepFields["checklist"]; ok {
+		t.Errorf("a status-only PATCH must not write checklist, got fields %+v", d.repo.lastPrepFields)
+	}
+	if _, ok := d.repo.lastPrepFields["prep_status"]; !ok {
+		t.Errorf("a status-only PATCH must write prep_status, got fields %+v", d.repo.lastPrepFields)
+	}
+
+	checklist := []ChecklistItem{{Label: "Soạn slide"}}
+	if _, err := svc.UpdateLessonPrep(ctx, sc, lesson.ID, PrepRequest{Checklist: &checklist}); err != nil {
+		t.Fatalf("checklist-only update: %v", err)
+	}
+	if _, ok := d.repo.lastPrepFields["prep_status"]; ok {
+		t.Errorf("a checklist-only PATCH must not write prep_status, got fields %+v", d.repo.lastPrepFields)
+	}
+	if _, ok := d.repo.lastPrepFields["checklist"]; !ok {
+		t.Errorf("a checklist-only PATCH must write checklist, got fields %+v", d.repo.lastPrepFields)
+	}
+}
+
+// TestPrepChecklistRejectsBlankLabel proves a whitespace-only label is
+// trimmed and refused, not silently stored as a checked-off item with
+// nothing to read: `binding:"required,min=1"` only checks byte length, so
+// "   " passes it.
+func TestPrepChecklistRejectsBlankLabel(t *testing.T) {
+	svc, d := newTestService()
+	ctx := context.Background()
+	sc := d.ownerScope()
+	tpl := mustTemplate(t, svc, sc, "CT01")
+	draft := draftOf(t, svc, sc, tpl.ID)
+	lesson := mustLesson(t, svc, sc, draft.ID, "Buổi 1")
+
+	blank := []ChecklistItem{{Label: "   "}}
+	_, err := svc.UpdateLessonPrep(ctx, sc, lesson.ID, PrepRequest{Checklist: &blank})
+	requireAppError(t, err, http.StatusUnprocessableEntity, "")
+
+	padded := []ChecklistItem{{Label: "  Soạn slide  "}}
+	got, err := svc.UpdateLessonPrep(ctx, sc, lesson.ID, PrepRequest{Checklist: &padded})
+	if err != nil {
+		t.Fatalf("padded label: %v", err)
+	}
+	if len(got.Checklist) != 1 || got.Checklist[0].Label != "Soạn slide" {
+		t.Errorf("a valid label must be trimmed before it is stored, got %+v", got.Checklist)
+	}
+}
+
+// TestListAssigneesRequiresPrepAssignNotMembersList proves the assign page's
+// picker never needs a members.list grant: prep.assign alone must return the
+// center's live members, and a caller with neither key is forbidden.
+func TestListAssigneesRequiresPrepAssignNotMembersList(t *testing.T) {
+	svc, d := newTestService()
+	ctx := context.Background()
+	minh := uuid.New()
+	d.repo.members[minh] = "Thầy Minh"
+
+	_, err := svc.ListAssignees(ctx, d.memberWith(authctx.PermMembersList))
+	requireAppError(t, err, http.StatusForbidden, "")
+
+	got, err := svc.ListAssignees(ctx, d.memberWith(authctx.PermPrepAssign))
+	if err != nil {
+		t.Fatalf("list assignees with prep.assign alone: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != minh || got[0].FullName != "Thầy Minh" {
+		t.Errorf("must list the center's live members, got %+v", got)
+	}
 }
 
 func TestAssignmentRequiresPrepAssignAndLiveMember(t *testing.T) {

@@ -30,6 +30,7 @@ func RegisterRoutes(rg *gin.RouterGroup, h *Handler, auth ...gin.HandlerFunc) {
 	g.PUT("/lessons/:lid/exercises", h.setLessonExercises)
 	g.PATCH("/lessons/:lid/prep", h.updateLessonPrep)
 	g.PATCH("/lessons/:lid/assignment", h.updateLessonAssignment)
+	g.GET("/assignees", h.listAssignees)
 	g.GET("/materials", h.listMaterials)
 	g.POST("/materials", h.createMaterial)
 	g.GET("/materials/:id", h.getMaterial)

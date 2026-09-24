@@ -81,15 +81,19 @@ type Repository interface {
 	// ListBoardCards returns the version's lessons by position, each with
 	// its assignee's display name.
 	ListBoardCards(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) ([]BoardCard, error)
-	// UpdateLessonPrep replaces the lesson's preparation status and
-	// checklist; ErrNotFound when missing.
-	UpdateLessonPrep(ctx context.Context, sc authctx.Scope, l *Lesson) error
+	// UpdateLessonPrep writes only the given fields ("prep_status" and/or
+	// "checklist"); a caller that omits a field never touches its stored
+	// value. ErrNotFound when missing.
+	UpdateLessonPrep(ctx context.Context, sc authctx.Scope, id uuid.UUID, fields map[string]any) error
 	// UpdateLessonAssignment replaces the lesson's assignee and due date;
 	// ErrNotFound when missing.
 	UpdateLessonAssignment(ctx context.Context, sc authctx.Scope, l *Lesson) error
 	// IsLiveMember reports whether teacherID currently holds a live (not
 	// left) membership of the caller's center.
 	IsLiveMember(ctx context.Context, sc authctx.Scope, teacherID uuid.UUID) (bool, error)
+	// ListAssignees returns the caller's center's live members eligible for
+	// assignment, ordered by name.
+	ListAssignees(ctx context.Context, sc authctx.Scope) ([]AssigneeRow, error)
 	// GetLesson loads one lesson of the center.
 	GetLesson(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Lesson, error)
 	// NextPosition returns max(position)+1 for the version. Call it with
@@ -464,10 +468,8 @@ func (r *gormRepository) UpdateLesson(ctx context.Context, sc authctx.Scope, l *
 	return nil
 }
 
-func (r *gormRepository) UpdateLessonPrep(ctx context.Context, sc authctx.Scope, l *Lesson) error {
-	return r.updateLessonFields(ctx, sc, l.ID, map[string]any{
-		"prep_status": l.PrepStatus, "checklist": l.Checklist,
-	})
+func (r *gormRepository) UpdateLessonPrep(ctx context.Context, sc authctx.Scope, id uuid.UUID, fields map[string]any) error {
+	return r.updateLessonFields(ctx, sc, id, fields)
 }
 
 func (r *gormRepository) UpdateLessonAssignment(ctx context.Context, sc authctx.Scope, l *Lesson) error {
@@ -497,6 +499,21 @@ func (r *gormRepository) IsLiveMember(ctx context.Context, sc authctx.Scope, tea
 			sc.CenterID, teacherID).
 		Scan(&exists).Error
 	return exists, err
+}
+
+// ListAssignees lists the center's live members (center_members, left_at
+// NULL) — the same live-membership test IsLiveMember runs — with only the
+// name a picker needs, never phone or email.
+func (r *gormRepository) ListAssignees(ctx context.Context, sc authctx.Scope) ([]AssigneeRow, error) {
+	var rows []AssigneeRow
+	err := database.FromContext(ctx, r.db).Raw(`
+		SELECT t.id AS id, t.full_name AS full_name
+		FROM center_members cm
+		JOIN teachers t ON t.id = cm.teacher_id
+		WHERE cm.center_id = ? AND cm.left_at IS NULL
+		ORDER BY t.full_name, t.id`,
+		sc.CenterID).Scan(&rows).Error
+	return rows, err
 }
 
 func (r *gormRepository) DeleteLesson(ctx context.Context, sc authctx.Scope, id uuid.UUID) error {
