@@ -62,6 +62,16 @@ transaction handle in the context and repositories resolve it with
 inside and outside transactions and nested `WithinTx` calls join the ambient
 transaction. Services own transaction boundaries.
 
+**Center-scoped tables**: every table introduced since migration `000025`
+carries `center_id NOT NULL`; a table another center-scoped table references
+also carries `UNIQUE (id, center_id)`, and every foreign key pointing at it is
+a **composite** `(fk_id, center_id)` — never a single-column FK — so Postgres
+itself rejects a row that names a class, template, or member outside its own
+center. `ON DELETE CASCADE` follows the same convention as migrations
+`000009`/`000015`/`000031` and only ever fires on a hard delete; business
+logic never depends on it, because classes soft-delete (`deleted_at`) and
+center members soft-leave (`left_at`) instead of being removed.
+
 ## Tenancy
 
 The tenant is the **center** (migration 000007). Every domain table carries a
@@ -419,6 +429,35 @@ repository interface), `dto.go` (request/response structs + mappers),
 Features never import another feature's repository. Cross-feature calls go
 service→service through an interface the consumer defines — e.g. `auth`
 declares `AccountService` with only the `teachers.Service` methods it needs.
+
+### Teaching menu features
+
+Six feature modules back the "Giảng dạy" sidebar group:
+
+- `classes` gained catalog fields (`code`, `tags`, `note`, `course_id`,
+  `parent_class_id`, `lineage_note`) rather than becoming a new feature — see
+  [`dto.go`](../apps/api/internal/features/classes/dto.go).
+- `classinvites`, `library`, `courses`, and `paths` each own one domain
+  table; their package doc comments are the scope reference:
+  [`classinvites`](../apps/api/internal/features/classinvites/model.go),
+  [`library`](../apps/api/internal/features/library/model.go),
+  [`courses`](../apps/api/internal/features/courses/model.go),
+  [`paths`](../apps/api/internal/features/paths/model.go).
+- `classprogram` and `classchat` are orchestration features with no domain
+  table of their own beyond a link/message row — see
+  [architecture.md](architecture.md) for how they compose `classes`,
+  `teaching`, and `library`.
+
+#### `GET /classes` list filter contract
+
+Filters combine with **AND**: `status` (`active` default, `archived`, or
+`all`), `q` (substring of name or code, case-insensitive), `weekday`/`shift`
+(match a timetable row currently in effect), `tag` (exact match), `phase`
+(derived from dates: `upcoming|running|ended|archived`), and `course_id`
+(classes attached to that course). An invalid enum or malformed value on any
+field always answers 422 with a per-field message — a typo in a filter never
+falls through to the unfiltered list. Source of truth:
+[`parseListFilter` in handler.go](../apps/api/internal/features/classes/handler.go).
 
 ## Tasks board (kanban)
 
