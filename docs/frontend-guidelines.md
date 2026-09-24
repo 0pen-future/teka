@@ -112,7 +112,10 @@ build without it renders a readable startup error, not a working app.
 Sidebar groups and entries are declared in one place,
 [`layouts/dashboard-layout.tsx`](../apps/web/src/layouts/dashboard-layout.tsx)
 (an unlabeled group holding only "Tổng quan", then the headed groups Dạy học,
-Giảng dạy, Học phí, Trung tâm). Below
+Giảng dạy, Kho học liệu, Học phí, Trung tâm). "Kho học liệu" points its three
+bank entries at child routes of one page — `/library`, `/library/materials`,
+`/library/exercises` — so each tab is linkable; the legacy `/library?tab=`
+query redirects to the matching child route. Below
 `md` the sidebar collapses into a bottom bar plus a "Thêm" overflow sheet, so
 every entry needs a second, independent registration: its exact `label` in
 `OVERFLOW_LABELS` and its route's prefix in `OVERFLOW_PATH_PREFIXES`. The

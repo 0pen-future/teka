@@ -432,7 +432,8 @@ declares `AccountService` with only the `teachers.Service` methods it needs.
 
 ### Teaching menu features
 
-Six feature modules back the "Giảng dạy" sidebar group:
+Six feature modules back the "Giảng dạy" and "Kho học liệu" sidebar groups
+(`library` serves "Kho học liệu" together with the prep board):
 
 - `classes` gained catalog fields (`code`, `tags`, `note`, `course_id`,
   `parent_class_id`, `lineage_note`) rather than becoming a new feature — see
@@ -447,6 +448,28 @@ Six feature modules back the "Giảng dạy" sidebar group:
   table of their own beyond a link/message row — see
   [architecture.md](architecture.md) for how they compose `classes`,
   `teaching`, and `library`.
+
+#### `library` contract notes
+
+- Materials and exercises are never hard-deleted while a lesson uses them:
+  `PATCH /library/{materials|exercises}/:id/status` toggles `active`, and a
+  delete of an in-use item answers 409 `MATERIAL_IN_USE` / `EXERCISE_IN_USE`.
+  Inactive items stay on the lessons that already hold them but are refused
+  (422) when newly attached. List endpoints filter on `active`.
+- An exercise `code` is optional on create; the server assigns the next
+  `BT-NNNN` per center, and a duplicate code answers 409 `EXERCISE_CODE_TAKEN`.
+- Exercise groups belong to one template version
+  (`/library/versions/:vid/exercise-groups`); a lesson exercise points at a
+  group through `group_id`, which clears when the group is deleted. Creating a
+  draft from a published version copies its groups.
+- `score_set` is an array of named score sets, each with its own weighted
+  components; log fields add the `long_text` and `student` kinds.
+- A published version is immutable: every write to it or its lessons answers
+  409 `VERSION_LOCKED`.
+
+Request and response shapes live in
+[`library/dto.go`](../apps/api/internal/features/library/dto.go); error codes
+in [`library/errors.go`](../apps/api/internal/features/library/errors.go).
 
 #### `GET /classes` list filter contract
 
