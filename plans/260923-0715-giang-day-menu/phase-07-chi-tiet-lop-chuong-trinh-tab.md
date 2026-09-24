@@ -73,7 +73,8 @@ FK về `classes` dùng `ON DELETE CASCADE` theo khuôn 000009/000015 (chỉ ch�
 ## API
 - `classprogram` (feature mới): `GET /classes/:id/program`, `PUT /classes/:id/program {template_version_id, confirm?}`,
   `DELETE /classes/:id/program` (chỉ xoá `class_programs`), `GET /classes/:id/program/lessons` (read-through: lessons +
-  materials `shared_with_students` + exercises từ `library`). Kind: `PUT`/`DELETE` `KindOwnerOnly`, `GET` `KindService`;
+  toàn bộ tài liệu + exercises từ `library`; web lọc mặc định theo `shared_with_students` kèm switch "Hiện tất cả").
+  Kind: `PUT`/`DELETE` `KindOwnerOnly`, `GET` `KindService`;
   port: `classes` read port, `teaching.Service.PutCurriculum`, `library` read port. <!-- Updated: Validation Session 1 - Q5 -->
 - `classchat` (feature mới): `GET/POST /classes/:id/messages` (cursor `before`, `limit ≤ 50`),
   `DELETE /classes/:id/messages/:mid` (tác giả hoặc owner). Kind: `POST` perm `class_messages.post` + gate stint mở;
@@ -102,7 +103,8 @@ FK về `classes` dùng `ON DELETE CASCADE` theo khuôn 000009/000015 (chỉ ch�
   áp dụng khi lessons đang khác → 409 rồi `confirm:true` → 200; **gỡ** → `class_programs` trống nhưng `class_curricula`
   còn nguyên; GV chính (giao_vien) và trợ giảng gọi PUT/DELETE program → 403 (owner-only); GV có stint đã đóng đọc messages → 404/403; owner đọc được.
 - Migration 000031 up/down/up sạch.
-- Manifest + snapshot + audit-action tests cho 7 route mới; Vitest tab Chat quartet + gửi tin; e2e cập nhật `class-list.spec.ts` (áp dụng CT).
+- Manifest + snapshot + audit-action tests cho 7 route mới; Vitest tab Chat quartet + gửi tin; e2e `class-program.spec.ts`
+  mới (áp dụng CT), tự tạo template và lớp qua API rồi dọn ở `afterEach`.
 
 ## Risks
 - Đụng hợp đồng `teaching` — chạy toàn bộ `make test-api` package `teaching` + web `teaching/__tests__`.
