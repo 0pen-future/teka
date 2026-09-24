@@ -14,12 +14,12 @@ const TEMPLATE_NAME = `Chuẩn bị e2e ${RUN_CODE}`;
 async function deleteRunTemplate(page: Page) {
   await page.goto("/library");
   await page.getByRole("searchbox", { name: "Tìm chương trình mẫu" }).fill(RUN_CODE);
-  const row = page.getByRole("row").filter({ hasText: RUN_CODE });
+  const card = page.getByRole("article", { name: TEMPLATE_NAME });
   const noMatch = page.getByText("Không có chương trình nào khớp từ khoá.");
-  await expect(row.or(noMatch)).toBeVisible();
-  if ((await row.count()) === 0) return;
+  await expect(card.or(noMatch)).toBeVisible();
+  if ((await card.count()) === 0) return;
 
-  await row.getByRole("link").first().click();
+  await card.getByRole("link", { name: TEMPLATE_NAME }).click();
   await page.getByRole("button", { name: "Xoá chương trình" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Xoá chương trình" }).click();
   await expect(page.getByText(`Đã xoá chương trình ${RUN_CODE}`)).toBeVisible();
