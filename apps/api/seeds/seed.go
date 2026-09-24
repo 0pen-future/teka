@@ -267,6 +267,14 @@ func Run(ctx context.Context, db *gorm.DB, log *slog.Logger) error {
 		return err
 	}
 
+	// The Giảng dạy menu demo data (templates, courses, learning path, class
+	// program, demo-teacher grants and invitations) lives in
+	// teaching_menu.go, keyed off the owner scope and center id resolved
+	// above.
+	if err := seedTeachingMenu(ctx, db, log, ownerSc, centerID); err != nil {
+		return err
+	}
+
 	// Only the member teacher gets a pre-closed period: a delegated sender can
 	// read and send another teacher's period but never create or close it
 	// (EnsurePeriod self-assigns to the caller, close is a write), and sends
