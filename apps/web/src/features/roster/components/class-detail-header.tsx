@@ -1,7 +1,7 @@
 import { ArrowLeftIcon, CopyIcon } from "lucide-react";
 import { Link } from "react-router";
 
-import { HvBadge, hvToast } from "@/components/hv";
+import { HvBadge, HvButton, hvToast } from "@/components/hv";
 import { useCenterContext } from "@/features/teaching";
 import { copyToClipboard } from "@/lib/utils";
 
@@ -11,10 +11,11 @@ import type { Class } from "../schemas/roster-schemas";
 interface ClassDetailHeaderProps {
   klass: Class;
   canWrite: boolean;
+  onEdit: () => void;
 }
 
-/** Back link, name, code with a copy button, phase badge and the settings shortcut. */
-export function ClassDetailHeader({ klass, canWrite }: ClassDetailHeaderProps) {
+/** Back link, name, code with a copy button, phase badge and edit action. */
+export function ClassDetailHeader({ klass, canWrite, onEdit }: ClassDetailHeaderProps) {
   const { has } = useCenterContext();
   // The catalog page is gated on courses.read; without it the chip informs
   // instead of linking somewhere the member would bounce off.
@@ -73,12 +74,9 @@ export function ClassDetailHeader({ klass, canWrite }: ClassDetailHeaderProps) {
           </div>
         </div>
         {canWrite ? (
-          <Link
-            to={`/classes/${klass.id}/settings`}
-            className="inline-flex min-h-[44px] items-center rounded-[var(--radius-md)] bg-white px-[18px] font-display text-[length:var(--text-sm)] font-bold text-mint-600 shadow-[0_var(--press-depth)_0_var(--line-300),inset_0_0_0_2px_var(--line-200)] hover:bg-cream-100"
-          >
+          <HvButton variant="secondary" onClick={onEdit}>
             Sửa lớp
-          </Link>
+          </HvButton>
         ) : null}
       </div>
     </div>

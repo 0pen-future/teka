@@ -53,7 +53,7 @@ export const rosterRoutes: RouteObject[] = [
   {
     path: "classes/:id/settings",
     lazy: async () => ({
-      Component: (await import("./pages/class-settings-page")).ClassSettingsPage,
+      Component: (await import("./components/class-settings-redirect")).ClassSettingsRedirect,
     }),
   },
 ];

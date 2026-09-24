@@ -66,7 +66,7 @@ afterEach(() => {
 });
 
 describe("StudentsPage tabs", () => {
-  it("defaults a bare URL to the classes tab: name, schedule, price, settings link", async () => {
+  it("defaults a bare URL to the classes tab: name, schedule, price, edit action", async () => {
     renderStudentsPage();
 
     const tabs = await screen.findByRole("tablist", { name: "Khu vực" });
@@ -79,10 +79,15 @@ describe("StudentsPage tabs", () => {
     // classSchedule: weekday 2 (T3) at 18:00; default_unit_price 150000.
     expect(within(table).getByText("T3 — 18:00")).toBeInTheDocument();
     expect(within(table).getByText("150.000 ₫/buổi")).toBeInTheDocument();
-    expect(within(table).getByRole("link", { name: "⚙ Cài đặt" })).toHaveAttribute(
-      "href",
-      `/classes/${classWithSchedule.id}/settings`,
-    );
+    await userEvent.click(within(table).getByRole("button", { name: "⚙ Cài đặt" }));
+    expect(await screen.findByRole("dialog", { name: "Sửa lớp học" })).toBeInTheDocument();
+  });
+
+  it("opens the same edit dialog from the mobile class card", async () => {
+    renderStudentsPage();
+    const buttons = await screen.findAllByRole("button", { name: "⚙ Cài đặt" });
+    await userEvent.click(buttons[0]!);
+    expect(await screen.findByRole("dialog", { name: "Sửa lớp học" })).toBeInTheDocument();
   });
 
   it("switches panels when clicking the page tabs", async () => {
@@ -98,8 +103,8 @@ describe("StudentsPage tabs", () => {
     );
 
     await userEvent.click(within(pageTabs()).getByRole("tab", { name: "Lớp học" }));
-    // Mobile card + desktop table both render the per-class settings link.
-    expect(await screen.findAllByRole("link", { name: "⚙ Cài đặt" })).not.toHaveLength(0);
+    // Mobile card + desktop table both render the per-class edit action.
+    expect(await screen.findAllByRole("button", { name: "⚙ Cài đặt" })).toHaveLength(2);
     expect(screen.queryByRole("tablist", { name: "Lớp" })).not.toBeInTheDocument();
   });
 
@@ -122,7 +127,7 @@ describe("StudentsPage tabs", () => {
       "aria-selected",
       "true",
     );
-    expect(await screen.findAllByRole("link", { name: "⚙ Cài đặt" })).not.toHaveLength(0);
+    expect(await screen.findAllByRole("button", { name: "⚙ Cài đặt" })).toHaveLength(2);
   });
 
   it("falls back to the resolution rule on an unknown ?tab= value", async () => {

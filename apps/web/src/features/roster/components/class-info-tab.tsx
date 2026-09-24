@@ -1,5 +1,7 @@
 import { Link } from "react-router";
 
+import { useCenter } from "@/features/center";
+
 import { useClassStaff } from "../hooks/use-class-staff";
 import { formatScheduleLabel, formatWeekday } from "../lib/roster-format";
 import { activeSchedules } from "../lib/schedule-diff";
@@ -8,6 +10,8 @@ import { ClassLineageCard } from "./class-lineage-card";
 import { ClassOpsCard } from "./class-ops-card";
 import { ClassProgramCard } from "./class-program-card";
 import { ClassTeamSection } from "./class-team-section";
+import { ClassStaffSection } from "./class-staff-section";
+import { TeacherHandoffCard } from "./teacher-handoff-card";
 import { SectionCard, StaffList } from "./section-card";
 
 interface ClassInfoTabProps {
@@ -17,6 +21,7 @@ interface ClassInfoTabProps {
   isOwner: boolean;
   canReadAudit: boolean;
   canReadLibrary: boolean;
+  onEdit: () => void;
 }
 
 function endTime(start: string, durationMin: number): string {
@@ -35,7 +40,9 @@ export function ClassInfoTab({
   isOwner,
   canReadAudit,
   canReadLibrary,
+  onEdit,
 }: ClassInfoTabProps) {
+  const { data: center } = useCenter();
   const staff = useClassStaff(klass.id);
   const hocVu = (staff.data ?? []).filter(
     (item) => item.ended_at === null && item.role_key === "hoc_vu",
@@ -76,6 +83,10 @@ export function ClassInfoTab({
       <ClassOpsCard klass={klass} canWrite={canWrite} />
 
       <ClassTeamSection klass={klass} isOwner={isOwner} />
+      {isOwner ? <ClassStaffSection classId={klass.id} /> : null}
+      {center && "members" in center ? (
+        <TeacherHandoffCard klass={klass} members={center.members} />
+      ) : null}
 
       <SectionCard title="Nhân viên phụ trách">
         <StaffList
@@ -99,7 +110,13 @@ export function ClassInfoTab({
           </li>
           {canWrite ? (
             <li>
-              <ShortcutLink to={`/classes/${klass.id}/settings`}>Thiết lập lớp</ShortcutLink>
+              <button
+                type="button"
+                onClick={onEdit}
+                className="font-display font-bold text-mint-600 hover:underline"
+              >
+                Thiết lập lớp
+              </button>
             </li>
           ) : null}
           {isOwner ? (

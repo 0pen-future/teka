@@ -15,6 +15,7 @@ import {
   useClassListUrlState,
   type ClassListUrlValues,
 } from "../hooks/use-class-list-url-state";
+import { canWriteClass } from "../lib/class-permissions";
 
 /**
  * `/classes` — the class catalog. Filters live in the URL; the status chip
@@ -23,9 +24,10 @@ import {
  */
 export function ClassListPage() {
   const navigate = useNavigate();
-  const { has } = useCenterContext();
+  const { has, isOwner } = useCenterContext();
   const canCreate = has("classes.create");
   const [creating, setCreating] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const { view, q, weekday, shift, set } = useClassListUrlState();
   const today = new Date().toISOString().slice(0, 10);
 
@@ -114,10 +116,22 @@ export function ClassListPage() {
           classes={classes}
           today={today}
           onOpen={(klass) => void navigate(`/classes/${klass.id}`)}
+          canEdit={(klass) => canWriteClass(isOwner, klass)}
+          onEdit={(klass) => setEditingId(klass.id)}
         />
       )}
 
       {canCreate ? <ClassDialog open={creating} onOpenChange={setCreating} /> : null}
+      {editingId ? (
+        <ClassDialog
+          mode="edit"
+          classId={editingId}
+          open
+          onOpenChange={(open) => {
+            if (!open) setEditingId(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

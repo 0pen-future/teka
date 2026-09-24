@@ -16,14 +16,15 @@ interface ClassTableProps {
   /** ISO date used to pick the schedule rows effective now. */
   today: string;
   onOpen: (klass: Class) => void;
+  onEdit?: (klass: Class) => void;
+  canEdit?: (klass: Class) => boolean;
 }
 
 /**
  * The class catalog table. The whole row opens the detail; the trailing
- * "Sửa" link goes straight to the settings screen and stops the row click
- * so the two never race.
+ * "Sửa" action opens the edit dialog and stops the row click.
  */
-export function ClassTable({ classes, today, onOpen }: ClassTableProps) {
+export function ClassTable({ classes, today, onOpen, onEdit, canEdit }: ClassTableProps) {
   return (
     <div className="overflow-x-auto rounded-[var(--radius-lg)] border border-line-200 bg-white">
       <table className="w-full min-w-[880px] border-collapse text-left text-[14px]">
@@ -98,13 +99,19 @@ export function ClassTable({ classes, today, onOpen }: ClassTableProps) {
                 {klass.end_date ? formatFullDate(klass.end_date) : "—"}
               </td>
               <td className={cn(cellClassName, "text-right")}>
-                <Link
-                  to={`/classes/${klass.id}/settings`}
-                  onClick={(event) => event.stopPropagation()}
-                  className="font-display text-[13px] font-bold text-mint-600 hover:underline"
-                >
-                  Sửa
-                </Link>
+                {onEdit && (!canEdit || canEdit(klass)) ? (
+                  <button
+                    type="button"
+                    aria-label={`Sửa lớp ${klass.name}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onEdit(klass);
+                    }}
+                    className="font-display text-[13px] font-bold text-mint-600 hover:underline"
+                  >
+                    Sửa
+                  </button>
+                ) : null}
               </td>
             </tr>
           ))}

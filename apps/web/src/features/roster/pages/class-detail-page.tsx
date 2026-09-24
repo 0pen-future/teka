@@ -7,6 +7,7 @@ import { ApiError } from "@/lib/api/errors";
 
 import { ClassChatPanel } from "../components/class-chat-panel";
 import { ClassDetailHeader } from "../components/class-detail-header";
+import { ClassDialog } from "../components/class-dialog";
 import { ClassDocumentsTab } from "../components/class-documents-tab";
 import { ClassHomeworkTab } from "../components/class-homework-tab";
 import { ClassInfoTab } from "../components/class-info-tab";
@@ -39,6 +40,13 @@ export function ClassDetailPage() {
   const { isOwner, has } = useCenterContext();
   const klass = useClass(id);
   const today = new Date().toISOString().slice(0, 10);
+
+  function setEdit(open: boolean) {
+    const params = new URLSearchParams(searchParams);
+    if (open) params.set("edit", "1");
+    else params.delete("edit");
+    setSearchParams(params, { replace: true });
+  }
 
   function selectTab(next: string) {
     const params = new URLSearchParams(searchParams);
@@ -78,7 +86,7 @@ export function ClassDetailPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <ClassDetailHeader klass={klass.data} canWrite={canWrite} />
+      <ClassDetailHeader klass={klass.data} canWrite={canWrite} onEdit={() => setEdit(true)} />
 
       <HvSegmented
         variant="tabs"
@@ -102,6 +110,7 @@ export function ClassDetailPage() {
             isOwner={isOwner}
             canReadAudit={has("audit.read")}
             canReadLibrary={has("library.read")}
+            onEdit={() => setEdit(true)}
           />
         ) : tab === "students" ? (
           <ClassStudentsTab klass={klass.data} />
@@ -119,6 +128,14 @@ export function ClassDetailPage() {
           <ClassDocumentsTab klass={klass.data} />
         )}
       </div>
+      {canWrite ? (
+        <ClassDialog
+          mode="edit"
+          classId={klass.data.id}
+          open={searchParams.get("edit") === "1"}
+          onOpenChange={setEdit}
+        />
+      ) : null}
     </div>
   );
 }

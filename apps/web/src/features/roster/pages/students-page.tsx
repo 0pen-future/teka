@@ -89,6 +89,7 @@ function StudentsPageContent() {
   const urlQuery = searchParams.get("q") ?? "";
   const [query, setQuery] = useState(urlQuery);
   const [classDialogOpen, setClassDialogOpen] = useState(false);
+  const [editingClassId, setEditingClassId] = useState<string | null>(null);
   const [studentDialogOpen, setStudentDialogOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | undefined>(undefined);
   const [anonymizing, setAnonymizing] = useState<Student | undefined>(undefined);
@@ -281,6 +282,7 @@ function StudentsPageContent() {
           isPending={classesPending}
           isError={classesError}
           onCreateClass={() => setClassDialogOpen(true)}
+          onEditClass={setEditingClassId}
         />
       ) : (
         <>
@@ -388,6 +390,16 @@ function StudentsPageContent() {
       )}
 
       <ClassDialog open={classDialogOpen} onOpenChange={setClassDialogOpen} />
+      {editingClassId ? (
+        <ClassDialog
+          mode="edit"
+          classId={editingClassId}
+          open
+          onOpenChange={(open) => {
+            if (!open) setEditingClassId(null);
+          }}
+        />
+      ) : null}
       {selectedClass ? (
         <EnrollExistingStudentDialog
           open={enrollExistingOpen}

@@ -1,5 +1,3 @@
-import { Link } from "react-router";
-
 import { HvButton, HvCard } from "@/components/hv";
 import { cn, formatMoney } from "@/lib/utils";
 
@@ -17,15 +15,22 @@ interface ClassesTabProps {
   isPending: boolean;
   isError: boolean;
   onCreateClass: () => void;
+  onEditClass: (id: string) => void;
 }
 
 /**
  * "Lớp học" tab: every active class with its schedule and unit price, plus
- * class creation and the per-class settings link. Deliberately renders no
+ * class creation and the per-class edit action. Deliberately renders no
  * per-class headcount — `Class` carries no count field and a roster query
  * per row would fan out N+1 requests.
  */
-export function ClassesTab({ classes, isPending, isError, onCreateClass }: ClassesTabProps) {
+export function ClassesTab({
+  classes,
+  isPending,
+  isError,
+  onCreateClass,
+  onEditClass,
+}: ClassesTabProps) {
   const today = new Date().toISOString().slice(0, 10);
 
   if (isPending) {
@@ -67,12 +72,13 @@ export function ClassesTab({ classes, isPending, isError, onCreateClass }: Class
             </p>
             <p className="text-[13px] text-ink-500">{formatMoney(cls.default_unit_price)}/buổi</p>
             <div>
-              <Link
-                to={`/classes/${cls.id}/settings`}
+              <button
+                type="button"
+                onClick={() => onEditClass(cls.id)}
                 className="text-[13px] font-extrabold text-mint-600"
               >
                 ⚙ Cài đặt
-              </Link>
+              </button>
             </div>
           </HvCard>
         ))}
@@ -111,12 +117,13 @@ export function ClassesTab({ classes, isPending, isError, onCreateClass }: Class
                   </td>
                   <td className={tableCellClassName}>
                     <div className="flex justify-end">
-                      <Link
-                        to={`/classes/${cls.id}/settings`}
+                      <button
+                        type="button"
+                        onClick={() => onEditClass(cls.id)}
                         className="inline-flex min-h-9 items-center rounded-full border-[1.5px] border-line-300 px-3 text-[13px] font-extrabold text-ink-500 transition-colors hover:border-mint-400 hover:text-mint-600"
                       >
                         ⚙ Cài đặt
-                      </Link>
+                      </button>
                     </div>
                   </td>
                 </tr>

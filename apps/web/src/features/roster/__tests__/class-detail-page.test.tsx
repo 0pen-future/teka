@@ -1,4 +1,5 @@
 import { screen, waitFor, within } from "@testing-library/react";
+import { ClassSettingsRedirect } from "../components/class-settings-redirect";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -22,7 +23,7 @@ function renderPage(route = `/classes/${classWithSchedule.id}`) {
     path: "/classes/:id",
     extraRoutes: [
       { path: "/classes", element: <div>class-list-stub</div> },
-      { path: "/classes/:id/settings", element: <div>class-settings-stub</div> },
+      { path: "/classes/:id/settings", element: <ClassSettingsRedirect /> },
     ],
   });
 }
@@ -51,7 +52,7 @@ describe("ClassDetailPage", () => {
     useAuthStore.getState().clearSession();
   });
 
-  it("renders the header with code, phase chip, back link and settings link", async () => {
+  it("renders the header with code, phase chip, back link and edit button", async () => {
     renderPage();
     expect(await screen.findByRole("heading", { name: "Toán 6A" })).toBeInTheDocument();
     expect(screen.getByText("Mã lớp: TOAN6A")).toBeInTheDocument();
@@ -60,10 +61,39 @@ describe("ClassDetailPage", () => {
       "href",
       "/classes",
     );
-    expect(screen.getByRole("link", { name: "Sửa lớp" })).toHaveAttribute(
-      "href",
-      `/classes/${classWithSchedule.id}/settings`,
-    );
+    expect(screen.getByRole("button", { name: "Sửa lớp" })).toBeInTheDocument();
+  });
+
+  it("opens the edit dialog from the header and preserves the tab parameter", async () => {
+    const user = userEvent.setup();
+    const { router } = renderPage(`/classes/${classWithSchedule.id}?tab=students`);
+    await user.click(await screen.findByRole("button", { name: "Sửa lớp" }));
+    expect(await screen.findByRole("dialog", { name: "Sửa lớp học" })).toBeInTheDocument();
+    expect(router.state.location.search).toContain("tab=students");
+    expect(router.state.location.search).toContain("edit=1");
+    await user.click(screen.getByRole("button", { name: "Hủy" }));
+    await waitFor(() => expect(router.state.location.search).not.toContain("edit=1"));
+    expect(router.state.location.search).toContain("tab=students");
+  });
+
+  it("opens the dialog from ?edit=1 but not for a member without write permission", async () => {
+    renderPage(`/classes/${classWithSchedule.id}?edit=1`);
+    expect(await screen.findByRole("dialog", { name: "Sửa lớp học" })).toBeInTheDocument();
+  });
+
+  it("redirects old settings bookmarks to detail with the dialog open", async () => {
+    const { router } = renderPage(`/classes/${classWithSchedule.id}/settings`);
+    expect(await screen.findByRole("dialog", { name: "Sửa lớp học" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe(`/classes/${classWithSchedule.id}`);
+    expect(router.state.location.search).toBe("?edit=1");
+  });
+
+  it("ignores ?edit=1 for a caller without write permission", async () => {
+    server.use(memberCenterHandler);
+    renderPage(`/classes/${classWithSchedule.id}?edit=1`);
+    await screen.findByRole("heading", { name: "Toán 6A" });
+    expect(screen.queryByRole("dialog", { name: "Sửa lớp học" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sửa lớp" })).not.toBeInTheDocument();
   });
 
   it("links the course chip to the catalog when the class is attached to a course", async () => {
@@ -147,10 +177,7 @@ describe("ClassDetailPage", () => {
         `/records?class_id=${classWithSchedule.id}`,
       );
       expect(screen.getByRole("link", { name: "Điểm danh" })).toHaveAttribute("href", "/sessions");
-      expect(screen.getByRole("link", { name: "Thiết lập lớp" })).toHaveAttribute(
-        "href",
-        `/classes/${classWithSchedule.id}/settings`,
-      );
+      expect(screen.getByRole("button", { name: "Thiết lập lớp" })).toBeInTheDocument();
       expect(screen.getByRole("link", { name: "Cấu hình lớp học" })).toHaveAttribute(
         "href",
         "/center/class-config",

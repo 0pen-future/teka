@@ -11,6 +11,7 @@ import { apiLoginAsOwner, loginAsOwner } from "./helpers/auth.js";
 const RUN_SUFFIX = Date.now().toString(36).toUpperCase();
 const CLASS_NAME = `Lớp lọc e2e ${RUN_SUFFIX}`;
 const NEW_CLASS_NAME = `Lớp mới e2e ${RUN_SUFFIX}`;
+const EDITED_CLASS_NAME = `${NEW_CLASS_NAME} đã sửa`;
 
 function isoDateInDays(days: number): string {
   const date = new Date();
@@ -108,8 +109,7 @@ test("owner filters the class list, opens a class and creates one from Danh sác
   await chips.getByRole("radio", { name: "Tất cả" }).click();
   await expect(row).toBeVisible();
 
-  // Opening the detail from the list: click the row itself, not one of its
-  // two links (the class name and the "Sửa" settings shortcut).
+  // Opening the detail from the list: click the row itself, not its edit action.
   await row.click({ position: { x: 5, y: 5 } });
   await expect(page).toHaveURL(new RegExp(`/classes/${created.classId}$`));
   await expect(page.getByRole("heading", { name: CLASS_NAME })).toBeVisible();
@@ -122,10 +122,24 @@ test("owner filters the class list, opens a class and creates one from Danh sác
   await classDialog.getByRole("button", { name: "T2" }).click();
   await classDialog.getByLabel("Giờ học khung 1").fill("19:00");
   await classDialog.getByLabel("Đơn giá / buổi (đ)").fill("120000");
-  await classDialog.getByRole("button", { name: "Tạo lớp" }).click();
+  const [createResponse] = await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/v1/classes") && response.request().method() === "POST",
+    ),
+    classDialog.getByRole("button", { name: "Tạo lớp" }).click(),
+  ]);
+  expect(createResponse.ok()).toBe(true);
+  created.newClassId = ((await createResponse.json()) as { data: { id: string } }).data.id;
   const newRow = page.getByRole("row").filter({ hasText: NEW_CLASS_NAME });
   await expect(newRow).toBeVisible();
-  const settingsHref = await newRow.getByRole("link", { name: "Sửa" }).getAttribute("href");
-  created.newClassId = /\/classes\/([0-9a-f-]+)\/settings/.exec(settingsHref ?? "")?.[1];
-  expect(created.newClassId, "could not read the new class id off its settings link").toBeTruthy();
+
+  await newRow.getByRole("button", { name: `Sửa lớp ${NEW_CLASS_NAME}` }).click();
+  const editDialog = page.getByRole("dialog", { name: "Sửa lớp học" });
+  await expect(editDialog.getByLabel("Tên lớp")).toHaveValue(NEW_CLASS_NAME);
+  await editDialog.getByLabel("Tên lớp").fill(EDITED_CLASS_NAME);
+  await editDialog.getByRole("button", { name: "Lưu thay đổi" }).click();
+  await expect(editDialog).toBeHidden();
+  await expect(page.getByRole("row").filter({ hasText: EDITED_CLASS_NAME })).toBeVisible();
+  await expect(page).toHaveURL(/\/classes$/);
 });

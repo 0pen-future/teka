@@ -10,13 +10,8 @@ import { pickOption } from "@/test/pick-option";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
 import { mockViewport } from "@/test/viewport";
 
-import { ClassSettingsPage } from "../pages/class-settings-page";
+import { ClassDetailPage } from "../pages/class-detail-page";
 import { classWithSchedule, resetRosterStore, rosterHandlers } from "./roster-handlers";
-
-/** The stat card only needs the month's session list; an empty one is fine. */
-const sessionsHandler = http.get(`${API_URL}/classes/:classId/sessions`, () =>
-  HttpResponse.json(ok([])),
-);
 
 /** The class's current teacher plus one other member to hand it to. */
 const CURRENT_TEACHER = classWithSchedule.teacher_id;
@@ -66,16 +61,15 @@ const memberCenterHandler = http.get(`${API_URL}/centers/me`, () =>
 
 function renderClassSettings() {
   signInAs(testPrimaryTeacher);
-  return renderWithProviders(<ClassSettingsPage />, {
-    route: `/classes/${classWithSchedule.id}/settings`,
-    path: "/classes/:id/settings",
-    extraRoutes: [{ path: "/students", element: <div>students-screen-stub</div> }],
+  return renderWithProviders(<ClassDetailPage />, {
+    route: `/classes/${classWithSchedule.id}`,
+    path: "/classes/:id",
   });
 }
 
 beforeEach(() => {
   resetRosterStore();
-  server.use(...rosterHandlers, sessionsHandler);
+  server.use(...rosterHandlers);
   mockViewport(1024);
 });
 
@@ -83,7 +77,7 @@ afterEach(() => {
   useAuthStore.getState().clearSession();
 });
 
-describe("ClassSettingsPage teacher handoff", () => {
+describe("ClassDetailPage teacher handoff", () => {
   it("shows the current teacher and only other members as targets, for owners", async () => {
     const user = userEvent.setup();
     server.use(ownerCenterHandler);
@@ -106,8 +100,8 @@ describe("ClassSettingsPage teacher handoff", () => {
     server.use(memberCenterHandler);
     renderClassSettings();
 
-    // The settings form still loads; only the owner-only card is absent.
-    await screen.findByLabelText("Tên lớp");
+    // The detail still loads; only the owner-only card is absent.
+    await screen.findByRole("heading", { name: "Toán 6A" });
     expect(screen.queryByText("Giáo viên phụ trách")).not.toBeInTheDocument();
   });
 

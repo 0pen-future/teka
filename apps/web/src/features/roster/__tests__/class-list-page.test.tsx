@@ -97,10 +97,9 @@ describe("ClassListPage", () => {
     const second = rows[1]!;
     expect(within(second).getByText("Đã kết thúc")).toBeInTheDocument();
     expect(within(second).getByText("30/06/2026")).toBeInTheDocument();
-    expect(within(second).getByRole("link", { name: "Sửa" })).toHaveAttribute(
-      "href",
-      `/classes/${classEnded.id}/settings`,
-    );
+    expect(
+      within(second).getByRole("button", { name: `Sửa lớp ${classEnded.name}` }),
+    ).toBeInTheDocument();
   });
 
   it("shows a loading block while the list is pending", async () => {
@@ -178,6 +177,33 @@ describe("ClassListPage", () => {
       expect(screen.queryByText("Toán 6A")).not.toBeInTheDocument();
     });
     expect(screen.getByText("Anh Văn 7B")).toBeInTheDocument();
+  });
+
+  it("opens the edit dialog without navigating away or losing list filters", async () => {
+    const user = userEvent.setup();
+    const { router } = renderPage("/classes?view=all&q=toan");
+    const button = await screen.findByRole("button", { name: `Sửa lớp ${classWithSchedule.name}` });
+    await user.click(button);
+    expect(await screen.findByRole("dialog", { name: "Sửa lớp học" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/classes");
+    expect(router.state.location.search).toContain("q=toan");
+  });
+
+  it("hides edit for a member without a class staff role", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(
+          ok({ center_name: "Trung Tâm Bình Minh", permissions: ["classes.list"] }),
+        ),
+      ),
+    );
+    renderPage();
+    await screen.findByRole("table");
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: `Sửa lớp ${classWithSchedule.name}` }),
+      ).not.toBeInTheDocument(),
+    );
   });
 
   it("clicking a row navigates to the class detail", async () => {

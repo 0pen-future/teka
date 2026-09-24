@@ -5,7 +5,7 @@ import { loginAsMember, loginAsOwner } from "./helpers/auth.js";
 // Dev-only seed: Cô Lan owns the center and teaches "Văn 9 - Sáng Thứ Bảy"
 // with no other staff on it, so inviting Thầy Minh as giáo viên and letting
 // the owner confirm the invitation hands that class over to him. The
-// restoring afterEach hands it back through the settings card, and the
+// restoring afterEach hands it back through the detail card, and the
 // pre-clean cancels any invitation a dead earlier run left open, which keeps
 // the journey idempotent on a reused database.
 const INVITE_CLASS = "Văn 9 - Sáng Thứ Bảy";
@@ -49,7 +49,7 @@ async function cancelOpenInvitations(page: Page) {
 }
 
 /**
- * Reads the class-settings handoff card and, when the current teacher differs
+ * Reads the class-detail handoff card and, when the current teacher differs
  * from `targetName`, hands the class over. Assert-then-set keeps the restore
  * idempotent no matter where the journey stopped.
  */
@@ -59,7 +59,7 @@ async function ensureClassTeacher(
   targetName: string,
   targetOptionLabel: string,
 ) {
-  await page.goto(`/classes/${classId}/settings`);
+  await page.goto(`/classes/${classId}`);
   const card = page.locator("#teacher-handoff");
   const current = card.getByText("Giáo viên hiện tại:");
   await expect(current).toBeVisible();

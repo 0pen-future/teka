@@ -19,8 +19,8 @@ export interface ScheduleSlotsEditorProps {
 }
 
 /**
- * The khung-giờ list shared by `ClassDialog` and `ClassSettingsPage`
- * (prototype `modalClass.slots` / `classCfg.slots`): each card pairs one
+ * The khung-giờ list shared by class create and edit dialogs
+ * (prototype `modalClass.slots`): each card pairs one
  * start time with the weekdays it repeats on; "+ Thêm khung giờ khác"
  * appends the starter slot and "Xóa" only renders while another slot
  * remains, so a class can never edit its way to zero khung giờ.

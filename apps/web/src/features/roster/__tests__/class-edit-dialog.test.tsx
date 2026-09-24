@@ -1,14 +1,14 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
 import { API_URL, ok } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
 
-import { ClassSettingsPage } from "../pages/class-settings-page";
+import { ClassDialog } from "../components/class-dialog";
 import {
   classSchedule,
   classWithSchedule,
@@ -16,11 +16,6 @@ import {
   resetRosterStore,
   rosterHandlers,
 } from "./roster-handlers";
-
-/** The page's stat card only needs the month's session list; an empty one is fine. */
-const sessionsHandler = http.get(`${API_URL}/classes/:classId/sessions`, () =>
-  HttpResponse.json(ok([])),
-);
 
 /** Non-owner center member — `/centers/me`'s member body carries no `members` key. */
 const memberCenterHandler = http.get(`${API_URL}/centers/me`, () =>
@@ -45,38 +40,32 @@ function dayBefore(date: string): string {
   ).padStart(2, "0")}`;
 }
 
-function renderClassSettings() {
+function renderClassSettings(onOpenChange = () => undefined) {
   signInAs(testPrimaryTeacher);
-  return renderWithProviders(<ClassSettingsPage />, {
-    route: `/classes/${classWithSchedule.id}/settings`,
-    path: "/classes/:id/settings",
-    extraRoutes: [{ path: "/students", element: <div>students-screen-stub</div> }],
-  });
+  return renderWithProviders(
+    <ClassDialog mode="edit" classId={classWithSchedule.id} open onOpenChange={onOpenChange} />,
+    { route: "/classes", path: "/classes" },
+  );
 }
 
 beforeEach(() => {
   resetRosterStore();
-  server.use(...rosterHandlers, sessionsHandler);
+  server.use(...rosterHandlers);
 });
 
 afterEach(() => {
   useAuthStore.getState().clearSession();
 });
 
-describe("ClassSettingsPage", () => {
-  it("renders the classCfg screen prefilled from the class", async () => {
+describe("ClassDialog edit mode", () => {
+  it("renders the edit dialog prefilled from the class", async () => {
     renderClassSettings();
 
-    expect(
-      await screen.findByRole("heading", { name: `Cài đặt lớp — ${classWithSchedule.name}` }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Sửa lớp học" })).toBeInTheDocument();
     expect(
       screen.getByText("Thay đổi áp dụng từ buổi kế tiếp — các kỳ đã chốt không đổi."),
     ).toBeInTheDocument();
-    expect(screen.getByText("HỌC SINH")).toBeInTheDocument();
-    expect(screen.getByText("ĐƠN GIÁ HIỆN TẠI")).toBeInTheDocument();
-
-    expect(screen.getByLabelText("Tên lớp")).toHaveValue(classWithSchedule.name);
+    expect(await screen.findByLabelText("Tên lớp")).toHaveValue(classWithSchedule.name);
     expect(screen.getByLabelText("Giờ học khung 1")).toHaveValue("18:00");
     // classSchedule.weekday = 2 → the T3 chip starts selected.
     await waitFor(() =>
@@ -110,9 +99,10 @@ describe("ClassSettingsPage", () => {
     expect(await screen.findByText(/Đơn giá mới chỉ áp cho lượt ghi danh/)).toBeInTheDocument();
   });
 
-  it("saves name/price plus the schedule diff and returns to the roster", async () => {
+  it("saves name/price plus the schedule diff and closes the dialog", async () => {
     const user = userEvent.setup();
-    renderClassSettings();
+    const onOpenChange = vi.fn();
+    renderClassSettings(onOpenChange);
 
     const nameInput = await screen.findByLabelText("Tên lớp");
     await waitFor(() =>
@@ -124,7 +114,7 @@ describe("ClassSettingsPage", () => {
     await user.click(screen.getByRole("button", { name: "T7" }));
     await user.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
 
-    expect(await screen.findByText("students-screen-stub")).toBeInTheDocument();
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
 
     const saved = getRosterStore().classes.find((klass) => klass.id === classWithSchedule.id);
     expect(saved?.name).toBe("Toán 6A nâng cao");
@@ -139,7 +129,8 @@ describe("ClassSettingsPage", () => {
 
   it("adds a second khung giờ and saves rows for both times", async () => {
     const user = userEvent.setup();
-    renderClassSettings();
+    const onOpenChange = vi.fn();
+    renderClassSettings(onOpenChange);
 
     await screen.findByLabelText("Tên lớp");
     await waitFor(() =>
@@ -157,7 +148,7 @@ describe("ClassSettingsPage", () => {
     await user.click(chips[1]!);
     await user.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
 
-    expect(await screen.findByText("students-screen-stub")).toBeInTheDocument();
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
 
     const saved = getRosterStore().classes.find((klass) => klass.id === classWithSchedule.id);
     expect(saved?.schedules).toHaveLength(2);
@@ -189,12 +180,13 @@ describe("ClassSettingsPage", () => {
     expect(
       await screen.findByText("Ngày này đã có ở khung giờ khác — mỗi ngày chỉ một khung giờ"),
     ).toBeInTheDocument();
-    expect(screen.queryByText("students-screen-stub")).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Sửa lớp học" })).toBeInTheDocument();
   });
 
   it("closes the old row instead of deleting it when the time changes", async () => {
     const user = userEvent.setup();
-    renderClassSettings();
+    const onOpenChange = vi.fn();
+    renderClassSettings(onOpenChange);
 
     const timeInput = await screen.findByLabelText("Giờ học khung 1");
     await waitFor(() =>
@@ -204,7 +196,7 @@ describe("ClassSettingsPage", () => {
     await user.type(timeInput, "19:30");
     await user.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
 
-    expect(await screen.findByText("students-screen-stub")).toBeInTheDocument();
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
 
     const saved = getRosterStore().classes.find((klass) => klass.id === classWithSchedule.id);
     // Close-and-replace: the old T3 row stays, closed yesterday, so past
@@ -219,32 +211,12 @@ describe("ClassSettingsPage", () => {
     expect(replacement?.effective_from).toBe(todayIso());
   });
 
-  describe("back link by role", () => {
-    it("points the owner back at the students tab of Lớp & học sinh", async () => {
-      renderClassSettings();
-
-      const back = await screen.findByRole("link", { name: "← Lớp & học sinh" });
-      expect(back).toHaveAttribute(
-        "href",
-        `/students?tab=students&class_id=${classWithSchedule.id}`,
-      );
-    });
-
-    it("points a member at their per-class records, not the owner-only roster", async () => {
-      server.use(memberCenterHandler, classWithStaffRoles(["giao_vien"]));
-      renderClassSettings();
-
-      const back = await screen.findByRole("link", { name: "← Hồ sơ học sinh" });
-      expect(back).toHaveAttribute("href", `/records?class_id=${classWithSchedule.id}`);
-      expect(screen.queryByRole("link", { name: "← Lớp & học sinh" })).not.toBeInTheDocument();
-    });
-  });
-
   describe("write access by class-staff role", () => {
     it("shows an enabled save button for the center owner", async () => {
       renderClassSettings();
 
-      const save = await screen.findByRole("button", { name: "Lưu thay đổi" });
+      await screen.findByLabelText("Tên lớp");
+      const save = screen.getByRole("button", { name: "Lưu thay đổi" });
       expect(save).toBeEnabled();
       expect(
         screen.queryByText(/Chỉ giáo viên phụ trách hoặc chủ trung tâm mới sửa được/),
@@ -255,7 +227,8 @@ describe("ClassSettingsPage", () => {
       server.use(memberCenterHandler, classWithStaffRoles(["giao_vien"]));
       renderClassSettings();
 
-      const save = await screen.findByRole("button", { name: "Lưu thay đổi" });
+      await screen.findByLabelText("Tên lớp");
+      const save = screen.getByRole("button", { name: "Lưu thay đổi" });
       expect(save).toBeEnabled();
     });
 
