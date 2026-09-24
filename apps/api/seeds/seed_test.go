@@ -49,7 +49,7 @@ func assertTeachingMenuSeeded(t *testing.T, db *gorm.DB) {
 	var demoTeacherID uuid.UUID
 	require.NoError(t, db.Raw(
 		"SELECT id FROM user_accounts WHERE phone = ?", "+84901000004",
-	).Scan(&demoTeacherID).Error)
+	).Row().Scan(&demoTeacherID), "demo teacher account not seeded")
 	require.NotEqual(t, uuid.Nil, demoTeacherID, "demo teacher account not seeded")
 
 	var publishedVersions int64
