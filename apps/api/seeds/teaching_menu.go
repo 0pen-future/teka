@@ -104,11 +104,14 @@ func newTeachingMenuServices(db *gorm.DB) teachingMenuServices {
 }
 
 // seedTeachingMenu populates the Giảng dạy menu's demo data: two program
-// templates (one published, one with an open draft mid-preparation), three
-// courses, a three-stage learning path, the existing classes linked to their
-// course, one class with the published program applied, a demo teacher
-// granted the menu's three optIn permissions, and two invitations for that
-// teacher (pending and accepted). Every write goes through the real feature
+// templates (one published, one with an open draft mid-preparation), a
+// small library bank (materials and exercises), the v5 draft content on top
+// of it (an exercise group with one exercise assigned, a self_study lesson,
+// a two-group score set and a student log field), three courses, a
+// three-stage learning path, the existing classes linked to their course,
+// one class with the published program applied, a demo teacher granted the
+// menu's three optIn permissions, and two invitations for that teacher
+// (pending and accepted). Every write goes through the real feature
 // services and is skipped when its natural key already exists, so reseeding
 // a populated database changes nothing.
 func seedTeachingMenu(ctx context.Context, db *gorm.DB, log *slog.Logger, ownerSc authctx.Scope, centerID uuid.UUID) error {
@@ -123,7 +126,12 @@ func seedTeachingMenu(ctx context.Context, db *gorm.DB, log *slog.Logger, ownerS
 
 	svcs := newTeachingMenuServices(db)
 
-	publishedVersionID, err := seedProgramTemplates(ctx, db, log, svcs, ownerSc, demoID)
+	exerciseIDs, err := seedLibraryBank(ctx, db, log, svcs, ownerSc)
+	if err != nil {
+		return err
+	}
+
+	publishedVersionID, err := seedProgramTemplates(ctx, db, log, svcs, ownerSc, demoID, exerciseIDs)
 	if err != nil {
 		return err
 	}
@@ -154,15 +162,16 @@ func seedTeachingMenu(ctx context.Context, db *gorm.DB, log *slog.Logger, ownerS
 
 // seedProgramTemplates ensures the published and draft templates exist and
 // returns the published template's version id for the course catalog and
-// class program steps below.
+// class program steps below. exerciseIDs is the library bank's seeded
+// exercises, used to fill the draft template's exercise group.
 func seedProgramTemplates(
-	ctx context.Context, db *gorm.DB, log *slog.Logger, svcs teachingMenuServices, sc authctx.Scope, demoTeacherID uuid.UUID,
+	ctx context.Context, db *gorm.DB, log *slog.Logger, svcs teachingMenuServices, sc authctx.Scope, demoTeacherID uuid.UUID, exerciseIDs []uuid.UUID,
 ) (uuid.UUID, error) {
 	publishedVersionID, err := ensurePublishedTemplate(ctx, db, log, svcs, sc)
 	if err != nil {
 		return uuid.Nil, err
 	}
-	if err := ensureDraftTemplate(ctx, db, log, svcs, sc, demoTeacherID); err != nil {
+	if err := ensureDraftTemplate(ctx, db, log, svcs, sc, demoTeacherID, exerciseIDs); err != nil {
 		return uuid.Nil, err
 	}
 	return publishedVersionID, nil
@@ -200,12 +209,24 @@ func ensurePublishedTemplate(
 	return *tpl.DraftVersionID, nil
 }
 
+// draftExerciseGroupName names the one exercise group the v5 draft content
+// seeds on MAU-VAN9's draft version.
+const draftExerciseGroupName = "Khởi động"
+
+// draftSelfStudyUnit is the unit label of the self_study lesson the v5
+// draft content adds to MAU-VAN9's draft version.
+const draftSelfStudyUnit = "Unit 1"
+
 // ensureDraftTemplate creates a template whose draft is mid-preparation: one
 // lesson done and assigned with a due date and a checklist, one lesson in
 // review, and one lesson left at the default "todo" — the mixed prep board
-// the phase asks for.
+// the phase asks for. It also seeds the v5 draft content: one exercise
+// group carrying one bank exercise, a fourth lesson in self_study mode with
+// unit "Unit 1" the exercise is assigned into, a two-group score set and a
+// student-kind log field. exerciseIDs must hold at least one id (the
+// library bank the caller seeds first).
 func ensureDraftTemplate(
-	ctx context.Context, db *gorm.DB, log *slog.Logger, svcs teachingMenuServices, sc authctx.Scope, demoTeacherID uuid.UUID,
+	ctx context.Context, db *gorm.DB, log *slog.Logger, svcs teachingMenuServices, sc authctx.Scope, demoTeacherID uuid.UUID, exerciseIDs []uuid.UUID,
 ) error {
 	var count int64
 	err := db.WithContext(ctx).Raw(
@@ -270,7 +291,83 @@ func ensureDraftTemplate(
 	}
 	// Buổi 3 stays at the default "todo" status a new lesson is created with.
 
+	// One transaction for every v5 write: ensureDraftTemplate's natural-key
+	// guard above only checks the template itself, so a failure partway
+	// through the group/lesson/score-set/log-field chain would otherwise
+	// leave the template seeded but its v5 content half-written, and a
+	// reseed would then skip it forever (the guard sees the template and
+	// stops looking).
+	if err := database.NewTxManager(db).WithinTx(ctx, func(ctx context.Context) error {
+		return seedDraftTemplateV5Content(ctx, svcs, sc, *tpl.DraftVersionID, exerciseIDs)
+	}); err != nil {
+		return err
+	}
+
 	log.Info("seed: template drafted", "code", templateDraftCode, "version_id", *tpl.DraftVersionID)
+	return nil
+}
+
+// seedDraftTemplateV5Content adds the v5 fields to a freshly created draft
+// version: one exercise group, a fourth self_study lesson carrying the
+// group's one exercise, a two-group score set and a student log field. It
+// runs only once, from ensureDraftTemplate's own natural-key guard, so it
+// needs no find-then-skip of its own.
+func seedDraftTemplateV5Content(
+	ctx context.Context, svcs teachingMenuServices, sc authctx.Scope, draftVersionID uuid.UUID, exerciseIDs []uuid.UUID,
+) error {
+	if len(exerciseIDs) == 0 {
+		return fmt.Errorf("seed: no library exercises available to assign to %s", templateDraftCode)
+	}
+
+	group, err := svcs.library.CreateExerciseGroup(ctx, sc, draftVersionID, library.ExerciseGroupRequest{
+		Name: draftExerciseGroupName,
+	})
+	if err != nil {
+		return fmt.Errorf("seed: create exercise group for %s: %w", templateDraftCode, err)
+	}
+
+	unit := draftSelfStudyUnit
+	selfStudyLesson, err := svcs.library.CreateLesson(ctx, sc, draftVersionID, library.LessonRequest{
+		Title: "Buổi tự học Unit 1",
+		Mode:  library.LessonModeSelfStudy,
+		Unit:  &unit,
+	})
+	if err != nil {
+		return fmt.Errorf("seed: create self-study lesson for %s: %w", templateDraftCode, err)
+	}
+
+	groupID := group.ID
+	if _, err := svcs.library.SetLessonExercises(ctx, sc, selfStudyLesson.ID, []library.LessonExerciseInput{
+		{ExerciseID: exerciseIDs[0], GroupID: &groupID},
+	}); err != nil {
+		return fmt.Errorf("seed: assign exercise to group on %s: %w", templateDraftCode, err)
+	}
+
+	if _, err := svcs.library.SetScoreSet(ctx, sc, draftVersionID, []library.ScoreSetGroupInput{
+		{
+			Key:   "giua_ky",
+			Title: "Giữa kỳ",
+			Components: []library.ScoreComponentInput{
+				{Key: "kiem_tra_15p", Label: "Kiểm tra 15 phút", Max: 10, Weight: 1},
+			},
+		},
+		{
+			Key:   "cuoi_ky",
+			Title: "Cuối kỳ",
+			Components: []library.ScoreComponentInput{
+				{Key: "bai_thi", Label: "Bài thi cuối kỳ", Max: 10, Weight: 2},
+			},
+		},
+	}); err != nil {
+		return fmt.Errorf("seed: set score set for %s: %w", templateDraftCode, err)
+	}
+
+	if _, err := svcs.library.SetLogFields(ctx, sc, draftVersionID, []library.LogFieldInput{
+		{Label: "Chọn học sinh", Kind: library.LogFieldStudent},
+	}); err != nil {
+		return fmt.Errorf("seed: set log fields for %s: %w", templateDraftCode, err)
+	}
+
 	return nil
 }
 
@@ -294,6 +391,116 @@ func findTemplateVersionByCode(
 		return uuid.Nil, false, nil
 	}
 	return ids[0], true, nil
+}
+
+// libraryMaterialSeed is one bank material seedLibraryBank ensures exists.
+type libraryMaterialSeed struct {
+	Title  string
+	Kind   string
+	URL    string
+	Active bool
+}
+
+// libraryMaterialSeeds covers three of the v5 bank's new kinds plus one
+// material left inactive (kind link, unrelated to the video/doc/note trio
+// so the two groups stay easy to count independently in tests).
+var libraryMaterialSeeds = []libraryMaterialSeed{
+	{Title: "Video hướng dẫn phát âm", Kind: library.MaterialKindVideo, URL: "https://example.com/video/phat-am", Active: true},
+	{Title: "Tài liệu ngữ pháp tổng hợp", Kind: library.MaterialKindDoc, URL: "https://example.com/doc/ngu-phap", Active: true},
+	{Title: "Ghi chú chuẩn bị buổi học", Kind: library.MaterialKindNote, URL: "https://example.com/note/chuan-bi", Active: true},
+	{Title: "Tài liệu cũ đã ngừng dùng", Kind: library.MaterialKindLink, URL: "https://example.com/link/ngung-dung", Active: false},
+}
+
+// libraryExerciseSeed is one bank exercise seedLibraryBank ensures exists.
+// Code is left blank so the service assigns the next auto-generated
+// "BT-0001"-style code.
+type libraryExerciseSeed struct {
+	Title string
+	Skill string
+	Level string
+}
+
+var libraryExerciseSeeds = []libraryExerciseSeed{
+	{Title: "Bài tập đọc hiểu đoạn văn", Skill: "Đọc hiểu", Level: "A2"},
+	{Title: "Bài tập viết đoạn văn ngắn", Skill: "Viết", Level: "B1"},
+	{Title: "Bài tập từ vựng chủ đề gia đình", Skill: "Từ vựng", Level: "Cơ bản"},
+}
+
+// seedLibraryBank ensures the demo center-wide library bank exists: three
+// materials of the new video/doc/note kinds plus one inactive material, and
+// three exercises with skill/level and an auto-generated code. It returns
+// the seeded exercises' ids, in the same order as libraryExerciseSeeds, for
+// the draft template step to assign one into its exercise group.
+func seedLibraryBank(
+	ctx context.Context, db *gorm.DB, log *slog.Logger, svcs teachingMenuServices, sc authctx.Scope,
+) ([]uuid.UUID, error) {
+	for _, m := range libraryMaterialSeeds {
+		if err := ensureLibraryMaterial(ctx, db, log, svcs, sc, m); err != nil {
+			return nil, err
+		}
+	}
+	exerciseIDs := make([]uuid.UUID, 0, len(libraryExerciseSeeds))
+	for _, e := range libraryExerciseSeeds {
+		id, err := ensureLibraryExercise(ctx, db, log, svcs, sc, e)
+		if err != nil {
+			return nil, err
+		}
+		exerciseIDs = append(exerciseIDs, id)
+	}
+	return exerciseIDs, nil
+}
+
+func ensureLibraryMaterial(
+	ctx context.Context, db *gorm.DB, log *slog.Logger, svcs teachingMenuServices, sc authctx.Scope, spec libraryMaterialSeed,
+) error {
+	var ids []uuid.UUID
+	if err := db.WithContext(ctx).Raw(
+		"SELECT id FROM library_materials WHERE center_id = ? AND title = ? AND deleted_at IS NULL",
+		sc.CenterID, spec.Title,
+	).Scan(&ids).Error; err != nil {
+		return fmt.Errorf("seed: look up material %q: %w", spec.Title, err)
+	}
+	if len(ids) > 0 {
+		log.Info("seed: library material already exists, skipping", "title", spec.Title)
+		return nil
+	}
+
+	url := spec.URL
+	m, err := svcs.library.CreateMaterial(ctx, sc, library.MaterialRequest{Title: spec.Title, Kind: spec.Kind, URL: &url})
+	if err != nil {
+		return fmt.Errorf("seed: create material %q: %w", spec.Title, err)
+	}
+	if !spec.Active {
+		if _, err := svcs.library.SetMaterialStatus(ctx, sc, m.ID, false); err != nil {
+			return fmt.Errorf("seed: deactivate material %q: %w", spec.Title, err)
+		}
+	}
+	log.Info("seed: library material created", "title", spec.Title, "kind", spec.Kind, "active", spec.Active)
+	return nil
+}
+
+func ensureLibraryExercise(
+	ctx context.Context, db *gorm.DB, log *slog.Logger, svcs teachingMenuServices, sc authctx.Scope, spec libraryExerciseSeed,
+) (uuid.UUID, error) {
+	var ids []uuid.UUID
+	if err := db.WithContext(ctx).Raw(
+		"SELECT id FROM library_exercises WHERE center_id = ? AND title = ? AND deleted_at IS NULL",
+		sc.CenterID, spec.Title,
+	).Scan(&ids).Error; err != nil {
+		return uuid.Nil, fmt.Errorf("seed: look up exercise %q: %w", spec.Title, err)
+	}
+	if len(ids) > 0 {
+		log.Info("seed: library exercise already exists, skipping", "title", spec.Title)
+		return ids[0], nil
+	}
+
+	skill, level := spec.Skill, spec.Level
+	e, err := svcs.library.CreateExercise(ctx, sc, library.ExerciseRequest{Title: spec.Title, Skill: &skill, Level: &level})
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("seed: create exercise %q: %w", spec.Title, err)
+	}
+	log.Info("seed: library exercise created", "title", spec.Title, "code", e.Code)
+	return e.ID, nil
 }
 
 // courseSeed is one course the catalog step ensures exists.
