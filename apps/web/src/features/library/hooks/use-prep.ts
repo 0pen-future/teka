@@ -12,7 +12,12 @@ import {
   type KanbanTask,
 } from "@/lib/kanban";
 
-import { getBoard, updateLessonAssignment, updateLessonPrep } from "../api/library-api";
+import {
+  getBoard,
+  listAssignees,
+  updateLessonAssignment,
+  updateLessonPrep,
+} from "../api/library-api";
 import { prepStatusLabel } from "../lib/library-labels";
 import {
   PREP_STATUSES,
@@ -24,7 +29,21 @@ import {
   type ProgramTemplate,
   type TemplateVersion,
 } from "../schemas/library-schemas";
-import { lessonsKeys, templatesKeys, versionsKeys } from "./library-keys";
+import { assigneesKeys, lessonsKeys, templatesKeys, versionsKeys } from "./library-keys";
+
+/**
+ * Assign-picker source for the prep assignment page: the center's live
+ * members via `prep.assign` (`GET /library/assignees`), not the
+ * `members.list`-gated member directory `useMemberDirectory` uses elsewhere.
+ */
+export function useAssignees(enabled = true) {
+  return useQuery({
+    queryKey: assigneesKeys.all,
+    queryFn: listAssignees,
+    staleTime: 60_000,
+    enabled,
+  });
+}
 
 /* eslint-disable @typescript-eslint/only-throw-error -- the data source
  * rejects with the headless lib's plain `KanbanError` union, not an `Error`

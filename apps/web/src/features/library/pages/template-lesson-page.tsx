@@ -109,7 +109,7 @@ function LessonView({ template, version, lesson }: LessonViewProps) {
         </>
       )}
 
-      <LessonPrepPanel key={`prep-${lesson.updated_at}`} lesson={lesson} editable={editable} />
+      <LessonPrepPanel key={`prep-${lesson.id}`} lesson={lesson} editable={editable} />
 
       <LessonAttachments lesson={lesson} templateId={template.id} editable={editable} />
     </div>

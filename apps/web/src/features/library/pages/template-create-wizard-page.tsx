@@ -8,6 +8,7 @@ import { HvButton, HvStateBlock } from "@/components/hv";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useCenterContext } from "@/features/teaching";
+import { ApiError } from "@/lib/api/errors";
 import { useApiFormErrors } from "@/lib/forms/use-api-form-errors";
 import { cn } from "@/lib/utils";
 
@@ -43,6 +44,23 @@ type LessonCountValues = z.output<typeof lessonCountSchema>;
 
 const STEPS = ["Thông tin", "Số buổi", "Xác nhận"] as const;
 type Step = 0 | 1 | 2;
+
+const TEMPLATE_FIELDS = new Set(Object.keys(EMPTY_TEMPLATE));
+
+/**
+ * Only a duplicate code (409) or a validation error on one of the step-0
+ * fields (code/name/subject/level/description) belongs on that step; a
+ * `lesson_count` error, a permission change, or a 5xx has nowhere to land
+ * there and must stay on step 3, where the root error already renders.
+ */
+function belongsOnTemplateStep(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return false;
+  if (error.status === 409) return true;
+  if (error.fields) {
+    return Object.keys(error.fields).some((field) => TEMPLATE_FIELDS.has(field));
+  }
+  return false;
+}
 
 /**
  * `/library/templates/new` — a three-step alternative to the template
@@ -112,8 +130,12 @@ export function TemplateCreateWizardPage() {
         },
         onError: (error) => {
           // A duplicate code (409) lands on the code field, so the wizard
-          // goes back to where that field is.
-          setStep(0);
+          // goes back to where that field is. Anything else (a permission
+          // just revoked, a `lesson_count` validation error, a 5xx) has no
+          // home on step 0 and stays here, where the root error renders.
+          if (belongsOnTemplateStep(error)) {
+            setStep(0);
+          }
           handleApiError(error);
         },
       },

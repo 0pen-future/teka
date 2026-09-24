@@ -2,6 +2,7 @@ import { apiClient } from "@/lib/api/client";
 import { parseArray, parseData, parseList, type Paginated } from "@/lib/api/envelope";
 
 import {
+  assigneeSchema,
   exerciseSchema,
   prepBoardSchema,
   lessonExerciseSchema,
@@ -21,6 +22,7 @@ import {
   type LessonInput,
   type LessonMaterial,
   type LessonMaterialInput,
+  type Assignee,
   type LogField,
   type LogFieldInput,
   type Material,
@@ -167,6 +169,16 @@ export async function updateLessonAssignment(
 ): Promise<TemplateLesson> {
   const res = await apiClient.patch<unknown>(`/library/lessons/${id}/assignment`, input);
   return parseData(templateLessonSchema, res.data);
+}
+
+/**
+ * `GET /library/assignees` (`prep.assign`) — the center's live members
+ * eligible for assignment. Unlike the member directory, this does not need
+ * `members.list`.
+ */
+export async function listAssignees(): Promise<Assignee[]> {
+  const res = await apiClient.get<unknown>("/library/assignees");
+  return parseArray(assigneeSchema, res.data);
 }
 
 /**

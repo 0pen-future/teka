@@ -309,6 +309,70 @@ describe("TemplateLessonPage", () => {
     ]);
   });
 
+  it("disables the save button until the status or checklist actually changes", async () => {
+    renderPage();
+
+    const prep = await screen.findByRole("region", { name: "Chuẩn bị tài liệu" });
+    expect(within(prep).getByRole("button", { name: "Lưu chuẩn bị" })).toBeDisabled();
+  });
+
+  it("sends only the status when the checklist was not touched", async () => {
+    const user = userEvent.setup();
+    let capturedBody: { prep_status?: string; checklist?: unknown } | undefined;
+    server.use(
+      http.patch(`${API_URL}/library/lessons/:lid/prep`, async ({ params, request }) => {
+        capturedBody = (await request.json()) as typeof capturedBody;
+        const row = getLibraryStore().lessons.find((l) => l.id === params.lid);
+        if (row && capturedBody?.prep_status !== undefined) {
+          row.prep_status = capturedBody.prep_status as typeof row.prep_status;
+        }
+        return HttpResponse.json(ok(row));
+      }),
+    );
+    renderPage();
+
+    const prep = await screen.findByRole("region", { name: "Chuẩn bị tài liệu" });
+    await user.click(within(prep).getByRole("radio", { name: "Đang làm" }));
+    await user.click(within(prep).getByRole("button", { name: "Lưu chuẩn bị" }));
+
+    expect(await screen.findByText("Đã lưu trạng thái chuẩn bị")).toBeInTheDocument();
+    expect(capturedBody).toEqual({ prep_status: "doing" });
+  });
+
+  it("sends only the checklist when the status was not touched, so a stale status is never resent", async () => {
+    const user = userEvent.setup();
+    let capturedBody: { prep_status?: string; checklist?: unknown } | undefined;
+    server.use(
+      http.patch(`${API_URL}/library/lessons/:lid/prep`, async ({ params, request }) => {
+        capturedBody = (await request.json()) as typeof capturedBody;
+        const row = getLibraryStore().lessons.find((l) => l.id === params.lid);
+        if (row && capturedBody?.checklist !== undefined) {
+          row.checklist = capturedBody.checklist as typeof row.checklist;
+        }
+        return HttpResponse.json(ok(row));
+      }),
+    );
+    // Someone else moved the board card while this page was open: the server
+    // truth for prep_status is no longer "todo", but this panel never read it.
+    getLibraryStore().lessons.find((l) => l.id === lessonDraftSoTuNhien.id)!.prep_status = "review";
+    renderPage();
+
+    const prep = await screen.findByRole("region", { name: "Chuẩn bị tài liệu" });
+    await user.click(within(prep).getByRole("checkbox", { name: "In phiếu bài tập" }));
+    await user.click(within(prep).getByRole("button", { name: "Lưu chuẩn bị" }));
+
+    expect(await screen.findByText("Đã lưu trạng thái chuẩn bị")).toBeInTheDocument();
+    expect(capturedBody?.prep_status).toBeUndefined();
+    expect(capturedBody?.checklist).toEqual([
+      { label: "Soạn slide", done: true },
+      { label: "In phiếu bài tập", done: true },
+    ]);
+    // The elsewhere-set status must survive untouched.
+    expect(
+      getLibraryStore().lessons.find((l) => l.id === lessonDraftSoTuNhien.id)?.prep_status,
+    ).toBe("review");
+  });
+
   it("shows the preparation block read-only on a published lesson", async () => {
     renderPage(lessonPublishedSoTuNhien.id);
 

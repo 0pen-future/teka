@@ -3,6 +3,7 @@ import { http, HttpResponse } from "msw";
 import { API_URL, defaultMemberDirectory, fail, listMeta, ok } from "@/test/msw/handlers";
 
 import type {
+  Assignee,
   AssignmentInput,
   BoardCard,
   Exercise,
@@ -328,6 +329,17 @@ function assigneeName(teacherId: string | null): string | null {
   return defaultMemberDirectory.find((m) => m.teacher_id === teacherId)?.display_name ?? null;
 }
 
+/**
+ * `GET /library/assignees` is a separate, `prep.assign`-only endpoint from
+ * the `members.list`-gated member directory, but this mock reuses the same
+ * center roster so a test picking "Thầy Minh" resolves to the same teacher
+ * either way.
+ */
+const defaultAssignees: Assignee[] = defaultMemberDirectory.map((m) => ({
+  id: m.teacher_id,
+  full_name: m.display_name,
+}));
+
 /** Recomputes the template's summary columns the way the API's list query does. */
 function summarize(template: ProgramTemplate): ProgramTemplate {
   const versions = store.versions.filter((v) => v.template_id === template.id);
@@ -457,6 +469,7 @@ function renumber(versionId: string): TemplateLesson[] {
 }
 
 export const libraryHandlers = [
+  http.get(`${API_URL}/library/assignees`, () => HttpResponse.json(ok(defaultAssignees))),
   http.get(`${API_URL}/library/templates`, ({ request }) => {
     const params = new URL(request.url).searchParams;
     const q = (params.get("q") ?? "").toLowerCase();

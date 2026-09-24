@@ -128,6 +128,17 @@ export interface AssignmentInput {
   due_date: string | null;
 }
 
+/**
+ * `library.AssigneeResponse` — one live center member the assign picker can
+ * offer. Deliberately not the member directory (`members.list`): `prep.assign`
+ * alone must be enough to see who can be assigned.
+ */
+export const assigneeSchema = z.object({
+  id: z.string(),
+  full_name: z.string(),
+});
+export type Assignee = z.infer<typeof assigneeSchema>;
+
 /** `library.LessonRequest` — position is never in the body (append on create, reorder endpoint otherwise). */
 export interface LessonInput {
   title: string;

@@ -1,6 +1,6 @@
 import { Link } from "react-router";
 
-import { HvBadge, HvStateBlock, ProgressBar } from "@/components/hv";
+import { HvBadge, HvNotice, HvStateBlock, ProgressBar } from "@/components/hv";
 import { useCenterContext } from "@/features/teaching";
 import { cn } from "@/lib/utils";
 
@@ -41,6 +41,11 @@ export function PrepPage() {
   }
 
   const templates = (list.data?.items ?? []).filter((template) => template.draft_version_id);
+  // The page fetches one API page (100 rows); a center with more open
+  // drafts than that would otherwise see the tail silently disappear.
+  const fetched = list.data?.items.length ?? 0;
+  const total = list.data?.meta.total ?? 0;
+  const truncated = fetched < total;
 
   return (
     <div className="flex flex-col gap-4">
@@ -59,6 +64,13 @@ export function PrepPage() {
           </Link>
         ) : null}
       </div>
+
+      {truncated ? (
+        <HvNotice tone="warning">
+          Đang hiển thị {fetched}/{total} bản nháp. Trang này chỉ tải tối đa {fetched} bản nháp mỗi
+          lần; hoàn tất hoặc phát hành bớt bản nháp để thấy phần còn lại.
+        </HvNotice>
+      ) : null}
 
       {list.isPending ? (
         <HvStateBlock state="loading" title="Đang tải bản nháp" />

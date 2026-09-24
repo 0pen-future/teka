@@ -99,6 +99,26 @@ describe("PrepPage", () => {
     expect(await screen.findByText("Chưa có bản nháp nào cần chuẩn bị")).toBeInTheDocument();
   });
 
+  it("warns when the center has more open drafts than the page fetched", async () => {
+    server.use(
+      http.get(`${API_URL}/library/templates`, () =>
+        HttpResponse.json(
+          ok([templateToan6, templateVan9], { page: 1, per_page: 100, total: 101, total_pages: 2 }),
+        ),
+      ),
+    );
+    renderPage();
+
+    expect(await screen.findByText(/Đang hiển thị 2\/101 bản nháp/)).toBeInTheDocument();
+  });
+
+  it("shows no truncation warning when every open draft fits on the page", async () => {
+    renderPage();
+
+    await screen.findByRole("row", { name: /Toán 6 cơ bản/ });
+    expect(screen.queryByText(/Đang hiển thị/)).not.toBeInTheDocument();
+  });
+
   it("blocks a member without library.read", async () => {
     server.use(memberWith("tasks.list"));
     renderPage();

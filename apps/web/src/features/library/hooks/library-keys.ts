@@ -30,6 +30,10 @@ export const lessonsKeys = {
   detail: (id: string) => [...lessonsKeys.details(), id] as const,
 };
 
+export const assigneesKeys = {
+  all: ["library", "assignees"] as const,
+};
+
 export const materialsKeys = {
   all: ["library", "materials"] as const,
   lists: () => [...materialsKeys.all, "list"] as const,

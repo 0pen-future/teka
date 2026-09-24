@@ -4,12 +4,16 @@ import { Link, Navigate, useParams } from "react-router";
 
 import { HvBadge, HvNotice, HvSelect, HvStateBlock, hvToast } from "@/components/hv";
 import { Input } from "@/components/ui/input";
-import { useMemberDirectory } from "@/features/tasks";
 import { useCenterContext } from "@/features/teaching";
 import { ApiError } from "@/lib/api/errors";
 import { cn } from "@/lib/utils";
 
-import { usePrepBoard, useUpdateLessonAssignment, type PrepCard } from "../hooks/use-prep";
+import {
+  useAssignees,
+  usePrepBoard,
+  useUpdateLessonAssignment,
+  type PrepCard,
+} from "../hooks/use-prep";
 import {
   prepStatusLabel,
   prepStatusVariant,
@@ -34,7 +38,7 @@ export function PrepAssignPage() {
   const { has, isResolved, isError } = useCenterContext();
   const canAssign = has("prep.assign");
   const boardQuery = usePrepBoard(vid);
-  const directory = useMemberDirectory(isResolved && canAssign);
+  const assigneesQuery = useAssignees(isResolved && canAssign);
 
   if (!isResolved && !isError) {
     return <HvStateBlock state="loading" title="Đang tải phân công" />;
@@ -68,10 +72,9 @@ export function PrepAssignPage() {
   const lessons = [...board.tasks].sort((a, b) => a.lessonPosition - b.lessonPosition);
   const memberOptions = [
     { value: UNASSIGNED, label: "Chưa phân công" },
-    ...(directory.data ?? []).map((entry) => ({
-      value: entry.teacher_id,
-      label: entry.display_name,
-      meta: entry.role_name ?? undefined,
+    ...(assigneesQuery.data ?? []).map((entry) => ({
+      value: entry.id,
+      label: entry.full_name,
     })),
   ];
 
@@ -100,7 +103,7 @@ export function PrepAssignPage() {
           Phiên bản v{version.version_no} không còn là bản nháp, phân công được khoá.
         </HvNotice>
       ) : null}
-      {directory.isError ? (
+      {assigneesQuery.isError ? (
         <HvNotice tone="warning">Không tải được danh sách thành viên.</HvNotice>
       ) : null}
 
@@ -155,25 +158,42 @@ function AssignRow({ card, versionId, locked, memberOptions }: AssignRowProps) {
   // still shows while its refetch is in flight.
   const [assigneeId, setAssigneeId] = useState(card.assigneeId);
   const [dueDate, setDueDate] = useState(card.dueDate);
+  // The date input keeps its own draft so a keystroke mid-date never sends a
+  // half-typed value; it commits on blur or once the value is a complete
+  // YYYY-MM-DD (or cleared), never on every keystroke. `save` is the only
+  // place `dueDate` changes, so it resets the draft alongside it directly
+  // instead of syncing them through an effect.
+  const [dueDraft, setDueDraft] = useState(card.dueDate ?? "");
 
   function save(next: { assigneeId: string | null; dueDate: string | null }) {
     setAssigneeId(next.assigneeId);
     setDueDate(next.dueDate);
+    setDueDraft(next.dueDate ?? "");
     mutation.mutate(
       { assignee_id: next.assigneeId, due_date: next.dueDate },
       {
         onSuccess: (saved) => {
           setAssigneeId(saved.assignee_id);
           setDueDate(saved.due_date);
+          setDueDraft(saved.due_date ?? "");
           hvToast("Đã lưu phân công");
         },
         onError: () => {
           setAssigneeId(card.assigneeId);
           setDueDate(card.dueDate);
+          setDueDraft(card.dueDate ?? "");
           hvToast("Không lưu được phân công, vui lòng thử lại.", { variant: "danger" });
         },
       },
     );
+  }
+
+  function commitDue(raw: string) {
+    const nextDue = raw === "" ? null : raw;
+    if (nextDue === dueDate) {
+      return;
+    }
+    save({ assigneeId, dueDate: nextDue });
   }
 
   return (
@@ -211,12 +231,16 @@ function AssignRow({ card, versionId, locked, memberOptions }: AssignRowProps) {
         <Input
           id={dueId}
           type="date"
-          value={dueDate ?? ""}
-          disabled={locked || mutation.isPending}
+          value={dueDraft}
+          disabled={locked}
           onChange={(event) => {
             const value = event.target.value;
-            save({ assigneeId, dueDate: value === "" ? null : value });
+            setDueDraft(value);
+            if (value === "" || value.length === 10) {
+              commitDue(value);
+            }
           }}
+          onBlur={(event) => commitDue(event.target.value)}
           className="w-[160px]"
         />
       </td>

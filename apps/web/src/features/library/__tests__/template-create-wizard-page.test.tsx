@@ -4,7 +4,7 @@ import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
-import { API_URL, ok } from "@/test/msw/handlers";
+import { API_URL, fail, ok } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
 
@@ -109,6 +109,51 @@ describe("TemplateCreateWizardPage", () => {
 
     expect(await screen.findByLabelText("Mã chương trình")).toBeInTheDocument();
     expect(screen.getByLabelText("Mã chương trình")).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("keeps step 3 and shows the root error for a lesson_count validation error", async () => {
+    // lesson_count belongs to step 2's form, not step 1's; jumping to step 1
+    // would hide this error where nothing renders it.
+    const user = userEvent.setup();
+    server.use(
+      http.post(`${API_URL}/library/templates`, () =>
+        HttpResponse.json(
+          fail("VALIDATION_ERROR", "invalid", { lesson_count: "phải từ 1 đến 100" }),
+          {
+            status: 422,
+          },
+        ),
+      ),
+    );
+    renderPage();
+
+    await user.type(await screen.findByLabelText("Mã chương trình"), "su9");
+    await user.type(screen.getByLabelText("Tên chương trình"), "Sử 9");
+    await user.click(screen.getByRole("button", { name: "Tiếp tục" }));
+    await user.click(await screen.findByRole("button", { name: "Tiếp tục" }));
+    await user.click(await screen.findByRole("button", { name: "Tạo chương trình" }));
+
+    expect(await screen.findByText("lesson_count: phải từ 1 đến 100")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Bước 3/ })).toBeInTheDocument();
+  });
+
+  it("keeps step 3 and shows the root error when the permission was revoked mid-flow", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post(`${API_URL}/library/templates`, () =>
+        HttpResponse.json(fail("FORBIDDEN", "quyền vừa bị thu hồi"), { status: 403 }),
+      ),
+    );
+    renderPage();
+
+    await user.type(await screen.findByLabelText("Mã chương trình"), "su9");
+    await user.type(screen.getByLabelText("Tên chương trình"), "Sử 9");
+    await user.click(screen.getByRole("button", { name: "Tiếp tục" }));
+    await user.click(await screen.findByRole("button", { name: "Tiếp tục" }));
+    await user.click(await screen.findByRole("button", { name: "Tạo chương trình" }));
+
+    expect(await screen.findByText("quyền vừa bị thu hồi")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Bước 3/ })).toBeInTheDocument();
   });
 
   it("blocks a member without library.edit", async () => {

@@ -12,6 +12,7 @@ import { prepStatusLabel, prepStatusVariant } from "../lib/library-labels";
 import {
   PREP_STATUSES,
   type ChecklistItem,
+  type PrepInput,
   type PrepStatus,
   type TemplateLesson,
 } from "../schemas/library-schemas";
@@ -110,8 +111,15 @@ function PrepEditor({ lesson }: { lesson: TemplateLesson }) {
   const [checklist, setChecklist] = useState<ChecklistItem[]>(lesson.checklist);
   const [draftLabel, setDraftLabel] = useState("");
   const mutation = useUpdateLessonPrep(lesson.id, lesson.version_id);
+  // What the server last told us, so `save` can tell "the user touched this"
+  // from "this still holds the value the page opened with". Sending a field
+  // nobody edited would resend a value that may already be stale — e.g. a
+  // board drag changed `prep_status` elsewhere while this panel was open.
+  const [statusBaseline, setStatusBaseline] = useState(lesson.prep_status);
+  const [checklistBaseline, setChecklistBaseline] = useState(lesson.checklist);
 
   const full = checklist.length >= MAX_CHECKLIST;
+  const dirty = status !== statusBaseline || checklist !== checklistBaseline;
 
   function addItem() {
     const label = draftLabel.trim().slice(0, MAX_LABEL);
@@ -136,19 +144,28 @@ function PrepEditor({ lesson }: { lesson: TemplateLesson }) {
   }
 
   function save() {
-    mutation.mutate(
-      { prep_status: status, checklist },
-      {
-        onSuccess: (saved) => {
-          setStatus(saved.prep_status);
-          setChecklist(saved.checklist);
-          hvToast("Đã lưu trạng thái chuẩn bị");
-        },
-        onError: () => {
-          hvToast("Không lưu được trạng thái chuẩn bị, vui lòng thử lại.", { variant: "danger" });
-        },
+    const payload: PrepInput = {};
+    if (status !== statusBaseline) {
+      payload.prep_status = status;
+    }
+    if (checklist !== checklistBaseline) {
+      payload.checklist = checklist;
+    }
+    if (payload.prep_status === undefined && payload.checklist === undefined) {
+      return;
+    }
+    mutation.mutate(payload, {
+      onSuccess: (saved) => {
+        setStatus(saved.prep_status);
+        setChecklist(saved.checklist);
+        setStatusBaseline(saved.prep_status);
+        setChecklistBaseline(saved.checklist);
+        hvToast("Đã lưu trạng thái chuẩn bị");
       },
-    );
+      onError: () => {
+        hvToast("Không lưu được trạng thái chuẩn bị, vui lòng thử lại.", { variant: "danger" });
+      },
+    });
   }
 
   return (
@@ -227,7 +244,7 @@ function PrepEditor({ lesson }: { lesson: TemplateLesson }) {
       </div>
 
       <div className="flex justify-end">
-        <HvButton type="button" onClick={save} disabled={mutation.isPending}>
+        <HvButton type="button" onClick={save} disabled={mutation.isPending || !dirty}>
           {mutation.isPending ? "Đang lưu…" : "Lưu chuẩn bị"}
         </HvButton>
       </div>
