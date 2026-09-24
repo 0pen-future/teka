@@ -1,7 +1,7 @@
 ---
 phase: 9
 title: "Seed, e2e, docs & ship"
-status: pending
+status: in-progress
 priority: P1
 effort: "1.5d"
 dependencies: [1, 2, 3, 4, 5, 6, 7, 8]
@@ -44,3 +44,12 @@ PR lên `master`.
 ## Risks
 - e2e phụ thuộc seed tươi và thứ tự serial; tách spec theo dữ liệu riêng (prefix `E2E-`).
 - Tổng 8 migration: viết `docs/` phần "nâng cấp" hướng dẫn `make migrate-status` trước/sau.
+
+## Verification notes (2026-09-24)
+
+- `go test -tags=integration -p 1` toàn bộ API: pass, coverage 78.5% (floor 60%). Test seed mới từng lỗi do scan `uuid.UUID` qua GORM; sửa ở `b1123bd`.
+- `make lint`, `make build-api`, `make build-web`, `make test-web` (1092 pass): pass. `make api-docs` không tạo diff.
+- `CatalogVersion` = 5, khớp `CATALOG_VERSION` trong MSW mirror.
+- Playwright trên stack `teka-e2e` với seed mới: 48/48 pass (chạy thành hai lượt do lượt đầu bị dừng giữa chừng; lượt hai tiếp tục trên cùng stack, cùng thứ tự).
+- Migration trên DB `teka-e2e` đã seed (có backup trước): down 32→24, up lại 32, không dirty; reseed idempotent.
+- Còn lại: push nhánh + mở PR (cần người dùng duyệt), và bước sau merge (backup DB production do người dùng chạy).

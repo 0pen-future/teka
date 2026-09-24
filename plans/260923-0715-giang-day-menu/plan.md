@@ -60,7 +60,7 @@ trong "Scout trước khi làm").
 | 6 | [Lộ trình học](./phase-06-lo-trinh-hoc.md) | 1d | Completed |
 | 7 | [Chi tiết lớp học: Chương trình học, Bài tập, Tài liệu, Chat, Lịch sử](./phase-07-chi-tiet-lop-chuong-trinh-tab.md) | 2.5d | Completed |
 | 8 | [Chuẩn bị tài liệu (bảng chuẩn bị trên bản nháp, web-only)](./phase-08-chuan-bi-tai-lieu.md) | 1.5d | Completed |
-| 9 | [E2E, seed, docs, ship](./phase-09-e2e-docs-seed-ship.md) | 1.5d | Pending |
+| 9 | [E2E, seed, docs, ship](./phase-09-e2e-docs-seed-ship.md) | 1.5d | In progress (chờ ship) |
 
 Thứ tự: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9. Phase 2 và 3 độc lập file, chạy song song được;
 Phase 5 cần 1 + 3; Phase 6 cần 5; Phase 7 cần 1 + 4 + 5; **Phase 8 cần 3** (bảng chuẩn bị nằm trên
