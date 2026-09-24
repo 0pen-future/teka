@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/utils";
 
+import { actorLabel } from "../lib/actor-label";
 import type { AuditLog } from "../schemas/audit-schemas";
 
 // Matches the roster/billing header band; keeps the default px-2 so header
@@ -26,18 +27,6 @@ function statusVariant(code: number): HvBadgeVariant {
     return "warning";
   }
   return "success";
-}
-
-/**
- * Empty actor_name with a non-null actor id means the teacher row is gone
- * (LEFT JOIN miss server-side); a null actor id means the event carried no
- * actor at all.
- */
-function actorLabel(log: AuditLog): string {
-  if (log.actor_user_id === null) {
-    return "Ẩn danh";
-  }
-  return log.actor_name === "" ? "(đã xóa)" : log.actor_name;
 }
 
 export function AuditTable({ logs }: { logs: AuditLog[] }) {

@@ -67,8 +67,19 @@ export function ClassSessionsTab({ klass, today }: ClassSessionsTabProps) {
     if (lesson) lessonTitleBySession.set(session.id, lesson.title);
     countable += 1;
   }
+  // The tab never generates sessions (see the class doc above), so an
+  // open-ended or still-running class almost always shows fewer created
+  // sessions than the template holds — that gap will close as more weeks get
+  // scheduled and isn't a real mismatch worth a warning. It only becomes
+  // meaningful once there is no more room for it to self-resolve: the class
+  // already produced more countable sessions than the template has lessons,
+  // or its schedule has already ended so no further session will land.
+  const classEnded = klass.end_date !== null && klass.end_date <= today;
   const mismatch =
-    program.data && lessons.data && countable !== orderedLessons.length
+    program.data &&
+    lessons.data &&
+    countable !== orderedLessons.length &&
+    (countable > orderedLessons.length || classEnded)
       ? { sessions: countable, lessons: orderedLessons.length }
       : null;
 
@@ -96,8 +107,9 @@ export function ClassSessionsTab({ klass, today }: ClassSessionsTabProps) {
 
       {mismatch ? (
         <HvNotice tone="warning">
-          Lớp có {mismatch.sessions} buổi thực (không tính buổi huỷ) nhưng chương trình mẫu có{" "}
-          {mismatch.lessons} buổi. Danh sách buổi không tự sinh hay xoá theo chương trình.
+          Lớp có {mismatch.sessions} buổi đã lên lịch (tính trên các buổi đã tạo, không tính buổi
+          huỷ) nhưng chương trình mẫu có {mismatch.lessons} buổi. Danh sách buổi không tự sinh hay
+          xoá theo chương trình.
         </HvNotice>
       ) : null}
 

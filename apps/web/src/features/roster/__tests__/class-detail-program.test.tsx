@@ -215,6 +215,50 @@ describe("ClassDetailPage — program, lineage and the read-through tabs", () =>
         "Phiên bản này đã được lưu trữ trong thư viện; lớp vẫn xem được bài, nhưng nên đổi sang phiên bản mới hơn.",
       );
     });
+
+    it("toasts the API's reason when applying fails for a reason other than a curriculum mismatch", async () => {
+      const user = userEvent.setup();
+      getRosterStore().classes[0]!.course = {
+        id: courseOptionToan.id,
+        code: courseOptionToan.code,
+        name: courseOptionToan.name,
+      };
+      getRosterStore().courseDefaultVersion[courseOptionToan.id] = versionToan6Published.id;
+      server.use(
+        http.put(`${API_URL}/classes/:id/program`, () =>
+          HttpResponse.json(fail("VERSION_NOT_PUBLISHED", "Phiên bản chưa được phát hành"), {
+            status: 409,
+          }),
+        ),
+      );
+      renderPage();
+      const card = await screen.findByRole("region", { name: "Chương trình học" });
+      await user.click(await within(card).findByRole("button", { name: "Áp dụng từ khóa mẫu" }));
+
+      expect(await screen.findByText("Phiên bản chưa được phát hành")).toBeInTheDocument();
+      expect(getRosterStore().program).toBeNull();
+    });
+
+    it("toasts the API's reason when removing the program fails", async () => {
+      const user = userEvent.setup();
+      applyProgramToStore();
+      server.use(
+        http.delete(`${API_URL}/classes/:id/program`, () =>
+          HttpResponse.json(fail("FORBIDDEN", "Bạn không có quyền gỡ chương trình"), {
+            status: 403,
+          }),
+        ),
+      );
+      renderPage();
+      const card = await screen.findByRole("region", { name: "Chương trình học" });
+      await within(card).findByText("Toán 6 cơ bản · v1 · 2 buổi");
+      await user.click(within(card).getByRole("button", { name: "Gỡ chương trình" }));
+      const dialog = await screen.findByRole("dialog");
+      await user.click(within(dialog).getByRole("button", { name: "Gỡ" }));
+
+      expect(await screen.findByText("Bạn không có quyền gỡ chương trình")).toBeInTheDocument();
+      expect(getRosterStore().program).not.toBeNull();
+    });
   });
 
   describe("Lịch sử lớp card", () => {
@@ -290,6 +334,48 @@ describe("ClassDetailPage — program, lineage and the read-through tabs", () =>
       expect(seen[0]!.get("entity_id")).toBe(classWithSchedule.id);
     });
 
+    it("hides failed requests and class_message actions from the change history", async () => {
+      const user = userEvent.setup();
+      getRosterStore().auditLogs.push(
+        { ...auditLogClassUpdate },
+        {
+          ...auditLogClassUpdate,
+          id: "77000000-0000-4000-8000-000000000002",
+          action: "class.update",
+          status_code: 403,
+        },
+        {
+          ...auditLogClassUpdate,
+          id: "77000000-0000-4000-8000-000000000003",
+          action: "class_message.post",
+          entity_type: "class",
+        },
+        {
+          ...auditLogClassUpdate,
+          id: "77000000-0000-4000-8000-000000000004",
+          action: "class_message.delete",
+          entity_type: "class_message",
+          actor_user_id: null,
+          actor_name: "",
+        },
+      );
+      server.use(
+        http.get(`${API_URL}/audit-logs`, () =>
+          HttpResponse.json(ok({ items: getRosterStore().auditLogs, next_cursor: "" })),
+        ),
+      );
+      renderPage();
+      const card = await screen.findByRole("region", { name: "Lịch sử lớp" });
+
+      await user.click(within(card).getByRole("button", { name: "Lịch sử thay đổi" }));
+
+      expect(await within(card).findByText("class.update")).toBeInTheDocument();
+      expect(within(card).getAllByText("class.update")).toHaveLength(1);
+      expect(within(card).queryByText("class_message.post")).not.toBeInTheDocument();
+      expect(within(card).queryByText("class_message.delete")).not.toBeInTheDocument();
+      expect(within(card).getByText(testPrimaryTeacher.full_name)).toBeInTheDocument();
+    });
+
     it("hides the change history from a member without audit.read", async () => {
       server.use(memberCenterHandler);
       renderPage();
@@ -356,12 +442,43 @@ describe("ClassDetailPage — program, lineage and the read-through tabs", () =>
       // Day 8 is cancelled and never consumes a template lesson.
       expect(lessonCells).toEqual(["Số tự nhiên", "—", "Phân số", "—", "—"]);
       expect(screen.getByRole("note")).toHaveTextContent(
-        "Lớp có 4 buổi thực (không tính buổi huỷ) nhưng chương trình mẫu có 2 buổi.",
+        "Lớp có 4 buổi đã lên lịch (tính trên các buổi đã tạo, không tính buổi huỷ) nhưng chương trình mẫu có 2 buổi.",
       );
       expect(screen.getByRole("link", { name: "Sổ đầu bài" })).toHaveAttribute(
         "href",
         `/classbook?class_id=${classWithSchedule.id}`,
       );
+    });
+
+    it("hides the mismatch warning while an open-ended class still trails the template", async () => {
+      applyProgramToStore();
+      // Only the first (non-cancelled) session survives: 1 created session
+      // against a 2-lesson template, on a class with no end_date yet — the
+      // gap is only because sessions aren't all generated yet, not a real
+      // mismatch, so the warning would be noise here.
+      getRosterStore().sessions = [getRosterStore().sessions[0]!];
+      renderPage("sessions");
+      await screen.findByRole("table");
+      // Wait for the lesson data (not just the sessions) to land before
+      // asserting the warning stays absent, or the check could pass simply
+      // because the mismatch hasn't been computed yet.
+      await screen.findByText("Số tự nhiên");
+      expect(screen.queryByRole("note")).not.toBeInTheDocument();
+    });
+
+    it("keeps the table usable, with a blank Buổi mẫu column, when the lesson list fails to load", async () => {
+      applyProgramToStore();
+      server.use(
+        http.get(`${API_URL}/classes/:id/program/lessons`, () =>
+          HttpResponse.json(fail("INTERNAL", "Lỗi máy chủ"), { status: 500 }),
+        ),
+      );
+      renderPage("sessions");
+      const table = await screen.findByRole("table");
+      const rows = within(table).getAllByRole("row").slice(1);
+      const lessonCells = rows.map((row) => within(row).getAllByRole("cell").at(-2)!.textContent);
+      expect(lessonCells).toEqual(["—", "—", "—", "—", "—"]);
+      expect(screen.queryByRole("note")).not.toBeInTheDocument();
     });
   });
 

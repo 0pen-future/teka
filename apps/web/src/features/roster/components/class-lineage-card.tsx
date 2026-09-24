@@ -5,7 +5,7 @@ import { Link } from "react-router";
 
 import { HvButton, HvSelect, hvToast } from "@/components/hv";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { useAuditLogs } from "@/features/audit";
+import { actorLabel, useAuditLogs } from "@/features/audit";
 import { ApiError } from "@/lib/api/errors";
 import { cn, formatDateTime } from "@/lib/utils";
 
@@ -202,9 +202,19 @@ function LineageForm({
   );
 }
 
+// Chat posts are audited against the class itself (so the thread can be
+// tied back to it) while every other class_message action (e.g. delete) is
+// audited against the message row instead. Filtering the whole class_message
+// family out here keeps the lineage card's history to actual class edits and
+// makes post and delete equally invisible on this card, instead of only
+// half the family leaking through.
+function isClassEditLog(log: { action: string; status_code: number }): boolean {
+  return log.status_code < 400 && !log.action.startsWith("class_message.");
+}
+
 function ClassAuditList({ classId }: { classId: string }) {
   const logs = useAuditLogs({ entity_type: "class", entity_id: classId }, true);
-  const items = logs.data?.pages.flatMap((page) => page.items) ?? [];
+  const items = (logs.data?.pages.flatMap((page) => page.items) ?? []).filter(isClassEditLog);
 
   if (logs.isPending) {
     return <p className="mt-2 text-[13px] text-ink-400">Đang tải…</p>;
@@ -220,7 +230,7 @@ function ClassAuditList({ classId }: { classId: string }) {
       <ul className="flex flex-col gap-1 text-[13px]">
         {items.map((log) => (
           <li key={log.id} className="flex flex-wrap items-center gap-x-2 text-ink-700">
-            <span className="font-bold text-ink-900">{log.actor_name}</span>
+            <span className="font-bold text-ink-900">{actorLabel(log)}</span>
             <span className="text-ink-400">·</span>
             <span>{log.action}</span>
             <span className="text-ink-400">·</span>
