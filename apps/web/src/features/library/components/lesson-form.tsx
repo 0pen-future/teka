@@ -1,6 +1,7 @@
 import { useEffect } from "react";
+import { Controller } from "react-hook-form";
 
-import { HvButton, HvModal } from "@/components/hv";
+import { HvButton, HvModal, HvSegmented, type HvSegmentedOption } from "@/components/hv";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useApiFormErrors } from "@/lib/forms/use-api-form-errors";
@@ -8,7 +9,18 @@ import { useApiFormErrors } from "@/lib/forms/use-api-form-errors";
 import { EMPTY_LESSON_FORM, useLessonForm, type LessonForm } from "../hooks/use-lesson-form";
 import { useCreateLesson } from "../hooks/use-library";
 import { textareaClassName } from "@/lib/forms/textarea-class";
-import { toLessonInput, type TemplateLesson } from "../schemas/library-schemas";
+import {
+  lessonModeSchema,
+  toLessonInput,
+  type LessonMode,
+  type TemplateLesson,
+} from "../schemas/library-schemas";
+import { lessonModeLabel } from "../lib/library-labels";
+
+const modeOptions: HvSegmentedOption<LessonMode>[] = lessonModeSchema.options.map((mode) => ({
+  value: mode,
+  label: lessonModeLabel[mode],
+}));
 
 interface LessonFieldsProps {
   form: LessonForm;
@@ -16,7 +28,7 @@ interface LessonFieldsProps {
   idPrefix: string;
 }
 
-/** The four lesson inputs, shared by the add dialog and the lesson page. */
+/** The lesson inputs, shared by the add dialog and the lesson info card's edit form. */
 export function LessonFields({ form, idPrefix }: LessonFieldsProps) {
   const { errors } = form.formState;
   return (
@@ -31,27 +43,64 @@ export function LessonFields({ form, idPrefix }: LessonFieldsProps) {
         />
         <FieldError errors={[errors.title]} />
       </Field>
+      <Field data-invalid={Boolean(errors.mode)}>
+        <FieldLabel htmlFor={`${idPrefix}-mode`}>Hình thức</FieldLabel>
+        <Controller
+          control={form.control}
+          name="mode"
+          render={({ field }) => (
+            <HvSegmented
+              aria-label="Hình thức buổi học"
+              idBase={`${idPrefix}-mode`}
+              options={modeOptions}
+              value={field.value}
+              onValueChange={field.onChange}
+            />
+          )}
+        />
+        <p className="text-[12px] text-ink-500">
+          Buổi không lịch không xuất hiện trên thời khoá biểu; học viên tự học theo tiến độ riêng.
+        </p>
+        <FieldError errors={[errors.mode]} />
+      </Field>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field data-invalid={Boolean(errors.duration_min)}>
+          <FieldLabel htmlFor={`${idPrefix}-duration`}>Thời lượng (phút)</FieldLabel>
+          <Input
+            id={`${idPrefix}-duration`}
+            type="number"
+            inputMode="numeric"
+            step={15}
+            min={15}
+            max={1440}
+            placeholder="VD: 90"
+            aria-invalid={Boolean(errors.duration_min)}
+            {...form.register("duration_min")}
+          />
+          <FieldError errors={[errors.duration_min]} />
+        </Field>
+        <Field data-invalid={Boolean(errors.unit)}>
+          <FieldLabel htmlFor={`${idPrefix}-unit`}>Đơn vị</FieldLabel>
+          <Input
+            id={`${idPrefix}-unit`}
+            placeholder="VD: Tổ Toán"
+            aria-invalid={Boolean(errors.unit)}
+            {...form.register("unit")}
+          />
+          <FieldError errors={[errors.unit]} />
+        </Field>
+      </div>
       <Field data-invalid={Boolean(errors.objectives)}>
-        <FieldLabel htmlFor={`${idPrefix}-objectives`}>Mục tiêu</FieldLabel>
+        <FieldLabel htmlFor={`${idPrefix}-objectives`}>Mô tả ngắn</FieldLabel>
         <textarea
           id={`${idPrefix}-objectives`}
           rows={3}
+          placeholder="Mục tiêu buổi học, lưu ý cho giáo viên…"
           className={textareaClassName}
           aria-invalid={Boolean(errors.objectives)}
           {...form.register("objectives")}
         />
         <FieldError errors={[errors.objectives]} />
-      </Field>
-      <Field data-invalid={Boolean(errors.duration_min)} className="sm:max-w-[220px]">
-        <FieldLabel htmlFor={`${idPrefix}-duration`}>Thời lượng (phút)</FieldLabel>
-        <Input
-          id={`${idPrefix}-duration`}
-          inputMode="numeric"
-          placeholder="VD: 90"
-          aria-invalid={Boolean(errors.duration_min)}
-          {...form.register("duration_min")}
-        />
-        <FieldError errors={[errors.duration_min]} />
       </Field>
       <Field data-invalid={Boolean(errors.homework_note)}>
         <FieldLabel htmlFor={`${idPrefix}-homework`}>Bài tập về nhà</FieldLabel>

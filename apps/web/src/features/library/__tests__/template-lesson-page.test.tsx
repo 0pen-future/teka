@@ -4,7 +4,7 @@ import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
-import { API_URL, fail, listMeta, ok } from "@/test/msw/handlers";
+import { API_URL, fail, ok } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import {
   renderWithProviders,
@@ -13,10 +13,11 @@ import {
   testSecondaryTeacher,
 } from "@/test/utils";
 
+import { ExerciseGroupsTab } from "../components/exercise-groups-tab";
+import { MaterialsBank } from "../components/materials-bank";
 import { TemplateLessonPage } from "../pages/template-lesson-page";
 import {
   exerciseBai1,
-  exerciseBai2,
   getLibraryStore,
   lessonDraftSoTuNhien,
   lessonPublishedSoTuNhien,
@@ -42,6 +43,22 @@ function memberWith(...permissions: string[]) {
   );
 }
 
+async function openExercisesTab(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole("tab", { name: "Bài tập" }));
+}
+
+function materialLinksOf(lessonId: string) {
+  return getLibraryStore()
+    .materialLinks.filter((l) => l.lesson_id === lessonId)
+    .sort((a, b) => a.position - b.position);
+}
+
+function exerciseLinksOf(lessonId: string) {
+  return getLibraryStore()
+    .exerciseLinks.filter((l) => l.lesson_id === lessonId)
+    .sort((a, b) => a.position - b.position);
+}
+
 beforeEach(() => {
   resetLibraryStore();
   server.use(...libraryHandlers);
@@ -53,343 +70,516 @@ afterEach(() => {
 });
 
 describe("TemplateLessonPage", () => {
-  it("prefills the draft lesson form and saves the edited fields", async () => {
-    const user = userEvent.setup();
-    renderPage();
-
-    expect(
-      await screen.findByRole("heading", { name: "Buổi 1 · Số tự nhiên" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Toán 6 cơ bản" })).toHaveAttribute(
-      "href",
-      `/library/templates/${templateToan6.id}`,
-    );
-    expect(screen.getByText("v2 · Bản nháp")).toBeInTheDocument();
-    expect(screen.getByLabelText("Mục tiêu")).toHaveValue("Nhận biết tập N");
-    expect(screen.getByLabelText("Thời lượng (phút)")).toHaveValue("90");
-    expect(screen.getByLabelText("Bài tập về nhà")).toHaveValue("Bài 1-5 trang 10");
-
-    await user.clear(screen.getByLabelText("Thời lượng (phút)"));
-    await user.type(screen.getByLabelText("Thời lượng (phút)"), "120");
-    await user.clear(screen.getByLabelText("Bài tập về nhà"));
-    await user.click(screen.getByRole("button", { name: "Lưu" }));
-
-    expect(await screen.findByText("Đã lưu buổi học")).toBeInTheDocument();
-    await waitFor(() => {
-      expect(getLibraryStore().lessons.find((l) => l.id === lessonDraftSoTuNhien.id)).toMatchObject(
-        { duration_min: 120, homework_note: null, objectives: "Nhận biết tập N" },
-      );
-    });
-  });
-
-  it("rejects a non-numeric duration before calling the API", async () => {
-    const user = userEvent.setup();
-    renderPage();
-    await screen.findByLabelText("Thời lượng (phút)");
-
-    await user.clear(screen.getByLabelText("Thời lượng (phút)"));
-    await user.type(screen.getByLabelText("Thời lượng (phút)"), "abc");
-    await user.click(screen.getByRole("button", { name: "Lưu" }));
-
-    expect(await screen.findByText("Nhập số phút nguyên")).toBeInTheDocument();
-    expect(
-      getLibraryStore().lessons.find((l) => l.id === lessonDraftSoTuNhien.id)?.duration_min,
-    ).toBe(90);
-  });
-
-  it("renames the lesson and refreshes the heading", async () => {
-    const user = userEvent.setup();
-    renderPage();
-    await screen.findByLabelText("Tên buổi");
-
-    await user.clear(screen.getByLabelText("Tên buổi"));
-    await user.type(screen.getByLabelText("Tên buổi"), "Tập hợp số tự nhiên");
-    await user.click(screen.getByRole("button", { name: "Lưu" }));
-
-    expect(
-      await screen.findByRole("heading", { name: "Buổi 1 · Tập hợp số tự nhiên" }),
-    ).toBeInTheDocument();
-  });
-
-  it("shows a published lesson read-only with the locked notice", async () => {
-    renderPage(lessonPublishedSoTuNhien.id);
-
-    expect(
-      await screen.findByRole("heading", { name: "Buổi 1 · Số tự nhiên" }),
-    ).toBeInTheDocument();
-    expect(await screen.findByText(/Phiên bản v1 đã phát hành/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Lưu" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("textbox", { name: "Mục tiêu" })).not.toBeInTheDocument();
-    const objectives = screen.getByRole("group", { name: "Mục tiêu" });
-    expect(within(objectives).getByText("Chưa có")).toBeInTheDocument();
-    expect(
-      within(screen.getByRole("group", { name: "Thời lượng" })).getByText("90 phút"),
-    ).toBeInTheDocument();
-  });
-
-  it("is read-only for a member without library.edit", async () => {
-    server.use(memberWith("library.read"));
-    signInAs(testSecondaryTeacher);
-    renderPage();
-
-    expect(
-      await screen.findByRole("heading", { name: "Buổi 1 · Số tự nhiên" }),
-    ).toBeInTheDocument();
-    expect(await screen.findByText("Bạn không có quyền soạn buổi học mẫu.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Lưu" })).not.toBeInTheDocument();
-    expect(
-      within(screen.getByRole("group", { name: "Mục tiêu" })).getByText("Nhận biết tập N"),
-    ).toBeInTheDocument();
-  });
-
   it("shows the not-found block for an unknown lesson", async () => {
     renderPage("82000000-0000-4000-8000-00000000dead");
 
     expect(await screen.findByText("Không tìm thấy buổi học mẫu")).toBeInTheDocument();
   });
 
-  it("locks the form when the save is refused because the version was published meanwhile", async () => {
-    const user = userEvent.setup();
-    renderPage();
-    await screen.findByRole("heading", { name: "Buổi 1 · Số tự nhiên" });
+  describe("thông tin chung", () => {
+    it("shows the locked banner and hides every write control when the version was published", async () => {
+      renderPage(lessonPublishedSoTuNhien.id);
 
-    // Someone else published the draft between the page load and the save.
-    server.use(
-      http.put(`${API_URL}/library/lessons/:lid`, () => {
-        const version = getLibraryStore().versions.find((v) => v.id === versionToan6Draft.id);
-        if (version) version.status = "published";
-        return HttpResponse.json(fail("VERSION_LOCKED", "Phiên bản đã phát hành"), { status: 409 });
-      }),
-    );
-    await user.type(screen.getByRole("textbox", { name: "Mục tiêu" }), " thêm");
-    await user.click(screen.getByRole("button", { name: "Lưu" }));
-
-    expect(await screen.findByText(/Phiên bản v2 đã phát hành/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Lưu" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("textbox", { name: "Mục tiêu" })).not.toBeInTheDocument();
-  });
-
-  it("attaches materials with the share flag and exercises, saving each block separately", async () => {
-    const user = userEvent.setup();
-    renderPage();
-    await screen.findByRole("heading", { name: "Buổi 1 · Số tự nhiên" });
-
-    const materials = await screen.findByRole("region", { name: "Học liệu" });
-    expect(within(materials).getByRole("checkbox", { name: "Slide số tự nhiên" })).toBeChecked();
-    expect(
-      within(materials).getByRole("checkbox", { name: "Chia sẻ Slide số tự nhiên với học viên" }),
-    ).toBeChecked();
-    expect(within(materials).getByRole("checkbox", { name: "Video phân số" })).not.toBeChecked();
-    expect(
-      within(materials).queryByRole("checkbox", { name: "Chia sẻ Video phân số với học viên" }),
-    ).not.toBeInTheDocument();
-
-    await user.click(within(materials).getByRole("checkbox", { name: "Video phân số" }));
-    await user.click(
-      within(materials).getByRole("checkbox", { name: "Chia sẻ Slide số tự nhiên với học viên" }),
-    );
-    await user.click(within(materials).getByRole("button", { name: "Lưu học liệu" }));
-
-    expect(await screen.findByText("Đã lưu học liệu của buổi")).toBeInTheDocument();
-    expect(
-      getLibraryStore()
-        .materialLinks.filter((l) => l.lesson_id === lessonDraftSoTuNhien.id)
-        .map((l) => [l.material_id, l.shared_with_students, l.position]),
-    ).toEqual([
-      [materialSlide.id, false, 1],
-      [materialVideo.id, false, 2],
-    ]);
-
-    const exercises = screen.getByRole("region", { name: "Bài tập" });
-    expect(within(exercises).getByRole("checkbox", { name: "Bài 1: Tập hợp" })).toBeChecked();
-    await user.click(within(exercises).getByRole("checkbox", { name: "Bài 1: Tập hợp" }));
-    await user.click(within(exercises).getByRole("checkbox", { name: "Bài 2: So sánh phân số" }));
-    await user.click(within(exercises).getByRole("button", { name: "Lưu bài tập" }));
-
-    expect(await screen.findByText("Đã lưu bài tập của buổi")).toBeInTheDocument();
-    expect(
-      getLibraryStore()
-        .exerciseLinks.filter((l) => l.lesson_id === lessonDraftSoTuNhien.id)
-        .map((l) => l.exercise_id),
-    ).toEqual([exerciseBai2.id]);
-    expect(getLibraryStore().exerciseLinks.some((l) => l.exercise_id === exerciseBai1.id)).toBe(
-      false,
-    );
-  });
-
-  it("narrows the material picker with the search box", async () => {
-    const user = userEvent.setup();
-    renderPage();
-    const materials = await screen.findByRole("region", { name: "Học liệu" });
-    await within(materials).findByRole("checkbox", { name: "Video phân số" });
-
-    await user.type(within(materials).getByRole("searchbox", { name: "Tìm học liệu" }), "slide");
-
-    await waitFor(() => {
       expect(
-        within(materials).queryByRole("checkbox", { name: "Video phân số" }),
-      ).not.toBeInTheDocument();
+        await screen.findByRole("heading", { name: "Buổi 1 · Số tự nhiên" }),
+      ).toBeInTheDocument();
+      expect(
+        await screen.findByText(
+          "Phiên bản v1 đã phát hành (0 lớp đang gắn) — chỉ xem. Muốn sửa, tạo bản nháp mới ở màn chương trình mẫu.",
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Sửa" })).not.toBeInTheDocument();
+
+      const info = screen.getByRole("region", { name: "Thông tin chung" });
+      expect(
+        within(screen.getByRole("group", { name: "Hình thức" })).getByText("Buổi học có lịch"),
+      ).toBeInTheDocument();
+      expect(
+        within(screen.getByRole("group", { name: "Thời lượng" })).getByText("90 phút"),
+      ).toBeInTheDocument();
+      expect(within(info).queryByRole("textbox")).not.toBeInTheDocument();
     });
-    expect(within(materials).getByRole("checkbox", { name: "Slide số tự nhiên" })).toBeChecked();
+
+    it("is read-only for a member without library.edit, keeping the field values visible", async () => {
+      server.use(memberWith("library.read"));
+      signInAs(testSecondaryTeacher);
+      renderPage();
+
+      expect(await screen.findByText("Bạn không có quyền soạn buổi học mẫu.")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Sửa" })).not.toBeInTheDocument();
+      expect(
+        within(screen.getByRole("group", { name: "Mô tả ngắn" })).getByText("Nhận biết tập N"),
+      ).toBeInTheDocument();
+    });
+
+    it("switches to self-study mode and saves the duration in a step of 15 minutes", async () => {
+      const user = userEvent.setup();
+      renderPage();
+      await screen.findByRole("heading", { name: "Buổi 1 · Số tự nhiên" });
+      const info = screen.getByRole("region", { name: "Thông tin chung" });
+
+      await user.click(within(info).getByRole("button", { name: "Sửa" }));
+      expect(screen.getByLabelText("Tên buổi")).toHaveValue("Số tự nhiên");
+
+      await user.click(screen.getByRole("radio", { name: "Không lịch" }));
+      await user.clear(screen.getByLabelText("Thời lượng (phút)"));
+      await user.type(screen.getByLabelText("Thời lượng (phút)"), "105");
+      await user.click(screen.getByRole("button", { name: "Lưu" }));
+
+      expect(await screen.findByText("Đã lưu buổi học")).toBeInTheDocument();
+      expect(screen.queryByLabelText("Tên buổi")).not.toBeInTheDocument();
+      await waitFor(() => {
+        expect(
+          getLibraryStore().lessons.find((l) => l.id === lessonDraftSoTuNhien.id),
+        ).toMatchObject({ mode: "self_study", duration_min: 105 });
+      });
+      expect(
+        within(screen.getByRole("group", { name: "Hình thức" })).getByText("Không lịch"),
+      ).toBeInTheDocument();
+    });
+
+    it("rejects a duration that is not a multiple of 15 minutes before calling the API", async () => {
+      const user = userEvent.setup();
+      renderPage();
+      await screen.findByRole("heading", { name: "Buổi 1 · Số tự nhiên" });
+      const info = screen.getByRole("region", { name: "Thông tin chung" });
+      await user.click(within(info).getByRole("button", { name: "Sửa" }));
+
+      await user.clear(screen.getByLabelText("Thời lượng (phút)"));
+      await user.type(screen.getByLabelText("Thời lượng (phút)"), "100");
+      await user.click(screen.getByRole("button", { name: "Lưu" }));
+
+      expect(
+        await screen.findByText("Thời lượng là bội số của 15 phút, từ 15 đến 1440 phút"),
+      ).toBeInTheDocument();
+      expect(
+        getLibraryStore().lessons.find((l) => l.id === lessonDraftSoTuNhien.id)?.duration_min,
+      ).toBe(90);
+    });
+
+    it("locks the form when the save is refused because the version was published meanwhile", async () => {
+      const user = userEvent.setup();
+      renderPage();
+      await screen.findByRole("heading", { name: "Buổi 1 · Số tự nhiên" });
+      const info = screen.getByRole("region", { name: "Thông tin chung" });
+      await user.click(within(info).getByRole("button", { name: "Sửa" }));
+
+      server.use(
+        http.put(`${API_URL}/library/lessons/:lid`, () => {
+          const version = getLibraryStore().versions.find((v) => v.id === versionToan6Draft.id);
+          if (version) version.status = "published";
+          return HttpResponse.json(fail("VERSION_LOCKED", "Phiên bản đã phát hành"), {
+            status: 409,
+          });
+        }),
+      );
+      await user.click(screen.getByRole("button", { name: "Lưu" }));
+
+      expect(await screen.findByText(/Phiên bản v2 đã phát hành/)).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Sửa" })).not.toBeInTheDocument();
+    });
   });
 
-  it("keeps an attached material the catalog page no longer lists so it can be unticked", async () => {
-    const user = userEvent.setup();
-    server.use(
-      http.get(`${API_URL}/library/materials`, () =>
-        HttpResponse.json(ok([materialVideo], listMeta(1, 1, 100))),
-      ),
-    );
-    renderPage();
-    const materials = await screen.findByRole("region", { name: "Học liệu" });
-    await within(materials).findByRole("checkbox", { name: "Video phân số" });
+  describe("nội dung buổi học", () => {
+    it("creates new content from the menu, posting the material then attaching it with a PUT", async () => {
+      const user = userEvent.setup();
+      renderPage();
+      await screen.findByRole("heading", { name: "Buổi 1 · Số tự nhiên" });
 
-    const attached = within(materials).getByRole("checkbox", { name: "Slide số tự nhiên" });
-    expect(attached).toBeChecked();
-    await user.click(attached);
-    await user.click(within(materials).getByRole("button", { name: "Lưu học liệu" }));
+      await user.click(screen.getByRole("button", { name: "Thêm nội dung" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Video" }));
 
-    expect(await screen.findByText("Đã lưu học liệu của buổi")).toBeInTheDocument();
-    expect(
-      getLibraryStore().materialLinks.filter((l) => l.lesson_id === lessonDraftSoTuNhien.id),
-    ).toEqual([]);
+      const dialog = await screen.findByRole("dialog", { name: "Thêm học liệu" });
+      await user.type(within(dialog).getByLabelText("Tên học liệu"), "Slide chương 2");
+      await user.type(within(dialog).getByLabelText("Đường dẫn"), "https://example.com/slide-2");
+      await user.click(within(dialog).getByRole("button", { name: "Thêm" }));
+
+      expect(await screen.findByText("Đã thêm nội dung vào buổi học")).toBeInTheDocument();
+      const created = getLibraryStore().materials.find((m) => m.title === "Slide chương 2");
+      expect(created).toMatchObject({ kind: "video", url: "https://example.com/slide-2" });
+      expect(materialLinksOf(lessonDraftSoTuNhien.id).map((l) => l.material_id)).toEqual([
+        materialSlide.id,
+        created?.id,
+      ]);
+    });
+
+    it("adds an existing material from the bank picker, offering only active items", async () => {
+      const user = userEvent.setup();
+      getLibraryStore().materials.push({
+        ...materialVideo,
+        id: "83000000-0000-4000-8000-000000000099",
+        title: "Ảnh minh hoạ cũ",
+        active: false,
+      });
+      renderPage();
+      await screen.findByRole("heading", { name: "Buổi 1 · Số tự nhiên" });
+
+      await user.click(screen.getByRole("button", { name: "Thêm nội dung" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Chọn từ ngân hàng nội dung" }));
+
+      const picker = await screen.findByRole("dialog", { name: "Chọn từ ngân hàng nội dung" });
+      await within(picker).findByRole("checkbox", { name: "Video phân số" });
+      expect(
+        within(picker).queryByRole("checkbox", { name: "Ảnh minh hoạ cũ" }),
+      ).not.toBeInTheDocument();
+
+      await user.click(within(picker).getByRole("checkbox", { name: "Video phân số" }));
+      await user.click(within(picker).getByRole("button", { name: "Thêm 1 nội dung" }));
+
+      expect(await screen.findByText("Đã thêm nội dung vào buổi học")).toBeInTheDocument();
+      expect(materialLinksOf(lessonDraftSoTuNhien.id).map((l) => l.material_id)).toEqual([
+        materialSlide.id,
+        materialVideo.id,
+      ]);
+    });
+
+    it("toggles the share flag with an immediate save", async () => {
+      const user = userEvent.setup();
+      renderPage();
+      const checkbox = await screen.findByRole("checkbox", {
+        name: "Chia sẻ Slide số tự nhiên với học viên",
+      });
+      expect(checkbox).toBeChecked();
+
+      await user.click(checkbox);
+
+      expect(await screen.findByText("Đã cập nhật chia sẻ nội dung")).toBeInTheDocument();
+      expect(materialLinksOf(lessonDraftSoTuNhien.id)).toEqual([
+        expect.objectContaining({ material_id: materialSlide.id, shared_with_students: false }),
+      ]);
+    });
+
+    it("reorders with the up/down arrows and saves once sorting is turned off", async () => {
+      const user = userEvent.setup();
+      getLibraryStore().materialLinks.push({
+        lesson_id: lessonDraftSoTuNhien.id,
+        material_id: materialVideo.id,
+        shared_with_students: false,
+        position: 2,
+      });
+      renderPage();
+      await screen.findByText("Video phân số");
+
+      await user.click(screen.getByRole("button", { name: "Sắp xếp thứ tự" }));
+      await user.click(screen.getByRole("button", { name: "Đưa Slide số tự nhiên xuống" }));
+      await user.click(screen.getByRole("button", { name: "Xong sắp xếp" }));
+
+      expect(await screen.findByText("Đã lưu thứ tự nội dung")).toBeInTheDocument();
+      expect(materialLinksOf(lessonDraftSoTuNhien.id).map((l) => l.material_id)).toEqual([
+        materialVideo.id,
+        materialSlide.id,
+      ]);
+    });
+
+    it("removes a material from the lesson with an immediate save", async () => {
+      const user = userEvent.setup();
+      renderPage();
+      await screen.findByText("Slide số tự nhiên");
+
+      await user.click(screen.getByRole("button", { name: "Gỡ khỏi buổi" }));
+
+      expect(await screen.findByText("Đã gỡ nội dung khỏi buổi học")).toBeInTheDocument();
+      expect(materialLinksOf(lessonDraftSoTuNhien.id)).toEqual([]);
+    });
+
+    it("hides every write control on a published lesson but still lets a reader open the link", async () => {
+      renderPage(lessonPublishedSoTuNhien.id);
+      await screen.findByText(/Phiên bản v1 đã phát hành/);
+
+      const content = screen.getByRole("region", { name: "Nội dung buổi học" });
+      expect(within(content).getByText("Slide số tự nhiên")).toBeInTheDocument();
+      expect(
+        within(content).queryByRole("button", { name: "Thêm nội dung" }),
+      ).not.toBeInTheDocument();
+      expect(within(content).queryByRole("checkbox")).not.toBeInTheDocument();
+      expect(
+        within(content).queryByRole("button", { name: "Gỡ khỏi buổi" }),
+      ).not.toBeInTheDocument();
+
+      const user = userEvent.setup();
+      await user.click(within(content).getByRole("button", { name: "Xem thêm Slide số tự nhiên" }));
+      expect(within(content).getByRole("link", { name: "Mở liên kết" })).toHaveAttribute(
+        "href",
+        materialSlide.url,
+      );
+    });
+
+    it("refreshes the content bank's usage column once a material is attached from the picker", async () => {
+      const user = userEvent.setup();
+
+      // Both views share one query client, as they would in the app: the
+      // content bank and a lesson's content tab are separate routes that
+      // stay mounted at once here so the attach's cache invalidation, not a
+      // remount, is what the bank picks up.
+      renderWithProviders(
+        <>
+          <MaterialsBank canEdit={false} />
+          <TemplateLessonPage />
+        </>,
+        {
+          route: `/library/templates/${templateToan6.id}/lessons/${lessonDraftSoTuNhien.id}`,
+          path: "/library/templates/:id/lessons/:lessonId",
+          extraRoutes: [{ path: "/library/templates/:id", element: <div>template-stub</div> }],
+        },
+      );
+      await screen.findByRole("heading", { name: "Buổi 1 · Số tự nhiên" });
+      expect(
+        within(await screen.findByRole("row", { name: /Video phân số/ })).getByText("—"),
+      ).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Thêm nội dung" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Chọn từ ngân hàng nội dung" }));
+      const picker = await screen.findByRole("dialog", { name: "Chọn từ ngân hàng nội dung" });
+      await user.click(within(picker).getByRole("checkbox", { name: "Video phân số" }));
+      await user.click(within(picker).getByRole("button", { name: "Thêm 1 nội dung" }));
+      expect(await screen.findByText("Đã thêm nội dung vào buổi học")).toBeInTheDocument();
+
+      await waitFor(() => {
+        expect(
+          within(screen.getByRole("row", { name: /Video phân số/ })).getByText("1 buổi · 1 CT mẫu"),
+        ).toBeInTheDocument();
+      });
+    });
   });
 
-  it("lists the attachments read-only on a published lesson", async () => {
-    renderPage(lessonPublishedSoTuNhien.id);
-    await screen.findByText(/Phiên bản v1 đã phát hành/);
+  describe("bài tập", () => {
+    it("creates a self-authored exercise, posting it then attaching it with a PUT", async () => {
+      const user = userEvent.setup();
+      renderPage();
+      await openExercisesTab(user);
 
-    const materials = await screen.findByRole("region", { name: "Học liệu" });
-    expect(within(materials).getByText("Slide số tự nhiên")).toBeInTheDocument();
-    expect(within(materials).getByText("Tài liệu")).toBeInTheDocument();
-    expect(within(materials).queryByText("Chia sẻ HV")).not.toBeInTheDocument();
-    expect(within(materials).queryByRole("checkbox")).not.toBeInTheDocument();
-    expect(
-      within(materials).queryByRole("button", { name: "Lưu học liệu" }),
-    ).not.toBeInTheDocument();
-    expect(
-      within(screen.getByRole("region", { name: "Bài tập" })).getByText("Chưa gắn bài tập."),
-    ).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Bài tập tự soạn" }));
+      const dialog = await screen.findByRole("dialog", { name: "Thêm bài tập" });
+      await user.type(within(dialog).getByLabelText("Tên bài tập"), "Bài 3: Phép cộng");
+      await user.click(within(dialog).getByRole("button", { name: "Thêm" }));
+
+      expect(await screen.findByText("Đã thêm bài tập vào buổi học")).toBeInTheDocument();
+      const created = getLibraryStore().exercises.find((e) => e.title === "Bài 3: Phép cộng");
+      expect(created).toBeDefined();
+      expect(exerciseLinksOf(lessonDraftSoTuNhien.id).map((l) => l.exercise_id)).toEqual([
+        exerciseBai1.id,
+        created?.id,
+      ]);
+      expect(
+        exerciseLinksOf(lessonDraftSoTuNhien.id).find((l) => l.exercise_id === created?.id)
+          ?.group_id,
+      ).toBeNull();
+    });
+
+    it("moves an exercise into a group with an immediate save", async () => {
+      const user = userEvent.setup();
+      getLibraryStore().exerciseGroups.push({
+        id: "86000000-0000-4000-8000-000000000001",
+        version_id: versionToan6Draft.id,
+        name: "Nhóm A",
+        position: 1,
+      });
+      renderPage();
+      await openExercisesTab(user);
+
+      await user.click(screen.getByRole("combobox", { name: "Nhóm bài tập cho Bài 1: Tập hợp" }));
+      await user.click(
+        within(await screen.findByRole("listbox")).getByRole("option", { name: "Nhóm A" }),
+      );
+
+      expect(await screen.findByText("Đã cập nhật nhóm bài tập")).toBeInTheDocument();
+      expect(exerciseLinksOf(lessonDraftSoTuNhien.id)).toEqual([
+        expect.objectContaining({
+          exercise_id: exerciseBai1.id,
+          group_id: "86000000-0000-4000-8000-000000000001",
+        }),
+      ]);
+    });
+
+    it("removes an exercise from the lesson with an immediate save", async () => {
+      const user = userEvent.setup();
+      renderPage();
+      await openExercisesTab(user);
+      await screen.findByText("Bài 1: Tập hợp");
+
+      await user.click(screen.getByRole("button", { name: "Gỡ" }));
+
+      expect(await screen.findByText("Đã gỡ bài tập khỏi buổi học")).toBeInTheDocument();
+      expect(exerciseLinksOf(lessonDraftSoTuNhien.id)).toEqual([]);
+    });
+
+    it("links each exercise row to its own entry in the exercise bank", async () => {
+      const user = userEvent.setup();
+      renderPage();
+      await openExercisesTab(user);
+
+      expect(await screen.findByRole("link", { name: "Xem trong ngân hàng" })).toHaveAttribute(
+        "href",
+        `/library/exercises?q=${exerciseBai1.code}`,
+      );
+    });
+
+    it("hides every write control on a published lesson", async () => {
+      const user = userEvent.setup();
+      renderPage(lessonPublishedSoTuNhien.id);
+      await screen.findByText(/Phiên bản v1 đã phát hành/);
+      await openExercisesTab(user);
+
+      expect(screen.getByText("Chưa có bài tập nào trong buổi.")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Bài tập tự soạn" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Bài tập có sẵn" })).not.toBeInTheDocument();
+    });
+
+    it("clears a lesson's stale group selection once its exercise group is deleted elsewhere", async () => {
+      const user = userEvent.setup();
+      getLibraryStore().exerciseGroups.push({
+        id: "86000000-0000-4000-8000-000000000002",
+        version_id: versionToan6Draft.id,
+        name: "Nhóm B",
+        position: 1,
+      });
+      getLibraryStore().exerciseLinks.find(
+        (l) => l.lesson_id === lessonDraftSoTuNhien.id && l.exercise_id === exerciseBai1.id,
+      )!.group_id = "86000000-0000-4000-8000-000000000002";
+
+      // Both views share one query client, as they would in the app: the
+      // groups tab and the lesson's exercises tab are separate routes that
+      // stay mounted at once here so the delete's cache invalidation, not a
+      // remount, is what the lesson view picks up.
+      renderWithProviders(
+        <>
+          <ExerciseGroupsTab version={versionToan6Draft} templateId={templateToan6.id} authoring />
+          <TemplateLessonPage />
+        </>,
+        {
+          route: `/library/templates/${templateToan6.id}/lessons/${lessonDraftSoTuNhien.id}`,
+          path: "/library/templates/:id/lessons/:lessonId",
+          extraRoutes: [{ path: "/library/templates/:id", element: <div>template-stub</div> }],
+        },
+      );
+      await openExercisesTab(user);
+      expect(
+        await screen.findByRole("combobox", { name: "Nhóm bài tập cho Bài 1: Tập hợp" }),
+      ).toHaveTextContent("Nhóm B");
+
+      await user.click(await screen.findByRole("button", { name: "Xoá" }));
+      await user.click(
+        within(await screen.findByRole("dialog")).getByRole("button", { name: "Xoá nhóm" }),
+      );
+      expect(await screen.findByText("Đã xoá nhóm bài tập")).toBeInTheDocument();
+
+      await waitFor(() => {
+        expect(
+          screen.getByRole("combobox", { name: "Nhóm bài tập cho Bài 1: Tập hợp" }),
+        ).toHaveTextContent("Chưa phân nhóm");
+      });
+    });
   });
 
-  it("shows the shared badge for a reader without library.edit", async () => {
-    server.use(memberWith("library.read"));
-    signInAs(testSecondaryTeacher);
-    renderPage();
-    await screen.findByText("Bạn không có quyền soạn buổi học mẫu.");
+  describe("chuẩn bị tài liệu", () => {
+    it("edits the preparation status and checklist and saves them as one block", async () => {
+      const user = userEvent.setup();
+      renderPage();
 
-    const materials = await screen.findByRole("region", { name: "Học liệu" });
-    expect(within(materials).getByText("Slide số tự nhiên")).toBeInTheDocument();
-    expect(within(materials).getByText("Chia sẻ HV")).toBeInTheDocument();
-    expect(within(materials).queryByRole("checkbox")).not.toBeInTheDocument();
-  });
+      const prep = await screen.findByRole("region", { name: "Chuẩn bị tài liệu" });
+      expect(within(prep).getByRole("radio", { name: "Cần làm" })).toBeChecked();
+      expect(within(prep).getByRole("checkbox", { name: "Soạn slide" })).toBeChecked();
+      expect(within(prep).getByRole("checkbox", { name: "In phiếu bài tập" })).not.toBeChecked();
 
-  it("edits the preparation status and checklist and saves them as one block", async () => {
-    const user = userEvent.setup();
-    renderPage();
+      await user.click(within(prep).getByRole("radio", { name: "Đang làm" }));
+      await user.click(within(prep).getByRole("checkbox", { name: "In phiếu bài tập" }));
+      await user.type(within(prep).getByLabelText("Thêm việc cần làm"), "Chuẩn bị đề{Enter}");
+      expect(within(prep).getByRole("checkbox", { name: "Chuẩn bị đề" })).not.toBeChecked();
+      await user.click(within(prep).getByRole("button", { name: "Xoá Soạn slide" }));
+      await user.click(within(prep).getByRole("button", { name: "Lưu chuẩn bị" }));
 
-    const prep = await screen.findByRole("region", { name: "Chuẩn bị tài liệu" });
-    expect(within(prep).getByRole("radio", { name: "Cần làm" })).toBeChecked();
-    expect(within(prep).getByRole("checkbox", { name: "Soạn slide" })).toBeChecked();
-    expect(within(prep).getByRole("checkbox", { name: "In phiếu bài tập" })).not.toBeChecked();
+      expect(await screen.findByText("Đã lưu trạng thái chuẩn bị")).toBeInTheDocument();
+      const saved = getLibraryStore().lessons.find((l) => l.id === lessonDraftSoTuNhien.id);
+      expect(saved?.prep_status).toBe("doing");
+      expect(saved?.checklist).toEqual([
+        { label: "In phiếu bài tập", done: true },
+        { label: "Chuẩn bị đề", done: false },
+      ]);
+    });
 
-    await user.click(within(prep).getByRole("radio", { name: "Đang làm" }));
-    await user.click(within(prep).getByRole("checkbox", { name: "In phiếu bài tập" }));
-    await user.type(within(prep).getByLabelText("Thêm việc cần làm"), "Chuẩn bị đề{Enter}");
-    expect(within(prep).getByRole("checkbox", { name: "Chuẩn bị đề" })).not.toBeChecked();
-    await user.click(within(prep).getByRole("button", { name: "Xoá Soạn slide" }));
-    await user.click(within(prep).getByRole("button", { name: "Lưu chuẩn bị" }));
+    it("disables the save button until the status or checklist actually changes", async () => {
+      renderPage();
 
-    expect(await screen.findByText("Đã lưu trạng thái chuẩn bị")).toBeInTheDocument();
-    const saved = getLibraryStore().lessons.find((l) => l.id === lessonDraftSoTuNhien.id);
-    expect(saved?.prep_status).toBe("doing");
-    expect(saved?.checklist).toEqual([
-      { label: "In phiếu bài tập", done: true },
-      { label: "Chuẩn bị đề", done: false },
-    ]);
-  });
+      const prep = await screen.findByRole("region", { name: "Chuẩn bị tài liệu" });
+      expect(within(prep).getByRole("button", { name: "Lưu chuẩn bị" })).toBeDisabled();
+    });
 
-  it("disables the save button until the status or checklist actually changes", async () => {
-    renderPage();
+    it("sends only the status when the checklist was not touched", async () => {
+      const user = userEvent.setup();
+      let capturedBody: { prep_status?: string; checklist?: unknown } | undefined;
+      server.use(
+        http.patch(`${API_URL}/library/lessons/:lid/prep`, async ({ params, request }) => {
+          capturedBody = (await request.json()) as typeof capturedBody;
+          const row = getLibraryStore().lessons.find((l) => l.id === params.lid);
+          if (row && capturedBody?.prep_status !== undefined) {
+            row.prep_status = capturedBody.prep_status as typeof row.prep_status;
+          }
+          return HttpResponse.json(ok(row));
+        }),
+      );
+      renderPage();
 
-    const prep = await screen.findByRole("region", { name: "Chuẩn bị tài liệu" });
-    expect(within(prep).getByRole("button", { name: "Lưu chuẩn bị" })).toBeDisabled();
-  });
+      const prep = await screen.findByRole("region", { name: "Chuẩn bị tài liệu" });
+      await user.click(within(prep).getByRole("radio", { name: "Đang làm" }));
+      await user.click(within(prep).getByRole("button", { name: "Lưu chuẩn bị" }));
 
-  it("sends only the status when the checklist was not touched", async () => {
-    const user = userEvent.setup();
-    let capturedBody: { prep_status?: string; checklist?: unknown } | undefined;
-    server.use(
-      http.patch(`${API_URL}/library/lessons/:lid/prep`, async ({ params, request }) => {
-        capturedBody = (await request.json()) as typeof capturedBody;
-        const row = getLibraryStore().lessons.find((l) => l.id === params.lid);
-        if (row && capturedBody?.prep_status !== undefined) {
-          row.prep_status = capturedBody.prep_status as typeof row.prep_status;
-        }
-        return HttpResponse.json(ok(row));
-      }),
-    );
-    renderPage();
+      expect(await screen.findByText("Đã lưu trạng thái chuẩn bị")).toBeInTheDocument();
+      expect(capturedBody).toEqual({ prep_status: "doing" });
+    });
 
-    const prep = await screen.findByRole("region", { name: "Chuẩn bị tài liệu" });
-    await user.click(within(prep).getByRole("radio", { name: "Đang làm" }));
-    await user.click(within(prep).getByRole("button", { name: "Lưu chuẩn bị" }));
+    it("sends only the checklist when the status was not touched, so a stale status is never resent", async () => {
+      const user = userEvent.setup();
+      let capturedBody: { prep_status?: string; checklist?: unknown } | undefined;
+      server.use(
+        http.patch(`${API_URL}/library/lessons/:lid/prep`, async ({ params, request }) => {
+          capturedBody = (await request.json()) as typeof capturedBody;
+          const row = getLibraryStore().lessons.find((l) => l.id === params.lid);
+          if (row && capturedBody?.checklist !== undefined) {
+            row.checklist = capturedBody.checklist as typeof row.checklist;
+          }
+          return HttpResponse.json(ok(row));
+        }),
+      );
+      // Someone else moved the board card while this page was open: the server
+      // truth for prep_status is no longer "todo", but this panel never read it.
+      getLibraryStore().lessons.find((l) => l.id === lessonDraftSoTuNhien.id)!.prep_status =
+        "review";
+      renderPage();
 
-    expect(await screen.findByText("Đã lưu trạng thái chuẩn bị")).toBeInTheDocument();
-    expect(capturedBody).toEqual({ prep_status: "doing" });
-  });
+      const prep = await screen.findByRole("region", { name: "Chuẩn bị tài liệu" });
+      await user.click(within(prep).getByRole("checkbox", { name: "In phiếu bài tập" }));
+      await user.click(within(prep).getByRole("button", { name: "Lưu chuẩn bị" }));
 
-  it("sends only the checklist when the status was not touched, so a stale status is never resent", async () => {
-    const user = userEvent.setup();
-    let capturedBody: { prep_status?: string; checklist?: unknown } | undefined;
-    server.use(
-      http.patch(`${API_URL}/library/lessons/:lid/prep`, async ({ params, request }) => {
-        capturedBody = (await request.json()) as typeof capturedBody;
-        const row = getLibraryStore().lessons.find((l) => l.id === params.lid);
-        if (row && capturedBody?.checklist !== undefined) {
-          row.checklist = capturedBody.checklist as typeof row.checklist;
-        }
-        return HttpResponse.json(ok(row));
-      }),
-    );
-    // Someone else moved the board card while this page was open: the server
-    // truth for prep_status is no longer "todo", but this panel never read it.
-    getLibraryStore().lessons.find((l) => l.id === lessonDraftSoTuNhien.id)!.prep_status = "review";
-    renderPage();
+      expect(await screen.findByText("Đã lưu trạng thái chuẩn bị")).toBeInTheDocument();
+      expect(capturedBody?.prep_status).toBeUndefined();
+      expect(capturedBody?.checklist).toEqual([
+        { label: "Soạn slide", done: true },
+        { label: "In phiếu bài tập", done: true },
+      ]);
+      // The elsewhere-set status must survive untouched.
+      expect(
+        getLibraryStore().lessons.find((l) => l.id === lessonDraftSoTuNhien.id)?.prep_status,
+      ).toBe("review");
+    });
 
-    const prep = await screen.findByRole("region", { name: "Chuẩn bị tài liệu" });
-    await user.click(within(prep).getByRole("checkbox", { name: "In phiếu bài tập" }));
-    await user.click(within(prep).getByRole("button", { name: "Lưu chuẩn bị" }));
+    it("shows the preparation block read-only on a published lesson", async () => {
+      renderPage(lessonPublishedSoTuNhien.id);
 
-    expect(await screen.findByText("Đã lưu trạng thái chuẩn bị")).toBeInTheDocument();
-    expect(capturedBody?.prep_status).toBeUndefined();
-    expect(capturedBody?.checklist).toEqual([
-      { label: "Soạn slide", done: true },
-      { label: "In phiếu bài tập", done: true },
-    ]);
-    // The elsewhere-set status must survive untouched.
-    expect(
-      getLibraryStore().lessons.find((l) => l.id === lessonDraftSoTuNhien.id)?.prep_status,
-    ).toBe("review");
-  });
+      const prep = await screen.findByRole("region", { name: "Chuẩn bị tài liệu" });
+      expect(within(prep).getByText("Cần làm")).toBeInTheDocument();
+      expect(within(prep).getByText("Chưa có việc nào")).toBeInTheDocument();
+      expect(within(prep).queryByRole("button", { name: "Lưu chuẩn bị" })).not.toBeInTheDocument();
+    });
 
-  it("shows the preparation block read-only on a published lesson", async () => {
-    renderPage(lessonPublishedSoTuNhien.id);
+    it("shows the assignee and due date on the preparation block", async () => {
+      const row = getLibraryStore().lessons.find((l) => l.id === lessonDraftSoTuNhien.id)!;
+      row.assignee_id = testSecondaryTeacher.id;
+      row.due_date = "2026-10-01";
+      renderPage();
 
-    const prep = await screen.findByRole("region", { name: "Chuẩn bị tài liệu" });
-    expect(within(prep).getByText("Cần làm")).toBeInTheDocument();
-    expect(within(prep).getByText("Chưa có việc nào")).toBeInTheDocument();
-    expect(within(prep).queryByRole("button", { name: "Lưu chuẩn bị" })).not.toBeInTheDocument();
-  });
-
-  it("shows the assignee and due date on the preparation block", async () => {
-    const row = getLibraryStore().lessons.find((l) => l.id === lessonDraftSoTuNhien.id)!;
-    row.assignee_id = testSecondaryTeacher.id;
-    row.due_date = "2026-10-01";
-    renderPage();
-
-    const prep = await screen.findByRole("region", { name: "Chuẩn bị tài liệu" });
-    expect(within(prep).getByText("Thầy Minh")).toBeInTheDocument();
-    expect(within(prep).getByText("01/10")).toBeInTheDocument();
+      const prep = await screen.findByRole("region", { name: "Chuẩn bị tài liệu" });
+      expect(within(prep).getByText("Thầy Minh")).toBeInTheDocument();
+      expect(within(prep).getByText("01/10")).toBeInTheDocument();
+    });
   });
 });

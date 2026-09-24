@@ -1,6 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useEffect } from "react";
 import { Controller, useForm } from "react-hook-form";
+import { z } from "zod";
 
 import { HvButton, HvModal, HvSelect } from "@/components/hv";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -12,19 +13,63 @@ import { formatDifficulty } from "../lib/library-labels";
 import { textareaClassName } from "@/lib/forms/textarea-class";
 import {
   exerciseFormSchema,
+  optionalText,
   toExerciseForm,
   toExerciseInput,
   type Exercise,
-  type ExerciseFormInput,
-  type ExerciseFormValues,
+  type ExerciseInput,
 } from "../schemas/library-schemas";
 
-const EMPTY_FORM: ExerciseFormInput = {
+/**
+ * The shared schema does not carry code/skill/level yet (the exercise
+ * dialog used to leave them unset on the wire); this dialog is the one
+ * place that edits them, so it extends the base form schema locally
+ * instead of widening it for every other caller. Limits mirror the API's
+ * `ExerciseRequest` binding tags (`dto.go`): code max 20, skill/level max 50.
+ */
+const exerciseDialogSchema = exerciseFormSchema.extend({
+  code: z
+    .string()
+    .trim()
+    .max(20, "Tối đa 20 ký tự")
+    .regex(/^[A-Za-z0-9-]*$/, "Chỉ dùng chữ, số và dấu gạch ngang"),
+  skill: optionalText(50),
+  level: optionalText(50),
+});
+type ExerciseDialogFormInput = z.input<typeof exerciseDialogSchema>;
+type ExerciseDialogFormValues = z.output<typeof exerciseDialogSchema>;
+
+const EMPTY_FORM: ExerciseDialogFormInput = {
   title: "",
   description: "",
   difficulty: "",
+  code: "",
+  skill: "",
+  level: "",
   tags: "",
 };
+
+function toDialogForm(exercise: Exercise): ExerciseDialogFormInput {
+  return {
+    ...toExerciseForm(exercise),
+    code: exercise.code,
+    skill: exercise.skill ?? "",
+    level: exercise.level ?? "",
+  };
+}
+
+function blankToNull(text: string): string | null {
+  return text === "" ? null : text;
+}
+
+function toDialogInput(values: ExerciseDialogFormValues): ExerciseInput {
+  return {
+    ...toExerciseInput(values),
+    code: blankToNull(values.code),
+    skill: blankToNull(values.skill),
+    level: blankToNull(values.level),
+  };
+}
 
 const FORM_ID = "exercise-dialog-form";
 
@@ -48,9 +93,9 @@ export type ExerciseDialogProps = {
 export function ExerciseDialog(props: ExerciseDialogProps) {
   const { open, onOpenChange } = props;
   const editing = props.mode === "edit";
-  const form = useForm<ExerciseFormInput, unknown, ExerciseFormValues>({
-    resolver: zodResolver(exerciseFormSchema),
-    defaultValues: editing ? toExerciseForm(props.exercise) : EMPTY_FORM,
+  const form = useForm<ExerciseDialogFormInput, unknown, ExerciseDialogFormValues>({
+    resolver: zodResolver(exerciseDialogSchema),
+    defaultValues: editing ? toDialogForm(props.exercise) : EMPTY_FORM,
   });
   const createMutation = useCreateExercise();
   const updateMutation = useUpdateExercise(editing ? props.exercise.id : "");
@@ -59,14 +104,14 @@ export function ExerciseDialog(props: ExerciseDialogProps) {
 
   useEffect(() => {
     if (open) {
-      form.reset(props.mode === "edit" ? toExerciseForm(props.exercise) : EMPTY_FORM);
+      form.reset(props.mode === "edit" ? toDialogForm(props.exercise) : EMPTY_FORM);
     }
     // The form instance is stable; only the opening (and the row it opens on) matters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const onSubmit = form.handleSubmit((values) => {
-    const input = toExerciseInput(values);
+    const input: ExerciseInput = toDialogInput(values);
     if (props.mode === "edit") {
       updateMutation.mutate(input, {
         onSuccess: (exercise) => {
@@ -136,6 +181,38 @@ export function ExerciseDialog(props: ExerciseDialogProps) {
                 )}
               />
               <FieldError errors={[errors.difficulty]} />
+            </Field>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Field data-invalid={Boolean(errors.code)}>
+              <FieldLabel htmlFor="exercise-code">Mã</FieldLabel>
+              <Input
+                id="exercise-code"
+                placeholder="Tự sinh nếu bỏ trống"
+                aria-invalid={Boolean(errors.code)}
+                {...form.register("code")}
+              />
+              <FieldError errors={[errors.code]} />
+            </Field>
+            <Field data-invalid={Boolean(errors.skill)}>
+              <FieldLabel htmlFor="exercise-skill">Kỹ năng</FieldLabel>
+              <Input
+                id="exercise-skill"
+                placeholder="VD: Đọc hiểu"
+                aria-invalid={Boolean(errors.skill)}
+                {...form.register("skill")}
+              />
+              <FieldError errors={[errors.skill]} />
+            </Field>
+            <Field data-invalid={Boolean(errors.level)}>
+              <FieldLabel htmlFor="exercise-level">Cấp độ</FieldLabel>
+              <Input
+                id="exercise-level"
+                placeholder="VD: Cơ bản"
+                aria-invalid={Boolean(errors.level)}
+                {...form.register("level")}
+              />
+              <FieldError errors={[errors.level]} />
             </Field>
           </div>
           <Field data-invalid={Boolean(errors.description)}>

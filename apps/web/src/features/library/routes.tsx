@@ -4,7 +4,24 @@ import type { RouteObject } from "react-router";
 export const libraryRoutes: RouteObject[] = [
   {
     path: "library",
-    lazy: async () => ({ Component: (await import("./pages/library-page")).LibraryPage }),
+    lazy: async () => {
+      const { LibraryPage } = await import("./pages/library-page");
+      return { Component: () => <LibraryPage tab="templates" /> };
+    },
+  },
+  {
+    path: "library/materials",
+    lazy: async () => {
+      const { LibraryPage } = await import("./pages/library-page");
+      return { Component: () => <LibraryPage tab="materials" /> };
+    },
+  },
+  {
+    path: "library/exercises",
+    lazy: async () => {
+      const { LibraryPage } = await import("./pages/library-page");
+      return { Component: () => <LibraryPage tab="exercises" /> };
+    },
   },
   {
     path: "library/templates/new",

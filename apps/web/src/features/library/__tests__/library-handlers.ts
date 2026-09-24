@@ -7,6 +7,8 @@ import type {
   AssignmentInput,
   BoardCard,
   Exercise,
+  ExerciseGroup,
+  ExerciseGroupInput,
   ExerciseInput,
   LessonExercise,
   LessonExerciseInput,
@@ -20,18 +22,22 @@ import type {
   PrepInput,
   PrepStatus,
   ProgramTemplate,
-  ScoreComponent,
-  ScoreComponentInput,
+  ScoreSetGroup,
+  ScoreSetGroupInput,
   TemplateInput,
   TemplateLesson,
   TemplateLessonDetail,
   TemplateVersion,
+  VersionClassRefResponse,
   VersionDetail,
 } from "../schemas/library-schemas";
 
 // --- Fixtures ---
 // One template with a published v1 (two lessons) and an open draft v2 that
 // copied them, plus a second template whose only version is the draft v1.
+// No class binds to a version by default (that is a different domain's
+// store), so `class_count` stays 0 and `classes` stays empty unless a test
+// pushes rows onto `getLibraryStore().classLinks` itself.
 
 const OWNER_ID = "73000000-0000-4000-8000-000000000001";
 
@@ -47,6 +53,12 @@ export const templateToan6: ProgramTemplate = {
   draft_version_no: 2,
   draft_version_id: "81000000-0000-4000-8000-000000000002",
   version_count: 2,
+  class_count: 0,
+  lesson_count: 2,
+  versions: [
+    { id: "81000000-0000-4000-8000-000000000002", version_no: 2, status: "draft" },
+    { id: "81000000-0000-4000-8000-000000000001", version_no: 1, status: "published" },
+  ],
   prep: { lesson_count: 2, done_count: 0, assignees: [] },
   created_at: "2026-09-01T08:00:00Z",
   updated_at: "2026-09-10T08:00:00Z",
@@ -64,6 +76,9 @@ export const templateVan9: ProgramTemplate = {
   draft_version_no: 1,
   draft_version_id: "81000000-0000-4000-8000-000000000003",
   version_count: 1,
+  class_count: 0,
+  lesson_count: 0,
+  versions: [{ id: "81000000-0000-4000-8000-000000000003", version_no: 1, status: "draft" }],
   prep: { lesson_count: 0, done_count: 0, assignees: [] },
   created_at: "2026-09-05T08:00:00Z",
   updated_at: "2026-09-05T08:00:00Z",
@@ -78,6 +93,8 @@ export const versionToan6Published: TemplateVersion = {
   published_at: "2026-09-08T08:00:00Z",
   created_by: OWNER_ID,
   lesson_count: 2,
+  class_count: 0,
+  classes: [],
   created_at: "2026-09-01T08:00:00Z",
   updated_at: "2026-09-08T08:00:00Z",
 };
@@ -91,6 +108,8 @@ export const versionToan6Draft: TemplateVersion = {
   published_at: null,
   created_by: OWNER_ID,
   lesson_count: 2,
+  class_count: 0,
+  classes: [],
   created_at: "2026-09-10T08:00:00Z",
   updated_at: "2026-09-10T08:00:00Z",
 };
@@ -104,6 +123,8 @@ export const versionVan9Draft: TemplateVersion = {
   published_at: null,
   created_by: OWNER_ID,
   lesson_count: 0,
+  class_count: 0,
+  classes: [],
   created_at: "2026-09-05T08:00:00Z",
   updated_at: "2026-09-05T08:00:00Z",
 };
@@ -120,6 +141,8 @@ function lesson(
     version_id: versionId,
     position,
     title,
+    mode: "scheduled",
+    unit: null,
     objectives: null,
     duration_min: 90,
     homework_note: null,
@@ -127,6 +150,8 @@ function lesson(
     assignee_id: null,
     due_date: null,
     checklist: [],
+    material_count: 0,
+    exercise_count: 0,
     created_at: "2026-09-01T08:00:00Z",
     updated_at: "2026-09-01T08:00:00Z",
     ...extra,
@@ -177,6 +202,9 @@ export const materialSlide: Material = {
   url: "https://example.com/slide-so-tu-nhien.pdf",
   description: "Slide bài giảng chương 1.",
   tags: ["chương 1", "slide"],
+  active: true,
+  lesson_count: 0,
+  template_count: 0,
   created_at: "2026-09-02T08:00:00Z",
   updated_at: "2026-09-02T08:00:00Z",
 };
@@ -188,6 +216,9 @@ export const materialVideo: Material = {
   url: "https://example.com/video-phan-so",
   description: null,
   tags: [],
+  active: true,
+  lesson_count: 0,
+  template_count: 0,
   created_at: "2026-09-03T08:00:00Z",
   updated_at: "2026-09-03T08:00:00Z",
 };
@@ -197,7 +228,13 @@ export const exerciseBai1: Exercise = {
   title: "Bài 1: Tập hợp",
   description: "Liệt kê phần tử của tập hợp.",
   difficulty: 2,
+  code: "BT-0001",
+  skill: null,
+  level: null,
   tags: ["chương 1"],
+  active: true,
+  lesson_count: 0,
+  template_count: 0,
   created_at: "2026-09-02T08:00:00Z",
   updated_at: "2026-09-02T08:00:00Z",
 };
@@ -207,7 +244,13 @@ export const exerciseBai2: Exercise = {
   title: "Bài 2: So sánh phân số",
   description: null,
   difficulty: null,
+  code: "BT-0002",
+  skill: null,
+  level: null,
   tags: [],
+  active: true,
+  lesson_count: 0,
+  template_count: 0,
   created_at: "2026-09-03T08:00:00Z",
   updated_at: "2026-09-03T08:00:00Z",
 };
@@ -222,7 +265,22 @@ interface MaterialLink {
 interface ExerciseLink {
   lesson_id: string;
   exercise_id: string;
+  group_id: string | null;
   position: number;
+}
+
+interface ExerciseGroupRow {
+  id: string;
+  version_id: string;
+  name: string;
+  position: number;
+}
+
+/** A class bound to a version, as `library.ListVersionClasses` would report it. */
+interface ClassLink {
+  version_id: string;
+  class_id: string;
+  class_name: string;
 }
 
 type StoredLogField = LogField & { version_id: string };
@@ -235,8 +293,10 @@ interface LibraryStore {
   exercises: Exercise[];
   materialLinks: MaterialLink[];
   exerciseLinks: ExerciseLink[];
+  exerciseGroups: ExerciseGroupRow[];
+  classLinks: ClassLink[];
   logFields: StoredLogField[];
-  scoreSets: Record<string, ScoreComponent[]>;
+  scoreSets: Record<string, ScoreSetGroup[]>;
   nextId: number;
 }
 
@@ -273,8 +333,15 @@ function freshStore(): LibraryStore {
       },
     ],
     exerciseLinks: [
-      { lesson_id: lessonDraftSoTuNhien.id, exercise_id: exerciseBai1.id, position: 1 },
+      {
+        lesson_id: lessonDraftSoTuNhien.id,
+        exercise_id: exerciseBai1.id,
+        group_id: null,
+        position: 1,
+      },
     ],
+    exerciseGroups: [],
+    classLinks: [],
     logFields: [
       {
         id: "85000000-0000-4000-8000-000000000001",
@@ -296,10 +363,22 @@ function freshStore(): LibraryStore {
       },
     ],
     scoreSets: {
-      [versionToan6Published.id]: [{ key: "kt", label: "Kiểm tra", max: 10, weight: 1 }],
+      [versionToan6Published.id]: [
+        {
+          key: "main",
+          title: "Bộ điểm",
+          components: [{ key: "kt", label: "Kiểm tra", max: 10, weight: 1 }],
+        },
+      ],
       [versionToan6Draft.id]: [
-        { key: "hw", label: "Bài tập về nhà", max: 10, weight: 0.4 },
-        { key: "kt", label: "Kiểm tra", max: 10, weight: 0.6 },
+        {
+          key: "main",
+          title: "Bộ điểm",
+          components: [
+            { key: "hw", label: "Bài tập về nhà", max: 10, weight: 0.4 },
+            { key: "kt", label: "Kiểm tra", max: 10, weight: 0.6 },
+          ],
+        },
       ],
     },
     nextId: 1,
@@ -346,6 +425,9 @@ function summarize(template: ProgramTemplate): ProgramTemplate {
   const published = versions.find((v) => v.status === "published");
   const draft = versions.find((v) => v.status === "draft");
   const draftLessons = draft ? store.lessons.filter((l) => l.version_id === draft.id) : [];
+  const released = published
+    ? store.lessons.filter((l) => l.version_id === published.id).length
+    : draftLessons.length;
   const assignees = [
     ...new Set(draftLessons.flatMap((l) => assigneeName(l.assignee_id) ?? [])),
   ].sort();
@@ -355,6 +437,11 @@ function summarize(template: ProgramTemplate): ProgramTemplate {
     draft_version_no: draft?.version_no ?? null,
     draft_version_id: draft?.id ?? null,
     version_count: versions.length,
+    class_count: 0,
+    lesson_count: released,
+    versions: [...versions]
+      .sort((a, b) => b.version_no - a.version_no)
+      .map((v) => ({ id: v.id, version_no: v.version_no, status: v.status })),
     prep: draft
       ? {
           lesson_count: draftLessons.length,
@@ -381,11 +468,33 @@ function boardCard(row: TemplateLesson): BoardCard {
 
 const PREP_STATUSES: PrepStatus[] = ["todo", "doing", "review", "done"];
 
+/** Classes bound to a version, capped and ordered by name like the API's `ListVersionClasses`. */
+function versionClasses(versionId: string): VersionClassRefResponse[] {
+  return store.classLinks
+    .filter((link) => link.version_id === versionId)
+    .map((link) => ({ id: link.class_id, name: link.class_name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 function withCount(version: TemplateVersion): TemplateVersion {
+  const classes = versionClasses(version.id);
   return {
     ...version,
     lesson_count: store.lessons.filter((l) => l.version_id === version.id).length,
+    class_count: classes.length,
+    classes,
   };
+}
+
+function lessonCounts(lessonId: string): Pick<TemplateLesson, "material_count" | "exercise_count"> {
+  return {
+    material_count: store.materialLinks.filter((l) => l.lesson_id === lessonId).length,
+    exercise_count: store.exerciseLinks.filter((l) => l.lesson_id === lessonId).length,
+  };
+}
+
+function withLessonCounts(row: TemplateLesson): TemplateLesson {
+  return { ...row, ...lessonCounts(row.id) };
 }
 
 function lessonMaterials(lessonId: string): LessonMaterial[] {
@@ -412,12 +521,16 @@ function lessonExercises(lessonId: string): LessonExercise[] {
     .sort((a, b) => a.position - b.position)
     .flatMap((link) => {
       const exercise = store.exercises.find((e) => e.id === link.exercise_id);
-      return exercise ? [{ ...exercise, position: link.position }] : [];
+      return exercise ? [{ ...exercise, group_id: link.group_id, position: link.position }] : [];
     });
 }
 
 function lessonDetail(row: TemplateLesson): TemplateLessonDetail {
-  return { ...row, materials: lessonMaterials(row.id), exercises: lessonExercises(row.id) };
+  return {
+    ...withLessonCounts(row),
+    materials: lessonMaterials(row.id),
+    exercises: lessonExercises(row.id),
+  };
 }
 
 function versionLogFields(versionId: string): LogField[] {
@@ -454,8 +567,18 @@ function validationError(fields: Record<string, string>) {
 }
 
 function itemFilter(request: Request) {
-  const q = (new URL(request.url).searchParams.get("q") ?? "").toLowerCase();
-  return (item: { title: string }) => q === "" || item.title.toLowerCase().includes(q);
+  const params = new URL(request.url).searchParams;
+  const q = params.get("q")?.toLowerCase() ?? "";
+  const activeParam = params.get("active");
+  return (item: { title: string; active: boolean; code?: string }) => {
+    if (q !== "") {
+      const matchesTitle = item.title.toLowerCase().includes(q);
+      const matchesCode = item.code?.toLowerCase().includes(q) ?? false;
+      if (!matchesTitle && !matchesCode) return false;
+    }
+    if (activeParam !== null && item.active !== (activeParam === "true")) return false;
+    return true;
+  };
 }
 
 function renumber(versionId: string): TemplateLesson[] {
@@ -466,6 +589,43 @@ function renumber(versionId: string): TemplateLesson[] {
     row.position = index + 1;
   });
   return rows;
+}
+
+/** How many lessons/templates a catalog item is actually used by, as the bank's own responses show it. */
+function materialBankRow(material: Material): Material {
+  const links = store.materialLinks.filter((l) => l.material_id === material.id);
+  const lessonIds = new Set(links.map((l) => l.lesson_id));
+  const templateIds = new Set(
+    [...lessonIds].flatMap((lessonId) => {
+      const row = store.lessons.find((l) => l.id === lessonId);
+      const version = row && store.versions.find((v) => v.id === row.version_id);
+      return version ? [version.template_id] : [];
+    }),
+  );
+  return { ...material, lesson_count: lessonIds.size, template_count: templateIds.size };
+}
+
+function exerciseBankRow(exercise: Exercise): Exercise {
+  const links = store.exerciseLinks.filter((l) => l.exercise_id === exercise.id);
+  const lessonIds = new Set(links.map((l) => l.lesson_id));
+  const templateIds = new Set(
+    [...lessonIds].flatMap((lessonId) => {
+      const row = store.lessons.find((l) => l.id === lessonId);
+      const version = row && store.versions.find((v) => v.id === row.version_id);
+      return version ? [version.template_id] : [];
+    }),
+  );
+  return { ...exercise, lesson_count: lessonIds.size, template_count: templateIds.size };
+}
+
+function exerciseGroupResponse(row: ExerciseGroupRow): ExerciseGroup {
+  return {
+    id: row.id,
+    version_id: row.version_id,
+    name: row.name,
+    position: row.position,
+    exercise_count: store.exerciseLinks.filter((l) => l.group_id === row.id).length,
+  };
 }
 
 export const libraryHandlers = [
@@ -501,6 +661,9 @@ export const libraryHandlers = [
       draft_version_no: 1,
       draft_version_id: null,
       version_count: 1,
+      class_count: 0,
+      lesson_count: 0,
+      versions: [],
       prep: null,
       created_at: NOW,
       updated_at: NOW,
@@ -516,6 +679,8 @@ export const libraryHandlers = [
       published_at: null,
       created_by: OWNER_ID,
       lesson_count: 0,
+      class_count: 0,
+      classes: [],
       created_at: NOW,
       updated_at: NOW,
     });
@@ -568,6 +733,8 @@ export const libraryHandlers = [
       published_at: null,
       created_by: OWNER_ID,
       lesson_count: 0,
+      class_count: 0,
+      classes: [],
       created_at: NOW,
       updated_at: NOW,
     };
@@ -576,8 +743,16 @@ export const libraryHandlers = [
       .filter((v) => v.status !== "draft")
       .sort((a, b) => b.version_no - a.version_no)[0];
     if (source) {
+      const groupIdMap = new Map<string, string>();
+      for (const group of store.exerciseGroups.filter((g) => g.version_id === source.id)) {
+        const copyId = mintId();
+        groupIdMap.set(group.id, copyId);
+        store.exerciseGroups.push({ ...group, id: copyId, version_id: version.id });
+      }
       for (const row of store.lessons.filter((l) => l.version_id === source.id)) {
         const copy = lesson(mintId(), version.id, row.position, row.title, {
+          mode: row.mode,
+          unit: row.unit,
           objectives: row.objectives,
           duration_min: row.duration_min,
           homework_note: row.homework_note,
@@ -587,7 +762,11 @@ export const libraryHandlers = [
           store.materialLinks.push({ ...link, lesson_id: copy.id });
         }
         for (const link of store.exerciseLinks.filter((l) => l.lesson_id === row.id)) {
-          store.exerciseLinks.push({ ...link, lesson_id: copy.id });
+          store.exerciseLinks.push({
+            ...link,
+            lesson_id: copy.id,
+            group_id: link.group_id ? (groupIdMap.get(link.group_id) ?? null) : null,
+          });
         }
       }
       for (const field of store.logFields.filter((f) => f.version_id === source.id)) {
@@ -622,7 +801,7 @@ export const libraryHandlers = [
   }),
   http.get(`${API_URL}/library/versions/:vid/lessons`, ({ params }) => {
     if (!store.versions.some((v) => v.id === params.vid)) return notFound("version");
-    return HttpResponse.json(ok(renumber(String(params.vid))));
+    return HttpResponse.json(ok(renumber(String(params.vid)).map(withLessonCounts)));
   }),
   http.post(`${API_URL}/library/versions/:vid/lessons`, async ({ params, request }) => {
     const version = store.versions.find((v) => v.id === params.vid);
@@ -636,7 +815,13 @@ export const libraryHandlers = [
       version.id,
       store.lessons.filter((l) => l.version_id === version.id).length + 1,
       body.title,
-      { ...body, created_at: NOW, updated_at: NOW },
+      {
+        ...body,
+        mode: body.mode ?? "scheduled",
+        unit: body.unit ?? null,
+        created_at: NOW,
+        updated_at: NOW,
+      },
     );
     store.lessons.push(row);
     return HttpResponse.json(ok(row), { status: 201 });
@@ -662,7 +847,7 @@ export const libraryHandlers = [
       const row = rows.find((l) => l.id === id);
       if (row) row.position = index + 1;
     });
-    return HttpResponse.json(ok(renumber(version.id)));
+    return HttpResponse.json(ok(renumber(version.id).map(withLessonCounts)));
   }),
   http.get(`${API_URL}/library/lessons/:lid`, ({ params }) => {
     const row = store.lessons.find((l) => l.id === params.lid);
@@ -678,6 +863,54 @@ export const libraryHandlers = [
     const body = (await request.json()) as LessonInput;
     Object.assign(row, body, { updated_at: NOW });
     return HttpResponse.json(ok(lessonDetail(row)));
+  }),
+  http.delete(`${API_URL}/library/lessons/:lid`, ({ params }) => {
+    const index = store.lessons.findIndex((l) => l.id === params.lid);
+    if (index === -1) return notFound("lesson");
+    const [removed] = store.lessons.splice(index, 1);
+    if (removed) {
+      renumber(removed.version_id);
+      store.materialLinks = store.materialLinks.filter((l) => l.lesson_id !== removed.id);
+      store.exerciseLinks = store.exerciseLinks.filter((l) => l.lesson_id !== removed.id);
+    }
+    return HttpResponse.json(ok({ deleted: true }));
+  }),
+  http.post(`${API_URL}/library/lessons/:lid/duplicate`, ({ params }) => {
+    const row = store.lessons.find((l) => l.id === params.lid);
+    if (!row) return notFound("lesson");
+    const lock = locked(store.versions.find((v) => v.id === row.version_id));
+    if (lock) return lock;
+    const copy = lesson(mintId(), row.version_id, row.position + 0.5, `${row.title} (bản sao)`, {
+      mode: row.mode,
+      unit: row.unit,
+      objectives: row.objectives,
+      duration_min: row.duration_min,
+      homework_note: row.homework_note,
+      created_at: NOW,
+      updated_at: NOW,
+    });
+    store.lessons.push(copy);
+    for (const link of store.materialLinks.filter((l) => l.lesson_id === row.id)) {
+      store.materialLinks.push({ ...link, lesson_id: copy.id });
+    }
+    for (const link of store.exerciseLinks.filter((l) => l.lesson_id === row.id)) {
+      store.exerciseLinks.push({ ...link, lesson_id: copy.id });
+    }
+    renumber(row.version_id);
+    return HttpResponse.json(ok(withLessonCounts(copy)), { status: 201 });
+  }),
+  http.delete(`${API_URL}/library/versions/:vid/lessons`, ({ params }) => {
+    const version = store.versions.find((v) => v.id === params.vid);
+    if (!version) return notFound("version");
+    const lock = locked(version);
+    if (lock) return lock;
+    const removedIds = new Set(
+      store.lessons.filter((l) => l.version_id === version.id).map((l) => l.id),
+    );
+    store.lessons = store.lessons.filter((l) => l.version_id !== version.id);
+    store.materialLinks = store.materialLinks.filter((l) => !removedIds.has(l.lesson_id));
+    store.exerciseLinks = store.exerciseLinks.filter((l) => !removedIds.has(l.lesson_id));
+    return HttpResponse.json(ok({ cleared: true }));
   }),
   http.get(`${API_URL}/library/versions/:vid/board`, ({ params }) => {
     const version = store.versions.find((v) => v.id === params.vid);
@@ -735,17 +968,6 @@ export const libraryHandlers = [
     row.updated_at = NOW;
     return HttpResponse.json(ok(row));
   }),
-  http.delete(`${API_URL}/library/lessons/:lid`, ({ params }) => {
-    const index = store.lessons.findIndex((l) => l.id === params.lid);
-    if (index === -1) return notFound("lesson");
-    const [removed] = store.lessons.splice(index, 1);
-    if (removed) {
-      renumber(removed.version_id);
-      store.materialLinks = store.materialLinks.filter((l) => l.lesson_id !== removed.id);
-      store.exerciseLinks = store.exerciseLinks.filter((l) => l.lesson_id !== removed.id);
-    }
-    return HttpResponse.json(ok({ deleted: true }));
-  }),
   http.get(`${API_URL}/library/versions/:vid`, ({ params }) => {
     const version = store.versions.find((v) => v.id === params.vid);
     return version ? HttpResponse.json(ok(versionDetail(version))) : notFound("version");
@@ -783,24 +1005,79 @@ export const libraryHandlers = [
     if (!version) return notFound("version");
     const lock = locked(version);
     if (lock) return lock;
-    const body = (await request.json()) as ScoreComponentInput[];
+    const body = (await request.json()) as ScoreSetGroupInput[];
     const fields: Record<string, string> = {};
-    const seen = new Set<string>();
-    body.forEach((item, index) => {
-      if (!/^[a-z0-9_]+$/.test(item.key)) fields[`${index}.key`] = "key is malformed";
-      else if (seen.has(item.key)) fields[`${index}.key`] = "key is duplicated";
-      seen.add(item.key);
-      if (item.label.trim() === "") fields[`${index}.label`] = "label is required";
-      if (!(item.max > 0)) fields[`${index}.max`] = "max must be greater than 0";
+    const seenGroupKeys = new Set<string>();
+    body.forEach((group, gi) => {
+      const groupKey = group.key.trim();
+      if (!/^[a-z0-9_]+$/.test(groupKey)) fields[`${gi}.key`] = "group key is malformed";
+      else if (seenGroupKeys.has(groupKey)) fields[`${gi}.key`] = "group key is duplicated";
+      seenGroupKeys.add(groupKey);
+      if (group.title.trim() === "") fields[`${gi}.title`] = "group title is required";
+      const seen = new Set<string>();
+      group.components.forEach((item, ci) => {
+        const path = `${gi}.components.${ci}`;
+        if (!/^[a-z0-9_]+$/.test(item.key)) fields[`${path}.key`] = "key is malformed";
+        else if (seen.has(item.key)) fields[`${path}.key`] = "key is duplicated";
+        seen.add(item.key);
+        if (item.label.trim() === "") fields[`${path}.label`] = "label is required";
+        if (!(item.max > 0)) fields[`${path}.max`] = "max must be greater than 0";
+      });
     });
     if (Object.keys(fields).length > 0) return validationError(fields);
-    store.scoreSets[version.id] = body.map((item) => ({
-      key: item.key,
-      label: item.label.trim(),
-      max: item.max,
-      weight: item.weight,
+    store.scoreSets[version.id] = body.map((group) => ({
+      key: group.key.trim(),
+      title: group.title.trim(),
+      components: group.components.map((item) => ({
+        key: item.key,
+        label: item.label.trim(),
+        max: item.max,
+        weight: item.weight,
+      })),
     }));
     return HttpResponse.json(ok(store.scoreSets[version.id]));
+  }),
+  http.get(`${API_URL}/library/versions/:vid/exercise-groups`, ({ params }) => {
+    const version = store.versions.find((v) => v.id === params.vid);
+    if (!version) return notFound("version");
+    const rows = store.exerciseGroups
+      .filter((g) => g.version_id === version.id)
+      .sort((a, b) => a.position - b.position)
+      .map(exerciseGroupResponse);
+    return HttpResponse.json(ok(rows));
+  }),
+  http.post(`${API_URL}/library/versions/:vid/exercise-groups`, async ({ params, request }) => {
+    const version = store.versions.find((v) => v.id === params.vid);
+    if (!version) return notFound("version");
+    const lock = locked(version);
+    if (lock) return lock;
+    const body = (await request.json()) as ExerciseGroupInput;
+    if (body.name.trim() === "") return validationError({ name: "name is required" });
+    const row: ExerciseGroupRow = {
+      id: mintId(),
+      version_id: version.id,
+      name: body.name.trim(),
+      position: store.exerciseGroups.filter((g) => g.version_id === version.id).length + 1,
+    };
+    store.exerciseGroups.push(row);
+    return HttpResponse.json(ok(exerciseGroupResponse(row)), { status: 201 });
+  }),
+  http.delete(`${API_URL}/library/versions/:vid/exercise-groups/:gid`, ({ params }) => {
+    const version = store.versions.find((v) => v.id === params.vid);
+    if (!version) return notFound("version");
+    const lock = locked(version);
+    if (lock) return lock;
+    const index = store.exerciseGroups.findIndex(
+      (g) => g.id === params.gid && g.version_id === version.id,
+    );
+    if (index === -1) return notFound("exercise group");
+    const [removed] = store.exerciseGroups.splice(index, 1);
+    if (removed) {
+      store.exerciseLinks.forEach((link) => {
+        if (link.group_id === removed.id) link.group_id = null;
+      });
+    }
+    return HttpResponse.json(ok({ deleted: true }));
   }),
   http.put(`${API_URL}/library/lessons/:lid/materials`, async ({ params, request }) => {
     const row = store.lessons.find((l) => l.id === params.lid);
@@ -837,11 +1114,22 @@ export const libraryHandlers = [
     if (missing !== -1) {
       return validationError({ [`${missing}.exercise_id`]: "exercise not found" });
     }
+    const groupIds = new Set(
+      store.exerciseGroups.filter((g) => g.version_id === row.version_id).map((g) => g.id),
+    );
+    const badGroup = body.findIndex(
+      (item) =>
+        item.group_id !== undefined && item.group_id !== null && !groupIds.has(item.group_id),
+    );
+    if (badGroup !== -1) {
+      return validationError({ [`${badGroup}.group_id`]: "exercise group not found" });
+    }
     store.exerciseLinks = store.exerciseLinks.filter((l) => l.lesson_id !== row.id);
     body.forEach((item, index) => {
       store.exerciseLinks.push({
         lesson_id: row.id,
         exercise_id: item.exercise_id,
+        group_id: item.group_id ?? null,
         position: index + 1,
       });
     });
@@ -850,25 +1138,34 @@ export const libraryHandlers = [
   http.get(`${API_URL}/library/materials`, ({ request }) => {
     const rows = store.materials
       .filter(itemFilter(request))
-      .sort((a, b) => a.title.localeCompare(b.title));
+      .sort((a, b) => a.title.localeCompare(b.title))
+      .map(materialBankRow);
     return HttpResponse.json(ok(rows, listMeta(rows.length)));
   }),
   http.post(`${API_URL}/library/materials`, async ({ request }) => {
     const body = (await request.json()) as MaterialInput;
-    const material: Material = { id: mintId(), ...body, created_at: NOW, updated_at: NOW };
+    const material: Material = {
+      id: mintId(),
+      ...body,
+      active: true,
+      lesson_count: 0,
+      template_count: 0,
+      created_at: NOW,
+      updated_at: NOW,
+    };
     store.materials.push(material);
-    return HttpResponse.json(ok(material), { status: 201 });
+    return HttpResponse.json(ok(materialBankRow(material)), { status: 201 });
   }),
   http.get(`${API_URL}/library/materials/:id`, ({ params }) => {
     const material = store.materials.find((m) => m.id === params.id);
-    return material ? HttpResponse.json(ok(material)) : notFound("material");
+    return material ? HttpResponse.json(ok(materialBankRow(material))) : notFound("material");
   }),
   http.put(`${API_URL}/library/materials/:id`, async ({ params, request }) => {
     const material = store.materials.find((m) => m.id === params.id);
     if (!material) return notFound("material");
     const body = (await request.json()) as MaterialInput;
     Object.assign(material, body, { updated_at: NOW });
-    return HttpResponse.json(ok(material));
+    return HttpResponse.json(ok(materialBankRow(material)));
   }),
   http.delete(`${API_URL}/library/materials/:id`, ({ params }) => {
     const index = store.materials.findIndex((m) => m.id === params.id);
@@ -881,28 +1178,51 @@ export const libraryHandlers = [
     store.materials.splice(index, 1);
     return HttpResponse.json(ok({ deleted: true }));
   }),
+  http.patch(`${API_URL}/library/materials/:id/status`, async ({ params, request }) => {
+    const material = store.materials.find((m) => m.id === params.id);
+    if (!material) return notFound("material");
+    const body = (await request.json()) as { active: boolean };
+    material.active = body.active;
+    material.updated_at = NOW;
+    return HttpResponse.json(ok(materialBankRow(material)));
+  }),
   http.get(`${API_URL}/library/exercises`, ({ request }) => {
     const rows = store.exercises
       .filter(itemFilter(request))
-      .sort((a, b) => a.title.localeCompare(b.title));
+      .sort((a, b) => a.title.localeCompare(b.title))
+      .map(exerciseBankRow);
     return HttpResponse.json(ok(rows, listMeta(rows.length)));
   }),
   http.post(`${API_URL}/library/exercises`, async ({ request }) => {
     const body = (await request.json()) as ExerciseInput;
-    const exercise: Exercise = { id: mintId(), ...body, created_at: NOW, updated_at: NOW };
+    const exercise: Exercise = {
+      id: mintId(),
+      title: body.title,
+      description: body.description,
+      difficulty: body.difficulty,
+      code: body.code?.toUpperCase() ?? `BT-${String(store.exercises.length + 1).padStart(4, "0")}`,
+      skill: body.skill ?? null,
+      level: body.level ?? null,
+      tags: body.tags,
+      active: true,
+      lesson_count: 0,
+      template_count: 0,
+      created_at: NOW,
+      updated_at: NOW,
+    };
     store.exercises.push(exercise);
-    return HttpResponse.json(ok(exercise), { status: 201 });
+    return HttpResponse.json(ok(exerciseBankRow(exercise)), { status: 201 });
   }),
   http.get(`${API_URL}/library/exercises/:id`, ({ params }) => {
     const exercise = store.exercises.find((e) => e.id === params.id);
-    return exercise ? HttpResponse.json(ok(exercise)) : notFound("exercise");
+    return exercise ? HttpResponse.json(ok(exerciseBankRow(exercise))) : notFound("exercise");
   }),
   http.put(`${API_URL}/library/exercises/:id`, async ({ params, request }) => {
     const exercise = store.exercises.find((e) => e.id === params.id);
     if (!exercise) return notFound("exercise");
     const body = (await request.json()) as ExerciseInput;
     Object.assign(exercise, body, { updated_at: NOW });
-    return HttpResponse.json(ok(exercise));
+    return HttpResponse.json(ok(exerciseBankRow(exercise)));
   }),
   http.delete(`${API_URL}/library/exercises/:id`, ({ params }) => {
     const index = store.exercises.findIndex((e) => e.id === params.id);
@@ -914,5 +1234,13 @@ export const libraryHandlers = [
     }
     store.exercises.splice(index, 1);
     return HttpResponse.json(ok({ deleted: true }));
+  }),
+  http.patch(`${API_URL}/library/exercises/:id/status`, async ({ params, request }) => {
+    const exercise = store.exercises.find((e) => e.id === params.id);
+    if (!exercise) return notFound("exercise");
+    const body = (await request.json()) as { active: boolean };
+    exercise.active = body.active;
+    exercise.updated_at = NOW;
+    return HttpResponse.json(ok(exerciseBankRow(exercise)));
   }),
 ];

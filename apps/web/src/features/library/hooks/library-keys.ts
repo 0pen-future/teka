@@ -45,3 +45,8 @@ export const exercisesKeys = {
   lists: () => [...exercisesKeys.all, "list"] as const,
   list: (params: ListItemsParams) => [...exercisesKeys.lists(), params] as const,
 };
+
+export const exerciseGroupsKeys = {
+  all: ["library", "exercise-groups"] as const,
+  list: (versionId: string) => [...exerciseGroupsKeys.all, "list", versionId] as const,
+};

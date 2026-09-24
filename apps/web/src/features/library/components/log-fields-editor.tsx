@@ -9,17 +9,25 @@ import { useSetLogFields } from "../hooks/use-library";
 import { logFieldKindLabel } from "../lib/library-labels";
 import { rowErrorsFromApi, type RowErrors } from "../lib/row-errors";
 import {
-  logFieldKindSchema,
   splitTags,
   type LogField,
   type LogFieldInput,
   type LogFieldKind,
 } from "../schemas/library-schemas";
 
-const kindOptions = logFieldKindSchema.options.map((kind) => ({
+/** New rows may only pick one of the four v5 kinds; legacy `number`/`select` rows stay editable as-is. */
+const NEW_ROW_KINDS: LogFieldKind[] = ["text", "long_text", "checkbox", "student"];
+
+const newRowKindOptions = NEW_ROW_KINDS.map((kind) => ({
   value: kind,
   label: logFieldKindLabel[kind],
 }));
+
+/** A row keeps its own current kind selectable even when it is a legacy kind no longer offered for new rows. */
+function kindOptionsFor(currentKind: LogFieldKind) {
+  if (NEW_ROW_KINDS.includes(currentKind)) return newRowKindOptions;
+  return [...newRowKindOptions, { value: currentKind, label: logFieldKindLabel[currentKind] }];
+}
 
 interface Row {
   /** Local identity for React keys; server ids do not survive a wholesale replace. */
@@ -166,7 +174,7 @@ export function LogFieldsEditor({ versionId, templateId, fields }: LogFieldsEdit
                     <FieldError errors={[own.label ? { message: own.label } : undefined]} />
                   </div>
                   <HvSelect
-                    options={kindOptions}
+                    options={kindOptionsFor(row.kind)}
                     value={row.kind}
                     onValueChange={(kind) => update(index, { kind: kind as LogFieldKind })}
                     sheetTitle="Chọn loại trường"

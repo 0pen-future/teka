@@ -27,6 +27,14 @@ export const prepSummarySchema = z.object({
 });
 export type PrepSummary = z.infer<typeof prepSummarySchema>;
 
+/** `library.VersionRefResponse` — one entry of a template's version history. */
+export const versionRefResponseSchema = z.object({
+  id: z.string(),
+  version_no: z.number().int(),
+  status: templateVersionStatusSchema,
+});
+export type VersionRefResponse = z.infer<typeof versionRefResponseSchema>;
+
 export const programTemplateSchema = z.object({
   id: z.string(),
   code: z.string(),
@@ -39,11 +47,23 @@ export const programTemplateSchema = z.object({
   draft_version_no: z.number().int().nullable(),
   draft_version_id: z.string().nullable(),
   version_count: z.number().int(),
+  /** Classes bound to any version of the template. */
+  class_count: z.number().int(),
+  /** The released version's lesson count when one exists, else the open draft's. */
+  lesson_count: z.number().int(),
+  versions: z.array(versionRefResponseSchema),
   prep: prepSummarySchema.nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });
 export type ProgramTemplate = z.infer<typeof programTemplateSchema>;
+
+/** `library.VersionClassRefResponse` — one class bound to a version. */
+export const versionClassRefResponseSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+});
+export type VersionClassRefResponse = z.infer<typeof versionClassRefResponseSchema>;
 
 export const templateVersionSchema = z.object({
   id: z.string(),
@@ -54,16 +74,26 @@ export const templateVersionSchema = z.object({
   published_at: z.string().nullable(),
   created_by: z.string().nullable(),
   lesson_count: z.number().int(),
+  /** True count of classes bound to this version. */
+  class_count: z.number().int(),
+  /** Capped, ordered by name (see `library.ListVersionClasses`). */
+  classes: z.array(versionClassRefResponseSchema),
   created_at: z.string(),
   updated_at: z.string(),
 });
 export type TemplateVersion = z.infer<typeof templateVersionSchema>;
+
+/** Whether a lesson happens in class at a fixed time or the student works through it alone. */
+export const lessonModeSchema = z.enum(["scheduled", "self_study"]);
+export type LessonMode = z.infer<typeof lessonModeSchema>;
 
 export const templateLessonSchema = z.object({
   id: z.string(),
   version_id: z.string(),
   position: z.number().int(),
   title: z.string(),
+  mode: lessonModeSchema,
+  unit: z.string().nullable(),
   objectives: z.string().nullable(),
   duration_min: z.number().int().nullable(),
   homework_note: z.string().nullable(),
@@ -72,6 +102,9 @@ export const templateLessonSchema = z.object({
   /** Calendar day `YYYY-MM-DD`, no time part. */
   due_date: z.string().nullable(),
   checklist: z.array(checklistItemSchema),
+  /** 0 unless the row came from a list/detail response (see `lessonRowResponse`). */
+  material_count: z.number().int(),
+  exercise_count: z.number().int(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -139,9 +172,16 @@ export const assigneeSchema = z.object({
 });
 export type Assignee = z.infer<typeof assigneeSchema>;
 
-/** `library.LessonRequest` — position is never in the body (append on create, reorder endpoint otherwise). */
+/**
+ * `library.LessonRequest` — position is never in the body (append on create,
+ * reorder endpoint otherwise). `mode` and `unit` are optional on the wire
+ * (the server defaults an omitted mode to `scheduled`), but the lesson form
+ * always sends both explicitly once loaded from a lesson.
+ */
 export interface LessonInput {
   title: string;
+  mode?: LessonMode;
+  unit?: string | null;
   objectives: string | null;
   duration_min: number | null;
   homework_note: string | null;
@@ -150,7 +190,7 @@ export interface LessonInput {
 /** Stricter than `classcode.Valid` (`apps/api/internal/shared/classcode`): the server also allows a leading `-`; both upper-case before checking. */
 const templateCodePattern = /^[A-Z0-9][A-Z0-9-]*$/;
 
-const optionalText = (max: number) => z.string().trim().max(max, `Tối đa ${max} ký tự`);
+export const optionalText = (max: number) => z.string().trim().max(max, `Tối đa ${max} ký tự`);
 
 /** Form state for the template dialog; empty optional fields travel as `null` (see `toTemplateInput`). */
 export const templateFormSchema = z.object({
@@ -199,11 +239,14 @@ export function toTemplateForm(template: ProgramTemplate): TemplateFormInput {
 
 /**
  * Lesson form: the duration input is a free text field so an empty value can
- * mean "not set"; it must parse to a whole number of minutes within a day
- * (`binding:"min=1,max=1440"` server-side).
+ * mean "not set"; when given it must be a whole quarter-hour of minutes
+ * within a day (the number stepper moves it in steps of 15, min 15,
+ * `binding:"min=1,max=1440"` server-side).
  */
 export const lessonFormSchema = z.object({
   title: z.string().trim().min(1, "Bắt buộc nhập tên buổi").max(200, "Tối đa 200 ký tự"),
+  mode: lessonModeSchema,
+  unit: optionalText(100),
   objectives: optionalText(4000),
   duration_min: z
     .string()
@@ -212,8 +255,8 @@ export const lessonFormSchema = z.object({
     .refine((value) => {
       if (value === "") return true;
       const minutes = Number(value);
-      return minutes >= 1 && minutes <= 1440;
-    }, "Thời lượng từ 1 đến 1440 phút"),
+      return minutes >= 15 && minutes <= 1440 && minutes % 15 === 0;
+    }, "Thời lượng là bội số của 15 phút, từ 15 đến 1440 phút"),
   homework_note: optionalText(4000),
 });
 export type LessonFormInput = z.input<typeof lessonFormSchema>;
@@ -222,6 +265,8 @@ export type LessonFormValues = z.output<typeof lessonFormSchema>;
 export function toLessonInput(values: LessonFormValues): LessonInput {
   return {
     title: values.title,
+    mode: values.mode,
+    unit: blankToNull(values.unit),
     objectives: blankToNull(values.objectives),
     duration_min: values.duration_min === "" ? null : Number(values.duration_min),
     homework_note: blankToNull(values.homework_note),
@@ -231,6 +276,8 @@ export function toLessonInput(values: LessonFormValues): LessonInput {
 export function toLessonForm(lesson: TemplateLesson): LessonFormInput {
   return {
     title: lesson.title,
+    mode: lesson.mode,
+    unit: lesson.unit ?? "",
     objectives: lesson.objectives ?? "",
     duration_min: lesson.duration_min === null ? "" : String(lesson.duration_min),
     homework_note: lesson.homework_note ?? "",
@@ -239,7 +286,17 @@ export function toLessonForm(lesson: TemplateLesson): LessonFormInput {
 
 // --- Materials, exercises and what a version carries besides lessons ---
 
-export const materialKindSchema = z.enum(["link", "doc", "video", "other"]);
+/** `MaterialKindOther` stays readable on legacy rows but is not offered on new input. */
+export const materialKindSchema = z.enum([
+  "video",
+  "audio",
+  "image",
+  "doc",
+  "note",
+  "live",
+  "link",
+  "other",
+]);
 export type MaterialKind = z.infer<typeof materialKindSchema>;
 
 export const materialSchema = z.object({
@@ -249,6 +306,10 @@ export const materialSchema = z.object({
   url: z.string().nullable(),
   description: z.string().nullable(),
   tags: z.array(z.string()),
+  active: z.boolean(),
+  /** 0 unless the row came from the bank's own Get/List/Create/Update/status response. */
+  lesson_count: z.number().int(),
+  template_count: z.number().int(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -259,7 +320,14 @@ export const exerciseSchema = z.object({
   title: z.string(),
   description: z.string().nullable(),
   difficulty: z.number().int().nullable(),
+  code: z.string(),
+  skill: z.string().nullable(),
+  level: z.string().nullable(),
   tags: z.array(z.string()),
+  active: z.boolean(),
+  /** 0 unless the row came from the bank's own Get/List/Create/Update/status response. */
+  lesson_count: z.number().int(),
+  template_count: z.number().int(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -273,6 +341,8 @@ export const lessonMaterialSchema = materialSchema.extend({
 export type LessonMaterial = z.infer<typeof lessonMaterialSchema>;
 
 export const lessonExerciseSchema = exerciseSchema.extend({
+  /** Which of the version's exercise groups this attachment belongs to, if any. */
+  group_id: z.string().nullable(),
   position: z.number().int(),
 });
 export type LessonExercise = z.infer<typeof lessonExerciseSchema>;
@@ -284,7 +354,14 @@ export const templateLessonDetailSchema = templateLessonSchema.extend({
 });
 export type TemplateLessonDetail = z.infer<typeof templateLessonDetailSchema>;
 
-export const logFieldKindSchema = z.enum(["text", "number", "select", "checkbox"]);
+export const logFieldKindSchema = z.enum([
+  "text",
+  "long_text",
+  "checkbox",
+  "student",
+  "number",
+  "select",
+]);
 export type LogFieldKind = z.infer<typeof logFieldKindSchema>;
 
 export const logFieldSchema = z.object({
@@ -305,15 +382,36 @@ export const scoreComponentSchema = z.object({
 });
 export type ScoreComponent = z.infer<typeof scoreComponentSchema>;
 
+/** `library.ScoreSetGroup` — one named bucket of score components (e.g. "Giữa kỳ", "Cuối kỳ"). */
+export const scoreSetGroupSchema = z.object({
+  key: z.string(),
+  title: z.string(),
+  components: z.array(scoreComponentSchema),
+});
+export type ScoreSetGroup = z.infer<typeof scoreSetGroupSchema>;
+
+/** `library.ExerciseGroupResponse` — a named bucket of exercises within a version. */
+export const exerciseGroupSchema = z.object({
+  id: z.string(),
+  version_id: z.string(),
+  name: z.string(),
+  position: z.number().int(),
+  exercise_count: z.number().int(),
+});
+export type ExerciseGroup = z.infer<typeof exerciseGroupSchema>;
+
 /** `library.VersionDetailResponse` — a version with its score set, log fields and lessons. */
 export const versionDetailSchema = templateVersionSchema.extend({
-  score_set: z.array(scoreComponentSchema),
+  score_set: z.array(scoreSetGroupSchema),
   log_fields: z.array(logFieldSchema),
   lessons: z.array(templateLessonDetailSchema),
 });
 export type VersionDetail = z.infer<typeof versionDetailSchema>;
 
-/** `library.MaterialRequest` — create and full-replace share one body. */
+/**
+ * `library.MaterialRequest` — create and full-replace share one body. Active
+ * is not part of it: `setMaterialStatus` toggles that separately.
+ */
 export interface MaterialInput {
   title: string;
   kind: MaterialKind;
@@ -322,11 +420,19 @@ export interface MaterialInput {
   tags: string[];
 }
 
-/** `library.ExerciseRequest`. */
+/**
+ * `library.ExerciseRequest`. `code`, `skill` and `level` are optional on the
+ * wire and left unset by the exercise dialog for now, the same "do not send
+ * what the form cannot yet edit" reasoning as `LessonInput.mode`/`unit`.
+ * Active is not part of it: `setExerciseStatus` toggles that separately.
+ */
 export interface ExerciseInput {
   title: string;
   description: string | null;
   difficulty: number | null;
+  code?: string | null;
+  skill?: string | null;
+  level?: string | null;
   tags: string[];
 }
 
@@ -338,6 +444,8 @@ export interface LessonMaterialInput {
 
 export interface LessonExerciseInput {
   exercise_id: string;
+  /** Which exercise group of the lesson's own version this attaches to, if any. */
+  group_id?: string | null;
 }
 
 /** One entry of `PUT /library/versions/:vid/log-fields`; options only matter for kind `select`. */
@@ -348,12 +456,24 @@ export interface LogFieldInput {
   required: boolean;
 }
 
-/** One entry of `PUT /library/versions/:vid/score-set`; the key is what a class's grading refers to. */
+/** One component of a score set group; the key is what a class's grading refers to, unique within its own group. */
 export interface ScoreComponentInput {
   key: string;
   label: string;
   max: number;
   weight: number;
+}
+
+/** One entry of `PUT /library/versions/:vid/score-set`; the group's key is its own stable identifier, unique within the set. */
+export interface ScoreSetGroupInput {
+  key: string;
+  title: string;
+  components: ScoreComponentInput[];
+}
+
+/** `library.ExerciseGroupRequest` — creates an exercise group of a draft version. */
+export interface ExerciseGroupInput {
+  name: string;
 }
 
 /** "a, b ,,c" → ["a", "b", "c"]; the server trims and drops blanks the same way. */

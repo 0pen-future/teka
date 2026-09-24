@@ -59,12 +59,13 @@ interface NavGroup {
 
 /**
  * The prototype sidebar's grouped nav: Tổng quan ungrouped, then Dạy học /
- * Học phí / Trung tâm sections. Entries carrying a `perm` render only after
- * `/centers/me` resolves with that key in the caller's effective set —
- * rendering optimistically would flash entries a narrowed role then loses.
- * The three period-scoped routes (Chốt sổ, Gửi thông báo, Thu tiền) build
- * their link once `useCurrentPeriod` resolves rather than routing through a
- * redirect page, since phase 1 owns no `/billing/current`-style route.
+ * Giảng dạy / Kho học liệu / Học phí / Trung tâm sections. Entries carrying a
+ * `perm` render only after `/centers/me` resolves with that key in the
+ * caller's effective set — rendering optimistically would flash entries a
+ * narrowed role then loses. The three period-scoped routes (Chốt sổ, Gửi
+ * thông báo, Thu tiền) build their link once `useCurrentPeriod` resolves
+ * rather than routing through a redirect page, since phase 1 owns no
+ * `/billing/current`-style route.
  */
 function useNavGroups(): NavGroup[] {
   const { data: period } = useCurrentPeriod();
@@ -103,10 +104,27 @@ function useNavGroups(): NavGroup[] {
         // No perm: every member can receive an invitation, and the API
         // already scopes the list to the caller's own rows.
         { label: "Lời mời nhận lớp", to: "/class-invitations", Icon: MailPlusIcon },
-        { label: "Kho học liệu", to: "/library", Icon: LibraryBigIcon, perm: "library.read" },
-        { label: "Chuẩn bị tài liệu", to: "/prep", Icon: ClipboardListIcon, perm: "library.read" },
         { label: "Danh mục khóa học", to: "/courses", Icon: BookMarkedIcon, perm: "courses.read" },
         { label: "Lộ trình học", to: "/paths", Icon: RouteIcon, perm: "paths.read" },
+      ],
+    },
+    {
+      header: "Kho học liệu",
+      entries: [
+        { label: "Chương trình mẫu", to: "/library", Icon: LibraryBigIcon, perm: "library.read" },
+        {
+          label: "Ngân hàng nội dung",
+          to: "/library/materials",
+          Icon: BookOpenIcon,
+          perm: "library.read",
+        },
+        {
+          label: "Ngân hàng bài tập",
+          to: "/library/exercises",
+          Icon: ClipboardCheckIcon,
+          perm: "library.read",
+        },
+        { label: "Chuẩn bị tài liệu", to: "/prep", Icon: ClipboardListIcon, perm: "library.read" },
       ],
     },
     {
@@ -198,7 +216,9 @@ const OVERFLOW_LABELS = new Set([
   "Hồ sơ học sinh",
   "Danh sách lớp học",
   "Lời mời nhận lớp",
-  "Kho học liệu",
+  "Chương trình mẫu",
+  "Ngân hàng nội dung",
+  "Ngân hàng bài tập",
   "Chuẩn bị tài liệu",
   "Danh mục khóa học",
   "Lộ trình học",

@@ -9,6 +9,8 @@ import {
 
 export const EMPTY_LESSON_FORM: LessonFormInput = {
   title: "",
+  mode: "scheduled",
+  unit: "",
   objectives: "",
   duration_min: "",
   homework_note: "",

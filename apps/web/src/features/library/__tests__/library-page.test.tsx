@@ -1,10 +1,10 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
-import { API_URL, fail, ok } from "@/test/msw/handlers";
+import { API_URL, ok } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import {
   renderWithProviders,
@@ -19,18 +19,20 @@ import {
   exerciseBai2,
   getLibraryStore,
   libraryHandlers,
-  materialSlide,
   materialVideo,
   resetLibraryStore,
   templateToan6,
-  versionVan9Draft,
 } from "./library-handlers";
 
 function renderPage(route = "/library") {
-  return renderWithProviders(<LibraryPage />, {
+  return renderWithProviders(<LibraryPage tab="templates" />, {
     route,
     path: "/library",
-    extraRoutes: [{ path: "/library/templates/:id", element: <div>template-detail-stub</div> }],
+    extraRoutes: [
+      { path: "/library/materials", element: <LibraryPage tab="materials" /> },
+      { path: "/library/exercises", element: <LibraryPage tab="exercises" /> },
+      { path: "/library/templates/:id", element: <div>template-detail-stub</div> },
+    ],
   });
 }
 
@@ -55,50 +57,121 @@ afterEach(() => {
   useAuthStore.getState().clearSession();
 });
 
-describe("LibraryPage templates tab", () => {
-  it("lists every template with code, subject and version summary, linking to the detail page", async () => {
-    renderPage();
-
-    expect(await screen.findByRole("heading", { name: "Kho học liệu" })).toBeInTheDocument();
-    const toan = await screen.findByRole("row", { name: /Toán 6 cơ bản/ });
-    expect(within(toan).getByText("TOAN6")).toBeInTheDocument();
-    expect(within(toan).getByText("Toán · Lớp 6")).toBeInTheDocument();
-    expect(within(toan).getByText("v1 · Đã phát hành")).toBeInTheDocument();
-    expect(within(toan).getByText("v2 · Bản nháp")).toBeInTheDocument();
-    expect(within(toan).getByRole("link", { name: "Toán 6 cơ bản" })).toHaveAttribute(
-      "href",
-      `/library/templates/${templateToan6.id}`,
-    );
-
-    const van = rowOf("Văn 9 luyện thi");
-    expect(within(van).getByText("Chưa phát hành")).toBeInTheDocument();
-    expect(within(van).getByText("v1 · Bản nháp")).toBeInTheDocument();
+describe("LibraryPage routing", () => {
+  it("redirects the legacy ?tab=materials query to /library/materials", async () => {
+    renderPage("/library?tab=materials");
+    expect(await screen.findByRole("row", { name: /Slide số tự nhiên/ })).toBeInTheDocument();
   });
 
-  it("offers all four tabs and marks the templates tab selected", async () => {
+  it("redirects the legacy ?tab=exercises query to /library/exercises", async () => {
+    renderPage("/library?tab=exercises");
+    expect(await screen.findByRole("row", { name: /Bài 1: Tập hợp/ })).toBeInTheDocument();
+  });
+
+  it("drops an unknown or removed ?tab= value back to the templates route", async () => {
+    renderPage("/library?tab=lessons");
+    expect(await screen.findByRole("article", { name: "Toán 6 cơ bản" })).toBeInTheDocument();
+  });
+
+  it("keeps other query params (like a search term) through the legacy ?tab= redirect", async () => {
+    renderPage("/library?tab=exercises&q=BT-0002");
+
+    expect(await screen.findByRole("row", { name: /Bài 2: So sánh phân số/ })).toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Tìm bài tập" })).toHaveValue("BT-0002");
+    expect(screen.queryByRole("row", { name: /Bài 1: Tập hợp/ })).not.toBeInTheDocument();
+  });
+
+  it("renders each bank directly when opened at its own route", async () => {
+    renderPage("/library/materials");
+    expect(await screen.findByRole("row", { name: /Slide số tự nhiên/ })).toBeInTheDocument();
+    expect(screen.queryByRole("article")).not.toBeInTheDocument();
+  });
+});
+
+describe("LibraryPage tabs", () => {
+  it("offers all three tabs and marks the current one selected", async () => {
     renderPage();
-    await screen.findByRole("row", { name: /Toán 6 cơ bản/ });
+    await screen.findByRole("article", { name: "Toán 6 cơ bản" });
 
     expect(screen.getByRole("tab", { name: "Chương trình mẫu" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
-    for (const name of ["Buổi học mẫu", "Học liệu", "Bài tập"]) {
+    for (const name of ["Ngân hàng nội dung", "Ngân hàng bài tập"]) {
       expect(screen.getByRole("tab", { name })).toBeEnabled();
     }
   });
 
-  it("filters by name through the API's q parameter", async () => {
+  it("navigates to the materials route when its tab is clicked", async () => {
     const user = userEvent.setup();
     renderPage();
-    await screen.findByRole("row", { name: /Toán 6 cơ bản/ });
+    await screen.findByRole("article", { name: "Toán 6 cơ bản" });
+
+    await user.click(screen.getByRole("tab", { name: "Ngân hàng nội dung" }));
+
+    expect(await screen.findByRole("row", { name: /Slide số tự nhiên/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Ngân hàng nội dung" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("navigates to the exercises route when its tab is clicked", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("article", { name: "Toán 6 cơ bản" });
+
+    await user.click(screen.getByRole("tab", { name: "Ngân hàng bài tập" }));
+
+    expect(await screen.findByRole("row", { name: /Bài 1: Tập hợp/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Ngân hàng bài tập" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+});
+
+describe("LibraryPage templates tab", () => {
+  it("lists every template as a card with subject, counts and version chips, linking to the detail page", async () => {
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "Kho học liệu" })).toBeInTheDocument();
+    const toan = await screen.findByRole("article", { name: "Toán 6 cơ bản" });
+    expect(within(toan).getByText("Toán · Lớp 6")).toBeInTheDocument();
+    expect(within(toan).getByText("2 buổi mẫu · 2 phiên bản · 0 lớp đang gắn")).toBeInTheDocument();
+    expect(within(toan).getByRole("button", { name: "v1" })).toBeInTheDocument();
+    expect(within(toan).getByRole("button", { name: "v2" })).toBeInTheDocument();
+    expect(within(toan).getByRole("link", { name: "Toán 6 cơ bản" })).toHaveAttribute(
+      "href",
+      `/library/templates/${templateToan6.id}`,
+    );
+
+    const van = await screen.findByRole("article", { name: "Văn 9 luyện thi" });
+    expect(within(van).getByText("Ngữ văn")).toBeInTheDocument();
+    expect(within(van).getByText("0 buổi mẫu · 1 phiên bản · 0 lớp đang gắn")).toBeInTheDocument();
+  });
+
+  it("navigates to the detail page with the version query when a chip is clicked", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    const toan = await screen.findByRole("article", { name: "Toán 6 cơ bản" });
+
+    await user.click(within(toan).getByRole("button", { name: "v1" }));
+
+    expect(await screen.findByText("template-detail-stub")).toBeInTheDocument();
+  });
+
+  it("filters by name or code through the API's q parameter", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("article", { name: "Toán 6 cơ bản" });
 
     await user.type(screen.getByRole("searchbox", { name: "Tìm chương trình mẫu" }), "văn");
 
     await waitFor(() => {
-      expect(screen.queryByRole("row", { name: /Toán 6 cơ bản/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole("article", { name: "Toán 6 cơ bản" })).not.toBeInTheDocument();
     });
-    expect(await screen.findByRole("row", { name: /Văn 9 luyện thi/ })).toBeInTheDocument();
+    expect(await screen.findByRole("article", { name: "Văn 9 luyện thi" })).toBeInTheDocument();
   });
 
   it("shows the empty state when the center has no template yet", async () => {
@@ -111,9 +184,9 @@ describe("LibraryPage templates tab", () => {
   it("creates a template from the dialog and opens its detail page", async () => {
     const user = userEvent.setup();
     renderPage();
-    await screen.findByRole("row", { name: /Toán 6 cơ bản/ });
+    await screen.findByRole("article", { name: "Toán 6 cơ bản" });
 
-    await user.click(screen.getByRole("button", { name: "Tạo chương trình mẫu" }));
+    await user.click(screen.getByRole("button", { name: "+ Chương trình mẫu" }));
     const dialog = await screen.findByRole("dialog", { name: "Tạo chương trình mẫu" });
     await user.type(within(dialog).getByLabelText("Mã chương trình"), "ly7");
     await user.type(within(dialog).getByLabelText("Tên chương trình"), "Lý 7 nâng cao");
@@ -128,9 +201,9 @@ describe("LibraryPage templates tab", () => {
   it("puts a code clash on the code field and keeps the dialog open", async () => {
     const user = userEvent.setup();
     renderPage();
-    await screen.findByRole("row", { name: /Toán 6 cơ bản/ });
+    await screen.findByRole("article", { name: "Toán 6 cơ bản" });
 
-    await user.click(screen.getByRole("button", { name: "Tạo chương trình mẫu" }));
+    await user.click(screen.getByRole("button", { name: "+ Chương trình mẫu" }));
     const dialog = await screen.findByRole("dialog", { name: "Tạo chương trình mẫu" });
     await user.type(within(dialog).getByLabelText("Mã chương trình"), "toan6");
     await user.type(within(dialog).getByLabelText("Tên chương trình"), "Trùng mã");
@@ -140,30 +213,14 @@ describe("LibraryPage templates tab", () => {
     expect(screen.getByRole("dialog", { name: "Tạo chương trình mẫu" })).toBeInTheDocument();
   });
 
-  it("rejects a malformed code before calling the API", async () => {
-    const user = userEvent.setup();
-    renderPage();
-    await screen.findByRole("row", { name: /Toán 6 cơ bản/ });
-
-    await user.click(screen.getByRole("button", { name: "Tạo chương trình mẫu" }));
-    const dialog = await screen.findByRole("dialog", { name: "Tạo chương trình mẫu" });
-    await user.type(within(dialog).getByLabelText("Mã chương trình"), "a b");
-    await user.type(within(dialog).getByLabelText("Tên chương trình"), "Sai mã");
-    await user.click(within(dialog).getByRole("button", { name: "Tạo" }));
-
-    expect(
-      await within(dialog).findByText("Chỉ dùng chữ, số và dấu gạch ngang"),
-    ).toBeInTheDocument();
-    expect(getLibraryStore().templates).toHaveLength(2);
-  });
-
   it("hides the create action from a member without library.edit", async () => {
     server.use(memberWith("library.read"));
     signInAs(testSecondaryTeacher);
     renderPage();
 
-    await screen.findByRole("row", { name: /Toán 6 cơ bản/ });
-    expect(screen.queryByRole("button", { name: "Tạo chương trình mẫu" })).not.toBeInTheDocument();
+    await screen.findByRole("article", { name: "Toán 6 cơ bản" });
+    expect(screen.queryByRole("button", { name: "+ Chương trình mẫu" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sửa" })).not.toBeInTheDocument();
   });
 
   it("offers the create action to a member holding library.edit", async () => {
@@ -171,68 +228,31 @@ describe("LibraryPage templates tab", () => {
     signInAs(testSecondaryTeacher);
     renderPage();
 
-    await screen.findByRole("row", { name: /Toán 6 cơ bản/ });
-    expect(screen.getByRole("button", { name: "Tạo chương trình mẫu" })).toBeInTheDocument();
+    await screen.findByRole("article", { name: "Toán 6 cơ bản" });
+    expect(screen.getByRole("button", { name: "+ Chương trình mẫu" })).toBeInTheDocument();
   });
 });
 
-describe("LibraryPage lessons tab", () => {
-  it("browses a template's current version lessons after picking it", async () => {
-    const user = userEvent.setup();
-    renderPage();
-    await screen.findByRole("row", { name: /Toán 6 cơ bản/ });
-
-    await user.click(screen.getByRole("tab", { name: "Buổi học mẫu" }));
-    expect(screen.getByText("Chọn một chương trình mẫu để xem các buổi học.")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("combobox", { name: "Chọn chương trình mẫu" }));
-    await user.click(
-      within(await screen.findByRole("listbox")).getByRole("option", { name: /Toán 6 cơ bản/ }),
-    );
-
-    // The open draft is the working copy, so that is the version shown.
-    expect(await screen.findByText("v2 · Bản nháp")).toBeInTheDocument();
-    const first = await screen.findByRole("row", { name: /Số tự nhiên/ });
-    expect(within(first).getByRole("link", { name: "Số tự nhiên" })).toHaveAttribute(
-      "href",
-      `/library/templates/${templateToan6.id}/lessons/82000000-0000-4000-8000-000000000003`,
-    );
-    expect(within(first).getByText("90 phút")).toBeInTheDocument();
-    expect(within(rowOf("Phân số")).getByText("—")).toBeInTheDocument();
-  });
-
-  it("reports an empty draft without a table", async () => {
-    const user = userEvent.setup();
-    renderPage("/library?tab=lessons");
-    await user.click(await screen.findByRole("combobox", { name: "Chọn chương trình mẫu" }));
-    await user.click(
-      within(await screen.findByRole("listbox")).getByRole("option", { name: /Văn 9 luyện thi/ }),
-    );
-
-    expect(await screen.findByText("Phiên bản này chưa có buổi học nào.")).toBeInTheDocument();
-    expect(screen.queryByRole("table")).not.toBeInTheDocument();
-    expect(getLibraryStore().lessons.some((l) => l.version_id === versionVan9Draft.id)).toBe(false);
-  });
-});
-
-describe("LibraryPage materials tab", () => {
-  it("lists the materials with kind, link and tags", async () => {
-    renderPage("/library?tab=materials");
+describe("MaterialsBank", () => {
+  it("lists materials with kind, format, usage and status", async () => {
+    renderPage("/library/materials");
 
     const slide = await screen.findByRole("row", { name: /Slide số tự nhiên/ });
     expect(within(slide).getByText("Tài liệu")).toBeInTheDocument();
-    expect(within(slide).getByRole("link", { name: /slide-so-tu-nhien/ })).toHaveAttribute(
-      "href",
-      materialSlide.url,
-    );
-    expect(within(slide).getByText("chương 1, slide")).toBeInTheDocument();
-    expect(within(rowOf("Video phân số")).getByText("Video")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Học liệu" })).toHaveAttribute("aria-selected", "true");
+    expect(within(slide).getByText("Slide bài giảng chương 1.")).toBeInTheDocument();
+    expect(within(slide).getByText("PDF")).toBeInTheDocument();
+    expect(within(slide).getByText("2 buổi · 1 CT mẫu")).toBeInTheDocument();
+    expect(within(slide).getByText("Hoạt động")).toBeInTheDocument();
+
+    const video = await screen.findByRole("row", { name: /Video phân số/ });
+    expect(within(video).getByText("Video")).toBeInTheDocument();
+    expect(within(video).getByText("Link")).toBeInTheDocument();
+    expect(within(video).getByText("—")).toBeInTheDocument();
   });
 
   it("filters by title through the API's q parameter", async () => {
     const user = userEvent.setup();
-    renderPage("/library?tab=materials");
+    renderPage("/library/materials");
     await screen.findByRole("row", { name: /Slide số tự nhiên/ });
 
     await user.type(screen.getByRole("searchbox", { name: "Tìm học liệu" }), "video");
@@ -243,18 +263,47 @@ describe("LibraryPage materials tab", () => {
     expect(screen.getByRole("row", { name: /Video phân số/ })).toBeInTheDocument();
   });
 
-  it("creates a material from the dialog with a kind and comma-separated tags", async () => {
+  it("toggles a material's status and the filter honors it", async () => {
     const user = userEvent.setup();
-    renderPage("/library?tab=materials");
+    renderPage("/library/materials");
+    await screen.findByRole("row", { name: /Video phân số/ });
+
+    await user.click(screen.getByRole("button", { name: "Ngừng Video phân số" }));
+    expect(await screen.findByText("Đã ngừng học liệu")).toBeInTheDocument();
+    expect(within(rowOf("Video phân số")).getByText("Ngừng")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("radio", { name: "Hoạt động" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("row", { name: /Video phân số/ })).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("row", { name: /Slide số tự nhiên/ })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("radio", { name: "Ngừng" }));
+    expect(await screen.findByRole("row", { name: /Video phân số/ })).toBeInTheDocument();
+    expect(screen.queryByRole("row", { name: /Slide số tự nhiên/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Kích hoạt Video phân số" }));
+    expect(await screen.findByText("Đã kích hoạt học liệu")).toBeInTheDocument();
+  });
+
+  it("creates a material with a required URL, a kind excluding Khác, and comma-separated tags", async () => {
+    const user = userEvent.setup();
+    renderPage("/library/materials");
     await screen.findByRole("row", { name: /Slide số tự nhiên/ });
 
     await user.click(screen.getByRole("button", { name: "Thêm học liệu" }));
     const dialog = await screen.findByRole("dialog", { name: "Thêm học liệu" });
-    await user.type(within(dialog).getByLabelText("Tên học liệu"), "Đề cương ôn tập");
+    expect(
+      within(dialog).queryByText("Sửa nội dung này sẽ ảnh hưởng mọi buổi đang dùng"),
+    ).not.toBeInTheDocument();
     await user.click(within(dialog).getByRole("combobox", { name: /Loại/ }));
+    expect(
+      within(await screen.findByRole("listbox")).queryByRole("option", { name: "Khác" }),
+    ).not.toBeInTheDocument();
     await user.click(
-      within(await screen.findByRole("listbox")).getByRole("option", { name: "Liên kết" }),
+      within(await screen.findByRole("listbox")).getByRole("option", { name: "Liên kết ngoài" }),
     );
+    await user.type(within(dialog).getByLabelText("Tên học liệu"), "Đề cương ôn tập");
     await user.type(within(dialog).getByLabelText("Đường dẫn"), "https://example.com/de-cuong");
     await user.type(within(dialog).getByLabelText("Thẻ"), "ôn tập, , cuối kỳ ");
     await user.click(within(dialog).getByRole("button", { name: "Thêm" }));
@@ -269,9 +318,23 @@ describe("LibraryPage materials tab", () => {
     });
   });
 
-  it("refuses a material link that is not http(s) before calling the API", async () => {
+  it("refuses submitting a material without a URL", async () => {
     const user = userEvent.setup();
-    renderPage("/library?tab=materials");
+    renderPage("/library/materials");
+    await screen.findByRole("row", { name: /Video phân số/ });
+
+    await user.click(screen.getByRole("button", { name: "Thêm học liệu" }));
+    const dialog = await screen.findByRole("dialog", { name: "Thêm học liệu" });
+    await user.type(within(dialog).getByLabelText("Tên học liệu"), "Trang trống");
+    await user.click(within(dialog).getByRole("button", { name: "Thêm" }));
+
+    expect(await within(dialog).findByText("Bắt buộc nhập đường dẫn")).toBeInTheDocument();
+    expect(getLibraryStore().materials.some((m) => m.title === "Trang trống")).toBe(false);
+  });
+
+  it("refuses a material link that is not http(s)", async () => {
+    const user = userEvent.setup();
+    renderPage("/library/materials");
     await screen.findByRole("row", { name: /Video phân số/ });
 
     await user.click(screen.getByRole("button", { name: "Thêm học liệu" }));
@@ -288,11 +351,14 @@ describe("LibraryPage materials tab", () => {
 
   it("edits a material in place", async () => {
     const user = userEvent.setup();
-    renderPage("/library?tab=materials");
+    renderPage("/library/materials");
     await screen.findByRole("row", { name: /Video phân số/ });
 
     await user.click(screen.getByRole("button", { name: "Sửa Video phân số" }));
     const dialog = await screen.findByRole("dialog", { name: "Sửa học liệu" });
+    expect(
+      within(dialog).getByText("Sửa nội dung này sẽ ảnh hưởng mọi buổi đang dùng"),
+    ).toBeInTheDocument();
     expect(within(dialog).getByLabelText("Đường dẫn")).toHaveValue(materialVideo.url);
     await user.clear(within(dialog).getByLabelText("Tên học liệu"));
     await user.type(within(dialog).getByLabelText("Tên học liệu"), "Video so sánh phân số");
@@ -302,9 +368,38 @@ describe("LibraryPage materials tab", () => {
     expect(await screen.findByRole("row", { name: /Video so sánh phân số/ })).toBeInTheDocument();
   });
 
+  it("keeps Khác selectable only while editing a material that already has it", async () => {
+    const user = userEvent.setup();
+    getLibraryStore().materials.push({
+      ...materialVideo,
+      id: "83000000-0000-4000-8000-000000000009",
+      title: "Ghi chú cũ",
+      kind: "other",
+    });
+    renderPage("/library/materials");
+    await screen.findByRole("row", { name: /Ghi chú cũ/ });
+
+    await user.click(screen.getByRole("button", { name: "Sửa Ghi chú cũ" }));
+    const editDialog = await screen.findByRole("dialog", { name: "Sửa học liệu" });
+    expect(within(editDialog).getByRole("combobox", { name: /Loại/ })).toHaveTextContent("Khác");
+    await user.click(within(editDialog).getByRole("combobox", { name: /Loại/ }));
+    expect(
+      within(await screen.findByRole("listbox")).getByRole("option", { name: "Khác" }),
+    ).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await user.click(within(editDialog).getByRole("button", { name: "Hủy" }));
+
+    await user.click(screen.getByRole("button", { name: "Thêm học liệu" }));
+    const createDialog = await screen.findByRole("dialog", { name: "Thêm học liệu" });
+    await user.click(within(createDialog).getByRole("combobox", { name: /Loại/ }));
+    expect(
+      within(await screen.findByRole("listbox")).queryByRole("option", { name: "Khác" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("deletes a free material after confirming", async () => {
     const user = userEvent.setup();
-    renderPage("/library?tab=materials");
+    renderPage("/library/materials");
     await screen.findByRole("row", { name: /Video phân số/ });
 
     await user.click(screen.getByRole("button", { name: "Xoá Video phân số" }));
@@ -319,25 +414,31 @@ describe("LibraryPage materials tab", () => {
     expect(getLibraryStore().materials.some((m) => m.id === materialVideo.id)).toBe(false);
   });
 
-  it("keeps a material that a lesson still uses and shows the conflict", async () => {
-    const user = userEvent.setup();
-    renderPage("/library?tab=materials");
+  it("disables Xoá for a material a lesson still uses, with a tooltip explaining why", async () => {
+    renderPage("/library/materials");
+    const slide = await screen.findByRole("row", { name: /Slide số tự nhiên/ });
+
+    const deleteButton = within(slide).getByRole("button", { name: "Xoá Slide số tự nhiên" });
+    expect(deleteButton).toBeDisabled();
+    expect(deleteButton).toHaveAttribute(
+      "title",
+      "Học liệu đang gắn vào buổi học mẫu, ngừng hoạt động thay vì xoá.",
+    );
+  });
+
+  it("shows the do-not-hard-delete footnote", async () => {
+    renderPage("/library/materials");
     await screen.findByRole("row", { name: /Slide số tự nhiên/ });
 
-    await user.click(screen.getByRole("button", { name: "Xoá Slide số tự nhiên" }));
-    await user.click(
-      within(await screen.findByRole("dialog")).getByRole("button", { name: "Xoá học liệu" }),
-    );
-
-    expect(await screen.findByText("học liệu đang được gắn vào buổi học")).toBeInTheDocument();
-    expect(screen.getByRole("row", { name: /Slide số tự nhiên/ })).toBeInTheDocument();
-    expect(getLibraryStore().materials.some((m) => m.id === materialSlide.id)).toBe(true);
+    expect(
+      screen.getByText(/Không xóa cứng nội dung còn được phiên bản đang hoạt động tham chiếu/),
+    ).toBeInTheDocument();
   });
 
   it("is read-only for a member without library.edit", async () => {
     server.use(memberWith("library.read"));
     signInAs(testSecondaryTeacher);
-    renderPage("/library?tab=materials");
+    renderPage("/library/materials");
 
     await screen.findByRole("row", { name: /Slide số tự nhiên/ });
     expect(screen.queryByRole("button", { name: "Thêm học liệu" })).not.toBeInTheDocument();
@@ -346,45 +447,127 @@ describe("LibraryPage materials tab", () => {
   });
 });
 
-describe("LibraryPage exercises tab", () => {
-  it("lists the exercises with difficulty and tags", async () => {
-    renderPage("/library?tab=exercises");
+describe("ExercisesBank", () => {
+  it("lists exercises with code, tags, skill/level and usage", async () => {
+    renderPage("/library/exercises");
 
     const bai1 = await screen.findByRole("row", { name: /Bài 1: Tập hợp/ });
-    expect(within(bai1).getByText("Mức 2")).toBeInTheDocument();
+    expect(within(bai1).getByText("BT-0001")).toBeInTheDocument();
     expect(within(bai1).getByText("chương 1")).toBeInTheDocument();
-    expect(within(rowOf("Bài 2: So sánh phân số")).getAllByText("—").length).toBeGreaterThan(0);
-    expect(screen.getByRole("tab", { name: "Bài tập" })).toHaveAttribute("aria-selected", "true");
+    expect(within(bai1).getByText("1 buổi · 1 CT mẫu")).toBeInTheDocument();
+
+    const bai2 = await screen.findByRole("row", { name: /Bài 2: So sánh phân số/ });
+    expect(within(bai2).getAllByText("—").length).toBeGreaterThanOrEqual(2);
   });
 
-  it("creates an exercise with a difficulty from the dialog", async () => {
+  it("filters by title or code through the API's q parameter", async () => {
     const user = userEvent.setup();
-    renderPage("/library?tab=exercises");
+    renderPage("/library/exercises");
+    await screen.findByRole("row", { name: /Bài 1: Tập hợp/ });
+
+    await user.type(screen.getByRole("searchbox", { name: "Tìm bài tập" }), "BT-0002");
+
+    await waitFor(() => {
+      expect(screen.queryByRole("row", { name: /Bài 1: Tập hợp/ })).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("row", { name: /Bài 2: So sánh phân số/ })).toBeInTheDocument();
+  });
+
+  it("seeds the search box from an initial ?q= so the lesson page's link lands filtered", async () => {
+    renderPage("/library/exercises?q=BT-0002");
+
+    expect(await screen.findByRole("row", { name: /Bài 2: So sánh phân số/ })).toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Tìm bài tập" })).toHaveValue("BT-0002");
+    expect(screen.queryByRole("row", { name: /Bài 1: Tập hợp/ })).not.toBeInTheDocument();
+  });
+
+  it("copies the exercise code to the clipboard and confirms with a toast", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    renderPage("/library/exercises");
+    await screen.findByRole("row", { name: /Bài 1: Tập hợp/ });
+
+    await user.click(screen.getByRole("button", { name: "Sao chép mã BT-0001" }));
+
+    expect(writeText).toHaveBeenCalledWith("BT-0001");
+    expect(await screen.findByText("Đã sao chép mã")).toBeInTheDocument();
+  });
+
+  it("toggles an exercise's status and the filter honors it", async () => {
+    const user = userEvent.setup();
+    renderPage("/library/exercises");
+    await screen.findByRole("row", { name: /Bài 2: So sánh phân số/ });
+
+    await user.click(screen.getByRole("button", { name: "Ngừng Bài 2: So sánh phân số" }));
+    expect(await screen.findByText("Đã ngừng bài tập")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("radio", { name: "Hoạt động" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("row", { name: /Bài 2: So sánh phân số/ })).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("row", { name: /Bài 1: Tập hợp/ })).toBeInTheDocument();
+  });
+
+  it("creates an exercise with a code, skill and level from the dialog", async () => {
+    const user = userEvent.setup();
+    renderPage("/library/exercises");
     await screen.findByRole("row", { name: /Bài 1: Tập hợp/ });
 
     await user.click(screen.getByRole("button", { name: "Thêm bài tập" }));
     const dialog = await screen.findByRole("dialog", { name: "Thêm bài tập" });
     await user.type(within(dialog).getByLabelText("Tên bài tập"), "Bài 3: Hỗn số");
-    await user.click(within(dialog).getByRole("combobox", { name: /Độ khó/ }));
-    await user.click(
-      within(await screen.findByRole("listbox")).getByRole("option", { name: "Mức 4" }),
-    );
-    await user.type(within(dialog).getByLabelText("Mô tả"), "Đổi hỗn số ra phân số.");
+    await user.type(within(dialog).getByLabelText("Mã"), "bt-hon-so");
+    await user.type(within(dialog).getByLabelText("Kỹ năng"), "Tính toán");
+    await user.type(within(dialog).getByLabelText("Cấp độ"), "Nâng cao");
     await user.click(within(dialog).getByRole("button", { name: "Thêm" }));
 
     expect(await screen.findByText("Đã thêm bài tập")).toBeInTheDocument();
     const row = await screen.findByRole("row", { name: /Bài 3: Hỗn số/ });
-    expect(within(row).getByText("Mức 4")).toBeInTheDocument();
+    expect(within(row).getByText("Tính toán")).toBeInTheDocument();
+    expect(within(row).getByText("Nâng cao")).toBeInTheDocument();
     expect(getLibraryStore().exercises.find((e) => e.title === "Bài 3: Hỗn số")).toMatchObject({
-      difficulty: 4,
-      description: "Đổi hỗn số ra phân số.",
-      tags: [],
+      code: "BT-HON-SO",
+      skill: "Tính toán",
+      level: "Nâng cao",
     });
   });
 
-  it("deletes a free exercise and refuses one in use", async () => {
+  it("rejects a malformed exercise code before calling the API", async () => {
     const user = userEvent.setup();
-    renderPage("/library?tab=exercises");
+    renderPage("/library/exercises");
+    await screen.findByRole("row", { name: /Bài 1: Tập hợp/ });
+
+    await user.click(screen.getByRole("button", { name: "Thêm bài tập" }));
+    const dialog = await screen.findByRole("dialog", { name: "Thêm bài tập" });
+    await user.type(within(dialog).getByLabelText("Tên bài tập"), "Bài lỗi mã");
+    await user.type(within(dialog).getByLabelText("Mã"), "bt lỗi");
+    await user.click(within(dialog).getByRole("button", { name: "Thêm" }));
+
+    expect(
+      await within(dialog).findByText("Chỉ dùng chữ, số và dấu gạch ngang"),
+    ).toBeInTheDocument();
+    expect(getLibraryStore().exercises.some((e) => e.title === "Bài lỗi mã")).toBe(false);
+  });
+
+  it("rejects an exercise skill longer than the API's 50-character limit", async () => {
+    const user = userEvent.setup();
+    renderPage("/library/exercises");
+    await screen.findByRole("row", { name: /Bài 1: Tập hợp/ });
+
+    await user.click(screen.getByRole("button", { name: "Thêm bài tập" }));
+    const dialog = await screen.findByRole("dialog", { name: "Thêm bài tập" });
+    await user.type(within(dialog).getByLabelText("Tên bài tập"), "Bài lỗi kỹ năng");
+    await user.type(within(dialog).getByLabelText("Kỹ năng"), "a".repeat(51));
+    await user.click(within(dialog).getByRole("button", { name: "Thêm" }));
+
+    expect(await within(dialog).findByText("Tối đa 50 ký tự")).toBeInTheDocument();
+    expect(getLibraryStore().exercises.some((e) => e.title === "Bài lỗi kỹ năng")).toBe(false);
+  });
+
+  it("deletes a free exercise", async () => {
+    const user = userEvent.setup();
+    renderPage("/library/exercises");
     await screen.findByRole("row", { name: /Bài 2: So sánh phân số/ });
 
     await user.click(screen.getByRole("button", { name: "Xoá Bài 2: So sánh phân số" }));
@@ -395,19 +578,29 @@ describe("LibraryPage exercises tab", () => {
     await waitFor(() => {
       expect(getLibraryStore().exercises.some((e) => e.id === exerciseBai2.id)).toBe(false);
     });
+  });
 
-    server.use(
-      http.delete(`${API_URL}/library/exercises/:id`, () =>
-        HttpResponse.json(fail("EXERCISE_IN_USE", "bài tập đang được gắn vào buổi học"), {
-          status: 409,
-        }),
-      ),
+  it("disables Xoá for an exercise a lesson still uses, with a tooltip explaining why", async () => {
+    renderPage("/library/exercises");
+    const bai1 = await screen.findByRole("row", { name: /Bài 1: Tập hợp/ });
+
+    const deleteButton = within(bai1).getByRole("button", { name: "Xoá Bài 1: Tập hợp" });
+    expect(deleteButton).toBeDisabled();
+    expect(deleteButton).toHaveAttribute(
+      "title",
+      "Bài tập đang gắn vào buổi học mẫu, ngừng hoạt động thay vì xoá.",
     );
-    await user.click(screen.getByRole("button", { name: "Xoá Bài 1: Tập hợp" }));
-    await user.click(
-      within(await screen.findByRole("dialog")).getByRole("button", { name: "Xoá bài tập" }),
-    );
-    expect(await screen.findByText("bài tập đang được gắn vào buổi học")).toBeInTheDocument();
     expect(getLibraryStore().exercises.some((e) => e.id === exerciseBai1.id)).toBe(true);
+  });
+
+  it("is read-only for a member without library.edit", async () => {
+    server.use(memberWith("library.read"));
+    signInAs(testSecondaryTeacher);
+    renderPage("/library/exercises");
+
+    await screen.findByRole("row", { name: /Bài 1: Tập hợp/ });
+    expect(screen.queryByRole("button", { name: "Thêm bài tập" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Sửa / })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Xoá / })).not.toBeInTheDocument();
   });
 });

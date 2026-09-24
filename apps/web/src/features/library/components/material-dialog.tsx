@@ -1,8 +1,9 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useEffect } from "react";
 import { Controller, useForm } from "react-hook-form";
+import { z } from "zod";
 
-import { HvButton, HvModal, HvSelect } from "@/components/hv";
+import { HvButton, HvModal, HvNotice, HvSelect } from "@/components/hv";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useApiFormErrors } from "@/lib/forms/use-api-form-errors";
@@ -18,6 +19,7 @@ import {
   type Material,
   type MaterialFormInput,
   type MaterialFormValues,
+  type MaterialKind,
 } from "../schemas/library-schemas";
 
 const EMPTY_FORM: MaterialFormInput = {
@@ -30,16 +32,61 @@ const EMPTY_FORM: MaterialFormInput = {
 
 const FORM_ID = "material-dialog-form";
 
-const kindOptions = materialKindSchema.options.map((kind) => ({
-  value: kind,
-  label: materialKindLabel[kind],
-}));
+function createForm(kind: MaterialFormInput["kind"] | undefined): MaterialFormInput {
+  return kind ? { ...EMPTY_FORM, kind } : EMPTY_FORM;
+}
+
+/**
+ * `other` stays readable on legacy rows but is not offered as a new choice;
+ * `kindOptionsFor` puts it back only while editing an item that already has
+ * it, so `HvSelect` still finds the current value among its own options
+ * (otherwise it falls back to showing the placeholder instead of "Khác").
+ */
+const SELECTABLE_KINDS = materialKindSchema.options.filter((kind) => kind !== "other");
+
+function kindOptionsFor(currentKind: MaterialKind | undefined) {
+  const kinds = currentKind === "other" ? materialKindSchema.options : SELECTABLE_KINDS;
+  return kinds.map((kind) => ({ value: kind, label: materialKindLabel[kind] }));
+}
+
+const urlPlaceholderByKind: Record<MaterialKind, string> = {
+  video: "https://youtube.com/watch?v=…",
+  audio: "https://…/bai-giang.mp3",
+  image: "https://…/anh-minh-hoa.png",
+  doc: "https://…/tai-lieu.pdf",
+  note: "https://…/ghi-chu",
+  live: "https://meet.google.com/xxx-yyyy-zzz",
+  link: "https://…",
+  other: "https://…",
+};
+
+/**
+ * The bank keeps every material's URL required (the v5 decision — `note`
+ * uses `description` for the write-up, not a blank link), so the dialog's
+ * own schema tightens the shared form schema's optional URL locally rather
+ * than editing it for every other caller.
+ */
+const requiredUrl = z
+  .string()
+  .trim()
+  .min(1, "Bắt buộc nhập đường dẫn")
+  .max(2000, "Tối đa 2000 ký tự")
+  .refine(
+    (text) => /^https?:\/\/[^/\s]+/i.test(text),
+    "Đường dẫn phải bắt đầu bằng http:// hoặc https://",
+  );
+const materialDialogSchema = materialFormSchema.extend({ url: requiredUrl });
 
 export type MaterialDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 } & (
-  | { mode: "create"; onCreated: (material: Material) => void }
+  | {
+      mode: "create";
+      /** Kind preselected when the dialog opens from a "create <kind>" menu entry. */
+      defaultKind?: MaterialFormInput["kind"];
+      onCreated: (material: Material) => void;
+    }
   | { mode: "edit"; material: Material; onSaved: (material: Material) => void }
 );
 
@@ -52,17 +99,21 @@ export function MaterialDialog(props: MaterialDialogProps) {
   const { open, onOpenChange } = props;
   const editing = props.mode === "edit";
   const form = useForm<MaterialFormInput, unknown, MaterialFormValues>({
-    resolver: zodResolver(materialFormSchema),
-    defaultValues: editing ? toMaterialForm(props.material) : EMPTY_FORM,
+    resolver: zodResolver(materialDialogSchema),
+    defaultValues: editing ? toMaterialForm(props.material) : createForm(props.defaultKind),
   });
   const createMutation = useCreateMaterial();
   const updateMutation = useUpdateMaterial(editing ? props.material.id : "");
   const handleApiError = useApiFormErrors(form);
   const pending = createMutation.isPending || updateMutation.isPending;
+  const kind = form.watch("kind");
+  const kindOptions = kindOptionsFor(editing ? props.material.kind : undefined);
 
   useEffect(() => {
     if (open) {
-      form.reset(props.mode === "edit" ? toMaterialForm(props.material) : EMPTY_FORM);
+      form.reset(
+        props.mode === "edit" ? toMaterialForm(props.material) : createForm(props.defaultKind),
+      );
     }
     // The form instance is stable; only the opening (and the row it opens on) matters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -109,6 +160,9 @@ export function MaterialDialog(props: MaterialDialogProps) {
     >
       <form id={FORM_ID} onSubmit={(event) => void onSubmit(event)} noValidate>
         <FieldGroup>
+          {editing ? (
+            <HvNotice tone="warning">Sửa nội dung này sẽ ảnh hưởng mọi buổi đang dùng</HvNotice>
+          ) : null}
           <div className="grid gap-3 sm:grid-cols-[1fr_160px]">
             <Field data-invalid={Boolean(errors.title)}>
               <FieldLabel htmlFor="material-title">Tên học liệu</FieldLabel>
@@ -146,7 +200,7 @@ export function MaterialDialog(props: MaterialDialogProps) {
             <Input
               id="material-url"
               inputMode="url"
-              placeholder="https://…"
+              placeholder={urlPlaceholderByKind[kind]}
               aria-invalid={Boolean(errors.url)}
               {...form.register("url")}
             />

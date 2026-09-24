@@ -3,6 +3,7 @@ import { parseArray, parseData, parseList, type Paginated } from "@/lib/api/enve
 
 import {
   assigneeSchema,
+  exerciseGroupSchema,
   exerciseSchema,
   prepBoardSchema,
   lessonExerciseSchema,
@@ -10,12 +11,14 @@ import {
   logFieldSchema,
   materialSchema,
   programTemplateSchema,
-  scoreComponentSchema,
+  scoreSetGroupSchema,
   templateLessonDetailSchema,
   templateLessonSchema,
   templateVersionSchema,
   versionDetailSchema,
   type Exercise,
+  type ExerciseGroup,
+  type ExerciseGroupInput,
   type ExerciseInput,
   type LessonExercise,
   type LessonExerciseInput,
@@ -31,8 +34,8 @@ import {
   type PrepBoard,
   type PrepInput,
   type ProgramTemplate,
-  type ScoreComponent,
-  type ScoreComponentInput,
+  type ScoreSetGroup,
+  type ScoreSetGroupInput,
   type TemplateInput,
   type TemplateLesson,
   type TemplateLessonDetail,
@@ -150,6 +153,17 @@ export async function deleteLesson(id: string): Promise<void> {
   await apiClient.delete(`/library/lessons/${id}`);
 }
 
+/** `POST /library/lessons/:lid/duplicate` — inserts a copy right after the source lesson. */
+export async function duplicateLesson(id: string): Promise<TemplateLesson> {
+  const res = await apiClient.post<unknown>(`/library/lessons/${id}/duplicate`);
+  return parseData(templateLessonSchema, res.data);
+}
+
+/** `DELETE /library/versions/:vid/lessons` — clears every lesson of a draft version at once. */
+export async function clearLessons(versionId: string): Promise<void> {
+  await apiClient.delete(`/library/versions/${versionId}/lessons`);
+}
+
 /** `GET /library/versions/:vid/board` — the preparation board; readable for every version status. */
 export async function getBoard(versionId: string): Promise<PrepBoard> {
   const res = await apiClient.get<unknown>(`/library/versions/${versionId}/board`);
@@ -214,13 +228,39 @@ export async function setLogFields(versionId: string, items: LogFieldInput[]): P
   return parseArray(logFieldSchema, res.data);
 }
 
-/** `PUT /library/versions/:vid/score-set` — wholesale replace; a repeated key is a 422 on `<index>.key`. */
+/** `PUT /library/versions/:vid/score-set` — wholesale replace; a repeated key (within or across groups) is a 422. */
 export async function setScoreSet(
   versionId: string,
-  items: ScoreComponentInput[],
-): Promise<ScoreComponent[]> {
+  items: ScoreSetGroupInput[],
+): Promise<ScoreSetGroup[]> {
   const res = await apiClient.put<unknown>(`/library/versions/${versionId}/score-set`, items);
-  return parseArray(scoreComponentSchema, res.data);
+  return parseArray(scoreSetGroupSchema, res.data);
+}
+
+/** `GET /library/versions/:vid/exercise-groups` — ordered by position. */
+export async function listExerciseGroups(versionId: string): Promise<ExerciseGroup[]> {
+  const res = await apiClient.get<unknown>(`/library/versions/${versionId}/exercise-groups`);
+  return parseArray(exerciseGroupSchema, res.data);
+}
+
+/** `POST /library/versions/:vid/exercise-groups` — appends; a locked version answers 409 `VERSION_LOCKED`. */
+export async function createExerciseGroup(
+  versionId: string,
+  input: ExerciseGroupInput,
+): Promise<ExerciseGroup> {
+  const res = await apiClient.post<unknown>(
+    `/library/versions/${versionId}/exercise-groups`,
+    input,
+  );
+  return parseData(exerciseGroupSchema, res.data);
+}
+
+/**
+ * `DELETE /library/versions/:vid/exercise-groups/:gid` — the group's own
+ * exercises stay attached to the lesson, only ungrouped (`group_id` → null).
+ */
+export async function deleteExerciseGroup(versionId: string, groupId: string): Promise<void> {
+  await apiClient.delete(`/library/versions/${versionId}/exercise-groups/${groupId}`);
 }
 
 export interface ListItemsParams {
@@ -230,6 +270,8 @@ export interface ListItemsParams {
   per_page?: number;
   /** `title` (default) | `created_at`, `-` prefix for descending. */
   sort?: string;
+  /** Filter by catalog status; omitted returns every status. */
+  active?: boolean;
 }
 
 /** `GET /library/materials` — the center's material catalog, paginated. */
@@ -253,6 +295,12 @@ export async function deleteMaterial(id: string): Promise<void> {
   await apiClient.delete(`/library/materials/${id}`);
 }
 
+/** `PATCH /library/materials/:id/status` — toggles catalog visibility without touching existing links. */
+export async function setMaterialStatus(id: string, active: boolean): Promise<Material> {
+  const res = await apiClient.patch<unknown>(`/library/materials/${id}/status`, { active });
+  return parseData(materialSchema, res.data);
+}
+
 export async function listExercises(params: ListItemsParams = {}): Promise<Paginated<Exercise>> {
   const res = await apiClient.get<unknown>("/library/exercises", { params });
   return parseList(exerciseSchema, res.data);
@@ -271,4 +319,10 @@ export async function updateExercise(id: string, input: ExerciseInput): Promise<
 /** `DELETE /library/exercises/:id` — refused with 409 `EXERCISE_IN_USE` while any lesson links it. */
 export async function deleteExercise(id: string): Promise<void> {
   await apiClient.delete(`/library/exercises/${id}`);
+}
+
+/** `PATCH /library/exercises/:id/status` — toggles catalog visibility without touching existing links. */
+export async function setExerciseStatus(id: string, active: boolean): Promise<Exercise> {
+  const res = await apiClient.patch<unknown>(`/library/exercises/${id}/status`, { active });
+  return parseData(exerciseSchema, res.data);
 }

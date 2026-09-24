@@ -1,14 +1,14 @@
 import { ArrowLeftIcon } from "lucide-react";
 import { useId, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
+import { z } from "zod";
 
 import {
+  HvBadge,
   HvButton,
   HvConfirmDialog,
   HvModal,
-  HvNotice,
   HvSegmented,
-  HvSelect,
   HvStateBlock,
   hvToast,
   type HvSegmentedOption,
@@ -16,45 +16,62 @@ import {
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { useCenterContext } from "@/features/teaching";
 import { ApiError } from "@/lib/api/errors";
+import { textareaClassName } from "@/lib/forms/textarea-class";
 
-import { LessonDialog } from "../components/lesson-form";
-import { LessonsTable } from "../components/lessons-table";
+import { ExerciseGroupsTab } from "../components/exercise-groups-tab";
+import { LessonsTab } from "../components/lessons-tab";
 import { LogFieldsEditor, LogFieldsReadOnly } from "../components/log-fields-editor";
-import { ScoreSetEditor, ScoreSetReadOnly } from "../components/score-set-editor";
+import { ScoreSetsEditor, ScoreSetsReadOnly } from "../components/score-sets-editor";
 import { TemplateDialog } from "../components/template-dialog";
+import { VersionBanner } from "../components/version-banner";
+import { VersionChips } from "../components/version-chips";
+import { VersionExercisesTab } from "../components/version-exercises-tab";
+import { VersionMaterialsTab } from "../components/version-materials-tab";
+import { VersionsTab } from "../components/versions-tab";
 import {
   useArchiveVersion,
   useCreateVersion,
-  useDeleteLesson,
   useDeleteTemplate,
-  useLessons,
   usePublishVersion,
-  useReorderLessons,
   useTemplate,
   useVersionDetail,
   useVersions,
 } from "../hooks/use-library";
-import { defaultVersion, versionLabel } from "../lib/library-labels";
-import { textareaClassName } from "@/lib/forms/textarea-class";
-import type { ProgramTemplate, TemplateLesson, TemplateVersion } from "../schemas/library-schemas";
+import { defaultVersion, versionStatusVariant } from "../lib/library-labels";
+import type { ProgramTemplate, TemplateVersion } from "../schemas/library-schemas";
 
 function apiMessage(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
 }
 
-type Section = "lessons" | "grading";
+const TAB_VALUES = [
+  "lessons",
+  "exercises",
+  "materials",
+  "groups",
+  "scores",
+  "logs",
+  "versions",
+] as const;
+type Tab = (typeof TAB_VALUES)[number];
+const tabSchema = z.enum(TAB_VALUES).catch("lessons");
 
-const sectionOptions: HvSegmentedOption<Section>[] = [
+const tabOptions: HvSegmentedOption<Tab>[] = [
   { value: "lessons", label: "Buổi học" },
-  { value: "grading", label: "Nhật ký & Điểm" },
+  { value: "exercises", label: "Bài tập" },
+  { value: "materials", label: "Tài liệu" },
+  { value: "groups", label: "Nhóm bài tập" },
+  { value: "scores", label: "Bộ điểm" },
+  { value: "logs", label: "Nhật ký" },
+  { value: "versions", label: "Phiên bản" },
 ];
 
-const SECTION_ID_BASE = "template-section";
+const TAB_ID_BASE = "template-tab";
 
 /**
- * `/library/templates/:id` — one template, its version picker and the
- * lessons of the picked version. Authoring (add/reorder/delete lessons,
- * archive) needs `library.edit` and a draft; publishing needs
+ * `/library/templates/:id` — one template, its version picker and 7 tabs
+ * scoped to the picked version. Authoring (lessons, exercise groups, score
+ * sets, log fields) needs `library.edit` and a draft; publishing needs
  * `library.publish`, which the API keeps separate because it freezes the
  * version for every class that later binds to it.
  */
@@ -113,24 +130,19 @@ function TemplateWorkspace({ template, versions }: TemplateWorkspaceProps) {
   const hasDraft = versions.some((version) => version.status === "draft");
   const isDraft = selected?.status === "draft";
   const authoring = canEdit && isDraft;
+  const tab = tabSchema.parse(searchParams.get("tab") ?? undefined);
 
-  const lessons = useLessons(selected?.id);
-  const publish = usePublishVersion(template.id);
-  const archive = useArchiveVersion(template.id);
   const createVersion = useCreateVersion(template.id);
   const deleteTemplate = useDeleteTemplate();
-  const reorder = useReorderLessons(selected?.id ?? "", template.id);
-  const removeLesson = useDeleteLesson(selected?.id ?? "", template.id);
+  const publish = usePublishVersion(template.id);
+  const archive = useArchiveVersion(template.id);
 
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [drafting, setDrafting] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [archiving, setArchiving] = useState(false);
-  const [drafting, setDrafting] = useState(false);
-  const [addingLesson, setAddingLesson] = useState(false);
-  const [lessonToDelete, setLessonToDelete] = useState<TemplateLesson | null>(null);
   const [changelog, setChangelog] = useState("");
-  const [section, setSection] = useState<Section>("lessons");
   const changelogId = useId();
 
   function selectVersion(versionNo: number) {
@@ -139,26 +151,11 @@ function TemplateWorkspace({ template, versions }: TemplateWorkspaceProps) {
     setSearchParams(params, { replace: true });
   }
 
-  function moveLesson(lesson: TemplateLesson, direction: -1 | 1) {
-    const ordered = lessons.data ?? [];
-    const index = ordered.findIndex((row) => row.id === lesson.id);
-    const target = index + direction;
-    if (index < 0 || target < 0 || target >= ordered.length) {
-      return;
-    }
-    const ids = ordered.map((row) => row.id);
-    [ids[index], ids[target]] = [ids[target]!, ids[index]!];
-    reorder.mutate(ids, {
-      onError: (error) =>
-        hvToast(apiMessage(error, "Không đổi được thứ tự buổi học."), { variant: "danger" }),
-    });
+  function selectTab(next: Tab) {
+    const params = new URLSearchParams(searchParams);
+    params.set("tab", next);
+    setSearchParams(params, { replace: true });
   }
-
-  const versionOptions = [...versions]
-    .sort((a, b) => b.version_no - a.version_no)
-    .map((version) => ({ value: version.id, label: versionLabel(version) }));
-  const subjectLine = [template.subject, template.level].filter(Boolean).join(" · ");
-  const lessonRows = lessons.data ?? [];
 
   return (
     <div className="flex flex-col gap-4">
@@ -172,12 +169,21 @@ function TemplateWorkspace({ template, versions }: TemplateWorkspaceProps) {
         </Link>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="font-display text-[26px] font-extrabold text-ink-900">
-              {template.name}
-            </h1>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="font-display text-[26px] font-extrabold text-ink-900">
+                {template.name}
+              </h1>
+              {selected ? (
+                <HvBadge variant={versionStatusVariant[selected.status]}>
+                  v{selected.version_no}
+                </HvBadge>
+              ) : null}
+            </div>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-[14px] text-ink-500">
               <span className="font-mono text-[13px]">Mã: {template.code}</span>
-              {subjectLine ? <span>{subjectLine}</span> : null}
+              {[template.subject, template.level].filter(Boolean).join(" · ") ? (
+                <span>{[template.subject, template.level].filter(Boolean).join(" · ")}</span>
+              ) : null}
             </div>
             {template.description ? (
               <p className="mt-2 max-w-[640px] text-[14px] text-ink-700">{template.description}</p>
@@ -188,7 +194,17 @@ function TemplateWorkspace({ template, versions }: TemplateWorkspaceProps) {
               <HvButton size="sm" variant="secondary" onClick={() => setEditing(true)}>
                 Sửa
               </HvButton>
-              <HvButton size="sm" variant="ghost" onClick={() => setDeleting(true)}>
+              <HvButton
+                size="sm"
+                variant="ghost"
+                disabled={template.class_count > 0}
+                title={
+                  template.class_count > 0
+                    ? "Đang có lớp gắn chương trình này, không thể xoá."
+                    : undefined
+                }
+                onClick={() => setDeleting(true)}
+              >
                 Xoá chương trình
               </HvButton>
             </div>
@@ -196,119 +212,76 @@ function TemplateWorkspace({ template, versions }: TemplateWorkspaceProps) {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius-lg)] border border-line-200 bg-white p-3">
-        {selected ? (
-          <HvSelect
-            options={versionOptions}
-            value={selected.id}
-            onValueChange={(versionId) => {
-              const next = versions.find((version) => version.id === versionId);
-              if (next) selectVersion(next.version_no);
-            }}
-            sheetTitle="Chọn phiên bản"
-            aria-label="Phiên bản"
-            searchThreshold={Infinity}
-            className="min-w-[200px]"
-          />
-        ) : (
-          <span className="text-[14px] text-ink-500">Chưa có phiên bản nào.</span>
-        )}
-        {selected?.changelog ? (
-          <span className="text-[14px] text-ink-500">{selected.changelog}</span>
-        ) : null}
-        <div className="ml-auto flex flex-wrap gap-2">
-          {canPublish && isDraft ? (
-            <HvButton size="sm" onClick={() => setPublishing(true)}>
-              Phát hành
-            </HvButton>
-          ) : null}
-          {canEdit && selected?.status === "published" ? (
-            <HvButton size="sm" variant="ghost" onClick={() => setArchiving(true)}>
-              Lưu trữ
-            </HvButton>
-          ) : null}
-          {canEdit && !hasDraft ? (
-            <HvButton size="sm" variant="secondary" onClick={() => setDrafting(true)}>
-              Tạo bản nháp mới
-            </HvButton>
-          ) : null}
-        </div>
-      </div>
-
-      {selected && selected.status !== "draft" ? (
-        <HvNotice tone="info">
-          {selected.status === "published"
-            ? "Phiên bản này đã phát hành, nội dung được khoá. Tạo bản nháp mới để chỉnh sửa."
-            : "Phiên bản này đã lưu trữ, nội dung được khoá."}
-        </HvNotice>
-      ) : null}
-
-      <HvSegmented
-        variant="tabs"
-        idBase={SECTION_ID_BASE}
-        aria-label="Nội dung phiên bản"
-        options={sectionOptions}
-        value={section}
-        onValueChange={setSection}
+      <VersionChips
+        versions={versions}
+        selectedId={selected?.id}
+        canEdit={canEdit}
+        hasDraft={hasDraft}
+        onSelect={selectVersion}
+        onNewDraft={() => setDrafting(true)}
       />
 
-      <div
-        role="tabpanel"
-        id={`${SECTION_ID_BASE}-panel-${section}`}
-        aria-labelledby={`${SECTION_ID_BASE}-tab-${section}`}
-        className="flex flex-col gap-4"
-      >
-        {section === "lessons" ? (
-          <>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="font-display text-[18px] font-extrabold text-ink-900">Buổi học mẫu</h2>
-              {authoring && selected ? (
-                <HvButton size="sm" onClick={() => setAddingLesson(true)}>
-                  Thêm buổi học
-                </HvButton>
-              ) : null}
-            </div>
+      {selected ? (
+        <VersionBanner
+          version={selected}
+          canEdit={canEdit}
+          canPublish={canPublish}
+          hasDraft={hasDraft}
+          onPublish={() => setPublishing(true)}
+          onCreateDraft={() => setDrafting(true)}
+          onArchive={() => setArchiving(true)}
+        />
+      ) : (
+        <HvStateBlock state="empty" title="Chương trình này chưa có phiên bản nào." />
+      )}
 
-            {!selected ? (
-              <HvStateBlock state="empty" title="Chương trình này chưa có phiên bản nào." />
-            ) : lessons.isPending ? (
-              <HvStateBlock state="loading" title="Đang tải buổi học" />
-            ) : lessons.isError ? (
-              <HvStateBlock
-                state="error"
-                title="Không tải được buổi học"
-                action={
-                  <HvButton size="sm" variant="ghost" onClick={() => void lessons.refetch()}>
-                    Thử lại
-                  </HvButton>
-                }
-              />
-            ) : lessonRows.length === 0 ? (
-              <HvStateBlock
-                state="empty"
-                title="Phiên bản này chưa có buổi học nào."
-                description={authoring ? "Thêm buổi đầu tiên bằng nút Thêm buổi học." : undefined}
-              />
-            ) : (
-              <LessonsTable
-                lessons={lessonRows}
+      {selected ? (
+        <>
+          <HvSegmented
+            variant="tabs"
+            idBase={TAB_ID_BASE}
+            aria-label="Nội dung phiên bản"
+            options={tabOptions}
+            value={tab}
+            onValueChange={selectTab}
+          />
+
+          <div
+            role="tabpanel"
+            id={`${TAB_ID_BASE}-panel-${tab}`}
+            aria-labelledby={`${TAB_ID_BASE}-tab-${tab}`}
+            className="flex flex-col gap-4"
+          >
+            {tab === "lessons" ? (
+              <LessonsTab version={selected} templateId={template.id} authoring={authoring} />
+            ) : null}
+            {tab === "exercises" ? <VersionExercisesTab version={selected} /> : null}
+            {tab === "materials" ? <VersionMaterialsTab version={selected} /> : null}
+            {tab === "groups" ? (
+              <ExerciseGroupsTab
+                version={selected}
                 templateId={template.id}
-                editing={
-                  authoring
-                    ? {
-                        pending: reorder.isPending || removeLesson.isPending,
-                        onMove: moveLesson,
-                        onDelete: setLessonToDelete,
-                      }
-                    : undefined
-                }
+                authoring={authoring}
               />
-            )}
-          </>
-        ) : (
-          <GradingPanel version={selected} templateId={template.id} authoring={authoring} />
-        )}
-      </div>
+            ) : null}
+            {tab === "scores" ? (
+              <ScoresPanel version={selected} templateId={template.id} authoring={authoring} />
+            ) : null}
+            {tab === "logs" ? (
+              <LogsPanel version={selected} templateId={template.id} authoring={authoring} />
+            ) : null}
+            {tab === "versions" ? (
+              <VersionsTab
+                versions={versions}
+                templateId={template.id}
+                canEdit={canEdit}
+                canPublish={canPublish}
+                onSelect={selectVersion}
+              />
+            ) : null}
+          </div>
+        </>
+      ) : null}
 
       {canEdit ? (
         <>
@@ -394,19 +367,21 @@ function TemplateWorkspace({ template, versions }: TemplateWorkspaceProps) {
           <HvConfirmDialog
             open={publishing}
             onOpenChange={setPublishing}
-            title={`Phát hành v${selected.version_no}?`}
-            description="Sau khi phát hành, buổi học của phiên bản này bị khoá; muốn sửa phải tạo bản nháp mới."
-            confirmLabel="Phát hành"
+            title={`Kích hoạt v${selected.version_no}?`}
+            description="Sau khi kích hoạt, buổi học của phiên bản này bị khoá; muốn sửa phải tạo bản nháp mới."
+            confirmLabel="Kích hoạt"
             pending={publish.isPending}
             onConfirm={() =>
               publish.mutate(selected.id, {
                 onSuccess: (version) => {
                   setPublishing(false);
-                  hvToast(`Đã phát hành v${version.version_no}`);
+                  hvToast(`Đã kích hoạt v${version.version_no}`);
                 },
                 onError: (error) => {
                   setPublishing(false);
-                  hvToast(apiMessage(error, "Không phát hành được."), { variant: "danger" });
+                  hvToast(apiMessage(error, "Không kích hoạt được phiên bản."), {
+                    variant: "danger",
+                  });
                 },
               })
             }
@@ -414,58 +389,27 @@ function TemplateWorkspace({ template, versions }: TemplateWorkspaceProps) {
           <HvConfirmDialog
             open={archiving}
             onOpenChange={setArchiving}
-            title={`Lưu trữ v${selected.version_no}?`}
-            description="Phiên bản lưu trữ không còn là phiên bản chính thức của chương trình."
-            confirmLabel="Lưu trữ"
+            title={`Ngừng v${selected.version_no}?`}
+            description={
+              selected.class_count > 0
+                ? `${selected.class_count} lớp đang gắn phiên bản này sẽ không còn dùng được bản mới.`
+                : "Phiên bản sẽ chuyển sang chỉ xem."
+            }
+            confirmLabel="Ngừng"
+            tone="danger"
             pending={archive.isPending}
             onConfirm={() =>
               archive.mutate(selected.id, {
                 onSuccess: (version) => {
                   setArchiving(false);
-                  hvToast(`Đã lưu trữ v${version.version_no}`);
+                  hvToast(`Đã ngừng v${version.version_no}`);
                 },
                 onError: (error) => {
                   setArchiving(false);
-                  hvToast(apiMessage(error, "Không lưu trữ được."), { variant: "danger" });
+                  hvToast(apiMessage(error, "Không ngừng được phiên bản."), { variant: "danger" });
                 },
               })
             }
-          />
-        </>
-      ) : null}
-
-      {authoring && selected ? (
-        <>
-          <LessonDialog
-            open={addingLesson}
-            onOpenChange={setAddingLesson}
-            versionId={selected.id}
-            templateId={template.id}
-            onCreated={(lesson) => hvToast(`Đã thêm buổi ${lesson.position}`)}
-          />
-          <HvConfirmDialog
-            open={lessonToDelete != null}
-            onOpenChange={(open) => {
-              if (!open) setLessonToDelete(null);
-            }}
-            title={`Xoá buổi "${lessonToDelete?.title ?? ""}"?`}
-            description="Các buổi phía sau sẽ được đánh số lại."
-            confirmLabel="Xoá buổi"
-            tone="danger"
-            pending={removeLesson.isPending}
-            onConfirm={() => {
-              if (!lessonToDelete) return;
-              removeLesson.mutate(lessonToDelete.id, {
-                onSuccess: () => {
-                  setLessonToDelete(null);
-                  hvToast("Đã xoá buổi học");
-                },
-                onError: (error) => {
-                  setLessonToDelete(null);
-                  hvToast(apiMessage(error, "Không xoá được buổi học."), { variant: "danger" });
-                },
-              });
-            }}
           />
         </>
       ) : null}
@@ -473,30 +417,25 @@ function TemplateWorkspace({ template, versions }: TemplateWorkspaceProps) {
   );
 }
 
-interface GradingPanelProps {
-  version: TemplateVersion | undefined;
+interface VersionScopedPanelProps {
+  version: TemplateVersion;
   templateId: string;
   authoring: boolean;
 }
 
 /**
- * The version's log fields and score set. Editors are keyed on the
- * server's copy so a save (or a version switch) starts them fresh.
+ * The version's score sets. The editor is keyed on the server's copy so a
+ * save, or switching to a different version, starts it fresh.
  */
-function GradingPanel({ version, templateId, authoring }: GradingPanelProps) {
-  const detail = useVersionDetail(version?.id);
+function ScoresPanel({ version, templateId, authoring }: VersionScopedPanelProps) {
+  const detail = useVersionDetail(version.id);
 
-  if (!version) {
-    return <HvStateBlock state="empty" title="Chương trình này chưa có phiên bản nào." />;
-  }
-  if (detail.isPending) {
-    return <HvStateBlock state="loading" title="Đang tải nhật ký và cơ cấu điểm" />;
-  }
+  if (detail.isPending) return <HvStateBlock state="loading" title="Đang tải cơ cấu điểm" />;
   if (detail.isError) {
     return (
       <HvStateBlock
         state="error"
-        title="Không tải được nhật ký và cơ cấu điểm"
+        title="Không tải được cơ cấu điểm"
         action={
           <HvButton size="sm" variant="ghost" onClick={() => void detail.refetch()}>
             Thử lại
@@ -506,31 +445,59 @@ function GradingPanel({ version, templateId, authoring }: GradingPanelProps) {
     );
   }
 
-  const { log_fields: logFields, score_set: scoreSet } = detail.data;
-  const logFieldsKey = logFields.map((f) => f.id).join(",");
-  const scoreSetKey = scoreSet.map((c) => `${c.key}:${c.label}:${c.max}:${c.weight}`).join(",");
-  return (
-    <>
-      {authoring ? (
-        <LogFieldsEditor
-          key={`${version.id}:${logFieldsKey}`}
-          versionId={version.id}
-          templateId={templateId}
-          fields={logFields}
-        />
-      ) : (
-        <LogFieldsReadOnly fields={logFields} />
-      )}
-      {authoring ? (
-        <ScoreSetEditor
-          key={`${version.id}:${scoreSetKey}`}
-          versionId={version.id}
-          templateId={templateId}
-          components={scoreSet}
-        />
-      ) : (
-        <ScoreSetReadOnly components={scoreSet} />
-      )}
-    </>
+  const groups = detail.data.score_set;
+  const groupsKey = groups
+    .map(
+      (group) =>
+        `${group.key}:${group.components.map((c) => `${c.key}:${c.label}:${c.max}:${c.weight}`).join(",")}`,
+    )
+    .join("|");
+
+  return authoring ? (
+    <ScoreSetsEditor
+      key={`${version.id}:${groupsKey}`}
+      versionId={version.id}
+      templateId={templateId}
+      groups={groups}
+    />
+  ) : (
+    <ScoreSetsReadOnly groups={groups} />
+  );
+}
+
+/**
+ * The version's log fields. The editor is keyed on the server's copy so a
+ * save, or switching to a different version, starts it fresh.
+ */
+function LogsPanel({ version, templateId, authoring }: VersionScopedPanelProps) {
+  const detail = useVersionDetail(version.id);
+
+  if (detail.isPending) return <HvStateBlock state="loading" title="Đang tải trường nhật ký" />;
+  if (detail.isError) {
+    return (
+      <HvStateBlock
+        state="error"
+        title="Không tải được trường nhật ký"
+        action={
+          <HvButton size="sm" variant="ghost" onClick={() => void detail.refetch()}>
+            Thử lại
+          </HvButton>
+        }
+      />
+    );
+  }
+
+  const fields = detail.data.log_fields;
+  const fieldsKey = fields.map((field) => field.id).join(",");
+
+  return authoring ? (
+    <LogFieldsEditor
+      key={`${version.id}:${fieldsKey}`}
+      versionId={version.id}
+      templateId={templateId}
+      fields={fields}
+    />
+  ) : (
+    <LogFieldsReadOnly fields={fields} />
   );
 }

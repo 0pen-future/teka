@@ -1,60 +1,54 @@
-import { SearchIcon } from "lucide-react";
-import { useEffect, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
-import { z } from "zod";
+import { Navigate, useNavigate, useSearchParams } from "react-router";
 
-import {
-  HvBadge,
-  HvButton,
-  HvSegmented,
-  HvSelect,
-  HvStateBlock,
-  hvToast,
-  type HvSegmentedOption,
-} from "@/components/hv";
-import { Input } from "@/components/ui/input";
+import { HvSegmented, HvStateBlock, type HvSegmentedOption } from "@/components/hv";
 import { useCenterContext } from "@/features/teaching";
-import { cn } from "@/lib/utils";
 
-import { ExercisesTab, MaterialsTab } from "../components/items-tabs";
-import { LessonsTable } from "../components/lessons-table";
-import { TemplateDialog } from "../components/template-dialog";
-import { useLessons, useTemplatesList, useVersions } from "../hooks/use-library";
-import { defaultVersion, versionLabel, versionStatusVariant } from "../lib/library-labels";
-import type { ProgramTemplate } from "../schemas/library-schemas";
+import { ExercisesBank } from "../components/exercises-bank";
+import { MaterialsBank } from "../components/materials-bank";
+import { TemplateCards } from "../components/template-cards";
 
-const tabs = ["templates", "lessons", "materials", "exercises"] as const;
-type Tab = (typeof tabs)[number];
+export type LibraryTab = "templates" | "materials" | "exercises";
 
-const tabSchema = z.enum(tabs).catch("templates");
-
-const tabOptions: HvSegmentedOption<Tab>[] = [
+const tabOptions: HvSegmentedOption<LibraryTab>[] = [
   { value: "templates", label: "Chương trình mẫu" },
-  { value: "lessons", label: "Buổi học mẫu" },
-  { value: "materials", label: "Học liệu" },
-  { value: "exercises", label: "Bài tập" },
+  { value: "materials", label: "Ngân hàng nội dung" },
+  { value: "exercises", label: "Ngân hàng bài tập" },
 ];
 
 const TAB_ID_BASE = "library";
 
+const TAB_PATH: Record<LibraryTab, string> = {
+  templates: "/library",
+  materials: "/library/materials",
+  exercises: "/library/exercises",
+};
+
 /**
- * `/library` — the center's program-template catalog, a browser for one
- * version's lessons, and the shared material and exercise catalogs.
+ * `/library` · `/library/materials` · `/library/exercises` — the center's
+ * program-template hub plus the two shared banks it only ever references
+ * (never copies). Each tab is its own route so the sidebar's Kho học liệu
+ * group can deep-link straight into one, and so `useNavActive`'s
+ * longest-prefix match lights exactly one nav entry per tab.
  */
-export function LibraryPage() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const tab: Tab = tabSchema.parse(searchParams.get("tab") ?? undefined);
+export function LibraryPage({ tab }: { tab: LibraryTab }) {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { has, isResolved } = useCenterContext();
   const canEdit = has("library.edit");
 
-  function selectTab(next: Tab) {
-    const params = new URLSearchParams(searchParams);
-    if (next === "templates") {
-      params.delete("tab");
-    } else {
-      params.set("tab", next);
+  // `/library` used to carry every tab behind `?tab=`; keep old links and
+  // bookmarks working by redirecting once to the tab's own route, and keep
+  // any other query param (e.g. a search term) that rode along with it.
+  if (tab === "templates") {
+    const legacyTab = searchParams.get("tab");
+    if (legacyTab !== null) {
+      const target =
+        legacyTab === "materials" || legacyTab === "exercises" ? TAB_PATH[legacyTab] : "/library";
+      const rest = new URLSearchParams(searchParams);
+      rest.delete("tab");
+      const query = rest.toString();
+      return <Navigate to={query ? `${target}?${query}` : target} replace />;
     }
-    setSearchParams(params, { replace: true });
   }
 
   return (
@@ -62,7 +56,8 @@ export function LibraryPage() {
       <div>
         <h1 className="font-display text-[26px] font-extrabold text-ink-900">Kho học liệu</h1>
         <p className="mt-1 text-[14px] text-ink-500">
-          Chương trình mẫu và buổi học mẫu dùng chung cho các lớp của trung tâm.
+          Ba cấp: ngân hàng nội dung, ngân hàng bài tập và chương trình mẫu. Chương trình mẫu chỉ
+          tham chiếu tới hai ngân hàng — không giữ bản sao.
         </p>
       </div>
 
@@ -72,7 +67,7 @@ export function LibraryPage() {
         aria-label="Các mục của kho học liệu"
         options={tabOptions}
         value={tab}
-        onValueChange={selectTab}
+        onValueChange={(next) => void navigate(TAB_PATH[next])}
       />
 
       <div
@@ -83,212 +78,13 @@ export function LibraryPage() {
         {!isResolved ? (
           <HvStateBlock state="loading" title="Đang tải kho học liệu" />
         ) : tab === "templates" ? (
-          <TemplatesTab canEdit={canEdit} />
-        ) : tab === "lessons" ? (
-          <LessonsTab />
+          <TemplateCards canEdit={canEdit} />
         ) : tab === "materials" ? (
-          <MaterialsTab canEdit={canEdit} />
+          <MaterialsBank canEdit={canEdit} />
         ) : (
-          <ExercisesTab canEdit={canEdit} />
+          <ExercisesBank canEdit={canEdit} />
         )}
       </div>
-    </div>
-  );
-}
-
-const headCellClassName =
-  "sticky top-0 z-10 bg-cream-200 px-[18px] py-[10px] text-[12px] font-extrabold uppercase tracking-[0.4px] text-ink-500";
-const cellClassName = "border-t border-line-100 px-[18px] py-[11px] align-middle";
-
-function subjectLine(template: ProgramTemplate): string {
-  return [template.subject, template.level].filter(Boolean).join(" · ");
-}
-
-function TemplatesTab({ canEdit }: { canEdit: boolean }) {
-  const navigate = useNavigate();
-  const [query, setQuery] = useState("");
-  const [q, setQ] = useState("");
-  const [creating, setCreating] = useState(false);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setQ(query.trim()), 300);
-    return () => clearTimeout(timer);
-  }, [query]);
-
-  const list = useTemplatesList({ q: q || undefined, per_page: 100, sort: "name" });
-  const templates = list.data?.items ?? [];
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
-          <SearchIcon
-            aria-hidden="true"
-            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-400"
-          />
-          <Input
-            type="search"
-            aria-label="Tìm chương trình mẫu"
-            placeholder="Tìm theo tên hoặc mã…"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            className="pl-9"
-          />
-        </div>
-        {canEdit ? (
-          <HvButton size="sm" onClick={() => setCreating(true)}>
-            Tạo chương trình mẫu
-          </HvButton>
-        ) : null}
-      </div>
-
-      {list.isPending ? (
-        <HvStateBlock state="loading" title="Đang tải chương trình mẫu" />
-      ) : list.isError ? (
-        <HvStateBlock
-          state="error"
-          title="Không tải được kho học liệu"
-          action={
-            <HvButton size="sm" variant="ghost" onClick={() => void list.refetch()}>
-              Thử lại
-            </HvButton>
-          }
-        />
-      ) : templates.length === 0 ? (
-        <HvStateBlock
-          state="empty"
-          title={q ? "Không có chương trình nào khớp từ khoá." : "Chưa có chương trình mẫu nào."}
-          description={
-            q
-              ? "Đổi từ khoá hoặc xoá ô tìm."
-              : canEdit
-                ? "Tạo chương trình đầu tiên bằng nút Tạo chương trình mẫu."
-                : "Người có quyền soạn sẽ thêm chương trình tại đây."
-          }
-        />
-      ) : (
-        <div className="overflow-x-auto rounded-[var(--radius-lg)] border border-line-200 bg-white">
-          <table className="w-full min-w-[720px] border-collapse text-left text-[14px]">
-            <thead>
-              <tr>
-                <th className={headCellClassName}>Chương trình</th>
-                <th className={headCellClassName}>Mã</th>
-                <th className={headCellClassName}>Môn · Trình độ</th>
-                <th className={headCellClassName}>Phát hành</th>
-                <th className={headCellClassName}>Bản nháp</th>
-              </tr>
-            </thead>
-            <tbody>
-              {templates.map((template) => (
-                <tr key={template.id} className="transition-colors hover:bg-cream-100">
-                  <td className={cn(cellClassName, "font-extrabold text-ink-900")}>
-                    <Link to={`/library/templates/${template.id}`} className="hover:text-mint-600">
-                      {template.name}
-                    </Link>
-                  </td>
-                  <td className={cn(cellClassName, "font-mono text-[13px] text-ink-700")}>
-                    {template.code}
-                  </td>
-                  <td className={cn(cellClassName, "text-ink-500")}>
-                    {subjectLine(template) || "—"}
-                  </td>
-                  <td className={cellClassName}>
-                    {template.published_version_no == null ? (
-                      <span className="text-ink-400">Chưa phát hành</span>
-                    ) : (
-                      <HvBadge variant="success" size="sm" dot>
-                        {versionLabel({
-                          version_no: template.published_version_no,
-                          status: "published",
-                        })}
-                      </HvBadge>
-                    )}
-                  </td>
-                  <td className={cellClassName}>
-                    {template.draft_version_no == null ? (
-                      <span className="text-ink-400">—</span>
-                    ) : (
-                      <HvBadge variant="warning" size="sm" dot>
-                        {versionLabel({ version_no: template.draft_version_no, status: "draft" })}
-                      </HvBadge>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {canEdit ? (
-        <TemplateDialog
-          mode="create"
-          open={creating}
-          onOpenChange={setCreating}
-          onCreated={(template) => {
-            hvToast(`Đã tạo chương trình ${template.code}`);
-            void navigate(`/library/templates/${template.id}`);
-          }}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * Browses the lessons of one template's working version: the open draft
- * when there is one, else the published version. Authoring happens on the
- * template page, so this tab is read-only by design.
- */
-function LessonsTab() {
-  const [templateId, setTemplateId] = useState("");
-  const templates = useTemplatesList({ per_page: 100, sort: "name" });
-  const versions = useVersions(templateId || undefined);
-  const version = versions.data ? defaultVersion(versions.data) : undefined;
-  const lessons = useLessons(version?.id);
-  const options = (templates.data?.items ?? []).map((template) => ({
-    value: template.id,
-    label: template.name,
-    meta: template.code,
-  }));
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <HvSelect
-          options={options}
-          value={templateId}
-          onValueChange={setTemplateId}
-          sheetTitle="Chọn chương trình mẫu"
-          placeholder="Chọn chương trình mẫu…"
-          searchNoun="chương trình"
-          aria-label="Chọn chương trình mẫu"
-          className="min-w-[260px] max-sm:w-full"
-        />
-        {version ? (
-          <HvBadge variant={versionStatusVariant[version.status]} dot>
-            {versionLabel(version)}
-          </HvBadge>
-        ) : null}
-      </div>
-
-      {templateId === "" ? (
-        <HvStateBlock
-          state="empty"
-          title="Chọn một chương trình mẫu để xem các buổi học."
-          description="Tab này chỉ để xem; soạn buổi học trong trang của chương trình."
-        />
-      ) : versions.isPending || (version && lessons.isPending) ? (
-        <HvStateBlock state="loading" title="Đang tải buổi học" />
-      ) : versions.isError || lessons.isError ? (
-        <HvStateBlock state="error" title="Không tải được buổi học" />
-      ) : !version ? (
-        <HvStateBlock state="empty" title="Chương trình này chưa có phiên bản nào." />
-      ) : (lessons.data ?? []).length === 0 ? (
-        <HvStateBlock state="empty" title="Phiên bản này chưa có buổi học nào." />
-      ) : (
-        <LessonsTable lessons={lessons.data ?? []} templateId={templateId} />
-      )}
     </div>
   );
 }

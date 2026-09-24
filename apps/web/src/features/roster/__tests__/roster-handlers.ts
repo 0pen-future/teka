@@ -144,12 +144,12 @@ export const programLessonsToan6: ClassLesson[] = [
       { ...materialSlide, shared_with_students: false, position: 1 },
       { ...materialVideo, shared_with_students: true, position: 2 },
     ],
-    exercises: [{ ...exerciseBai1, position: 1 }],
+    exercises: [{ ...exerciseBai1, group_id: null, position: 1 }],
   },
   {
     ...lessonPublishedPhanSo,
     materials: [],
-    exercises: [{ ...exerciseBai2, position: 1 }],
+    exercises: [{ ...exerciseBai2, group_id: null, position: 1 }],
   },
 ];
 

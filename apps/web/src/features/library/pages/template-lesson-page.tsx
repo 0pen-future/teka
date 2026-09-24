@@ -1,25 +1,39 @@
 import { ArrowLeftIcon } from "lucide-react";
-import { Link, useParams } from "react-router";
+import { Link, useParams, useSearchParams } from "react-router";
+import { z } from "zod";
 
-import { HvBadge, HvButton, HvNotice, HvStateBlock, hvToast } from "@/components/hv";
+import {
+  HvBadge,
+  HvNotice,
+  HvSegmented,
+  HvStateBlock,
+  type HvSegmentedOption,
+} from "@/components/hv";
 import { useCenterContext } from "@/features/teaching";
 import { ApiError } from "@/lib/api/errors";
-import { useApiFormErrors } from "@/lib/forms/use-api-form-errors";
 
-import { LessonAttachments } from "../components/lesson-attachments";
+import { LessonContents } from "../components/lesson-contents";
+import { LessonExercises } from "../components/lesson-exercises";
+import { LessonInfoCard } from "../components/lesson-info-card";
 import { LessonPrepPanel } from "../components/lesson-prep-panel";
-import { LessonFields } from "../components/lesson-form";
-import { useLessonForm } from "../hooks/use-lesson-form";
-import { useLesson, useTemplate, useUpdateLesson, useVersions } from "../hooks/use-library";
-import { formatDuration, versionLabel, versionStatusVariant } from "../lib/library-labels";
-import {
-  toLessonForm,
-  toLessonInput,
-  type ProgramTemplate,
-  type TemplateLesson,
-  type TemplateLessonDetail,
-  type TemplateVersion,
+import { useLesson, useTemplate, useVersions } from "../hooks/use-library";
+import { versionLabel, versionStatusVariant } from "../lib/library-labels";
+import type {
+  ProgramTemplate,
+  TemplateLessonDetail,
+  TemplateVersion,
 } from "../schemas/library-schemas";
+
+const tabs = ["info", "exercises"] as const;
+type Tab = (typeof tabs)[number];
+const tabSchema = z.enum(tabs).catch("info");
+
+const tabOptions: HvSegmentedOption<Tab>[] = [
+  { value: "info", label: "Thông tin" },
+  { value: "exercises", label: "Bài tập" },
+];
+
+const TAB_ID_BASE = "lesson-section";
 
 /**
  * `/library/templates/:id/lessons/:lessonId` — one lesson of a template
@@ -73,6 +87,18 @@ function LessonView({ template, version, lesson }: LessonViewProps) {
   const { has } = useCenterContext();
   const canEdit = has("library.edit");
   const editable = canEdit && version.status === "draft";
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab: Tab = tabSchema.parse(searchParams.get("tab") ?? undefined);
+
+  function selectTab(next: Tab) {
+    const params = new URLSearchParams(searchParams);
+    if (next === "info") {
+      params.delete("tab");
+    } else {
+      params.set("tab", next);
+    }
+    setSearchParams(params, { replace: true });
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -94,80 +120,41 @@ function LessonView({ template, version, lesson }: LessonViewProps) {
         </div>
       </div>
 
-      {editable ? (
-        <LessonEditor key={lesson.updated_at} lesson={lesson} templateId={template.id} />
-      ) : (
-        <>
-          <HvNotice tone="info">
-            {version.status === "published"
-              ? `Phiên bản v${version.version_no} đã phát hành, nội dung được khoá.`
-              : version.status === "archived"
-                ? `Phiên bản v${version.version_no} đã lưu trữ, nội dung được khoá.`
-                : "Bạn không có quyền soạn buổi học mẫu."}
-          </HvNotice>
-          <LessonReadOnly lesson={lesson} />
-        </>
-      )}
+      {!editable ? (
+        <HvNotice tone="info">
+          {version.status === "published"
+            ? `Phiên bản v${version.version_no} đã phát hành (${version.class_count} lớp đang gắn) — chỉ xem. Muốn sửa, tạo bản nháp mới ở màn chương trình mẫu.`
+            : version.status === "archived"
+              ? `Phiên bản v${version.version_no} đã ngừng (${version.class_count} lớp đang gắn) — chỉ xem. Muốn sửa, tạo bản nháp mới ở màn chương trình mẫu.`
+              : "Bạn không có quyền soạn buổi học mẫu."}
+        </HvNotice>
+      ) : null}
 
-      <LessonPrepPanel key={`prep-${lesson.id}`} lesson={lesson} editable={editable} />
+      <HvSegmented
+        variant="tabs"
+        idBase={TAB_ID_BASE}
+        aria-label="Nội dung buổi học mẫu"
+        options={tabOptions}
+        value={tab}
+        onValueChange={selectTab}
+      />
 
-      <LessonAttachments lesson={lesson} templateId={template.id} editable={editable} />
-    </div>
-  );
-}
-
-function LessonEditor({ lesson, templateId }: { lesson: TemplateLesson; templateId: string }) {
-  const form = useLessonForm(toLessonForm(lesson));
-  const mutation = useUpdateLesson(lesson.id, lesson.version_id, templateId);
-  const handleApiError = useApiFormErrors(form);
-
-  const onSubmit = form.handleSubmit((values) => {
-    mutation.mutate(toLessonInput(values), {
-      onSuccess: (saved) => {
-        form.reset(toLessonForm(saved));
-        hvToast("Đã lưu buổi học");
-      },
-      onError: handleApiError,
-    });
-  });
-
-  return (
-    <form
-      onSubmit={(event) => void onSubmit(event)}
-      noValidate
-      className="flex flex-col gap-4 rounded-[var(--radius-lg)] border border-line-200 bg-white p-4"
-    >
-      <LessonFields form={form} idPrefix="lesson" />
-      <div className="flex justify-end">
-        <HvButton type="submit" disabled={mutation.isPending}>
-          {mutation.isPending ? "Đang lưu…" : "Lưu"}
-        </HvButton>
+      <div
+        role="tabpanel"
+        id={`${TAB_ID_BASE}-panel-${tab}`}
+        aria-labelledby={`${TAB_ID_BASE}-tab-${tab}`}
+        className="flex flex-col gap-4"
+      >
+        {tab === "info" ? (
+          <>
+            <LessonInfoCard lesson={lesson} templateId={template.id} editable={editable} />
+            <LessonContents lesson={lesson} templateId={template.id} editable={editable} />
+            <LessonPrepPanel key={`prep-${lesson.id}`} lesson={lesson} editable={editable} />
+          </>
+        ) : (
+          <LessonExercises lesson={lesson} templateId={template.id} editable={editable} />
+        )}
       </div>
-    </form>
-  );
-}
-
-function ReadOnlyField({ label, value }: { label: string; value: string | null }) {
-  return (
-    <div role="group" aria-label={label} className="flex flex-col gap-1">
-      <span className="text-[12px] font-extrabold uppercase tracking-[0.4px] text-ink-500">
-        {label}
-      </span>
-      {value ? (
-        <p className="whitespace-pre-wrap text-[14px] text-ink-900">{value}</p>
-      ) : (
-        <p className="text-[14px] text-ink-400">Chưa có</p>
-      )}
-    </div>
-  );
-}
-
-function LessonReadOnly({ lesson }: { lesson: TemplateLesson }) {
-  return (
-    <div className="flex flex-col gap-4 rounded-[var(--radius-lg)] border border-line-200 bg-white p-4">
-      <ReadOnlyField label="Mục tiêu" value={lesson.objectives} />
-      <ReadOnlyField label="Thời lượng" value={formatDuration(lesson.duration_min)} />
-      <ReadOnlyField label="Bài tập về nhà" value={lesson.homework_note} />
     </div>
   );
 }
