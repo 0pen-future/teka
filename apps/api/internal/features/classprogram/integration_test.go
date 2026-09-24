@@ -7,7 +7,9 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -289,6 +291,103 @@ func TestArchivedVersionStaysReadableButCannotBeApplied(t *testing.T) {
 	// one (or applying it to another class) is still refused.
 	_, err = f.svc.Apply(ctx, f.owner, f.class.ID, classprogram.ApplyRequest{TemplateVersionID: version.ID, Confirm: true})
 	requireStatus(t, err, http.StatusConflict, library.CodeVersionNotPublished)
+}
+
+// awaits reports whether done closes within d.
+func awaits(done <-chan struct{}, d time.Duration) bool {
+	select {
+	case <-done:
+		return true
+	case <-time.After(d):
+		return false
+	}
+}
+
+// TestApplyRereadsCurriculumUnderLockAfterAConcurrentEdit proves the
+// CURRICULUM_DIFFERS decision uses the curriculum row as it stands right
+// before Apply writes, not a snapshot taken before its transaction opened: a
+// curriculum edit in flight when Apply starts must be waited for, and its
+// result must feed the comparison.
+func TestApplyRereadsCurriculumUnderLockAfterAConcurrentEdit(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	version := f.publishedVersion(t, f.owner, "SU-6", "Bài 1", "Bài 2")
+
+	// The class already keeps exactly the template's own lessons, so a read
+	// taken before the concurrent edit below lands would see no difference
+	// and apply without asking for confirmation.
+	_, err := f.teaching.PutCurriculum(ctx, f.teacher, f.class.ID, teaching.PutCurriculumRequest{Lessons: []string{"Bài 1", "Bài 2"}})
+	require.NoError(t, err)
+
+	tx := f.db.Begin()
+	require.NoError(t, tx.Error)
+	require.NoError(t, tx.Exec(`SELECT 1 FROM class_curricula WHERE class_id = ? FOR UPDATE`, f.class.ID).Error)
+
+	// applyErr is only read after done closes, so the goroutine's write to it
+	// happens-before this test's read: no data race, and no second receive on
+	// a single-value channel that would block forever.
+	var applyErr error
+	done := make(chan struct{})
+	go func() {
+		_, applyErr = f.svc.Apply(ctx, f.owner, f.class.ID, classprogram.ApplyRequest{TemplateVersionID: version.ID})
+		close(done)
+	}()
+	require.False(t, awaits(done, 300*time.Millisecond), "apply must wait for the concurrent curriculum edit to commit")
+
+	// The concurrent edit swaps in a lesson list the template no longer
+	// matches, then commits and releases the row.
+	require.NoError(t, tx.Exec(`UPDATE class_curricula SET lessons = '["Bài khác"]' WHERE class_id = ?`, f.class.ID).Error)
+	require.NoError(t, tx.Commit().Error)
+
+	require.True(t, awaits(done, 5*time.Second), "apply must proceed once the curriculum edit commits")
+	requireStatus(t, applyErr, http.StatusConflict, classprogram.CodeCurriculumDiffers)
+}
+
+// TestApplySerialisesWithTemplateDelete proves applying a version and
+// deleting its template lock the template row in opposite modes, so whichever
+// commits first decides the outcome: the apply sees the delete and gets a
+// 404, or the delete sees the class program and gets 409. No class may end up
+// applying a deleted template.
+func TestApplySerialisesWithTemplateDelete(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	for round := 0; round < 8; round++ {
+		version := f.publishedVersion(t, f.owner, "RACE-"+uuid.NewString()[:8], "Bài 1")
+		class := testutil.Class(t, f.db, f.owner.TeacherID)
+
+		var wg sync.WaitGroup
+		var applyErr, deleteErr error
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_, applyErr = f.svc.Apply(ctx, f.owner, class.ID, classprogram.ApplyRequest{TemplateVersionID: version.ID})
+		}()
+		go func() {
+			defer wg.Done()
+			deleteErr = f.library.DeleteTemplate(ctx, f.owner, version.TemplateID)
+		}()
+		wg.Wait()
+
+		switch {
+		case applyErr == nil && deleteErr == nil:
+			t.Fatalf("round %d: both the apply and the delete went through", round)
+		case applyErr == nil:
+			requireStatus(t, deleteErr, http.StatusConflict, library.CodeTemplateInUse)
+		case deleteErr == nil:
+			requireStatus(t, applyErr, http.StatusNotFound, "")
+		default:
+			t.Fatalf("round %d: both failed: apply=%v delete=%v", round, applyErr, deleteErr)
+		}
+	}
+
+	var orphans int64
+	require.NoError(t, f.db.Raw(`
+		SELECT count(*) FROM class_programs p
+		JOIN program_template_versions v ON v.id = p.template_version_id
+		JOIN program_templates t ON t.id = v.template_id
+		WHERE t.deleted_at IS NOT NULL`).Scan(&orphans).Error)
+	require.Zero(t, orphans, "no class program may keep applying a deleted template")
 }
 
 func TestApplyRefusesMoreLessonsThanTheCurriculumHolds(t *testing.T) {

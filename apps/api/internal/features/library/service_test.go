@@ -153,6 +153,31 @@ func (f *fakeRepo) TemplateInUse(_ context.Context, sc authctx.Scope, id uuid.UU
 	return f.inUse[id] && f.templates[id] != nil && f.templates[id].CenterID == sc.CenterID, nil
 }
 
+func (f *fakeRepo) LockTemplate(_ context.Context, sc authctx.Scope, id uuid.UUID) (*Template, error) {
+	t, ok := f.templates[id]
+	if !ok || t.CenterID != sc.CenterID || t.DeletedAt != nil {
+		return nil, ErrNotFound
+	}
+	f.locks++
+	cp := *t
+	return &cp, nil
+}
+
+// LockTemplateForVersion mirrors the SQL join: a version whose template is
+// gone or of another center reads as missing.
+func (f *fakeRepo) LockTemplateForVersion(_ context.Context, sc authctx.Scope, versionID uuid.UUID) error {
+	v, ok := f.versions[versionID]
+	if !ok || v.CenterID != sc.CenterID {
+		return ErrNotFound
+	}
+	tpl, ok := f.templates[v.TemplateID]
+	if !ok || tpl.CenterID != sc.CenterID || tpl.DeletedAt != nil {
+		return ErrNotFound
+	}
+	f.locks++
+	return nil
+}
+
 func (f *fakeRepo) SoftDeleteTemplate(_ context.Context, sc authctx.Scope, id uuid.UUID) error {
 	cur, ok := f.templates[id]
 	if !ok || cur.CenterID != sc.CenterID || cur.DeletedAt != nil {

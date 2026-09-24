@@ -125,19 +125,37 @@ func (s *Service) UpdateTemplate(ctx context.Context, sc authctx.Scope, id uuid.
 }
 
 // DeleteTemplate soft-deletes the template; its versions and lessons stay
-// in place for anything still bound to them.
+// in place for anything still bound to them. The row is locked for the
+// in-use check and the stamp: a class applying one of its versions
+// concurrently holds the row FOR SHARE, so one side waits and sees the
+// other's outcome instead of racing a pre-lock snapshot.
 func (s *Service) DeleteTemplate(ctx context.Context, sc authctx.Scope, id uuid.UUID) error {
 	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
 		return err
 	}
-	inUse, err := s.repo.TemplateInUse(ctx, sc, id)
-	if err != nil {
-		return err
-	}
-	if inUse {
-		return errTemplateInUse()
-	}
-	return notFound(s.repo.SoftDeleteTemplate(ctx, sc, id), "program template")
+	return s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		if _, err := s.repo.LockTemplate(ctx, sc, id); err != nil {
+			return notFound(err, "program template")
+		}
+		inUse, err := s.repo.TemplateInUse(ctx, sc, id)
+		if err != nil {
+			return err
+		}
+		if inUse {
+			return errTemplateInUse()
+		}
+		return notFound(s.repo.SoftDeleteTemplate(ctx, sc, id), "program template")
+	})
+}
+
+// LockTemplateForVersion locks the version's template row for the rest of
+// the caller's transaction: classprogram's Apply calls this before reading
+// the version, so a concurrent DeleteTemplate of the same template either
+// waits for the apply to finish or has already removed the template by the
+// time the apply reaches the lock. ErrNotFound (mapped to 404) covers both a
+// version outside the center and a template already deleted.
+func (s *Service) LockTemplateForVersion(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) error {
+	return notFound(s.repo.LockTemplateForVersion(ctx, sc, versionID), "program template")
 }
 
 // PublishedVersion returns a version with its lessons for the class-program

@@ -57,6 +57,28 @@ func (f *fakeRepository) LiveClassInCenter(_ context.Context, a authctx.Anchor, 
 	return ok && !c.deleted && c.CenterID == a.CenterID, nil
 }
 
+// ParentCreatesCycle mirrors the real recursive walk: follow parentID's own
+// chain of parents and report whether selfID turns up anywhere in it.
+func (f *fakeRepository) ParentCreatesCycle(_ context.Context, a authctx.Anchor, parentID, selfID uuid.UUID) (bool, error) {
+	cur := parentID
+	seen := map[uuid.UUID]bool{}
+	for i := 0; i < 50; i++ {
+		if cur == selfID {
+			return true, nil
+		}
+		if seen[cur] {
+			return false, nil
+		}
+		seen[cur] = true
+		c, ok := f.classes[cur]
+		if !ok || c.deleted || c.CenterID != a.CenterID || c.ParentClassID == nil {
+			return false, nil
+		}
+		cur = *c.ParentClassID
+	}
+	return false, nil
+}
+
 func (f *fakeRepository) FindCourse(_ context.Context, a authctx.Anchor, courseID uuid.UUID) (*CourseRef, error) {
 	ref, ok := f.courses[courseID]
 	if !ok || f.courseCenters[courseID] != a.CenterID {
@@ -1109,6 +1131,46 @@ func TestUpdateSetsAndClearsParentClass(t *testing.T) {
 	resp := FromModel(got)
 	if resp.ParentClassID != nil || resp.LineageNote != nil {
 		t.Fatalf("response must mirror the cleared lineage: %+v", resp)
+	}
+}
+
+// A parent link must not close a loop through the lineage chain: neither a
+// direct swap (a<-b, then a<-b's parent set back to b) nor a longer chain
+// (a<-b<-c, then a's parent set to c) may succeed.
+func TestUpdateRefusesParentClassLineageCycle(t *testing.T) {
+	svc, _ := newTestService()
+	sc := memberScope()
+	classA, err := svc.Create(context.Background(), sc, validCreateRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	classB, err := svc.Create(context.Background(), sc, validCreateRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	updB := UpdateClassRequest{Name: classB.Name, StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000), ParentClassID: strPtr(classA.ID.String())}
+	if _, err := svc.Update(context.Background(), sc, classB.ID, updB); err != nil {
+		t.Fatalf("attach b under a: %v", err)
+	}
+
+	updA := UpdateClassRequest{Name: classA.Name, StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000), ParentClassID: strPtr(classB.ID.String())}
+	_, err = svc.Update(context.Background(), sc, classA.ID, updA)
+	if appErr := appErrorOf(t, err, http.StatusUnprocessableEntity); appErr.Fields["parent_class_id"] == "" {
+		t.Fatalf("a direct cycle must land on parent_class_id: %v", err)
+	}
+
+	classC, err := svc.Create(context.Background(), sc, validCreateRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	updC := UpdateClassRequest{Name: classC.Name, StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000), ParentClassID: strPtr(classB.ID.String())}
+	if _, err := svc.Update(context.Background(), sc, classC.ID, updC); err != nil {
+		t.Fatalf("attach c under b: %v", err)
+	}
+	updA.ParentClassID = strPtr(classC.ID.String())
+	_, err = svc.Update(context.Background(), sc, classA.ID, updA)
+	if appErr := appErrorOf(t, err, http.StatusUnprocessableEntity); appErr.Fields["parent_class_id"] == "" {
+		t.Fatalf("a longer cycle (a<-b<-c, a->c) must land on parent_class_id: %v", err)
 	}
 }
 

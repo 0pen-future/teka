@@ -32,6 +32,10 @@ type ClassSource interface {
 // whole-replacing the class curriculum. *teaching.Service satisfies it.
 type CurriculumStore interface {
 	GetCurriculum(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*teaching.CurriculumResponse, error)
+	// LockCurriculum locks the class's curriculum row inside Apply's
+	// transaction so its CURRICULUM_DIFFERS decision re-reads under the lock
+	// instead of racing a snapshot taken before the transaction opened.
+	LockCurriculum(ctx context.Context, sc authctx.Scope, classID uuid.UUID) error
 	PutCurriculum(ctx context.Context, sc authctx.Scope, classID uuid.UUID, req teaching.PutCurriculumRequest) (*teaching.CurriculumResponse, error)
 }
 
@@ -42,6 +46,10 @@ type CurriculumStore interface {
 type LibrarySource interface {
 	PublishedVersion(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) (*library.VersionResponse, []library.LessonDetailResponse, error)
 	ReleasedVersion(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) (*library.VersionResponse, []library.LessonDetailResponse, error)
+	// LockTemplateForVersion locks the version's template row inside Apply's
+	// transaction so applying a version serialises with a concurrent
+	// DeleteTemplate of the same template instead of racing it.
+	LockTemplateForVersion(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) error
 }
 
 // Service applies and removes class programs.
@@ -105,25 +113,39 @@ func (s *Service) Apply(ctx context.Context, sc authctx.Scope, classID uuid.UUID
 	if !sc.IsOwner {
 		return nil, errOwnerOnly()
 	}
-	_, lessons, err := s.library.PublishedVersion(ctx, sc, req.TemplateVersionID)
-	if err != nil {
-		return nil, err
-	}
-	if len(lessons) > teaching.MaxCurriculumLessons {
-		return nil, errTooManyLessons(len(lessons))
-	}
-	titles := make([]string, 0, len(lessons))
-	for _, l := range lessons {
-		titles = append(titles, l.Title)
-	}
-	current, err := s.curricula.GetCurriculum(ctx, sc, classID)
-	if err != nil {
-		return nil, err
-	}
-	if len(current.Lessons) > 0 && !slices.Equal(current.Lessons, titles) && !req.Confirm {
-		return nil, errCurriculumDiffers(len(current.Lessons), len(titles))
-	}
-	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
+	err := s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		// Lock the template before reading the version: a concurrent
+		// DeleteTemplate either waits for this transaction or has already
+		// removed the template by the time the lock is granted, so
+		// PublishedVersion below never applies a version whose template is
+		// mid-delete.
+		if err := s.library.LockTemplateForVersion(ctx, sc, req.TemplateVersionID); err != nil {
+			return err
+		}
+		_, lessons, err := s.library.PublishedVersion(ctx, sc, req.TemplateVersionID)
+		if err != nil {
+			return err
+		}
+		if len(lessons) > teaching.MaxCurriculumLessons {
+			return errTooManyLessons(len(lessons))
+		}
+		titles := make([]string, 0, len(lessons))
+		for _, l := range lessons {
+			titles = append(titles, l.Title)
+		}
+		// Lock the curriculum row before re-reading it: the CURRICULUM_DIFFERS
+		// decision below must see the class's latest committed lesson list,
+		// not a snapshot taken before this transaction opened.
+		if err := s.curricula.LockCurriculum(ctx, sc, classID); err != nil {
+			return err
+		}
+		current, err := s.curricula.GetCurriculum(ctx, sc, classID)
+		if err != nil {
+			return err
+		}
+		if len(current.Lessons) > 0 && !slices.Equal(current.Lessons, titles) && !req.Confirm {
+			return errCurriculumDiffers(len(current.Lessons), len(titles))
+		}
 		if err := s.repo.Upsert(ctx, &Program{
 			ClassID:           classID,
 			CenterID:          sc.CenterID,
@@ -132,7 +154,7 @@ func (s *Service) Apply(ctx context.Context, sc authctx.Scope, classID uuid.UUID
 		}); err != nil {
 			return apperror.Internal(err)
 		}
-		_, err := s.curricula.PutCurriculum(ctx, sc, classID, teaching.PutCurriculumRequest{
+		_, err = s.curricula.PutCurriculum(ctx, sc, classID, teaching.PutCurriculumRequest{
 			Lessons:      titles,
 			CurrentIndex: current.CurrentIndex,
 		})

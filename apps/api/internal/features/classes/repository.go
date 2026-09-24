@@ -70,6 +70,12 @@ type Repository interface {
 	// LiveClassInCenter reports whether a live (non-deleted) class with this
 	// id exists in the anchor's center — the parent-class validation.
 	LiveClassInCenter(ctx context.Context, a authctx.Anchor, classID uuid.UUID) (bool, error)
+	// ParentCreatesCycle reports whether selfID appears anywhere in
+	// parentID's own ancestor chain (parentID, its parent, its parent's
+	// parent, …) within the anchor's center. If it does, pointing selfID at
+	// parentID would close a loop in the lineage. The walk is depth-capped so
+	// a corrupted chain cannot loop the query itself.
+	ParentCreatesCycle(ctx context.Context, a authctx.Anchor, parentID, selfID uuid.UUID) (bool, error)
 	// CodeExists reports whether a live class in the anchor's center other
 	// than exceptID already carries code — the partial unique index's
 	// predicate, checked ahead of the insert so the caller gets a 409 rather
@@ -363,6 +369,30 @@ func (r *gormRepository) LiveClassInCenter(ctx context.Context, a authctx.Anchor
 			WHERE id = ? AND center_id = ? AND deleted_at IS NULL)`, classID, a.CenterID).
 		Scan(&exists).Error
 	return exists, err
+}
+
+// maxLineageDepth caps the ancestor walk well past any plausible split
+// chain, so a corrupted or (impossibly, given this same guard) cyclic chain
+// cannot turn the recursive query itself into an infinite loop.
+const maxLineageDepth = 50
+
+func (r *gormRepository) ParentCreatesCycle(ctx context.Context, a authctx.Anchor, parentID, selfID uuid.UUID) (bool, error) {
+	var found bool
+	err := database.FromContext(ctx, r.db).
+		Raw(`WITH RECURSIVE ancestors AS (
+			SELECT id, parent_class_id, 1 AS depth
+			FROM classes
+			WHERE id = ? AND center_id = ? AND deleted_at IS NULL
+			UNION ALL
+			SELECT c.id, c.parent_class_id, ancestors.depth + 1
+			FROM classes c
+			JOIN ancestors ON c.id = ancestors.parent_class_id
+			WHERE c.center_id = ? AND c.deleted_at IS NULL AND ancestors.depth < ?
+		)
+		SELECT EXISTS (SELECT 1 FROM ancestors WHERE id = ?)`,
+			parentID, a.CenterID, a.CenterID, maxLineageDepth, selfID).
+		Scan(&found).Error
+	return found, err
 }
 
 func (r *gormRepository) FindCourse(ctx context.Context, a authctx.Anchor, courseID uuid.UUID) (*CourseRef, error) {

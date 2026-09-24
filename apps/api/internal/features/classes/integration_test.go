@@ -965,3 +965,101 @@ func TestCourseLinkStaysInsideCenterAndCopiesPrice(t *testing.T) {
 	_, _, err = svc.List(ctx, scOther, classes.ListFilter{CourseID: &mine}, listParams(t))
 	require.NoError(t, err, "filtering by a foreign course just yields nothing")
 }
+
+// A parent must be a live class of the same center: another center's class
+// and a soft-deleted class are both refused, against the real query
+// (LiveClassInCenter), not the in-memory fake the unit tests use.
+func TestParentClassMustBeLiveAndInCenter(t *testing.T) {
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
+	other, _ := testutil.Teacher(t, db)
+	scOther := testutil.ScopeFor(t, db, other.ID)
+
+	theirs, err := svc.Create(ctx, scOther, createRequest())
+	require.NoError(t, err)
+
+	toDelete, err := svc.Create(ctx, sc, createRequest())
+	require.NoError(t, err)
+	require.NoError(t, svc.Delete(ctx, sc, toDelete.ID))
+
+	class, err := svc.Create(ctx, sc, createRequest())
+	require.NoError(t, err)
+
+	upd := classes.UpdateClassRequest{Name: class.Name, StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000)}
+
+	upd.ParentClassID = strPtr(theirs.ID.String())
+	_, err = svc.Update(ctx, sc, class.ID, upd)
+	var appErr *apperror.AppError
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
+	require.Contains(t, appErr.Fields, "parent_class_id")
+
+	upd.ParentClassID = strPtr(toDelete.ID.String())
+	_, err = svc.Update(ctx, sc, class.ID, upd)
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
+	require.Contains(t, appErr.Fields, "parent_class_id")
+
+	live, err := svc.Create(ctx, sc, createRequest())
+	require.NoError(t, err)
+	upd.ParentClassID = strPtr(live.ID.String())
+	got, err := svc.Update(ctx, sc, class.ID, upd)
+	require.NoError(t, err)
+	require.NotNil(t, got.ParentClassID)
+	require.Equal(t, live.ID, *got.ParentClassID)
+}
+
+// A parent link may not close a loop through the lineage chain, whether the
+// loop is direct (a<-b, then a<-b) or runs through a longer chain
+// (a<-b<-c, then a<-c) — proven here against the real WITH RECURSIVE query.
+func TestParentClassCycleIsRefusedAcrossTheChain(t *testing.T) {
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
+
+	classA, err := svc.Create(ctx, sc, createRequest())
+	require.NoError(t, err)
+	classB, err := svc.Create(ctx, sc, createRequest())
+	require.NoError(t, err)
+	classC, err := svc.Create(ctx, sc, createRequest())
+	require.NoError(t, err)
+
+	_, err = svc.Update(ctx, sc, classB.ID, classes.UpdateClassRequest{
+		Name: classB.Name, StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000),
+		ParentClassID: strPtr(classA.ID.String()),
+	})
+	require.NoError(t, err, "attach b under a")
+
+	updA := classes.UpdateClassRequest{Name: classA.Name, StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000)}
+	updA.ParentClassID = strPtr(classB.ID.String())
+	_, err = svc.Update(ctx, sc, classA.ID, updA)
+	var appErr *apperror.AppError
+	require.ErrorAs(t, err, &appErr, "a<-b, a->b closes a direct loop")
+	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
+	require.Contains(t, appErr.Fields, "parent_class_id")
+
+	_, err = svc.Update(ctx, sc, classC.ID, classes.UpdateClassRequest{
+		Name: classC.Name, StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000),
+		ParentClassID: strPtr(classB.ID.String()),
+	})
+	require.NoError(t, err, "attach c under b")
+
+	updA.ParentClassID = strPtr(classC.ID.String())
+	_, err = svc.Update(ctx, sc, classA.ID, updA)
+	require.ErrorAs(t, err, &appErr, "a<-b<-c, a->c closes a longer loop")
+	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
+	require.Contains(t, appErr.Fields, "parent_class_id")
+
+	// c<-b remains a valid, acyclic reattachment: c's own current chain
+	// (through b, through a) does not go through c itself.
+	got, err := svc.Update(ctx, sc, classC.ID, classes.UpdateClassRequest{
+		Name: classC.Name, StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000),
+		ParentClassID: strPtr(classB.ID.String()),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, got.ParentClassID)
+	require.Equal(t, classB.ID, *got.ParentClassID)
+}

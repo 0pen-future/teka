@@ -51,6 +51,18 @@ type Repository interface {
 	// TemplateInUse reports whether any class of the center applies one of
 	// the template's versions (a class_programs row).
 	TemplateInUse(ctx context.Context, sc authctx.Scope, id uuid.UUID) (bool, error)
+	// LockTemplate loads the live template FOR UPDATE inside the caller's
+	// transaction, so DeleteTemplate's in-use check and the stamp it acts on
+	// serialise with a concurrent class applying one of its versions.
+	// ErrNotFound when missing.
+	LockTemplate(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Template, error)
+	// LockTemplateForVersion loads the version's template FOR SHARE inside
+	// the caller's transaction: several concurrent readers (classes applying
+	// the version) may hold the lock together, but all of them block a
+	// concurrent DeleteTemplate's FOR UPDATE until they commit, and none of
+	// them can proceed while a delete already holds the row. ErrNotFound when
+	// the version is outside the center or its template was deleted.
+	LockTemplateForVersion(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) error
 
 	// CreateVersion inserts a version; gorm.ErrDuplicatedKey when the
 	// template already has a draft (uq_program_template_versions_draft).
@@ -284,6 +296,36 @@ func (r *gormRepository) SoftDeleteTemplate(ctx context.Context, sc authctx.Scop
 	}
 	if res.RowsAffected == 0 {
 		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *gormRepository) LockTemplate(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Template, error) {
+	var t Template
+	err := r.liveTemplates(ctx, sc).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("program_templates.id = ?", id).
+		Take(&t).Error
+	if err != nil {
+		return nil, notFoundOr(err)
+	}
+	return &t, nil
+}
+
+func (r *gormRepository) LockTemplateForVersion(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) error {
+	var t Template
+	// FOR SHARE OF the template table only: several classes may apply
+	// different versions of the same template at once, so readers must not
+	// exclude each other, only a concurrent LockTemplate (delete) does.
+	err := database.FromContext(ctx, r.db).
+		Model(&Template{}).
+		Clauses(clause.Locking{Strength: "SHARE", Table: clause.Table{Name: "program_templates"}}).
+		Joins("JOIN program_template_versions v ON v.template_id = program_templates.id").
+		Where("v.id = ? AND v.center_id = ? AND program_templates.center_id = ? AND program_templates.deleted_at IS NULL",
+			versionID, sc.CenterID, sc.CenterID).
+		Take(&t).Error
+	if err != nil {
+		return notFoundOr(err)
 	}
 	return nil
 }

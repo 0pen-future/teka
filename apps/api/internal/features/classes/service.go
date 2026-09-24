@@ -455,6 +455,14 @@ func (s *Service) resolveParentClass(ctx context.Context, a authctx.Anchor, raw 
 	if !exists {
 		return nil, invalid
 	}
+	cycle, err := s.repo.ParentCreatesCycle(ctx, a, parentID, selfID)
+	if err != nil {
+		return nil, err
+	}
+	if cycle {
+		return nil, apperror.Invalid("Lớp gốc tạo vòng lặp trong lịch sử lớp",
+			map[string]string{"parent_class_id": "không được tạo vòng lặp trong lịch sử tách lớp"})
+	}
 	return &parentID, nil
 }
 

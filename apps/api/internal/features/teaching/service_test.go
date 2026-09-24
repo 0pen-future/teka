@@ -160,6 +160,10 @@ func (f *fakeRepository) GetCurriculum(_ context.Context, _ authctx.Scope, class
 	return &copied, nil
 }
 
+func (f *fakeRepository) LockCurriculum(_ context.Context, _ authctx.Scope, _ uuid.UUID) error {
+	return nil
+}
+
 func (f *fakeRepository) UpsertCurriculum(_ context.Context, cur *Curriculum) error {
 	if existing, ok := f.curricula[cur.ClassID]; ok {
 		existing.Lessons = cur.Lessons

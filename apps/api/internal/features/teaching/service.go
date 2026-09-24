@@ -86,6 +86,15 @@ func (s *Service) GetCurriculum(ctx context.Context, sc authctx.Scope, classID u
 	return curriculumResponse(cur), nil
 }
 
+// LockCurriculum locks the class's curriculum row for the rest of the
+// caller's transaction, without the read gate: it exists for classprogram's
+// Apply, which already resolved the class and checked the owner-only rule
+// before opening its transaction, so re-checking read access here would only
+// repeat work already done under the same scope.
+func (s *Service) LockCurriculum(ctx context.Context, sc authctx.Scope, classID uuid.UUID) error {
+	return s.repo.LockCurriculum(ctx, sc, classID)
+}
+
 // PutCurriculum whole-replaces the class's lesson list (the editor modal
 // always saves the entire list) and clamps the progress pointer into the new
 // range. Gated by the lesson-plan capability: the owner and the class's
