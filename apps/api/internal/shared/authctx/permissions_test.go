@@ -88,7 +88,7 @@ func TestBuildPermSetImpliesReadKeysForReportsSend(t *testing.T) {
 // carries its read reach: a deny on library.read alone does not narrow a
 // holder of library.edit; only denying the write key does.
 func TestBuildPermSetImpliesReadForLibraryWrites(t *testing.T) {
-	for _, write := range []string{PermLibraryEdit, PermLibraryPublish, PermPrepAssign} {
+	for _, write := range []string{PermLibraryEdit, PermLibraryPublish} {
 		set := BuildPermSet(nil, []string{write}, []string{PermLibraryRead})
 		if !set.HasKey(write) || !set.HasKey(PermLibraryRead) {
 			t.Errorf("%s must imply library.read even when that key is denied, got %v", write, set)
@@ -102,7 +102,7 @@ func TestBuildPermSetImpliesReadForLibraryWrites(t *testing.T) {
 		}
 	}
 	read := BuildPermSet(nil, []string{PermLibraryRead}, nil)
-	if read.HasKey(PermLibraryEdit) || read.HasKey(PermLibraryPublish) || read.HasKey(PermPrepAssign) {
+	if read.HasKey(PermLibraryEdit) || read.HasKey(PermLibraryPublish) {
 		t.Error("library.read must not imply a write key in reverse")
 	}
 }

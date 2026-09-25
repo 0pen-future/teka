@@ -145,8 +145,6 @@ var actionSnapshot = []struct {
 	{"PUT", "/api/v1/library/versions/:vid/score-set", ActionSpec{Action: "template_version.set_score_set", EntityType: "template_version", IDParam: "vid"}},
 	{"PUT", "/api/v1/library/lessons/:lid/materials", ActionSpec{Action: "template_lesson.set_materials", EntityType: "template_lesson", IDParam: "lid"}},
 	{"PUT", "/api/v1/library/lessons/:lid/exercises", ActionSpec{Action: "template_lesson.set_exercises", EntityType: "template_lesson", IDParam: "lid"}},
-	{"PATCH", "/api/v1/library/lessons/:lid/prep", ActionSpec{Action: "template_lesson.prep", EntityType: "template_lesson", IDParam: "lid"}},
-	{"PATCH", "/api/v1/library/lessons/:lid/assignment", ActionSpec{Action: "template_lesson.assign", EntityType: "template_lesson", IDParam: "lid"}},
 	{"POST", "/api/v1/library/materials", ActionSpec{Action: "library_material.create", EntityType: "library_material", IDParam: ""}},
 	{"PUT", "/api/v1/library/materials/:id", ActionSpec{Action: "library_material.update", EntityType: "library_material", IDParam: "id"}},
 	{"DELETE", "/api/v1/library/materials/:id", ActionSpec{Action: "library_material.delete", EntityType: "library_material", IDParam: "id"}},
