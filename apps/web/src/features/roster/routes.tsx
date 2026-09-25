@@ -39,6 +39,13 @@ export const rosterRoutes: RouteObject[] = [
     lazy: async () => ({ Component: (await import("./pages/class-list-page")).ClassListPage }),
   },
   {
+    // Static segment, so react-router ranks it above "classes/:id".
+    path: "classes/recruiting",
+    lazy: async () => ({
+      Component: (await import("./pages/class-list-page")).RecruitingClassListPage,
+    }),
+  },
+  {
     path: "classes/:id",
     lazy: async () => ({
       Component: (await import("./pages/class-detail-page")).ClassDetailPage,

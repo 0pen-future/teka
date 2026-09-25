@@ -1,5 +1,5 @@
 import { ArrowLeftIcon, CopyIcon } from "lucide-react";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 
 import { HvBadge, HvButton, hvToast } from "@/components/hv";
 import { useCenterContext } from "@/features/teaching";
@@ -14,9 +14,27 @@ interface ClassDetailHeaderProps {
   onEdit: () => void;
 }
 
+/**
+ * Where the back link returns: the list the class was opened from, passed as
+ * router state by that list, else the full catalog. Only known list paths are
+ * honored so arbitrary state never becomes a link target.
+ */
+function backTarget(state: unknown): { to: string; label: string } {
+  if (
+    typeof state === "object" &&
+    state !== null &&
+    "from" in state &&
+    state.from === "/classes/recruiting"
+  ) {
+    return { to: "/classes/recruiting", label: "Lớp cần tuyển sinh" };
+  }
+  return { to: "/classes", label: "Danh sách lớp học" };
+}
+
 /** Back link, name, code with a copy button, phase badge and edit action. */
 export function ClassDetailHeader({ klass, canWrite, onEdit }: ClassDetailHeaderProps) {
   const { has } = useCenterContext();
+  const back = backTarget(useLocation().state);
   // The catalog page is gated on courses.read; without it the chip informs
   // instead of linking somewhere the member would bounce off.
   const canOpenCourse = has("courses.read");
@@ -34,11 +52,11 @@ export function ClassDetailHeader({ klass, canWrite, onEdit }: ClassDetailHeader
   return (
     <div className="flex flex-col gap-3">
       <Link
-        to="/classes"
+        to={back.to}
         className="inline-flex items-center gap-1 self-start font-display text-[13px] font-bold text-ink-500 hover:text-mint-600"
       >
         <ArrowLeftIcon aria-hidden="true" className="size-4" />
-        Danh sách lớp học
+        {back.label}
       </Link>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
