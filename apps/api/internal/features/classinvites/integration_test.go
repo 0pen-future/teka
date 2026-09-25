@@ -191,6 +191,34 @@ func TestInvitationIsPrivateToInvitee(t *testing.T) {
 	require.NotNil(t, accepted.RespondedAt)
 }
 
+func TestInvitationCarriesTheClassCourse(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	class := f.classOf(t, f.owner.TeacherID)
+	inv := f.send(t, class.ID, f.b, authctx.StaffRoleTroGiang)
+	require.Nil(t, inv.CourseName, "a class without a course has no course line")
+
+	courseID := uuid.New()
+	require.NoError(t, f.db.Exec(
+		`INSERT INTO courses (id, center_id, code, name, status, default_unit_price)
+		 VALUES (?, ?, 'TOAN6', 'Toán 6 nâng cao', 'active', 0)`,
+		courseID, f.owner.CenterID,
+	).Error)
+	require.NoError(t, f.db.Exec("UPDATE classes SET course_id = ? WHERE id = ?", courseID, class.ID).Error)
+
+	listed, err := f.svc.List(context.Background(), f.owner, classinvites.ListQuery{})
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	require.NotNil(t, listed[0].CourseName)
+	require.Equal(t, "Toán 6 nâng cao", *listed[0].CourseName)
+
+	// A retired course reads as no course, like the class list does.
+	require.NoError(t, f.db.Exec("UPDATE courses SET deleted_at = now() WHERE id = ?", courseID).Error)
+	listed, err = f.svc.List(context.Background(), f.owner, classinvites.ListQuery{})
+	require.NoError(t, err)
+	require.Nil(t, listed[0].CourseName)
+}
+
 func TestAcceptWritesNoStint(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)

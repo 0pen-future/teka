@@ -25,9 +25,11 @@ type ListQuery struct {
 
 // InvitationResponse is one invitation as the API returns it.
 type InvitationResponse struct {
-	ID            uuid.UUID  `json:"id"`
-	ClassID       uuid.UUID  `json:"class_id"`
-	ClassName     string     `json:"class_name"`
+	ID        uuid.UUID `json:"id"`
+	ClassID   uuid.UUID `json:"class_id"`
+	ClassName string    `json:"class_name"`
+	// CourseName is the class's course, null when it has none.
+	CourseName    *string    `json:"course_name"`
 	TeacherID     uuid.UUID  `json:"teacher_id"`
 	TeacherName   string     `json:"teacher_name"`
 	RoleKey       string     `json:"role_key"`
@@ -54,6 +56,7 @@ func toResponse(row Row) InvitationResponse {
 		ID:            row.ID,
 		ClassID:       row.ClassID,
 		ClassName:     row.ClassName,
+		CourseName:    row.CourseName,
 		TeacherID:     row.TeacherID,
 		TeacherName:   row.TeacherName,
 		RoleKey:       row.RoleKey,

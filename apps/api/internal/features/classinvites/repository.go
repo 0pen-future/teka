@@ -60,9 +60,10 @@ func NewRepository(db *gorm.DB) Repository {
 const rowSelect = `SELECT ci.id, ci.center_id, ci.class_id, ci.teacher_id, ci.role_key, ci.status,
 	ci.invited_by, ci.message, ci.sent_at, ci.reminded_at, ci.responded_at, ci.assigned_at,
 	ci.created_at, ci.updated_at,
-	c.name AS class_name, t.full_name AS teacher_name, ib.full_name AS invited_by_name
+	c.name AS class_name, co.name AS course_name, t.full_name AS teacher_name, ib.full_name AS invited_by_name
 FROM class_invitations ci
 JOIN classes c ON c.id = ci.class_id AND c.deleted_at IS NULL
+LEFT JOIN courses co ON co.id = c.course_id AND co.deleted_at IS NULL
 JOIN teachers t ON t.id = ci.teacher_id
 JOIN teachers ib ON ib.id = ci.invited_by`
 

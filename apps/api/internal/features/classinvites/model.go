@@ -57,6 +57,7 @@ func (Invitation) TableName() string { return "class_invitations" }
 type Row struct {
 	Invitation
 	ClassName     string
+	CourseName    *string // nil when the class is not tied to a live course
 	TeacherName   string
 	InvitedByName string
 }
