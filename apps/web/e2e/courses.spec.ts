@@ -42,23 +42,24 @@ test.afterEach(async ({ request }) => {
   expect(failures, "cleanup left rows behind").toEqual([]);
 });
 
-test("owner creates a course, prices it, opens a class on it and stops recruiting", async ({
+test("owner creates a course, prices it, opens a class on it and stops it once the class is gone", async ({
   page,
+  request,
 }) => {
   await loginAsOwner(page);
 
-  // The nav entry lives in the Giảng dạy group; Kho học liệu now has its own sidebar group.
+  // The nav entry lives in the Kho học liệu group, next to Lộ trình học.
   await page.goto("/courses");
-  await expect(page.getByRole("heading", { name: "Danh mục khóa học" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Khóa học", exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "Tạo khóa học" }).click();
+  await page.getByRole("button", { name: "+ Tạo khóa học" }).click();
   const createDialog = page.getByRole("dialog", { name: "Tạo khóa học" });
   await createDialog.getByLabel("Mã khóa học").fill(RUN_CODE.toLowerCase());
   await createDialog.getByLabel("Tên khóa học").fill(COURSE_NAME);
   await createDialog.getByLabel("Môn học").fill("Toán");
   await createDialog.getByLabel("Cấp / trình độ").fill("Lớp 6");
   // Only an active course is offered when a class is created.
-  await pickOption(page, "Trạng thái", "Đang mở");
+  await pickOption(page, "Trạng thái", "Đang hoạt động");
   await createDialog.getByLabel("Đơn giá / buổi (đ)").fill("150000");
   await createDialog.getByLabel("Tổng số buổi").fill("24");
   await createDialog.getByRole("button", { name: "Tạo" }).click();
@@ -67,40 +68,40 @@ test("owner creates a course, prices it, opens a class on it and stops recruitin
   await expect(page).toHaveURL(/\/courses\/[0-9a-f-]+$/);
   created.courseId = page.url().split("/").pop();
   await expect(page.getByRole("heading", { name: COURSE_NAME })).toBeVisible();
-  await expect(page.getByText(`Mã: ${RUN_CODE}`)).toBeVisible();
-  // The sidebar also says "Đang mở" about the center, so scope to the page body.
   const main = page.getByRole("main");
-  await expect(main.getByText("Đang mở")).toBeVisible();
+  await expect(main.getByText(RUN_CODE, { exact: true })).toBeVisible();
+  await expect(main.getByText("Đang hoạt động", { exact: true })).toBeVisible();
   const info = page.getByRole("tabpanel");
-  await expect(info.getByText("150.000 ₫")).toBeVisible();
-  await expect(info.getByText("24 buổi")).toBeVisible();
+  await expect(info.getByText("150.000đ")).toBeVisible();
 
   // Edit keeps everything else as stored.
-  await page.getByRole("button", { name: "Sửa" }).click();
+  await page.getByRole("button", { name: "Sửa khóa" }).click();
   const editDialog = page.getByRole("dialog", { name: "Sửa khóa học" });
   await editDialog.getByLabel("Tên khóa học").fill(COURSE_NAME_EDITED);
   await editDialog.getByRole("button", { name: "Lưu" }).click();
   await expect(page.getByText("Đã lưu khóa học")).toBeVisible();
   await expect(page.getByRole("heading", { name: COURSE_NAME_EDITED })).toBeVisible();
-  await expect(info.getByText("150.000 ₫")).toBeVisible();
+  await expect(info.getByText("150.000đ")).toBeVisible();
 
-  // Tuition packs are saved wholesale in display order.
-  await page.getByRole("tab", { name: "Gói học phí" }).click();
-  const packs = page.getByRole("region", { name: "Gói học phí" });
-  await packs.getByRole("button", { name: "Thêm gói" }).click();
-  await packs.getByRole("textbox", { name: "Tên gói 1" }).fill("Gói 12 buổi");
-  await packs.getByRole("spinbutton", { name: "Số buổi 1" }).fill("12");
-  await packs.getByRole("spinbutton", { name: "Giá 1" }).fill("1600000");
-  await packs.getByRole("button", { name: "Thêm gói" }).click();
-  await packs.getByRole("textbox", { name: "Tên gói 2" }).fill("Gói 24 buổi");
-  await packs.getByRole("spinbutton", { name: "Số buổi 2" }).fill("24");
-  await packs.getByRole("spinbutton", { name: "Giá 2" }).fill("3000000");
-  await packs.getByRole("button", { name: "Chuyển lên gói 2" }).click();
-  await packs.getByRole("button", { name: "Lưu gói học phí" }).click();
-  await expect(page.getByText("Đã lưu gói học phí")).toBeVisible();
+  // The duration and price edit in place on Thông tin chung.
+  await info.getByRole("button", { name: "Chỉnh sửa" }).click();
+  await info.getByLabel("Thời lượng buổi (phút)").fill("90");
+  await info.getByRole("button", { name: "Lưu thay đổi" }).click();
+  await expect(page.getByText("Đã lưu — áp dụng cho lớp mở mới")).toBeVisible();
+  await expect(info.getByText("90 phút")).toBeVisible();
+
+  // Tuition packs live in Thiết lập and save on every add.
+  await info.getByRole("button", { name: /Gói học phí/ }).click();
+  await expect(page).toHaveURL(/\?tab=setup$/);
+  await page.getByRole("textbox", { name: "Tên gói" }).fill("Gói 12 buổi");
+  await page.getByRole("spinbutton", { name: "Số buổi" }).fill("12");
+  await page.getByRole("spinbutton", { name: "Giá gói" }).fill("1600000");
+  await page.getByRole("button", { name: "+ Thêm gói" }).click();
+  await expect(page.getByText("Đã thêm gói")).toBeVisible();
   await page.reload();
-  await expect(page.getByRole("textbox", { name: "Tên gói 1" })).toHaveValue("Gói 24 buổi");
-  await expect(page.getByRole("textbox", { name: "Tên gói 2" })).toHaveValue("Gói 12 buổi");
+  await expect(main.getByText("Gói 12 buổi", { exact: true })).toBeVisible();
+  // 12 × 150.000đ = 1.800.000đ, so a 1.600.000đ pack saves 11%.
+  await expect(main.getByText("−11%")).toBeVisible();
 
   // A class opened on the course inherits its unit price.
   await page.goto("/students");
@@ -116,35 +117,38 @@ test("owner creates a course, prices it, opens a class on it and stops recruitin
   const classRow = page.getByRole("row").filter({ hasText: CLASS_NAME });
   await expect(classRow).toBeVisible();
   await expect(classRow.getByText("150.000 ₫/buổi")).toBeVisible();
-  await classRow.getByRole("link", { name: "⚙ Cài đặt" }).click();
-  await expect(page).toHaveURL(/\/classes\/[0-9a-f-]+\/settings$/);
-  created.classId = /\/classes\/([0-9a-f-]+)/.exec(page.url())?.[1];
 
-  // The class list shows the course code; the class header links back to it.
+  // The class list opens the class, whose chip links back to the course.
   await page.goto("/classes");
-  await expect(
-    page.getByRole("row").filter({ hasText: CLASS_NAME }).getByText(RUN_CODE, { exact: true }),
-  ).toBeVisible();
+  await page.getByRole("link", { name: CLASS_NAME, exact: true }).click();
+  await expect(page).toHaveURL(/\/classes\/[0-9a-f-]+$/);
+  created.classId = page.url().split("/classes/")[1];
   await page.goto(`/classes/${created.classId}`);
   const chip = page.getByRole("link", { name: `Khóa: ${RUN_CODE} · ${COURSE_NAME_EDITED}` });
   await expect(chip).toBeVisible();
   await chip.click();
   await expect(page.getByRole("heading", { name: COURSE_NAME_EDITED })).toBeVisible();
 
-  // The Vận hành tab lists the class.
-  await page.getByRole("tab", { name: "Vận hành" }).click();
+  // The Lớp học tab lists the class and opens it.
+  await page.getByRole("tab", { name: "Lớp học" }).click();
   const opsRow = page.getByRole("row").filter({ hasText: CLASS_NAME });
-  await expect(opsRow.getByRole("link", { name: CLASS_NAME })).toHaveAttribute(
-    "href",
-    `/classes/${created.classId}`,
-  );
+  await expect(opsRow).toBeVisible();
 
-  // Stop recruiting: the course leaves the class picker, the class keeps running.
-  await page.getByRole("button", { name: "Ngừng tuyển" }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Ngừng tuyển" }).click();
-  await expect(page.getByText(`Đã ngừng tuyển khóa ${RUN_CODE}`)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Ngừng tuyển" })).toBeHidden();
-  await expect(main.getByText("Ngừng tuyển", { exact: true })).toBeVisible();
+  // A course with an open class refuses to stop.
+  await page.getByRole("button", { name: "Dừng hoạt động" }).click();
+  await expect(page.getByText(/lớp đang mở — kết thúc lớp trước khi dừng/)).toBeVisible();
+
+  // Once the class is gone the course stops and leaves the active list.
+  const token = await apiLoginAsOwner(request);
+  const removed = await request.delete(`/api/v1/classes/${created.classId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect([200, 204]).toContain(removed.status());
+  created.classId = undefined;
+  await page.reload();
+  await page.getByRole("button", { name: "Dừng hoạt động" }).click();
+  await expect(page.getByText("Đã dừng hoạt động — không mở lớp mới từ khóa này")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Kích hoạt lại" })).toBeVisible();
 
   await page.goto("/courses?status=archived");
   await expect(page.getByRole("row").filter({ hasText: RUN_CODE })).toBeVisible();

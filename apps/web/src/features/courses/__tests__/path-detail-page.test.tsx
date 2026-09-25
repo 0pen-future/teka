@@ -54,7 +54,7 @@ describe("PathDetailPage", () => {
     renderPage();
     expect(await screen.findByRole("heading", { name: "Lộ trình Toán THCS" })).toBeInTheDocument();
     expect(screen.getByText("Mã: LT-TOAN")).toBeInTheDocument();
-    expect(screen.getByText("Đang dùng")).toBeInTheDocument();
+    expect(screen.getByText("Đang hoạt động")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Lộ trình học" })).toHaveAttribute("href", "/paths");
     expect(screen.getByText("Từ nền tảng lớp 6 tới ôn thi vào 10.")).toBeInTheDocument();
 
@@ -89,8 +89,8 @@ describe("PathDetailPage", () => {
     await screen.findByRole("heading", { name: "Lộ trình Toán THCS" });
 
     await user.click(screen.getByRole("button", { name: "Thêm giai đoạn" }));
-    const dialog = await screen.findByRole("dialog", { name: "Thêm giai đoạn" });
-    await user.type(within(dialog).getByLabelText("Tên giai đoạn"), "Ôn thi vào 10");
+    const dialog = await screen.findByRole("dialog", { name: "Thêm chặng" });
+    await user.type(within(dialog).getByLabelText("Tên chặng"), "Ôn thi vào 10");
     await user.type(within(dialog).getByLabelText("Mục tiêu"), "Luyện đề tổng hợp.");
     await user.click(within(dialog).getByRole("button", { name: "Thêm" }));
 
@@ -112,8 +112,8 @@ describe("PathDetailPage", () => {
         name: "Sửa giai đoạn Nền tảng",
       }),
     );
-    const dialog = await screen.findByRole("dialog", { name: "Sửa giai đoạn" });
-    const name = within(dialog).getByLabelText("Tên giai đoạn");
+    const dialog = await screen.findByRole("dialog", { name: "Đổi tên chặng" });
+    const name = within(dialog).getByLabelText("Tên chặng");
     await user.clear(name);
     await user.type(name, "Khởi đầu");
     await user.click(within(dialog).getByRole("button", { name: "Lưu" }));

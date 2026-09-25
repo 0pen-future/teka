@@ -46,6 +46,14 @@ test.afterEach(async ({ request }) => {
   // that would not delete still leaves the path attempt (and its status) in
   // the log instead of silently leaking both rows.
   const failures: string[] = [];
+  // The list page creates paths without navigating, so find this run's path by code.
+  if (!created.pathId) {
+    const list = await request.get(`/api/v1/paths?per_page=100&q=${PATH_CODE}`, { headers });
+    const rows = list.ok()
+      ? ((await list.json()) as { data: { id: string; code: string }[] }).data
+      : [];
+    created.pathId = rows.find((row) => row.code === PATH_CODE)?.id;
+  }
   if (created.pathId) {
     const response = await request.delete(`/api/v1/paths/${created.pathId}`, { headers });
     if (![200, 204, 404].includes(response.status())) {
@@ -61,7 +69,7 @@ test.afterEach(async ({ request }) => {
   expect(failures, "cleanup left rows behind").toEqual([]);
 });
 
-test("owner builds a learning path, stages it, picks a course and tears it down", async ({
+test("owner builds a learning path, stages it, picks a course and tears the stage down", async ({
   page,
 }) => {
   await loginAsOwner(page);
@@ -69,75 +77,70 @@ test("owner builds a learning path, stages it, picks a course and tears it down"
   await page.goto("/paths");
   await expect(page.getByRole("heading", { name: "Lộ trình học" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Tạo lộ trình" }).click();
+  await page.getByRole("button", { name: "+ Tạo lộ trình" }).click();
   const createDialog = page.getByRole("dialog", { name: "Tạo lộ trình" });
   await createDialog.getByLabel("Mã lộ trình").fill(PATH_CODE);
   await createDialog.getByLabel("Tên lộ trình").fill(PATH_NAME);
   await createDialog.getByRole("button", { name: "Tạo", exact: true }).click();
 
-  // Creating lands on the detail page.
-  await expect(page).toHaveURL(/\/paths\/[0-9a-f-]+$/);
-  created.pathId = page.url().split("/").pop();
-  const main = page.getByRole("main");
-  await expect(page.getByRole("heading", { name: PATH_NAME })).toBeVisible();
-  await expect(page.getByText(`Mã: ${PATH_CODE}`)).toBeVisible();
-  await expect(main.getByText("Đang soạn")).toBeVisible();
-  await expect(page.getByText("Chưa có giai đoạn nào.")).toBeVisible();
+  // Creating stays on the list and opens the new row.
+  await expect(page.getByText(`Đã tạo lộ trình ${PATH_CODE}`)).toBeVisible();
+  const row = page.getByRole("row").filter({ hasText: PATH_NAME }).first();
+  await expect(row.getByText("Nháp")).toBeVisible();
+  await expect(page.getByRole("button", { name: `Thu gọn ${PATH_NAME}` })).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
 
   // Editing keeps the code and adds a description; the status can move
   // straight from draft to active from the same form.
-  await page.getByRole("button", { name: "Sửa lộ trình" }).click();
+  await page.getByRole("button", { name: `Sửa ${PATH_NAME}` }).click();
   const editDialog = page.getByRole("dialog", { name: "Sửa lộ trình" });
   await expect(editDialog.getByLabel("Mã lộ trình")).toHaveValue(PATH_CODE);
   await editDialog.getByLabel("Mô tả").fill(PATH_DESCRIPTION_EDITED);
-  await pickOption(page, "Trạng thái", "Đang dùng");
+  await pickOption(page, "Trạng thái", "Đang hoạt động");
   await editDialog.getByRole("button", { name: "Lưu" }).click();
   await expect(page.getByText("Đã lưu lộ trình")).toBeVisible();
-  await expect(page.getByText(PATH_DESCRIPTION_EDITED)).toBeVisible();
-  await expect(main.getByText("Đang dùng")).toBeVisible();
+  await expect(row.getByText("Đang hoạt động")).toBeVisible();
 
   // A new stage starts empty, offering the run's own active course in the picker.
-  await page.getByRole("button", { name: "Thêm giai đoạn" }).click();
-  const stageDialog = page.getByRole("dialog", { name: "Thêm giai đoạn" });
-  await stageDialog.getByLabel("Tên giai đoạn").fill(STAGE_NAME);
+  await page.getByRole("button", { name: "+ Thêm chặng" }).click();
+  const stageDialog = page.getByRole("dialog", { name: "Thêm chặng" });
+  await stageDialog.getByLabel("Tên chặng").fill(STAGE_NAME);
   await stageDialog.getByRole("button", { name: "Thêm", exact: true }).click();
 
-  const stage = page.getByRole("region", { name: `Giai đoạn 1: ${STAGE_NAME}` });
+  const stage = page.getByRole("group", { name: `Chặng 1: ${STAGE_NAME}` });
   await expect(stage).toBeVisible();
-  await expect(stage.getByText("Chưa gắn khóa học nào.")).toBeVisible();
 
+  await stage.getByRole("button", { name: `Thêm khóa vào ${STAGE_NAME}` }).click();
   await pickOption(page, `Thêm khóa học vào ${STAGE_NAME}`, new RegExp(COURSE_CODE));
-  await expect(stage.getByText(COURSE_NAME)).toBeVisible();
-  await expect(stage.getByText(COURSE_CODE)).toBeVisible();
+  const coursesDialog = page.getByRole("dialog", { name: `Khóa học của chặng ${STAGE_NAME}` });
+  await expect(coursesDialog.getByText(`${COURSE_CODE} · ${COURSE_NAME}`)).toBeVisible();
+  await coursesDialog.getByRole("button", { name: "Đóng" }).last().click();
+  await expect(stage.getByText(`${COURSE_CODE} · ${COURSE_NAME}`)).toBeVisible();
 
-  // Editing the stage's own fields keeps its course list untouched.
-  await stage.getByRole("button", { name: `Sửa giai đoạn ${STAGE_NAME}` }).click();
-  const stageEditDialog = page.getByRole("dialog", { name: "Sửa giai đoạn" });
-  await stageEditDialog.getByLabel("Tên giai đoạn").fill(STAGE_NAME_EDITED);
-  await stageEditDialog.getByLabel("Mục tiêu").fill(STAGE_GOAL_EDITED);
-  await stageEditDialog.getByRole("button", { name: "Lưu" }).click();
-  const stageAfterEdit = page.getByRole("region", { name: `Giai đoạn 1: ${STAGE_NAME_EDITED}` });
+  // Renaming the stage keeps its course list untouched.
+  await stage.getByRole("button", { name: STAGE_NAME, exact: true }).click();
+  const renameDialog = page.getByRole("dialog", { name: "Đổi tên chặng" });
+  await renameDialog.getByLabel("Tên chặng").fill(STAGE_NAME_EDITED);
+  await renameDialog.getByLabel("Mục tiêu").fill(STAGE_GOAL_EDITED);
+  await renameDialog.getByRole("button", { name: "Lưu" }).click();
+  const stageAfterEdit = page.getByRole("group", { name: `Chặng 1: ${STAGE_NAME_EDITED}` });
   await expect(stageAfterEdit).toBeVisible();
-  await expect(stageAfterEdit.getByText(STAGE_GOAL_EDITED)).toBeVisible();
-  await expect(stageAfterEdit.getByText(COURSE_NAME)).toBeVisible();
+  await expect(stageAfterEdit.getByText(`${COURSE_CODE} · ${COURSE_NAME}`)).toBeVisible();
 
   // Removing the course leaves an empty stage; deleting the stage then leaves
-  // an empty path, all before the path itself is torn down.
-  await stageAfterEdit.getByRole("button", { name: `Gỡ ${COURSE_NAME}` }).click();
-  await expect(stageAfterEdit.getByText("Chưa gắn khóa học nào.")).toBeVisible();
+  // an empty path. The path itself is removed by afterEach.
+  await stageAfterEdit.getByRole("button", { name: `Thêm khóa vào ${STAGE_NAME_EDITED}` }).click();
+  const coursesAgain = page.getByRole("dialog", {
+    name: `Khóa học của chặng ${STAGE_NAME_EDITED}`,
+  });
+  await coursesAgain.getByRole("button", { name: `Gỡ ${COURSE_NAME}` }).click();
+  await expect(coursesAgain.getByText("Chưa gắn khóa học nào.")).toBeVisible();
+  await coursesAgain.getByRole("button", { name: "Đóng" }).last().click();
 
-  await stageAfterEdit.getByRole("button", { name: `Xoá giai đoạn ${STAGE_NAME_EDITED}` }).click();
-  const stageDeleteDialog = page.getByRole("dialog");
-  await expect(stageDeleteDialog).toContainText(`Xoá giai đoạn "${STAGE_NAME_EDITED}"?`);
-  await stageDeleteDialog.getByRole("button", { name: "Xoá giai đoạn", exact: true }).click();
-  await expect(page.getByText("Chưa có giai đoạn nào.")).toBeVisible();
-
-  await page.getByRole("button", { name: "Xoá lộ trình" }).click();
-  const pathDeleteDialog = page.getByRole("dialog");
-  await expect(pathDeleteDialog).toContainText(`Xoá lộ trình "${PATH_NAME}"?`);
-  await pathDeleteDialog.getByRole("button", { name: "Xoá lộ trình", exact: true }).click();
-  await expect(page.getByText(`Đã xoá lộ trình ${PATH_CODE}`)).toBeVisible();
-  await expect(page).toHaveURL(/\/paths$/);
-  // The path is already gone; only the course setup is left for afterEach.
-  created.pathId = undefined;
+  await stageAfterEdit.getByRole("button", { name: `Xoá chặng ${STAGE_NAME_EDITED}` }).click();
+  const stageDeleteDialog = page.getByRole("dialog", { name: `Xoá chặng "${STAGE_NAME_EDITED}"?` });
+  await stageDeleteDialog.getByRole("button", { name: "Xoá chặng", exact: true }).click();
+  await expect(page.getByRole("group", { name: /Chặng 1:/ })).toHaveCount(0);
 });

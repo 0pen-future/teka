@@ -1,53 +1,61 @@
-import { SearchIcon } from "lucide-react";
-import { useEffect, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { useState } from "react";
+import { useNavigate, useSearchParams } from "react-router";
 import { z } from "zod";
 
-import {
-  HvBadge,
-  HvButton,
-  HvSegmented,
-  HvStateBlock,
-  hvToast,
-  type HvSegmentedOption,
-} from "@/components/hv";
-import { Input } from "@/components/ui/input";
+import { HvBadge, HvButton, HvChip, HvStateBlock, hvToast } from "@/components/hv";
 import { useCenterContext } from "@/features/teaching";
 import { cn } from "@/lib/utils";
 
 import { CourseDialog } from "../components/course-dialog";
 import { useCoursesList } from "../hooks/use-courses";
-import { courseStatusLabel, courseStatusVariant } from "../lib/course-labels";
-import { courseStatusSchema, type Course } from "../schemas/courses-schemas";
+import { usePathsList } from "../hooks/use-paths";
+import {
+  copyCourseCode,
+  courseStatusLabel,
+  courseStatusVariant,
+  templateLabel,
+} from "../lib/course-labels";
+import {
+  cellClassName,
+  formatVnd,
+  headCellClassName,
+  mintActionClassName,
+  skyActionClassName,
+  tableCardClassName,
+} from "../lib/table-classes";
+import type { Course } from "../schemas/courses-schemas";
+import type { LearningPath } from "../schemas/paths-schemas";
 
-type StatusFilter = "all" | z.infer<typeof courseStatusSchema>;
+/** The prototype's strip: drafts only show under "Tất cả". */
+type StatusFilter = "all" | "active" | "archived";
 
-const statusFilterSchema = z.union([z.literal("all"), courseStatusSchema]).catch("all");
+const statusFilterSchema = z.enum(["all", "active", "archived"]).catch("all");
 
-const statusOptions: HvSegmentedOption<StatusFilter>[] = [
+const filters: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "Tất cả" },
-  { value: "draft", label: courseStatusLabel.draft },
   { value: "active", label: courseStatusLabel.active },
   { value: "archived", label: courseStatusLabel.archived },
 ];
 
-const STATUS_ID_BASE = "courses-status";
-
-const headCellClassName =
-  "sticky top-0 z-10 bg-cream-200 px-[18px] py-[10px] text-[12px] font-extrabold uppercase tracking-[0.4px] text-ink-500";
-const cellClassName = "border-t border-line-100 px-[18px] py-[11px] align-middle";
-
-function classesSummary(course: Course): string | null {
-  const parts: string[] = [];
-  if (course.classes_running > 0) parts.push(`${course.classes_running} đang học`);
-  if (course.classes_upcoming > 0) parts.push(`${course.classes_upcoming} sắp mở`);
-  return parts.length > 0 ? parts.join(" · ") : null;
+/** Course id → the stage names recommending it, across every path. */
+function stageNamesByCourse(paths: LearningPath[]): Map<string, string[]> {
+  const names = new Map<string, string[]>();
+  for (const path of paths) {
+    for (const stage of path.stages) {
+      for (const course of stage.courses) {
+        const held = names.get(course.id) ?? [];
+        if (!held.includes(stage.name)) held.push(stage.name);
+        names.set(course.id, held);
+      }
+    }
+  }
+  return names;
 }
 
 /**
- * `/courses` — the center's course catalog: what it sells, at what price,
- * built on which program template. Classes hang off a course; the class
- * dialog reads the active ones from the same endpoint.
+ * `/courses` — the prototype's "Khóa học" table. The catalog loads once so
+ * the chips carry counts and the search filters as you type; the CHẶNG
+ * column is read off the learning paths, which embed their stage courses.
  */
 export function CoursesPage() {
   const navigate = useNavigate();
@@ -57,24 +65,19 @@ export function CoursesPage() {
   const canEdit = has("courses.edit");
 
   const [query, setQuery] = useState("");
-  const [q, setQ] = useState("");
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<Course | null>(null);
 
-  useEffect(() => {
-    const timer = setTimeout(() => setQ(query.trim()), 300);
-    return () => clearTimeout(timer);
-  }, [query]);
-
-  const list = useCoursesList(
-    {
-      status: status === "all" ? undefined : status,
-      q: q || undefined,
-      per_page: 100,
-      sort: "name",
-    },
-    isResolved,
+  const list = useCoursesList({ per_page: 100, sort: "name" }, isResolved);
+  const paths = usePathsList({ per_page: 100 }, isResolved && has("paths.read"));
+  const stages = stageNamesByCourse(paths.data?.items ?? []);
+  const all = list.data?.items ?? [];
+  const q = query.trim().toLowerCase();
+  const rows = all.filter(
+    (course) =>
+      (status === "all" || course.status === status) &&
+      (!q || course.name.toLowerCase().includes(q) || course.code.toLowerCase().includes(q)),
   );
-  const courses = list.data?.items ?? [];
 
   function selectStatus(next: StatusFilter) {
     const params = new URLSearchParams(searchParams);
@@ -88,145 +91,200 @@ export function CoursesPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="font-display text-[26px] font-extrabold text-ink-900">
-            Danh mục khóa học
-          </h1>
+      <div className="flex flex-wrap items-start gap-3">
+        <div className="min-w-[260px] flex-1">
+          <h1 className="font-display text-[26px] font-extrabold text-ink-900">Khóa học</h1>
           <p className="mt-1 text-[14px] text-ink-500">
-            Khóa học là sản phẩm trung tâm bán: giá mỗi buổi, gói học phí và chương trình mẫu đi
-            kèm. Mỗi lớp mở ra gắn với một khóa.
+            Khóa học gắn một phiên bản chương trình mẫu làm mặc định. Lịch dạy, giáo viên, học phí
+            thuộc khóa/lớp — không thuộc template.
           </p>
         </div>
-        {canEdit ? (
-          <HvButton size="sm" onClick={() => setCreating(true)}>
-            Tạo khóa học
-          </HvButton>
-        ) : null}
+        {canEdit ? <HvButton onClick={() => setCreating(true)}>+ Tạo khóa học</HvButton> : null}
       </div>
 
-      <HvSegmented
-        variant="tabs"
-        idBase={STATUS_ID_BASE}
-        aria-label="Lọc theo trạng thái"
-        options={statusOptions}
-        value={status}
-        onValueChange={selectStatus}
-      />
-
-      <div className="relative">
-        <SearchIcon
-          aria-hidden="true"
-          className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-400"
-        />
-        <Input
+      <div className="flex flex-wrap items-center gap-2">
+        <div role="radiogroup" aria-label="Lọc theo trạng thái" className="flex flex-wrap gap-2">
+          {filters.map((filter) => (
+            <HvChip
+              key={filter.value}
+              role="radio"
+              size="sm"
+              pressed={filter.value === status}
+              count={
+                list.data
+                  ? filter.value === "all"
+                    ? all.length
+                    : all.filter((course) => course.status === filter.value).length
+                  : undefined
+              }
+              onClick={() => selectStatus(filter.value)}
+            >
+              {filter.label}
+            </HvChip>
+          ))}
+        </div>
+        <input
           type="search"
           aria-label="Tìm khóa học"
-          placeholder="Tìm theo tên hoặc mã…"
+          placeholder="Tìm theo tên, mã khóa học…"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          className="pl-9"
+          className="ml-auto w-[240px] rounded-[14px] border-2 border-line-200 bg-white px-3 py-[9px] text-[13.5px] outline-none focus:border-mint-400 max-sm:ml-0 max-sm:w-full"
         />
       </div>
 
       {!isResolved || list.isPending ? (
-        <HvStateBlock state="loading" title="Đang tải danh mục khóa học" />
+        <HvStateBlock state="loading" title="Đang tải khóa học" />
       ) : list.isError ? (
         <HvStateBlock
           state="error"
-          title="Không tải được danh mục khóa học"
+          title="Không tải được khóa học"
           action={
             <HvButton size="sm" variant="ghost" onClick={() => void list.refetch()}>
               Thử lại
             </HvButton>
           }
         />
-      ) : courses.length === 0 ? (
-        <HvStateBlock
-          state="empty"
-          title={
-            q
-              ? "Không có khóa học nào khớp từ khoá."
-              : status !== "all"
-                ? "Không có khóa học nào ở trạng thái này."
-                : "Chưa có khóa học nào."
-          }
-          description={
-            q
-              ? "Đổi từ khoá hoặc xoá ô tìm."
-              : status !== "all"
-                ? "Chọn Tất cả để xem toàn bộ danh mục."
-                : canEdit
-                  ? "Tạo khóa đầu tiên bằng nút Tạo khóa học."
-                  : "Người có quyền quản lý khóa học sẽ thêm khóa tại đây."
-          }
-        />
       ) : (
-        <div className="overflow-x-auto rounded-[var(--radius-lg)] border border-line-200 bg-white">
-          <table className="w-full min-w-[840px] border-collapse text-left text-[14px]">
+        <div className={tableCardClassName}>
+          <table className="w-full min-w-[1000px] table-fixed border-collapse text-left text-[13.5px]">
+            <colgroup>
+              <col className="w-[44px]" />
+              <col className="w-[120px]" />
+              <col className="w-[17%]" />
+              <col className="w-[9%]" />
+              <col className="w-[8%]" />
+              <col className="w-[9%]" />
+              <col className="w-[9%]" />
+              <col className="w-[13%]" />
+              <col className="w-[9%]" />
+              <col className="w-[130px]" />
+            </colgroup>
             <thead>
               <tr>
+                <th className={headCellClassName}>STT</th>
                 <th className={headCellClassName}>Mã</th>
-                <th className={headCellClassName}>Tên khóa học</th>
-                <th className={headCellClassName}>Môn</th>
-                <th className={headCellClassName}>Cấp</th>
+                <th className={headCellClassName}>Khóa học</th>
+                <th className={headCellClassName}>Chặng</th>
+                <th className={headCellClassName}>Thời lượng</th>
+                <th className={headCellClassName}>Giá/buổi học</th>
+                <th className={headCellClassName}>Lớp đang diễn ra</th>
                 <th className={headCellClassName}>Chương trình mẫu</th>
-                <th className={headCellClassName}>Lớp</th>
                 <th className={headCellClassName}>Trạng thái</th>
+                <th className={headCellClassName}>
+                  <span className="sr-only">Thao tác</span>
+                </th>
               </tr>
             </thead>
             <tbody>
-              {courses.map((course) => {
-                const classes = classesSummary(course);
-                return (
-                  <tr key={course.id} className="transition-colors hover:bg-cream-100">
-                    <td className={cn(cellClassName, "font-mono text-[13px] text-ink-700")}>
-                      {course.code}
-                    </td>
-                    <td className={cn(cellClassName, "font-extrabold text-ink-900")}>
-                      <Link to={`/courses/${course.id}`} className="hover:text-mint-600">
-                        {course.name}
-                      </Link>
-                    </td>
-                    <td className={cn(cellClassName, "text-ink-700")}>
-                      {course.subject ?? <span className="text-ink-400">—</span>}
-                    </td>
-                    <td className={cn(cellClassName, "text-ink-700")}>
-                      {course.level ?? <span className="text-ink-400">—</span>}
-                    </td>
-                    <td className={cn(cellClassName, "text-ink-700")}>
-                      {course.default_template ? (
-                        `${course.default_template.name} · v${course.default_template.version_no}`
-                      ) : (
-                        <span className="text-ink-400">—</span>
-                      )}
-                    </td>
-                    <td className={cn(cellClassName, "text-ink-700")}>
-                      {classes ?? <span className="text-ink-400">Chưa có lớp</span>}
-                    </td>
-                    <td className={cellClassName}>
-                      <HvBadge variant={courseStatusVariant[course.status]} size="sm" dot>
-                        {courseStatusLabel[course.status]}
-                      </HvBadge>
-                    </td>
-                  </tr>
-                );
-              })}
+              {rows.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={10}
+                    className="border-t border-line-100 p-[30px] text-center font-bold text-ink-400"
+                  >
+                    Không có khóa nào khớp.
+                  </td>
+                </tr>
+              ) : null}
+              {rows.map((course, index) => (
+                <tr
+                  key={course.id}
+                  className="cursor-pointer transition-colors hover:bg-cream-100"
+                  onClick={() => void navigate(`/courses/${course.id}`)}
+                >
+                  <td className={cn(cellClassName, "font-extrabold text-ink-400")}>{index + 1}</td>
+                  <td className={cn(cellClassName, "text-[12.5px] font-extrabold text-ink-500")}>
+                    {course.code}
+                  </td>
+                  <td className={cn(cellClassName, "font-extrabold text-ink-900")}>
+                    {course.name}
+                  </td>
+                  <td className={cn(cellClassName, "text-ink-500")}>
+                    {stages.get(course.id)?.join(", ") ?? "—"}
+                  </td>
+                  <td className={cn(cellClassName, "text-ink-700")}>
+                    {course.duration_min === null ? "—" : `${course.duration_min} phút`}
+                  </td>
+                  <td className={cn(cellClassName, "font-bold")}>
+                    {formatVnd(course.default_unit_price)}
+                  </td>
+                  <td
+                    className={cn(
+                      cellClassName,
+                      "font-extrabold",
+                      course.classes_running > 0 ? "text-mint-600" : "text-ink-300",
+                    )}
+                  >
+                    {course.classes_running > 0 ? `${course.classes_running} lớp` : "—"}
+                  </td>
+                  <td className={cn(cellClassName, "text-[12.5px] text-ink-500")}>
+                    {templateLabel(course)}
+                  </td>
+                  <td className={cellClassName}>
+                    <HvBadge variant={courseStatusVariant[course.status]} size="sm">
+                      {courseStatusLabel[course.status]}
+                    </HvBadge>
+                  </td>
+                  <td className={cellClassName}>
+                    <div className="flex justify-end gap-1.5">
+                      <button
+                        type="button"
+                        title="Sao chép mã"
+                        aria-label={`Sao chép mã ${course.code}`}
+                        className={skyActionClassName}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void copyCourseCode(course.code);
+                        }}
+                      >
+                        Mã
+                      </button>
+                      {canEdit ? (
+                        <button
+                          type="button"
+                          aria-label={`Sửa ${course.name}`}
+                          className={mintActionClassName}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setEditing(course);
+                          }}
+                        >
+                          Sửa
+                        </button>
+                      ) : null}
+                    </div>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
       )}
 
       {canEdit ? (
-        <CourseDialog
-          mode="create"
-          open={creating}
-          onOpenChange={setCreating}
-          onCreated={(course) => {
-            hvToast(`Đã tạo khóa học ${course.code}`);
-            void navigate(`/courses/${course.id}`);
-          }}
-        />
+        <>
+          <CourseDialog
+            mode="create"
+            open={creating}
+            onOpenChange={setCreating}
+            onCreated={(course) => {
+              hvToast(`Đã tạo khóa học ${course.code}`);
+              void navigate(`/courses/${course.id}`);
+            }}
+          />
+          {editing ? (
+            <CourseDialog
+              mode="edit"
+              course={editing}
+              open
+              onOpenChange={(next) => {
+                if (!next) setEditing(null);
+              }}
+              onSaved={() => hvToast("Đã lưu khóa học")}
+            />
+          ) : null}
+        </>
       ) : null}
     </div>
   );

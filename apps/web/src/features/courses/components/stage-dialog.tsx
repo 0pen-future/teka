@@ -72,8 +72,8 @@ export function StageDialog(props: StageDialogProps) {
     <HvModal
       open={open}
       onOpenChange={onOpenChange}
-      title={editing ? "Sửa giai đoạn" : "Thêm giai đoạn"}
-      description="Mỗi giai đoạn gom vài khóa học học sinh nên đi qua trước khi sang giai đoạn sau."
+      title={editing ? "Đổi tên chặng" : "Thêm chặng"}
+      description="Mỗi chặng chứa các khóa học học sinh nên đi qua trước khi sang chặng sau."
       footer={
         <>
           <HvButton type="button" variant="ghost" onClick={() => onOpenChange(false)}>
@@ -88,7 +88,7 @@ export function StageDialog(props: StageDialogProps) {
       <form id={FORM_ID} onSubmit={(event) => void onSubmit(event)} noValidate>
         <FieldGroup>
           <Field data-invalid={Boolean(errors.name)}>
-            <FieldLabel htmlFor="stage-name">Tên giai đoạn</FieldLabel>
+            <FieldLabel htmlFor="stage-name">Tên chặng</FieldLabel>
             <Input
               id="stage-name"
               placeholder="VD: Nền tảng"
@@ -102,7 +102,7 @@ export function StageDialog(props: StageDialogProps) {
             <textarea
               id="stage-goal"
               rows={3}
-              placeholder="Học sinh đạt được gì sau giai đoạn này"
+              placeholder="Học sinh đạt được gì sau chặng này"
               className={textareaClassName}
               aria-invalid={Boolean(errors.goal)}
               {...form.register("goal")}

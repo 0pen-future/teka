@@ -15,6 +15,7 @@ import {
   getCoursesStore,
   resetCoursesStore,
 } from "./courses-handlers";
+import { pathsHandlers, resetPathsStore } from "./paths-handlers";
 
 function renderPage(route = "/courses") {
   return renderWithProviders(<CoursesPage />, {
@@ -32,7 +33,8 @@ function memberWith(...permissions: string[]) {
 
 beforeEach(() => {
   resetCoursesStore();
-  server.use(...coursesHandlers);
+  resetPathsStore();
+  server.use(...coursesHandlers, ...pathsHandlers);
   signInAs(testPrimaryTeacher);
 });
 
@@ -41,48 +43,50 @@ afterEach(() => {
 });
 
 describe("CoursesPage", () => {
-  it("lists every course with code, subject, template and class counts, linking to the detail page", async () => {
-    renderPage();
-    expect(await screen.findByRole("heading", { name: "Danh mục khóa học" })).toBeInTheDocument();
+  it("lists every course with code, stage, duration, price, template and status, opening the detail page", async () => {
+    const user = userEvent.setup();
+    const { router } = renderPage();
+    expect(await screen.findByRole("heading", { name: "Khóa học" })).toBeInTheDocument();
 
     const toan = await screen.findByRole("row", { name: /Toán 6 nền tảng/ });
-    expect(within(toan).getByRole("link", { name: "Toán 6 nền tảng" })).toHaveAttribute(
-      "href",
-      `/courses/${courseToan6.id}`,
-    );
     expect(within(toan).getByText("TOAN-6")).toBeInTheDocument();
-    expect(within(toan).getByText("Toán")).toBeInTheDocument();
-    expect(within(toan).getByText("Lớp 6")).toBeInTheDocument();
+    expect(await within(toan).findByText("Nền tảng")).toBeInTheDocument();
+    expect(within(toan).getByText("90 phút")).toBeInTheDocument();
+    expect(within(toan).getByText("1 lớp")).toBeInTheDocument();
     expect(within(toan).getByText("Toán 6 cơ bản · v1")).toBeInTheDocument();
-    expect(within(toan).getByText("1 đang học")).toBeInTheDocument();
-    expect(within(toan).getByText("Đang mở")).toBeInTheDocument();
+    expect(within(toan).getByText("Đang hoạt động")).toBeInTheDocument();
 
     const van = screen.getByRole("row", { name: /Văn 9 luyện thi/ });
-    expect(within(van).getByText("Đang soạn")).toBeInTheDocument();
-    expect(within(van).getAllByText("—")).toHaveLength(2);
-    expect(within(van).getByText("Chưa có lớp")).toBeInTheDocument();
+    expect(within(van).getByText("Nháp")).toBeInTheDocument();
+    expect(within(van).getByText("Chưa gắn")).toBeInTheDocument();
+    expect(within(van).getAllByText("—")).toHaveLength(3);
+
+    await user.click(within(toan).getByText("Toán 6 nền tảng"));
+    expect(await screen.findByText("course-detail-stub")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe(`/courses/${courseToan6.id}`);
   });
 
-  it("filters by status through the query string", async () => {
+  it("filters by status through the query string, with counts on each chip", async () => {
     const user = userEvent.setup();
     const { router } = renderPage();
     await screen.findByRole("row", { name: /Toán 6 nền tảng/ });
 
-    await user.click(screen.getByRole("tab", { name: "Đang soạn" }));
+    expect(screen.getByRole("radio", { name: /Tất cả/ })).toHaveTextContent("2");
+    await user.click(screen.getByRole("radio", { name: /Đang hoạt động/ }));
 
     await waitFor(() =>
-      expect(screen.queryByRole("row", { name: /Toán 6 nền tảng/ })).not.toBeInTheDocument(),
+      expect(screen.queryByRole("row", { name: /Văn 9 luyện thi/ })).not.toBeInTheDocument(),
     );
-    expect(screen.getByRole("row", { name: /Văn 9 luyện thi/ })).toBeInTheDocument();
-    expect(router.state.location.search).toBe("?status=draft");
+    expect(screen.getByRole("row", { name: /Toán 6 nền tảng/ })).toBeInTheDocument();
+    expect(router.state.location.search).toBe("?status=active");
   });
 
-  it("searches by name after the debounce", async () => {
+  it("searches by name or code as you type", async () => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByRole("row", { name: /Toán 6 nền tảng/ });
 
-    await user.type(screen.getByRole("searchbox", { name: "Tìm khóa học" }), "văn");
+    await user.type(screen.getByRole("searchbox", { name: "Tìm khóa học" }), "van-9");
 
     await waitFor(() =>
       expect(screen.queryByRole("row", { name: /Toán 6 nền tảng/ })).not.toBeInTheDocument(),
@@ -95,7 +99,7 @@ describe("CoursesPage", () => {
     renderPage();
     await screen.findByRole("row", { name: /Toán 6 nền tảng/ });
 
-    await user.click(screen.getByRole("button", { name: "Tạo khóa học" }));
+    await user.click(screen.getByRole("button", { name: "+ Tạo khóa học" }));
     const dialog = await screen.findByRole("dialog", { name: "Tạo khóa học" });
     await user.type(within(dialog).getByLabelText("Mã khóa học"), "ly-8");
     await user.type(within(dialog).getByLabelText("Tên khóa học"), "Lý 8 nâng cao");
@@ -125,7 +129,7 @@ describe("CoursesPage", () => {
     renderPage();
     await screen.findByRole("row", { name: /Toán 6 nền tảng/ });
 
-    await user.click(screen.getByRole("button", { name: "Tạo khóa học" }));
+    await user.click(screen.getByRole("button", { name: "+ Tạo khóa học" }));
     const dialog = await screen.findByRole("dialog", { name: "Tạo khóa học" });
     await user.type(within(dialog).getByLabelText("Mã khóa học"), "TOAN-6");
     await user.type(within(dialog).getByLabelText("Tên khóa học"), "Trùng mã");
@@ -137,15 +141,26 @@ describe("CoursesPage", () => {
     expect(within(dialog).getByLabelText("Mã khóa học")).toHaveAttribute("aria-invalid", "true");
   });
 
-  it("hides the create button from a member who can only read", async () => {
+  it("edits a course from its row without opening the detail page", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    const toan = await screen.findByRole("row", { name: /Toán 6 nền tảng/ });
+
+    await user.click(within(toan).getByRole("button", { name: "Sửa Toán 6 nền tảng" }));
+    expect(await screen.findByRole("dialog", { name: "Sửa khóa học" })).toBeInTheDocument();
+    expect(screen.queryByText("course-detail-stub")).not.toBeInTheDocument();
+  });
+
+  it("hides the create and edit buttons from a member who can only read", async () => {
     server.use(memberWith("courses.read"));
     renderPage();
     await screen.findByRole("row", { name: /Toán 6 nền tảng/ });
-    expect(screen.queryByRole("button", { name: "Tạo khóa học" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "+ Tạo khóa học" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Sửa / })).not.toBeInTheDocument();
   });
 
-  it("shows the empty block when no course matches the filter", async () => {
+  it("says so inside the table when no course matches the filter", async () => {
     renderPage("/courses?status=archived");
-    expect(await screen.findByText("Không có khóa học nào ở trạng thái này.")).toBeInTheDocument();
+    expect(await screen.findByText("Không có khóa nào khớp.")).toBeInTheDocument();
   });
 });

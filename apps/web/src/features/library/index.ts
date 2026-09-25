@@ -6,6 +6,7 @@ export {
   useLessons,
   useTemplate,
   useTemplatesList,
+  useVersionDetail,
   useVersions,
   versionsKeys,
 } from "./hooks/use-library";
@@ -22,9 +23,11 @@ export type {
 export {
   defaultVersion,
   formatDifficulty,
+  materialFormatLabel,
   materialKindLabel,
   versionLabel,
   versionStatusLabel,
+  versionStatusVariant,
 } from "./lib/library-labels";
 export { rowErrorsFromApi } from "./lib/row-errors";
 export type { RowErrors } from "./lib/row-errors";
