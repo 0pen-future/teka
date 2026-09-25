@@ -1,12 +1,32 @@
 import { http, HttpResponse } from "msw";
 
 import type { AttendanceRow, Session } from "@/features/attendance";
-import { API_URL, fail, listMeta, ok } from "@/test/msw/handlers";
+import type { AuditLog } from "@/features/audit";
+import {
+  exerciseBai1,
+  exerciseBai2,
+  lessonPublishedPhanSo,
+  lessonPublishedSoTuNhien,
+  materialSlide,
+  materialVideo,
+  templateToan6,
+  versionToan6Published,
+} from "@/features/library/__tests__/library-handlers";
+import {
+  API_URL,
+  defaultMemberDirectory,
+  fail,
+  listMeta,
+  ok,
+  primaryTeacher,
+} from "@/test/msw/handlers";
 
 type AttendanceStatus = NonNullable<AttendanceRow["status"]>;
 
+import type { ClassLesson, ClassMessage, ClassProgram } from "../schemas/class-program-schemas";
 import type {
   Class,
+  ClassInvitation,
   ClassStaff,
   Contact,
   Enrollment,
@@ -85,6 +105,114 @@ export const classWithSchedule: Class = {
   created_at: "2026-01-01T08:00:00Z",
   my_staff_roles: [],
   student_count: 0,
+  code: "TOAN6A",
+  tags: ["Toán", "Khối 6"],
+  recruiting: false,
+  note: null,
+  phase: "running",
+  course: null,
+  parent_class_id: null,
+  lineage_note: null,
+  room: "",
+  study_mode: "scheduled",
+  next_class_id: null,
+};
+
+/** A second, ended class the lineage card can point at as the parent. */
+export const classParentToan5: Class = {
+  ...classWithSchedule,
+  id: "70000000-0000-4000-8000-000000000002",
+  name: "Toán 5B",
+  code: "TOAN5B",
+  start_date: "2025-01-06",
+  end_date: "2025-12-20",
+  phase: "ended",
+  tags: [],
+  schedules: [],
+};
+
+/**
+ * The published Toán 6 version applied to a class, as `GET /classes/:id/program`
+ * answers it; the lessons read through are the library fixtures' published rows
+ * with their materials (one shared, one not) and exercises.
+ */
+export const programToan6: ClassProgram = {
+  template_version_id: versionToan6Published.id,
+  template_id: templateToan6.id,
+  template_name: templateToan6.name,
+  version_no: versionToan6Published.version_no,
+  version_status: "published",
+  lesson_count: 2,
+  applied_at: "2026-09-15T08:00:00Z",
+  applied_by: primaryTeacher.id,
+};
+
+export const programLessonsToan6: ClassLesson[] = [
+  {
+    ...lessonPublishedSoTuNhien,
+    materials: [
+      { ...materialSlide, shared_with_students: false, position: 1 },
+      { ...materialVideo, shared_with_students: true, position: 2 },
+    ],
+    exercises: [{ ...exerciseBai1, group_id: null, position: 1 }],
+  },
+  {
+    ...lessonPublishedPhanSo,
+    materials: [],
+    exercises: [{ ...exerciseBai2, group_id: null, position: 1 }],
+  },
+];
+
+export const messageFromMinh: ClassMessage = {
+  id: "76000000-0000-4000-8000-000000000001",
+  class_id: classWithSchedule.id,
+  author_id: "73000000-0000-4000-8000-000000000002",
+  author_name: "Thầy Minh",
+  body: "Tuần này kiểm tra 15 phút nhé.",
+  created_at: "2026-09-20T08:00:00Z",
+};
+
+export const messageFromLan: ClassMessage = {
+  id: "76000000-0000-4000-8000-000000000002",
+  class_id: classWithSchedule.id,
+  author_id: primaryTeacher.id,
+  author_name: primaryTeacher.full_name,
+  body: "Đã nhận, cảm ơn thầy.",
+  created_at: "2026-09-21T08:00:00Z",
+};
+
+export const auditLogClassUpdate: AuditLog = {
+  id: "77000000-0000-4000-8000-000000000001",
+  occurred_at: "2026-09-22T09:30:00Z",
+  actor_user_id: primaryTeacher.id,
+  actor_name: primaryTeacher.full_name,
+  actor_role: "owner",
+  action: "class.update",
+  method: "PUT",
+  path: `/api/v1/classes/${classWithSchedule.id}`,
+  entity_type: "class",
+  entity_id: classWithSchedule.id,
+  status_code: 200,
+  ip: "127.0.0.1",
+  user_agent: "vitest",
+  metadata: null,
+};
+
+/**
+ * Active-course rows for the class dialog's picker (`GET /courses`), shaped
+ * like `courses.CourseResponse` only as far as the roster lookup reads them.
+ */
+export const courseOptionToan = {
+  id: "90000000-0000-4000-8000-000000000001",
+  code: "TOAN-6",
+  name: "Toán 6 nền tảng",
+  default_unit_price: 180000,
+};
+export const courseOptionVan = {
+  id: "90000000-0000-4000-8000-000000000002",
+  code: "VAN-9",
+  name: "Văn 9 luyện thi",
+  default_unit_price: 200000,
 };
 
 /**
@@ -163,6 +291,68 @@ function makeSession(day: number, status: Session["status"]): Session {
   };
 }
 
+// --- Class invitations ---
+// One pending tro_giang invite (Cô Hương) and one accepted giao_vien invite
+// (Thầy Nam) on the seeded class: the accepted giao_vien row is the one whose
+// owner confirm hands the class over from Cô Lan.
+
+export const invitationPendingTroGiang: ClassInvitation = {
+  id: "a0000000-0000-4000-8000-000000000001",
+  class_id: classWithSchedule.id,
+  class_name: classWithSchedule.name,
+  course_name: null,
+  teacher_id: staffCandidateTroGiang.id,
+  teacher_name: staffCandidateTroGiang.full_name,
+  role_key: "tro_giang",
+  role_label: "Trợ giảng",
+  status: "pending",
+  invited_by: classWithSchedule.teacher_id,
+  invited_by_name: "Cô Lan",
+  message: "Nhờ cô hỗ trợ lớp tối thứ ba nhé.",
+  sent_at: "2026-09-20T08:00:00Z",
+  reminded_at: null,
+  responded_at: null,
+  assigned_at: null,
+};
+
+export const invitationAcceptedGiaoVien: ClassInvitation = {
+  id: "a0000000-0000-4000-8000-000000000002",
+  class_id: classWithSchedule.id,
+  class_name: classWithSchedule.name,
+  course_name: null,
+  teacher_id: staffCandidateHocVu.id,
+  teacher_name: staffCandidateHocVu.full_name,
+  role_key: "giao_vien",
+  role_label: "Giáo viên",
+  status: "accepted",
+  invited_by: classWithSchedule.teacher_id,
+  invited_by_name: "Cô Lan",
+  message: null,
+  sent_at: "2026-09-18T08:00:00Z",
+  reminded_at: null,
+  responded_at: "2026-09-19T09:30:00Z",
+  assigned_at: null,
+};
+
+export const invitationDeclined: ClassInvitation = {
+  id: "a0000000-0000-4000-8000-000000000003",
+  class_id: classWithSchedule.id,
+  class_name: classWithSchedule.name,
+  course_name: null,
+  teacher_id: "73000000-0000-4000-8000-000000000004",
+  teacher_name: "Cô Hoa",
+  role_key: "hoc_vu",
+  role_label: "Học vụ",
+  status: "declined",
+  invited_by: classWithSchedule.teacher_id,
+  invited_by_name: "Cô Lan",
+  message: null,
+  sent_at: "2026-09-10T08:00:00Z",
+  reminded_at: null,
+  responded_at: "2026-09-11T10:00:00Z",
+  assigned_at: null,
+};
+
 // --- In-memory store, reset before each test in the suite's beforeEach ---
 
 export function seedRosterStore() {
@@ -173,6 +363,11 @@ export function seedRosterStore() {
     })),
     classes: [{ ...classWithSchedule, schedules: [{ ...classSchedule }] }],
     classStaff: [{ ...classStaffGiaoVien }],
+    classInvitations: [
+      { ...invitationPendingTroGiang },
+      { ...invitationAcceptedGiaoVien },
+      { ...invitationDeclined },
+    ],
     enrollments: [{ ...enrollmentActive }],
     // Four countable sessions this month plus one cancelled — the BUỔI T{m}
     // column must skip the cancelled one.
@@ -189,13 +384,27 @@ export function seedRosterStore() {
     // sessionId → studentId → explicit attendance status; wins over `absences`
     // so tests can stage `late`/`excused` rows the boolean list cannot express.
     attendanceStatus: {} as Record<string, Record<string, AttendanceStatus>>,
+    // The applied template version, if any; tests set `programToan6` to
+    // exercise the read-through tabs. `curriculumDiffers` stages the 409 an
+    // apply gets while the class keeps a different lesson list.
+    program: null as ClassProgram | null,
+    programLessons: [] as ClassLesson[],
+    curriculumDiffers: false,
+    // courseId → default template version the course recommends.
+    courseDefaultVersion: {} as Record<string, string | null>,
+    // Newest last; the handler reverses and pages them.
+    messages: [] as ClassMessage[],
+    messagesPageSize: 20,
+    auditLogs: [] as AuditLog[],
   };
 }
 
 let store = seedRosterStore();
+syncNextLinks();
 
 export function resetRosterStore() {
   store = seedRosterStore();
+  syncNextLinks();
 }
 
 /** Read-only peek for asserting what a flow actually persisted. */
@@ -209,7 +418,77 @@ function nextId(prefix: string) {
   return `${prefix}${String(idCounter).padStart(8, "0")}`;
 }
 
+/** Mirrors the API's derived `next_class_id`: the first live child that names the class as parent. */
+function syncNextLinks() {
+  for (const klass of store.classes) {
+    klass.next_class_id =
+      store.classes.find((child) => child.status === "active" && child.parent_class_id === klass.id)
+        ?.id ?? null;
+  }
+}
+
+/** Mirrors the API's recruiting filter: the flag is on and the class has not ended or been archived. */
+function openForRecruitment(klass: Class) {
+  return klass.recruiting && (klass.phase === "upcoming" || klass.phase === "running");
+}
+
+function minutesOf(time: string) {
+  return Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
+}
+
+/**
+ * Mirrors `GET /classes/availability`: a slot is busy when another live class
+ * has a still-active row on that weekday whose time range overlaps it.
+ */
+function availabilityFor(slots: string[], excludeClassId: string | null) {
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const wanted = slots.map((slot) => {
+    const [weekday = "", time = "", duration = ""] = slot.split("-");
+    const start = minutesOf(time);
+    return { weekday: Number(weekday), start, end: start + Number(duration) };
+  });
+  const live = store.classes.filter((klass) => klass.status === "active");
+  const busy = live.filter(
+    (klass) =>
+      klass.id !== excludeClassId &&
+      klass.schedules.some((row) => {
+        if (row.effective_to !== null && row.effective_to < todayIso) return false;
+        const start = minutesOf(row.start_time);
+        return wanted.some(
+          (slot) =>
+            slot.weekday === row.weekday &&
+            slot.start < start + row.duration_min &&
+            start < slot.end,
+        );
+      }),
+  );
+  const rooms = [...new Set(live.map((klass) => klass.room).filter(Boolean))].sort();
+  const busyRooms = new Set(busy.map((klass) => klass.room));
+  const busyTeachers = new Set(busy.map((klass) => klass.teacher_id));
+  return {
+    rooms: rooms.map((name) => ({ name, free: !busyRooms.has(name) })),
+    teachers: defaultMemberDirectory.map((member) => ({
+      teacher_id: member.teacher_id,
+      name: member.display_name,
+      free: !busyTeachers.has(member.teacher_id),
+    })),
+  };
+}
+
+/** Mirrors the API's shift bounds: before 12:00 morning, before 17:30 afternoon, else evening. */
+function shiftOf(startTime: string): "morning" | "afternoon" | "evening" {
+  if (startTime < "12:00") return "morning";
+  if (startTime < "17:30") return "afternoon";
+  return "evening";
+}
+
 /** Treats an empty-string form value the same as an absent one (`??` alone would not). */
+/** The chip a class carries for the picked course; unknown or blank ids leave it unattached. */
+function courseRefOf(courseId: string | undefined): Class["course"] {
+  const course = [courseOptionToan, courseOptionVan].find((option) => option.id === courseId);
+  return course ? { id: course.id, code: course.code, name: course.name } : null;
+}
+
 function orNull(value: string | null | undefined): string | null {
   if (!value) {
     return null;
@@ -390,13 +669,54 @@ export const rosterHandlers = [
   http.get(`${API_URL}/classes`, ({ request }) => {
     const url = new URL(request.url);
     const status = url.searchParams.get("status");
+    const phase = url.searchParams.get("phase");
+    const q = url.searchParams.get("q")?.toLowerCase() ?? "";
+    const weekday = url.searchParams.get("weekday");
+    const shift = url.searchParams.get("shift");
+    const tag = url.searchParams.get("tag");
+    const courseId = url.searchParams.get("course_id");
+    const recruiting = url.searchParams.get("recruiting") === "true";
     const items = store.classes
       .filter((klass) => {
-        if (!status || status === "all") return true;
-        return klass.status === status;
+        if (status && status !== "all" && klass.status !== status) return false;
+        if (phase && klass.phase !== phase) return false;
+        if (recruiting && !openForRecruitment(klass)) return false;
+        if (courseId && klass.course?.id !== courseId) return false;
+        if (q && !klass.name.toLowerCase().includes(q) && !klass.code.toLowerCase().includes(q)) {
+          return false;
+        }
+        if (tag && !klass.tags.includes(tag)) return false;
+        if (weekday || shift) {
+          return klass.schedules.some(
+            (schedule) =>
+              (!weekday || String(schedule.weekday) === weekday) &&
+              (!shift || shiftOf(schedule.start_time) === shift),
+          );
+        }
+        return true;
       })
       .map(withStudentCount);
     return HttpResponse.json(ok(items, listMeta(items.length)));
+  }),
+  http.get(`${API_URL}/classes/availability`, ({ request }) => {
+    const url = new URL(request.url);
+    return HttpResponse.json(
+      ok(
+        availabilityFor(url.searchParams.getAll("slot"), url.searchParams.get("exclude_class_id")),
+      ),
+    );
+  }),
+  // Before `/classes/:id`, which would otherwise swallow "stats" as an id.
+  http.get(`${API_URL}/classes/stats`, ({ request }) => {
+    const recruitingOnly = new URL(request.url).searchParams.get("recruiting") === "true";
+    const counts = { all: 0, upcoming: 0, running: 0, ended: 0, archived: 0, recruiting: 0 };
+    for (const klass of store.classes) {
+      if (recruitingOnly && !openForRecruitment(klass)) continue;
+      counts.all += 1;
+      counts[klass.phase] += 1;
+      if (openForRecruitment(klass)) counts.recruiting += 1;
+    }
+    return HttpResponse.json(ok(counts));
   }),
   http.get(`${API_URL}/classes/:id`, ({ params }) => {
     const klass = store.classes.find((item) => item.id === params.id);
@@ -408,13 +728,27 @@ export const rosterHandlers = [
   http.post(`${API_URL}/classes`, async ({ request }) => {
     const body = (await request.json()) as Omit<
       Class,
-      "id" | "status" | "schedules" | "created_at"
+      "id" | "status" | "schedules" | "created_at" | "code" | "tags" | "note" | "phase"
     > & {
       schedules: Omit<Schedule, "id">[];
+      code?: string;
+      tags?: string[];
+      note?: string;
+      course_id?: string;
     };
     const klass: Class = {
       id: nextId("class-"),
       name: body.name,
+      code:
+        (body.code ?? "").trim() !== ""
+          ? body.code!
+          : `L${String(store.classes.length + 1).padStart(5, "0")}`,
+      tags: body.tags ?? [],
+      recruiting: false,
+      note: orNull(body.note),
+      // The fixture never dates a new class into the past, so it opens as
+      // upcoming unless it starts today or earlier.
+      phase: body.start_date <= new Date().toISOString().slice(0, 10) ? "running" : "upcoming",
       // The API assigns a new class to the creating teacher; the fixture
       // roster runs under one owner, so a single stable id stands in.
       teacher_id: "73000000-0000-4000-8000-000000000001",
@@ -430,6 +764,12 @@ export const rosterHandlers = [
       created_at: new Date().toISOString(),
       my_staff_roles: [],
       student_count: 0,
+      course: courseRefOf(body.course_id),
+      parent_class_id: null,
+      lineage_note: null,
+      room: "",
+      study_mode: "scheduled",
+      next_class_id: null,
     };
     store.classes.push(klass);
     return HttpResponse.json(ok(klass), { status: 201 });
@@ -444,12 +784,54 @@ export const rosterHandlers = [
       start_date: string;
       end_date?: string;
       default_unit_price: number;
+      code?: string;
+      tags?: string[];
+      recruiting?: boolean;
+      note?: string;
+      course_id?: string;
+      parent_class_id?: string;
+      lineage_note?: string;
+      room?: string;
+      study_mode?: Class["study_mode"];
+      next_class_id?: string;
     };
+    if (body.next_class_id && body.next_class_id === klass.id) {
+      return HttpResponse.json(
+        fail("VALIDATION_FAILED", "invalid", {
+          next_class_id: "Lớp sau không thể là chính lớp này",
+        }),
+        { status: 422 },
+      );
+    }
     klass.name = body.name;
     klass.start_date = body.start_date;
     klass.end_date = orNull(body.end_date);
     klass.default_unit_price = body.default_unit_price;
-    return HttpResponse.json(ok(klass));
+    // Catalog fields are pointers server-side: absent means unchanged.
+    if (body.code !== undefined) klass.code = body.code;
+    if (body.tags !== undefined) klass.tags = body.tags;
+    if (body.recruiting !== undefined) klass.recruiting = body.recruiting;
+    if (body.note !== undefined) klass.note = orNull(body.note);
+    // Same patch rule as the API: absent keeps, "" detaches, an id attaches.
+    if (body.course_id !== undefined) klass.course = courseRefOf(body.course_id);
+    if (body.parent_class_id !== undefined) klass.parent_class_id = orNull(body.parent_class_id);
+    if (body.lineage_note !== undefined) klass.lineage_note = orNull(body.lineage_note);
+    if (body.room !== undefined) klass.room = body.room;
+    if (body.study_mode !== undefined) klass.study_mode = body.study_mode;
+    // "" unlinks every child; an id makes that class the single child.
+    if (body.next_class_id !== undefined) {
+      for (const child of store.classes) {
+        if (child.parent_class_id === klass.id) child.parent_class_id = null;
+      }
+      const target = store.classes.find((item) => item.id === body.next_class_id);
+      if (target) target.parent_class_id = klass.id;
+    }
+    syncNextLinks();
+    return HttpResponse.json(ok(withStudentCount(klass)));
+  }),
+  http.get(`${API_URL}/courses`, () => {
+    const items = [courseOptionToan, courseOptionVan];
+    return HttpResponse.json(ok(items, listMeta(items.length)));
   }),
   http.put(`${API_URL}/classes/:id/teacher`, async ({ params, request }) => {
     const klass = store.classes.find((item) => item.id === params.id);
@@ -701,4 +1083,255 @@ export const rosterHandlers = [
     enrollment.ended_on = orToday(body.ended_on);
     return HttpResponse.json(ok(enrollment));
   }),
+
+  // --- Class invitations ---
+  // Mirrors `classinvites.Service`: members only ever see rows addressed to
+  // them, the owner sees every row; the invitee answers, the owner cancels,
+  // reminds and confirms. Confirm writes the stint the API would — a
+  // giao_vien confirm closes the old teacher's stint and repoints the class.
+  http.get(`${API_URL}/class-invitations`, ({ request }) => {
+    const url = new URL(request.url);
+    const status = url.searchParams.get("status");
+    const classId = url.searchParams.get("class_id");
+    const items = store.classInvitations.filter(
+      (item) => (!status || item.status === status) && (!classId || item.class_id === classId),
+    );
+    return HttpResponse.json(ok(items));
+  }),
+  http.post(`${API_URL}/classes/:classId/invitations`, async ({ params, request }) => {
+    const body = (await request.json()) as {
+      teacher_id: string;
+      role_key: string;
+      message?: string | null;
+    };
+    const klass = store.classes.find((item) => item.id === params.classId);
+    if (!klass) {
+      return HttpResponse.json(fail("NOT_FOUND", "class not found"), { status: 404 });
+    }
+    if (body.teacher_id === klass.teacher_id) {
+      return HttpResponse.json(fail("SELF_INVITE", "không thể tự mời chính mình"), {
+        status: 422,
+      });
+    }
+    const pending = store.classInvitations.some(
+      (item) =>
+        item.class_id === klass.id &&
+        item.teacher_id === body.teacher_id &&
+        item.status === "pending",
+    );
+    if (pending) {
+      return HttpResponse.json(fail("CONFLICT", "thành viên này đã có lời mời đang chờ"), {
+        status: 409,
+      });
+    }
+    const invitation: ClassInvitation = {
+      id: nextId("invitation-"),
+      class_id: klass.id,
+      class_name: klass.name,
+      course_name: klass.course?.name ?? null,
+      teacher_id: body.teacher_id,
+      teacher_name: staffMemberNames[body.teacher_id] ?? "Thành viên",
+      role_key: body.role_key,
+      role_label: STAFF_ROLE_LABELS[body.role_key] ?? body.role_key,
+      status: "pending",
+      invited_by: klass.teacher_id,
+      invited_by_name: "Cô Lan",
+      message: body.message ?? null,
+      sent_at: new Date().toISOString(),
+      reminded_at: null,
+      responded_at: null,
+      assigned_at: null,
+    };
+    store.classInvitations.push(invitation);
+    return HttpResponse.json(ok(invitation), { status: 201 });
+  }),
+  http.post(`${API_URL}/class-invitations/:id/accept`, ({ params }) =>
+    transitionInvitation(String(params.id), ["pending"], "accepted"),
+  ),
+  http.post(`${API_URL}/class-invitations/:id/decline`, ({ params }) =>
+    transitionInvitation(String(params.id), ["pending"], "declined"),
+  ),
+  http.post(`${API_URL}/class-invitations/:id/cancel`, ({ params }) =>
+    transitionInvitation(String(params.id), ["pending", "accepted"], "cancelled"),
+  ),
+  http.post(`${API_URL}/class-invitations/:id/remind`, ({ params }) => {
+    const invitation = store.classInvitations.find((item) => item.id === params.id);
+    if (invitation?.status !== "pending") {
+      return HttpResponse.json(fail("CONFLICT", "lời mời không còn chờ"), { status: 409 });
+    }
+    invitation.reminded_at = new Date().toISOString();
+    return HttpResponse.json(ok(invitation));
+  }),
+  http.post(`${API_URL}/class-invitations/:id/confirm`, ({ params }) => {
+    const invitation = store.classInvitations.find((item) => item.id === params.id);
+    if (!invitation || !["pending", "accepted"].includes(invitation.status)) {
+      return HttpResponse.json(fail("CONFLICT", "lời mời không còn hiệu lực"), { status: 409 });
+    }
+    const now = new Date().toISOString();
+    let moved = 0;
+    if (invitation.role_key === "giao_vien") {
+      const klass = store.classes.find((item) => item.id === invitation.class_id);
+      for (const stint of store.classStaff) {
+        if (
+          stint.class_id === invitation.class_id &&
+          stint.role_key === "giao_vien" &&
+          stint.ended_at === null
+        ) {
+          stint.ended_at = now;
+        }
+      }
+      if (klass) {
+        klass.teacher_id = invitation.teacher_id;
+      }
+      moved = store.sessions.filter(
+        (session) => session.class_id === invitation.class_id && session.status === "planned",
+      ).length;
+    }
+    store.classStaff.push({
+      id: nextId("staff-"),
+      class_id: invitation.class_id,
+      teacher_id: invitation.teacher_id,
+      teacher_name: invitation.teacher_name,
+      role_key: invitation.role_key,
+      role_label: invitation.role_label,
+      started_at: now,
+      ended_at: null,
+    });
+    invitation.status = "assigned";
+    invitation.assigned_at = now;
+    return HttpResponse.json(ok({ ...invitation, moved_planned_sessions: moved }));
+  }),
+
+  // --- Class program (template version applied to the class) ---
+  http.get(`${API_URL}/classes/:id/program`, ({ params }) => {
+    if (!store.classes.some((item) => item.id === params.id)) {
+      return HttpResponse.json(fail("NOT_FOUND", "class not found"), { status: 404 });
+    }
+    // The real envelope drops `data` for a nil payload instead of sending null.
+    return HttpResponse.json(store.program ? ok(store.program) : { success: true });
+  }),
+  http.get(`${API_URL}/classes/:id/program/lessons`, ({ params }) => {
+    if (!store.classes.some((item) => item.id === params.id)) {
+      return HttpResponse.json(fail("NOT_FOUND", "class not found"), { status: 404 });
+    }
+    return HttpResponse.json(ok(store.program ? store.programLessons : []));
+  }),
+  http.put(`${API_URL}/classes/:id/program`, async ({ params, request }) => {
+    if (!store.classes.some((item) => item.id === params.id)) {
+      return HttpResponse.json(fail("NOT_FOUND", "class not found"), { status: 404 });
+    }
+    const body = (await request.json()) as { template_version_id: string; confirm?: boolean };
+    if (store.curriculumDiffers && !body.confirm) {
+      return HttpResponse.json(
+        fail("CURRICULUM_DIFFERS", "Chương trình hiện tại của lớp khác với chương trình mẫu", {
+          current_count: "3",
+          template_count: "2",
+        }),
+        { status: 409 },
+      );
+    }
+    store.program = { ...programToan6, template_version_id: body.template_version_id };
+    store.programLessons = programLessonsToan6.map((lesson) => ({ ...lesson }));
+    store.curriculumDiffers = false;
+    return HttpResponse.json(ok(store.program));
+  }),
+  http.delete(`${API_URL}/classes/:id/program`, ({ params }) => {
+    if (!store.classes.some((item) => item.id === params.id) || store.program === null) {
+      return HttpResponse.json(fail("NOT_FOUND", "program not found"), { status: 404 });
+    }
+    store.program = null;
+    store.programLessons = [];
+    return HttpResponse.json(ok({ deleted: true }));
+  }),
+  http.get(`${API_URL}/courses/:id`, ({ params }) => {
+    const course = [courseOptionToan, courseOptionVan].find((item) => item.id === params.id);
+    if (!course) {
+      return HttpResponse.json(fail("NOT_FOUND", "course not found"), { status: 404 });
+    }
+    return HttpResponse.json(
+      ok({
+        ...course,
+        default_template_version_id: store.courseDefaultVersion[course.id] ?? null,
+      }),
+    );
+  }),
+
+  // --- Class chat ---
+  http.get(`${API_URL}/classes/:id/messages`, ({ params, request }) => {
+    if (!store.classes.some((item) => item.id === params.id)) {
+      return HttpResponse.json(fail("NOT_FOUND", "class not found"), { status: 404 });
+    }
+    const before = new URL(request.url).searchParams.get("before");
+    const newestFirst = [...store.messages].reverse();
+    const start = before ? newestFirst.findIndex((item) => item.id === before) + 1 : 0;
+    const page = newestFirst.slice(start, start + store.messagesPageSize);
+    const hasMore = start + page.length < newestFirst.length;
+    return HttpResponse.json(
+      ok({ items: page, next_cursor: hasMore ? page[page.length - 1]!.id : "" }),
+    );
+  }),
+  http.post(`${API_URL}/classes/:id/messages`, async ({ params, request }) => {
+    if (!store.classes.some((item) => item.id === params.id)) {
+      return HttpResponse.json(fail("NOT_FOUND", "class not found"), { status: 404 });
+    }
+    const body = (await request.json()) as { body: string };
+    if (body.body.trim() === "") {
+      return HttpResponse.json(
+        fail("VALIDATION_ERROR", "Dữ liệu không hợp lệ", { body: "Bắt buộc nhập nội dung" }),
+        { status: 422 },
+      );
+    }
+    const message: ClassMessage = {
+      id: nextId("76000000-0000-4000-8000-"),
+      class_id: String(params.id),
+      author_id: primaryTeacher.id,
+      author_name: primaryTeacher.full_name,
+      body: body.body,
+      created_at: new Date().toISOString(),
+    };
+    store.messages.push(message);
+    return HttpResponse.json(ok(message), { status: 201 });
+  }),
+  http.delete(`${API_URL}/classes/:id/messages/:mid`, ({ params }) => {
+    const index = store.messages.findIndex((item) => item.id === params.mid);
+    if (index === -1) {
+      return HttpResponse.json(fail("NOT_FOUND", "message not found"), { status: 404 });
+    }
+    store.messages.splice(index, 1);
+    return HttpResponse.json(ok({ deleted: true }));
+  }),
+
+  // --- Change history of one record ---
+  http.get(`${API_URL}/audit-logs`, ({ request }) => {
+    const url = new URL(request.url);
+    const entityType = url.searchParams.get("entity_type");
+    const entityId = url.searchParams.get("entity_id");
+    const items = store.auditLogs.filter(
+      (log) =>
+        (!entityType || log.entity_type === entityType) &&
+        (!entityId || log.entity_id === entityId),
+    );
+    return HttpResponse.json(ok({ items, next_cursor: "" }));
+  }),
 ];
+
+const STAFF_ROLE_LABELS: Record<string, string> = {
+  giao_vien: "Giáo viên",
+  hoc_vu: "Học vụ",
+  tro_giang: "Trợ giảng",
+};
+
+function transitionInvitation(id: string, from: string[], to: ClassInvitation["status"]) {
+  const invitation = store.classInvitations.find((item) => item.id === id);
+  if (!invitation) {
+    return HttpResponse.json(fail("NOT_FOUND", "invitation not found"), { status: 404 });
+  }
+  if (!from.includes(invitation.status)) {
+    return HttpResponse.json(fail("CONFLICT", "lời mời không còn ở trạng thái này"), {
+      status: 409,
+    });
+  }
+  invitation.status = to;
+  invitation.responded_at = new Date().toISOString();
+  return HttpResponse.json(ok(invitation));
+}

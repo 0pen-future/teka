@@ -4,13 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/shared/apperror"
 	"teka/apps/api/internal/shared/authctx"
+	"teka/apps/api/internal/shared/classcode"
+	"teka/apps/api/internal/shared/dbtypes"
 	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/shared/pagination"
 )
@@ -62,16 +68,40 @@ func (s *Service) CreateAnchored(ctx context.Context, a authctx.Anchor, req Crea
 	if err != nil {
 		return nil, err
 	}
+	if err := validateDateRange(startDate, endDate); err != nil {
+		return nil, err
+	}
+	studyMode := req.StudyMode
+	if studyMode == "" {
+		studyMode = StudyModeScheduled
+	}
+	switch {
+	case studyMode == StudyModeSelfPaced && len(req.Schedules) > 0:
+		return nil, apperror.Invalid("validation failed",
+			map[string]string{"schedules": "must be empty for a self_paced class"})
+	case studyMode == StudyModeScheduled && len(req.Schedules) == 0:
+		return nil, apperror.Invalid("validation failed",
+			map[string]string{"schedules": "is required for a scheduled class"})
+	}
+
+	code, err := s.resolveCode(ctx, a, req.Code, uuid.Nil)
+	if err != nil {
+		return nil, err
+	}
 
 	class := &Class{
-		ID:               id.New(),
-		TeacherID:        a.TeacherID,
-		CenterID:         a.CenterID,
-		Name:             req.Name,
-		StartDate:        startDate,
-		EndDate:          endDate,
-		DefaultUnitPrice: *req.DefaultUnitPrice,
-		Status:           StatusActive,
+		ID:        id.New(),
+		TeacherID: a.TeacherID,
+		CenterID:  a.CenterID,
+		Name:      req.Name,
+		StartDate: startDate,
+		EndDate:   endDate,
+		Status:    StatusActive,
+		Code:      code,
+		Tags:      tagList(req.Tags),
+		Note:      noteValue(req.Note),
+		Room:      req.Room,
+		StudyMode: studyMode,
 	}
 	schedules := make([]Schedule, len(req.Schedules))
 	for i, sr := range req.Schedules {
@@ -83,6 +113,23 @@ func (s *Service) CreateAnchored(ctx context.Context, a authctx.Anchor, req Crea
 	}
 
 	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		// The course is resolved (and share-locked) inside the write
+		// transaction so a concurrent course delete cannot slip between
+		// the lookup and the insert.
+		course, err := s.resolveCourse(ctx, a, req.CourseID, nil)
+		if err != nil {
+			return err
+		}
+		// The price is required unless a course supplies its default.
+		unitPrice, err := unitPriceFor(req.DefaultUnitPrice, course)
+		if err != nil {
+			return err
+		}
+		class.DefaultUnitPrice = unitPrice
+		class.Course = course
+		if course != nil {
+			class.CourseID = &course.ID
+		}
 		if err := s.repo.CreateWithSchedules(ctx, class, schedules); err != nil {
 			return err
 		}
@@ -91,10 +138,88 @@ func (s *Service) CreateAnchored(ctx context.Context, a authctx.Anchor, req Crea
 		return s.staff.SyncPrimaryTeacher(ctx, class.ID, class.CenterID, class.TeacherID)
 	})
 	if err != nil {
-		return nil, err
+		return nil, codeConflictOr(err, class.Code)
 	}
 	class.Schedules = schedules
 	return class, nil
+}
+
+// codeAttempts bounds the generate-and-probe loop for a blank code. With
+// 32^6 values per center a second collision is already implausible, so three
+// misses mean something other than chance is wrong and the caller is told.
+const codeAttempts = 3
+
+// resolveCode returns the code a class row should carry: the requested one,
+// checked for shape and for a clash with another live class in the center
+// (exceptID excludes the row being edited), or a freshly minted one when the
+// request left it blank. A clash — explicit or after every generate attempt
+// — is ErrCodeTaken wrapped as a 409 so the form can point at its code field.
+func (s *Service) resolveCode(ctx context.Context, a authctx.Anchor, requested *string, exceptID uuid.UUID) (string, error) {
+	if requested != nil && strings.TrimSpace(*requested) != "" {
+		code := strings.TrimSpace(*requested)
+		if !classcode.Valid(code) {
+			return "", apperror.Invalid("validation failed",
+				map[string]string{"code": "must be 2-20 characters of A-Z, 0-9 or -"})
+		}
+		taken, err := s.repo.CodeExists(ctx, a, code, exceptID)
+		if err != nil {
+			return "", err
+		}
+		if taken {
+			return "", codeTakenError(code)
+		}
+		return code, nil
+	}
+	for range codeAttempts {
+		code := classcode.Generate()
+		taken, err := s.repo.CodeExists(ctx, a, code, exceptID)
+		if err != nil {
+			return "", err
+		}
+		if !taken {
+			return code, nil
+		}
+	}
+	return "", codeTakenError("")
+}
+
+func codeTakenError(code string) error {
+	msg := "could not allocate a free class code; retry or choose one"
+	appErr := apperror.New(CodeClassCodeTaken, http.StatusConflict, msg)
+	if code != "" {
+		msg = fmt.Sprintf("class code %q is already used by another class in this center", code)
+		appErr = apperror.New(CodeClassCodeTaken, http.StatusConflict, msg)
+		appErr.Fields = map[string]string{"code": msg}
+	}
+	appErr.Err = ErrCodeTaken
+	return appErr
+}
+
+// codeConflictOr maps a duplicate-key error from the class insert or update
+// to the same 409 the CodeExists probe produces. The probe and the partial
+// unique index on (center_id, code) can disagree under a concurrent write of
+// the same code; the index is the authority, and its refusal must read as
+// "code taken", not as an internal failure.
+func codeConflictOr(err error, code string) error {
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return codeTakenError(code)
+	}
+	return err
+}
+
+// tagList copies the request tags into the JSONB list, never nil so the
+// column always holds an array.
+func tagList(tags []string) dbtypes.StringList {
+	out := make(dbtypes.StringList, 0, len(tags))
+	return append(out, tags...)
+}
+
+// noteValue stores a blank note as NULL rather than an empty string.
+func noteValue(note *string) *string {
+	if note == nil || *note == "" {
+		return nil
+	}
+	return note
 }
 
 // scheduleFromRequest builds a schedule row, defaulting effective_from to the
@@ -243,14 +368,232 @@ func (s *Service) Update(ctx context.Context, sc authctx.Scope, classID uuid.UUI
 	if err != nil {
 		return nil, err
 	}
+	if err := validateDateRange(startDate, endDate); err != nil {
+		return nil, err
+	}
+	anchor := authctx.Anchor{TeacherID: class.TeacherID, CenterID: class.CenterID}
 	class.Name = req.Name
 	class.StartDate = startDate
 	class.EndDate = endDate
 	class.DefaultUnitPrice = *req.DefaultUnitPrice
-	if err := s.repo.Update(ctx, class); err != nil {
-		return nil, err
+	// The catalog fields patch: nil keeps the stored value, a present pointer
+	// replaces it whole. A blank code also keeps the stored one — a class
+	// never goes back to having no code.
+	if req.Code != nil && strings.TrimSpace(*req.Code) != "" {
+		code, err := s.resolveCode(ctx, anchor, req.Code, class.ID)
+		if err != nil {
+			return nil, err
+		}
+		class.Code = code
+	}
+	if req.Tags != nil {
+		class.Tags = tagList(*req.Tags)
+	}
+	if req.Recruiting != nil {
+		class.Recruiting = *req.Recruiting
+	}
+	if req.Note != nil {
+		class.Note = noteValue(req.Note)
+	}
+	if req.LineageNote != nil {
+		class.LineageNote = noteValue(req.LineageNote)
+	}
+	if req.ParentClassID != nil {
+		parentID, err := s.resolveParentClass(ctx, anchor, req.ParentClassID, class.ID)
+		if err != nil {
+			return nil, err
+		}
+		class.ParentClassID = parentID
+	}
+	if req.Room != nil {
+		class.Room = *req.Room
+	}
+	if req.StudyMode != nil {
+		mode := strings.TrimSpace(*req.StudyMode)
+		if mode != StudyModeScheduled && mode != StudyModeSelfPaced {
+			return nil, apperror.Invalid("validation failed",
+				map[string]string{"study_mode": "must be one of: scheduled, self_paced"})
+		}
+		class.StudyMode = mode
+	}
+	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		if req.CourseID != nil {
+			// Resolved under the same transaction as the write so the
+			// share lock on the course holds until the class row lands.
+			course, err := s.resolveCourse(ctx, anchor, req.CourseID, class.CourseID)
+			if err != nil {
+				return err
+			}
+			class.Course, class.CourseID = course, nil
+			if course != nil {
+				class.CourseID = &course.ID
+			}
+		}
+		var nextChildID *uuid.UUID
+		nextChanged := false
+		if req.NextClassID != nil {
+			childID, changed, err := s.resolveNextClassLink(ctx, anchor, req.NextClassID, class.ID)
+			if err != nil {
+				return err
+			}
+			nextChildID, nextChanged = childID, changed
+		}
+		if err := s.repo.Update(ctx, class); err != nil {
+			return err
+		}
+		if nextChanged {
+			// Same transaction as the class row: a next-class link must
+			// never be observable as half-applied.
+			if err := s.repo.LinkNextClass(ctx, anchor, class.ID, nextChildID); err != nil {
+				return err
+			}
+			class.NextClassID = nextChildID
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, codeConflictOr(err, class.Code)
 	}
 	return class, nil
+}
+
+// resolveCourse turns a request's course_id into the center's course row:
+// nil or blank means no course; anything else must name a live course of
+// the anchor's center, else 422 on the course_id field. The field carries
+// no uuid binding tag (a pointer to "" would fail it), so the shape is
+// checked here and a bad one is the same 422. An archived course takes no
+// new class: current is the class's stored course id, and resending it is
+// not a new attachment, so an already-attached class keeps saving.
+func (s *Service) resolveCourse(ctx context.Context, a authctx.Anchor, raw *string, current *uuid.UUID) (*CourseRef, error) {
+	if raw == nil || strings.TrimSpace(*raw) == "" {
+		return nil, nil
+	}
+	invalid := apperror.Invalid("Khóa học không tồn tại trong trung tâm",
+		map[string]string{"course_id": "phải là khóa học còn hiệu lực của trung tâm"})
+	courseID, err := uuid.Parse(strings.TrimSpace(*raw))
+	if err != nil {
+		return nil, invalid
+	}
+	course, err := s.repo.FindCourse(ctx, a, courseID)
+	if errors.Is(err, ErrCourseNotFound) {
+		return nil, invalid
+	}
+	if err != nil {
+		return nil, err
+	}
+	if course.Status == courseStatusArchived && (current == nil || *current != course.ID) {
+		return nil, apperror.Invalid("Khóa học đã ngừng tuyển, không gắn lớp mới",
+			map[string]string{"course_id": "khóa học đã ngừng tuyển"})
+	}
+	return course, nil
+}
+
+// resolveParentClass turns a request's parent_class_id into the linked
+// class id: blank means no parent; anything else must name a live class of
+// the anchor's center other than the class itself, else 422 on the field.
+func (s *Service) resolveParentClass(ctx context.Context, a authctx.Anchor, raw *string, selfID uuid.UUID) (*uuid.UUID, error) {
+	if raw == nil || strings.TrimSpace(*raw) == "" {
+		return nil, nil
+	}
+	invalid := apperror.Invalid("Lớp gốc không tồn tại trong trung tâm",
+		map[string]string{"parent_class_id": "phải là lớp còn hiệu lực của trung tâm, khác lớp hiện tại"})
+	parentID, err := uuid.Parse(strings.TrimSpace(*raw))
+	if err != nil || parentID == selfID {
+		return nil, invalid
+	}
+	exists, err := s.repo.LiveClassInCenter(ctx, a, parentID)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, invalid
+	}
+	cycle, err := s.repo.ParentCreatesCycle(ctx, a, parentID, selfID)
+	if err != nil {
+		return nil, err
+	}
+	if cycle {
+		return nil, apperror.Invalid("Lớp gốc tạo vòng lặp trong lịch sử lớp",
+			map[string]string{"parent_class_id": "không được tạo vòng lặp trong lịch sử tách lớp"})
+	}
+	return &parentID, nil
+}
+
+// resolveNextClassLink turns a request's next_class_id into the child class
+// id to link and whether the link should change at all: nil raw means "leave
+// every existing child untouched" (changed=false); "" means "unlink every
+// live child" (changed=true, child=nil); a uuid means "link that live class
+// of the anchor's center as the single child" (changed=true) — rejecting a
+// self-link, an unknown or foreign-center class, and a link that would close
+// a lineage cycle, each as 422 on next_class_id.
+//
+// selfID becomes childID's new parent, so this mirrors resolveParentClass's
+// checks with the roles reversed: childID must be a live class of the
+// anchor's center, and childID must not already be an ancestor of selfID
+// (walking selfID's own parent chain), else childID would become both an
+// ancestor and a descendant of selfID.
+func (s *Service) resolveNextClassLink(ctx context.Context, a authctx.Anchor, raw *string, selfID uuid.UUID) (*uuid.UUID, bool, error) {
+	if raw == nil {
+		return nil, false, nil
+	}
+	trimmed := strings.TrimSpace(*raw)
+	if trimmed == "" {
+		return nil, true, nil
+	}
+	childID, err := uuid.Parse(trimmed)
+	if err != nil || childID == selfID {
+		return nil, false, invalidNextClassIDError()
+	}
+	exists, err := s.repo.LiveClassInCenter(ctx, a, childID)
+	if err != nil {
+		return nil, false, err
+	}
+	if !exists {
+		return nil, false, invalidNextClassIDError()
+	}
+	cycle, err := s.repo.ParentCreatesCycle(ctx, a, selfID, childID)
+	if err != nil {
+		return nil, false, err
+	}
+	if cycle {
+		return nil, false, apperror.Invalid("Lớp kế tiếp tạo vòng lặp trong lịch sử lớp",
+			map[string]string{"next_class_id": "không được tạo vòng lặp trong lịch sử tách lớp"})
+	}
+	return &childID, true, nil
+}
+
+func invalidNextClassIDError() error {
+	return apperror.Invalid("Lớp kế tiếp không tồn tại trong trung tâm",
+		map[string]string{"next_class_id": "phải là lớp còn hiệu lực của trung tâm, khác lớp hiện tại"})
+}
+
+// selfPacedNoScheduleError is AddSchedule's refusal on a self_paced class.
+func selfPacedNoScheduleError() error {
+	appErr := apperror.New(CodeSelfPacedNoSchedule, http.StatusUnprocessableEntity,
+		"self-paced class cannot have schedules")
+	appErr.Err = ErrSelfPacedNoSchedule
+	return appErr
+}
+
+// unitPriceFor picks the class's per-session price: the request's own value
+// wins, then the course's default; with neither the field is required.
+func unitPriceFor(requested *int64, course *CourseRef) (int64, error) {
+	if requested != nil {
+		return *requested, nil
+	}
+	if course != nil {
+		return course.DefaultUnitPrice, nil
+	}
+	return 0, apperror.Invalid("validation failed",
+		map[string]string{"default_unit_price": "required unless course_id is set"})
+}
+
+// Stats buckets the classes the caller can read by phase on today. It
+// shares ListReadable's port, so the chips never count a class the list
+// would not show. recruitingOnly scopes every counter to the classes open for
+// recruitment, matching the list's recruiting filter.
+func (s *Service) Stats(ctx context.Context, sc authctx.Scope, today time.Time, recruitingOnly bool) (ClassStatsResponse, error) {
+	return s.repo.CountReadableByPhase(ctx, sc, today, recruitingOnly)
 }
 
 // Archive flips the class to archived — the normal end-of-term action, and
@@ -305,6 +648,9 @@ func (s *Service) AddSchedule(ctx context.Context, sc authctx.Scope, classID uui
 	class, err := s.repo.GetByID(ctx, sc, classID)
 	if err != nil {
 		return nil, translate(err)
+	}
+	if class.StudyMode == StudyModeSelfPaced {
+		return nil, selfPacedNoScheduleError()
 	}
 	return s.addSchedule(ctx, authctx.Anchor{TeacherID: class.TeacherID, CenterID: class.CenterID}, classID, class.StartDate, req)
 }
@@ -400,6 +746,104 @@ func (s *Service) FindActiveByName(ctx context.Context, a authctx.Anchor, name s
 // touches only tables classes owns. ErrNotFound surfaces as a 404.
 func (s *Service) ReassignTeacher(ctx context.Context, sc authctx.Scope, classID, newTeacherID uuid.UUID) error {
 	return translate(s.repo.ReassignTeacher(ctx, sc, classID, newTeacherID))
+}
+
+// Availability computes room and teacher busy/free state for the requested
+// slots: a room or teacher is free only when no other live class's active
+// schedule overlaps ANY requested slot on the same weekday. Permission
+// PermClassesList gates the endpoint; there is no further per-class scoping
+// because the answer is a center-wide resource fact, not one class's data.
+func (s *Service) Availability(ctx context.Context, sc authctx.Scope, slots []AvailabilitySlot, excludeClassID *uuid.UUID) (AvailabilityResponse, error) {
+	classes, err := s.repo.AvailabilityClasses(ctx, sc, excludeClassID)
+	if err != nil {
+		return AvailabilityResponse{}, err
+	}
+	directory, err := s.repo.ActiveMemberDirectory(ctx, sc)
+	if err != nil {
+		return AvailabilityResponse{}, err
+	}
+	busyRooms, busyTeachers := computeBusy(classes, slots)
+	return buildAvailabilityResponse(classes, directory, busyRooms, busyTeachers), nil
+}
+
+// computeBusy marks a class busy when any of its active schedules overlaps
+// any requested slot on the same weekday, then folds a busy class's room and
+// teacher — its assigned teacher_id and every active class_staff member —
+// into the busy sets.
+func computeBusy(classes []AvailabilityClassRow, slots []AvailabilitySlot) (busyRooms map[string]bool, busyTeachers map[uuid.UUID]bool) {
+	busyRooms = map[string]bool{}
+	busyTeachers = map[uuid.UUID]bool{}
+	for _, c := range classes {
+		busy := false
+		for _, sch := range c.Schedules {
+			for _, slot := range slots {
+				if sch.Weekday == slot.Weekday && overlaps(sch.StartTime, sch.DurationMin, slot.StartTime, slot.DurationMin) {
+					busy = true
+					break
+				}
+			}
+			if busy {
+				break
+			}
+		}
+		if !busy {
+			continue
+		}
+		if c.Room != "" {
+			busyRooms[c.Room] = true
+		}
+		busyTeachers[c.TeacherID] = true
+		for _, staffID := range c.StaffIDs {
+			busyTeachers[staffID] = true
+		}
+	}
+	return busyRooms, busyTeachers
+}
+
+// overlaps reports whether two [start, start+dur) minute-of-day intervals
+// intersect.
+func overlaps(aStart TimeOfDay, aDur int16, bStart TimeOfDay, bDur int16) bool {
+	aFrom, aTo := minutesOfDay(aStart), minutesOfDay(aStart)+int(aDur)
+	bFrom, bTo := minutesOfDay(bStart), minutesOfDay(bStart)+int(bDur)
+	return aFrom < bTo && bFrom < aTo
+}
+
+// minutesOfDay converts a validated "HH:MM" TimeOfDay to minutes since local
+// midnight.
+func minutesOfDay(t TimeOfDay) int {
+	h := int(t[0]-'0')*10 + int(t[1]-'0')
+	m := int(t[3]-'0')*10 + int(t[4]-'0')
+	return h*60 + m
+}
+
+// buildAvailabilityResponse lists the distinct non-empty rooms among the
+// fetched live classes and every directory member, each tagged free/busy
+// from the precomputed sets.
+func buildAvailabilityResponse(classes []AvailabilityClassRow, directory []DirectoryMember, busyRooms map[string]bool, busyTeachers map[uuid.UUID]bool) AvailabilityResponse {
+	seen := map[string]bool{}
+	names := make([]string, 0, len(classes))
+	for _, c := range classes {
+		if c.Room == "" || seen[c.Room] {
+			continue
+		}
+		seen[c.Room] = true
+		names = append(names, c.Room)
+	}
+	sort.Strings(names)
+
+	rooms := make([]AvailabilityRoomResponse, 0, len(names))
+	for _, name := range names {
+		rooms = append(rooms, AvailabilityRoomResponse{Name: name, Free: !busyRooms[name]})
+	}
+	teachers := make([]AvailabilityTeacherResponse, 0, len(directory))
+	for _, m := range directory {
+		teachers = append(teachers, AvailabilityTeacherResponse{
+			TeacherID: m.TeacherID,
+			Name:      m.Name,
+			Free:      !busyTeachers[m.TeacherID],
+		})
+	}
+	return AvailabilityResponse{Rooms: rooms, Teachers: teachers}
 }
 
 // ScheduleExists reports whether the class already carries this exact weekly

@@ -687,3 +687,567 @@ func TestViewAllWidensClassReadsNotWrites(t *testing.T) {
 	_, err = svc.Archive(ctx, scMember, ownClass.ID)
 	require.NoError(t, err)
 }
+
+// TestListFiltersMatchLiterallyAndOnEffectiveTimetable drives every list
+// filter through Postgres: the search escapes ILIKE metacharacters so "100%"
+// and "a_b" match literally and also hit the code; the tag filter is JSONB
+// containment of one whole element; weekday/shift only see timetable rows
+// still effective today; and the phase filter follows the same calendar rules
+// PhaseOf applies in Go.
+func TestListFiltersMatchLiterallyAndOnEffectiveTimetable(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
+
+	running := testutil.Class(t, db, teacher.ID,
+		testutil.WithClassName("Toán 100% nâng cao"), testutil.WithClassCode("TOAN-A"),
+		testutil.WithClassTags("Toán", "Khối 8"), testutil.WithClassStartDate(date("2000-01-01")))
+	testutil.Schedule(t, db, running, 2, "18:00")
+	testutil.Schedule(t, db, running, 4, "08:00")
+
+	upcoming := testutil.Class(t, db, teacher.ID,
+		testutil.WithClassName("Văn a_b"), testutil.WithClassCode("VAN-B"),
+		testutil.WithClassTags("Văn"), testutil.WithClassStartDate(date("2099-01-01")))
+	testutil.Schedule(t, db, upcoming, 2, "14:00")
+
+	ended := testutil.Class(t, db, teacher.ID,
+		testutil.WithClassName("Lý cũ"), testutil.WithClassCode("LY-C"),
+		testutil.WithClassTags("Khối 8"),
+		testutil.WithClassStartDate(date("2000-01-01")), testutil.WithClassEndDate(date("2000-12-31")))
+	closed := testutil.Schedule(t, db, ended, 6, "18:00")
+	require.NoError(t, db.Model(closed).Update("effective_to", date("2001-01-01")).Error)
+
+	archived := testutil.Class(t, db, teacher.ID,
+		testutil.WithClassName("Lớp lưu trữ"), testutil.WithClassCode("ARCH-D"),
+		testutil.WithClassStatus(classes.StatusArchived), testutil.WithClassStartDate(date("2000-01-01")))
+
+	// Would match "100%" and "a_b" if the metacharacters were left unescaped.
+	decoy := testutil.Class(t, db, teacher.ID,
+		testutil.WithClassName("Toán 1000 acb"), testutil.WithClassCode("DECOY-E"),
+		testutil.WithClassStartDate(date("2000-01-01")))
+
+	ids := func(filter classes.ListFilter) []uuid.UUID {
+		t.Helper()
+		rows, _, total, err := svc.ListReadable(ctx, sc, filter, listParams(t))
+		require.NoError(t, err)
+		require.EqualValues(t, len(rows), total)
+		return classes.ClassIDs(rows)
+	}
+	cases := []struct {
+		name   string
+		filter classes.ListFilter
+		want   []uuid.UUID
+	}{
+		{"percent literal", classes.ListFilter{Q: "100%"}, []uuid.UUID{running.ID}},
+		{"underscore literal", classes.ListFilter{Q: "a_b"}, []uuid.UUID{upcoming.ID}},
+		{"code case-insensitive", classes.ListFilter{Q: "van-b"}, []uuid.UUID{upcoming.ID}},
+		{"tag whole element", classes.ListFilter{Tag: "Khối 8"}, []uuid.UUID{ended.ID, running.ID}},
+		{"tag no prefix match", classes.ListFilter{Tag: "Khối"}, nil},
+		{"weekday effective only", classes.ListFilter{Weekday: int16Ptr(2)}, []uuid.UUID{running.ID, upcoming.ID}},
+		{"weekday closed row ignored", classes.ListFilter{Weekday: int16Ptr(6)}, nil},
+		{"shift morning", classes.ListFilter{Shift: classes.ShiftMorning}, []uuid.UUID{running.ID}},
+		{"shift afternoon", classes.ListFilter{Shift: classes.ShiftAfternoon}, []uuid.UUID{upcoming.ID}},
+		{"shift evening", classes.ListFilter{Shift: classes.ShiftEvening}, []uuid.UUID{running.ID}},
+		{"weekday and shift on one row", classes.ListFilter{Weekday: int16Ptr(2), Shift: classes.ShiftAfternoon}, []uuid.UUID{upcoming.ID}},
+		{"phase upcoming", classes.ListFilter{Phase: classes.PhaseUpcoming}, []uuid.UUID{upcoming.ID}},
+		{"phase running", classes.ListFilter{Phase: classes.PhaseRunning}, []uuid.UUID{running.ID, decoy.ID}},
+		{"phase ended", classes.ListFilter{Phase: classes.PhaseEnded}, []uuid.UUID{ended.ID}},
+		{"phase archived", classes.ListFilter{Phase: classes.PhaseArchived}, []uuid.UUID{archived.ID}},
+		{"phase and status disagree", classes.ListFilter{Phase: classes.PhaseArchived, Status: classes.StatusActive}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.ElementsMatch(t, tc.want, ids(tc.filter))
+		})
+	}
+
+	// The recruiting filter is the SQL form of OpenForRecruitment: the flag
+	// alone is not enough once the class has ended or been archived.
+	for _, c := range []*classes.Class{running, upcoming, ended, archived} {
+		require.NoError(t, db.Model(c).Update("recruiting", true).Error)
+	}
+	require.ElementsMatch(t, []uuid.UUID{running.ID, upcoming.ID}, ids(classes.ListFilter{Recruiting: true}))
+	require.ElementsMatch(t, []uuid.UUID{upcoming.ID}, ids(classes.ListFilter{Recruiting: true, Phase: classes.PhaseUpcoming}))
+	recruitingStats, err := svc.Stats(ctx, sc, time.Now(), true)
+	require.NoError(t, err)
+	require.Equal(t, classes.ClassStatsResponse{All: 2, Upcoming: 1, Running: 1, Recruiting: 2}, recruitingStats)
+
+	// The phase the SQL predicate selected must be the phase the DTO reports.
+	for _, phase := range []string{classes.PhaseUpcoming, classes.PhaseRunning, classes.PhaseEnded, classes.PhaseArchived} {
+		rows, _, _, err := svc.ListReadable(ctx, sc, classes.ListFilter{Phase: phase}, listParams(t))
+		require.NoError(t, err)
+		for i := range rows {
+			require.Equal(t, phase, classes.FromModel(&rows[i]).Phase, rows[i].Name)
+		}
+	}
+}
+
+// TestStatsCountReadableClassesOnly checks the stats counters run through the
+// same readable port as the list: a member counts only their own classes, the
+// owner and a classes.view_all holder count the whole center, and the
+// per-phase buckets partition the total.
+func TestStatsCountReadableClassesOnly(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+
+	owner, _ := testutil.Teacher(t, db)
+	scOwner := testutil.ScopeFor(t, db, owner.ID)
+	member, _ := testutil.Teacher(t, db)
+	testutil.JoinCenter(t, db, member.ID, scOwner.CenterID)
+	scMember := testutil.ScopeFor(t, db, member.ID)
+
+	testutil.Class(t, db, owner.ID, testutil.WithClassStartDate(date("2000-01-01")), testutil.WithClassRecruiting(true))
+	testutil.Class(t, db, owner.ID, testutil.WithClassStartDate(date("2099-01-01")))
+	testutil.Class(t, db, owner.ID, testutil.WithClassStartDate(date("2000-01-01")), testutil.WithClassEndDate(date("2000-12-31")))
+	testutil.Class(t, db, owner.ID, testutil.WithClassStartDate(date("2000-01-01")), testutil.WithClassStatus(classes.StatusArchived))
+	testutil.Class(t, db, member.ID, testutil.WithClassStartDate(date("2000-01-01")))
+
+	// A class in another center never leaks into anyone's counters.
+	stranger, _ := testutil.Teacher(t, db)
+	testutil.Class(t, db, stranger.ID, testutil.WithClassRecruiting(true))
+
+	now := time.Now()
+	got, err := svc.Stats(ctx, scMember, now, false)
+	require.NoError(t, err)
+	require.Equal(t, classes.ClassStatsResponse{All: 1, Running: 1}, got)
+
+	centerWide := classes.ClassStatsResponse{All: 5, Upcoming: 1, Running: 2, Ended: 1, Archived: 1, Recruiting: 1}
+	got, err = svc.Stats(ctx, scOwner, now, false)
+	require.NoError(t, err)
+	require.Equal(t, centerWide, got)
+
+	scMember.Perms = authctx.BuildPermSet(nil, []string{authctx.PermClassesViewAll}, nil)
+	got, err = svc.Stats(ctx, scMember, now, false)
+	require.NoError(t, err)
+	require.Equal(t, centerWide, got, "classes.view_all widens the counters like it widens the list")
+	require.Equal(t, got.All, got.Upcoming+got.Running+got.Ended+got.Archived, "phases partition the total")
+}
+
+// TestClassCodeIsUniquePerCenterThroughTheIndex exercises the code
+// uniqueness rules against the real partial unique index: a taken code is
+// refused with 409 on create and on update, keeping your own code on update
+// is fine, a soft-deleted class frees its code, and another center may reuse
+// it.
+func TestClassCodeIsUniquePerCenterThroughTheIndex(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
+
+	req := createRequest()
+	req.Code = strPtr(" TOAN8 ")
+	first, err := svc.Create(ctx, sc, req)
+	require.NoError(t, err)
+	require.Equal(t, "TOAN8", first.Code, "the code is trimmed before storing")
+
+	req.Name = "Toán 8 B"
+	_, err = svc.Create(ctx, sc, req)
+	require.Equal(t, http.StatusConflict, apperror.From(err).Status)
+	require.Equal(t, classes.CodeClassCodeTaken, apperror.From(err).Code)
+
+	req.Code = nil
+	second, err := svc.Create(ctx, sc, req)
+	require.NoError(t, err)
+	require.NotEmpty(t, second.Code, "a blank code is minted")
+	require.NotEqual(t, first.Code, second.Code)
+
+	_, err = svc.Update(ctx, sc, second.ID, classes.UpdateClassRequest{
+		Name: second.Name, StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000), Code: strPtr("TOAN8"),
+	})
+	require.Equal(t, http.StatusConflict, apperror.From(err).Status, "moving onto another class's code is a collision")
+	_, err = svc.Update(ctx, sc, second.ID, classes.UpdateClassRequest{
+		Name: second.Name, StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000), Code: strPtr("toan8"),
+	})
+	require.Equal(t, http.StatusUnprocessableEntity, apperror.From(err).Status, "lowercase never reaches the index")
+
+	kept, err := svc.Update(ctx, sc, first.ID, classes.UpdateClassRequest{
+		Name: "Toán 8 đổi tên", StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000), Code: strPtr("TOAN8"),
+	})
+	require.NoError(t, err, "re-sending your own code is not a collision")
+	require.Equal(t, "TOAN8", kept.Code)
+
+	require.NoError(t, svc.Delete(ctx, sc, first.ID))
+	req.Code = strPtr("TOAN8")
+	req.Name = "Toán 8 mới"
+	reused, err := svc.Create(ctx, sc, req)
+	require.NoError(t, err, "a soft-deleted class no longer holds its code")
+	require.Equal(t, "TOAN8", reused.Code)
+
+	other, _ := testutil.Teacher(t, db)
+	scOther := testutil.ScopeFor(t, db, other.ID)
+	_, err = svc.Create(ctx, scOther, req)
+	require.NoError(t, err, "codes are unique per center, not globally")
+}
+
+func strPtr(s string) *string { return &s }
+
+// insertCourse seeds a catalog course directly so this package's tests do not
+// depend on the courses service; the classes side only reads the row.
+func insertCourse(t *testing.T, db *gorm.DB, centerID uuid.UUID, code string, price int64) uuid.UUID {
+	t.Helper()
+	courseID := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO courses (id, center_id, code, name, status, default_unit_price)
+		 VALUES (?, ?, ?, ?, 'active', ?)`,
+		courseID, centerID, code, "Khóa "+code, price,
+	).Error)
+	return courseID
+}
+
+func TestCourseLinkStaysInsideCenterAndCopiesPrice(t *testing.T) {
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
+	other, _ := testutil.Teacher(t, db)
+	scOther := testutil.ScopeFor(t, db, other.ID)
+
+	mine := insertCourse(t, db, sc.CenterID, "TOAN-8", 180_000)
+	foreign := insertCourse(t, db, scOther.CenterID, "TOAN-8", 90_000)
+
+	req := createRequest()
+	req.DefaultUnitPrice = nil
+	req.CourseID = strPtr(foreign.String())
+	_, err := svc.Create(ctx, sc, req)
+	var appErr *apperror.AppError
+	require.ErrorAs(t, err, &appErr, "another center's course is rejected before insert")
+	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
+	require.Contains(t, appErr.Fields, "course_id")
+
+	req.CourseID = nil
+	_, err = svc.Create(ctx, sc, req)
+	require.ErrorAs(t, err, &appErr, "no course and no price is a validation error")
+	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
+	require.Contains(t, appErr.Fields, "default_unit_price")
+
+	req.CourseID = strPtr(mine.String())
+	attached, err := svc.Create(ctx, sc, req)
+	require.NoError(t, err)
+	require.Equal(t, int64(180_000), attached.DefaultUnitPrice, "price copied from the course")
+	require.NotNil(t, attached.CourseID)
+	require.Equal(t, mine, *attached.CourseID)
+
+	got, err := svc.Get(ctx, sc, attached.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.Course, "GET preloads the course reference")
+	require.Equal(t, "TOAN-8", got.Course.Code)
+	require.Equal(t, "Khóa TOAN-8", got.Course.Name)
+
+	plain, err := svc.Create(ctx, sc, createRequest())
+	require.NoError(t, err)
+	require.Nil(t, plain.CourseID)
+
+	rows, total, err := svc.List(ctx, sc, classes.ListFilter{CourseID: &mine}, listParams(t))
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total, "course_id filter narrows to attached classes")
+	require.Equal(t, attached.ID, rows[0].ID)
+	require.NotNil(t, rows[0].Course)
+
+	explicit := createRequest()
+	explicit.CourseID = strPtr(mine.String())
+	explicit.DefaultUnitPrice = int64Ptr(200_000)
+	own, err := svc.Create(ctx, sc, explicit)
+	require.NoError(t, err)
+	require.Equal(t, int64(200_000), own.DefaultUnitPrice, "an explicit price wins over the course default")
+
+	detached, err := svc.Update(ctx, sc, attached.ID, classes.UpdateClassRequest{
+		Name: "Toán 8", StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(180_000), CourseID: strPtr(""),
+	})
+	require.NoError(t, err)
+	require.Nil(t, detached.CourseID, "an empty course_id detaches")
+	require.Nil(t, detached.Course)
+
+	kept, err := svc.Update(ctx, sc, own.ID, classes.UpdateClassRequest{
+		Name: "Toán 8", StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(200_000),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, kept.CourseID, "an absent course_id keeps the stored course")
+
+	_, err = svc.Update(ctx, sc, own.ID, classes.UpdateClassRequest{
+		Name: "Toán 8", StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(200_000), CourseID: strPtr(foreign.String()),
+	})
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
+
+	_, _, err = svc.List(ctx, scOther, classes.ListFilter{CourseID: &mine}, listParams(t))
+	require.NoError(t, err, "filtering by a foreign course just yields nothing")
+}
+
+// A parent must be a live class of the same center: another center's class
+// and a soft-deleted class are both refused, against the real query
+// (LiveClassInCenter), not the in-memory fake the unit tests use.
+func TestParentClassMustBeLiveAndInCenter(t *testing.T) {
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
+	other, _ := testutil.Teacher(t, db)
+	scOther := testutil.ScopeFor(t, db, other.ID)
+
+	theirs, err := svc.Create(ctx, scOther, createRequest())
+	require.NoError(t, err)
+
+	toDelete, err := svc.Create(ctx, sc, createRequest())
+	require.NoError(t, err)
+	require.NoError(t, svc.Delete(ctx, sc, toDelete.ID))
+
+	class, err := svc.Create(ctx, sc, createRequest())
+	require.NoError(t, err)
+
+	upd := classes.UpdateClassRequest{Name: class.Name, StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000)}
+
+	upd.ParentClassID = strPtr(theirs.ID.String())
+	_, err = svc.Update(ctx, sc, class.ID, upd)
+	var appErr *apperror.AppError
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
+	require.Contains(t, appErr.Fields, "parent_class_id")
+
+	upd.ParentClassID = strPtr(toDelete.ID.String())
+	_, err = svc.Update(ctx, sc, class.ID, upd)
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
+	require.Contains(t, appErr.Fields, "parent_class_id")
+
+	live, err := svc.Create(ctx, sc, createRequest())
+	require.NoError(t, err)
+	upd.ParentClassID = strPtr(live.ID.String())
+	got, err := svc.Update(ctx, sc, class.ID, upd)
+	require.NoError(t, err)
+	require.NotNil(t, got.ParentClassID)
+	require.Equal(t, live.ID, *got.ParentClassID)
+}
+
+// A parent link may not close a loop through the lineage chain, whether the
+// loop is direct (a<-b, then a<-b) or runs through a longer chain
+// (a<-b<-c, then a<-c) — proven here against the real WITH RECURSIVE query.
+func TestParentClassCycleIsRefusedAcrossTheChain(t *testing.T) {
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
+
+	classA, err := svc.Create(ctx, sc, createRequest())
+	require.NoError(t, err)
+	classB, err := svc.Create(ctx, sc, createRequest())
+	require.NoError(t, err)
+	classC, err := svc.Create(ctx, sc, createRequest())
+	require.NoError(t, err)
+
+	_, err = svc.Update(ctx, sc, classB.ID, classes.UpdateClassRequest{
+		Name: classB.Name, StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000),
+		ParentClassID: strPtr(classA.ID.String()),
+	})
+	require.NoError(t, err, "attach b under a")
+
+	updA := classes.UpdateClassRequest{Name: classA.Name, StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000)}
+	updA.ParentClassID = strPtr(classB.ID.String())
+	_, err = svc.Update(ctx, sc, classA.ID, updA)
+	var appErr *apperror.AppError
+	require.ErrorAs(t, err, &appErr, "a<-b, a->b closes a direct loop")
+	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
+	require.Contains(t, appErr.Fields, "parent_class_id")
+
+	_, err = svc.Update(ctx, sc, classC.ID, classes.UpdateClassRequest{
+		Name: classC.Name, StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000),
+		ParentClassID: strPtr(classB.ID.String()),
+	})
+	require.NoError(t, err, "attach c under b")
+
+	updA.ParentClassID = strPtr(classC.ID.String())
+	_, err = svc.Update(ctx, sc, classA.ID, updA)
+	require.ErrorAs(t, err, &appErr, "a<-b<-c, a->c closes a longer loop")
+	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
+	require.Contains(t, appErr.Fields, "parent_class_id")
+
+	// c<-b remains a valid, acyclic reattachment: c's own current chain
+	// (through b, through a) does not go through c itself.
+	got, err := svc.Update(ctx, sc, classC.ID, classes.UpdateClassRequest{
+		Name: classC.Name, StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000),
+		ParentClassID: strPtr(classB.ID.String()),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, got.ParentClassID)
+	require.Equal(t, classB.ID, *got.ParentClassID)
+}
+
+// A self-paced class carries no timetable: zero schedules must pass create,
+// the stored study_mode and room must round-trip through Get, and adding a
+// schedule afterwards must still be refused against the real DB-backed
+// class, not just the in-memory fake the unit tests use.
+func TestSelfPacedCreateWithZeroSchedulesRoundTrips(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
+
+	req := classes.CreateClassRequest{
+		Name:             "Tự học Python",
+		StartDate:        "2026-01-05",
+		DefaultUnitPrice: int64Ptr(0),
+		StudyMode:        classes.StudyModeSelfPaced,
+		Room:             "P101",
+	}
+	created, err := svc.Create(ctx, sc, req)
+	require.NoError(t, err, "self-paced create with zero schedules must succeed")
+	require.Empty(t, created.Schedules)
+	require.Equal(t, classes.StudyModeSelfPaced, created.StudyMode)
+	require.Equal(t, "P101", created.Room)
+
+	got, err := svc.Get(ctx, sc, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, classes.StudyModeSelfPaced, got.StudyMode)
+	require.Equal(t, "P101", got.Room)
+	require.Empty(t, got.Schedules)
+
+	_, err = svc.AddSchedule(ctx, sc, created.ID, classes.ScheduleRequest{
+		Weekday: int16Ptr(2), StartTime: "18:00", DurationMin: 60,
+	})
+	var appErr *apperror.AppError
+	require.ErrorAs(t, err, &appErr, "a self-paced class must refuse a schedule even against the real DB")
+	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
+
+	// A scheduled class (the default study_mode) still requires at least one
+	// schedule.
+	scheduled := createRequest()
+	scheduled.Schedules = nil
+	_, err = svc.Create(ctx, sc, scheduled)
+	require.ErrorAs(t, err, &appErr, "a scheduled class with no schedules must be refused")
+	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
+}
+
+// A next_class_id link must point at a live class of the same center, the
+// same rule parent_class_id follows, exercised here against the real
+// LiveClassInCenter/ParentCreatesCycle queries instead of the in-memory fake:
+// an unknown id, a foreign-center class, and a direct two-class cycle are all
+// refused with a 422 on next_class_id, while a valid link round-trips
+// through Get and an explicit "" clears it.
+func TestNextClassLinkAgainstRealDB(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
+	other, _ := testutil.Teacher(t, db)
+	scOther := testutil.ScopeFor(t, db, other.ID)
+
+	classA, err := svc.Create(ctx, sc, createRequest())
+	require.NoError(t, err)
+	classB, err := svc.Create(ctx, sc, createRequest())
+	require.NoError(t, err)
+	theirs, err := svc.Create(ctx, scOther, createRequest())
+	require.NoError(t, err)
+
+	updA := classes.UpdateClassRequest{Name: classA.Name, StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000)}
+
+	updA.NextClassID = strPtr(uuid.New().String())
+	_, err = svc.Update(ctx, sc, classA.ID, updA)
+	var appErr *apperror.AppError
+	require.ErrorAs(t, err, &appErr, "an unknown next_class_id must be refused")
+	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
+	require.Contains(t, appErr.Fields, "next_class_id")
+
+	updA.NextClassID = strPtr(theirs.ID.String())
+	_, err = svc.Update(ctx, sc, classA.ID, updA)
+	require.ErrorAs(t, err, &appErr, "a foreign-center class must be refused")
+	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
+	require.Contains(t, appErr.Fields, "next_class_id")
+
+	updA.NextClassID = strPtr(classB.ID.String())
+	got, err := svc.Update(ctx, sc, classA.ID, updA)
+	require.NoError(t, err, "a live class of the same center links")
+	require.NotNil(t, got.NextClassID)
+	require.Equal(t, classB.ID, *got.NextClassID)
+
+	reread, err := svc.Get(ctx, sc, classA.ID)
+	require.NoError(t, err)
+	require.NotNil(t, reread.NextClassID)
+	require.Equal(t, classB.ID, *reread.NextClassID)
+
+	// B's next cannot be A: that would close a direct two-class loop.
+	updB := classes.UpdateClassRequest{Name: classB.Name, StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000)}
+	updB.NextClassID = strPtr(classA.ID.String())
+	_, err = svc.Update(ctx, sc, classB.ID, updB)
+	require.ErrorAs(t, err, &appErr, "a<-next-b, b->next-a closes a direct loop")
+	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
+	require.Contains(t, appErr.Fields, "next_class_id")
+
+	// Clearing with an explicit "" unlinks.
+	updA.NextClassID = strPtr("")
+	cleared, err := svc.Update(ctx, sc, classA.ID, updA)
+	require.NoError(t, err)
+	require.Nil(t, cleared.NextClassID)
+
+	rereadCleared, err := svc.Get(ctx, sc, classA.ID)
+	require.NoError(t, err)
+	require.Nil(t, rereadCleared.NextClassID, "clearing next_class_id must persist")
+}
+
+// The availability endpoint reports a room/teacher busy only when a live
+// class's active schedule overlaps a requested slot on the same weekday,
+// exercised here against the real batched queries (AvailabilityClasses,
+// ActiveMemberDirectory) instead of the in-memory fake: exclude_class_id
+// frees the excluded class's room/teacher, and a non-overlapping slot leaves
+// everyone free.
+func TestAvailabilityAgainstRealDB(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, owner.ID)
+
+	busyReq := createRequest()
+	busyReq.Room = "P101"
+	busyReq.Schedules = []classes.ScheduleRequest{{Weekday: int16Ptr(2), StartTime: "18:00", DurationMin: 90}}
+	busy, err := svc.Create(ctx, sc, busyReq)
+	require.NoError(t, err)
+
+	freeReq := createRequest()
+	freeReq.Name = "Lớp trống"
+	freeReq.Room = "P102"
+	freeReq.Schedules = []classes.ScheduleRequest{{Weekday: int16Ptr(3), StartTime: "18:00", DurationMin: 90}}
+	_, err = svc.Create(ctx, sc, freeReq)
+	require.NoError(t, err)
+
+	overlapping := []classes.AvailabilitySlot{{Weekday: 2, StartTime: "18:30", DurationMin: 30}}
+	resp, err := svc.Availability(ctx, sc, overlapping, nil)
+	require.NoError(t, err)
+
+	roomFree := map[string]bool{}
+	for _, r := range resp.Rooms {
+		roomFree[r.Name] = r.Free
+	}
+	require.False(t, roomFree["P101"], "an overlapping schedule must mark its room busy")
+	require.True(t, roomFree["P102"], "a room with no overlapping schedule stays free")
+
+	teacherFree := map[uuid.UUID]bool{}
+	for _, tRow := range resp.Teachers {
+		teacherFree[tRow.TeacherID] = tRow.Free
+	}
+	require.False(t, teacherFree[owner.ID], "the owner teaching the overlapping class must be busy")
+
+	// Excluding the busy class from the check frees its room and teacher —
+	// this is the "editing my own class" case.
+	respExcluded, err := svc.Availability(ctx, sc, overlapping, &busy.ID)
+	require.NoError(t, err)
+	for _, r := range respExcluded.Rooms {
+		if r.Name == "P101" {
+			require.True(t, r.Free, "exclude_class_id must free the excluded class's own room")
+		}
+	}
+
+	// A non-overlapping slot on the same weekday leaves the room free.
+	nonOverlapping := []classes.AvailabilitySlot{{Weekday: 2, StartTime: "08:00", DurationMin: 30}}
+	respFree, err := svc.Availability(ctx, sc, nonOverlapping, nil)
+	require.NoError(t, err)
+	for _, r := range respFree.Rooms {
+		if r.Name == "P101" {
+			require.True(t, r.Free, "a non-overlapping slot must not mark the room busy")
+		}
+	}
+}

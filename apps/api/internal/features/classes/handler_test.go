@@ -107,6 +107,8 @@ func TestAllRoutesRequireAuth(t *testing.T) {
 	routes := []struct{ method, path string }{
 		{http.MethodPost, "/api/v1/classes"},
 		{http.MethodGet, "/api/v1/classes"},
+		{http.MethodGet, "/api/v1/classes/stats"},
+		{http.MethodGet, "/api/v1/classes/availability"},
 		{http.MethodGet, "/api/v1/classes/" + someID},
 		{http.MethodPut, "/api/v1/classes/" + someID},
 		{http.MethodPost, "/api/v1/classes/" + someID + "/archive"},
@@ -162,6 +164,14 @@ func TestCreateValidation(t *testing.T) {
 		"bad start_time": {
 			`{"name":"Toán 8","start_date":"2026-01-05","default_unit_price":150000,"schedules":[{"weekday":2,"start_time":"25:99","duration_min":90}]}`,
 			"start_time",
+		},
+		"end_date before start_date": {
+			`{"name":"Toán 8","start_date":"2026-01-05","end_date":"2026-01-01","default_unit_price":150000,"schedules":[{"weekday":2,"start_time":"18:00","duration_min":90}]}`,
+			"end_date",
+		},
+		"duration_min too long": {
+			`{"name":"Toán 8","start_date":"2026-01-05","default_unit_price":150000,"schedules":[{"weekday":2,"start_time":"18:00","duration_min":601}]}`,
+			"duration_min",
 		},
 	}
 	for name, tc := range cases {
@@ -378,5 +388,423 @@ func TestListIsTenantScoped(t *testing.T) {
 	}
 	if len(rows) != 0 {
 		t.Fatalf("another teacher's list must be empty, got %+v", rows)
+	}
+}
+
+// createClass posts body and decodes the created class.
+func createClass(t *testing.T, r *gin.Engine, token, body string) ClassResponse {
+	t.Helper()
+	w, env := do(t, r, http.MethodPost, "/api/v1/classes", body, token)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: got %d %+v", w.Code, env)
+	}
+	var created ClassResponse
+	if err := json.Unmarshal(env.Data, &created); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	return created
+}
+
+// listIDs fetches the list with query and returns the ids in page order.
+func listIDs(t *testing.T, r *gin.Engine, token, query string) []uuid.UUID {
+	t.Helper()
+	w, env := do(t, r, http.MethodGet, "/api/v1/classes"+query, "", token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list %q: got %d %+v", query, w.Code, env)
+	}
+	var rows []ClassResponse
+	if err := json.Unmarshal(env.Data, &rows); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	ids := make([]uuid.UUID, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	return ids
+}
+
+// Filter parameters outside their enums are rejected up front with a field
+// message, never silently ignored — a UI chip that sent a typo would
+// otherwise show the unfiltered list as if it matched.
+func TestListRejectsUnknownFilterValues(t *testing.T) {
+	r, _ := newClassesHTTPTest(t)
+	token := mintToken(t, uuid.New())
+
+	cases := map[string]string{
+		"?weekday=7":    "weekday",
+		"?weekday=-1":   "weekday",
+		"?weekday=mon":  "weekday",
+		"?shift=night":  "shift",
+		"?phase=paused": "phase",
+		"?status=bogus": "status",
+		"?course_id=x":  "course_id",
+		"?recruiting=1": "recruiting",
+	}
+	for query, field := range cases {
+		w, env := do(t, r, http.MethodGet, "/api/v1/classes"+query, "", token)
+		if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields[field] == "" {
+			t.Fatalf("%s: want 422 with a %s field message, got %d %+v", query, field, w.Code, env)
+		}
+	}
+}
+
+// q matches name or code case-insensitively, weekday/shift look at the
+// class's still-effective timetable, tag matches one element exactly, and
+// phase is derived from the dates — all combinable.
+func TestListFiltersByQueryTimetableTagAndPhase(t *testing.T) {
+	r, _ := newClassesHTTPTest(t)
+	token := mintToken(t, uuid.New())
+
+	evening := createClass(t, r, token, `{
+		"name": "Toán 8", "code": "TOAN8", "tags": ["Toán", "Khối 8"],
+		"start_date": "2026-01-05", "default_unit_price": 150000,
+		"schedules": [{"weekday": 2, "start_time": "18:00", "duration_min": 90}]
+	}`)
+	morning := createClass(t, r, token, `{
+		"name": "Văn 9", "code": "VAN9", "tags": ["Văn"],
+		"start_date": "2026-10-01", "default_unit_price": 150000,
+		"schedules": [{"weekday": 6, "start_time": "08:00", "duration_min": 90}]
+	}`)
+
+	want := func(query string, ids ...uuid.UUID) {
+		t.Helper()
+		got := listIDs(t, r, token, query)
+		if len(got) != len(ids) {
+			t.Fatalf("%s: want %d rows, got %v", query, len(ids), got)
+		}
+		for i := range ids {
+			if got[i] != ids[i] {
+				t.Fatalf("%s: want %v, got %v", query, ids, got)
+			}
+		}
+	}
+	want("?q=toan8", evening.ID)
+	want("?q=v%C4%83n", morning.ID)
+	want("?q=zzz")
+	want("?weekday=2", evening.ID)
+	want("?weekday=2&shift=evening", evening.ID)
+	want("?weekday=2&shift=morning")
+	want("?shift=morning", morning.ID)
+	want("?tag=Kh%E1%BB%91i%208", evening.ID)
+	want("?tag=Khối")
+	want("?phase=running", evening.ID)
+	want("?phase=upcoming", morning.ID)
+	want("?phase=upcoming&q=toan")
+}
+
+// recruiting=true narrows both the list and the stats counters to the classes
+// open for recruitment: flag on and not ended or archived. The flag alone is
+// not enough, and false behaves like an absent filter.
+func TestRecruitingFilterScopesListAndStats(t *testing.T) {
+	r, repo := newClassesHTTPTest(t)
+	token := mintToken(t, uuid.New())
+
+	body := func(name, start, end string) string {
+		return `{"name": "` + name + `", "start_date": "` + start + `", "end_date": "` + end + `",
+			"default_unit_price": 150000,
+			"schedules": [{"weekday": 2, "start_time": "18:00", "duration_min": 90}]}`
+	}
+	running := createClass(t, r, token, body("Đang học", "2000-01-01", ""))
+	upcoming := createClass(t, r, token, body("Sắp khai giảng", "2099-01-01", ""))
+	ended := createClass(t, r, token, body("Đã kết thúc", "2000-01-01", "2000-12-31"))
+	archived := createClass(t, r, token, body("Lưu trữ", "2000-01-01", ""))
+	notRecruiting := createClass(t, r, token, body("Không tuyển", "2000-01-01", ""))
+	for _, c := range []ClassResponse{running, upcoming, ended, archived} {
+		repo.classes[c.ID].Recruiting = true
+	}
+	repo.classes[archived.ID].Status = StatusArchived
+
+	got := listIDs(t, r, token, "?status=all&recruiting=true")
+	if len(got) != 2 || !containsID(got, running.ID) || !containsID(got, upcoming.ID) {
+		t.Fatalf("recruiting list: want running and upcoming only, got %v", got)
+	}
+	if all := listIDs(t, r, token, "?status=all&recruiting=false"); len(all) != 5 {
+		t.Fatalf("recruiting=false must not filter, got %d rows", len(all))
+	}
+	if !containsID(listIDs(t, r, token, "?status=all"), notRecruiting.ID) {
+		t.Fatal("the unfiltered list must keep a class that is not recruiting")
+	}
+
+	w, env := do(t, r, http.MethodGet, "/api/v1/classes/stats?recruiting=true", "", token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("stats: want 200, got %d %+v", w.Code, env)
+	}
+	var stats ClassStatsResponse
+	if err := json.Unmarshal(env.Data, &stats); err != nil {
+		t.Fatalf("decode stats: %v", err)
+	}
+	want := ClassStatsResponse{All: 2, Upcoming: 1, Running: 1, Recruiting: 2}
+	if stats != want {
+		t.Fatalf("recruiting stats: want %+v, got %+v", want, stats)
+	}
+
+	w, env = do(t, r, http.MethodGet, "/api/v1/classes/stats?recruiting=maybe", "", token)
+	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["recruiting"] == "" {
+		t.Fatalf("stats with a bad recruiting flag: want 422 on recruiting, got %d %+v", w.Code, env)
+	}
+}
+
+func containsID(ids []uuid.UUID, want uuid.UUID) bool {
+	for _, got := range ids {
+		if got == want {
+			return true
+		}
+	}
+	return false
+}
+
+// A code the center already uses is a 409 with its own error code so the
+// form can attach the message to the code field; the malformed shape is a
+// plain 422.
+func TestCreateCodeConflictsAndValidation(t *testing.T) {
+	r, _ := newClassesHTTPTest(t)
+	token := mintToken(t, uuid.New())
+
+	body := `{"name": "Toán 8", "code": "TOAN8", "start_date": "2026-01-05", "default_unit_price": 150000,
+		"schedules": [{"weekday": 2, "start_time": "18:00", "duration_min": 90}]}`
+	created := createClass(t, r, token, body)
+	if created.Code != "TOAN8" || created.Phase != PhaseRunning || created.Tags == nil {
+		t.Fatalf("response must carry code, phase and a non-null tags list, got %+v", created)
+	}
+
+	w, env := do(t, r, http.MethodPost, "/api/v1/classes", body, token)
+	if w.Code != http.StatusConflict || env.Error == nil || env.Error.Code != CodeClassCodeTaken {
+		t.Fatalf("want 409 %s, got %d %+v", CodeClassCodeTaken, w.Code, env)
+	}
+
+	bad := strings.Replace(body, `"TOAN8"`, `"toán 8"`, 1)
+	w, env = do(t, r, http.MethodPost, "/api/v1/classes", bad, token)
+	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["code"] == "" {
+		t.Fatalf("want 422 on code, got %d %+v", w.Code, env)
+	}
+
+	tooMany := strings.Replace(body, `"code": "TOAN8",`, `"code": "TOAN8B", "tags": ["1","2","3","4","5","6","7","8","9","10","11"],`, 1)
+	w, env = do(t, r, http.MethodPost, "/api/v1/classes", tooMany, token)
+	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["tags"] == "" {
+		t.Fatalf("want 422 on tags, got %d %+v", w.Code, env)
+	}
+}
+
+// PUT keeps its full-replace contract for the original fields (name is
+// still required) while the catalog fields patch: a body naming only
+// recruiting leaves code, tags and note untouched.
+func TestUpdatePatchesCatalogFieldsOnly(t *testing.T) {
+	r, _ := newClassesHTTPTest(t)
+	token := mintToken(t, uuid.New())
+
+	created := createClass(t, r, token, `{
+		"name": "Toán 8", "code": "TOAN8", "tags": ["Toán"], "note": "Phòng 201",
+		"start_date": "2026-01-05", "default_unit_price": 150000,
+		"schedules": [{"weekday": 2, "start_time": "18:00", "duration_min": 90}]
+	}`)
+	path := "/api/v1/classes/" + created.ID.String()
+
+	w, env := do(t, r, http.MethodPut, path, `{"recruiting": true}`, token)
+	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["name"] == "" {
+		t.Fatalf("original fields stay required, want 422 on name, got %d %+v", w.Code, env)
+	}
+
+	w, env = do(t, r, http.MethodPut, path, `{"name": "Toán 8", "start_date": "2026-01-05", "default_unit_price": 150000, "recruiting": true}`, token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update: got %d %+v", w.Code, env)
+	}
+	var updated ClassResponse
+	if err := json.Unmarshal(env.Data, &updated); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if !updated.Recruiting || updated.Code != "TOAN8" || len(updated.Tags) != 1 || updated.Note == nil || *updated.Note != "Phòng 201" {
+		t.Fatalf("absent catalog fields must be kept, got %+v", updated)
+	}
+}
+
+// stats is its own route ahead of /:id, counts through the caller's read
+// scope, and reflects a recruiting toggle immediately.
+func TestStatsRoute(t *testing.T) {
+	r, _ := newClassesHTTPTest(t)
+	token := mintToken(t, uuid.New())
+
+	stats := func() ClassStatsResponse {
+		t.Helper()
+		w, env := do(t, r, http.MethodGet, "/api/v1/classes/stats", "", token)
+		if w.Code != http.StatusOK {
+			t.Fatalf("stats: got %d %+v", w.Code, env)
+		}
+		var out ClassStatsResponse
+		if err := json.Unmarshal(env.Data, &out); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		return out
+	}
+	if got := stats(); got != (ClassStatsResponse{}) {
+		t.Fatalf("empty center must count zeros, got %+v", got)
+	}
+
+	created := createClass(t, r, token, validCreateBody)
+	if got := stats(); got.All != 1 || got.Running != 1 || got.Recruiting != 0 {
+		t.Fatalf("one running class: got %+v", got)
+	}
+
+	w, env := do(t, r, http.MethodPut, "/api/v1/classes/"+created.ID.String(),
+		`{"name": "Toán 8", "start_date": "2026-01-05", "default_unit_price": 150000, "recruiting": true}`, token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update: got %d %+v", w.Code, env)
+	}
+	if got := stats(); got.Recruiting != 1 {
+		t.Fatalf("recruiting toggle must count, got %+v", got)
+	}
+
+	if w, env = do(t, r, http.MethodPost, "/api/v1/classes/"+created.ID.String()+"/archive", "", token); w.Code != http.StatusOK {
+		t.Fatalf("archive: got %d %+v", w.Code, env)
+	}
+	if got := stats(); got.All != 1 || got.Archived != 1 || got.Running != 0 {
+		t.Fatalf("archived class must move buckets, got %+v", got)
+	}
+
+	// Another caller's center must not leak into the count.
+	other := mintToken(t, uuid.New())
+	w, env = do(t, r, http.MethodGet, "/api/v1/classes/stats", "", other)
+	var out ClassStatsResponse
+	if w.Code != http.StatusOK || json.Unmarshal(env.Data, &out) != nil || out != (ClassStatsResponse{}) {
+		t.Fatalf("stats must be tenant scoped, got %d %+v", w.Code, env)
+	}
+}
+
+// course_id on create binds as a uuid, the response embeds the course as
+// {id, code, name} (null without one), and the list filters on it.
+func TestCourseAttachmentOverHTTP(t *testing.T) {
+	r, repo := newClassesHTTPTest(t)
+	teacher := uuid.New()
+	token := mintToken(t, teacher)
+	course := repo.addCourse(teacher, "TOAN-6", 180_000)
+
+	w, env := do(t, r, http.MethodPost, "/api/v1/classes", `{
+		"name": "Toán 6A", "start_date": "2026-01-05", "course_id": "not-a-uuid",
+		"schedules": [{"weekday": 2, "start_time": "18:00", "duration_min": 90}]
+	}`, token)
+	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["course_id"] == "" {
+		t.Fatalf("malformed course_id: want 422 on course_id, got %d %+v", w.Code, env)
+	}
+
+	attached := createClass(t, r, token, `{
+		"name": "Toán 6A", "start_date": "2026-01-05", "course_id": "`+course.ID.String()+`",
+		"schedules": [{"weekday": 2, "start_time": "18:00", "duration_min": 90}]
+	}`)
+	if attached.Course == nil || attached.Course.ID != course.ID || attached.Course.Code != "TOAN-6" || attached.DefaultUnitPrice != 180_000 {
+		t.Fatalf("attached class must embed the course and copy its price, got %+v", attached)
+	}
+	plain := createClass(t, r, token, `{
+		"name": "Văn 6", "start_date": "2026-01-05", "default_unit_price": 100000,
+		"schedules": [{"weekday": 3, "start_time": "18:00", "duration_min": 90}]
+	}`)
+	if plain.Course != nil {
+		t.Fatalf("class without course must carry null, got %+v", plain.Course)
+	}
+	w, _ = do(t, r, http.MethodGet, "/api/v1/classes/"+plain.ID.String(), "", token)
+	if !strings.Contains(w.Body.String(), `"course":null`) {
+		t.Fatalf("course must serialise as null: %s", w.Body.String())
+	}
+
+	ids := listIDs(t, r, token, "?course_id="+course.ID.String())
+	if len(ids) != 1 || ids[0] != attached.ID {
+		t.Fatalf("course_id filter: want only the attached class, got %v", ids)
+	}
+	if got := listIDs(t, r, token, ""); len(got) != 2 {
+		t.Fatalf("unfiltered list: want 2, got %d", len(got))
+	}
+
+	// The patch rule must survive binding: "" detaches, garbage is a 422 on
+	// the field, and a blank course_id on create means "no course".
+	w, env = do(t, r, http.MethodPut, "/api/v1/classes/"+attached.ID.String(),
+		`{"name": "Toán 6A", "start_date": "2026-01-05", "default_unit_price": 180000, "course_id": ""}`, token)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"course":null`) {
+		t.Fatalf("empty course_id must detach: got %d %s", w.Code, w.Body.String())
+	}
+	w, env = do(t, r, http.MethodPut, "/api/v1/classes/"+attached.ID.String(),
+		`{"name": "Toán 6A", "start_date": "2026-01-05", "default_unit_price": 180000, "course_id": "x"}`, token)
+	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["course_id"] == "" {
+		t.Fatalf("malformed course_id on update: want 422 on course_id, got %d %+v", w.Code, env)
+	}
+	blank := createClass(t, r, token, `{
+		"name": "Lý 6", "start_date": "2026-01-05", "default_unit_price": 100000, "course_id": "",
+		"schedules": [{"weekday": 4, "start_time": "18:00", "duration_min": 90}]
+	}`)
+	if blank.Course != nil {
+		t.Fatalf("blank course_id on create must mean no course, got %+v", blank.Course)
+	}
+}
+
+// A schedule's duration_min is bounded to 1..600 minutes (10 hours) on both
+// the add and the update endpoint, matching the web wizard's own bound.
+func TestScheduleDurationBounds(t *testing.T) {
+	r, _ := newClassesHTTPTest(t)
+	token := mintToken(t, uuid.New())
+	class := createClass(t, r, token, validCreateBody)
+
+	w, env := do(t, r, http.MethodPost, "/api/v1/classes/"+class.ID.String()+"/schedules",
+		`{"weekday":3,"start_time":"08:00","duration_min":601}`, token)
+	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["duration_min"] == "" {
+		t.Fatalf("add schedule with duration_min 601: want 422 on duration_min, got %d %+v", w.Code, env)
+	}
+
+	scheduleID := class.Schedules[0].ID
+	w, env = do(t, r, http.MethodPut, "/api/v1/classes/"+class.ID.String()+"/schedules/"+scheduleID.String(),
+		`{"weekday":2,"start_time":"18:00","duration_min":601,"effective_from":"2026-01-05"}`, token)
+	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["duration_min"] == "" {
+		t.Fatalf("update schedule with duration_min 601: want 422 on duration_min, got %d %+v", w.Code, env)
+	}
+}
+
+// GET /classes/availability reports room and teacher busy/free state for the
+// requested slots, honours exclude_class_id, and answers 422 on a malformed
+// slot or exclude_class_id.
+func TestAvailabilityRoute(t *testing.T) {
+	r, repo := newClassesHTTPTest(t)
+	teacher := uuid.New()
+	token := mintToken(t, teacher)
+
+	busy := createClass(t, r, token, `{
+		"name": "Toán 8", "start_date": "2026-01-05", "default_unit_price": 150000, "room": "P101",
+		"schedules": [{"weekday": 1, "start_time": "08:00", "duration_min": 90}]
+	}`)
+	repo.addMember(teacher, teacher, "Giáo viên chính")
+
+	w, env := do(t, r, http.MethodGet, "/api/v1/classes/availability?slot=1-08:30-30", "", token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("availability: got %d %+v", w.Code, env)
+	}
+	var resp AvailabilityResponse
+	if err := json.Unmarshal(env.Data, &resp); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if len(resp.Rooms) != 1 || resp.Rooms[0].Name != "P101" || resp.Rooms[0].Free {
+		t.Fatalf("the overlapping class's room must be busy, got %+v", resp.Rooms)
+	}
+	if len(resp.Teachers) != 1 || resp.Teachers[0].Free {
+		t.Fatalf("the class's teacher must be busy, got %+v", resp.Teachers)
+	}
+
+	// Excluding the busy class's own id must free its room and teacher.
+	w, env = do(t, r, http.MethodGet, "/api/v1/classes/availability?slot=1-08:30-30&exclude_class_id="+busy.ID.String(), "", token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("availability: got %d %+v", w.Code, env)
+	}
+	if err := json.Unmarshal(env.Data, &resp); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if len(resp.Rooms) != 0 {
+		t.Fatalf("excluding the only class must leave no room, got %+v", resp.Rooms)
+	}
+	if len(resp.Teachers) != 1 || !resp.Teachers[0].Free {
+		t.Fatalf("excluding the busy class must free its teacher, got %+v", resp.Teachers)
+	}
+
+	w, env = do(t, r, http.MethodGet, "/api/v1/classes/availability?slot=bogus", "", token)
+	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["slot"] == "" {
+		t.Fatalf("a malformed slot must be 422 on slot, got %d %+v", w.Code, env)
+	}
+
+	w, env = do(t, r, http.MethodGet, "/api/v1/classes/availability?exclude_class_id=not-a-uuid", "", token)
+	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["exclude_class_id"] == "" {
+		t.Fatalf("a malformed exclude_class_id must be 422 on exclude_class_id, got %d %+v", w.Code, env)
 	}
 }

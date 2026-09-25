@@ -8,6 +8,10 @@ func RegisterRoutes(rg *gin.RouterGroup, h *Handler, auth ...gin.HandlerFunc) {
 	g := rg.Group("/classes", auth...)
 	g.POST("", h.create)
 	g.GET("", h.list)
+	// stats and availability must precede /:id or Gin would read them as a
+	// class id.
+	g.GET("/stats", h.stats)
+	g.GET("/availability", h.availability)
 	g.GET("/:id", h.get)
 	g.PUT("/:id", h.update)
 	g.POST("/:id/archive", h.archive)

@@ -7,10 +7,14 @@ import {
   createClass,
   deleteSchedule,
   getClass,
+  getClassAvailability,
+  getClassStats,
   listClasses,
+  listCourseOptions,
   reassignTeacher,
   updateClass,
   updateSchedule,
+  type ClassStatsParams,
   type ListClassesParams,
   type UpdateScheduleInput,
 } from "../api/classes-api";
@@ -19,10 +23,11 @@ import { classesKeys } from "./roster-keys";
 
 export { classesKeys };
 
-export function useClassesList(params: ListClassesParams = {}) {
+export function useClassesList(params: ListClassesParams = {}, enabled = true) {
   return useQuery({
     queryKey: classesKeys.list(params),
     queryFn: () => listClasses(params),
+    enabled,
     placeholderData: keepPreviousData,
   });
 }
@@ -35,12 +40,45 @@ export function useClass(id: string | undefined) {
   });
 }
 
+/** Per-phase counts for the class list's status chips. */
+/** The center's active courses for the class dialog; fetched only while the dialog is open. */
+export function useCourseOptions(enabled: boolean) {
+  return useQuery({
+    queryKey: classesKeys.courseOptions(),
+    queryFn: listCourseOptions,
+    enabled,
+    staleTime: 0,
+  });
+}
+
+/** Room names in use across the center — availability with no slots lists them all as free. */
+export function useClassRooms(excludeClassId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: classesKeys.rooms(excludeClassId),
+    queryFn: async () =>
+      (await getClassAvailability([], excludeClassId)).rooms.map((room) => room.name),
+    enabled,
+  });
+}
+
+export function useClassStats(params: ClassStatsParams = {}) {
+  return useQuery({
+    queryKey: classesKeys.stats(params),
+    queryFn: () => getClassStats(params),
+  });
+}
+
+/**
+ * Create and update invalidate every class query, not just the lists: the
+ * stats counts move with a new class or a recruiting/date edit, and the
+ * detail must reflect an edit made from the list.
+ */
 export function useCreateClass() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: ClassCreateInput) => createClass(input),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: classesKeys.lists() });
+      void queryClient.invalidateQueries({ queryKey: classesKeys.all });
     },
   });
 }
@@ -50,8 +88,7 @@ export function useUpdateClass(id: string) {
   return useMutation({
     mutationFn: (input: ClassUpdateInput) => updateClass(id, input),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: classesKeys.lists() });
-      void queryClient.invalidateQueries({ queryKey: classesKeys.detail(id) });
+      void queryClient.invalidateQueries({ queryKey: classesKeys.all });
     },
   });
 }

@@ -6,6 +6,7 @@ package seeds
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -99,8 +100,10 @@ type seedSchedule struct {
 
 type seedClass struct {
 	Name      string
-	StartDate string // YYYY-MM-DD
-	UnitPrice int64  // đồng per session
+	Code      string   // mã lớp, unique per center
+	Tags      []string // catalog tags shown as chips
+	StartDate string   // YYYY-MM-DD
+	UnitPrice int64    // đồng per session
 	Schedules []seedSchedule
 }
 
@@ -128,6 +131,8 @@ var seedEnrollments = []seedEnrollment{
 var seedClasses = []seedClass{
 	{
 		Name:      "Toán 8 - Tối Thứ Ba",
+		Code:      "TOAN8B",
+		Tags:      []string{"Toán", "Khối 8"},
 		StartDate: "2026-01-06",
 		UnitPrice: 150_000,
 		Schedules: []seedSchedule{
@@ -136,6 +141,8 @@ var seedClasses = []seedClass{
 	},
 	{
 		Name:      "Văn 9 - Sáng Thứ Bảy",
+		Code:      "VAN9S",
+		Tags:      []string{"Văn", "Khối 9"},
 		StartDate: "2026-02-07",
 		UnitPrice: 200_000,
 		Schedules: []seedSchedule{
@@ -175,6 +182,8 @@ var minhData = teacherDataset{
 	Classes: []seedClass{
 		{
 			Name:      "Lý 7 - Chiều Thứ Năm",
+			Code:      "LY7C",
+			Tags:      []string{"Lý", "Khối 7"},
 			StartDate: "2026-02-05",
 			UnitPrice: 180_000,
 			Schedules: []seedSchedule{
@@ -255,6 +264,14 @@ func Run(ctx context.Context, db *gorm.DB, log *slog.Logger) error {
 	// the member teacher as tro_giang — so the class-staff UI and the
 	// assignment-scoped read paths have demo material.
 	if err := seedClassStaff(ctx, db, log, ownerSc, seedClasses[0].Name, thuID, minhID); err != nil {
+		return err
+	}
+
+	// The Giảng dạy menu demo data (templates, courses, learning path, class
+	// program, demo-teacher grants and invitations) lives in
+	// teaching_menu.go, keyed off the owner scope and center id resolved
+	// above.
+	if err := seedTeachingMenu(ctx, db, log, ownerSc, centerID); err != nil {
 		return err
 	}
 
@@ -626,9 +643,13 @@ func seedClassList(ctx context.Context, db *gorm.DB, log *slog.Logger, sc authct
 	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, c := range classList {
 			classID := id.New()
+			tags, err := json.Marshal(c.Tags)
+			if err != nil {
+				return err
+			}
 			if err := tx.Exec(
-				"INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price, status) VALUES (?, ?, ?, ?, ?::date, ?, 'active')",
-				classID, sc.TeacherID, sc.CenterID, c.Name, c.StartDate, c.UnitPrice,
+				"INSERT INTO classes (id, teacher_id, center_id, name, code, tags, start_date, default_unit_price, status) VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::date, ?, 'active')",
+				classID, sc.TeacherID, sc.CenterID, c.Name, c.Code, string(tags), c.StartDate, c.UnitPrice,
 			).Error; err != nil {
 				return err
 			}

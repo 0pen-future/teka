@@ -35,6 +35,14 @@ type TaskHandover interface {
 	HandoverOnDeparture(ctx context.Context, centerID, departed, newOwner uuid.UUID) (unassigned, reassigned int, err error)
 }
 
+// ClassInviteCanceller withdraws a departing member's open class invitations
+// (consumer-defined interface; implemented by *classinvites.Service). It runs
+// inside RemoveMember's transaction so a removed member never keeps an
+// invitation the owner could later confirm into a stint.
+type ClassInviteCanceller interface {
+	CancelOpenForMember(ctx context.Context, centerID, teacherID uuid.UUID) (int64, error)
+}
+
 // Service implements center membership business logic.
 type Service struct {
 	repo     Repository
@@ -46,6 +54,9 @@ type Service struct {
 	// taskHandover is set post-construction, same as disabler — see
 	// SetTaskHandover.
 	taskHandover TaskHandover
+	// classInvites is set post-construction like taskHandover — see
+	// SetClassInviteCanceller.
+	classInvites ClassInviteCanceller
 }
 
 // NewService builds the centers service. The bus is a constructor parameter
@@ -86,6 +97,19 @@ func (s *Service) SetTaskHandover(h TaskHandover) {
 // itself end to end.
 func (s *Service) TaskHandoverWired() bool {
 	return s.taskHandover != nil
+}
+
+// SetClassInviteCanceller wires the classinvites dependency after
+// construction, for the same ordering reason as SetTaskHandover: classinvites
+// is built after centers because it validates invitees through this service.
+func (s *Service) SetClassInviteCanceller(c ClassInviteCanceller) {
+	s.classInvites = c
+}
+
+// ClassInviteCancellerWired reports whether SetClassInviteCanceller has run;
+// the server package's wiring test reads it.
+func (s *Service) ClassInviteCancellerWired() bool {
+	return s.classInvites != nil
 }
 
 // ResolveScope loads the caller's center scope; it satisfies
@@ -363,6 +387,11 @@ func (s *Service) RemoveMember(ctx context.Context, scope authctx.Scope, targetI
 				Unassigned:  unassigned,
 				Reassigned:  reassigned,
 			}
+		}
+		if s.classInvites == nil {
+			logger.FromContext(ctx).Warn("class invite canceller not wired, skipping")
+		} else if _, err := s.classInvites.CancelOpenForMember(ctx, scope.CenterID, targetID); err != nil {
+			return err
 		}
 		if err := s.repo.CloseMembership(ctx, targetID, scope.CenterID); err != nil {
 			return err

@@ -41,6 +41,13 @@ type Repository interface {
 	// error) when the class has none — the service maps that to the empty
 	// default the UI expects.
 	GetCurriculum(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*Curriculum, error)
+	// LockCurriculum locks the class's curriculum row FOR UPDATE inside the
+	// caller's transaction, so a decision that reads the curriculum right
+	// after (such as classprogram's Apply comparing lesson lists) serialises
+	// against a concurrent writer instead of racing a pre-lock snapshot. A
+	// class with no curriculum row yet has nothing to lock, so a miss is not
+	// an error.
+	LockCurriculum(ctx context.Context, sc authctx.Scope, classID uuid.UUID) error
 	// UpsertCurriculum whole-replaces the class's lessons and progress
 	// pointer, keeping the row id and creation-time teacher anchor stable
 	// across edits.
@@ -109,6 +116,18 @@ func (r *gormRepository) GetCurriculum(ctx context.Context, sc authctx.Scope, cl
 		return nil, err
 	}
 	return &cur, nil
+}
+
+func (r *gormRepository) LockCurriculum(ctx context.Context, sc authctx.Scope, classID uuid.UUID) error {
+	var cur Curriculum
+	err := database.FromContext(ctx, r.db).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("center_id = ? AND class_id = ?", sc.CenterID, classID).
+		Take(&cur).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	return err
 }
 
 func (r *gormRepository) UpsertCurriculum(ctx context.Context, cur *Curriculum) error {

@@ -7,13 +7,14 @@ import {
   getSession,
   getSessionRoster,
   listClassSessions,
+  type ListClassSessionsParams,
 } from "../api/attendance-api";
 import type { CancelSessionInput, ConfirmAttendanceInput } from "../schemas/attendance-schemas";
 
 export const sessionsKeys = {
   all: ["attendance", "sessions"] as const,
   lists: () => [...sessionsKeys.all, "list"] as const,
-  list: (classId: string, params: { from: string; to: string }) =>
+  list: (classId: string, params: ListClassSessionsParams) =>
     [...sessionsKeys.lists(), classId, params] as const,
   details: () => [...sessionsKeys.all, "detail"] as const,
   detail: (id: string) => [...sessionsKeys.details(), id] as const,

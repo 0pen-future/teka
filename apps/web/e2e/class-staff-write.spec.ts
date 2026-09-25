@@ -134,7 +134,7 @@ test("tro_giang records attendance directly on the staffed class", async ({ page
 // send journey to assert for Cô Thu anymore.
 
 /**
- * Reads the class-settings handoff card and, when the current teacher differs
+ * Reads the class-detail handoff card and, when the current teacher differs
  * from `targetName`, hands the class over. Assert-then-set keeps it
  * idempotent on a reused database and safe to run from the restoring
  * afterEach no matter where the journey stopped.
@@ -145,7 +145,7 @@ async function ensureClassTeacher(
   targetName: string,
   targetOptionLabel: string,
 ) {
-  await page.goto(`/classes/${classId}/settings`);
+  await page.goto(`/classes/${classId}`);
   const card = page.locator("#teacher-handoff");
   const current = card.getByText("Giáo viên hiện tại:");
   await expect(current).toBeVisible();
@@ -190,7 +190,7 @@ test("a handed-off teacher keeps reading history but loses every write", async (
     minh.getByRole("button", { name: /^(XÁC NHẬN|ĐÃ XÁC NHẬN ✓|LƯU VÀ TẠO ĐIỀU CHỈNH)( · .+)?$/ }),
   ).toBeEnabled();
 
-  // The owner hands the class to herself through the settings card.
+  // The owner hands the class to herself through the detail card.
   const ownerContext = await browser.newContext();
   const owner = await ownerContext.newPage();
   await login(owner, OWNER);
@@ -202,15 +202,13 @@ test("a handed-off teacher keeps reading history but loses every write", async (
   await minh.goto(`/records?class_id=${classId}`);
   await expect(minh.getByText("Bé Phúc", { exact: true })).toBeVisible();
 
-  // Every write freezes — settings save is reserved for the new teacher…
-  await minh.goto(`/classes/${classId}/settings`);
-  await expect(
-    minh.getByText("Chỉ giáo viên phụ trách hoặc chủ trung tâm mới sửa được cài đặt lớp."),
-  ).toBeVisible();
-  await expect(minh.getByRole("button", { name: "Lưu thay đổi" })).toBeDisabled();
-
-  // …and so is attendance, even on the past session he himself recorded.
+  // Every write freezes — the edit dialog disables saving for the former teacher…
+  await minh.goto(`/classes/${classId}?edit=1`);
+  // The URL is ignored without class write permission; no edit controls are mounted.
+  await expect(minh.getByRole("dialog", { name: "Sửa lớp học" })).toHaveCount(0);
+  await expect(minh.getByRole("button", { name: "Sửa lớp" })).toHaveCount(0);
   await minh.goto(sheetUrl);
+  // …and so is attendance, even on the past session he himself recorded.
   await expect(minh.getByRole("radiogroup").first()).toBeVisible();
   const frozen = minh.getByRole("button", {
     name: "CHỈ GIÁO VIÊN, TRỢ GIẢNG LỚP HOẶC CHỦ TRUNG TÂM MỚI XÁC NHẬN ĐƯỢC",

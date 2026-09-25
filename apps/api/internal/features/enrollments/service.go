@@ -238,6 +238,12 @@ func (s *Service) ActiveOn(ctx context.Context, sc authctx.Scope, classID uuid.U
 	return s.repo.ActiveOn(ctx, sc, classID, on)
 }
 
+// ActiveInRange is ActiveOn's batched form: every enrollment active on at
+// least one day of [from, to], for callers that resolve many dates at once.
+func (s *Service) ActiveInRange(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]Enrollment, error) {
+	return s.repo.ActiveInRange(ctx, sc, classID, from, to)
+}
+
 // ActiveOnClass is ActiveOn's center-scoped sibling: billing.EnrollmentSource
 // calls it from post-close reconciliation so a confirming caller with no
 // stint or ownership on the session's class (a teaching assistant, most

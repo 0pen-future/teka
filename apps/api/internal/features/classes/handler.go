@@ -2,6 +2,8 @@ package classes
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -56,13 +58,14 @@ func pathID(c *gin.Context, param, resource string) (uuid.UUID, bool) {
 // create registers a class with its weekly schedules in one transaction.
 //
 //	@Summary		Create class
-//	@Description	Schedules are required — a class without a timetable generates no sessions.
+//	@Description	Schedules are required — a class without a timetable generates no sessions. A blank code is generated; a code another live class in the center uses is refused with 409 CLASS_CODE_TAKEN.
 //	@Tags			classes
 //	@Accept			json
 //	@Produce		json
 //	@Param			request	body		CreateClassRequest	true	"class fields with schedules"
 //	@Success		201		{object}	response.Envelope{data=ClassResponse}
 //	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		409		{object}	response.Envelope{error=response.ErrorBody}	"class code already taken"
 //	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}	"validation failed"
 //	@Security		BearerAuth
 //	@Router			/classes [post]
@@ -87,10 +90,17 @@ func (h *Handler) create(c *gin.Context) {
 // list returns a page of classes, active-only by default.
 //
 //	@Summary		List classes
-//	@Description	status filters the list: active (default), archived, or all.
+//	@Description	status filters the list: active (default), archived, or all. The other filters combine with AND: q matches name or code, weekday/shift match a timetable row still in effect, tag matches one tag exactly, phase is derived from the dates, recruiting=true keeps the classes open for recruitment (flag on, not ended or archived).
 //	@Tags			classes
 //	@Produce		json
 //	@Param			status		query		string	false	"active (default), archived, or all"
+//	@Param			q			query		string	false	"substring of name or code, case-insensitive"
+//	@Param			weekday		query		int		false	"0 (Sunday) to 6"
+//	@Param			shift		query		string	false	"morning, afternoon, or evening"
+//	@Param			tag			query		string	false	"exact tag"
+//	@Param			phase		query		string	false	"upcoming, running, ended, or archived"
+//	@Param			course_id	query		string	false	"only classes attached to this course"
+//	@Param			recruiting	query		bool	false	"true: only classes open for recruitment"
 //	@Param			page		query		int		false	"page number"
 //	@Param			per_page	query		int		false	"page size (max 100)"
 //	@Param			sort		query		string	false	"name, start_date, or created_at; - prefix for desc"
@@ -104,15 +114,8 @@ func (h *Handler) list(c *gin.Context) {
 	if !ok {
 		return
 	}
-	filter := ListFilter{}
-	switch status := c.DefaultQuery("status", StatusActive); status {
-	case StatusActive, StatusArchived:
-		filter.Status = status
-	case "all":
-		// Status stays empty: every non-deleted class.
-	default:
-		response.Err(c, apperror.Invalid("validation failed",
-			map[string]string{"status": "must be one of: active, archived, all"}))
+	filter, ok := parseListFilter(c)
+	if !ok {
 		return
 	}
 	params := pagination.Parse(c, "name", listSorts)
@@ -133,6 +136,155 @@ func (h *Handler) list(c *gin.Context) {
 		out = append(out, resp)
 	}
 	response.List(c, out, params.Meta(total))
+}
+
+// parseListFilter reads the list query parameters, answering 422 with one
+// message per offending field when any enum or range is off. A typo in a
+// filter must never fall through to the unfiltered list.
+func parseListFilter(c *gin.Context) (ListFilter, bool) {
+	filter := ListFilter{Q: strings.TrimSpace(c.Query("q")), Tag: c.Query("tag")}
+	fields := map[string]string{}
+	switch status := c.DefaultQuery("status", StatusActive); status {
+	case StatusActive, StatusArchived:
+		filter.Status = status
+	case "all":
+		// Status stays empty: every non-deleted class.
+	default:
+		fields["status"] = "must be one of: active, archived, all"
+	}
+	if raw := c.Query("weekday"); raw != "" {
+		n, err := strconv.ParseInt(raw, 10, 16)
+		if err != nil || n < 0 || n > 6 {
+			fields["weekday"] = "must be an integer from 0 (Sunday) to 6"
+		} else {
+			weekday := int16(n)
+			filter.Weekday = &weekday
+		}
+	}
+	switch shift := c.Query("shift"); shift {
+	case "", ShiftMorning, ShiftAfternoon, ShiftEvening:
+		filter.Shift = shift
+	default:
+		fields["shift"] = "must be one of: morning, afternoon, evening"
+	}
+	switch phase := c.Query("phase"); phase {
+	case "", PhaseUpcoming, PhaseRunning, PhaseEnded, PhaseArchived:
+		filter.Phase = phase
+	default:
+		fields["phase"] = "must be one of: upcoming, running, ended, archived"
+	}
+	if raw := c.Query("course_id"); raw != "" {
+		courseID, err := uuid.Parse(raw)
+		if err != nil {
+			fields["course_id"] = "must be a uuid"
+		} else {
+			filter.CourseID = &courseID
+		}
+	}
+	filter.Recruiting = parseRecruiting(c, fields)
+	if len(fields) > 0 {
+		response.Err(c, apperror.Invalid("validation failed", fields))
+		return ListFilter{}, false
+	}
+	return filter, true
+}
+
+// parseRecruiting reads the optional recruiting=true|false query flag;
+// false and absent both mean "no recruiting filter". Anything else lands in
+// fields so the caller answers 422 instead of silently listing everything.
+func parseRecruiting(c *gin.Context, fields map[string]string) bool {
+	switch c.Query("recruiting") {
+	case "", "false":
+		return false
+	case "true":
+		return true
+	default:
+		fields["recruiting"] = "must be true or false"
+		return false
+	}
+}
+
+// stats counts the caller's readable classes per phase.
+//
+//	@Summary		Class stats
+//	@Description	Counts every class the caller can read, bucketed by phase on today, plus how many are recruiting. recruiting=true scopes every counter to the classes open for recruitment, as the list filter of the same name does.
+//	@Tags			classes
+//	@Produce		json
+//	@Param			recruiting	query		bool	false	"true: count only classes open for recruitment"
+//	@Success		200			{object}	response.Envelope{data=ClassStatsResponse}
+//	@Failure		401			{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		422			{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/classes/stats [get]
+func (h *Handler) stats(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	fields := map[string]string{}
+	recruitingOnly := parseRecruiting(c, fields)
+	if len(fields) > 0 {
+		response.Err(c, apperror.Invalid("validation failed", fields))
+		return
+	}
+	stats, err := h.svc.Stats(c.Request.Context(), sc, Today(), recruitingOnly)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, stats)
+}
+
+// availability reports which rooms and teachers are free for a set of
+// requested weekly slots.
+//
+//	@Summary		Class availability
+//	@Description	slot is repeatable, "<weekday 0-6>-<HH:MM>-<duration minutes>" (e.g. "1-08:00-90"). Rooms are the distinct non-empty rooms of live classes in the center; teachers are the active center members. A room or teacher is free only when no other live class's active schedule overlaps any requested slot on the same weekday; exclude_class_id leaves one class out of that check (the class being edited).
+//	@Tags			classes
+//	@Produce		json
+//	@Param			slot				query		[]string	false	"repeatable, <weekday 0-6>-<HH:MM>-<duration minutes>"
+//	@Param			exclude_class_id	query		string		false	"class id to leave out of the busy check"
+//	@Success		200					{object}	response.Envelope{data=AvailabilityResponse}
+//	@Failure		401					{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		422					{object}	response.Envelope{error=response.ErrorBody}
+//	@Security		BearerAuth
+//	@Router			/classes/availability [get]
+func (h *Handler) availability(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	slots, excludeClassID, ok := parseAvailabilityQuery(c)
+	if !ok {
+		return
+	}
+	resp, err := h.svc.Availability(c.Request.Context(), sc, slots, excludeClassID)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, resp)
+}
+
+// parseAvailabilityQuery reads the repeatable slot query values and the
+// optional exclude_class_id, answering 422 on the first malformed value.
+func parseAvailabilityQuery(c *gin.Context) ([]AvailabilitySlot, *uuid.UUID, bool) {
+	slots, err := ParseAvailabilitySlots(c.QueryArray("slot"))
+	if err != nil {
+		response.Err(c, err)
+		return nil, nil, false
+	}
+	var excludeClassID *uuid.UUID
+	if raw := c.Query("exclude_class_id"); raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			response.Err(c, apperror.Invalid("validation failed",
+				map[string]string{"exclude_class_id": "must be a uuid"}))
+			return nil, nil, false
+		}
+		excludeClassID = &id
+	}
+	return slots, excludeClassID, true
 }
 
 // get returns one class with its schedules; archived classes remain
@@ -174,7 +326,7 @@ func (h *Handler) get(c *gin.Context) {
 // update edits the class's own fields.
 //
 //	@Summary		Update class
-//	@Description	Edits name, dates, and default price; schedules and status have their own endpoints.
+//	@Description	Edits name, dates, and default price (full replace); code, tags, recruiting and note are optional and keep their stored value when absent. Schedules and status have their own endpoints.
 //	@Tags			classes
 //	@Accept			json
 //	@Produce		json
@@ -183,6 +335,7 @@ func (h *Handler) get(c *gin.Context) {
 //	@Success		200		{object}	response.Envelope{data=ClassResponse}
 //	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
 //	@Failure		404		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		409		{object}	response.Envelope{error=response.ErrorBody}	"class code already taken"
 //	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}
 //	@Security		BearerAuth
 //	@Router			/classes/{id} [put]

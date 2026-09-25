@@ -90,6 +90,57 @@ func TestActiveOnBoundariesAreInclusive(t *testing.T) {
 	require.False(t, got[startsAfter.ID.String()], "started_on == D+1 is excluded")
 }
 
+func TestActiveInRangeKeepsAnyEnrollmentOverlappingTheWindow(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
+	contact := testutil.Contact(t, db, teacher.ID)
+	class := testutil.Class(t, db, teacher.ID)
+
+	// Window [2026-03-01, 2026-03-31]: one enrollment ends on the first day,
+	// one starts on the last day, one ended the day before and one starts the
+	// day after.
+	endsOnFirst := testutil.Student(t, db, teacher.ID, contact.ID, testutil.WithStudentFullName("Ends On First"))
+	startsOnLast := testutil.Student(t, db, teacher.ID, contact.ID, testutil.WithStudentFullName("Starts On Last"))
+	endedBefore := testutil.Student(t, db, teacher.ID, contact.ID, testutil.WithStudentFullName("Ended Before"))
+	startsAfter := testutil.Student(t, db, teacher.ID, contact.ID, testutil.WithStudentFullName("Starts After"))
+
+	ending, err := svc.Create(ctx, sc, enrollments.CreateRequest{
+		StudentID: endsOnFirst.ID, ClassID: class.ID, StartedOn: "2026-01-05",
+	})
+	require.NoError(t, err)
+	_, err = svc.End(ctx, sc, ending.ID, enrollments.EndRequest{EndedOn: "2026-03-01"})
+	require.NoError(t, err)
+	_, err = svc.Create(ctx, sc, enrollments.CreateRequest{
+		StudentID: startsOnLast.ID, ClassID: class.ID, StartedOn: "2026-03-31",
+	})
+	require.NoError(t, err)
+	gone, err := svc.Create(ctx, sc, enrollments.CreateRequest{
+		StudentID: endedBefore.ID, ClassID: class.ID, StartedOn: "2026-01-05",
+	})
+	require.NoError(t, err)
+	_, err = svc.End(ctx, sc, gone.ID, enrollments.EndRequest{EndedOn: "2026-02-28"})
+	require.NoError(t, err)
+	_, err = svc.Create(ctx, sc, enrollments.CreateRequest{
+		StudentID: startsAfter.ID, ClassID: class.ID, StartedOn: "2026-04-01",
+	})
+	require.NoError(t, err)
+
+	active, err := svc.ActiveInRange(ctx, sc, class.ID, date("2026-03-01"), date("2026-03-31"))
+	require.NoError(t, err)
+	got := map[string]bool{}
+	for _, e := range active {
+		got[e.StudentID.String()] = true
+	}
+	require.Len(t, active, 2)
+	require.True(t, got[endsOnFirst.ID.String()], "ended_on == from is inclusive")
+	require.True(t, got[startsOnLast.ID.String()], "started_on == to is inclusive")
+	require.False(t, got[endedBefore.ID.String()], "ended_on == from-1 is excluded")
+	require.False(t, got[startsAfter.ID.String()], "started_on == to+1 is excluded")
+}
+
 func TestDuplicateOpenEnrollmentRefusedByIndexThenReenrollAllowed(t *testing.T) {
 	t.Parallel()
 	svc, db := newIntegrationService(t)

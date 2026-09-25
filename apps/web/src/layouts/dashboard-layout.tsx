@@ -1,14 +1,20 @@
 import {
+  BookMarkedIcon,
   BookOpenIcon,
   BookUserIcon,
   Building2Icon,
   ClipboardCheckIcon,
+  ClipboardListIcon,
   EllipsisIcon,
   FileSpreadsheetIcon,
+  GraduationCapIcon,
   HistoryIcon,
   IdCardIcon,
   KanbanIcon,
+  LibraryBigIcon,
   LogOutIcon,
+  MailPlusIcon,
+  RouteIcon,
   ShieldCheckIcon,
   SlidersHorizontalIcon,
   type LucideProps,
@@ -53,12 +59,13 @@ interface NavGroup {
 
 /**
  * The prototype sidebar's grouped nav: Tổng quan ungrouped, then Dạy học /
- * Học phí / Trung tâm sections. Entries carrying a `perm` render only after
- * `/centers/me` resolves with that key in the caller's effective set —
- * rendering optimistically would flash entries a narrowed role then loses.
- * The three period-scoped routes (Chốt sổ, Gửi thông báo, Thu tiền) build
- * their link once `useCurrentPeriod` resolves rather than routing through a
- * redirect page, since phase 1 owns no `/billing/current`-style route.
+ * Giảng dạy / Kho học liệu / Học phí / Trung tâm sections. Entries carrying a
+ * `perm` render only after `/centers/me` resolves with that key in the
+ * caller's effective set — rendering optimistically would flash entries a
+ * narrowed role then loses. The three period-scoped routes (Chốt sổ, Gửi
+ * thông báo, Thu tiền) build their link once `useCurrentPeriod` resolves
+ * rather than routing through a redirect page, since phase 1 owns no
+ * `/billing/current`-style route.
  */
 function useNavGroups(): NavGroup[] {
   const { data: period } = useCurrentPeriod();
@@ -83,6 +90,36 @@ function useNavGroups(): NavGroup[] {
         { label: "Quản lý lớp học", to: "/classbook", Icon: BookOpenIcon, perm: "classes.list" },
         { label: "Hồ sơ học sinh", to: "/records", Icon: IdCardIcon, perm: "students.list" },
         { label: "Phụ huynh", to: "/contacts", Icon: BookUserIcon, perm: "contacts.list" },
+      ],
+    },
+    {
+      header: "Giảng dạy",
+      entries: [
+        {
+          label: "Danh sách lớp học",
+          to: "/classes",
+          Icon: BookMarkedIcon,
+          perm: "classes.list",
+        },
+        {
+          label: "Lớp cần tuyển sinh",
+          to: "/classes/recruiting",
+          Icon: HvUsersIcon,
+          perm: "classes.list",
+        },
+        // No perm: every member can receive an invitation, and the API
+        // already scopes the list to the caller's own rows.
+        { label: "Lời mời nhận lớp", to: "/class-invitations", Icon: MailPlusIcon },
+      ],
+    },
+    {
+      header: "Kho học liệu",
+      entries: [
+        { label: "Lộ trình học", to: "/paths", Icon: RouteIcon, perm: "paths.read" },
+        { label: "Khóa học", to: "/courses", Icon: GraduationCapIcon, perm: "courses.read" },
+        // The hub links on to the content and exercise banks, so they share its entry.
+        { label: "Kho học liệu", to: "/library", Icon: LibraryBigIcon, perm: "library.read" },
+        { label: "Chuẩn bị tài liệu", to: "/prep", Icon: ClipboardListIcon, perm: "library.read" },
       ],
     },
     {
@@ -172,6 +209,13 @@ function useNavGroups(): NavGroup[] {
 const OVERFLOW_LABELS = new Set([
   "Quản lý lớp học",
   "Hồ sơ học sinh",
+  "Danh sách lớp học",
+  "Lớp cần tuyển sinh",
+  "Lời mời nhận lớp",
+  "Lộ trình học",
+  "Khóa học",
+  "Kho học liệu",
+  "Chuẩn bị tài liệu",
   "Chốt sổ",
   "Gửi thông báo",
   "Phụ huynh",
@@ -193,6 +237,12 @@ const OVERFLOW_LABELS = new Set([
  */
 const OVERFLOW_PATH_PREFIXES = [
   "/classbook",
+  "/classes",
+  "/class-invitations",
+  "/library",
+  "/prep",
+  "/courses",
+  "/paths",
   "/records",
   "/billing",
   "/notifications",

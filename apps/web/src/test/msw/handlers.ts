@@ -14,7 +14,7 @@ export const API_URL = "http://localhost:8080/api/v1";
 export const PUBLIC_API_URL = API_URL.replace(/\/api\/v1\/?$/, "");
 
 /** Version stamp of the mirrored catalog below (`authctx.CatalogVersion`). */
-export const CATALOG_VERSION = 4;
+export const CATALOG_VERSION = 5;
 
 function perm(
   key: string,
@@ -307,6 +307,69 @@ export const PERMISSION_CATALOG = [
   ),
   perm("tasks.view_all", "Xem mọi công việc", "scope", "high", SCOPE_DESC),
   perm(
+    "library.read",
+    "Xem kho học liệu",
+    "crud",
+    "low",
+    "Xem chương trình mẫu, phiên bản và buổi học mẫu của trung tâm.",
+  ),
+  perm(
+    "library.edit",
+    "Soạn chương trình mẫu",
+    "crud",
+    "medium",
+    "Tạo, sửa, xoá chương trình mẫu và soạn buổi học mẫu trong bản nháp.",
+  ),
+  perm(
+    "library.publish",
+    "Phát hành chương trình mẫu",
+    "special",
+    "high",
+    "Phát hành một bản nháp thành phiên bản chính thức, khoá nội dung của phiên bản đó.",
+  ),
+  perm(
+    "prep.assign",
+    "Phân công chuẩn bị tài liệu",
+    "special",
+    "medium",
+    "Phân công thành viên và đặt hạn hoàn thành cho từng buổi mẫu trong bản nháp chương trình.",
+  ),
+  perm(
+    "courses.read",
+    "Xem danh mục khóa học",
+    "crud",
+    "low",
+    "Xem khóa học, gói học phí và lớp thuộc khóa.",
+  ),
+  perm(
+    "courses.edit",
+    "Quản lý khóa học",
+    "crud",
+    "medium",
+    "Tạo, sửa, ngừng tuyển và xoá khóa học; đặt gói học phí.",
+  ),
+  perm(
+    "paths.read",
+    "Xem lộ trình học",
+    "crud",
+    "low",
+    "Xem lộ trình học, các giai đoạn và khóa học gợi ý trong từng giai đoạn.",
+  ),
+  perm(
+    "paths.edit",
+    "Quản lý lộ trình học",
+    "crud",
+    "medium",
+    "Tạo, sửa, xoá lộ trình học; thêm, sắp xếp giai đoạn và gán khóa học vào giai đoạn.",
+  ),
+  perm(
+    "class_messages.post",
+    "Nhắn tin trong lớp",
+    "special",
+    "low",
+    "Gửi tin nhắn nội bộ trong các lớp mình đang phụ trách; chủ trung tâm nhắn được mọi lớp.",
+  ),
+  perm(
     "reports.send",
     "Gửi báo cáo học phí",
     "special",
@@ -496,6 +559,11 @@ export function makeClass(overrides: Record<string, unknown> = {}) {
     end_date: null,
     default_unit_price: 60000,
     status: "active",
+    code: `L${String(classCounter).padStart(5, "0")}`,
+    tags: [],
+    recruiting: false,
+    note: null,
+    phase: "running",
     schedules: [
       {
         id: `21000000-0000-4000-8000-${String(classCounter).padStart(12, "0")}`,
@@ -967,6 +1035,13 @@ export const handlers = [
   ),
   // Dashboard aggregation defaults: an empty roster with nothing billed.
   http.get(`${API_URL}/classes`, () => HttpResponse.json(ok([], listMeta(0)))),
+  // Registered before any `/classes/:id` handler: MSW matches in order and
+  // would otherwise read "stats" as a class id.
+  http.get(`${API_URL}/classes/stats`, () =>
+    HttpResponse.json(
+      ok({ all: 0, upcoming: 0, running: 0, ended: 0, archived: 0, recruiting: 0 }),
+    ),
+  ),
   http.get(`${API_URL}/classes/:id/sessions`, () => HttpResponse.json(ok([]))),
   // Teaching defaults: nothing saved yet. Stateful round-trip handlers live in
   // `@/features/teaching/__tests__/teaching-handlers.ts`; tests that write

@@ -10,6 +10,8 @@ export interface HvSegmentedOption<T extends string> {
   label: React.ReactNode;
   icon?: React.ReactNode;
   disabled?: boolean;
+  /** Native tooltip, e.g. why a disabled option is unavailable. */
+  title?: string;
 }
 
 export interface HvSegmentedProps<T extends string> {
@@ -145,6 +147,7 @@ export function HvSegmented<T extends string>({
               tabIndex={active ? 0 : -1}
               data-state={active ? "active" : "inactive"}
               disabled={option.disabled}
+              title={option.title}
               onClick={() => onValueChange(option.value)}
               onKeyDown={(event) => handleKeyDown(event, option.value)}
               className={cn(itemClassName, tabStateClassName)}
@@ -170,6 +173,7 @@ export function HvSegmented<T extends string>({
           key={option.value}
           value={option.value}
           disabled={option.disabled}
+          title={option.title}
           className={cn(itemClassName, radioStateClassName)}
         >
           <ItemBody option={option} />

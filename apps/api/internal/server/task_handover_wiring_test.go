@@ -59,4 +59,7 @@ func TestRegisterFeaturesWiresTaskHandover(t *testing.T) {
 	if !centersSvc.TaskHandoverWired() {
 		t.Error("registerFeatures must wire tasksSvc into centersSvc via SetTaskHandover")
 	}
+	if !centersSvc.ClassInviteCancellerWired() {
+		t.Error("registerFeatures must wire classInvitesSvc into centersSvc via SetClassInviteCanceller")
+	}
 }

@@ -19,9 +19,19 @@ import {
  * filter. Generates any missing rows for `[from, to]` from the class's
  * schedules before returning, capped at a 400-day range server-side.
  */
+/**
+ * `readonly: true` returns only the sessions already on file and skips the
+ * 400-day window cap; without it the API materialises the timetable first.
+ */
+export interface ListClassSessionsParams {
+  from: string;
+  to: string;
+  readonly?: boolean;
+}
+
 export async function listClassSessions(
   classId: string,
-  params: { from: string; to: string },
+  params: ListClassSessionsParams,
 ): Promise<Session[]> {
   const res = await apiClient.get<unknown>(`/classes/${classId}/sessions`, { params });
   return parseData(sessionSchema.array(), res.data);

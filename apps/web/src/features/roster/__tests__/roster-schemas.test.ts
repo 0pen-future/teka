@@ -3,9 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   classDialogInputSchema,
   classSchema,
-  classSettingsInputSchema,
+  classWizardInputSchema,
   toClassCreateInput,
+  toClassUpdateInput,
+  type Class,
   type ClassDialogInput,
+  type ClassWizardInput,
 } from "../schemas/roster-schemas";
 
 function dialogInput(slots: ClassDialogInput["slots"]): ClassDialogInput {
@@ -16,10 +19,41 @@ function dialogInput(slots: ClassDialogInput["slots"]): ClassDialogInput {
     default_unit_price: 150_000,
     slots,
     duration_min: 90,
+    course_id: "",
+  };
+}
+
+function wizardInput(overrides: Partial<ClassWizardInput>): ClassWizardInput {
+  return {
+    name: "Toán 9C",
+    course_id: "90000000-0000-4000-8000-000000000001",
+    code: "TOAN9C",
+    default_unit_price: 150_000,
+    tags: [],
+    parent_class_id: "",
+    next_class_id: "",
+    study_mode: "scheduled",
+    start_date: "2026-08-05",
+    end_date: "",
+    slots: [{ weekday: 2, start_time: "18:00", duration_min: 90 }],
+    room: "",
+    teacher_id: "",
+    note: "",
+    ...overrides,
   };
 }
 
 describe("toClassCreateInput", () => {
+  it("omits course_id when no course was picked and passes it through otherwise", () => {
+    const blank = toClassCreateInput(dialogInput([{ start_time: "18:00", days: [1] }]));
+    expect("course_id" in blank).toBe(false);
+    const attached = toClassCreateInput({
+      ...dialogInput([{ start_time: "18:00", days: [1] }]),
+      course_id: "90000000-0000-4000-8000-000000000001",
+    });
+    expect(attached.course_id).toBe("90000000-0000-4000-8000-000000000001");
+  });
+
   it("flattens slots into one schedule row per (weekday, time) pair", () => {
     const input = toClassCreateInput(
       dialogInput([
@@ -94,17 +128,35 @@ describe("khung-giờ slot validation", () => {
     expect(issue?.message).toContain("mỗi ngày chỉ một khung giờ");
   });
 
-  it("applies the same duplicate-weekday rule to the settings form", () => {
-    const result = classSettingsInputSchema.safeParse({
-      name: "Toán 9C",
-      default_unit_price: 150_000,
-      slots: [
-        { start_time: "18:00", days: [2] },
-        { start_time: "19:30", days: [2] },
-      ],
-    });
+  it("rejects a repeated weekday in the class wizard", () => {
+    const result = classWizardInputSchema.safeParse(
+      wizardInput({
+        slots: [
+          { weekday: 2, start_time: "18:00", duration_min: 90 },
+          { weekday: 2, start_time: "19:30", duration_min: 90 },
+        ],
+      }),
+    );
     expect(result.success).toBe(false);
-    expect(result.error?.issues.some((i) => i.code === "custom")).toBe(true);
+    expect(result.error?.issues[0]?.path).toEqual(["slots", 1, "weekday"]);
+  });
+
+  it("requires time and duration on every wizard row of a scheduled class", () => {
+    const result = classWizardInputSchema.safeParse(
+      wizardInput({ slots: [{ weekday: 2, start_time: "", duration_min: null }] }),
+    );
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((issue) => issue.message)).toEqual([
+      "Mỗi lịch học cần giờ bắt đầu và thời lượng",
+      "Mỗi lịch học cần giờ bắt đầu và thời lượng",
+    ]);
+  });
+
+  it("lets a self-paced class save without a timetable or start date", () => {
+    const result = classWizardInputSchema.safeParse(
+      wizardInput({ study_mode: "self_paced", start_date: "", slots: [] }),
+    );
+    expect(result.success).toBe(true);
   });
 
   it("accepts distinct weekdays across two slots", () => {
@@ -115,5 +167,79 @@ describe("khung-giờ slot validation", () => {
       ]),
     );
     expect(result.success).toBe(true);
+  });
+});
+
+describe("classSchema catalog fields", () => {
+  it("defaults the catalog fields for a response that predates them", () => {
+    const parsed = classSchema.parse({
+      id: "c1",
+      name: "Toán 9C",
+      teacher_id: "t1",
+      start_date: "2026-08-05",
+      end_date: null,
+      default_unit_price: 150_000,
+      status: "active",
+      schedules: [],
+      created_at: "2026-08-01T00:00:00Z",
+    });
+    expect(parsed.code).toBe("");
+    expect(parsed.tags).toEqual([]);
+    expect(parsed.recruiting).toBe(false);
+    expect(parsed.note).toBeNull();
+    expect(parsed.phase).toBe("running");
+  });
+});
+
+describe("toClassUpdateInput", () => {
+  const klass: Class = classSchema.parse({
+    id: "c1",
+    name: "Toán 9C",
+    teacher_id: "t1",
+    start_date: "2026-08-05",
+    end_date: "2026-12-20",
+    default_unit_price: 150_000,
+    status: "active",
+    schedules: [],
+    created_at: "2026-08-01T00:00:00Z",
+    code: "TOAN9C",
+    tags: ["Toán", "Khối 9"],
+    recruiting: false,
+    note: "Phòng 201",
+    phase: "running",
+  });
+
+  it("copies the required base fields and adds only the catalog fields that changed", () => {
+    expect(toClassUpdateInput(klass, { recruiting: true })).toEqual({
+      name: "Toán 9C",
+      start_date: "2026-08-05",
+      end_date: "2026-12-20",
+      default_unit_price: 150_000,
+      recruiting: true,
+    });
+  });
+
+  it("omits every catalog field when nothing differs from the class", () => {
+    const body = toClassUpdateInput(klass, {
+      recruiting: false,
+      tags: ["Toán", "Khối 9"],
+      note: "Phòng 201",
+    });
+    expect(body).not.toHaveProperty("recruiting");
+    expect(body).not.toHaveProperty("tags");
+    expect(body).not.toHaveProperty("note");
+    expect(body).not.toHaveProperty("code");
+  });
+
+  it("sends an empty note to clear it and an empty end_date for an open-ended class", () => {
+    const openEnded = { ...klass, end_date: null };
+    expect(toClassUpdateInput(openEnded, { note: "", tags: ["Toán"] })).toEqual({
+      name: "Toán 9C",
+      start_date: "2026-08-05",
+      end_date: "",
+      default_unit_price: 150_000,
+      note: "",
+      tags: ["Toán"],
+    });
   });
 });

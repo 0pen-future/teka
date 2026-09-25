@@ -123,9 +123,9 @@ func insertClass(t *testing.T, db *gorm.DB, teacherID, centerID uuid.UUID) uuid.
 	t.Helper()
 	rowID := id.New()
 	require.NoError(t, db.Exec(
-		`INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price)
-		 VALUES (?, ?, ?, 'Lớp Toán 9', '2026-01-05', 100000)`,
-		rowID, teacherID, centerID).Error)
+		`INSERT INTO classes (id, teacher_id, center_id, name, start_date, default_unit_price, code)
+		 VALUES (?, ?, ?, 'Lớp Toán 9', '2026-01-05', 100000, ?)`,
+		rowID, teacherID, centerID, strings.ToUpper(rowID.String()[:8])).Error)
 	return rowID
 }
 

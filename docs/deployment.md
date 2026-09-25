@@ -87,6 +87,17 @@ init container, or a release-phase command on a PaaS) **before** the new API
 version starts. Migrations are idempotent and forward-only in normal
 operation; `migrate down` exists for local development and emergencies.
 
+**Upgrading across a multi-migration release**: check `api migrate status`
+before running `migrate up`, and again after, so a partially-applied batch is
+never mistaken for a clean one. Back up the production database before
+`migrate up` runs — a batch spanning several migrations gives a bad row in any
+one of them more surface to fail on than a single-migration release does. Once
+a migration has shipped to production and carries real data, roll back with a
+new **forward** migration, never `migrate down`: a down migration only stays
+a safe rollback path before the schema it touches holds production data (see
+[`adding-permissions.md`](./adding-permissions.md#4-choose-the-database-rollout-policy)
+for the same rule applied to a permission backfill).
+
 ## Topology
 
 ```

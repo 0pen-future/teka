@@ -13,6 +13,8 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+
+	"teka/apps/api/internal/shared/dbtypes"
 )
 
 // Class status values, mirroring the CHECK constraint on classes.status.
@@ -21,6 +23,14 @@ import (
 const (
 	StatusActive   = "active"
 	StatusArchived = "archived"
+)
+
+// Study mode values, mirroring the CHECK constraint on classes.study_mode.
+// A scheduled class runs on the weekly timetable in Schedules; a self-paced
+// class carries none and AddSchedule refuses to open one.
+const (
+	StudyModeScheduled = "scheduled"
+	StudyModeSelfPaced = "self_paced"
 )
 
 // Class is one lớp học. Money is BIGINT đồng — never a float anywhere.
@@ -38,12 +48,68 @@ type Class struct {
 	EndDate          *time.Time
 	DefaultUnitPrice int64
 	Status           string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	DeletedAt        gorm.DeletedAt
+	// Code is the class's display code (mã lớp), unique per center among
+	// live rows; classcode.Generate fills it when the creator supplies none.
+	Code string
+	// Tags is a free-form JSONB list replaced whole on every write.
+	Tags dbtypes.StringList
+	// Recruiting flags a class still taking enrolments (cần tuyển sinh).
+	Recruiting bool
+	// Note is the operational note shown on the class detail; nil = none.
+	Note *string
+	// CourseID links the class to a course of the same center (nullable);
+	// Course carries the embedded {id, code, name} when preloaded.
+	CourseID *uuid.UUID
+	Course   *CourseRef `gorm:"foreignKey:CourseID;references:ID"`
+	// ParentClassID links a class split off from or continuing another
+	// class of the same center (lịch sử lớp); LineageNote explains the
+	// relation. Both are optional and only ever set through update.
+	ParentClassID *uuid.UUID
+	LineageNote   *string
+	// Room is the physical/virtual room name (phòng học); "" means unassigned.
+	Room string
+	// StudyMode is one of the StudyMode* constants. The gorm default tag
+	// lets GORM omit a zero-value (unset) field from the INSERT so the
+	// column's own DB DEFAULT 'scheduled' applies — every write path that
+	// builds a Class without explicitly resolving StudyMode (fixtures in
+	// other packages' tests) must still land on a value the CHECK
+	// constraint accepts.
+	StudyMode string `gorm:"default:scheduled"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt gorm.DeletedAt
 	// Schedules holds the class's live schedule rows when preloaded.
 	Schedules []Schedule `gorm:"foreignKey:ClassID"`
+	// NextClassID is the earliest-created live child whose ParentClassID
+	// points back at this class (lớp kế tiếp). It has no backing column —
+	// gorm:"-" keeps it out of every generated SELECT/INSERT/UPDATE — and is
+	// populated by the repository's own follow-up query after the primary
+	// fetch succeeds.
+	NextClassID *uuid.UUID `gorm:"-"`
 }
+
+// CourseRef is the slice of a course row a class embeds: enough to render
+// a chip and link to the catalog, nothing the class could edit. The
+// classes feature reads it and never writes it; the courses feature owns
+// the table.
+type CourseRef struct {
+	ID   uuid.UUID `gorm:"primaryKey"`
+	Code string
+	Name string
+	// Status is the course's catalog status; an archived course (ngừng
+	// tuyển) takes no new class but keeps the ones it has.
+	Status string
+	// DefaultUnitPrice is the course's price a new class copies when its
+	// request leaves default_unit_price out.
+	DefaultUnitPrice int64
+}
+
+// courseStatusArchived mirrors the courses feature's archived status; the
+// constant lives here because courses imports classes, not the reverse.
+const courseStatusArchived = "archived"
+
+// TableName maps the reference onto the courses table.
+func (CourseRef) TableName() string { return "courses" }
 
 // TableName pins the table explicitly so a later model rename cannot silently
 // break the mapping.

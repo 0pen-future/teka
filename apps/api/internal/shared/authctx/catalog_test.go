@@ -36,12 +36,16 @@ var expectedScopeKeys = []string{
 	PermTasksViewAll,
 }
 
-// The two catalog v4 keys an owner must assign explicitly: DefaultGrant is
-// false, so the compatibility backfill and the default-role baseline never
-// carry them.
+// The keys an owner must assign explicitly: DefaultGrant is false, so the
+// compatibility backfill and the default-role baseline never carry them.
 var optInKeys = []string{
 	PermTasksManageBoard,
 	PermMembersList,
+	PermLibraryEdit,
+	PermLibraryPublish,
+	PermCoursesEdit,
+	PermPathsEdit,
+	PermPrepAssign,
 }
 
 // Keys the catalog once knew and has since retired: assignment rows for them
@@ -254,8 +258,8 @@ func TestEffectiveKeysCoversCatalogInOrder(t *testing.T) {
 // already — granting them would escalate).
 func TestDefaultRoleKeysPreserveLegacyBaseline(t *testing.T) {
 	defaults := DefaultRoleKeys()
-	if len(defaults) != 58 {
-		t.Fatalf("default baseline must hold the 58 operational keys, got %d", len(defaults))
+	if len(defaults) != 62 {
+		t.Fatalf("default baseline must hold the 62 operational keys, got %d", len(defaults))
 	}
 	inDefaults := map[string]bool{}
 	for _, key := range defaults {
@@ -311,11 +315,11 @@ func TestDefaultRoleKeysPreserveLegacyBaseline(t *testing.T) {
 // The catalog version is the CAS anchor for permission-assignment writes: a
 // client that loaded the read model under an older catalog must get 409, not
 // a silent partial write. Version 4 added the tasks group, members.list, and
-// the DefaultGrant attribute. Bump it on any catalog change that alters what
-// a stored assignment means.
+// the DefaultGrant attribute; 5 added prep.assign. Bump it on any catalog
+// change that alters what a stored assignment means.
 func TestCatalogVersion(t *testing.T) {
-	if CatalogVersion != 4 {
-		t.Fatalf("catalog version must be 4 after adding the tasks group, got %d", CatalogVersion)
+	if CatalogVersion != 5 {
+		t.Fatalf("catalog version must be 5 after adding prep.assign, got %d", CatalogVersion)
 	}
 }
 

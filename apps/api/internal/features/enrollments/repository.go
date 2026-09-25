@@ -72,6 +72,11 @@ type Repository interface {
 	// ended_on equals it attends their last one. An exclusive boundary would
 	// silently lose one session of revenue per student per departure.
 	ActiveOn(ctx context.Context, sc authctx.Scope, classID uuid.UUID, on time.Time) ([]Enrollment, error)
+	// ActiveInRange returns every enrollment active on at least one day of
+	// [from, to] under the same inclusive boundaries as ActiveOn, so a
+	// caller listing many dates can resolve each day's roster from one read
+	// instead of one query per date.
+	ActiveInRange(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]Enrollment, error)
 	// EndOpenEnrollments closes every open enrollment the student holds,
 	// effective on the given date — the students feature calls this while
 	// anonymising a deleted student.
@@ -300,6 +305,19 @@ func (r *gormRepository) SoftDelete(ctx context.Context, sc authctx.Scope, roles
 
 func (r *gormRepository) ActiveOn(ctx context.Context, sc authctx.Scope, classID uuid.UUID, on time.Time) ([]Enrollment, error) {
 	return r.activeOn(r.readScoped(ctx, sc), classID, on)
+}
+
+func (r *gormRepository) ActiveInRange(ctx context.Context, sc authctx.Scope, classID uuid.UUID, from, to time.Time) ([]Enrollment, error) {
+	var rows []Enrollment
+	err := r.readScoped(ctx, sc).
+		Where("enrollments.class_id = ?", classID).
+		Where("enrollments.started_on <= ? AND (enrollments.ended_on IS NULL OR enrollments.ended_on >= ?)", to, from).
+		Order("enrollments.started_on, enrollments.id").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 // centerScoped is ActiveOnClass's center-only filter: no teacher_id branch,

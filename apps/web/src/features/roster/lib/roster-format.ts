@@ -5,7 +5,8 @@
  * a file outside this feature's ownership (see `adr.md`).
  */
 
-import { deriveScheduleSlots } from "./schedule-diff";
+import { activeSchedules, deriveScheduleSlots } from "./schedule-diff";
+import type { ClassShift } from "../api/classes-api";
 import type { Schedule } from "../schemas/roster-schemas";
 
 /**
@@ -35,10 +36,18 @@ const weekdayWordLabels = [
 /**
  * Renders a `class_schedules.weekday` integer (0 = Chủ nhật … 6 = Thứ 7,
  * `docs/schema_design.sql:149`) as its Vietnamese label. `short` gives the
- * two-letter chip form used by the weekday picker.
+ * two-letter chip form used by the weekday picker; `word` the spelled-out
+ * "Thứ Ba" form.
  */
-export function formatWeekday(weekday: number, options?: { short?: boolean }): string {
-  const labels = options?.short ? weekdayShortLabels : weekdayLabels;
+export function formatWeekday(
+  weekday: number,
+  options?: { short?: boolean; word?: boolean },
+): string {
+  const labels = options?.short
+    ? weekdayShortLabels
+    : options?.word
+      ? weekdayWordLabels
+      : weekdayLabels;
   return labels[weekday] ?? String(weekday);
 }
 
@@ -91,4 +100,52 @@ export function formatScheduleLabel(schedules: Schedule[], today: string): strin
       return part ? `${part} ${dayLabel}` : dayLabel;
     })
     .join(", ");
+}
+
+/** One weekly session of a class as the list row prints it. */
+export interface ScheduleLine {
+  key: string;
+  /** "Thứ Ba, 19:00 - 20:30" */
+  text: string;
+  shift: ClassShift;
+}
+
+/** The API's shift bands (`classes.ShiftOf`): before 12:00, before 17:30, then evening. */
+function shiftOf(hhmm: string): ClassShift {
+  if (hhmm < "12:00") return "morning";
+  if (hhmm < "17:30") return "afternoon";
+  return "evening";
+}
+
+export function addMinutes(hhmm: string, minutes: number): string {
+  const [hour = 0, minute = 0] = hhmm.split(":").map(Number);
+  const total = (hour * 60 + minute + minutes) % (24 * 60);
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/**
+ * One line per weekly session still in effect ("Thứ Ba, 19:00 - 20:30"),
+ * Monday-first then by start time, each tagged with the shift the list's
+ * dot colour and the shift filter share. Empty with no timetable.
+ */
+export function formatScheduleLines(schedules: Schedule[], today: string): ScheduleLine[] {
+  return activeSchedules(schedules, today)
+    .map((schedule) => ({ ...schedule, start: schedule.start_time.slice(0, 5) }))
+    .sort(
+      (a, b) => mondayFirst(a.weekday) - mondayFirst(b.weekday) || a.start.localeCompare(b.start),
+    )
+    .map((schedule) => ({
+      key: schedule.id,
+      text: `${weekdayWordLabels[schedule.weekday] ?? schedule.weekday}, ${schedule.start} - ${addMinutes(schedule.start, schedule.duration_min)}`,
+      shift: shiftOf(schedule.start),
+    }));
+}
+
+/** "05/01/2026" for a DATE column value; anything unparsable passes through. */
+export function formatFullDate(isoDate: string): string {
+  const [year, month, day] = isoDate.split("-");
+  if (!year || !month || !day) {
+    return isoDate;
+  }
+  return `${day}/${month}/${year}`;
 }

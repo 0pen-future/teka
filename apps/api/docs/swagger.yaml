@@ -659,8 +659,73 @@ definitions:
       teacher:
         $ref: '#/definitions/centers.MemberResponse'
     type: object
+  classchat.ListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/classchat.MessageResponse'
+        type: array
+      next_cursor:
+        type: string
+    type: object
+  classchat.MessageResponse:
+    properties:
+      author_id:
+        type: string
+      author_name:
+        type: string
+      body:
+        type: string
+      class_id:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+    type: object
+  classchat.PostRequest:
+    properties:
+      body:
+        maxLength: 2000
+        type: string
+    required:
+    - body
+    type: object
+  classes.AvailabilityResponse:
+    properties:
+      rooms:
+        items:
+          $ref: '#/definitions/classes.AvailabilityRoomResponse'
+        type: array
+      teachers:
+        items:
+          $ref: '#/definitions/classes.AvailabilityTeacherResponse'
+        type: array
+    type: object
+  classes.AvailabilityRoomResponse:
+    properties:
+      free:
+        type: boolean
+      name:
+        type: string
+    type: object
+  classes.AvailabilityTeacherResponse:
+    properties:
+      free:
+        type: boolean
+      name:
+        type: string
+      teacher_id:
+        type: string
+    type: object
   classes.ClassResponse:
     properties:
+      code:
+        type: string
+      course:
+        allOf:
+        - $ref: '#/definitions/classes.CourseRefResponse'
+        description: Course is the attached course, null when the class has none.
       created_at:
         type: string
       default_unit_price:
@@ -668,6 +733,8 @@ definitions:
       end_date:
         type: string
       id:
+        type: string
+      lineage_note:
         type: string
       my_staff_roles:
         description: |-
@@ -679,6 +746,28 @@ definitions:
           type: string
         type: array
       name:
+        type: string
+      next_class_id:
+        description: |-
+          NextClassID is the earliest-created live child whose parent_class_id
+          is this class (lớp kế tiếp); null when it has none.
+        type: string
+      note:
+        type: string
+      parent_class_id:
+        description: |-
+          ParentClassID and LineageNote describe the class's place in its
+          lineage (lịch sử lớp); both null when the class stands alone.
+        type: string
+      phase:
+        description: |-
+          Phase is derived from status and the dates against today (see
+          PhaseOf); the client renders it and never recomputes it.
+        type: string
+      recruiting:
+        type: boolean
+      room:
+        description: Room and StudyMode are the wizard's "Hình thức học" fields.
         type: string
       schedules:
         items:
@@ -696,12 +785,58 @@ definitions:
           rows that endpoint lists. Like MyStaffRoles it is filled only by the
           readable GET paths; every other producer leaves it 0.
         type: integer
+      study_mode:
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
       teacher_id:
+        type: string
+    type: object
+  classes.ClassStatsResponse:
+    properties:
+      all:
+        type: integer
+      archived:
+        type: integer
+      ended:
+        type: integer
+      recruiting:
+        type: integer
+      running:
+        type: integer
+      upcoming:
+        type: integer
+    type: object
+  classes.CourseRefResponse:
+    properties:
+      code:
+        type: string
+      id:
+        type: string
+      name:
         type: string
     type: object
   classes.CreateClassRequest:
     properties:
+      code:
+        description: |-
+          Code is the display code (mã lớp); blank or absent means "mint one".
+          Its shape is checked by the service via classcode.Valid so the message
+          lands on this field either way.
+        maxLength: 20
+        type: string
+      course_id:
+        description: |-
+          CourseID attaches the class to a live course of the same center;
+          blank or absent means no course. No uuid tag: the validator treats a
+          pointer to "" as present and would fail it, so the service parses.
+        type: string
       default_unit_price:
+        description: |-
+          DefaultUnitPrice may be left out only when course_id is set: the
+          class then copies the course's default price.
         minimum: 0
         type: integer
       end_date:
@@ -710,22 +845,44 @@ definitions:
         maxLength: 100
         minLength: 1
         type: string
+      note:
+        maxLength: 1000
+        type: string
+      room:
+        description: |-
+          Room is the physical/virtual room name; blank or absent means
+          unassigned.
+        maxLength: 50
+        type: string
       schedules:
+        description: |-
+          Schedules is required for a scheduled class and must be empty for a
+          self_paced one; the service enforces that pairing since it depends on
+          StudyMode, not on binding tags alone.
         items:
           $ref: '#/definitions/classes.ScheduleRequest'
-        minItems: 1
         type: array
       start_date:
         type: string
+      study_mode:
+        description: StudyMode defaults to "scheduled" when absent.
+        enum:
+        - scheduled
+        - self_paced
+        type: string
+      tags:
+        items:
+          type: string
+        maxItems: 10
+        type: array
     required:
-    - default_unit_price
     - name
-    - schedules
     - start_date
     type: object
   classes.ScheduleRequest:
     properties:
       duration_min:
+        maximum: 600
         minimum: 1
         type: integer
       effective_from:
@@ -761,17 +918,64 @@ definitions:
     type: object
   classes.UpdateClassRequest:
     properties:
+      code:
+        maxLength: 20
+        type: string
+      course_id:
+        description: |-
+          CourseID follows the same patch rule: nil keeps the stored course, an
+          empty string detaches it, a uuid attaches that course. Untagged for
+          the same reason as on create: "" must reach the service.
+        type: string
       default_unit_price:
         minimum: 0
         type: integer
       end_date:
         type: string
+      lineage_note:
+        maxLength: 1000
+        type: string
       name:
         maxLength: 100
         minLength: 1
         type: string
+      next_class_id:
+        description: |-
+          NextClassID follows the same patch rule: nil keeps every existing
+          child link, "" unlinks every live child, a uuid links that live class
+          of the same center as the single child (see resolveNextClassLink).
+          Untagged for the same "" reason as course_id.
+        type: string
+      note:
+        description: Note replaces the stored note; an empty string clears it.
+        maxLength: 1000
+        type: string
+      parent_class_id:
+        description: |-
+          ParentClassID and LineageNote follow the same patch rule: nil keeps,
+          "" clears, a uuid links a live class of the same center (never the
+          class itself). Untagged for the same reason as course_id.
+        type: string
+      recruiting:
+        type: boolean
+      room:
+        description: 'Room follows the same patch rule: nil keeps, "" clears.'
+        maxLength: 50
+        type: string
       start_date:
         type: string
+      study_mode:
+        description: |-
+          StudyMode follows the same patch rule: nil keeps the stored mode.
+          Untagged: an empty string is not a valid mode and must reach the
+          service to surface as a field error rather than being silently dropped
+          by a binding tag.
+        type: string
+      tags:
+        items:
+          type: string
+        maxItems: 10
+        type: array
     required:
     - default_unit_price
     - name
@@ -780,6 +984,7 @@ definitions:
   classes.UpdateScheduleRequest:
     properties:
       duration_min:
+        maximum: 600
         minimum: 1
         type: integer
       effective_from:
@@ -797,6 +1002,122 @@ definitions:
     - effective_from
     - start_time
     - weekday
+    type: object
+  classinvites.ConfirmResponse:
+    properties:
+      assigned_at:
+        type: string
+      class_id:
+        type: string
+      class_name:
+        type: string
+      course_name:
+        description: CourseName is the class's course, null when it has none.
+        type: string
+      id:
+        type: string
+      invited_by:
+        type: string
+      invited_by_name:
+        type: string
+      message:
+        type: string
+      moved_planned_sessions:
+        type: integer
+      reminded_at:
+        type: string
+      responded_at:
+        type: string
+      role_key:
+        type: string
+      role_label:
+        type: string
+      sent_at:
+        type: string
+      status:
+        type: string
+      teacher_id:
+        type: string
+      teacher_name:
+        type: string
+    type: object
+  classinvites.InvitationResponse:
+    properties:
+      assigned_at:
+        type: string
+      class_id:
+        type: string
+      class_name:
+        type: string
+      course_name:
+        description: CourseName is the class's course, null when it has none.
+        type: string
+      id:
+        type: string
+      invited_by:
+        type: string
+      invited_by_name:
+        type: string
+      message:
+        type: string
+      reminded_at:
+        type: string
+      responded_at:
+        type: string
+      role_key:
+        type: string
+      role_label:
+        type: string
+      sent_at:
+        type: string
+      status:
+        type: string
+      teacher_id:
+        type: string
+      teacher_name:
+        type: string
+    type: object
+  classinvites.SendRequest:
+    properties:
+      message:
+        maxLength: 500
+        type: string
+      role_key:
+        maxLength: 32
+        type: string
+      teacher_id:
+        type: string
+    required:
+    - role_key
+    - teacher_id
+    type: object
+  classprogram.ApplyRequest:
+    properties:
+      confirm:
+        type: boolean
+      template_version_id:
+        type: string
+    required:
+    - template_version_id
+    type: object
+  classprogram.ProgramResponse:
+    properties:
+      applied_at:
+        type: string
+      applied_by:
+        type: string
+      lesson_count:
+        type: integer
+      template_id:
+        type: string
+      template_name:
+        type: string
+      template_version_id:
+        type: string
+      version_no:
+        type: integer
+      version_status:
+        type: string
     type: object
   classstaff.AssignRequest:
     properties:
@@ -975,6 +1296,151 @@ definitions:
     required:
     - zalo_name
     - zalo_user_id
+    type: object
+  courses.CoursePathResponse:
+    properties:
+      code:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      stage_id:
+        type: string
+      stage_name:
+        type: string
+      stage_position:
+        type: integer
+      status:
+        type: string
+    type: object
+  courses.CourseRequest:
+    properties:
+      code:
+        maxLength: 20
+        minLength: 2
+        type: string
+      default_template_version_id:
+        type: string
+      default_unit_price:
+        minimum: 0
+        type: integer
+      description:
+        maxLength: 2000
+        type: string
+      duration_min:
+        maximum: 1440
+        minimum: 1
+        type: integer
+      level:
+        maxLength: 100
+        type: string
+      name:
+        maxLength: 200
+        minLength: 1
+        type: string
+      status:
+        description: Status left blank means draft on create and "keep as stored"
+          on update.
+        enum:
+        - draft
+        - active
+        - archived
+        type: string
+      subject:
+        maxLength: 100
+        type: string
+      total_sessions:
+        maximum: 1000
+        minimum: 1
+        type: integer
+    required:
+    - code
+    - name
+    type: object
+  courses.CourseResponse:
+    properties:
+      classes_running:
+        type: integer
+      classes_upcoming:
+        type: integer
+      code:
+        type: string
+      created_at:
+        type: string
+      default_template:
+        $ref: '#/definitions/courses.DefaultTemplateResponse'
+      default_template_version_id:
+        type: string
+      default_unit_price:
+        type: integer
+      description:
+        type: string
+      duration_min:
+        type: integer
+      id:
+        type: string
+      level:
+        type: string
+      name:
+        type: string
+      status:
+        type: string
+      subject:
+        type: string
+      total_sessions:
+        type: integer
+      tuition_packs:
+        items:
+          $ref: '#/definitions/courses.TuitionPackResponse'
+        type: array
+      updated_at:
+        type: string
+    type: object
+  courses.DefaultTemplateResponse:
+    properties:
+      code:
+        type: string
+      name:
+        type: string
+      status:
+        type: string
+      template_id:
+        type: string
+      version_id:
+        type: string
+      version_no:
+        type: integer
+    type: object
+  courses.TuitionPackInput:
+    properties:
+      name:
+        maxLength: 100
+        minLength: 1
+        type: string
+      price:
+        minimum: 0
+        type: integer
+      sessions:
+        maximum: 1000
+        minimum: 1
+        type: integer
+    required:
+    - name
+    - sessions
+    type: object
+  courses.TuitionPackResponse:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+      position:
+        type: integer
+      price:
+        type: integer
+      sessions:
+        type: integer
     type: object
   enrollments.CreateRequest:
     properties:
@@ -1209,6 +1675,757 @@ definitions:
       phone_masked:
         type: string
     type: object
+  library.AssigneeResponse:
+    properties:
+      full_name:
+        type: string
+      id:
+        type: string
+    type: object
+  library.AssignmentRequest:
+    properties:
+      assignee_id:
+        type: string
+      due_date:
+        type: string
+    type: object
+  library.BoardCardResponse:
+    properties:
+      assignee_id:
+        type: string
+      assignee_name:
+        type: string
+      checklist_done:
+        type: integer
+      checklist_total:
+        type: integer
+      due_date:
+        type: string
+      id:
+        type: string
+      position:
+        type: integer
+      prep_status:
+        type: string
+      title:
+        type: string
+    type: object
+  library.BoardColumnResponse:
+    properties:
+      lessons:
+        items:
+          $ref: '#/definitions/library.BoardCardResponse'
+        type: array
+      status:
+        type: string
+    type: object
+  library.BoardResponse:
+    properties:
+      columns:
+        items:
+          $ref: '#/definitions/library.BoardColumnResponse'
+        type: array
+      template:
+        $ref: '#/definitions/library.TemplateResponse'
+      version:
+        $ref: '#/definitions/library.VersionResponse'
+    type: object
+  library.ChecklistItem:
+    properties:
+      done:
+        type: boolean
+      label:
+        maxLength: 200
+        minLength: 1
+        type: string
+    required:
+    - label
+    type: object
+  library.CreateVersionRequest:
+    properties:
+      changelog:
+        maxLength: 2000
+        type: string
+    type: object
+  library.DuplicateLessonResponse:
+    properties:
+      assignee_id:
+        type: string
+      checklist:
+        items:
+          $ref: '#/definitions/library.ChecklistItem'
+        type: array
+      created_at:
+        type: string
+      due_date:
+        type: string
+      duration_min:
+        type: integer
+      exercise_count:
+        type: integer
+      homework_note:
+        type: string
+      id:
+        type: string
+      material_count:
+        type: integer
+      mode:
+        type: string
+      objectives:
+        type: string
+      position:
+        type: integer
+      prep_status:
+        type: string
+      title:
+        type: string
+      unit:
+        type: string
+      updated_at:
+        type: string
+      version_id:
+        type: string
+    type: object
+  library.ExerciseGroupRequest:
+    properties:
+      name:
+        maxLength: 100
+        type: string
+    required:
+    - name
+    type: object
+  library.ExerciseGroupResponse:
+    properties:
+      exercise_count:
+        type: integer
+      id:
+        type: string
+      name:
+        type: string
+      position:
+        type: integer
+      version_id:
+        type: string
+    type: object
+  library.ExerciseRequest:
+    properties:
+      code:
+        maxLength: 20
+        type: string
+      description:
+        maxLength: 4000
+        type: string
+      difficulty:
+        maximum: 5
+        minimum: 1
+        type: integer
+      level:
+        maxLength: 50
+        type: string
+      skill:
+        maxLength: 50
+        type: string
+      tags:
+        items:
+          type: string
+        maxItems: 20
+        type: array
+      title:
+        maxLength: 200
+        minLength: 1
+        type: string
+    required:
+    - title
+    type: object
+  library.ExerciseResponse:
+    properties:
+      active:
+        type: boolean
+      code:
+        type: string
+      created_at:
+        type: string
+      description:
+        type: string
+      difficulty:
+        type: integer
+      id:
+        type: string
+      lesson_count:
+        type: integer
+      level:
+        type: string
+      skill:
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+      template_count:
+        type: integer
+      title:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  library.ItemStatusRequest:
+    properties:
+      active:
+        type: boolean
+    required:
+    - active
+    type: object
+  library.LessonDetailResponse:
+    properties:
+      assignee_id:
+        type: string
+      checklist:
+        items:
+          $ref: '#/definitions/library.ChecklistItem'
+        type: array
+      created_at:
+        type: string
+      due_date:
+        type: string
+      duration_min:
+        type: integer
+      exercise_count:
+        type: integer
+      exercises:
+        items:
+          $ref: '#/definitions/library.LessonExerciseResponse'
+        type: array
+      homework_note:
+        type: string
+      id:
+        type: string
+      material_count:
+        type: integer
+      materials:
+        items:
+          $ref: '#/definitions/library.LessonMaterialResponse'
+        type: array
+      mode:
+        type: string
+      objectives:
+        type: string
+      position:
+        type: integer
+      prep_status:
+        type: string
+      title:
+        type: string
+      unit:
+        type: string
+      updated_at:
+        type: string
+      version_id:
+        type: string
+    type: object
+  library.LessonExerciseInput:
+    properties:
+      exercise_id:
+        type: string
+      group_id:
+        type: string
+    required:
+    - exercise_id
+    type: object
+  library.LessonExerciseResponse:
+    properties:
+      active:
+        type: boolean
+      code:
+        type: string
+      created_at:
+        type: string
+      description:
+        type: string
+      difficulty:
+        type: integer
+      group_id:
+        type: string
+      id:
+        type: string
+      lesson_count:
+        type: integer
+      level:
+        type: string
+      position:
+        type: integer
+      skill:
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+      template_count:
+        type: integer
+      title:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  library.LessonMaterialInput:
+    properties:
+      material_id:
+        type: string
+      shared_with_students:
+        type: boolean
+    required:
+    - material_id
+    type: object
+  library.LessonMaterialResponse:
+    properties:
+      active:
+        type: boolean
+      created_at:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      kind:
+        type: string
+      lesson_count:
+        type: integer
+      position:
+        type: integer
+      shared_with_students:
+        type: boolean
+      tags:
+        items:
+          type: string
+        type: array
+      template_count:
+        type: integer
+      title:
+        type: string
+      updated_at:
+        type: string
+      url:
+        type: string
+    type: object
+  library.LessonRequest:
+    properties:
+      duration_min:
+        maximum: 1440
+        minimum: 1
+        type: integer
+      homework_note:
+        maxLength: 4000
+        type: string
+      mode:
+        enum:
+        - scheduled
+        - self_study
+        type: string
+      objectives:
+        maxLength: 4000
+        type: string
+      title:
+        maxLength: 200
+        minLength: 1
+        type: string
+      unit:
+        maxLength: 100
+        type: string
+    required:
+    - title
+    type: object
+  library.LessonResponse:
+    properties:
+      assignee_id:
+        type: string
+      checklist:
+        items:
+          $ref: '#/definitions/library.ChecklistItem'
+        type: array
+      created_at:
+        type: string
+      due_date:
+        type: string
+      duration_min:
+        type: integer
+      exercise_count:
+        type: integer
+      homework_note:
+        type: string
+      id:
+        type: string
+      material_count:
+        type: integer
+      mode:
+        type: string
+      objectives:
+        type: string
+      position:
+        type: integer
+      prep_status:
+        type: string
+      title:
+        type: string
+      unit:
+        type: string
+      updated_at:
+        type: string
+      version_id:
+        type: string
+    type: object
+  library.LogFieldInput:
+    properties:
+      kind:
+        enum:
+        - text
+        - long_text
+        - checkbox
+        - student
+        - number
+        - select
+        type: string
+      label:
+        maxLength: 100
+        minLength: 1
+        type: string
+      options:
+        items:
+          type: string
+        maxItems: 20
+        type: array
+      required:
+        type: boolean
+    required:
+    - kind
+    - label
+    type: object
+  library.LogFieldResponse:
+    properties:
+      id:
+        type: string
+      kind:
+        type: string
+      label:
+        type: string
+      options:
+        items:
+          type: string
+        type: array
+      position:
+        type: integer
+      required:
+        type: boolean
+    type: object
+  library.MaterialRequest:
+    properties:
+      description:
+        maxLength: 4000
+        type: string
+      kind:
+        enum:
+        - video
+        - audio
+        - image
+        - doc
+        - note
+        - live
+        - link
+        - other
+        type: string
+      tags:
+        items:
+          type: string
+        maxItems: 20
+        type: array
+      title:
+        maxLength: 200
+        minLength: 1
+        type: string
+      url:
+        maxLength: 2000
+        type: string
+    required:
+    - kind
+    - title
+    type: object
+  library.MaterialResponse:
+    properties:
+      active:
+        type: boolean
+      created_at:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      kind:
+        type: string
+      lesson_count:
+        type: integer
+      tags:
+        items:
+          type: string
+        type: array
+      template_count:
+        type: integer
+      title:
+        type: string
+      updated_at:
+        type: string
+      url:
+        type: string
+    type: object
+  library.PrepRequest:
+    properties:
+      checklist:
+        items:
+          $ref: '#/definitions/library.ChecklistItem'
+        maxItems: 50
+        type: array
+      prep_status:
+        enum:
+        - todo
+        - doing
+        - review
+        - done
+        type: string
+    type: object
+  library.PrepSummaryResponse:
+    properties:
+      assignees:
+        items:
+          type: string
+        type: array
+      done_count:
+        type: integer
+      lesson_count:
+        type: integer
+    type: object
+  library.ReorderRequest:
+    properties:
+      lesson_ids:
+        items:
+          type: string
+        minItems: 1
+        type: array
+    required:
+    - lesson_ids
+    type: object
+  library.ScoreComponent:
+    properties:
+      key:
+        type: string
+      label:
+        type: string
+      max:
+        type: number
+      weight:
+        type: number
+    type: object
+  library.ScoreComponentInput:
+    properties:
+      key:
+        maxLength: 30
+        minLength: 1
+        type: string
+      label:
+        maxLength: 100
+        minLength: 1
+        type: string
+      max:
+        type: number
+      weight:
+        minimum: 0
+        type: number
+    required:
+    - key
+    - label
+    - max
+    type: object
+  library.ScoreSetGroup:
+    properties:
+      components:
+        items:
+          $ref: '#/definitions/library.ScoreComponent'
+        type: array
+      key:
+        type: string
+      title:
+        type: string
+    type: object
+  library.ScoreSetGroupInput:
+    properties:
+      components:
+        items:
+          $ref: '#/definitions/library.ScoreComponentInput'
+        type: array
+      key:
+        maxLength: 30
+        minLength: 1
+        type: string
+      title:
+        maxLength: 100
+        minLength: 1
+        type: string
+    required:
+    - key
+    - title
+    type: object
+  library.TemplateRequest:
+    properties:
+      code:
+        maxLength: 20
+        minLength: 2
+        type: string
+      description:
+        maxLength: 2000
+        type: string
+      lesson_count:
+        description: |-
+          LessonCount, on create only, seeds that many empty lessons
+          ("Buổi 1".."Buổi N") into the first draft so preparation can start
+          before the content is written. Ignored on update.
+        maximum: 100
+        minimum: 1
+        type: integer
+      level:
+        maxLength: 100
+        type: string
+      name:
+        maxLength: 200
+        minLength: 1
+        type: string
+      subject:
+        maxLength: 100
+        type: string
+    required:
+    - code
+    - name
+    type: object
+  library.TemplateResponse:
+    properties:
+      class_count:
+        type: integer
+      code:
+        type: string
+      created_at:
+        type: string
+      created_by:
+        type: string
+      description:
+        type: string
+      draft_version_id:
+        type: string
+      draft_version_no:
+        type: integer
+      id:
+        type: string
+      lesson_count:
+        type: integer
+      level:
+        type: string
+      name:
+        type: string
+      prep:
+        $ref: '#/definitions/library.PrepSummaryResponse'
+      published_version_no:
+        type: integer
+      subject:
+        type: string
+      updated_at:
+        type: string
+      version_count:
+        type: integer
+      versions:
+        items:
+          $ref: '#/definitions/library.VersionRefResponse'
+        type: array
+    type: object
+  library.VersionClassRefResponse:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+    type: object
+  library.VersionDetailResponse:
+    properties:
+      changelog:
+        type: string
+      class_count:
+        type: integer
+      classes:
+        items:
+          $ref: '#/definitions/library.VersionClassRefResponse'
+        type: array
+      created_at:
+        type: string
+      created_by:
+        type: string
+      id:
+        type: string
+      lesson_count:
+        type: integer
+      lessons:
+        items:
+          $ref: '#/definitions/library.LessonDetailResponse'
+        type: array
+      log_fields:
+        items:
+          $ref: '#/definitions/library.LogFieldResponse'
+        type: array
+      published_at:
+        type: string
+      score_set:
+        items:
+          $ref: '#/definitions/library.ScoreSetGroup'
+        type: array
+      status:
+        type: string
+      template_id:
+        type: string
+      updated_at:
+        type: string
+      version_no:
+        type: integer
+    type: object
+  library.VersionRefResponse:
+    properties:
+      id:
+        type: string
+      status:
+        type: string
+      version_no:
+        type: integer
+    type: object
+  library.VersionResponse:
+    properties:
+      changelog:
+        type: string
+      class_count:
+        type: integer
+      classes:
+        items:
+          $ref: '#/definitions/library.VersionClassRefResponse'
+        type: array
+      created_at:
+        type: string
+      created_by:
+        type: string
+      id:
+        type: string
+      lesson_count:
+        type: integer
+      published_at:
+        type: string
+      status:
+        type: string
+      template_id:
+        type: string
+      updated_at:
+        type: string
+      version_no:
+        type: integer
+    type: object
   notifications.BulkSendRequest:
     properties:
       channel:
@@ -1398,6 +2615,114 @@ definitions:
         items:
           $ref: '#/definitions/notifications.SendPreviewContact'
         type: array
+    type: object
+  paths.PathRequest:
+    properties:
+      code:
+        maxLength: 20
+        minLength: 2
+        type: string
+      description:
+        maxLength: 2000
+        type: string
+      name:
+        maxLength: 200
+        minLength: 1
+        type: string
+      status:
+        enum:
+        - draft
+        - active
+        - archived
+        type: string
+    required:
+    - code
+    - name
+    type: object
+  paths.PathResponse:
+    properties:
+      code:
+        type: string
+      course_count:
+        type: integer
+      created_at:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      stage_count:
+        type: integer
+      stages:
+        items:
+          $ref: '#/definitions/paths.StageResponse'
+        type: array
+      status:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  paths.ReorderRequest:
+    properties:
+      stage_ids:
+        items:
+          type: string
+        minItems: 1
+        type: array
+    required:
+    - stage_ids
+    type: object
+  paths.StageCourseResponse:
+    properties:
+      code:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      position:
+        type: integer
+      status:
+        type: string
+    type: object
+  paths.StageCoursesRequest:
+    properties:
+      course_ids:
+        items:
+          type: string
+        maxItems: 20
+        type: array
+    required:
+    - course_ids
+    type: object
+  paths.StageRequest:
+    properties:
+      goal:
+        maxLength: 2000
+        type: string
+      name:
+        maxLength: 200
+        minLength: 1
+        type: string
+    required:
+    - name
+    type: object
+  paths.StageResponse:
+    properties:
+      courses:
+        items:
+          $ref: '#/definitions/paths.StageCourseResponse'
+        type: array
+      goal:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      position:
+        type: integer
     type: object
   payments.AllocationResponse:
     properties:
@@ -2316,6 +3641,14 @@ paths:
       - description: action prefix, e.g. class. or auth.login
         in: query
         name: action
+        type: string
+      - description: exact entity type, e.g. class
+        in: query
+        name: entity_type
+        type: string
+      - description: exact entity id, e.g. a class id
+        in: query
+        name: entity_id
         type: string
       - description: RFC3339 lower bound on occurred_at
         in: query
@@ -4333,14 +5666,405 @@ paths:
       summary: Replace a role's permission set (owner-only)
       tags:
       - centers
+  /class-invitations:
+    get:
+      description: The owner sees every invitation of the center; a member sees only
+        invitations addressed to them. Optional status and class_id filters never
+        widen visibility.
+      parameters:
+      - description: pending | accepted | declined | cancelled | assigned
+        in: query
+        name: status
+        type: string
+      - description: class id
+        in: query
+        name: class_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/classinvites.InvitationResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List class invitations
+      tags:
+      - class-invitations
+  /class-invitations/{id}/accept:
+    post:
+      description: Invitee only; pending → accepted. Writes no class_staff row — the
+        owner completes the assignment with confirm. Another member's invitation is
+        a 404.
+      parameters:
+      - description: invitation id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classinvites.InvitationResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: no longer pending
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Accept a class invitation
+      tags:
+      - class-invitations
+  /class-invitations/{id}/cancel:
+    post:
+      description: Owner only; pending | accepted → cancelled.
+      parameters:
+      - description: invitation id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classinvites.InvitationResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: already ended
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Cancel a class invitation
+      tags:
+      - class-invitations
+  /class-invitations/{id}/confirm:
+    post:
+      description: Owner only; pending | accepted → assigned. A giao_vien invitation
+        is a class handoff (the current teacher's stint closes and future planned
+        sessions move); any other role becomes a staff assignment. Both happen in
+        one transaction with the status change. 409 when the center is busy with another
+        operation, 422 MEMBER_INACTIVE when the invitee has left.
+      parameters:
+      - description: invitation id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classinvites.ConfirmResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Confirm a class invitation (GV nhận lớp)
+      tags:
+      - class-invitations
+  /class-invitations/{id}/decline:
+    post:
+      description: Invitee only; pending → declined.
+      parameters:
+      - description: invitation id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classinvites.InvitationResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: no longer pending
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Decline a class invitation
+      tags:
+      - class-invitations
+  /class-invitations/{id}/remind:
+    post:
+      description: Owner only; sets reminded_at = now() on a pending invitation. No
+        message is sent.
+      parameters:
+      - description: invitation id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classinvites.InvitationResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: not pending
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Remind an invitee
+      tags:
+      - class-invitations
   /classes:
     get:
-      description: 'status filters the list: active (default), archived, or all.'
+      description: 'status filters the list: active (default), archived, or all. The
+        other filters combine with AND: q matches name or code, weekday/shift match
+        a timetable row still in effect, tag matches one tag exactly, phase is derived
+        from the dates, recruiting=true keeps the classes open for recruitment (flag
+        on, not ended or archived).'
       parameters:
       - description: active (default), archived, or all
         in: query
         name: status
         type: string
+      - description: substring of name or code, case-insensitive
+        in: query
+        name: q
+        type: string
+      - description: 0 (Sunday) to 6
+        in: query
+        name: weekday
+        type: integer
+      - description: morning, afternoon, or evening
+        in: query
+        name: shift
+        type: string
+      - description: exact tag
+        in: query
+        name: tag
+        type: string
+      - description: upcoming, running, ended, or archived
+        in: query
+        name: phase
+        type: string
+      - description: only classes attached to this course
+        in: query
+        name: course_id
+        type: string
+      - description: 'true: only classes open for recruitment'
+        in: query
+        name: recruiting
+        type: boolean
       - description: page number
         in: query
         name: page
@@ -4396,7 +6120,8 @@ paths:
       consumes:
       - application/json
       description: Schedules are required — a class without a timetable generates
-        no sessions.
+        no sessions. A blank code is generated; a code another live class in the center
+        uses is refused with 409 CLASS_CODE_TAKEN.
       parameters:
       - description: class fields with schedules
         in: body
@@ -4418,6 +6143,15 @@ paths:
               type: object
         "401":
           description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: class code already taken
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'
@@ -4531,8 +6265,9 @@ paths:
     put:
       consumes:
       - application/json
-      description: Edits name, dates, and default price; schedules and status have
-        their own endpoints.
+      description: Edits name, dates, and default price (full replace); code, tags,
+        recruiting and note are optional and keep their stored value when absent.
+        Schedules and status have their own endpoints.
       parameters:
       - description: class id
         in: path
@@ -4568,6 +6303,15 @@ paths:
               type: object
         "404":
           description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: class code already taken
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'
@@ -4808,6 +6552,89 @@ paths:
       summary: Search enrollable students
       tags:
       - enrollments
+  /classes/{id}/invitations:
+    post:
+      consumes:
+      - application/json
+      description: Owner only. Proposes a role (giao_vien, tro_giang, hoc_vu) to an
+        active member of the center. No class_staff stint is written until the owner
+        confirms. 422 SELF_INVITE when inviting oneself, 422 MEMBER_INACTIVE when
+        the invitee is not an active member, 409 when a pending invitation exists
+        or the person already holds that role.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: invitee, role and optional message
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/classinvites.SendRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classinvites.InvitationResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Invite a member to a class role
+      tags:
+      - class-invitations
   /classes/{id}/lesson-plans:
     get:
       description: Every saved giáo án of the class, ordered by lesson index, submitter
@@ -5313,6 +7140,434 @@ paths:
       summary: Month batch read of session notes and marks
       tags:
       - teaching
+  /classes/{id}/messages:
+    get:
+      description: Internal class chat, newest first. Pass before=<id of the oldest
+        shown message> for the next page; next_cursor is empty on the last one. Readable
+        by the owner and teachers currently on the class.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 'message id cursor: only older messages'
+        in: query
+        name: before
+        type: string
+      - description: page size, default 20, max 50
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classchat.ListResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List class messages
+      tags:
+      - classes
+    post:
+      consumes:
+      - application/json
+      description: Needs class_messages.post and an active stint on the class (the
+        owner always qualifies). Body is trimmed, max 2000 characters.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: message
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/classchat.PostRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classchat.MessageResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Post a class message
+      tags:
+      - classes
+  /classes/{id}/messages/{mid}:
+    delete:
+      description: Soft-deletes the message. Only its author or the center owner may
+        retract it.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: message id
+        in: path
+        name: mid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Retract a class message
+      tags:
+      - classes
+  /classes/{id}/program:
+    delete:
+      description: Owner only. Drops the link to the template version; the class curriculum
+        and lesson plans stay as they are.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Remove the class's program
+      tags:
+      - classes
+    get:
+      description: The published template version the class applies, or null when
+        none is applied. Readable by the owner and any teacher with a stint on the
+        class.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classprogram.ProgramResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get the class's applied program
+      tags:
+      - classes
+    put:
+      consumes:
+      - application/json
+      description: Owner only. Copies the version's lesson titles into the class curriculum.
+        When the class already keeps a different lesson list the call returns 409
+        CURRICULUM_DIFFERS (fields.current_count / fields.template_count) until re-sent
+        with confirm=true; the curriculum pointer and every lesson plan are kept.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: version to apply
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/classprogram.ApplyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classprogram.ProgramResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Apply a program template version to the class
+      tags:
+      - classes
+  /classes/{id}/program/lessons:
+    get:
+      description: Lessons of the applied template version with their materials and
+        exercises, in position order; an empty list when the class applies no program.
+      parameters:
+      - description: class id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/library.LessonDetailResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List the applied program's lessons
+      tags:
+      - classes
   /classes/{id}/schedules:
     post:
       consumes:
@@ -5662,9 +7917,11 @@ paths:
         effective schedules, then returns every session in the range — including cancelled
         ones. Idempotent: calling it again with an overlapping range never duplicates
         a row. Range is capped at 400 days — comfortably above the 62-day window a
-        month-calendar view needs. Each session carries attendance_summary (per-status
-        counts over its live attendance records), null until the session''s attendance
-        is confirmed.'
+        month-calendar view needs. With readonly=true nothing is generated: only sessions
+        already on file are returned, and the range is bounded only by order (to must
+        not precede from). Each session carries attendance_summary (per-status counts
+        over its live attendance records), null until the session''s attendance is
+        confirmed.'
       parameters:
       - description: class id
         in: path
@@ -5681,6 +7938,11 @@ paths:
         name: to
         required: true
         type: string
+      - description: true returns only sessions already on file, never generating;
+          range cap does not apply
+        in: query
+        name: readonly
+        type: boolean
       produces:
       - application/json
       responses:
@@ -5714,7 +7976,7 @@ paths:
                   $ref: '#/definitions/response.ErrorBody'
               type: object
         "422":
-          description: range too large or to before from
+          description: range too large, to before from, or readonly not a boolean
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'
@@ -6088,6 +8350,106 @@ paths:
       summary: Bàn giao lớp cho giáo viên khác
       tags:
       - classes
+  /classes/availability:
+    get:
+      description: slot is repeatable, "<weekday 0-6>-<HH:MM>-<duration minutes>"
+        (e.g. "1-08:00-90"). Rooms are the distinct non-empty rooms of live classes
+        in the center; teachers are the active center members. A room or teacher is
+        free only when no other live class's active schedule overlaps any requested
+        slot on the same weekday; exclude_class_id leaves one class out of that check
+        (the class being edited).
+      parameters:
+      - collectionFormat: csv
+        description: repeatable, <weekday 0-6>-<HH:MM>-<duration minutes>
+        in: query
+        items:
+          type: string
+        name: slot
+        type: array
+      - description: class id to leave out of the busy check
+        in: query
+        name: exclude_class_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classes.AvailabilityResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Class availability
+      tags:
+      - classes
+  /classes/stats:
+    get:
+      description: Counts every class the caller can read, bucketed by phase on today,
+        plus how many are recruiting. recruiting=true scopes every counter to the
+        classes open for recruitment, as the list filter of the same name does.
+      parameters:
+      - description: 'true: count only classes open for recruitment'
+        in: query
+        name: recruiting
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classes.ClassStatsResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Class stats
+      tags:
+      - classes
   /contacts:
     get:
       description: Paginated; query matches full_name or phone case-insensitively.
@@ -6458,6 +8820,533 @@ paths:
       summary: Map contact to a Zalo friend
       tags:
       - contacts
+  /courses:
+    get:
+      description: Live courses of the caller's center with running/upcoming class
+        counters and tuition packs. q matches code or name.
+      parameters:
+      - description: draft | active | archived
+        in: query
+        name: status
+        type: string
+      - description: code or name fragment
+        in: query
+        name: q
+        type: string
+      - description: page (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: page size (default 20, max 100)
+        in: query
+        name: per_page
+        type: integer
+      - description: name | code | status | created_at, prefix - for descending
+        in: query
+        name: sort
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/courses.CourseResponse'
+                  type: array
+                meta:
+                  $ref: '#/definitions/response.Meta'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List courses
+      tags:
+      - courses
+    post:
+      consumes:
+      - application/json
+      description: The code is upper-cased and must be unique among the center's live
+        courses (409 CODE_TAKEN). default_template_version_id must be a published
+        version of the center's library (422).
+      parameters:
+      - description: course
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/courses.CourseRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/courses.CourseResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Create a course
+      tags:
+      - courses
+  /courses/{id}:
+    delete:
+      description: 'Soft delete: the code becomes reusable. Refused with 409 COURSE_IN_USE
+        while live classes point at the course, or 409 COURSE_IN_PATH while a live
+        learning path recommends it — archive it instead.'
+      parameters:
+      - description: course id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a course
+      tags:
+      - courses
+    get:
+      parameters:
+      - description: course id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/courses.CourseResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get a course
+      tags:
+      - courses
+    put:
+      consumes:
+      - application/json
+      description: Full replace of the course's own fields; tuition packs have their
+        own endpoint.
+      parameters:
+      - description: course id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: course
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/courses.CourseRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/courses.CourseResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Update a course
+      tags:
+      - courses
+  /courses/{id}/archive:
+    post:
+      description: Moves the course to archived; classes attached to it keep running.
+        409 COURSE_ARCHIVED when it already is.
+      parameters:
+      - description: course id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/courses.CourseResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Archive a course
+      tags:
+      - courses
+  /courses/{id}/paths:
+    get:
+      description: One row per stage of a live learning path that recommends the course,
+        ordered by path then stage position. Needs courses.read and paths.read.
+      parameters:
+      - description: course id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/courses.CoursePathResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List the learning paths a course belongs to
+      tags:
+      - courses
+  /courses/{id}/tuition-packs:
+    put:
+      consumes:
+      - application/json
+      description: Wholesale replace, positions assigned in body order; [] clears
+        the list. At most 20 packs.
+      parameters:
+      - description: course id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: tuition packs; [] clears
+        in: body
+        name: body
+        required: true
+        schema:
+          items:
+            $ref: '#/definitions/courses.TuitionPackInput'
+          type: array
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/courses.TuitionPackResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Replace a course's tuition packs
+      tags:
+      - courses
   /enrollments:
     get:
       parameters:
@@ -7099,6 +9988,2718 @@ paths:
       summary: Void an invoice
       tags:
       - billing
+  /library/assignees:
+    get:
+      description: The center's live members a lesson can be assigned to. Needs prep.assign;
+        unlike the member directory, this does not need members.list.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/library.AssigneeResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List assignable members for lesson preparation
+      tags:
+      - library
+  /library/exercises:
+    get:
+      description: Live exercises of the caller's center. q matches the title or code.
+      parameters:
+      - description: title or code fragment
+        in: query
+        name: q
+        type: string
+      - description: only exercises with this active value
+        in: query
+        name: active
+        type: boolean
+      - description: page (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: page size (default 20, max 100)
+        in: query
+        name: per_page
+        type: integer
+      - description: title | created_at, prefix - for descending
+        in: query
+        name: sort
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/library.ExerciseResponse'
+                  type: array
+                meta:
+                  $ref: '#/definitions/response.Meta'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List library exercises
+      tags:
+      - library
+    post:
+      consumes:
+      - application/json
+      description: Code, when given, is upper-cased and must match ^[A-Za-z0-9-]+$
+        (409 EXERCISE_CODE_TAKEN on a clash); omitted, the next BT-0001-style code
+        of the center is assigned.
+      parameters:
+      - description: exercise
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/library.ExerciseRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.ExerciseResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Create a library exercise
+      tags:
+      - library
+  /library/exercises/{id}:
+    delete:
+      description: 409 EXERCISE_IN_USE while any template lesson still links it.
+      parameters:
+      - description: exercise id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a library exercise
+      tags:
+      - library
+    get:
+      parameters:
+      - description: exercise id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.ExerciseResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get a library exercise
+      tags:
+      - library
+    put:
+      consumes:
+      - application/json
+      description: Replaces every field. Lessons linking the exercise see the change
+        at once. Code, when given, follows the create rule (409 EXERCISE_CODE_TAKEN
+        on a clash); omitted, the exercise keeps its current code.
+      parameters:
+      - description: exercise id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: exercise
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/library.ExerciseRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.ExerciseResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Update a library exercise
+      tags:
+      - library
+  /library/exercises/{id}/status:
+    patch:
+      consumes:
+      - application/json
+      description: An inactive exercise stays visible to a lesson that already links
+        it and stays in the bank list by default; SetLessonExercises refuses to attach
+        it to another lesson.
+      parameters:
+      - description: exercise id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: status
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/library.ItemStatusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.ExerciseResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Set a library exercise's active status
+      tags:
+      - library
+  /library/lessons/{lid}:
+    delete:
+      description: Removes the lesson and renumbers the rest. 409 VERSION_LOCKED when
+        the lesson's version is not a draft.
+      parameters:
+      - description: lesson id
+        in: path
+        name: lid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a template lesson
+      tags:
+      - library
+    get:
+      parameters:
+      - description: lesson id
+        in: path
+        name: lid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.LessonDetailResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get a template lesson
+      tags:
+      - library
+    put:
+      consumes:
+      - application/json
+      description: Replaces title, objectives, duration and homework note. 409 VERSION_LOCKED
+        when the lesson's version is not a draft.
+      parameters:
+      - description: lesson id
+        in: path
+        name: lid
+        required: true
+        type: string
+      - description: lesson
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/library.LessonRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.LessonDetailResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Update a template lesson
+      tags:
+      - library
+  /library/lessons/{lid}/assignment:
+    patch:
+      consumes:
+      - application/json
+      description: Replaces the assignee and due date as one block; an omitted field
+        clears it. Needs prep.assign. 422 when the assignee is not a live member.
+        409 VERSION_LOCKED when the lesson's version is not a draft.
+      parameters:
+      - description: lesson id
+        in: path
+        name: lid
+        required: true
+        type: string
+      - description: assignment
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/library.AssignmentRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.LessonResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Assign a lesson's preparation
+      tags:
+      - library
+  /library/lessons/{lid}/duplicate:
+    post:
+      description: Inserts a copy right after the lesson, shifting later ones up by
+        one position. Content (mode, unit, objectives, duration, homework note, materials,
+        exercises) is copied; board state (prep status, assignee, due date, checklist)
+        starts fresh. 409 VERSION_LOCKED when the lesson's version is not a draft.
+      parameters:
+      - description: lesson id
+        in: path
+        name: lid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.DuplicateLessonResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Duplicate a template lesson
+      tags:
+      - library
+  /library/lessons/{lid}/exercises:
+    put:
+      consumes:
+      - application/json
+      description: Wholesale replace, body order is the display order. Every id must
+        be a live exercise of the center. 409 VERSION_LOCKED unless the lesson's version
+        is a draft.
+      parameters:
+      - description: lesson id
+        in: path
+        name: lid
+        required: true
+        type: string
+      - description: exercises; [] clears
+        in: body
+        name: body
+        required: true
+        schema:
+          items:
+            $ref: '#/definitions/library.LessonExerciseInput'
+          type: array
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/library.LessonExerciseResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Replace the exercises of a template lesson
+      tags:
+      - library
+  /library/lessons/{lid}/materials:
+    put:
+      consumes:
+      - application/json
+      description: Wholesale replace, body order is the display order. Every id must
+        be a live material of the center. 409 VERSION_LOCKED unless the lesson's version
+        is a draft.
+      parameters:
+      - description: lesson id
+        in: path
+        name: lid
+        required: true
+        type: string
+      - description: materials; [] clears
+        in: body
+        name: body
+        required: true
+        schema:
+          items:
+            $ref: '#/definitions/library.LessonMaterialInput'
+          type: array
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/library.LessonMaterialResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Replace the materials of a template lesson
+      tags:
+      - library
+  /library/lessons/{lid}/prep:
+    patch:
+      consumes:
+      - application/json
+      description: Sets the preparation status and/or replaces the checklist; an omitted
+        field keeps its value. 409 VERSION_LOCKED when the lesson's version is not
+        a draft.
+      parameters:
+      - description: lesson id
+        in: path
+        name: lid
+        required: true
+        type: string
+      - description: preparation
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/library.PrepRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.LessonResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Update a lesson's preparation
+      tags:
+      - library
+  /library/materials:
+    get:
+      description: Live materials of the caller's center. q matches the title.
+      parameters:
+      - description: title fragment
+        in: query
+        name: q
+        type: string
+      - description: only materials with this active value
+        in: query
+        name: active
+        type: boolean
+      - description: page (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: page size (default 20, max 100)
+        in: query
+        name: per_page
+        type: integer
+      - description: title | created_at, prefix - for descending
+        in: query
+        name: sort
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/library.MaterialResponse'
+                  type: array
+                meta:
+                  $ref: '#/definitions/response.Meta'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List library materials
+      tags:
+      - library
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: material
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/library.MaterialRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.MaterialResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Create a library material
+      tags:
+      - library
+  /library/materials/{id}:
+    delete:
+      description: 409 MATERIAL_IN_USE while any template lesson still links it.
+      parameters:
+      - description: material id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a library material
+      tags:
+      - library
+    get:
+      parameters:
+      - description: material id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.MaterialResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get a library material
+      tags:
+      - library
+    put:
+      consumes:
+      - application/json
+      description: Replaces every field. Lessons linking the material see the change
+        at once.
+      parameters:
+      - description: material id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: material
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/library.MaterialRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.MaterialResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Update a library material
+      tags:
+      - library
+  /library/materials/{id}/status:
+    patch:
+      consumes:
+      - application/json
+      description: An inactive material stays visible to a lesson that already links
+        it and stays in the bank list by default; SetLessonMaterials refuses to attach
+        it to another lesson.
+      parameters:
+      - description: material id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: status
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/library.ItemStatusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.MaterialResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Set a library material's active status
+      tags:
+      - library
+  /library/templates:
+    get:
+      description: Live templates of the caller's center with their published and
+        draft version numbers. q matches code or name.
+      parameters:
+      - description: code or name fragment
+        in: query
+        name: q
+        type: string
+      - description: only templates with an open draft
+        in: query
+        name: has_draft
+        type: boolean
+      - description: page (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: page size (default 20, max 100)
+        in: query
+        name: per_page
+        type: integer
+      - description: name | code | created_at, prefix - for descending
+        in: query
+        name: sort
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/library.TemplateResponse'
+                  type: array
+                meta:
+                  $ref: '#/definitions/response.Meta'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List program templates
+      tags:
+      - library
+    post:
+      consumes:
+      - application/json
+      description: Creates the template and draft version 1 in one step. The code
+        is upper-cased and must be unique among the center's live templates (409 CODE_TAKEN).
+      parameters:
+      - description: template
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/library.TemplateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.TemplateResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Create a program template
+      tags:
+      - library
+  /library/templates/{id}:
+    delete:
+      description: 'Soft delete: the template leaves the library and its code becomes
+        reusable; versions and lessons are kept.'
+      parameters:
+      - description: template id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a program template
+      tags:
+      - library
+    get:
+      parameters:
+      - description: template id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.TemplateResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get a program template
+      tags:
+      - library
+    put:
+      consumes:
+      - application/json
+      description: Replaces code, name, subject, level and description. Versions and
+        lessons are untouched. 409 CODE_TAKEN when the new code belongs to another
+        live template.
+      parameters:
+      - description: template id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: template
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/library.TemplateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.TemplateResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Update a program template
+      tags:
+      - library
+  /library/templates/{id}/versions:
+    get:
+      parameters:
+      - description: template id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/library.VersionResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List template versions
+      tags:
+      - library
+    post:
+      consumes:
+      - application/json
+      description: Numbers the draft after the highest existing version and copies
+        the lessons of the latest published version into it. 409 DRAFT_EXISTS while
+        another draft is open.
+      parameters:
+      - description: template id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: optional changelog
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/library.CreateVersionRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.VersionResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Open a new draft version
+      tags:
+      - library
+  /library/versions/{vid}:
+    get:
+      description: The version with its score set, log fields and lessons, each lesson
+        with its attached materials and exercises.
+      parameters:
+      - description: version id
+        in: path
+        name: vid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.VersionDetailResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get a template version
+      tags:
+      - library
+  /library/versions/{vid}/archive:
+    post:
+      description: published → archived; lessons are kept but the version no longer
+        counts as the template's published one. 409 VERSION_NOT_PUBLISHED for any
+        other status.
+      parameters:
+      - description: version id
+        in: path
+        name: vid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.VersionResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Archive a published version
+      tags:
+      - library
+  /library/versions/{vid}/board:
+    get:
+      description: The version's lessons grouped into the four fixed preparation columns
+        (todo, doing, review, done), each card with its assignee, due date and checklist
+        progress.
+      parameters:
+      - description: version id
+        in: path
+        name: vid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.BoardResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get a version's preparation board
+      tags:
+      - library
+  /library/versions/{vid}/exercise-groups:
+    get:
+      description: Groups by position, each with how many lesson-exercise links point
+        at it.
+      parameters:
+      - description: version id
+        in: path
+        name: vid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/library.ExerciseGroupResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List the exercise groups of a version
+      tags:
+      - library
+    post:
+      consumes:
+      - application/json
+      description: Appends the group at the next position. 409 VERSION_LOCKED when
+        the version is not a draft.
+      parameters:
+      - description: version id
+        in: path
+        name: vid
+        required: true
+        type: string
+      - description: exercise group
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/library.ExerciseGroupRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.ExerciseGroupResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Add an exercise group to a draft
+      tags:
+      - library
+  /library/versions/{vid}/exercise-groups/{gid}:
+    delete:
+      description: The lesson-exercise links that pointed at it lose their group_id
+        instead of being deleted. 409 VERSION_LOCKED when the version is not a draft.
+      parameters:
+      - description: version id
+        in: path
+        name: vid
+        required: true
+        type: string
+      - description: exercise group id
+        in: path
+        name: gid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Delete an exercise group from a draft
+      tags:
+      - library
+  /library/versions/{vid}/lessons:
+    delete:
+      description: Removes all lessons of the version in one call; their attachments
+        cascade with them. 409 VERSION_LOCKED when the version is not a draft.
+      parameters:
+      - description: version id
+        in: path
+        name: vid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Delete every lesson of a draft
+      tags:
+      - library
+    get:
+      parameters:
+      - description: version id
+        in: path
+        name: vid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/library.LessonResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List lessons of a version
+      tags:
+      - library
+    post:
+      consumes:
+      - application/json
+      description: Appends the lesson at the next position. 409 VERSION_LOCKED when
+        the version is published or archived.
+      parameters:
+      - description: version id
+        in: path
+        name: vid
+        required: true
+        type: string
+      - description: lesson
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/library.LessonRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.LessonResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Add a lesson to a draft
+      tags:
+      - library
+  /library/versions/{vid}/lessons/order:
+    put:
+      consumes:
+      - application/json
+      description: lesson_ids must list every lesson of the version exactly once,
+        in the wanted order (422 otherwise). 409 VERSION_LOCKED when the version is
+        not a draft.
+      parameters:
+      - description: version id
+        in: path
+        name: vid
+        required: true
+        type: string
+      - description: ordered lesson ids
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/library.ReorderRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/library.LessonResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Reorder the lessons of a draft
+      tags:
+      - library
+  /library/versions/{vid}/log-fields:
+    put:
+      consumes:
+      - application/json
+      description: Wholesale replace, body order is the position. A select field needs
+        at least one option. 409 VERSION_LOCKED unless the version is a draft.
+      parameters:
+      - description: version id
+        in: path
+        name: vid
+        required: true
+        type: string
+      - description: log fields; [] clears
+        in: body
+        name: body
+        required: true
+        schema:
+          items:
+            $ref: '#/definitions/library.LogFieldInput'
+          type: array
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/library.LogFieldResponse'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Replace the log fields of a version
+      tags:
+      - library
+  /library/versions/{vid}/publish:
+    post:
+      description: draft → published; its lessons become read-only. 409 VERSION_NOT_DRAFT
+        for any other status. Older published versions are left as they are.
+      parameters:
+      - description: version id
+        in: path
+        name: vid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/library.VersionResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Publish a draft version
+      tags:
+      - library
+  /library/versions/{vid}/score-set:
+    put:
+      consumes:
+      - application/json
+      description: Wholesale replace. Group and component keys are lowercase identifiers;
+        a component key is unique within its own group only. max must be positive.
+        409 VERSION_LOCKED unless the version is a draft.
+      parameters:
+      - description: version id
+        in: path
+        name: vid
+        required: true
+        type: string
+      - description: score set groups; [] clears
+        in: body
+        name: body
+        required: true
+        schema:
+          items:
+            $ref: '#/definitions/library.ScoreSetGroupInput'
+          type: array
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/library.ScoreSetGroup'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Replace the score set of a version
+      tags:
+      - library
   /me:
     get:
       produces:
@@ -7569,6 +13170,677 @@ paths:
       summary: Mark notifications sent
       tags:
       - notifications
+  /paths:
+    get:
+      description: Live learning paths of the caller's center, each with its stages
+        and recommended courses. q matches code or name.
+      parameters:
+      - description: draft | active | archived
+        in: query
+        name: status
+        type: string
+      - description: code or name fragment
+        in: query
+        name: q
+        type: string
+      - description: page (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: page size (default 20, max 100)
+        in: query
+        name: per_page
+        type: integer
+      - description: name | code | status | created_at, prefix - for descending
+        in: query
+        name: sort
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/paths.PathResponse'
+                  type: array
+                meta:
+                  $ref: '#/definitions/response.Meta'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List learning paths
+      tags:
+      - paths
+    post:
+      consumes:
+      - application/json
+      description: The code is upper-cased and must be unique among the center's live
+        paths (409 CODE_TAKEN). Status defaults to draft.
+      parameters:
+      - description: learning path
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/paths.PathRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/paths.PathResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Create a learning path
+      tags:
+      - paths
+  /paths/{id}:
+    delete:
+      description: 'Soft delete: the code becomes reusable and the stages go with
+        the path. Courses are never touched.'
+      parameters:
+      - description: learning path id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a learning path
+      tags:
+      - paths
+    get:
+      parameters:
+      - description: learning path id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/paths.PathResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get a learning path
+      tags:
+      - paths
+    put:
+      consumes:
+      - application/json
+      description: Full replace of the path's own fields; a blank status keeps the
+        stored one. Stages have their own endpoints.
+      parameters:
+      - description: learning path id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: learning path
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/paths.PathRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/paths.PathResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "409":
+          description: Conflict
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Update a learning path
+      tags:
+      - paths
+  /paths/{id}/stages:
+    post:
+      consumes:
+      - application/json
+      description: Appends a stage after the last one and returns the whole path.
+      parameters:
+      - description: learning path id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: stage
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/paths.StageRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/paths.PathResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Add a stage
+      tags:
+      - paths
+  /paths/{id}/stages/{sid}:
+    delete:
+      description: Removes the stage with its course links; the remaining stages keep
+        positions 1..n.
+      parameters:
+      - description: learning path id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: stage id
+        in: path
+        name: sid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/paths.PathResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a stage
+      tags:
+      - paths
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: learning path id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: stage id
+        in: path
+        name: sid
+        required: true
+        type: string
+      - description: stage
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/paths.StageRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/paths.PathResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Update a stage
+      tags:
+      - paths
+  /paths/{id}/stages/{sid}/courses:
+    put:
+      consumes:
+      - application/json
+      description: Wholesale replace in body order; [] clears the list. Every id must
+        be a live course of the center (422 otherwise); at most 20 per stage.
+      parameters:
+      - description: learning path id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: stage id
+        in: path
+        name: sid
+        required: true
+        type: string
+      - description: course ids; [] clears
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/paths.StageCoursesRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/paths.PathResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Replace a stage's courses
+      tags:
+      - paths
+  /paths/{id}/stages/order:
+    put:
+      consumes:
+      - application/json
+      description: stage_ids must list every stage of the path exactly once (422 otherwise);
+        positions are assigned in that order.
+      parameters:
+      - description: learning path id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: new order
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/paths.ReorderRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/paths.PathResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Reorder stages
+      tags:
+      - paths
   /payments:
     get:
       parameters:

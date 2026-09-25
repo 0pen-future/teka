@@ -45,4 +45,7 @@ export interface AuditLogFilters {
   from?: string;
   /** RFC3339 instant, inclusive. */
   to?: string;
+  /** Exact entity match, e.g. `class` + the class id for one record's own trail. */
+  entity_type?: string;
+  entity_id?: string;
 }

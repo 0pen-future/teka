@@ -32,7 +32,7 @@ function apiErrorMessage(error: unknown, fallback: string): string | null {
 /**
  * "Nhân sự lớp" — owner-only roster of who works a class and in what role.
  * `giao_vien` stays read-only here and links to the `TeacherHandoffCard`
- * further down the settings page (`#teacher-handoff`): during the dual-write
+ * below it on the class detail's info tab (`#teacher-handoff`): during the dual-write
  * window the primary teacher changes only through that handoff flow, never
  * through this section's assign/remove calls (the API refuses it with 409).
  */

@@ -127,7 +127,7 @@ export type ScheduleInput = z.infer<typeof scheduleInputSchema>;
  * One "khung giờ" as the class-timetable forms edit it (prototype
  * `modalClass.slots` / `classCfg.slots`): a shared start time plus every
  * weekday it repeats on. The wire shape stays one `ScheduleRequest` row per
- * (weekday, time) pair — see `toClassCreateInput` and `diffSchedules`
+ * (weekday, time) pair — see `toClassCreateInput`
  * (`../lib/schedule-diff.ts`).
  */
 export const scheduleSlotInputSchema = z.object({
@@ -166,6 +166,34 @@ const classSlotsField = z
     });
   });
 
+/** The lifecycle bucket the API assigns a class; the list filter and stats use the same values. */
+export const classPhases = ["upcoming", "running", "ended", "archived"] as const;
+export const classPhaseSchema = z.enum(classPhases);
+export type ClassPhase = z.infer<typeof classPhaseSchema>;
+
+/** The course chip embedded in a class: enough to label it and link to `/courses/:id`. */
+export const courseRefSchema = z.object({
+  id: z.string(),
+  code: z.string(),
+  name: z.string(),
+});
+
+export type CourseRef = z.infer<typeof courseRefSchema>;
+
+/**
+ * The slice of `courses.CourseResponse` the class dialog's picker needs.
+ * Roster owns this lookup so it never imports the courses feature (which
+ * imports roster for the class list on the course page).
+ */
+export const courseOptionSchema = z.object({
+  id: z.string(),
+  code: z.string(),
+  name: z.string(),
+  default_unit_price: z.number().int(),
+});
+
+export type CourseOption = z.infer<typeof courseOptionSchema>;
+
 /**
  * `classes.ClassResponse`. `default_unit_price` is integer đồng, never a
  * decimal. `my_staff_roles` is the caller's own active class-staff role keys
@@ -187,9 +215,49 @@ export const classSchema = z.object({
   my_staff_roles: z.array(z.string()).default([]),
   /** Open enrollments on the class — what `GET /enrollments?active=true` lists. */
   student_count: z.number().int().nonnegative().default(0),
+  // Catalog fields. They default rather than require so a cached or older
+  // response that predates them still parses.
+  /** Display code (mã lớp), unique per center among live classes. */
+  code: z.string().default(""),
+  tags: z.array(z.string()).default([]),
+  /** Still taking enrolments (cần tuyển sinh). */
+  recruiting: z.boolean().default(false),
+  /** Operational note shown on the class detail; null when none. */
+  note: z.string().nullable().default(null),
+  /**
+   * Derived server-side from status and the dates against today
+   * (`classes.PhaseOf`); the client only renders it and never recomputes it.
+   */
+  phase: classPhaseSchema.default("running"),
+  /** The course the class is attached to (`classes.CourseRefResponse`); null when none. */
+  course: courseRefSchema.nullable().default(null),
+  /** The class this one split off from or continues (lịch sử lớp); null when it stands alone. */
+  parent_class_id: z.string().nullable().default(null),
+  lineage_note: z.string().nullable().default(null),
+  /** Planned room (phòng học); "" when none. */
+  room: z.string().default(""),
+  /** `self_paced` classes follow the template with no weekly timetable. */
+  study_mode: z.enum(["scheduled", "self_paced"]).default("scheduled"),
+  /** The live class that continues this one (its `parent_class_id` points here); null when none. */
+  next_class_id: z.string().nullable().default(null),
 });
 
 export type Class = z.infer<typeof classSchema>;
+
+export const studyModes = ["scheduled", "self_paced"] as const;
+export type StudyMode = (typeof studyModes)[number];
+
+/** `classes.ClassStatsResponse` (`GET /classes/stats`): counts within the caller's read scope. */
+export const classStatsSchema = z.object({
+  all: z.number().int().nonnegative(),
+  upcoming: z.number().int().nonnegative(),
+  running: z.number().int().nonnegative(),
+  ended: z.number().int().nonnegative(),
+  archived: z.number().int().nonnegative(),
+  recruiting: z.number().int().nonnegative(),
+});
+
+export type ClassStats = z.infer<typeof classStatsSchema>;
 
 /**
  * `classes.CreateClassRequest` — schedules are required atomically; a class
@@ -201,19 +269,158 @@ export const classCreateInputSchema = z.object({
   end_date: z.union([dateField, z.literal("")]).optional(),
   default_unit_price: z.number().int().min(0, "Học phí không được âm"),
   schedules: z.array(scheduleInputSchema).min(1, "Chọn ít nhất một buổi trong tuần"),
+  /** A live course of the center; absent means no course. */
+  course_id: z.string().optional(),
 });
 
 export type ClassCreateInput = z.infer<typeof classCreateInputSchema>;
 
-/** `classes.UpdateClassRequest` — schedules and status are separate endpoints. */
+const classCodeField = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .regex(/^[A-Z0-9-]{2,20}$/, "Mã lớp gồm 2–20 ký tự chữ, số hoặc gạch ngang");
+
+const classTagsField = z
+  .array(z.string().trim().min(1).max(30, "Mỗi thẻ tối đa 30 ký tự"))
+  .max(10, "Tối đa 10 thẻ");
+
+/**
+ * `classes.UpdateClassRequest` — schedules and status are separate endpoints.
+ * The catalog fields are pointers server-side: a key left out means "keep",
+ * so callers send only what they changed (see `toClassUpdateInput`).
+ */
 export const classUpdateInputSchema = z.object({
   name: z.string().trim().min(1, "Bắt buộc nhập tên lớp").max(100, "Tối đa 100 ký tự"),
   start_date: dateField,
   end_date: z.union([dateField, z.literal("")]).optional(),
   default_unit_price: z.number().int().min(0, "Học phí không được âm"),
+  code: classCodeField.optional(),
+  tags: classTagsField.optional(),
+  recruiting: z.boolean().optional(),
+  /** Replaces the stored note; `""` clears it. */
+  note: z.string().trim().max(1000, "Tối đa 1000 ký tự").optional(),
+  /** Same patch rule: absent keeps the course, `""` detaches, an id attaches. */
+  course_id: z.string().optional(),
+  /** Same patch rule for the lineage link and its note. */
+  parent_class_id: z.string().optional(),
+  lineage_note: z.string().trim().max(1000, "Tối đa 1000 ký tự").optional(),
+  /** Same patch rule: `""` clears the room. */
+  room: z.string().trim().max(50, "Tối đa 50 ký tự").optional(),
+  study_mode: z.enum(studyModes).optional(),
+  /** Links the class that continues this one; `""` unlinks every successor. */
+  next_class_id: z.string().optional(),
 });
 
 export type ClassUpdateInput = z.infer<typeof classUpdateInputSchema>;
+
+/** Form shape of the lineage card: the parent picker (`""` = none) and the note. */
+export const classLineageInputSchema = z.object({
+  parent_class_id: z.string(),
+  lineage_note: z.string().trim().max(1000, "Tối đa 1000 ký tự"),
+});
+
+export type ClassLineageInput = z.infer<typeof classLineageInputSchema>;
+
+/**
+ * Form shape of the operational card on the class detail ("Thông tin vận
+ * hành"): the recruiting flag, the tag list and the note. Dates and price
+ * stay on the settings screen.
+ */
+export const classOpsInputSchema = z.object({
+  recruiting: z.boolean(),
+  tags: classTagsField,
+  note: z.string().trim().max(1000, "Tối đa 1000 ký tự"),
+});
+
+export type ClassOpsInput = z.infer<typeof classOpsInputSchema>;
+
+/**
+ * Builds the `PUT /classes/:id` body for an operational edit: the required
+ * base fields copied from the class unchanged, plus only the catalog fields
+ * whose value differs from what the class already holds. Sending an
+ * unchanged `tags` would still be harmless, but sending an unchanged `code`
+ * from a stale read could clobber a rename made elsewhere — hence the diff.
+ */
+export function toClassUpdateInput(klass: Class, values: Partial<ClassOpsInput>): ClassUpdateInput {
+  const input: ClassUpdateInput = {
+    name: klass.name,
+    start_date: klass.start_date,
+    end_date: klass.end_date ?? "",
+    default_unit_price: klass.default_unit_price,
+  };
+  if (values.recruiting !== undefined && values.recruiting !== klass.recruiting) {
+    input.recruiting = values.recruiting;
+  }
+  if (values.tags !== undefined && !sameTags(values.tags, klass.tags)) {
+    input.tags = values.tags;
+  }
+  if (values.note !== undefined && values.note !== (klass.note ?? "")) {
+    input.note = values.note;
+  }
+  return input;
+}
+
+/** `PUT /classes/:id` body for a lineage edit: base fields plus only the lineage fields that changed. */
+export function toClassLineageUpdateInput(
+  klass: Class,
+  values: ClassLineageInput,
+): ClassUpdateInput {
+  const input = toClassUpdateInput(klass, {});
+  if (values.parent_class_id !== (klass.parent_class_id ?? "")) {
+    input.parent_class_id = values.parent_class_id;
+  }
+  if (values.lineage_note !== (klass.lineage_note ?? "")) {
+    input.lineage_note = values.lineage_note;
+  }
+  return input;
+}
+
+/**
+ * `PUT /classes/:id` body for a wizard save: the base fields plus only the
+ * patch fields that differ from the stored class, or null when nothing on
+ * the class row changed. A self-paced class may leave the start date blank;
+ * the stored one is kept.
+ */
+export function toClassWizardUpdateInput(
+  klass: Class,
+  values: ClassWizardInput,
+): ClassUpdateInput | null {
+  const input: ClassUpdateInput = {
+    name: values.name,
+    start_date: values.start_date || klass.start_date,
+    end_date: values.end_date,
+    default_unit_price: values.default_unit_price,
+  };
+  let changed =
+    input.name !== klass.name ||
+    input.start_date !== klass.start_date ||
+    input.end_date !== (klass.end_date ?? "") ||
+    input.default_unit_price !== klass.default_unit_price;
+  const patch = <K extends keyof ClassUpdateInput>(
+    key: K,
+    next: ClassUpdateInput[K],
+    stored: unknown,
+  ) => {
+    if (next !== stored) {
+      input[key] = next;
+      changed = true;
+    }
+  };
+  if (values.code !== "") patch("code", values.code, klass.code);
+  if (!sameTags(values.tags, klass.tags)) patch("tags", values.tags, undefined);
+  patch("note", values.note, klass.note ?? "");
+  patch("course_id", values.course_id, klass.course?.id ?? "");
+  patch("parent_class_id", values.parent_class_id, klass.parent_class_id ?? "");
+  patch("next_class_id", values.next_class_id, klass.next_class_id ?? "");
+  patch("room", values.room, klass.room);
+  patch("study_mode", values.study_mode, klass.study_mode);
+  return changed ? input : null;
+}
+
+function sameTags(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((tag, index) => tag === b[index]);
+}
 
 /**
  * `handoff.ReassignResponse` (`PUT /classes/:id/teacher`). `teacher_id` is the
@@ -264,20 +471,117 @@ export const classStaffAssignInputSchema = z.object({
 export type ClassStaffAssignInput = z.infer<typeof classStaffAssignInputSchema>;
 
 /**
- * Form shape for the "Cài đặt lớp" screen (prototype `classCfg`): one name,
- * a list of khung-giờ slots, one unit price. The screen fans this out into
- * `PUT /classes/:id` plus schedule add/delete calls — see `diffSchedules`
- * (`../lib/schedule-diff.ts`). Unlike `classUpdateInputSchema`, price must
- * be positive here: the prototype's onSave rejects a zero rate with
- * "Nhập đơn giá mỗi buổi".
+ * One weekly row of the "Sửa lớp học" wizard (prototype `cls.wiz.slots`):
+ * weekday, start time and its own duration. Time and duration start blank
+ * on a new row, so both are checked in the wizard's refinement rather than
+ * here.
  */
-export const classSettingsInputSchema = z.object({
-  name: z.string().trim().min(1, "Bắt buộc nhập tên lớp").max(100, "Tối đa 100 ký tự"),
-  slots: classSlotsField,
-  default_unit_price: z.number().int().min(1, "Nhập đơn giá mỗi buổi"),
+export const scheduleRowInputSchema = z.object({
+  weekday: z.number().int().min(0).max(6),
+  start_time: z.string(),
+  duration_min: z.number().int().nullable(),
 });
 
-export type ClassSettingsInput = z.infer<typeof classSettingsInputSchema>;
+export type ScheduleRowInput = z.infer<typeof scheduleRowInputSchema>;
+
+const SLOT_INCOMPLETE = "Mỗi lịch học cần giờ bắt đầu và thời lượng";
+
+/** A weekly session never runs past one evening; also keeps the value inside the API's int16. */
+const MAX_SLOT_MINUTES = 600;
+
+/**
+ * Form shape of the "Sửa lớp học" wizard. It fans out into `PUT /classes/:id`,
+ * the schedule row diff (`diffScheduleRows`) and an optional teacher
+ * invitation. Messages follow the prototype's save checks.
+ */
+export const classWizardInputSchema = z
+  .object({
+    name: z.string().trim().min(1, "Nhập tên lớp").max(100, "Tối đa 100 ký tự"),
+    /** `""` only for a class that has never had a course; the wizard offers no way back to blank. */
+    course_id: z.string(),
+    code: z.union([classCodeField, z.literal("")]),
+    default_unit_price: z.number().int().min(0, "Học phí không được âm"),
+    tags: classTagsField,
+    parent_class_id: z.string(),
+    next_class_id: z.string(),
+    study_mode: z.enum(studyModes),
+    start_date: z.union([dateField, z.literal("")]),
+    end_date: z.union([dateField, z.literal("")]),
+    slots: z.array(scheduleRowInputSchema),
+    room: z.string().trim().max(50, "Tối đa 50 ký tự"),
+    /** Planned teacher to invite on save; `""` sends nothing. */
+    teacher_id: z.string(),
+    note: z.string().trim().max(1000, "Tối đa 1000 ký tự"),
+  })
+  .superRefine((values, ctx) => {
+    if (values.start_date !== "" && values.end_date !== "" && values.end_date < values.start_date) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["end_date"],
+        message: "Ngày kết thúc phải sau ngày khai giảng",
+      });
+    }
+    if (values.parent_class_id !== "" && values.parent_class_id === values.next_class_id) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["next_class_id"],
+        message: "Lớp trước và lớp sau phải khác nhau",
+      });
+    }
+    if (values.study_mode !== "scheduled") return;
+    if (values.start_date === "") {
+      ctx.addIssue({ code: "custom", path: ["start_date"], message: "Chọn ngày khai giảng" });
+    }
+    if (values.slots.length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["slots"],
+        message: "Lớp học theo lịch cần ít nhất một lịch hàng tuần",
+      });
+    }
+    // One session per class per date: a second row on a weekday would never generate.
+    const seen = new Set<number>();
+    values.slots.forEach((slot, index) => {
+      if (!hhmmPattern.test(slot.start_time)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["slots", index, "start_time"],
+          message: SLOT_INCOMPLETE,
+        });
+      }
+      if (slot.duration_min === null || slot.duration_min < 1) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["slots", index, "duration_min"],
+          message: SLOT_INCOMPLETE,
+        });
+      } else if (slot.duration_min > MAX_SLOT_MINUTES) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["slots", index, "duration_min"],
+          message: `Thời lượng tối đa ${MAX_SLOT_MINUTES} phút`,
+        });
+      }
+      if (seen.has(slot.weekday)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["slots", index, "weekday"],
+          message: "Ngày này đã có lịch học — mỗi ngày chỉ một lịch",
+        });
+      }
+      seen.add(slot.weekday);
+    });
+  });
+
+export type ClassWizardInput = z.infer<typeof classWizardInputSchema>;
+
+/** `GET /classes/availability` — which rooms and members are free for the given weekly slots. */
+export const classAvailabilitySchema = z.object({
+  rooms: z.array(z.object({ name: z.string(), free: z.boolean() })),
+  teachers: z.array(z.object({ teacher_id: z.string(), name: z.string(), free: z.boolean() })),
+});
+
+export type ClassAvailability = z.infer<typeof classAvailabilitySchema>;
 
 /**
  * Form shape for `ClassDialog`'s create mode: the class fields plus the
@@ -293,12 +597,14 @@ export const classDialogInputSchema = z.object({
   default_unit_price: z.number().int().min(0, "Học phí không được âm"),
   slots: classSlotsField,
   duration_min: z.number().int().min(1, "Thời lượng phải lớn hơn 0"),
+  /** Picked course id; `""` means the class stays unattached. */
+  course_id: z.string(),
 });
 
 export type ClassDialogInput = z.infer<typeof classDialogInputSchema>;
 
 export function toClassCreateInput(values: ClassDialogInput): ClassCreateInput {
-  const { slots, duration_min, ...rest } = values;
+  const { slots, duration_min, course_id, ...rest } = values;
   // One wire row per (weekday, time) pair; two slots naming the same pair
   // would otherwise duplicate a session generator server-side.
   const seen = new Set<string>();
@@ -316,7 +622,7 @@ export function toClassCreateInput(values: ClassDialogInput): ClassCreateInput {
       });
     }
   }
-  return { ...rest, schedules };
+  return course_id === "" ? { ...rest, schedules } : { ...rest, schedules, course_id };
 }
 
 /** `enrollments.EnrollmentResponse`. `unit_price` is integer đồng. */
@@ -376,3 +682,65 @@ export function endEnrollmentInputSchema(startedOn: string) {
 }
 
 export type EndEnrollmentInput = z.infer<ReturnType<typeof endEnrollmentInputSchema>>;
+
+/**
+ * `classinvites.InvitationResponse` (`apps/api/internal/features/classinvites/dto.go`).
+ * An invitation moves pending → accepted/declined (invitee) → assigned
+ * (owner confirm writes the stint) or cancelled (owner, or the member left
+ * the center). `role_label` is the API's Vietnamese copy of `role_key`.
+ */
+export const classInvitationStatuses = [
+  "pending",
+  "accepted",
+  "declined",
+  "cancelled",
+  "assigned",
+] as const;
+
+export type ClassInvitationStatus = (typeof classInvitationStatuses)[number];
+
+export const classInvitationSchema = z.object({
+  id: z.string(),
+  class_id: z.string(),
+  class_name: z.string(),
+  course_name: z.string().nullable(),
+  teacher_id: z.string(),
+  teacher_name: z.string(),
+  role_key: z.string(),
+  role_label: z.string(),
+  status: z.enum(classInvitationStatuses),
+  invited_by: z.string(),
+  invited_by_name: z.string(),
+  message: z.string().nullable(),
+  sent_at: z.string(),
+  reminded_at: z.string().nullable(),
+  responded_at: z.string().nullable(),
+  assigned_at: z.string().nullable(),
+});
+
+export type ClassInvitation = z.infer<typeof classInvitationSchema>;
+
+/**
+ * `classinvites.ConfirmResponse` — the assigned invitation plus what the
+ * stint write moved: a giao_vien confirm is a handoff and carries the
+ * class's future planned sessions to the new teacher.
+ */
+export const classInvitationConfirmSchema = classInvitationSchema.extend({
+  moved_planned_sessions: z.number().int(),
+});
+
+export type ClassInvitationConfirm = z.infer<typeof classInvitationConfirmSchema>;
+
+/** Roles an invitation may propose — unlike direct staff assignment, giao_vien is allowed. */
+export const invitableStaffRoleKeys = ["giao_vien", "tro_giang", "hoc_vu"] as const;
+
+export type InvitableStaffRoleKey = (typeof invitableStaffRoleKeys)[number];
+
+/** `classinvites.SendRequest` (`POST /classes/:id/invitations`). */
+export const classInvitationSendInputSchema = z.object({
+  teacher_id: z.string().min(1, "Bắt buộc chọn thành viên"),
+  role_key: z.enum(invitableStaffRoleKeys),
+  message: z.string().trim().max(500, "Tối đa 500 ký tự").optional(),
+});
+
+export type ClassInvitationSendInput = z.infer<typeof classInvitationSendInputSchema>;

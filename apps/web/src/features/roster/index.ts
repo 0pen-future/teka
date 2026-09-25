@@ -2,7 +2,7 @@
 // here (types and read hooks for classes/students/enrollments they need to
 // reference); routes.tsx stays a separate entry so the router can mount
 // pages without pulling them into every consumer's chunk.
-export { useClass, useClassesList, classesKeys } from "./hooks/use-classes";
+export { useClass, useClassesList, useClassStats, classesKeys } from "./hooks/use-classes";
 export { ClassSearchEmptyNote, ClassSearchInput } from "./components/class-search";
 export { useClassSearch } from "./hooks/use-class-search";
 export { useContact, useContactsList, contactsKeys } from "./hooks/use-contacts";
@@ -23,6 +23,7 @@ export {
 export type { Class, Contact, Enrollment, Schedule, Student } from "./schemas/roster-schemas";
 
 export { formatScheduleLabel, formatScheduleSummary, formatWeekday } from "./lib/roster-format";
+export { phaseLabel, phaseVariant } from "./lib/class-labels";
 export { currentMonth } from "./lib/current-month";
 export { activeSchedules } from "./lib/schedule-diff";
 export { canRecordAttendance, canSendClassReports, canWriteClass } from "./lib/class-permissions";

@@ -46,6 +46,8 @@ func parseListQuery(c *gin.Context) (ListQuery, error) {
 		q.ActorID = actorID
 	}
 	q.Action = c.Query("action")
+	q.EntityType = c.Query("entity_type")
+	q.EntityID = c.Query("entity_id")
 	if raw := c.Query("from"); raw != "" {
 		from, err := time.Parse(time.RFC3339, raw)
 		if err != nil {
@@ -79,6 +81,8 @@ func parseListQuery(c *gin.Context) (ListQuery, error) {
 //	@Produce		json
 //	@Param			actor_id	query		string	false	"filter by actor teacher id (UUID)"
 //	@Param			action		query		string	false	"action prefix, e.g. class. or auth.login"
+//	@Param			entity_type	query		string	false	"exact entity type, e.g. class"
+//	@Param			entity_id	query		string	false	"exact entity id, e.g. a class id"
 //	@Param			from		query		string	false	"RFC3339 lower bound on occurred_at"
 //	@Param			to			query		string	false	"RFC3339 upper bound on occurred_at"
 //	@Param			cursor		query		string	false	"opaque cursor from a previous page"

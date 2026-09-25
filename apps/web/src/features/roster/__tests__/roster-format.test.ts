@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { formatScheduleLabel, formatScheduleSummary } from "../lib/roster-format";
+import {
+  formatScheduleLabel,
+  formatScheduleLines,
+  formatScheduleSummary,
+} from "../lib/roster-format";
 import type { Schedule } from "../schemas/roster-schemas";
 
 const TODAY = "2026-08-05";
@@ -111,5 +115,28 @@ describe("formatScheduleLabel", () => {
       ),
     ).toBe("Tối Thứ Hai");
     expect(formatScheduleLabel([], TODAY)).toBe("");
+  });
+});
+
+describe("formatScheduleLines", () => {
+  it("prints one line per active session, Monday-first, with its end time and shift", () => {
+    expect(
+      formatScheduleLines(
+        [
+          schedule({ id: "sun", weekday: 0, start_time: "09:30:00", duration_min: 90 }),
+          schedule({ id: "tue-late", weekday: 2, start_time: "17:30", duration_min: 90 }),
+          schedule({ id: "tue-early", weekday: 2, start_time: "17:15", duration_min: 90 }),
+          schedule({ id: "closed", weekday: 1, effective_to: "2026-08-04" }),
+          schedule({ id: "late", weekday: 6, start_time: "23:30", duration_min: 60 }),
+        ],
+        TODAY,
+      ),
+    ).toEqual([
+      { key: "tue-early", text: "Thứ Ba, 17:15 - 18:45", shift: "afternoon" },
+      { key: "tue-late", text: "Thứ Ba, 17:30 - 19:00", shift: "evening" },
+      { key: "late", text: "Thứ Bảy, 23:30 - 00:30", shift: "evening" },
+      { key: "sun", text: "Chủ Nhật, 09:30 - 11:00", shift: "morning" },
+    ]);
+    expect(formatScheduleLines([], TODAY)).toEqual([]);
   });
 });

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin/binding"
@@ -82,10 +83,38 @@ func BindError(err error) *apperror.AppError {
 	return apperror.BadRequest("invalid request body")
 }
 
+// Elements validates every element of a decoded JSON array body and keys
+// each failure by "<index>.<field>" ("2.label"), so a client can point at the
+// row that produced it. gin validates a slice body element by element too,
+// but its SliceValidationError drops the index, which is why array handlers
+// call this after binding instead of relying on BindError alone. Returns nil
+// when every element is valid.
+func Elements[T any](items []T) *apperror.AppError {
+	fields := map[string]string{}
+	for i, item := range items {
+		var verrs validator.ValidationErrors
+		if err := binding.Validator.ValidateStruct(item); errors.As(err, &verrs) {
+			for _, fe := range verrs {
+				fields[strconv.Itoa(i)+"."+fieldName(fe)] = message(fe)
+			}
+		}
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	return apperror.Invalid("validation failed", fields)
+}
+
 // fieldName exposes the request JSON name, supplied by the RegisterTagNameFunc
 // in init; the lowercase fallback only fires for fields with no json tag.
+// A failing slice element reports as "tags[2]"; the index goes so clients
+// can map the error onto the field's input.
 func fieldName(fe validator.FieldError) string {
-	return strings.ToLower(fe.Field())
+	name := strings.ToLower(fe.Field())
+	if i := strings.IndexByte(name, '['); i >= 0 {
+		name = name[:i]
+	}
+	return name
 }
 
 func message(fe validator.FieldError) string {

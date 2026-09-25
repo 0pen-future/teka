@@ -540,3 +540,164 @@ describe("teaching v2 nav", () => {
     expect(link.querySelector(".bg-coral-400")).toBeNull();
   });
 });
+
+describe("Giảng dạy nav group", () => {
+  it("shows Danh sách lớp học to owners in its own group after Dạy học", async () => {
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+    const group = await within(sidebarNav).findByRole("group", { name: "Giảng dạy" });
+
+    // Permission-gated entries appear once /centers/me resolves.
+    expect(await within(group).findByRole("link", { name: "Danh sách lớp học" })).toHaveAttribute(
+      "href",
+      "/classes",
+    );
+    const teaching = within(sidebarNav).getByRole("group", { name: "Dạy học" });
+    expect(teaching.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("lists Lớp cần tuyển sinh between the class list and the invitations", async () => {
+    renderLayout("/classes/recruiting");
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+    const group = await within(sidebarNav).findByRole("group", { name: "Giảng dạy" });
+    const recruiting = await within(group).findByRole("link", { name: "Lớp cần tuyển sinh" });
+    expect(recruiting).toHaveAttribute("href", "/classes/recruiting");
+
+    const labels = within(group)
+      .getAllByRole("link")
+      .map((link) => link.textContent);
+    expect(labels.slice(0, 3)).toEqual([
+      "Danh sách lớp học",
+      "Lớp cần tuyển sinh",
+      "Lời mời nhận lớp",
+    ]);
+    // Most specific wins: the recruiting route does not also light up /classes.
+    expect(recruiting).toHaveAttribute("aria-current", "page");
+    expect(within(group).getByRole("link", { name: "Danh sách lớp học" })).not.toHaveAttribute(
+      "aria-current",
+    );
+  });
+
+  it("shows the entry to a member holding classes.list", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(
+          ok({ center_name: "Trung Tâm Bình Minh", permissions: ["classes.list"] }),
+        ),
+      ),
+    );
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+    expect(
+      await within(sidebarNav).findByRole("link", { name: "Danh sách lớp học" }),
+    ).toHaveAttribute("href", "/classes");
+  });
+
+  it("hides the entry from a member without classes.list", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(
+          ok({ center_name: "Trung Tâm Bình Minh", permissions: ["sessions.list"] }),
+        ),
+      ),
+    );
+    renderLayout();
+    await screen.findByText("Giáo viên");
+    expect(screen.queryByText("Danh sách lớp học")).not.toBeInTheDocument();
+  });
+
+  it("lists the entry inside the Thêm sheet and marks Thêm active on a class route", async () => {
+    const user = userEvent.setup();
+    renderLayout("/classes/abc");
+    const { moreTab } = await findBottomNav();
+    expect(moreTab).toHaveClass("text-mint-600");
+
+    await user.click(moreTab);
+    const sheet = await screen.findByRole("dialog");
+    expect(await within(sheet).findByRole("link", { name: "Danh sách lớp học" })).toHaveAttribute(
+      "href",
+      "/classes",
+    );
+  });
+});
+
+describe("Kho học liệu nav group", () => {
+  it("shows its own group after Giảng dạy with the prototype's entries in order", async () => {
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+    const teaching = await within(sidebarNav).findByRole("group", { name: "Giảng dạy" });
+    const group = within(sidebarNav).getByRole("group", { name: "Kho học liệu" });
+    expect(teaching.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    await within(group).findByRole("link", { name: "Kho học liệu" });
+    const links = within(group).getAllByRole("link");
+    expect(links.map((link) => [link.textContent, link.getAttribute("href")])).toEqual([
+      ["Lộ trình học", "/paths"],
+      ["Khóa học", "/courses"],
+      ["Kho học liệu", "/library"],
+      ["Chuẩn bị tài liệu", "/prep"],
+    ]);
+    // Giảng dạy keeps only the class entries.
+    expect(
+      within(teaching)
+        .getAllByRole("link")
+        .map((link) => link.textContent),
+    ).toEqual(["Danh sách lớp học", "Lớp cần tuyển sinh", "Lời mời nhận lớp"]);
+    expect(screen.queryByText("Danh mục khóa học")).not.toBeInTheDocument();
+    expect(screen.queryByText("Ngân hàng nội dung")).not.toBeInTheDocument();
+  });
+
+  it("gates each entry on its own read key", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(
+          ok({ center_name: "Trung Tâm Bình Minh", permissions: ["classes.list", "courses.read"] }),
+        ),
+      ),
+    );
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+    const group = await within(sidebarNav).findByRole("group", { name: "Kho học liệu" });
+    await within(group).findByRole("link", { name: "Khóa học" });
+    expect(within(group).getAllByRole("link")).toHaveLength(1);
+    expect(screen.queryByText("Lộ trình học")).not.toBeInTheDocument();
+    expect(screen.queryByText("Chuẩn bị tài liệu")).not.toBeInTheDocument();
+  });
+
+  it("lists the entries inside the Thêm sheet", async () => {
+    const user = userEvent.setup();
+    renderLayout();
+    const { moreTab } = await findBottomNav();
+
+    await user.click(moreTab);
+    const sheet = await screen.findByRole("dialog");
+    expect(await within(sheet).findByRole("link", { name: "Kho học liệu" })).toHaveAttribute(
+      "href",
+      "/library",
+    );
+    for (const [name, href] of [
+      ["Lộ trình học", "/paths"],
+      ["Khóa học", "/courses"],
+      ["Chuẩn bị tài liệu", "/prep"],
+    ]) {
+      expect(within(sheet).getByRole("link", { name })).toHaveAttribute("href", href);
+    }
+  });
+
+  it("keeps Kho học liệu active on the content bank and template routes", async () => {
+    for (const route of ["/library/materials", "/library/templates/1"]) {
+      const { unmount } = renderLayout(route);
+      const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+      const hub = await within(sidebarNav).findByRole("link", { name: "Kho học liệu" });
+      expect(hub).toHaveAttribute("aria-current", "page");
+      unmount();
+    }
+  });
+
+  it("marks Khóa học active on a course detail route", async () => {
+    renderLayout("/courses/c1");
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+    const courses = await within(sidebarNav).findByRole("link", { name: "Khóa học" });
+    expect(courses).toHaveAttribute("aria-current", "page");
+  });
+});

@@ -21,7 +21,7 @@ async function login(page: Page, user: { phone: string; password: string; name: 
 /**
  * The read journey both staff roles share: the owner-only roster screen
  * bounces the member home, the assigned class's students read on Hồ sơ học
- * sinh, class settings render read-only, and the classbook opens without
+ * sinh, the class detail hides edit actions, and the classbook opens without
  * edit affordances. Purely read-only — it must not mutate the shared seeded
  * stack. Attendance is asserted per role below, because the two staff roles
  * diverge there: tro_giang may confirm attendance, hoc_vu may not.
@@ -44,13 +44,11 @@ async function assertStaffReadJourney(page: Page) {
   const classId = new URL(page.url()).searchParams.get("class_id");
   expect(classId).toBeTruthy();
 
-  // Class settings: readable, but saving is reserved for giao_vien/owner.
-  await page.goto(`/classes/${classId}/settings`);
-  await expect(page.getByLabel("Tên lớp")).toHaveValue(STAFF_CLASS);
-  await expect(
-    page.getByText("Chỉ giáo viên phụ trách hoặc chủ trung tâm mới sửa được cài đặt lớp."),
-  ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Lưu thay đổi" })).toBeDisabled();
+  // Class detail remains readable, but the edit dialog is owner/giao_vien-only.
+  await page.goto(`/classes/${classId}?edit=1`);
+  await expect(page.getByRole("heading", { name: STAFF_CLASS })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Sửa lớp học" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Sửa lớp" })).toHaveCount(0);
 
   // Classbook: the class is selectable and its teaching data loads, with the
   // curriculum edit link hidden for non-writers.
