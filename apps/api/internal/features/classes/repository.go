@@ -23,7 +23,8 @@ import (
 // the Phase* constants judged against today; Q matches name or code
 // case-insensitively as a substring; Weekday and Shift look for a timetable
 // row still effective today (Shift is one of the Shift* constants); Tag
-// matches one tag element exactly.
+// matches one tag element exactly; Recruiting keeps only the classes open for
+// recruitment (see OpenForRecruitment).
 type ListFilter struct {
 	Status  string
 	Phase   string
@@ -32,7 +33,34 @@ type ListFilter struct {
 	Shift   string
 	Tag     string
 	// CourseID narrows to the classes attached to one course.
-	CourseID *uuid.UUID
+	CourseID   *uuid.UUID
+	Recruiting bool
+}
+
+// AvailabilitySchedule is one schedule row's weekday/time/duration, the only
+// fields the availability endpoint's overlap check needs.
+type AvailabilitySchedule struct {
+	Weekday     int16
+	StartTime   TimeOfDay
+	DurationMin int16
+}
+
+// AvailabilityClassRow is one live class's room, teacher, active schedules
+// (effective today or later) and active class_staff member ids — the raw
+// material the availability endpoint's busy computation runs over.
+type AvailabilityClassRow struct {
+	ClassID   uuid.UUID
+	Room      string
+	TeacherID uuid.UUID
+	Schedules []AvailabilitySchedule
+	StaffIDs  []uuid.UUID
+}
+
+// DirectoryMember is one active center member, as listed by the
+// availability endpoint's teachers array.
+type DirectoryMember struct {
+	TeacherID uuid.UUID
+	Name      string
 }
 
 // Repository is the persistence contract for classes and their schedules; the
@@ -43,6 +71,22 @@ type Repository interface {
 	CreateWithSchedules(ctx context.Context, class *Class, schedules []Schedule) error
 	GetByID(ctx context.Context, sc authctx.Scope, id uuid.UUID) (*Class, error)
 	List(ctx context.Context, sc authctx.Scope, filter ListFilter, p pagination.Params) ([]Class, int64, error)
+	// LinkNextClass sets classID as the parent of childID (nil unlinks) and
+	// unlinks every other live class currently pointing at classID, so a
+	// class keeps at most one next-class link (lớp kế tiếp). Runs on the
+	// context's transaction: the caller wraps it in the same WithinTx block
+	// as the rest of Update so both writes commit or roll back together.
+	// ErrNotFound when childID is set but does not resolve to a live class of
+	// the anchor's center.
+	LinkNextClass(ctx context.Context, a authctx.Anchor, classID uuid.UUID, childID *uuid.UUID) error
+	// AvailabilityClasses returns every live class of the center (excluding
+	// excludeClassID when set) with its room, teacher and the schedule/staff
+	// facts GET /classes/availability's busy computation needs.
+	AvailabilityClasses(ctx context.Context, sc authctx.Scope, excludeClassID *uuid.UUID) ([]AvailabilityClassRow, error)
+	// ActiveMemberDirectory lists the center's active members for the
+	// availability endpoint's teacher list — duplicates centers.Directory's
+	// join because centers imports classes and a reverse import would cycle.
+	ActiveMemberDirectory(ctx context.Context, sc authctx.Scope) ([]DirectoryMember, error)
 	// GetReadableByID and ListReadable are the READ port: own rows plus any
 	// class the caller holds a class_staff stint on (ended included — history
 	// reads). GetByID/List stay own-rows because they double as the write
@@ -66,7 +110,8 @@ type Repository interface {
 	CountActiveEnrollmentsByClass(ctx context.Context, sc authctx.Scope, classIDs []uuid.UUID) (map[uuid.UUID]int64, error)
 	// CountReadableByPhase buckets every class the caller can read (the same
 	// port ListReadable uses) by its phase on today, in one query.
-	CountReadableByPhase(ctx context.Context, sc authctx.Scope, today time.Time) (ClassStatsResponse, error)
+	// recruitingOnly narrows the counted rows to those open for recruitment.
+	CountReadableByPhase(ctx context.Context, sc authctx.Scope, today time.Time, recruitingOnly bool) (ClassStatsResponse, error)
 	// LiveClassInCenter reports whether a live (non-deleted) class with this
 	// id exists in the anchor's center — the parent-class validation.
 	LiveClassInCenter(ctx context.Context, a authctx.Anchor, classID uuid.UUID) (bool, error)
@@ -259,6 +304,9 @@ func (r *gormRepository) GetByID(ctx context.Context, sc authctx.Scope, id uuid.
 	if err != nil {
 		return nil, err
 	}
+	if class.NextClassID, err = r.nextChildID(ctx, class.ID); err != nil {
+		return nil, err
+	}
 	return &class, nil
 }
 
@@ -271,6 +319,9 @@ func (r *gormRepository) GetWritableByID(ctx context.Context, sc authctx.Scope, 
 		return nil, ErrNotFound
 	}
 	if err != nil {
+		return nil, err
+	}
+	if class.NextClassID, err = r.nextChildID(ctx, class.ID); err != nil {
 		return nil, err
 	}
 	return &class, nil
@@ -287,18 +338,64 @@ func (r *gormRepository) GetReadableByID(ctx context.Context, sc authctx.Scope, 
 	if err != nil {
 		return nil, err
 	}
+	if class.NextClassID, err = r.nextChildID(ctx, class.ID); err != nil {
+		return nil, err
+	}
 	return &class, nil
 }
 
+// nextChildID resolves the earliest-created live child of classID (the
+// earliest classes.created_at, ties broken by id, among live rows whose
+// parent_class_id is classID), or nil when it has none. "Live" matches
+// LiveClassInCenter: deleted_at IS NULL, any status.
+func (r *gormRepository) nextChildID(ctx context.Context, classID uuid.UUID) (*uuid.UUID, error) {
+	var row struct{ NextID *uuid.UUID }
+	err := database.FromContext(ctx, r.db).
+		Raw(`SELECT (
+			SELECT id FROM classes
+			WHERE parent_class_id = ? AND deleted_at IS NULL
+			ORDER BY created_at, id
+			LIMIT 1
+		) AS next_id`, classID).
+		Scan(&row).Error
+	return row.NextID, err
+}
+
+// nextChildIDs is nextChildID batched over a page of ids in one query, keyed
+// by parent id (absent key = no live child).
+func (r *gormRepository) nextChildIDs(ctx context.Context, classIDs []uuid.UUID) (map[uuid.UUID]uuid.UUID, error) {
+	result := make(map[uuid.UUID]uuid.UUID, len(classIDs))
+	if len(classIDs) == 0 {
+		return result, nil
+	}
+	var rows []struct {
+		ParentClassID uuid.UUID
+		ID            uuid.UUID
+	}
+	err := database.FromContext(ctx, r.db).
+		Raw(`SELECT DISTINCT ON (parent_class_id) parent_class_id, id
+			FROM classes
+			WHERE parent_class_id IN ? AND deleted_at IS NULL
+			ORDER BY parent_class_id, created_at, id`, classIDs).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		result[row.ParentClassID] = row.ID
+	}
+	return result, nil
+}
+
 func (r *gormRepository) ListReadable(ctx context.Context, sc authctx.Scope, filter ListFilter, p pagination.Params) ([]Class, int64, error) {
-	return r.list(r.readScoped(ctx, sc), filter, p)
+	return r.list(ctx, r.readScoped(ctx, sc), filter, p)
 }
 
 func (r *gormRepository) List(ctx context.Context, sc authctx.Scope, filter ListFilter, p pagination.Params) ([]Class, int64, error) {
-	return r.list(r.scoped(ctx, sc), filter, p)
+	return r.list(ctx, r.scoped(ctx, sc), filter, p)
 }
 
-func (r *gormRepository) list(q *gorm.DB, filter ListFilter, p pagination.Params) ([]Class, int64, error) {
+func (r *gormRepository) list(ctx context.Context, q *gorm.DB, filter ListFilter, p pagination.Params) ([]Class, int64, error) {
 	q = q.Model(&Class{})
 	if filter.Status != "" {
 		// The default active-only list matches the idx_classes_teacher
@@ -344,6 +441,10 @@ func (r *gormRepository) list(q *gorm.DB, filter ListFilter, p pagination.Params
 	if frag, args, ok := PhasePredicate(filter.Phase, today); ok {
 		q = q.Where(frag, args...)
 	}
+	if filter.Recruiting {
+		frag, args := RecruitingPredicate(today)
+		q = q.Where(frag, args...)
+	}
 
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
@@ -353,6 +454,20 @@ func (r *gormRepository) list(q *gorm.DB, filter ListFilter, p pagination.Params
 	err := q.Preload("Schedules", preloadSchedules).Preload("Course", "deleted_at IS NULL").Scopes(p.Scope).Find(&rows).Error
 	if err != nil {
 		return nil, 0, err
+	}
+	ids := make([]uuid.UUID, len(rows))
+	for i := range rows {
+		ids[i] = rows[i].ID
+	}
+	nextIDs, err := r.nextChildIDs(ctx, ids)
+	if err != nil {
+		return nil, 0, err
+	}
+	for i := range rows {
+		if childID, ok := nextIDs[rows[i].ID]; ok {
+			id := childID
+			rows[i].NextClassID = &id
+		}
 	}
 	return rows, total, nil
 }
@@ -393,6 +508,132 @@ func (r *gormRepository) ParentCreatesCycle(ctx context.Context, a authctx.Ancho
 			parentID, a.CenterID, a.CenterID, maxLineageDepth, selfID).
 		Scan(&found).Error
 	return found, err
+}
+
+func (r *gormRepository) LinkNextClass(ctx context.Context, a authctx.Anchor, classID uuid.UUID, childID *uuid.UUID) error {
+	db := database.FromContext(ctx, r.db)
+	unlink := db.Model(&Class{}).
+		Where("classes.center_id = ? AND classes.parent_class_id = ? AND classes.deleted_at IS NULL", a.CenterID, classID)
+	if childID != nil {
+		unlink = unlink.Where("classes.id <> ?", *childID)
+	}
+	if err := unlink.Update("parent_class_id", nil).Error; err != nil {
+		return err
+	}
+	if childID == nil {
+		return nil
+	}
+	res := db.Model(&Class{}).
+		Where("classes.id = ? AND classes.center_id = ? AND classes.deleted_at IS NULL", *childID, a.CenterID).
+		Update("parent_class_id", classID)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// teacherAccountStatusActive mirrors teachers.StatusActive. It is duplicated
+// as a literal, rather than imported, because ActiveMemberDirectory below
+// already duplicates centers.Directory's join for the import-cycle reason
+// documented there — importing the teachers package for this one constant
+// would add a dependency edge this package does not otherwise need.
+const teacherAccountStatusActive = "active"
+
+// AvailabilityClasses fetches every live class of the center (deleted_at IS
+// NULL, any status — the LiveClassInCenter definition), excluding
+// excludeClassID when set, together with its active schedules (effective
+// today or later) and active class_staff member ids. Three queries batched
+// by class id, rather than one join, keep the row shape flat and avoid a
+// fan-out multiplying class rows by schedule/staff rows.
+func (r *gormRepository) AvailabilityClasses(ctx context.Context, sc authctx.Scope, excludeClassID *uuid.UUID) ([]AvailabilityClassRow, error) {
+	db := database.FromContext(ctx, r.db)
+	var classRows []struct {
+		ID        uuid.UUID
+		Room      string
+		TeacherID uuid.UUID
+	}
+	q := db.Table("classes").
+		Select("id, room, teacher_id").
+		Where("center_id = ? AND deleted_at IS NULL", sc.CenterID)
+	if excludeClassID != nil {
+		q = q.Where("id <> ?", *excludeClassID)
+	}
+	if err := q.Scan(&classRows).Error; err != nil {
+		return nil, err
+	}
+	if len(classRows) == 0 {
+		return nil, nil
+	}
+	ids := make([]uuid.UUID, len(classRows))
+	for i, c := range classRows {
+		ids[i] = c.ID
+	}
+
+	today := Today()
+	var scheduleRows []struct {
+		ClassID     uuid.UUID
+		Weekday     int16
+		StartTime   TimeOfDay
+		DurationMin int16
+	}
+	if err := db.Table("class_schedules").
+		Select("class_id, weekday, start_time, duration_min").
+		Where("class_id IN ? AND deleted_at IS NULL AND (effective_to IS NULL OR effective_to >= ?)", ids, today).
+		Scan(&scheduleRows).Error; err != nil {
+		return nil, err
+	}
+	schedulesByClass := make(map[uuid.UUID][]AvailabilitySchedule, len(classRows))
+	for _, s := range scheduleRows {
+		schedulesByClass[s.ClassID] = append(schedulesByClass[s.ClassID],
+			AvailabilitySchedule{Weekday: s.Weekday, StartTime: s.StartTime, DurationMin: s.DurationMin})
+	}
+
+	var staffRows []struct {
+		ClassID   uuid.UUID
+		TeacherID uuid.UUID
+	}
+	if err := db.Table("class_staff").
+		Select("class_id, teacher_id").
+		Where("class_id IN ? AND ended_at IS NULL", ids).
+		Scan(&staffRows).Error; err != nil {
+		return nil, err
+	}
+	staffByClass := make(map[uuid.UUID][]uuid.UUID, len(classRows))
+	for _, s := range staffRows {
+		staffByClass[s.ClassID] = append(staffByClass[s.ClassID], s.TeacherID)
+	}
+
+	out := make([]AvailabilityClassRow, len(classRows))
+	for i, c := range classRows {
+		out[i] = AvailabilityClassRow{
+			ClassID:   c.ID,
+			Room:      c.Room,
+			TeacherID: c.TeacherID,
+			Schedules: schedulesByClass[c.ID],
+			StaffIDs:  staffByClass[c.ID],
+		}
+	}
+	return out, nil
+}
+
+// ActiveMemberDirectory duplicates centers.Directory's join (center_members
+// + teachers + user_accounts) rather than importing the centers package,
+// because centers already imports classes (for its dashboard) and a reverse
+// import would cycle.
+func (r *gormRepository) ActiveMemberDirectory(ctx context.Context, sc authctx.Scope) ([]DirectoryMember, error) {
+	var rows []DirectoryMember
+	err := database.FromContext(ctx, r.db).Raw(`
+		SELECT t.id AS teacher_id, t.full_name AS name
+		FROM center_members cm
+		JOIN teachers t ON t.id = cm.teacher_id AND t.deleted_at IS NULL
+		JOIN user_accounts ua ON ua.id = t.id AND ua.deleted_at IS NULL AND ua.status = ?
+		WHERE cm.center_id = ? AND cm.left_at IS NULL
+		ORDER BY t.full_name, t.id`,
+		teacherAccountStatusActive, sc.CenterID).Scan(&rows).Error
+	return rows, err
 }
 
 func (r *gormRepository) FindCourse(ctx context.Context, a authctx.Anchor, courseID uuid.UUID) (*CourseRef, error) {
@@ -484,9 +725,10 @@ func (r *gormRepository) CountActiveEnrollmentsByClass(ctx context.Context, sc a
 // CountReadableByPhase runs the four phase predicates as SUM(CASE ...) arms
 // over readScoped — the one place classes.view_all may widen a read — so the
 // chips on the list page count exactly the rows the list would show.
-func (r *gormRepository) CountReadableByPhase(ctx context.Context, sc authctx.Scope, today time.Time) (ClassStatsResponse, error) {
-	selectSQL := "COUNT(*) AS all_count, SUM(CASE WHEN classes.recruiting THEN 1 ELSE 0 END) AS recruiting"
-	var args []any
+func (r *gormRepository) CountReadableByPhase(ctx context.Context, sc authctx.Scope, today time.Time, recruitingOnly bool) (ClassStatsResponse, error) {
+	recruitingFrag, recruitingArgs := RecruitingPredicate(today)
+	selectSQL := "COUNT(*) AS all_count, SUM(CASE WHEN " + recruitingFrag + " THEN 1 ELSE 0 END) AS recruiting"
+	args := append([]any{}, recruitingArgs...)
 	for _, phase := range []string{PhaseUpcoming, PhaseRunning, PhaseEnded, PhaseArchived} {
 		frag, phaseArgs, _ := PhasePredicate(phase, today)
 		selectSQL += ", SUM(CASE WHEN " + frag + " THEN 1 ELSE 0 END) AS " + phase
@@ -500,9 +742,11 @@ func (r *gormRepository) CountReadableByPhase(ctx context.Context, sc authctx.Sc
 		Archived   int64
 		Recruiting int64
 	}
-	err := r.readScoped(ctx, sc).Model(&Class{}).
-		Select(selectSQL, args...).
-		Scan(&row).Error
+	q := r.readScoped(ctx, sc).Model(&Class{})
+	if recruitingOnly {
+		q = q.Where(recruitingFrag, recruitingArgs...)
+	}
+	err := q.Select(selectSQL, args...).Scan(&row).Error
 	if err != nil {
 		return ClassStatsResponse{}, err
 	}

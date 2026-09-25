@@ -108,6 +108,7 @@ func TestAllRoutesRequireAuth(t *testing.T) {
 		{http.MethodPost, "/api/v1/classes"},
 		{http.MethodGet, "/api/v1/classes"},
 		{http.MethodGet, "/api/v1/classes/stats"},
+		{http.MethodGet, "/api/v1/classes/availability"},
 		{http.MethodGet, "/api/v1/classes/" + someID},
 		{http.MethodPut, "/api/v1/classes/" + someID},
 		{http.MethodPost, "/api/v1/classes/" + someID + "/archive"},
@@ -163,6 +164,14 @@ func TestCreateValidation(t *testing.T) {
 		"bad start_time": {
 			`{"name":"Toán 8","start_date":"2026-01-05","default_unit_price":150000,"schedules":[{"weekday":2,"start_time":"25:99","duration_min":90}]}`,
 			"start_time",
+		},
+		"end_date before start_date": {
+			`{"name":"Toán 8","start_date":"2026-01-05","end_date":"2026-01-01","default_unit_price":150000,"schedules":[{"weekday":2,"start_time":"18:00","duration_min":90}]}`,
+			"end_date",
+		},
+		"duration_min too long": {
+			`{"name":"Toán 8","start_date":"2026-01-05","default_unit_price":150000,"schedules":[{"weekday":2,"start_time":"18:00","duration_min":601}]}`,
+			"duration_min",
 		},
 	}
 	for name, tc := range cases {
@@ -429,6 +438,7 @@ func TestListRejectsUnknownFilterValues(t *testing.T) {
 		"?phase=paused": "phase",
 		"?status=bogus": "status",
 		"?course_id=x":  "course_id",
+		"?recruiting=1": "recruiting",
 	}
 	for query, field := range cases {
 		w, env := do(t, r, http.MethodGet, "/api/v1/classes"+query, "", token)
@@ -480,6 +490,67 @@ func TestListFiltersByQueryTimetableTagAndPhase(t *testing.T) {
 	want("?phase=running", evening.ID)
 	want("?phase=upcoming", morning.ID)
 	want("?phase=upcoming&q=toan")
+}
+
+// recruiting=true narrows both the list and the stats counters to the classes
+// open for recruitment: flag on and not ended or archived. The flag alone is
+// not enough, and false behaves like an absent filter.
+func TestRecruitingFilterScopesListAndStats(t *testing.T) {
+	r, repo := newClassesHTTPTest(t)
+	token := mintToken(t, uuid.New())
+
+	body := func(name, start, end string) string {
+		return `{"name": "` + name + `", "start_date": "` + start + `", "end_date": "` + end + `",
+			"default_unit_price": 150000,
+			"schedules": [{"weekday": 2, "start_time": "18:00", "duration_min": 90}]}`
+	}
+	running := createClass(t, r, token, body("Đang học", "2000-01-01", ""))
+	upcoming := createClass(t, r, token, body("Sắp khai giảng", "2099-01-01", ""))
+	ended := createClass(t, r, token, body("Đã kết thúc", "2000-01-01", "2000-12-31"))
+	archived := createClass(t, r, token, body("Lưu trữ", "2000-01-01", ""))
+	notRecruiting := createClass(t, r, token, body("Không tuyển", "2000-01-01", ""))
+	for _, c := range []ClassResponse{running, upcoming, ended, archived} {
+		repo.classes[c.ID].Recruiting = true
+	}
+	repo.classes[archived.ID].Status = StatusArchived
+
+	got := listIDs(t, r, token, "?status=all&recruiting=true")
+	if len(got) != 2 || !containsID(got, running.ID) || !containsID(got, upcoming.ID) {
+		t.Fatalf("recruiting list: want running and upcoming only, got %v", got)
+	}
+	if all := listIDs(t, r, token, "?status=all&recruiting=false"); len(all) != 5 {
+		t.Fatalf("recruiting=false must not filter, got %d rows", len(all))
+	}
+	if !containsID(listIDs(t, r, token, "?status=all"), notRecruiting.ID) {
+		t.Fatal("the unfiltered list must keep a class that is not recruiting")
+	}
+
+	w, env := do(t, r, http.MethodGet, "/api/v1/classes/stats?recruiting=true", "", token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("stats: want 200, got %d %+v", w.Code, env)
+	}
+	var stats ClassStatsResponse
+	if err := json.Unmarshal(env.Data, &stats); err != nil {
+		t.Fatalf("decode stats: %v", err)
+	}
+	want := ClassStatsResponse{All: 2, Upcoming: 1, Running: 1, Recruiting: 2}
+	if stats != want {
+		t.Fatalf("recruiting stats: want %+v, got %+v", want, stats)
+	}
+
+	w, env = do(t, r, http.MethodGet, "/api/v1/classes/stats?recruiting=maybe", "", token)
+	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["recruiting"] == "" {
+		t.Fatalf("stats with a bad recruiting flag: want 422 on recruiting, got %d %+v", w.Code, env)
+	}
+}
+
+func containsID(ids []uuid.UUID, want uuid.UUID) bool {
+	for _, got := range ids {
+		if got == want {
+			return true
+		}
+	}
+	return false
 }
 
 // A code the center already uses is a 409 with its own error code so the
@@ -659,5 +730,81 @@ func TestCourseAttachmentOverHTTP(t *testing.T) {
 	}`)
 	if blank.Course != nil {
 		t.Fatalf("blank course_id on create must mean no course, got %+v", blank.Course)
+	}
+}
+
+// A schedule's duration_min is bounded to 1..600 minutes (10 hours) on both
+// the add and the update endpoint, matching the web wizard's own bound.
+func TestScheduleDurationBounds(t *testing.T) {
+	r, _ := newClassesHTTPTest(t)
+	token := mintToken(t, uuid.New())
+	class := createClass(t, r, token, validCreateBody)
+
+	w, env := do(t, r, http.MethodPost, "/api/v1/classes/"+class.ID.String()+"/schedules",
+		`{"weekday":3,"start_time":"08:00","duration_min":601}`, token)
+	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["duration_min"] == "" {
+		t.Fatalf("add schedule with duration_min 601: want 422 on duration_min, got %d %+v", w.Code, env)
+	}
+
+	scheduleID := class.Schedules[0].ID
+	w, env = do(t, r, http.MethodPut, "/api/v1/classes/"+class.ID.String()+"/schedules/"+scheduleID.String(),
+		`{"weekday":2,"start_time":"18:00","duration_min":601,"effective_from":"2026-01-05"}`, token)
+	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["duration_min"] == "" {
+		t.Fatalf("update schedule with duration_min 601: want 422 on duration_min, got %d %+v", w.Code, env)
+	}
+}
+
+// GET /classes/availability reports room and teacher busy/free state for the
+// requested slots, honours exclude_class_id, and answers 422 on a malformed
+// slot or exclude_class_id.
+func TestAvailabilityRoute(t *testing.T) {
+	r, repo := newClassesHTTPTest(t)
+	teacher := uuid.New()
+	token := mintToken(t, teacher)
+
+	busy := createClass(t, r, token, `{
+		"name": "Toán 8", "start_date": "2026-01-05", "default_unit_price": 150000, "room": "P101",
+		"schedules": [{"weekday": 1, "start_time": "08:00", "duration_min": 90}]
+	}`)
+	repo.addMember(teacher, teacher, "Giáo viên chính")
+
+	w, env := do(t, r, http.MethodGet, "/api/v1/classes/availability?slot=1-08:30-30", "", token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("availability: got %d %+v", w.Code, env)
+	}
+	var resp AvailabilityResponse
+	if err := json.Unmarshal(env.Data, &resp); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if len(resp.Rooms) != 1 || resp.Rooms[0].Name != "P101" || resp.Rooms[0].Free {
+		t.Fatalf("the overlapping class's room must be busy, got %+v", resp.Rooms)
+	}
+	if len(resp.Teachers) != 1 || resp.Teachers[0].Free {
+		t.Fatalf("the class's teacher must be busy, got %+v", resp.Teachers)
+	}
+
+	// Excluding the busy class's own id must free its room and teacher.
+	w, env = do(t, r, http.MethodGet, "/api/v1/classes/availability?slot=1-08:30-30&exclude_class_id="+busy.ID.String(), "", token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("availability: got %d %+v", w.Code, env)
+	}
+	if err := json.Unmarshal(env.Data, &resp); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if len(resp.Rooms) != 0 {
+		t.Fatalf("excluding the only class must leave no room, got %+v", resp.Rooms)
+	}
+	if len(resp.Teachers) != 1 || !resp.Teachers[0].Free {
+		t.Fatalf("excluding the busy class must free its teacher, got %+v", resp.Teachers)
+	}
+
+	w, env = do(t, r, http.MethodGet, "/api/v1/classes/availability?slot=bogus", "", token)
+	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["slot"] == "" {
+		t.Fatalf("a malformed slot must be 422 on slot, got %d %+v", w.Code, env)
+	}
+
+	w, env = do(t, r, http.MethodGet, "/api/v1/classes/availability?exclude_class_id=not-a-uuid", "", token)
+	if w.Code != http.StatusUnprocessableEntity || env.Error == nil || env.Error.Fields["exclude_class_id"] == "" {
+		t.Fatalf("a malformed exclude_class_id must be 422 on exclude_class_id, got %d %+v", w.Code, env)
 	}
 }

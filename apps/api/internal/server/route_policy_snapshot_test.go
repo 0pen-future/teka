@@ -66,6 +66,7 @@ var routePolicySnapshot = []RoutePolicy{
 	{Method: "POST", Path: "/api/v1/classes", Kind: PolicyPermission, Key: "classes.create"},
 	{Method: "GET", Path: "/api/v1/classes", Kind: PolicyPermission, Key: "classes.list"},
 	{Method: "GET", Path: "/api/v1/classes/stats", Kind: PolicyPermission, Key: "classes.list"},
+	{Method: "GET", Path: "/api/v1/classes/availability", Kind: PolicyPermission, Key: "classes.list"},
 	{Method: "GET", Path: "/api/v1/classes/:id", Kind: PolicyPermission, Key: "classes.read"},
 	{Method: "GET", Path: "/api/v1/classes/:id/staff", Kind: PolicyPermission, Key: "classes.read"},
 	{Method: "PUT", Path: "/api/v1/classes/:id", Kind: PolicyPermission, Key: "classes.edit"},

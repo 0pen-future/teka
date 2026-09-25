@@ -30,6 +30,13 @@ type fakeSchedule struct {
 	deleted bool
 }
 
+// fakeMember is one directory entry ActiveMemberDirectory serves, tagged with
+// the center it belongs to so lookups can be center-scoped like the real join.
+type fakeMember struct {
+	DirectoryMember
+	centerID uuid.UUID
+}
+
 // fakeRepository is an in-memory Repository enforcing the same invariants the
 // SQL layer does: center-scoped reads (owner sees the whole center, a member
 // only their own rows) and soft-delete filtering.
@@ -42,6 +49,24 @@ type fakeRepository struct {
 	codeCollisions  int                      // CodeExists reports a hit this many times first
 	courses         map[uuid.UUID]*CourseRef // live courses per id, with their center
 	courseCenters   map[uuid.UUID]uuid.UUID
+	staff           map[uuid.UUID][]uuid.UUID // classID -> active class_staff teacher ids
+	members         []fakeMember              // center directory rows, for ActiveMemberDirectory
+}
+
+// addStaff registers classID's active class_staff teacher ids, for
+// AvailabilityClasses' busy-teacher fold.
+func (f *fakeRepository) addStaff(classID uuid.UUID, teacherIDs ...uuid.UUID) {
+	f.staff[classID] = append(f.staff[classID], teacherIDs...)
+}
+
+// addMember registers an active center member so ActiveMemberDirectory lists
+// it; teacherID is caller-supplied so a test can register the directory
+// entry for a class's own teacher.
+func (f *fakeRepository) addMember(center, teacherID uuid.UUID, name string) {
+	f.members = append(f.members, fakeMember{
+		DirectoryMember: DirectoryMember{TeacherID: teacherID, Name: name},
+		centerID:        center,
+	})
 }
 
 // addCourse registers a live course of center so FindCourse resolves it.
@@ -95,6 +120,7 @@ func newFakeRepository() *fakeRepository {
 		openEnrollments: map[uuid.UUID]int64{},
 		courses:         map[uuid.UUID]*CourseRef{},
 		courseCenters:   map[uuid.UUID]uuid.UUID{},
+		staff:           map[uuid.UUID][]uuid.UUID{},
 	}
 }
 
@@ -180,7 +206,29 @@ func (f *fakeRepository) GetByID(_ context.Context, sc authctx.Scope, classID uu
 	}
 	out := c.Class
 	out.Schedules = f.liveSchedules(classID)
+	out.NextClassID = f.nextChildID(classID)
 	return &out, nil
+}
+
+// nextChildID mirrors the real repository's earliest-created-live-child
+// lookup (ties broken by id), so a read through GetByID reflects a
+// previously linked next class the same way the SQL layer would.
+func (f *fakeRepository) nextChildID(classID uuid.UUID) *uuid.UUID {
+	var best *fakeClass
+	for _, c := range f.classes {
+		if c.deleted || c.ParentClassID == nil || *c.ParentClassID != classID {
+			continue
+		}
+		if best == nil || c.CreatedAt.Before(best.CreatedAt) ||
+			(c.CreatedAt.Equal(best.CreatedAt) && c.ID.String() < best.ID.String()) {
+			best = c
+		}
+	}
+	if best == nil {
+		return nil
+	}
+	childID := best.ID
+	return &childID
 }
 
 // The unit fakes carry no class_staff table, so the readable ports collapse
@@ -220,6 +268,9 @@ func (f *fakeRepository) List(_ context.Context, sc authctx.Scope, filter ListFi
 		if filter.CourseID != nil && (c.CourseID == nil || *c.CourseID != *filter.CourseID) {
 			continue
 		}
+		if filter.Recruiting && !OpenForRecruitment(&c.Class, today) {
+			continue
+		}
 		row := c.Class
 		row.Schedules = f.liveSchedules(c.ID)
 		if (filter.Weekday != nil || filter.Shift != "") && !hasEffectiveSlot(row.Schedules, filter, today) {
@@ -256,10 +307,13 @@ func hasEffectiveSlot(schedules []Schedule, filter ListFilter, today time.Time) 
 
 // CountReadableByPhase mirrors the SQL SUM(CASE ...) over the same phase
 // predicate the list filter applies, so the two can never disagree here.
-func (f *fakeRepository) CountReadableByPhase(_ context.Context, sc authctx.Scope, today time.Time) (ClassStatsResponse, error) {
+func (f *fakeRepository) CountReadableByPhase(_ context.Context, sc authctx.Scope, today time.Time, recruitingOnly bool) (ClassStatsResponse, error) {
 	var stats ClassStatsResponse
 	for _, c := range f.classes {
 		if !visibleClass(c, sc) {
+			continue
+		}
+		if recruitingOnly && !OpenForRecruitment(&c.Class, today) {
 			continue
 		}
 		stats.All++
@@ -273,7 +327,7 @@ func (f *fakeRepository) CountReadableByPhase(_ context.Context, sc authctx.Scop
 		case PhaseArchived:
 			stats.Archived++
 		}
-		if c.Recruiting {
+		if OpenForRecruitment(&c.Class, today) {
 			stats.Recruiting++
 		}
 	}
@@ -304,6 +358,78 @@ func (f *fakeRepository) Update(_ context.Context, class *Class) error {
 	stored.Schedules = nil
 	f.classes[class.ID] = &fakeClass{Class: stored}
 	return nil
+}
+
+// LinkNextClass mirrors the real repository: unlink every other live class of
+// the center currently pointing at classID, then, when childID is set, point
+// it at classID — reporting ErrNotFound when childID does not resolve to a
+// live class of the same center.
+func (f *fakeRepository) LinkNextClass(_ context.Context, a authctx.Anchor, classID uuid.UUID, childID *uuid.UUID) error {
+	for _, c := range f.classes {
+		if c.deleted || c.CenterID != a.CenterID || c.ParentClassID == nil || *c.ParentClassID != classID {
+			continue
+		}
+		if childID != nil && c.ID == *childID {
+			continue
+		}
+		c.ParentClassID = nil
+	}
+	if childID == nil {
+		return nil
+	}
+	child, ok := f.classes[*childID]
+	if !ok || child.deleted || child.CenterID != a.CenterID {
+		return ErrNotFound
+	}
+	parent := classID
+	child.ParentClassID = &parent
+	return nil
+}
+
+// AvailabilityClasses mirrors the real repository: every live class of the
+// center (excluding excludeClassID when set) with its room, teacher, active
+// schedules (effective today or later) and registered class_staff ids.
+func (f *fakeRepository) AvailabilityClasses(_ context.Context, sc authctx.Scope, excludeClassID *uuid.UUID) ([]AvailabilityClassRow, error) {
+	today := Today()
+	var out []AvailabilityClassRow
+	for _, c := range f.classes {
+		if c.deleted || c.CenterID != sc.CenterID {
+			continue
+		}
+		if excludeClassID != nil && c.ID == *excludeClassID {
+			continue
+		}
+		var schedules []AvailabilitySchedule
+		for _, s := range f.liveSchedules(c.ID) {
+			if s.EffectiveTo != nil && s.EffectiveTo.Before(today) {
+				continue
+			}
+			schedules = append(schedules, AvailabilitySchedule{
+				Weekday: s.Weekday, StartTime: s.StartTime, DurationMin: s.DurationMin,
+			})
+		}
+		out = append(out, AvailabilityClassRow{
+			ClassID:   c.ID,
+			Room:      c.Room,
+			TeacherID: c.TeacherID,
+			Schedules: schedules,
+			StaffIDs:  f.staff[c.ID],
+		})
+	}
+	return out, nil
+}
+
+// ActiveMemberDirectory mirrors the real repository: every registered member
+// of the caller's center, for the availability endpoint's teacher list.
+func (f *fakeRepository) ActiveMemberDirectory(_ context.Context, sc authctx.Scope) ([]DirectoryMember, error) {
+	var out []DirectoryMember
+	for _, m := range f.members {
+		if m.centerID == sc.CenterID {
+			out = append(out, m.DirectoryMember)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
 }
 
 func (f *fakeRepository) Archive(_ context.Context, sc authctx.Scope, classID uuid.UUID) error {
@@ -954,7 +1080,7 @@ func TestStatsFollowReadScopeAndPhase(t *testing.T) {
 	repo.classes[archived.ID].Status = StatusArchived
 	_ = ended
 
-	got, err := svc.Stats(context.Background(), member, today)
+	got, err := svc.Stats(context.Background(), member, today, false)
 	if err != nil {
 		t.Fatalf("stats: %v", err)
 	}
@@ -963,13 +1089,24 @@ func TestStatsFollowReadScopeAndPhase(t *testing.T) {
 		t.Fatalf("member stats: want %+v, got %+v", want, got)
 	}
 
-	got, err = svc.Stats(context.Background(), owner, today)
+	got, err = svc.Stats(context.Background(), owner, today, false)
 	if err != nil {
 		t.Fatalf("stats: %v", err)
 	}
-	want = ClassStatsResponse{All: 4, Upcoming: 1, Running: 1, Ended: 1, Archived: 1, Recruiting: 2}
+	// The archived class keeps its flag but is no longer open for recruitment.
+	want = ClassStatsResponse{All: 4, Upcoming: 1, Running: 1, Ended: 1, Archived: 1, Recruiting: 1}
 	if got != want {
 		t.Fatalf("owner stats: want %+v, got %+v", want, got)
+	}
+
+	// recruitingOnly narrows every counter to the recruiting list's base set.
+	got, err = svc.Stats(context.Background(), owner, today, true)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	want = ClassStatsResponse{All: 1, Running: 1, Recruiting: 1}
+	if got != want {
+		t.Fatalf("recruiting stats: want %+v, got %+v", want, got)
 	}
 }
 
@@ -1219,4 +1356,310 @@ func appErrorOf(t *testing.T, err error, status int) *apperror.AppError {
 		t.Fatalf("want status %d, got %d (%s: %s)", status, appErr.Status, appErr.Code, appErr.Message)
 	}
 	return appErr
+}
+
+// An end_date earlier than start_date is refused on both create and update;
+// the same day for both, and an end_date after start_date, are both allowed.
+func TestCreateAndUpdateRejectEndDateBeforeStartDate(t *testing.T) {
+	svc, _ := newTestService()
+	sc := memberScope()
+
+	req := validCreateRequest()
+	req.EndDate = "2026-01-01"
+	_, err := svc.Create(context.Background(), sc, req)
+	if appErr := appErrorOf(t, err, http.StatusUnprocessableEntity); appErr.Fields["end_date"] == "" {
+		t.Fatalf("end_date before start_date must land on end_date, got %+v", appErr.Fields)
+	}
+
+	req.EndDate = "2026-01-05"
+	class, err := svc.Create(context.Background(), sc, req)
+	if err != nil {
+		t.Fatalf("end_date equal to start_date must be allowed, got %v", err)
+	}
+
+	patch := UpdateClassRequest{
+		Name: class.Name, StartDate: "2026-01-05", EndDate: "2025-12-31", DefaultUnitPrice: int64Ptr(150_000),
+	}
+	_, err = svc.Update(context.Background(), sc, class.ID, patch)
+	if appErr := appErrorOf(t, err, http.StatusUnprocessableEntity); appErr.Fields["end_date"] == "" {
+		t.Fatalf("update with end_date before start_date must land on end_date, got %+v", appErr.Fields)
+	}
+
+	patch.EndDate = "2026-06-30"
+	if _, err := svc.Update(context.Background(), sc, class.ID, patch); err != nil {
+		t.Fatalf("end_date after start_date must be allowed, got %v", err)
+	}
+}
+
+// A self-paced class carries no weekly timetable: creating one with
+// schedules is refused, and creating one with none succeeds with an empty
+// schedule list.
+func TestCreateSelfPacedRejectsSchedules(t *testing.T) {
+	svc, _ := newTestService()
+	sc := memberScope()
+
+	req := validCreateRequest()
+	req.StudyMode = StudyModeSelfPaced
+	_, err := svc.Create(context.Background(), sc, req)
+	if appErr := appErrorOf(t, err, http.StatusUnprocessableEntity); appErr.Fields["schedules"] == "" {
+		t.Fatalf("self_paced with schedules must land on schedules, got %+v", appErr.Fields)
+	}
+}
+
+func TestCreateSelfPacedWithZeroSchedulesSucceeds(t *testing.T) {
+	svc, _ := newTestService()
+	sc := memberScope()
+
+	req := validCreateRequest()
+	req.StudyMode = StudyModeSelfPaced
+	req.Schedules = nil
+	class, err := svc.Create(context.Background(), sc, req)
+	if err != nil {
+		t.Fatalf("self-paced create with no schedules must succeed, got %v", err)
+	}
+	if class.StudyMode != StudyModeSelfPaced {
+		t.Fatalf("want study_mode self_paced, got %q", class.StudyMode)
+	}
+	if len(class.Schedules) != 0 {
+		t.Fatalf("a self-paced class must carry no schedules, got %d", len(class.Schedules))
+	}
+}
+
+// A scheduled class (the default when study_mode is absent) still requires
+// at least one schedule, as before this feature existed.
+func TestCreateScheduledRequiresSchedules(t *testing.T) {
+	svc, _ := newTestService()
+	sc := memberScope()
+
+	req := validCreateRequest()
+	req.Schedules = nil
+	_, err := svc.Create(context.Background(), sc, req)
+	if appErr := appErrorOf(t, err, http.StatusUnprocessableEntity); appErr.Fields["schedules"] == "" {
+		t.Fatalf("scheduled without schedules must land on schedules, got %+v", appErr.Fields)
+	}
+}
+
+// Update's room and study_mode fields follow the same patch rule as the rest
+// of the DTO: nil keeps, a present value replaces (an empty room clears it),
+// and an invalid study_mode is refused.
+func TestUpdateRoomAndStudyModePatch(t *testing.T) {
+	svc, _ := newTestService()
+	sc := memberScope()
+	req := validCreateRequest()
+	req.Room = "P101"
+	class, err := svc.Create(context.Background(), sc, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := UpdateClassRequest{Name: class.Name, StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000)}
+
+	got, err := svc.Update(context.Background(), sc, class.ID, base)
+	if err != nil || got.Room != "P101" {
+		t.Fatalf("absent room must keep the stored one, got %v %+v", err, got)
+	}
+
+	patch := base
+	patch.StudyMode = strPtr(StudyModeSelfPaced)
+	got, err = svc.Update(context.Background(), sc, class.ID, patch)
+	if err != nil || got.StudyMode != StudyModeSelfPaced {
+		t.Fatalf("study_mode must switch to self_paced, got %v %+v", err, got)
+	}
+
+	patch = base
+	patch.StudyMode = strPtr("weekend")
+	_, err = svc.Update(context.Background(), sc, class.ID, patch)
+	if appErr := appErrorOf(t, err, http.StatusUnprocessableEntity); appErr.Fields["study_mode"] == "" {
+		t.Fatalf("an invalid study_mode must land on study_mode, got %+v", appErr.Fields)
+	}
+
+	patch = base
+	patch.Room = strPtr("")
+	got, err = svc.Update(context.Background(), sc, class.ID, patch)
+	if err != nil || got.Room != "" {
+		t.Fatalf("an empty room must clear it, got %v %+v", err, got)
+	}
+}
+
+// Update's next_class_id follows the reverse-lineage patch rule: nil keeps
+// every existing child, "" unlinks every live child, and a uuid links that
+// live class of the same center as the single child — rejecting a self-link,
+// an unknown or foreign-center class, and a link that would close a lineage
+// cycle.
+func TestUpdateNextClassLinkAndUnlink(t *testing.T) {
+	svc, _ := newTestService()
+	sc := memberScope()
+	parent, err := svc.Create(context.Background(), sc, validCreateRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := svc.Create(context.Background(), sc, validCreateRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := UpdateClassRequest{Name: parent.Name, StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000)}
+
+	upd := base
+	upd.NextClassID = strPtr(child.ID.String())
+	got, err := svc.Update(context.Background(), sc, parent.ID, upd)
+	if err != nil || got.NextClassID == nil || *got.NextClassID != child.ID {
+		t.Fatalf("link: %v %+v", err, got)
+	}
+
+	upd = base
+	upd.NextClassID = nil
+	got, err = svc.Update(context.Background(), sc, parent.ID, upd)
+	if err != nil || got.NextClassID == nil || *got.NextClassID != child.ID {
+		t.Fatalf("nil must keep the existing link, got %v %+v", err, got)
+	}
+
+	upd = base
+	upd.NextClassID = strPtr(parent.ID.String())
+	_, err = svc.Update(context.Background(), sc, parent.ID, upd)
+	if appErr := appErrorOf(t, err, http.StatusUnprocessableEntity); appErr.Fields["next_class_id"] == "" {
+		t.Fatalf("a class cannot be its own next class: %+v", appErr.Fields)
+	}
+
+	upd = base
+	upd.NextClassID = strPtr(id.New().String())
+	_, err = svc.Update(context.Background(), sc, parent.ID, upd)
+	if appErr := appErrorOf(t, err, http.StatusUnprocessableEntity); appErr.Fields["next_class_id"] == "" {
+		t.Fatalf("unknown next class must land on next_class_id: %+v", appErr.Fields)
+	}
+
+	other := ownerScope()
+	theirs, err := svc.Create(context.Background(), other, validCreateRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	upd = base
+	upd.NextClassID = strPtr(theirs.ID.String())
+	_, err = svc.Update(context.Background(), sc, parent.ID, upd)
+	if appErr := appErrorOf(t, err, http.StatusUnprocessableEntity); appErr.Fields["next_class_id"] == "" {
+		t.Fatalf("another center's class cannot be linked: %+v", appErr.Fields)
+	}
+
+	// parent's next is child (linked above); linking child's next back to
+	// parent would close a two-class loop.
+	childUpd := UpdateClassRequest{
+		Name: child.Name, StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000),
+		NextClassID: strPtr(parent.ID.String()),
+	}
+	_, err = svc.Update(context.Background(), sc, child.ID, childUpd)
+	if appErr := appErrorOf(t, err, http.StatusUnprocessableEntity); appErr.Fields["next_class_id"] == "" {
+		t.Fatalf("a lineage cycle must land on next_class_id: %+v", appErr.Fields)
+	}
+
+	upd = base
+	upd.NextClassID = strPtr("")
+	got, err = svc.Update(context.Background(), sc, parent.ID, upd)
+	if err != nil || got.NextClassID != nil {
+		t.Fatalf("blank must unlink, got %v %+v", err, got)
+	}
+}
+
+// AddSchedule refuses to open a schedule on a self-paced class with the
+// dedicated SELF_PACED_NO_SCHEDULE code, distinct from a generic validation
+// error.
+func TestAddScheduleOnSelfPacedRejected(t *testing.T) {
+	svc, _ := newTestService()
+	sc := memberScope()
+	req := validCreateRequest()
+	req.StudyMode = StudyModeSelfPaced
+	req.Schedules = nil
+	class, err := svc.Create(context.Background(), sc, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = svc.AddSchedule(context.Background(), sc, class.ID, ScheduleRequest{
+		Weekday: int16Ptr(2), StartTime: "18:00", DurationMin: 90,
+	})
+	appErr := appErrorOf(t, err, http.StatusUnprocessableEntity)
+	if appErr.Code != CodeSelfPacedNoSchedule {
+		t.Fatalf("want %s, got %s", CodeSelfPacedNoSchedule, appErr.Code)
+	}
+}
+
+// Availability marks a room and its class's teacher and staff busy only when
+// one of their classes has an active schedule overlapping a requested slot
+// on the same weekday; excludeClassID leaves one class out of that check,
+// and a free room or teacher is reported alongside the busy ones.
+func TestAvailabilityMarksBusyRoomsAndTeachers(t *testing.T) {
+	svc, repo := newTestService()
+	sc := memberScope()
+
+	busy := validCreateRequest()
+	busy.Room = "P101"
+	busy.Schedules = []ScheduleRequest{{Weekday: int16Ptr(1), StartTime: "08:00", DurationMin: 90}}
+	busyClass, err := svc.Create(context.Background(), sc, busy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coTeacher := id.New()
+	repo.addStaff(busyClass.ID, coTeacher)
+
+	free := validCreateRequest()
+	free.Room = "P102"
+	free.Schedules = []ScheduleRequest{{Weekday: int16Ptr(3), StartTime: "08:00", DurationMin: 90}}
+	if _, err := svc.Create(context.Background(), sc, free); err != nil {
+		t.Fatal(err)
+	}
+
+	excluded := validCreateRequest()
+	excluded.Room = "P103"
+	excluded.Schedules = []ScheduleRequest{{Weekday: int16Ptr(1), StartTime: "08:00", DurationMin: 90}}
+	excludedClass, err := svc.Create(context.Background(), sc, excluded)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	repo.addMember(sc.CenterID, sc.TeacherID, "Giáo viên chính")
+	repo.addMember(sc.CenterID, coTeacher, "Trợ giảng")
+	freeTeacher := id.New()
+	repo.addMember(sc.CenterID, freeTeacher, "Giáo viên rảnh")
+
+	slots := []AvailabilitySlot{{Weekday: 1, StartTime: "08:30", DurationMin: 30}}
+	resp, err := svc.Availability(context.Background(), sc, slots, &excludedClass.ID)
+	if err != nil {
+		t.Fatalf("availability: %v", err)
+	}
+
+	roomFree := map[string]bool{}
+	for _, r := range resp.Rooms {
+		roomFree[r.Name] = r.Free
+	}
+	if roomFree["P101"] {
+		t.Fatalf("P101 must be busy, got %+v", resp.Rooms)
+	}
+	if !roomFree["P102"] {
+		t.Fatalf("P102 must be free, got %+v", resp.Rooms)
+	}
+	if _, ok := roomFree["P103"]; ok {
+		t.Fatalf("the excluded class's room must not appear as busy from it, got %+v", resp.Rooms)
+	}
+
+	teacherFree := map[uuid.UUID]bool{}
+	for _, tch := range resp.Teachers {
+		teacherFree[tch.TeacherID] = tch.Free
+	}
+	if teacherFree[sc.TeacherID] {
+		t.Fatalf("the busy class's own teacher must be busy, got %+v", resp.Teachers)
+	}
+	if teacherFree[coTeacher] {
+		t.Fatalf("the busy class's co-teacher (class_staff) must be busy, got %+v", resp.Teachers)
+	}
+	if !teacherFree[freeTeacher] {
+		t.Fatalf("an unrelated teacher must stay free, got %+v", resp.Teachers)
+	}
+
+	// A slot on a different weekday overlaps nothing, so every room is free.
+	noOverlap, err := svc.Availability(context.Background(), sc, []AvailabilitySlot{{Weekday: 5, StartTime: "08:00", DurationMin: 30}}, nil)
+	if err != nil {
+		t.Fatalf("availability: %v", err)
+	}
+	for _, r := range noOverlap.Rooms {
+		if !r.Free {
+			t.Fatalf("no requested slot overlaps weekday 5, every room must be free, got %+v", noOverlap.Rooms)
+		}
+	}
 }

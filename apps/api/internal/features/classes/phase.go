@@ -65,6 +65,24 @@ func PhasePredicate(phase string, today time.Time) (frag string, args []any, ok 
 	}
 }
 
+// OpenForRecruitment reports whether the class belongs on the "Lớp cần
+// tuyển sinh" list: its recruiting flag is on and it has not ended or been
+// archived — a class past its term takes no enrolments whatever the flag says.
+func OpenForRecruitment(c *Class, today time.Time) bool {
+	if !c.Recruiting {
+		return false
+	}
+	phase := PhaseOf(c, today)
+	return phase == PhaseUpcoming || phase == PhaseRunning
+}
+
+// RecruitingPredicate is OpenForRecruitment as a SQL fragment, shared by the
+// list filter and the stats counters so both select the same rows.
+func RecruitingPredicate(today time.Time) (frag string, args []any) {
+	return "classes.recruiting AND classes.status <> '" + StatusArchived +
+		"' AND (classes.end_date IS NULL OR classes.end_date >= ?)", []any{dateOnly(today)}
+}
+
 // ShiftOf classifies a start time: before 12:00 is morning, before 17:30 is
 // afternoon, anything later is evening. "HH:MM" strings compare correctly
 // as plain strings because both halves are zero-padded.

@@ -763,6 +763,17 @@ func TestListFiltersMatchLiterallyAndOnEffectiveTimetable(t *testing.T) {
 		})
 	}
 
+	// The recruiting filter is the SQL form of OpenForRecruitment: the flag
+	// alone is not enough once the class has ended or been archived.
+	for _, c := range []*classes.Class{running, upcoming, ended, archived} {
+		require.NoError(t, db.Model(c).Update("recruiting", true).Error)
+	}
+	require.ElementsMatch(t, []uuid.UUID{running.ID, upcoming.ID}, ids(classes.ListFilter{Recruiting: true}))
+	require.ElementsMatch(t, []uuid.UUID{upcoming.ID}, ids(classes.ListFilter{Recruiting: true, Phase: classes.PhaseUpcoming}))
+	recruitingStats, err := svc.Stats(ctx, sc, time.Now(), true)
+	require.NoError(t, err)
+	require.Equal(t, classes.ClassStatsResponse{All: 2, Upcoming: 1, Running: 1, Recruiting: 2}, recruitingStats)
+
 	// The phase the SQL predicate selected must be the phase the DTO reports.
 	for _, phase := range []string{classes.PhaseUpcoming, classes.PhaseRunning, classes.PhaseEnded, classes.PhaseArchived} {
 		rows, _, _, err := svc.ListReadable(ctx, sc, classes.ListFilter{Phase: phase}, listParams(t))
@@ -799,17 +810,17 @@ func TestStatsCountReadableClassesOnly(t *testing.T) {
 	testutil.Class(t, db, stranger.ID, testutil.WithClassRecruiting(true))
 
 	now := time.Now()
-	got, err := svc.Stats(ctx, scMember, now)
+	got, err := svc.Stats(ctx, scMember, now, false)
 	require.NoError(t, err)
 	require.Equal(t, classes.ClassStatsResponse{All: 1, Running: 1}, got)
 
 	centerWide := classes.ClassStatsResponse{All: 5, Upcoming: 1, Running: 2, Ended: 1, Archived: 1, Recruiting: 1}
-	got, err = svc.Stats(ctx, scOwner, now)
+	got, err = svc.Stats(ctx, scOwner, now, false)
 	require.NoError(t, err)
 	require.Equal(t, centerWide, got)
 
 	scMember.Perms = authctx.BuildPermSet(nil, []string{authctx.PermClassesViewAll}, nil)
-	got, err = svc.Stats(ctx, scMember, now)
+	got, err = svc.Stats(ctx, scMember, now, false)
 	require.NoError(t, err)
 	require.Equal(t, centerWide, got, "classes.view_all widens the counters like it widens the list")
 	require.Equal(t, got.All, got.Upcoming+got.Running+got.Ended+got.Archived, "phases partition the total")
@@ -1062,4 +1073,181 @@ func TestParentClassCycleIsRefusedAcrossTheChain(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got.ParentClassID)
 	require.Equal(t, classB.ID, *got.ParentClassID)
+}
+
+// A self-paced class carries no timetable: zero schedules must pass create,
+// the stored study_mode and room must round-trip through Get, and adding a
+// schedule afterwards must still be refused against the real DB-backed
+// class, not just the in-memory fake the unit tests use.
+func TestSelfPacedCreateWithZeroSchedulesRoundTrips(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
+
+	req := classes.CreateClassRequest{
+		Name:             "Tự học Python",
+		StartDate:        "2026-01-05",
+		DefaultUnitPrice: int64Ptr(0),
+		StudyMode:        classes.StudyModeSelfPaced,
+		Room:             "P101",
+	}
+	created, err := svc.Create(ctx, sc, req)
+	require.NoError(t, err, "self-paced create with zero schedules must succeed")
+	require.Empty(t, created.Schedules)
+	require.Equal(t, classes.StudyModeSelfPaced, created.StudyMode)
+	require.Equal(t, "P101", created.Room)
+
+	got, err := svc.Get(ctx, sc, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, classes.StudyModeSelfPaced, got.StudyMode)
+	require.Equal(t, "P101", got.Room)
+	require.Empty(t, got.Schedules)
+
+	_, err = svc.AddSchedule(ctx, sc, created.ID, classes.ScheduleRequest{
+		Weekday: int16Ptr(2), StartTime: "18:00", DurationMin: 60,
+	})
+	var appErr *apperror.AppError
+	require.ErrorAs(t, err, &appErr, "a self-paced class must refuse a schedule even against the real DB")
+	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
+
+	// A scheduled class (the default study_mode) still requires at least one
+	// schedule.
+	scheduled := createRequest()
+	scheduled.Schedules = nil
+	_, err = svc.Create(ctx, sc, scheduled)
+	require.ErrorAs(t, err, &appErr, "a scheduled class with no schedules must be refused")
+	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
+}
+
+// A next_class_id link must point at a live class of the same center, the
+// same rule parent_class_id follows, exercised here against the real
+// LiveClassInCenter/ParentCreatesCycle queries instead of the in-memory fake:
+// an unknown id, a foreign-center class, and a direct two-class cycle are all
+// refused with a 422 on next_class_id, while a valid link round-trips
+// through Get and an explicit "" clears it.
+func TestNextClassLinkAgainstRealDB(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
+	other, _ := testutil.Teacher(t, db)
+	scOther := testutil.ScopeFor(t, db, other.ID)
+
+	classA, err := svc.Create(ctx, sc, createRequest())
+	require.NoError(t, err)
+	classB, err := svc.Create(ctx, sc, createRequest())
+	require.NoError(t, err)
+	theirs, err := svc.Create(ctx, scOther, createRequest())
+	require.NoError(t, err)
+
+	updA := classes.UpdateClassRequest{Name: classA.Name, StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000)}
+
+	updA.NextClassID = strPtr(uuid.New().String())
+	_, err = svc.Update(ctx, sc, classA.ID, updA)
+	var appErr *apperror.AppError
+	require.ErrorAs(t, err, &appErr, "an unknown next_class_id must be refused")
+	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
+	require.Contains(t, appErr.Fields, "next_class_id")
+
+	updA.NextClassID = strPtr(theirs.ID.String())
+	_, err = svc.Update(ctx, sc, classA.ID, updA)
+	require.ErrorAs(t, err, &appErr, "a foreign-center class must be refused")
+	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
+	require.Contains(t, appErr.Fields, "next_class_id")
+
+	updA.NextClassID = strPtr(classB.ID.String())
+	got, err := svc.Update(ctx, sc, classA.ID, updA)
+	require.NoError(t, err, "a live class of the same center links")
+	require.NotNil(t, got.NextClassID)
+	require.Equal(t, classB.ID, *got.NextClassID)
+
+	reread, err := svc.Get(ctx, sc, classA.ID)
+	require.NoError(t, err)
+	require.NotNil(t, reread.NextClassID)
+	require.Equal(t, classB.ID, *reread.NextClassID)
+
+	// B's next cannot be A: that would close a direct two-class loop.
+	updB := classes.UpdateClassRequest{Name: classB.Name, StartDate: "2026-01-05", DefaultUnitPrice: int64Ptr(150_000)}
+	updB.NextClassID = strPtr(classA.ID.String())
+	_, err = svc.Update(ctx, sc, classB.ID, updB)
+	require.ErrorAs(t, err, &appErr, "a<-next-b, b->next-a closes a direct loop")
+	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
+	require.Contains(t, appErr.Fields, "next_class_id")
+
+	// Clearing with an explicit "" unlinks.
+	updA.NextClassID = strPtr("")
+	cleared, err := svc.Update(ctx, sc, classA.ID, updA)
+	require.NoError(t, err)
+	require.Nil(t, cleared.NextClassID)
+
+	rereadCleared, err := svc.Get(ctx, sc, classA.ID)
+	require.NoError(t, err)
+	require.Nil(t, rereadCleared.NextClassID, "clearing next_class_id must persist")
+}
+
+// The availability endpoint reports a room/teacher busy only when a live
+// class's active schedule overlaps a requested slot on the same weekday,
+// exercised here against the real batched queries (AvailabilityClasses,
+// ActiveMemberDirectory) instead of the in-memory fake: exclude_class_id
+// frees the excluded class's room/teacher, and a non-overlapping slot leaves
+// everyone free.
+func TestAvailabilityAgainstRealDB(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	owner, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, owner.ID)
+
+	busyReq := createRequest()
+	busyReq.Room = "P101"
+	busyReq.Schedules = []classes.ScheduleRequest{{Weekday: int16Ptr(2), StartTime: "18:00", DurationMin: 90}}
+	busy, err := svc.Create(ctx, sc, busyReq)
+	require.NoError(t, err)
+
+	freeReq := createRequest()
+	freeReq.Name = "Lớp trống"
+	freeReq.Room = "P102"
+	freeReq.Schedules = []classes.ScheduleRequest{{Weekday: int16Ptr(3), StartTime: "18:00", DurationMin: 90}}
+	_, err = svc.Create(ctx, sc, freeReq)
+	require.NoError(t, err)
+
+	overlapping := []classes.AvailabilitySlot{{Weekday: 2, StartTime: "18:30", DurationMin: 30}}
+	resp, err := svc.Availability(ctx, sc, overlapping, nil)
+	require.NoError(t, err)
+
+	roomFree := map[string]bool{}
+	for _, r := range resp.Rooms {
+		roomFree[r.Name] = r.Free
+	}
+	require.False(t, roomFree["P101"], "an overlapping schedule must mark its room busy")
+	require.True(t, roomFree["P102"], "a room with no overlapping schedule stays free")
+
+	teacherFree := map[uuid.UUID]bool{}
+	for _, tRow := range resp.Teachers {
+		teacherFree[tRow.TeacherID] = tRow.Free
+	}
+	require.False(t, teacherFree[owner.ID], "the owner teaching the overlapping class must be busy")
+
+	// Excluding the busy class from the check frees its room and teacher —
+	// this is the "editing my own class" case.
+	respExcluded, err := svc.Availability(ctx, sc, overlapping, &busy.ID)
+	require.NoError(t, err)
+	for _, r := range respExcluded.Rooms {
+		if r.Name == "P101" {
+			require.True(t, r.Free, "exclude_class_id must free the excluded class's own room")
+		}
+	}
+
+	// A non-overlapping slot on the same weekday leaves the room free.
+	nonOverlapping := []classes.AvailabilitySlot{{Weekday: 2, StartTime: "08:00", DurationMin: 30}}
+	respFree, err := svc.Availability(ctx, sc, nonOverlapping, nil)
+	require.NoError(t, err)
+	for _, r := range respFree.Rooms {
+		if r.Name == "P101" {
+			require.True(t, r.Free, "a non-overlapping slot must not mark the room busy")
+		}
+	}
 }

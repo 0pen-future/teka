@@ -25,6 +25,14 @@ const (
 	StatusArchived = "archived"
 )
 
+// Study mode values, mirroring the CHECK constraint on classes.study_mode.
+// A scheduled class runs on the weekly timetable in Schedules; a self-paced
+// class carries none and AddSchedule refuses to open one.
+const (
+	StudyModeScheduled = "scheduled"
+	StudyModeSelfPaced = "self_paced"
+)
+
 // Class is one lớp học. Money is BIGINT đồng — never a float anywhere.
 type Class struct {
 	// ID is a UUIDv7 generated in Go via id.New(); the column has no default.
@@ -58,11 +66,26 @@ type Class struct {
 	// relation. Both are optional and only ever set through update.
 	ParentClassID *uuid.UUID
 	LineageNote   *string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	DeletedAt     gorm.DeletedAt
+	// Room is the physical/virtual room name (phòng học); "" means unassigned.
+	Room string
+	// StudyMode is one of the StudyMode* constants. The gorm default tag
+	// lets GORM omit a zero-value (unset) field from the INSERT so the
+	// column's own DB DEFAULT 'scheduled' applies — every write path that
+	// builds a Class without explicitly resolving StudyMode (fixtures in
+	// other packages' tests) must still land on a value the CHECK
+	// constraint accepts.
+	StudyMode string `gorm:"default:scheduled"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt gorm.DeletedAt
 	// Schedules holds the class's live schedule rows when preloaded.
 	Schedules []Schedule `gorm:"foreignKey:ClassID"`
+	// NextClassID is the earliest-created live child whose ParentClassID
+	// points back at this class (lớp kế tiếp). It has no backing column —
+	// gorm:"-" keeps it out of every generated SELECT/INSERT/UPDATE — and is
+	// populated by the repository's own follow-up query after the primary
+	// fetch succeeds.
+	NextClassID *uuid.UUID `gorm:"-"`
 }
 
 // CourseRef is the slice of a course row a class embeds: enough to render
