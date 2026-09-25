@@ -72,7 +72,7 @@ const opsHints: Partial<Record<Tab, string>> = {
   students: "Học viên đang theo học tất cả lớp của khóa; chuyển lớp trong cùng khóa giữ lịch sử.",
   homework: "Bài nộp của học viên theo từng lớp — thuộc instance, không thuộc template.",
   eval: "Điểm tổng kết theo cấu trúc điểm của phiên bản lớp đang dùng.",
-  tasks: "Việc chuẩn bị tài liệu cho khóa — nối với Bảng chuẩn bị.",
+  tasks: "Việc chuẩn bị tài liệu cho khóa.",
 };
 
 const cardClassName = "rounded-[24px] bg-white px-5 py-[18px] shadow-soft-md";

@@ -1,11 +1,8 @@
 import { http, HttpResponse } from "msw";
 
-import { API_URL, defaultMemberDirectory, fail, listMeta, ok } from "@/test/msw/handlers";
+import { API_URL, fail, listMeta, ok } from "@/test/msw/handlers";
 
 import type {
-  Assignee,
-  AssignmentInput,
-  BoardCard,
   Exercise,
   ExerciseGroup,
   ExerciseGroupInput,
@@ -19,8 +16,6 @@ import type {
   LogFieldInput,
   Material,
   MaterialInput,
-  PrepInput,
-  PrepStatus,
   ProgramTemplate,
   ScoreSetGroup,
   ScoreSetGroupInput,
@@ -59,7 +54,6 @@ export const templateToan6: ProgramTemplate = {
     { id: "81000000-0000-4000-8000-000000000002", version_no: 2, status: "draft" },
     { id: "81000000-0000-4000-8000-000000000001", version_no: 1, status: "published" },
   ],
-  prep: { lesson_count: 2, done_count: 0, assignees: [] },
   created_at: "2026-09-01T08:00:00Z",
   updated_at: "2026-09-10T08:00:00Z",
 };
@@ -79,7 +73,6 @@ export const templateVan9: ProgramTemplate = {
   class_count: 0,
   lesson_count: 0,
   versions: [{ id: "81000000-0000-4000-8000-000000000003", version_no: 1, status: "draft" }],
-  prep: { lesson_count: 0, done_count: 0, assignees: [] },
   created_at: "2026-09-05T08:00:00Z",
   updated_at: "2026-09-05T08:00:00Z",
 };
@@ -146,10 +139,6 @@ function lesson(
     objectives: null,
     duration_min: 90,
     homework_note: null,
-    prep_status: "todo",
-    assignee_id: null,
-    due_date: null,
-    checklist: [],
     material_count: 0,
     exercise_count: 0,
     created_at: "2026-09-01T08:00:00Z",
@@ -178,10 +167,6 @@ export const lessonDraftSoTuNhien = lesson(
   {
     objectives: "Nhận biết tập N",
     homework_note: "Bài 1-5 trang 10",
-    checklist: [
-      { label: "Soạn slide", done: true },
-      { label: "In phiếu bài tập", done: false },
-    ],
   },
 );
 export const lessonDraftPhanSo = lesson(
@@ -189,7 +174,7 @@ export const lessonDraftPhanSo = lesson(
   versionToan6Draft.id,
   2,
   "Phân số",
-  { duration_min: null, prep_status: "doing" },
+  { duration_min: null },
 );
 
 // Catalog items: one material and one exercise attached to the draft's
@@ -404,21 +389,6 @@ function notFound(resource: string) {
   return HttpResponse.json(fail("NOT_FOUND", `${resource} not found`), { status: 404 });
 }
 
-function assigneeName(teacherId: string | null): string | null {
-  return defaultMemberDirectory.find((m) => m.teacher_id === teacherId)?.display_name ?? null;
-}
-
-/**
- * `GET /library/assignees` is a separate, `prep.assign`-only endpoint from
- * the `members.list`-gated member directory, but this mock reuses the same
- * center roster so a test picking "Thầy Minh" resolves to the same teacher
- * either way.
- */
-const defaultAssignees: Assignee[] = defaultMemberDirectory.map((m) => ({
-  id: m.teacher_id,
-  full_name: m.display_name,
-}));
-
 /** Recomputes the template's summary columns the way the API's list query does. */
 function summarize(template: ProgramTemplate): ProgramTemplate {
   const versions = store.versions.filter((v) => v.template_id === template.id);
@@ -428,9 +398,6 @@ function summarize(template: ProgramTemplate): ProgramTemplate {
   const released = published
     ? store.lessons.filter((l) => l.version_id === published.id).length
     : draftLessons.length;
-  const assignees = [
-    ...new Set(draftLessons.flatMap((l) => assigneeName(l.assignee_id) ?? [])),
-  ].sort();
   return {
     ...template,
     published_version_no: published?.version_no ?? null,
@@ -442,31 +409,8 @@ function summarize(template: ProgramTemplate): ProgramTemplate {
     versions: [...versions]
       .sort((a, b) => b.version_no - a.version_no)
       .map((v) => ({ id: v.id, version_no: v.version_no, status: v.status })),
-    prep: draft
-      ? {
-          lesson_count: draftLessons.length,
-          done_count: draftLessons.filter((l) => l.prep_status === "done").length,
-          assignees,
-        }
-      : null,
   };
 }
-
-function boardCard(row: TemplateLesson): BoardCard {
-  return {
-    id: row.id,
-    position: row.position,
-    title: row.title,
-    prep_status: row.prep_status,
-    assignee_id: row.assignee_id,
-    assignee_name: assigneeName(row.assignee_id),
-    due_date: row.due_date,
-    checklist_done: row.checklist.filter((item) => item.done).length,
-    checklist_total: row.checklist.length,
-  };
-}
-
-const PREP_STATUSES: PrepStatus[] = ["todo", "doing", "review", "done"];
 
 /** Classes bound to a version, capped and ordered by name like the API's `ListVersionClasses`. */
 function versionClasses(versionId: string): VersionClassRefResponse[] {
@@ -629,7 +573,6 @@ function exerciseGroupResponse(row: ExerciseGroupRow): ExerciseGroup {
 }
 
 export const libraryHandlers = [
-  http.get(`${API_URL}/library/assignees`, () => HttpResponse.json(ok(defaultAssignees))),
   http.get(`${API_URL}/library/templates`, ({ request }) => {
     const params = new URL(request.url).searchParams;
     const q = (params.get("q") ?? "").toLowerCase();
@@ -664,7 +607,6 @@ export const libraryHandlers = [
       class_count: 0,
       lesson_count: 0,
       versions: [],
-      prep: null,
       created_at: NOW,
       updated_at: NOW,
     };
@@ -911,62 +853,6 @@ export const libraryHandlers = [
     store.materialLinks = store.materialLinks.filter((l) => !removedIds.has(l.lesson_id));
     store.exerciseLinks = store.exerciseLinks.filter((l) => !removedIds.has(l.lesson_id));
     return HttpResponse.json(ok({ cleared: true }));
-  }),
-  http.get(`${API_URL}/library/versions/:vid/board`, ({ params }) => {
-    const version = store.versions.find((v) => v.id === params.vid);
-    if (!version) return notFound("version");
-    const template = store.templates.find((t) => t.id === version.template_id);
-    if (!template) return notFound("template");
-    const rows = renumber(version.id);
-    return HttpResponse.json(
-      ok({
-        template: summarize(template),
-        version: withCount(version),
-        columns: PREP_STATUSES.map((status) => ({
-          status,
-          lessons: rows.filter((l) => l.prep_status === status).map(boardCard),
-        })),
-      }),
-    );
-  }),
-  http.patch(`${API_URL}/library/lessons/:lid/prep`, async ({ params, request }) => {
-    const row = store.lessons.find((l) => l.id === params.lid);
-    if (!row) return notFound("lesson");
-    const lock = locked(store.versions.find((v) => v.id === row.version_id));
-    if (lock) return lock;
-    const body = (await request.json()) as PrepInput;
-    const fields: Record<string, string> = {};
-    if (body.prep_status !== undefined && !PREP_STATUSES.includes(body.prep_status)) {
-      fields.prep_status = "must be one of todo doing review done";
-    }
-    if (body.checklist !== undefined) {
-      if (body.checklist.length > 50) fields.checklist = "at most 50 items";
-      body.checklist.forEach((item, index) => {
-        if (item.label.trim() === "") fields[`checklist.${index}.label`] = "label is required";
-      });
-    }
-    if (Object.keys(fields).length > 0) return validationError(fields);
-    if (body.prep_status !== undefined) row.prep_status = body.prep_status;
-    if (body.checklist !== undefined) row.checklist = body.checklist;
-    row.updated_at = NOW;
-    return HttpResponse.json(ok(row));
-  }),
-  http.patch(`${API_URL}/library/lessons/:lid/assignment`, async ({ params, request }) => {
-    const row = store.lessons.find((l) => l.id === params.lid);
-    if (!row) return notFound("lesson");
-    const lock = locked(store.versions.find((v) => v.id === row.version_id));
-    if (lock) return lock;
-    const body = (await request.json()) as AssignmentInput;
-    if (body.assignee_id !== null && assigneeName(body.assignee_id) === null) {
-      return validationError({ assignee_id: "assignee must be a member of the center" });
-    }
-    if (body.due_date !== null && !/^\d{4}-\d{2}-\d{2}$/.test(body.due_date)) {
-      return validationError({ due_date: "must be a calendar day" });
-    }
-    row.assignee_id = body.assignee_id;
-    row.due_date = body.due_date;
-    row.updated_at = NOW;
-    return HttpResponse.json(ok(row));
   }),
   http.get(`${API_URL}/library/versions/:vid`, ({ params }) => {
     const version = store.versions.find((v) => v.id === params.vid);

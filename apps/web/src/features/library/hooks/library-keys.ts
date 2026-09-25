@@ -20,7 +20,6 @@ export const versionsKeys = {
   list: (templateId: string) => [...versionsKeys.all, "list", templateId] as const,
   details: () => [...versionsKeys.all, "detail"] as const,
   detail: (id: string) => [...versionsKeys.details(), id] as const,
-  board: (id: string) => [...versionsKeys.all, "board", id] as const,
 };
 
 export const lessonsKeys = {
@@ -28,10 +27,6 @@ export const lessonsKeys = {
   list: (versionId: string) => [...lessonsKeys.all, "list", versionId] as const,
   details: () => [...lessonsKeys.all, "detail"] as const,
   detail: (id: string) => [...lessonsKeys.details(), id] as const,
-};
-
-export const assigneesKeys = {
-  all: ["library", "assignees"] as const,
 };
 
 export const materialsKeys = {

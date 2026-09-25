@@ -16,7 +16,7 @@ function renderPage() {
     route: "/library/templates/new",
     path: "/library/templates/new",
     extraRoutes: [
-      { path: "/prep/:vid/board", element: <div>board-stub</div> },
+      { path: "/library/templates/:id", element: <div>template-detail-stub</div> },
       { path: "/library", element: <div>library-stub</div> },
     ],
   });
@@ -39,7 +39,7 @@ afterEach(() => {
 });
 
 describe("TemplateCreateWizardPage", () => {
-  it("walks the three steps and lands on the new draft's board", async () => {
+  it("walks the three steps and lands on the new template's detail page", async () => {
     const user = userEvent.setup();
     const { router } = renderPage();
 
@@ -67,7 +67,7 @@ describe("TemplateCreateWizardPage", () => {
     expect(screen.queryByText("Buổi 4")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Tạo chương trình" }));
 
-    await waitFor(() => expect(screen.getByText("board-stub")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("template-detail-stub")).toBeInTheDocument());
     const store = getLibraryStore();
     const template = store.templates.find((t) => t.code === "HOA-8");
     expect(template?.subject).toBe("Hoá");
@@ -77,7 +77,7 @@ describe("TemplateCreateWizardPage", () => {
       "Buổi 2",
       "Buổi 3",
     ]);
-    expect(router.state.location.pathname).toBe(`/prep/${draft?.id}/board`);
+    expect(router.state.location.pathname).toBe(`/library/templates/${template?.id}`);
   });
 
   it("rejects a lesson count outside 1–100 and lets the user step back", async () => {

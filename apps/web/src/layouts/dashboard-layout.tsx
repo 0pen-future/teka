@@ -4,7 +4,6 @@ import {
   BookUserIcon,
   Building2Icon,
   ClipboardCheckIcon,
-  ClipboardListIcon,
   EllipsisIcon,
   FileSpreadsheetIcon,
   GraduationCapIcon,
@@ -119,7 +118,6 @@ function useNavGroups(): NavGroup[] {
         { label: "Khóa học", to: "/courses", Icon: GraduationCapIcon, perm: "courses.read" },
         // The hub links on to the content and exercise banks, so they share its entry.
         { label: "Kho học liệu", to: "/library", Icon: LibraryBigIcon, perm: "library.read" },
-        { label: "Chuẩn bị tài liệu", to: "/prep", Icon: ClipboardListIcon, perm: "library.read" },
       ],
     },
     {
@@ -215,7 +213,6 @@ const OVERFLOW_LABELS = new Set([
   "Lộ trình học",
   "Khóa học",
   "Kho học liệu",
-  "Chuẩn bị tài liệu",
   "Chốt sổ",
   "Gửi thông báo",
   "Phụ huynh",
@@ -240,7 +237,6 @@ const OVERFLOW_PATH_PREFIXES = [
   "/classes",
   "/class-invitations",
   "/library",
-  "/prep",
   "/courses",
   "/paths",
   "/records",
