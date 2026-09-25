@@ -12,7 +12,14 @@ import {
   templateToan6,
   versionToan6Published,
 } from "@/features/library/__tests__/library-handlers";
-import { API_URL, fail, listMeta, ok, primaryTeacher } from "@/test/msw/handlers";
+import {
+  API_URL,
+  defaultMemberDirectory,
+  fail,
+  listMeta,
+  ok,
+  primaryTeacher,
+} from "@/test/msw/handlers";
 
 type AttendanceStatus = NonNullable<AttendanceRow["status"]>;
 
@@ -106,6 +113,9 @@ export const classWithSchedule: Class = {
   course: null,
   parent_class_id: null,
   lineage_note: null,
+  room: "",
+  study_mode: "scheduled",
+  next_class_id: null,
 };
 
 /** A second, ended class the lineage card can point at as the parent. */
@@ -290,6 +300,7 @@ export const invitationPendingTroGiang: ClassInvitation = {
   id: "a0000000-0000-4000-8000-000000000001",
   class_id: classWithSchedule.id,
   class_name: classWithSchedule.name,
+  course_name: null,
   teacher_id: staffCandidateTroGiang.id,
   teacher_name: staffCandidateTroGiang.full_name,
   role_key: "tro_giang",
@@ -308,6 +319,7 @@ export const invitationAcceptedGiaoVien: ClassInvitation = {
   id: "a0000000-0000-4000-8000-000000000002",
   class_id: classWithSchedule.id,
   class_name: classWithSchedule.name,
+  course_name: null,
   teacher_id: staffCandidateHocVu.id,
   teacher_name: staffCandidateHocVu.full_name,
   role_key: "giao_vien",
@@ -326,6 +338,7 @@ export const invitationDeclined: ClassInvitation = {
   id: "a0000000-0000-4000-8000-000000000003",
   class_id: classWithSchedule.id,
   class_name: classWithSchedule.name,
+  course_name: null,
   teacher_id: "73000000-0000-4000-8000-000000000004",
   teacher_name: "Cô Hoa",
   role_key: "hoc_vu",
@@ -387,9 +400,11 @@ export function seedRosterStore() {
 }
 
 let store = seedRosterStore();
+syncNextLinks();
 
 export function resetRosterStore() {
   store = seedRosterStore();
+  syncNextLinks();
 }
 
 /** Read-only peek for asserting what a flow actually persisted. */
@@ -401,6 +416,63 @@ let idCounter = 0;
 function nextId(prefix: string) {
   idCounter += 1;
   return `${prefix}${String(idCounter).padStart(8, "0")}`;
+}
+
+/** Mirrors the API's derived `next_class_id`: the first live child that names the class as parent. */
+function syncNextLinks() {
+  for (const klass of store.classes) {
+    klass.next_class_id =
+      store.classes.find((child) => child.status === "active" && child.parent_class_id === klass.id)
+        ?.id ?? null;
+  }
+}
+
+/** Mirrors the API's recruiting filter: the flag is on and the class has not ended or been archived. */
+function openForRecruitment(klass: Class) {
+  return klass.recruiting && (klass.phase === "upcoming" || klass.phase === "running");
+}
+
+function minutesOf(time: string) {
+  return Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
+}
+
+/**
+ * Mirrors `GET /classes/availability`: a slot is busy when another live class
+ * has a still-active row on that weekday whose time range overlaps it.
+ */
+function availabilityFor(slots: string[], excludeClassId: string | null) {
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const wanted = slots.map((slot) => {
+    const [weekday = "", time = "", duration = ""] = slot.split("-");
+    const start = minutesOf(time);
+    return { weekday: Number(weekday), start, end: start + Number(duration) };
+  });
+  const live = store.classes.filter((klass) => klass.status === "active");
+  const busy = live.filter(
+    (klass) =>
+      klass.id !== excludeClassId &&
+      klass.schedules.some((row) => {
+        if (row.effective_to !== null && row.effective_to < todayIso) return false;
+        const start = minutesOf(row.start_time);
+        return wanted.some(
+          (slot) =>
+            slot.weekday === row.weekday &&
+            slot.start < start + row.duration_min &&
+            start < slot.end,
+        );
+      }),
+  );
+  const rooms = [...new Set(live.map((klass) => klass.room).filter(Boolean))].sort();
+  const busyRooms = new Set(busy.map((klass) => klass.room));
+  const busyTeachers = new Set(busy.map((klass) => klass.teacher_id));
+  return {
+    rooms: rooms.map((name) => ({ name, free: !busyRooms.has(name) })),
+    teachers: defaultMemberDirectory.map((member) => ({
+      teacher_id: member.teacher_id,
+      name: member.display_name,
+      free: !busyTeachers.has(member.teacher_id),
+    })),
+  };
 }
 
 /** Mirrors the API's shift bounds: before 12:00 morning, before 17:30 afternoon, else evening. */
@@ -603,10 +675,12 @@ export const rosterHandlers = [
     const shift = url.searchParams.get("shift");
     const tag = url.searchParams.get("tag");
     const courseId = url.searchParams.get("course_id");
+    const recruiting = url.searchParams.get("recruiting") === "true";
     const items = store.classes
       .filter((klass) => {
         if (status && status !== "all" && klass.status !== status) return false;
         if (phase && klass.phase !== phase) return false;
+        if (recruiting && !openForRecruitment(klass)) return false;
         if (courseId && klass.course?.id !== courseId) return false;
         if (q && !klass.name.toLowerCase().includes(q) && !klass.code.toLowerCase().includes(q)) {
           return false;
@@ -624,13 +698,23 @@ export const rosterHandlers = [
       .map(withStudentCount);
     return HttpResponse.json(ok(items, listMeta(items.length)));
   }),
+  http.get(`${API_URL}/classes/availability`, ({ request }) => {
+    const url = new URL(request.url);
+    return HttpResponse.json(
+      ok(
+        availabilityFor(url.searchParams.getAll("slot"), url.searchParams.get("exclude_class_id")),
+      ),
+    );
+  }),
   // Before `/classes/:id`, which would otherwise swallow "stats" as an id.
-  http.get(`${API_URL}/classes/stats`, () => {
+  http.get(`${API_URL}/classes/stats`, ({ request }) => {
+    const recruitingOnly = new URL(request.url).searchParams.get("recruiting") === "true";
     const counts = { all: 0, upcoming: 0, running: 0, ended: 0, archived: 0, recruiting: 0 };
     for (const klass of store.classes) {
+      if (recruitingOnly && !openForRecruitment(klass)) continue;
       counts.all += 1;
       counts[klass.phase] += 1;
-      if (klass.recruiting) counts.recruiting += 1;
+      if (openForRecruitment(klass)) counts.recruiting += 1;
     }
     return HttpResponse.json(ok(counts));
   }),
@@ -683,6 +767,9 @@ export const rosterHandlers = [
       course: courseRefOf(body.course_id),
       parent_class_id: null,
       lineage_note: null,
+      room: "",
+      study_mode: "scheduled",
+      next_class_id: null,
     };
     store.classes.push(klass);
     return HttpResponse.json(ok(klass), { status: 201 });
@@ -704,7 +791,18 @@ export const rosterHandlers = [
       course_id?: string;
       parent_class_id?: string;
       lineage_note?: string;
+      room?: string;
+      study_mode?: Class["study_mode"];
+      next_class_id?: string;
     };
+    if (body.next_class_id && body.next_class_id === klass.id) {
+      return HttpResponse.json(
+        fail("VALIDATION_FAILED", "invalid", {
+          next_class_id: "Lớp sau không thể là chính lớp này",
+        }),
+        { status: 422 },
+      );
+    }
     klass.name = body.name;
     klass.start_date = body.start_date;
     klass.end_date = orNull(body.end_date);
@@ -718,6 +816,17 @@ export const rosterHandlers = [
     if (body.course_id !== undefined) klass.course = courseRefOf(body.course_id);
     if (body.parent_class_id !== undefined) klass.parent_class_id = orNull(body.parent_class_id);
     if (body.lineage_note !== undefined) klass.lineage_note = orNull(body.lineage_note);
+    if (body.room !== undefined) klass.room = body.room;
+    if (body.study_mode !== undefined) klass.study_mode = body.study_mode;
+    // "" unlinks every child; an id makes that class the single child.
+    if (body.next_class_id !== undefined) {
+      for (const child of store.classes) {
+        if (child.parent_class_id === klass.id) child.parent_class_id = null;
+      }
+      const target = store.classes.find((item) => item.id === body.next_class_id);
+      if (target) target.parent_class_id = klass.id;
+    }
+    syncNextLinks();
     return HttpResponse.json(ok(withStudentCount(klass)));
   }),
   http.get(`${API_URL}/courses`, () => {
@@ -1019,6 +1128,7 @@ export const rosterHandlers = [
       id: nextId("invitation-"),
       class_id: klass.id,
       class_name: klass.name,
+      course_name: klass.course?.name ?? null,
       teacher_id: body.teacher_id,
       teacher_name: staffMemberNames[body.teacher_id] ?? "Thành viên",
       role_key: body.role_key,

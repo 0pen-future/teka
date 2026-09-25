@@ -1,5 +1,10 @@
 import type { UpdateScheduleInput } from "../api/classes-api";
-import type { Schedule, ScheduleInput, ScheduleSlotInput } from "../schemas/roster-schemas";
+import type {
+  Schedule,
+  ScheduleInput,
+  ScheduleRowInput,
+  ScheduleSlotInput,
+} from "../schemas/roster-schemas";
 
 /** A row to close via `PUT /classes/:id/schedules/:sid` with `effective_to` set. */
 export interface ScheduleClose {
@@ -8,8 +13,8 @@ export interface ScheduleClose {
 }
 
 /**
- * Mutations the "Cài đặt lớp" save needs to reconcile the class's weekly
- * timetable with the form's khung-giờ slot list.
+ * Mutations the "Sửa lớp học" save needs to reconcile the class's weekly
+ * timetable with the wizard's schedule rows.
  */
 export interface ScheduleDiff {
   /** Rows to `POST /classes/:id/schedules`. Applied first so a mid-sequence failure can never leave the class without a timetable. */
@@ -76,50 +81,67 @@ export function deriveScheduleSlots(schedules: Schedule[], today: string): Sched
     .map(([start_time, days]) => ({ start_time, days }));
 }
 
-/** The (weekday, time) identity a schedule row has from the forms' viewpoint. */
-function pairKey(weekday: number, hhmm: string): string {
-  return `${weekday}|${hhmm}`;
+/**
+ * The class's active rows as the wizard edits them — one row per schedule,
+ * Monday first, then by start time.
+ */
+export function activeScheduleRows(schedules: Schedule[], today: string): ScheduleRowInput[] {
+  const mondayFirst = (weekday: number) => (weekday === 0 ? 7 : weekday);
+  return activeSchedules(schedules, today)
+    .map((schedule) => ({
+      weekday: schedule.weekday,
+      start_time: toHhmm(schedule.start_time),
+      duration_min: schedule.duration_min,
+    }))
+    .sort(
+      (a, b) =>
+        mondayFirst(a.weekday) - mondayFirst(b.weekday) || a.start_time.localeCompare(b.start_time),
+    );
+}
+
+/** The identity a schedule row has from the wizard's viewpoint. */
+function rowKey(weekday: number, hhmm: string, duration: number): string {
+  return `${weekday}|${hhmm}|${duration}`;
 }
 
 /**
- * Diffs the class's active timetable against the form's slot list. The API
+ * Diffs the class's active timetable against the wizard's rows. The API
  * contract (`classes.UpdateScheduleRequest`) prescribes that a real timetable
  * change closes the old row and adds a new one, so sessions the old row
  * already explains stay queryable for past ranges. New rows start today
- * (`effective_from = today`) and replaced rows close yesterday, so the change
- * applies "từ buổi kế tiếp" and never rewrites attended or billed sessions.
+ * (`effective_from = today`) and replaced rows close yesterday, so attended
+ * or billed sessions are never rewritten.
  *
- * A row survives only if some slot still names its (weekday, time) pair;
- * otherwise it is closed — or deleted when it never took effect. Wanted pairs
- * without a surviving row get a new one, preserving the replaced row's
- * duration when that weekday had one (else the class's most common duration,
- * else 90).
+ * A row survives only if the wizard still lists its exact (weekday, time,
+ * duration); otherwise it is closed — or deleted when it never took effect.
+ * Pass no rows to retire the whole timetable (a self-paced class).
  */
-export function diffSchedules(
+export function diffScheduleRows(
   schedules: Schedule[],
-  slots: ScheduleSlotInput[],
+  rows: ScheduleRowInput[],
   today: string,
 ): ScheduleDiff {
-  const wanted = new Map<string, { weekday: number; start_time: string }>();
-  for (const slot of slots) {
-    for (const weekday of slot.days) {
-      wanted.set(pairKey(weekday, slot.start_time), { weekday, start_time: slot.start_time });
-    }
+  const wanted = new Map<string, ScheduleInput>();
+  for (const row of rows) {
+    if (row.duration_min === null) continue;
+    wanted.set(rowKey(row.weekday, row.start_time, row.duration_min), {
+      weekday: row.weekday,
+      start_time: row.start_time,
+      duration_min: row.duration_min,
+      effective_from: today,
+    });
   }
-  const active = activeSchedules(schedules, today);
   const kept = new Set<string>();
   const toClose: ScheduleClose[] = [];
   const toDelete: string[] = [];
-  const replacedDuration = new Map<number, number>();
   const closeOn = dayBefore(today);
 
-  for (const schedule of active) {
-    const key = pairKey(schedule.weekday, toHhmm(schedule.start_time));
+  for (const schedule of activeSchedules(schedules, today)) {
+    const key = rowKey(schedule.weekday, toHhmm(schedule.start_time), schedule.duration_min);
     if (wanted.has(key) && !kept.has(key)) {
       kept.add(key);
       continue;
     }
-    replacedDuration.set(schedule.weekday, schedule.duration_min);
     if (schedule.effective_from >= today) {
       toDelete.push(schedule.id);
     } else {
@@ -136,27 +158,6 @@ export function diffSchedules(
     }
   }
 
-  const durationCounts = new Map<number, number>();
-  for (const schedule of active) {
-    durationCounts.set(schedule.duration_min, (durationCounts.get(schedule.duration_min) ?? 0) + 1);
-  }
-  let commonDuration = 90;
-  let best = 0;
-  for (const [duration, count] of durationCounts) {
-    if (count > best) {
-      commonDuration = duration;
-      best = count;
-    }
-  }
-
-  const toAdd: ScheduleInput[] = [...wanted.entries()]
-    .filter(([key]) => !kept.has(key))
-    .map(([, pair]) => ({
-      weekday: pair.weekday,
-      start_time: pair.start_time,
-      duration_min: replacedDuration.get(pair.weekday) ?? commonDuration,
-      effective_from: today,
-    }));
-
+  const toAdd = [...wanted.entries()].filter(([key]) => !kept.has(key)).map(([, input]) => input);
   return { toAdd, toClose, toDelete };
 }

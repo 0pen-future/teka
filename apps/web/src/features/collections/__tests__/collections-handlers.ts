@@ -44,6 +44,9 @@ export const classMath: Class = {
   course: null,
   parent_class_id: null,
   lineage_note: null,
+  room: "",
+  study_mode: "scheduled",
+  next_class_id: null,
 };
 
 export const classEnglish: Class = {
@@ -66,6 +69,9 @@ export const classEnglish: Class = {
   course: null,
   parent_class_id: null,
   lineage_note: null,
+  room: "",
+  study_mode: "scheduled",
+  next_class_id: null,
 };
 
 /** No sessions fell in the fixture period — never produces a collections/invoice row. */
@@ -89,6 +95,9 @@ export const classEmpty: Class = {
   course: null,
   parent_class_id: null,
   lineage_note: null,
+  room: "",
+  study_mode: "scheduled",
+  next_class_id: null,
 };
 
 // --- Contacts ---

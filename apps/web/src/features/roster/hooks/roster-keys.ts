@@ -5,7 +5,7 @@
  * importing from one another.
  */
 import type { ListClassInvitationsParams } from "../api/class-invitations-api";
-import type { ListClassesParams } from "../api/classes-api";
+import type { ClassStatsParams, ListClassesParams } from "../api/classes-api";
 import type { ListContactsParams } from "../api/contacts-api";
 import type { ListEnrollmentsParams } from "../api/enrollments-api";
 import type { ListStudentsParams } from "../api/students-api";
@@ -32,9 +32,11 @@ export const classesKeys = {
   list: (params: ListClassesParams) => [...classesKeys.lists(), params] as const,
   details: () => [...classesKeys.all, "detail"] as const,
   detail: (id: string) => [...classesKeys.details(), id] as const,
-  stats: () => [...classesKeys.all, "stats"] as const,
+  stats: (params: ClassStatsParams = {}) => [...classesKeys.all, "stats", params] as const,
   /** Active-course picker rows for the class dialog; a course write elsewhere refetches on mount. */
   courseOptions: () => [...classesKeys.all, "course-options"] as const,
+  /** Rooms already used across the center, for the wizard's room suggestions. */
+  rooms: (excludeClassId: string) => [...classesKeys.all, "rooms", excludeClassId] as const,
 };
 
 export const enrollmentsKeys = {

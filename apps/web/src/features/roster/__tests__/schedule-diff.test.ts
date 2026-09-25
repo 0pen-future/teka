@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { deriveScheduleSlots, diffSchedules } from "../lib/schedule-diff";
+import { activeScheduleRows, deriveScheduleSlots, diffScheduleRows } from "../lib/schedule-diff";
 import type { Schedule } from "../schemas/roster-schemas";
 
 const TODAY = "2026-08-05";
@@ -57,19 +57,39 @@ describe("deriveScheduleSlots", () => {
   });
 });
 
-describe("diffSchedules", () => {
-  it("returns an empty diff when the slots match the active rows", () => {
+const row = (weekday: number, start_time = "19:00", duration_min: number | null = 90) => ({
+  weekday,
+  start_time,
+  duration_min,
+});
+
+describe("activeScheduleRows", () => {
+  it("lists active rows Monday first with their own durations", () => {
+    const rows = activeScheduleRows(
+      [
+        schedule({ id: "a", weekday: 0, start_time: "09:00:00", duration_min: 120 }),
+        schedule({ id: "b", weekday: 3 }),
+        schedule({ id: "c", weekday: 1, effective_to: "2026-07-01" }),
+      ],
+      TODAY,
+    );
+    expect(rows).toEqual([row(3), row(0, "09:00", 120)]);
+  });
+});
+
+describe("diffScheduleRows", () => {
+  it("returns an empty diff when the rows match the active schedules", () => {
     const rows = [schedule({ id: "a", weekday: 1 }), schedule({ id: "b", weekday: 3 })];
-    expect(diffSchedules(rows, [{ start_time: "19:00", days: [1, 3] }], TODAY)).toEqual({
+    expect(diffScheduleRows(rows, [row(1), row(3)], TODAY)).toEqual({
       toAdd: [],
       toClose: [],
       toDelete: [],
     });
   });
 
-  it("closes rows for deselected weekdays and adds rows for new ones", () => {
+  it("closes a removed row and adds a new one", () => {
     const rows = [schedule({ id: "a", weekday: 1 }), schedule({ id: "b", weekday: 3 })];
-    const diff = diffSchedules(rows, [{ start_time: "19:00", days: [3, 6] }], TODAY);
+    const diff = diffScheduleRows(rows, [row(3), row(6)], TODAY);
     expect(diff.toClose).toEqual([
       {
         id: "a",
@@ -88,41 +108,21 @@ describe("diffSchedules", () => {
     ]);
   });
 
-  it("replaces every kept weekday's row on a time change, preserving its duration", () => {
-    const rows = [
-      schedule({ id: "a", weekday: 1, duration_min: 120 }),
-      schedule({ id: "b", weekday: 3, duration_min: 90 }),
-    ];
-    const diff = diffSchedules(rows, [{ start_time: "20:30", days: [1, 3] }], TODAY);
-    expect(diff.toClose.map((close) => close.id).sort()).toEqual(["a", "b"]);
-    expect(diff.toClose.every((close) => close.input.effective_to === YESTERDAY)).toBe(true);
-    expect(diff.toAdd).toEqual([
-      { weekday: 1, start_time: "20:30", duration_min: 120, effective_from: TODAY },
-      { weekday: 3, start_time: "20:30", duration_min: 90, effective_from: TODAY },
-    ]);
-  });
-
-  // The forms reject a weekday spanning two slots (`classSlotsField`), but the
-  // diff must still leave such legacy rows alone when nothing changed.
-  it("keeps a weekday's rows in two slots with different times apart", () => {
-    const rows = [
-      schedule({ id: "a", weekday: 1, start_time: "18:00" }),
-      schedule({ id: "b", weekday: 1, start_time: "20:00" }),
-    ];
-    const diff = diffSchedules(
-      rows,
-      [
-        { start_time: "18:00", days: [1] },
-        { start_time: "20:00", days: [1] },
-      ],
+  it("replaces a row whose duration alone changed", () => {
+    const diff = diffScheduleRows(
+      [schedule({ id: "a", weekday: 1 })],
+      [row(1, "19:00", 120)],
       TODAY,
     );
-    expect(diff).toEqual({ toAdd: [], toClose: [], toDelete: [] });
+    expect(diff.toClose.map((close) => close.id)).toEqual(["a"]);
+    expect(diff.toAdd).toEqual([
+      { weekday: 1, start_time: "19:00", duration_min: 120, effective_from: TODAY },
+    ]);
   });
 
   it("deletes outright a replaced row that has not taken effect yet", () => {
     const rows = [schedule({ id: "a", weekday: 1, effective_from: "2026-08-09" })];
-    const diff = diffSchedules(rows, [{ start_time: "20:00", days: [1] }], TODAY);
+    const diff = diffScheduleRows(rows, [row(1, "20:00")], TODAY);
     expect(diff.toClose).toEqual([]);
     expect(diff.toDelete).toEqual(["a"]);
     expect(diff.toAdd).toEqual([
@@ -132,7 +132,7 @@ describe("diffSchedules", () => {
 
   it("leaves rows closed before today alone and still re-adds their weekday", () => {
     const rows = [schedule({ id: "a", weekday: 1, effective_to: "2026-07-01" })];
-    const diff = diffSchedules(rows, [{ start_time: "19:00", days: [1] }], TODAY);
+    const diff = diffScheduleRows(rows, [row(1)], TODAY);
     expect(diff.toClose).toEqual([]);
     expect(diff.toDelete).toEqual([]);
     expect(diff.toAdd).toEqual([
@@ -140,25 +140,26 @@ describe("diffSchedules", () => {
     ]);
   });
 
-  it("collapses duplicate rows on the same weekday and time down to one", () => {
+  it("retires the whole timetable when no rows are wanted", () => {
     const rows = [
-      schedule({ id: "a", weekday: 1, start_time: "19:00" }),
-      schedule({ id: "b", weekday: 1, start_time: "19:00" }),
+      schedule({ id: "a", weekday: 1 }),
+      schedule({ id: "b", weekday: 3, effective_from: "2026-08-10" }),
     ];
-    const diff = diffSchedules(rows, [{ start_time: "19:00", days: [1] }], TODAY);
+    const diff = diffScheduleRows(rows, [], TODAY);
+    expect(diff.toClose.map((close) => close.id)).toEqual(["a"]);
+    expect(diff.toDelete).toEqual(["b"]);
+    expect(diff.toAdd).toEqual([]);
+  });
+
+  it("collapses duplicate rows on the same weekday, time and duration down to one", () => {
+    const rows = [schedule({ id: "a", weekday: 1 }), schedule({ id: "b", weekday: 1 })];
+    const diff = diffScheduleRows(rows, [row(1)], TODAY);
     expect(diff.toClose.map((close) => close.id)).toEqual(["b"]);
     expect(diff.toAdd).toEqual([]);
   });
 
-  it("never double-adds a pair listed twice across the slots", () => {
-    const diff = diffSchedules(
-      [],
-      [
-        { start_time: "19:00", days: [4, 4] },
-        { start_time: "19:00", days: [4] },
-      ],
-      TODAY,
-    );
+  it("never double-adds a row listed twice", () => {
+    const diff = diffScheduleRows([], [row(4), row(4)], TODAY);
     expect(diff.toAdd).toEqual([
       { weekday: 4, start_time: "19:00", duration_min: 90, effective_from: TODAY },
     ]);

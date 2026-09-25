@@ -7,12 +7,14 @@ import {
   createClass,
   deleteSchedule,
   getClass,
+  getClassAvailability,
   getClassStats,
   listClasses,
   listCourseOptions,
   reassignTeacher,
   updateClass,
   updateSchedule,
+  type ClassStatsParams,
   type ListClassesParams,
   type UpdateScheduleInput,
 } from "../api/classes-api";
@@ -21,10 +23,11 @@ import { classesKeys } from "./roster-keys";
 
 export { classesKeys };
 
-export function useClassesList(params: ListClassesParams = {}) {
+export function useClassesList(params: ListClassesParams = {}, enabled = true) {
   return useQuery({
     queryKey: classesKeys.list(params),
     queryFn: () => listClasses(params),
+    enabled,
     placeholderData: keepPreviousData,
   });
 }
@@ -48,10 +51,20 @@ export function useCourseOptions(enabled: boolean) {
   });
 }
 
-export function useClassStats() {
+/** Room names in use across the center — availability with no slots lists them all as free. */
+export function useClassRooms(excludeClassId: string, enabled: boolean) {
   return useQuery({
-    queryKey: classesKeys.stats(),
-    queryFn: getClassStats,
+    queryKey: classesKeys.rooms(excludeClassId),
+    queryFn: async () =>
+      (await getClassAvailability([], excludeClassId)).rooms.map((room) => room.name),
+    enabled,
+  });
+}
+
+export function useClassStats(params: ClassStatsParams = {}) {
+  return useQuery({
+    queryKey: classesKeys.stats(params),
+    queryFn: () => getClassStats(params),
   });
 }
 

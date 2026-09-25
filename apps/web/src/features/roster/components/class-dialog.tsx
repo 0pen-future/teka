@@ -2,26 +2,20 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useEffect, useRef } from "react";
 import { useForm } from "react-hook-form";
 
-import { HvButton, HvModal, HvSelect, HvStateBlock, hvToast } from "@/components/hv";
-import { useCenterContext } from "@/features/teaching";
+import { HvButton, HvModal, HvSelect } from "@/components/hv";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { ApiError } from "@/lib/api/errors";
 import { useApiFormErrors } from "@/lib/forms/use-api-form-errors";
 
 import { MoneyInput } from "./money-input";
+import { ClassEditWizard } from "./class-edit-wizard";
 import { ScheduleSlotsEditor } from "./schedule-slots-editor";
-import { useClass, useCreateClass, useCourseOptions } from "../hooks/use-classes";
-import { useSaveClassSettings } from "../hooks/use-save-class-settings";
-import { canWriteClass } from "../lib/class-permissions";
-import { deriveScheduleSlots, emptySlot, weeklySessionCount } from "../lib/schedule-diff";
+import { useCreateClass, useCourseOptions } from "../hooks/use-classes";
+import { emptySlot, weeklySessionCount } from "../lib/schedule-diff";
 import {
   classDialogInputSchema,
-  classSettingsInputSchema,
   toClassCreateInput,
-  type Class,
   type ClassDialogInput,
-  type ClassSettingsInput,
 } from "../schemas/roster-schemas";
 
 export type ClassDialogProps =
@@ -46,11 +40,11 @@ const NO_COURSE_OPTION = { value: "", label: "Không gắn khóa học" };
 
 /**
  * `ClassDialog` (prototype `modalClass`) supports creation and in-place editing.
- * Create posts one atomic class; edit saves name/price and timetable separately.
+ * Create posts one atomic class; edit opens the sectioned `ClassEditWizard`.
  */
 export function ClassDialog(props: ClassDialogProps) {
   if (props.mode === "edit") {
-    return <EditClassDialog {...props} />;
+    return <ClassEditWizard {...props} />;
   }
   return <CreateClassForm open={props.open} onOpenChange={props.onOpenChange} />;
 }
@@ -247,166 +241,6 @@ function CreateClassForm({
           <FieldError errors={[errors.root]} />
         </FieldGroup>
       </form>
-    </HvModal>
-  );
-}
-
-function toEditDefaults(klass: Class): ClassSettingsInput {
-  const slots = deriveScheduleSlots(klass.schedules, today());
-  return {
-    name: klass.name,
-    slots: slots.length ? slots : [emptySlot()],
-    default_unit_price: klass.default_unit_price,
-  };
-}
-
-function EditClassDialog({
-  classId,
-  open,
-  onOpenChange,
-}: Extract<ClassDialogProps, { mode: "edit" }>) {
-  const { data: klass, isPending, isError, error } = useClass(open ? classId : undefined);
-  const { isOwner } = useCenterContext();
-  const form = useForm<ClassSettingsInput>({
-    resolver: zodResolver(classSettingsInputSchema),
-    defaultValues: { name: "", slots: [emptySlot()], default_unit_price: 0 },
-  });
-  const handleApiError = useApiFormErrors(form);
-  const { save, isPending: saving } = useSaveClassSettings(klass);
-  // A detail invalidation during a multi-request save must not erase user edits or its error.
-  const resetForClassId = useRef<string | null>(null);
-  useEffect(() => {
-    if (!open) {
-      resetForClassId.current = null;
-    } else if (klass && resetForClassId.current !== klass.id) {
-      resetForClassId.current = klass.id;
-      form.reset(toEditDefaults(klass));
-    }
-    // form is stable from react-hook-form.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, klass]);
-
-  const canWrite = klass ? canWriteClass(isOwner, klass) : false;
-  const slots = form.watch("slots");
-  const rateChanged = klass && form.watch("default_unit_price") !== klass.default_unit_price;
-  const { errors } = form.formState;
-  const submit = form.handleSubmit(async (values) => {
-    if (!canWrite) return;
-    const result = await save(values, today());
-    if (result.ok) {
-      hvToast(`Đã lưu ${values.name.trim()} — áp dụng từ buổi kế tiếp`);
-      onOpenChange(false);
-    } else if (result.partial) {
-      form.setError("root", {
-        message: "Chỉ lưu được một phần thay đổi — kiểm tra lại lịch của lớp rồi lưu lại lần nữa.",
-      });
-    } else {
-      handleApiError(result.error);
-    }
-  });
-
-  return (
-    <HvModal
-      open={open}
-      onOpenChange={onOpenChange}
-      title="Sửa lớp học"
-      description="Thay đổi áp dụng từ buổi kế tiếp — các kỳ đã chốt không đổi."
-      stickyFooter
-      footer={
-        <>
-          <HvButton type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-            Hủy
-          </HvButton>
-          <HvButton type="submit" form="class-dialog-edit-form" disabled={saving || !canWrite}>
-            {saving ? "Đang lưu…" : "Lưu thay đổi"}
-          </HvButton>
-        </>
-      }
-    >
-      {isPending ? (
-        <HvStateBlock state="loading" title="Đang tải lớp" />
-      ) : isError || !klass ? (
-        <HvStateBlock
-          state="error"
-          title={
-            error instanceof ApiError && error.status === 404
-              ? "Không tìm thấy lớp"
-              : "Không tải được lớp"
-          }
-          action={
-            <HvButton variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
-              Đóng
-            </HvButton>
-          }
-        />
-      ) : (
-        <form id="class-dialog-edit-form" onSubmit={(event) => void submit(event)} noValidate>
-          <FieldGroup>
-            <Field data-invalid={Boolean(errors.name)}>
-              <FieldLabel htmlFor="class-edit-name">Tên lớp</FieldLabel>
-              <Input
-                id="class-edit-name"
-                aria-invalid={Boolean(errors.name)}
-                {...form.register("name")}
-              />
-              <FieldError errors={[errors.name]} />
-            </Field>
-            <Field data-invalid={Boolean(errors.slots)}>
-              <div className="flex items-baseline gap-2">
-                <FieldLabel>Lịch học trong tuần</FieldLabel>
-                {weeklySessionCount(slots) > 0 ? (
-                  <span className="text-[12.5px] font-bold text-ink-400">
-                    · {weeklySessionCount(slots)} buổi/tuần
-                  </span>
-                ) : null}
-              </div>
-              <p className="text-[12.5px] text-ink-400">
-                Mỗi khung giờ chọn được nhiều ngày. Lớp học nhiều giờ khác nhau thì thêm khung giờ
-                mới.
-              </p>
-              <ScheduleSlotsEditor
-                idPrefix="class-edit"
-                value={slots}
-                onChange={(next) =>
-                  form.setValue("slots", next, { shouldValidate: true, shouldDirty: true })
-                }
-                slotErrors={slots.map((_, index) => ({
-                  time: errors.slots?.[index]?.start_time?.message,
-                  days: errors.slots?.[index]?.days?.message,
-                }))}
-              />
-              <FieldError errors={[errors.slots?.root]} />
-            </Field>
-            <Field className="max-w-[280px]" data-invalid={Boolean(errors.default_unit_price)}>
-              <FieldLabel htmlFor="class-edit-unit-price">Đơn giá / buổi (đ)</FieldLabel>
-              <MoneyInput
-                id="class-edit-unit-price"
-                aria-invalid={Boolean(errors.default_unit_price)}
-                value={form.watch("default_unit_price")}
-                onChange={(value) =>
-                  form.setValue("default_unit_price", value, {
-                    shouldValidate: true,
-                    shouldDirty: true,
-                  })
-                }
-              />
-              <FieldError errors={[errors.default_unit_price]} />
-            </Field>
-            {rateChanged ? (
-              <p className="rounded-[var(--radius-md)] bg-sun-100 px-4 py-3 text-[13px] font-bold text-sun-600">
-                Đơn giá mới chỉ áp cho lượt ghi danh từ nay về sau và buổi học kế tiếp. Học phí đã
-                chốt và đã gửi không thay đổi.
-              </p>
-            ) : null}
-            {!canWrite ? (
-              <p className="text-[13px] text-ink-400">
-                Chỉ giáo viên phụ trách hoặc chủ trung tâm mới sửa được cài đặt lớp.
-              </p>
-            ) : null}
-            <FieldError errors={[errors.root]} />
-          </FieldGroup>
-        </form>
-      )}
     </HvModal>
   );
 }

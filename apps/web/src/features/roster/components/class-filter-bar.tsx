@@ -1,4 +1,3 @@
-import { SearchIcon } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
 import { HvSelect } from "@/components/hv";
@@ -48,7 +47,7 @@ export function ClassFilterBar({ q, weekday, shift, onChange }: ClassFilterBarPr
   }, [query, q, onChange]);
 
   return (
-    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+    <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center">
       <span id={weekdayLabelId} className="sr-only">
         Ngày học
       </span>
@@ -58,7 +57,7 @@ export function ClassFilterBar({ q, weekday, shift, onChange }: ClassFilterBarPr
         onValueChange={(next) => onChange({ weekday: next as ClassListUrlValues["weekday"] })}
         sheetTitle="Ngày học"
         labelId={weekdayLabelId}
-        className="sm:w-[190px]"
+        className="sm:min-w-[170px]"
       />
       <span id={shiftLabelId} className="sr-only">
         Ca học
@@ -69,22 +68,16 @@ export function ClassFilterBar({ q, weekday, shift, onChange }: ClassFilterBarPr
         onValueChange={(next) => onChange({ shift: next as ClassListUrlValues["shift"] })}
         sheetTitle="Ca học"
         labelId={shiftLabelId}
-        className="sm:w-[150px]"
+        className="sm:min-w-[150px]"
       />
-      <div className="relative flex-1">
-        <SearchIcon
-          aria-hidden="true"
-          className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-400"
-        />
-        <Input
-          type="search"
-          aria-label="Tìm lớp học"
-          placeholder="Tìm theo tên hoặc mã lớp…"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          className="pl-9"
-        />
-      </div>
+      <Input
+        type="search"
+        aria-label="Tìm lớp học"
+        placeholder="Tìm kiếm theo tên, mã lớp học"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        className="min-h-11 min-w-0 flex-1 px-3.5 text-[13.5px] sm:min-w-[220px]"
+      />
     </div>
   );
 }

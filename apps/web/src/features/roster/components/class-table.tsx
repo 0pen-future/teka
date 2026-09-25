@@ -3,13 +3,24 @@ import { Link } from "react-router";
 import { HvBadge } from "@/components/hv";
 import { cn } from "@/lib/utils";
 
+import type { ClassShift } from "../api/classes-api";
 import { phaseLabel, phaseVariant } from "../lib/class-labels";
-import { formatFullDate, formatScheduleLabel } from "../lib/roster-format";
+import { formatFullDate, formatScheduleLines } from "../lib/roster-format";
 import type { Class } from "../schemas/roster-schemas";
 
+// Cell padding carries the prototype grid's 8px gap; the outer cells add the row's 18px inset.
 const headCellClassName =
-  "sticky top-0 z-10 bg-cream-200 px-[18px] py-[10px] text-[12px] font-extrabold uppercase tracking-[0.4px] text-ink-500";
-const cellClassName = "border-t border-line-100 px-[18px] py-[11px]";
+  "whitespace-nowrap bg-cream-200 px-1 py-[10px] text-[11.5px] font-extrabold uppercase tracking-[0.4px] text-ink-500 first:pl-[18px] last:pr-[18px]";
+const cellClassName = "border-t border-line-100 px-1 py-3 first:pl-[18px] last:pr-[18px]";
+const actionClassName =
+  "rounded-[10px] border-[1.5px] border-line-200 px-2.5 py-[5px] text-[12px] font-extrabold";
+
+/** Session dot per shift: morning mint, afternoon sun, evening sky. */
+const shiftDotClassName: Record<ClassShift, string> = {
+  morning: "bg-mint-400",
+  afternoon: "bg-sun-400",
+  evening: "bg-sky-400",
+};
 
 interface ClassTableProps {
   classes: Class[];
@@ -18,103 +29,168 @@ interface ClassTableProps {
   onOpen: (klass: Class) => void;
   onEdit?: (klass: Class) => void;
   canEdit?: (klass: Class) => boolean;
+  /** Shown in place of the rows when `classes` is empty. */
+  emptyLabel?: string;
 }
 
 /**
- * The class catalog table. The whole row opens the detail; the trailing
- * "Sửa" action opens the edit dialog and stops the row click.
+ * The class catalog table (prototype "Danh sách lớp học"). The whole row
+ * opens the detail; the trailing "Sửa" / "Mở" actions stop the row click.
  */
-export function ClassTable({ classes, today, onOpen, onEdit, canEdit }: ClassTableProps) {
+export function ClassTable({
+  classes,
+  today,
+  onOpen,
+  onEdit,
+  canEdit,
+  emptyLabel,
+}: ClassTableProps) {
   return (
-    <div className="overflow-x-auto rounded-[var(--radius-lg)] border border-line-200 bg-white">
-      <table className="w-full min-w-[880px] border-collapse text-left text-[14px]">
+    <div className="overflow-x-auto rounded-[20px] bg-white shadow-soft-md">
+      <table className="w-full min-w-[980px] table-fixed border-collapse text-left text-[13.5px]">
+        <colgroup>
+          <col className="w-[62px]" />
+          <col className="w-[26%]" />
+          <col className="w-[24%]" />
+          <col className="w-[11%]" />
+          <col className="w-[13%]" />
+          <col className="w-[13%]" />
+          <col className="w-[13%]" />
+          <col className="w-[138px]" />
+        </colgroup>
         <thead>
           <tr>
-            <th className={headCellClassName}>Lớp</th>
-            <th className={headCellClassName}>Mã lớp</th>
-            <th className={headCellClassName}>Khóa học</th>
+            <th className={headCellClassName}>STT</th>
+            <th className={headCellClassName}>Lớp học</th>
             <th className={headCellClassName}>Lịch học</th>
-            <th className={headCellClassName}>Thẻ</th>
+            <th className={headCellClassName}>Gắn thẻ</th>
             <th className={headCellClassName}>Trạng thái</th>
-            <th className={headCellClassName}>Khai giảng</th>
-            <th className={headCellClassName}>Kết thúc</th>
+            <th className={headCellClassName}>Ngày bắt đầu</th>
+            <th className={headCellClassName}>Ngày kết thúc</th>
             <th className={headCellClassName}>
               <span className="sr-only">Thao tác</span>
             </th>
           </tr>
         </thead>
         <tbody>
-          {classes.map((klass) => (
-            <tr
-              key={klass.id}
-              onClick={() => onOpen(klass)}
-              className="cursor-pointer transition-colors hover:bg-cream-100"
-            >
-              <td className={cn(cellClassName, "font-extrabold text-ink-900")}>
-                <Link
-                  to={`/classes/${klass.id}`}
-                  onClick={(event) => event.stopPropagation()}
-                  className="hover:text-mint-600"
-                >
-                  {klass.name}
-                </Link>
-              </td>
-              <td className={cn(cellClassName, "font-mono text-[13px] text-ink-700")}>
-                {klass.code || "—"}
-              </td>
-              <td className={cellClassName}>
-                {klass.course ? (
-                  <HvBadge variant="info" size="sm" title={klass.course.name}>
-                    {klass.course.code}
-                  </HvBadge>
-                ) : (
-                  <span className="text-ink-400">—</span>
-                )}
-              </td>
-              <td className={cn(cellClassName, "text-ink-500")}>
-                {formatScheduleLabel(klass.schedules, today) || "Chưa có lịch"}
-              </td>
-              <td className={cellClassName}>
-                {klass.tags.length === 0 ? (
-                  <span className="text-ink-400">Chưa có thẻ</span>
-                ) : (
-                  <div className="flex flex-wrap gap-1">
-                    {klass.tags.map((tag) => (
-                      <HvBadge key={tag} variant="neutral" size="sm">
-                        {tag}
-                      </HvBadge>
-                    ))}
-                  </div>
-                )}
-              </td>
-              <td className={cellClassName}>
-                <HvBadge variant={phaseVariant[klass.phase]} size="sm" dot>
-                  {phaseLabel[klass.phase]}
-                </HvBadge>
-              </td>
-              <td className={cn(cellClassName, "text-ink-500")}>
-                {formatFullDate(klass.start_date)}
-              </td>
-              <td className={cn(cellClassName, "text-ink-500")}>
-                {klass.end_date ? formatFullDate(klass.end_date) : "—"}
-              </td>
-              <td className={cn(cellClassName, "text-right")}>
-                {onEdit && (!canEdit || canEdit(klass)) ? (
-                  <button
-                    type="button"
-                    aria-label={`Sửa lớp ${klass.name}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onEdit(klass);
-                    }}
-                    className="font-display text-[13px] font-bold text-mint-600 hover:underline"
-                  >
-                    Sửa
-                  </button>
-                ) : null}
+          {classes.length === 0 && emptyLabel ? (
+            <tr>
+              <td
+                colSpan={8}
+                className="border-t border-line-100 p-[34px] text-center font-bold text-ink-400"
+              >
+                {emptyLabel}
               </td>
             </tr>
-          ))}
+          ) : null}
+          {classes.map((klass, index) => {
+            const lines = formatScheduleLines(klass.schedules, today);
+            const courseLine = [klass.course?.name, klass.code].filter(Boolean).join(" · ");
+            return (
+              <tr
+                key={klass.id}
+                onClick={() => onOpen(klass)}
+                className="cursor-pointer align-middle transition-colors hover:bg-cream-100"
+              >
+                <td className={cn(cellClassName, "font-extrabold text-ink-400")}>{index + 1}</td>
+                <td className={cellClassName}>
+                  <Link
+                    to={`/classes/${klass.id}`}
+                    onClick={(event) => event.stopPropagation()}
+                    className="font-extrabold text-ink-900 hover:text-mint-600"
+                  >
+                    {klass.name}
+                  </Link>
+                  {courseLine ? (
+                    <div title={courseLine} className="mt-0.5 truncate text-[12px] text-ink-400">
+                      {courseLine}
+                    </div>
+                  ) : null}
+                </td>
+                <td className={cellClassName}>
+                  {lines.length === 0 ? (
+                    <span className="font-bold text-ink-300">Chưa có lịch</span>
+                  ) : (
+                    <div className="flex flex-col gap-1">
+                      {lines.map((line) => (
+                        <div
+                          key={line.key}
+                          className="flex items-center gap-2 text-[13px] text-ink-700"
+                        >
+                          <span
+                            aria-hidden="true"
+                            className={cn(
+                              "size-1.5 shrink-0 rounded-full",
+                              shiftDotClassName[line.shift],
+                            )}
+                          />
+                          {line.text}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </td>
+                <td className={cellClassName}>
+                  {klass.tags.length === 0 ? (
+                    <span className="text-ink-300">-</span>
+                  ) : (
+                    <div className="flex flex-wrap gap-1">
+                      {klass.tags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="rounded-[8px] bg-sky-50 px-2 py-0.5 text-[11.5px] font-extrabold text-sky-600"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </td>
+                <td className={cellClassName}>
+                  <HvBadge variant={phaseVariant[klass.phase]} size="sm">
+                    {phaseLabel[klass.phase]}
+                  </HvBadge>
+                </td>
+                <td className={cn(cellClassName, "text-ink-700")}>
+                  {formatFullDate(klass.start_date)}
+                </td>
+                <td className={cn(cellClassName, "text-ink-700")}>
+                  {klass.end_date ? formatFullDate(klass.end_date) : "—"}
+                </td>
+                <td className={cellClassName}>
+                  <div className="flex justify-end gap-1">
+                    {onEdit && (!canEdit || canEdit(klass)) ? (
+                      <button
+                        type="button"
+                        aria-label={`Sửa lớp ${klass.name}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onEdit(klass);
+                        }}
+                        className={cn(
+                          actionClassName,
+                          "text-ink-500 hover:border-mint-400 hover:text-mint-600",
+                        )}
+                      >
+                        Sửa
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      aria-label={`Mở lớp ${klass.name}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onOpen(klass);
+                      }}
+                      className={cn(actionClassName, "text-sky-500 hover:border-sky-300")}
+                    >
+                      Mở
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

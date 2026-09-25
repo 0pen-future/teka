@@ -47,6 +47,9 @@ export const fixtureClass: Class = {
   course: null,
   parent_class_id: null,
   lineage_note: null,
+  room: "",
+  study_mode: "scheduled",
+  next_class_id: null,
 };
 
 function buildRosterTemplate(): AttendanceRow[] {

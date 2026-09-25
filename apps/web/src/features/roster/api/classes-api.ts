@@ -2,12 +2,14 @@ import { apiClient } from "@/lib/api/client";
 import { parseData, parseList, type Paginated } from "@/lib/api/envelope";
 
 import {
+  classAvailabilitySchema,
   classSchema,
   classStatsSchema,
   courseOptionSchema,
   reassignTeacherResponseSchema,
   scheduleSchema,
   type Class,
+  type ClassAvailability,
   type ClassCreateInput,
   type ClassPhase,
   type ClassStats,
@@ -33,6 +35,8 @@ export interface ListClassesParams {
   tag?: string;
   /** Only the classes attached to this course. */
   course_id?: string;
+  /** Only the classes open for recruitment: the flag is on and the class has not ended or been archived. */
+  recruiting?: boolean;
   page?: number;
   per_page?: number;
   sort?: string;
@@ -56,10 +60,33 @@ export async function listCourseOptions(): Promise<CourseOption[]> {
   return parseList(courseOptionSchema, res.data).items;
 }
 
+export interface ClassStatsParams {
+  /** Count only the classes open for recruitment, the same set as the list's `recruiting` filter. */
+  recruiting?: boolean;
+}
+
 /** `GET /classes/stats` — per-phase counts over the classes the caller can read. */
-export async function getClassStats(): Promise<ClassStats> {
-  const res = await apiClient.get<unknown>("/classes/stats");
+export async function getClassStats(params: ClassStatsParams = {}): Promise<ClassStats> {
+  const res = await apiClient.get<unknown>("/classes/stats", { params });
   return parseData(classStatsSchema, res.data);
+}
+
+/**
+ * `GET /classes/availability` — the center's rooms and members, each flagged
+ * free unless another live class meets in an overlapping weekly slot. With
+ * no slots everything is free, which doubles as the room list.
+ */
+export async function getClassAvailability(
+  slots: { weekday: number; start_time: string; duration_min: number }[],
+  excludeClassId?: string,
+): Promise<ClassAvailability> {
+  const params = new URLSearchParams();
+  for (const slot of slots) {
+    params.append("slot", `${slot.weekday}-${slot.start_time}-${slot.duration_min}`);
+  }
+  if (excludeClassId) params.set("exclude_class_id", excludeClassId);
+  const res = await apiClient.get<unknown>("/classes/availability", { params });
+  return parseData(classAvailabilitySchema, res.data);
 }
 
 export async function getClass(id: string): Promise<Class> {

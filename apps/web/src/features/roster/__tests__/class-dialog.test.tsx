@@ -10,7 +10,6 @@ import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils"
 
 import { ClassDialog } from "../components/class-dialog";
 import {
-  classSchedule,
   classWithSchedule,
   courseOptionToan,
   getRosterStore,
@@ -68,87 +67,6 @@ describe("ClassDialog", () => {
       expect(await screen.findByText("Không tìm thấy lớp")).toBeInTheDocument();
       await user.click(screen.getByRole("button", { name: "Đóng" }));
       expect(onOpenChange).toHaveBeenCalledWith(false);
-    });
-
-    it("prefills the existing name and timetable", async () => {
-      renderEditDialog();
-      const dialog = await screen.findByRole("dialog", { name: "Sửa lớp học" });
-      expect(await within(dialog).findByLabelText("Tên lớp")).toHaveValue(classWithSchedule.name);
-      expect(within(dialog).getByLabelText("Giờ học khung 1")).toHaveValue("18:00");
-      await waitFor(() =>
-        expect(within(dialog).getByRole("button", { name: "T3" })).toHaveAttribute(
-          "aria-pressed",
-          "true",
-        ),
-      );
-    });
-
-    it("saves the changed timetable without deleting the replaced historical row", async () => {
-      const user = userEvent.setup();
-      const onOpenChange = vi.fn();
-      renderEditDialog(onOpenChange);
-      const time = await screen.findByLabelText("Giờ học khung 1");
-      await waitFor(() =>
-        expect(screen.getByRole("button", { name: "T3" })).toHaveAttribute("aria-pressed", "true"),
-      );
-      await user.clear(time);
-      await user.type(time, "19:30");
-      await user.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
-      await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
-      const schedules = getRosterStore().classes[0]!.schedules;
-      expect(schedules).toHaveLength(2);
-      expect(schedules.find((s) => s.id === classSchedule.id)?.effective_to).not.toBeNull();
-      expect(schedules.find((s) => s.id !== classSchedule.id)?.start_time).toBe("19:30");
-    });
-
-    it("skips PUT for schedule-only edits and adds before closing the old row", async () => {
-      const user = userEvent.setup();
-      const requests: string[] = [];
-      const onRequest = ({ request }: { request: Request }) => {
-        if (request.url.includes(`/classes/${classWithSchedule.id}`) && request.method !== "GET") {
-          requests.push(`${request.method} ${new URL(request.url).pathname}`);
-        }
-      };
-      server.events.on("request:start", onRequest);
-      try {
-        const onOpenChange = vi.fn();
-        renderEditDialog(onOpenChange);
-        const time = await screen.findByLabelText("Giờ học khung 1");
-        await waitFor(() =>
-          expect(screen.getByRole("button", { name: "T3" })).toHaveAttribute(
-            "aria-pressed",
-            "true",
-          ),
-        );
-        await user.clear(time);
-        await user.type(time, "19:30");
-        await user.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
-        await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
-        expect(requests).toEqual([
-          `POST /api/v1/classes/${classWithSchedule.id}/schedules`,
-          `PUT /api/v1/classes/${classWithSchedule.id}/schedules/${classSchedule.id}`,
-        ]);
-      } finally {
-        server.events.removeListener("request:start", onRequest);
-      }
-    });
-
-    it("keeps the dialog open when a later schedule write fails", async () => {
-      const user = userEvent.setup();
-      const onOpenChange = vi.fn();
-      server.use(
-        http.post(`${API_URL}/classes/:id/schedules`, () =>
-          HttpResponse.json(fail("INTERNAL", "schedule failed"), { status: 500 }),
-        ),
-      );
-      renderEditDialog(onOpenChange);
-      const name = await screen.findByLabelText("Tên lớp");
-      await user.clear(name);
-      await user.type(name, "Toán 6A mới");
-      await user.click(screen.getByRole("button", { name: "T7" }));
-      await user.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
-      expect(await screen.findByText(/Chỉ lưu được một phần thay đổi/)).toBeInTheDocument();
-      expect(onOpenChange).not.toHaveBeenCalled();
     });
   });
 
