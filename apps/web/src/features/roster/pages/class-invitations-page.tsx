@@ -25,9 +25,23 @@ import {
 } from "../lib/class-invitation-labels";
 import type { ClassInvitation } from "../schemas/roster-schemas";
 
+// Same grid as the class table: the prototype's 8px gap as cell padding, 18px row inset.
 const headCellClassName =
-  "sticky top-0 z-10 bg-cream-200 px-[18px] py-[10px] text-[12px] font-extrabold uppercase tracking-[0.4px] text-ink-500";
-const cellClassName = "border-t border-line-100 px-[18px] py-[11px] align-middle";
+  "whitespace-nowrap bg-cream-200 px-1 py-[10px] text-[11.5px] font-extrabold uppercase tracking-[0.4px] text-ink-500 first:pl-[18px] last:pr-[18px]";
+const cellClassName =
+  "border-t border-line-100 px-1 py-[11px] align-middle first:pl-[18px] last:pr-[18px]";
+const actionClassName =
+  "rounded-[10px] px-2.5 py-[5px] text-[12px] font-extrabold disabled:cursor-not-allowed disabled:opacity-50";
+const primaryActionClassName = cn(actionClassName, "bg-mint-50 text-mint-600 hover:bg-mint-100");
+const outlineActionClassName = cn(actionClassName, "border-[1.5px] border-line-200");
+const neutralActionClassName = cn(
+  outlineActionClassName,
+  "text-ink-500 hover:border-sky-300 hover:text-sky-500",
+);
+const dangerActionClassName = cn(
+  outlineActionClassName,
+  "text-coral-500 hover:border-coral-300 hover:bg-coral-100",
+);
 
 function apiMessage(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
@@ -72,9 +86,7 @@ export function ClassInvitationsPage() {
       <div>
         <h1 className="font-display text-[26px] font-extrabold text-ink-900">Lời mời nhận lớp</h1>
         <p className="mt-1 text-[14px] text-ink-500">
-          {isOwner
-            ? "Theo dõi lời mời đã gửi; phân công khi giáo viên đã đồng ý."
-            : "Lời mời tham gia lớp gửi đến bạn. Chấp nhận để chủ trung tâm phân công."}
+          Giáo viên được mời vào lớp phải xác nhận trước khi xuất hiện trong Đội ngũ giảng dạy.
         </p>
       </div>
 
@@ -107,56 +119,74 @@ export function ClassInvitationsPage() {
             </HvButton>
           }
         />
-      ) : rows.length === 0 ? (
-        <HvStateBlock
-          state="empty"
-          title={
-            all.length === 0 ? "Chưa có lời mời nào." : "Không có lời mời nào ở trạng thái này."
-          }
-          description={
-            all.length === 0 && isOwner
-              ? "Mời giáo viên từ mục Đội ngũ giảng dạy của một lớp."
-              : undefined
-          }
-        />
       ) : (
-        <div className="overflow-x-auto rounded-[var(--radius-lg)] border border-line-200 bg-white">
-          <table className="w-full min-w-[880px] border-collapse text-left text-[14px]">
+        <div className="overflow-x-auto rounded-[20px] bg-white shadow-soft-md">
+          <table className="w-full min-w-[820px] table-fixed border-collapse text-left text-[13.5px]">
+            <colgroup>
+              <col className="w-[62px]" />
+              <col className="w-[30%]" />
+              <col className="w-[21%]" />
+              <col className="w-[15%]" />
+              <col className="w-[15%]" />
+              <col className="w-[238px]" />
+            </colgroup>
             <thead>
               <tr>
-                <th className={headCellClassName}>Lớp</th>
-                <th className={headCellClassName}>GV</th>
-                <th className={headCellClassName}>Vai trò</th>
+                <th className={headCellClassName}>STT</th>
+                <th className={headCellClassName}>Lớp học</th>
+                <th className={headCellClassName}>Giáo viên</th>
                 <th className={headCellClassName}>Gửi lúc</th>
                 <th className={headCellClassName}>Trạng thái</th>
-                <th className={cn(headCellClassName, "text-right")}>
+                <th className={headCellClassName}>
                   <span className="sr-only">Thao tác</span>
                 </th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((item) => {
+              {rows.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={6}
+                    className="border-t border-line-100 p-[34px] text-center font-bold text-ink-400"
+                  >
+                    Không có lời mời nào.
+                  </td>
+                </tr>
+              ) : null}
+              {rows.map((item, index) => {
                 const busy = busyId === item.id;
+                const open = item.status === "pending" || item.status === "accepted";
                 return (
-                  <tr key={item.id}>
-                    <td className={cn(cellClassName, "font-extrabold text-ink-900")}>
+                  <tr key={item.id} className="transition-colors hover:bg-cream-100">
+                    <td className={cn(cellClassName, "font-extrabold text-ink-400")}>
+                      {index + 1}
+                    </td>
+                    <td className={cellClassName}>
                       {isOwner || item.status === "assigned" ? (
-                        <Link to={`/classes/${item.class_id}`} className="hover:text-mint-600">
+                        <Link
+                          to={`/classes/${item.class_id}`}
+                          className="font-extrabold text-ink-900 hover:text-sky-500"
+                        >
                           {item.class_name}
                         </Link>
                       ) : (
                         // The class detail is own-rows for members: until the
                         // stint exists the invitee has nothing to open there.
-                        item.class_name
+                        <span className="font-extrabold text-ink-900">{item.class_name}</span>
                       )}
+                      <div className="truncate text-[12px] text-ink-400">
+                        {item.course_name ?? "Chưa gắn khóa"}
+                      </div>
                       {item.message ? (
-                        <p className="mt-0.5 text-[12px] font-normal text-ink-500">
-                          {item.message}
-                        </p>
+                        <div className="mt-0.5 text-[12px] italic text-ink-500">
+                          “{item.message}”
+                        </div>
                       ) : null}
                     </td>
-                    <td className={cn(cellClassName, "text-ink-900")}>{item.teacher_name}</td>
-                    <td className={cn(cellClassName, "text-ink-700")}>{item.role_label}</td>
+                    <td className={cellClassName}>
+                      <div className="font-bold text-ink-900">{item.teacher_name}</div>
+                      <div className="text-[12px] text-ink-400">{item.role_label}</div>
+                    </td>
                     <td className={cn(cellClassName, "text-ink-500")}>
                       {formatDateTime(item.sent_at)}
                       {item.reminded_at ? (
@@ -170,14 +200,22 @@ export function ClassInvitationsPage() {
                         {invitationStatusLabel[item.status]}
                       </HvBadge>
                     </td>
-                    <td className={cn(cellClassName, "text-right")}>
+                    <td className={cellClassName}>
                       <div className="flex flex-wrap justify-end gap-1">
-                        {isOwner ? (
+                        {isOwner && open ? (
                           <>
+                            <button
+                              type="button"
+                              className={primaryActionClassName}
+                              disabled={busy}
+                              onClick={() => setConfirming(item)}
+                            >
+                              {item.role_key === "giao_vien" ? "GV nhận lớp" : "Phân công"}
+                            </button>
                             {item.status === "pending" ? (
-                              <HvButton
-                                size="sm"
-                                variant="ghost"
+                              <button
+                                type="button"
+                                className={neutralActionClassName}
                                 disabled={busy}
                                 onClick={() =>
                                   run(
@@ -189,47 +227,23 @@ export function ClassInvitationsPage() {
                                 }
                               >
                                 Nhắc lại
-                              </HvButton>
+                              </button>
                             ) : null}
-                            {item.status === "pending" || item.status === "accepted" ? (
-                              <>
-                                <HvButton
-                                  size="sm"
-                                  variant="ghost"
-                                  disabled={busy}
-                                  onClick={() => setCancelling(item)}
-                                >
-                                  Hủy
-                                </HvButton>
-                                <HvButton
-                                  size="sm"
-                                  disabled={busy}
-                                  onClick={() => setConfirming(item)}
-                                >
-                                  {item.role_key === "giao_vien" ? "GV nhận lớp" : "Phân công"}
-                                </HvButton>
-                              </>
-                            ) : null}
-                          </>
-                        ) : item.status === "pending" ? (
-                          <>
-                            <HvButton
-                              size="sm"
-                              variant="ghost"
+                            <button
+                              type="button"
+                              className={dangerActionClassName}
                               disabled={busy}
-                              onClick={() =>
-                                run(
-                                  decline,
-                                  item,
-                                  `Đã từ chối lời mời lớp ${item.class_name}`,
-                                  "Không từ chối được.",
-                                )
-                              }
+                              onClick={() => setCancelling(item)}
                             >
-                              Từ chối
-                            </HvButton>
-                            <HvButton
-                              size="sm"
+                              Hủy
+                            </button>
+                          </>
+                        ) : null}
+                        {!isOwner && item.status === "pending" ? (
+                          <>
+                            <button
+                              type="button"
+                              className={primaryActionClassName}
                               disabled={busy}
                               onClick={() =>
                                 run(
@@ -241,7 +255,22 @@ export function ClassInvitationsPage() {
                               }
                             >
                               Chấp nhận
-                            </HvButton>
+                            </button>
+                            <button
+                              type="button"
+                              className={dangerActionClassName}
+                              disabled={busy}
+                              onClick={() =>
+                                run(
+                                  decline,
+                                  item,
+                                  `Đã từ chối lời mời lớp ${item.class_name}`,
+                                  "Không từ chối được.",
+                                )
+                              }
+                            >
+                              Từ chối
+                            </button>
                           </>
                         ) : null}
                       </div>

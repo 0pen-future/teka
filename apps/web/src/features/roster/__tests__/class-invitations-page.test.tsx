@@ -56,7 +56,8 @@ describe("ClassInvitationsPage as the invited member", () => {
     const pending = await screen.findByRole("row", { name: /Cô Hương/ });
     expect(within(pending).getByText("Toán 6A")).toBeInTheDocument();
     expect(within(pending).getByText("Trợ giảng")).toBeInTheDocument();
-    expect(within(pending).getByText("Đang chờ")).toBeInTheDocument();
+    expect(within(pending).getByText("Chờ xác nhận")).toBeInTheDocument();
+    expect(within(pending).getByText("Chưa gắn khóa")).toBeInTheDocument();
     expect(within(pending).getByRole("button", { name: "Chấp nhận" })).toBeInTheDocument();
     expect(within(pending).getByRole("button", { name: "Từ chối" })).toBeInTheDocument();
 
@@ -110,18 +111,56 @@ describe("ClassInvitationsPage as the invited member", () => {
     expect(within(chips).getByRole("radio", { name: /Tất cả/ })).toHaveTextContent("3");
     expect(within(chips).getByRole("radio", { name: /Đã nhận/ })).toHaveTextContent("1");
 
-    await user.click(within(chips).getByRole("radio", { name: /Đã từ chối/ }));
+    await user.click(within(chips).getByRole("radio", { name: /Từ chối/ }));
 
     expect(screen.getAllByRole("row")).toHaveLength(2); // header + one declined row
     expect(screen.getByText("Học vụ")).toBeInTheDocument();
     expect(screen.queryByText("Trợ giảng")).not.toBeInTheDocument();
   });
 
+  it("renders the prototype layout: subtitle, numbered columns and the class's course", async () => {
+    getRosterStore().classInvitations[0] = {
+      ...getRosterStore().classInvitations[0]!,
+      course_name: "Toán 6 nâng cao",
+    };
+    renderWithProviders(<ClassInvitationsPage />);
+
+    expect(
+      await screen.findByText(
+        "Giáo viên được mời vào lớp phải xác nhận trước khi xuất hiện trong Đội ngũ giảng dạy.",
+      ),
+    ).toBeInTheDocument();
+    const first = await screen.findByRole("row", { name: /Cô Hương/ });
+    const headers = screen.getAllByRole("columnheader").map((cell) => cell.textContent);
+    expect(headers).toEqual(["STT", "Lớp học", "Giáo viên", "Gửi lúc", "Trạng thái", "Thao tác"]);
+    expect(within(first).getByText("1")).toBeInTheDocument();
+    expect(within(first).getByText("Toán 6 nâng cao")).toBeInTheDocument();
+  });
+
+  it("offers only the prototype's four chips and keeps cancelled rows under Tất cả", async () => {
+    const store = getRosterStore();
+    store.classInvitations[2] = { ...store.classInvitations[2]!, status: "cancelled" };
+    const user = userEvent.setup();
+    renderWithProviders(<ClassInvitationsPage />);
+    await screen.findByRole("row", { name: /Cô Hoa/ });
+
+    const chips = screen.getByRole("radiogroup", { name: "Lọc theo trạng thái" });
+    expect(
+      within(chips)
+        .getAllByRole("radio")
+        .map((chip) => chip.firstChild?.textContent),
+    ).toEqual(["Tất cả", "Chờ xác nhận", "Đã nhận", "Từ chối"]);
+    expect(within(rowOf("Cô Hoa")).getByText("Đã hủy")).toBeInTheDocument();
+
+    await user.click(within(chips).getByRole("radio", { name: /Từ chối/ }));
+    expect(await screen.findByText("Không có lời mời nào.")).toBeInTheDocument();
+  });
+
   it("shows the empty state when nothing was ever sent", async () => {
     getRosterStore().classInvitations = [];
     renderWithProviders(<ClassInvitationsPage />);
 
-    expect(await screen.findByText("Chưa có lời mời nào.")).toBeInTheDocument();
+    expect(await screen.findByText("Không có lời mời nào.")).toBeInTheDocument();
   });
 });
 
@@ -152,6 +191,25 @@ describe("ClassInvitationsPage as the owner", () => {
     });
   });
 
+  it("orders owner actions as in the prototype: nhận lớp, nhắc lại, hủy", async () => {
+    renderWithProviders(<ClassInvitationsPage />);
+    const pending = await screen.findByRole("row", { name: /Cô Hương/ });
+
+    expect(
+      within(pending)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Phân công", "Nhắc lại", "Hủy"]);
+    // Once the invitee said yes there is nothing left to remind.
+    expect(
+      within(rowOf("Thầy Nam"))
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["GV nhận lớp", "Hủy"]);
+    // Finished rows carry no actions.
+    expect(within(rowOf("Cô Hoa")).queryByRole("button")).not.toBeInTheDocument();
+  });
+
   it("confirming an accepted giao_vien invite names the replaced teacher and hands the class over", async () => {
     const user = userEvent.setup();
     const { queryClient } = renderWithProviders(<ClassInvitationsPage />);
@@ -168,7 +226,7 @@ describe("ClassInvitationsPage as the owner", () => {
       await screen.findByText("Thầy Nam đã nhận lớp Toán 6A · chuyển 2 buổi sắp tới"),
     ).toBeInTheDocument();
     await waitFor(() => {
-      expect(within(rowOf("Thầy Nam")).getByText("Đã phân công")).toBeInTheDocument();
+      expect(within(rowOf("Thầy Nam")).getByText("Đã nhận lớp")).toBeInTheDocument();
     });
     const store = getRosterStore();
     expect(

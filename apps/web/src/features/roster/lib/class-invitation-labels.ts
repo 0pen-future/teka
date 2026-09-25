@@ -2,38 +2,43 @@ import type { HvBadgeVariant } from "@/components/hv";
 
 import type { ClassInvitationStatus } from "../schemas/roster-schemas";
 
-/** Row badge copy per invitation status. */
+/**
+ * Row badge copy per invitation status. The prototype knows four states
+ * (chờ / nhận / từ chối / hủy); the API adds `accepted` — the invitee said
+ * yes but the owner has not written the stint yet — which keeps its own
+ * sky badge so the owner can tell it from a finished `assigned` row.
+ */
 export const invitationStatusLabel: Record<ClassInvitationStatus, string> = {
-  pending: "Đang chờ",
+  pending: "Chờ xác nhận",
   accepted: "Đã đồng ý",
   declined: "Đã từ chối",
   cancelled: "Đã hủy",
-  assigned: "Đã phân công",
+  assigned: "Đã nhận lớp",
 };
 
 export const invitationStatusVariant: Record<ClassInvitationStatus, HvBadgeVariant> = {
   pending: "warning",
   accepted: "info",
-  declined: "neutral",
+  declined: "danger",
   cancelled: "neutral",
   assigned: "success",
 };
 
 /**
- * The filter strip's buckets. "Đã nhận" folds accepted and assigned together:
- * to the invitee both mean "I said yes", and the row badge still tells the
- * owner which of the two a row is in.
+ * The filter strip's buckets, as in the prototype: cancelled rows only show
+ * under "Tất cả". "Đã nhận" folds accepted and assigned together: to the
+ * invitee both mean "I said yes", and the row badge still tells the owner
+ * which of the two a row is in.
  */
-export const invitationViews = ["all", "pending", "received", "declined", "cancelled"] as const;
+export const invitationViews = ["all", "pending", "received", "declined"] as const;
 
 export type InvitationView = (typeof invitationViews)[number];
 
 export const invitationViewLabel: Record<InvitationView, string> = {
   all: "Tất cả",
-  pending: "Đang chờ",
+  pending: "Chờ xác nhận",
   received: "Đã nhận",
-  declined: "Đã từ chối",
-  cancelled: "Đã hủy",
+  declined: "Từ chối",
 };
 
 export function invitationInView(status: ClassInvitationStatus, view: InvitationView): boolean {

@@ -38,7 +38,7 @@ function invitationRow(page: Page, status: string) {
 async function cancelOpenInvitations(page: Page) {
   await page.goto("/class-invitations");
   await expect(page.getByRole("heading", { name: "Lời mời nhận lớp" })).toBeVisible();
-  for (const status of ["Đang chờ", "Đã đồng ý"]) {
+  for (const status of ["Chờ xác nhận", "Đã đồng ý"]) {
     while ((await invitationRow(page, status).count()) > 0) {
       await invitationRow(page, status).first().getByRole("button", { name: "Hủy" }).click();
       await page.getByRole("button", { name: "Hủy lời mời" }).click();
@@ -118,7 +118,7 @@ test("owner invites a member, the member accepts, and the owner confirms the han
   const member = await memberContext.newPage();
   await loginAsMember(member);
   await member.goto("/class-invitations");
-  const pending = invitationRow(member, "Đang chờ");
+  const pending = invitationRow(member, "Chờ xác nhận");
   await expect(pending).toHaveCount(1);
   await expect(pending).toContainText("Nhờ thầy nhận lớp Văn 9 giúp nhé.");
   await pending.getByRole("button", { name: "Chấp nhận" }).click();
@@ -142,7 +142,7 @@ test("owner invites a member, the member accepts, and the owner confirms the han
       new RegExp(`${MEMBER_NAME} đã nhận lớp ${INVITE_CLASS} · chuyển \\d+ buổi sắp tới`),
     ),
   ).toBeVisible();
-  await expect(invitationRow(owner, "Đã phân công")).toHaveCount(1);
+  await expect(invitationRow(owner, "Đã nhận lớp")).toHaveCount(1);
 
   // The teaching team on the class detail now lists Thầy Minh as giáo viên.
   await owner.goto(`/classes/${classId}`);
