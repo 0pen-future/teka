@@ -37,12 +37,6 @@ type fakeRepo struct {
 	locks int
 	// inUse marks templates a class applies (class_programs rows).
 	inUse map[uuid.UUID]bool
-	// members maps live center members to their display name, standing in
-	// for the center_members/teachers join the assignment code relies on.
-	members map[uuid.UUID]string
-	// lastPrepFields is the fields map the last UpdateLessonPrep call
-	// received, so a test can assert an omitted field never reached it.
-	lastPrepFields map[string]any
 	// versionClasses stands in for the class_programs join, keyed by
 	// version id; empty unless a test populates it.
 	versionClasses map[uuid.UUID][]VersionClassRef
@@ -63,7 +57,6 @@ func newFakeRepo() *fakeRepo {
 		logFields:       map[uuid.UUID][]LogField{},
 		groups:          map[uuid.UUID]*ExerciseGroup{},
 		inUse:           map[uuid.UUID]bool{},
-		members:         map[uuid.UUID]string{},
 		versionClasses:  map[uuid.UUID][]VersionClassRef{},
 	}
 }
@@ -103,23 +96,6 @@ func (f *fakeRepo) summary(t *Template) *TemplateRow {
 			row.DraftVersionNo = &n
 			id := v.ID
 			row.DraftVersionID = &id
-			seen := map[string]bool{}
-			for _, l := range f.lessons {
-				if l.VersionID != v.ID {
-					continue
-				}
-				row.DraftLessonCount++
-				if l.PrepStatus == PrepDone {
-					row.DraftDoneCount++
-				}
-				if l.AssigneeID != nil {
-					if name, ok := f.members[*l.AssigneeID]; ok && !seen[name] {
-						seen[name] = true
-						row.DraftAssignees = append(row.DraftAssignees, name)
-					}
-				}
-			}
-			sort.Strings(row.DraftAssignees)
 		}
 	}
 	// lesson_count mirrors the SQL: the newest published version's lessons
@@ -381,12 +357,6 @@ func (f *fakeRepo) CreateLessons(_ context.Context, sc authctx.Scope, rows []*Le
 	for _, l := range rows {
 		l.ID, l.CenterID = uuid.New(), sc.CenterID
 		l.CreatedAt, l.UpdatedAt = nowUTC(), nowUTC()
-		if l.PrepStatus == "" {
-			l.PrepStatus = PrepTodo
-		}
-		if l.Checklist == nil {
-			l.Checklist = Checklist{}
-		}
 		cp := *l
 		f.lessons[l.ID] = &cp
 	}
@@ -435,73 +405,6 @@ func (f *fakeRepo) SetPositions(_ context.Context, sc authctx.Scope, versionID u
 		l.Position = i + 1
 	}
 	return nil
-}
-
-// UpdateLessonPrep applies only the given fields, exactly like the real
-// repository's `Updates(fields)`, and records the last fields map it
-// received so a test can assert a partial PATCH never carries the field it
-// left out.
-func (f *fakeRepo) UpdateLessonPrep(_ context.Context, sc authctx.Scope, id uuid.UUID, fields map[string]any) error {
-	cur, ok := f.lessons[id]
-	if !ok || cur.CenterID != sc.CenterID {
-		return ErrNotFound
-	}
-	f.lastPrepFields = fields
-	if v, ok := fields["prep_status"]; ok {
-		cur.PrepStatus = v.(string)
-	}
-	if v, ok := fields["checklist"]; ok {
-		cur.Checklist = append(Checklist{}, v.(Checklist)...)
-	}
-	cur.UpdatedAt = nowUTC()
-	return nil
-}
-
-func (f *fakeRepo) UpdateLessonAssignment(_ context.Context, sc authctx.Scope, l *Lesson) error {
-	cur, ok := f.lessons[l.ID]
-	if !ok || cur.CenterID != sc.CenterID {
-		return ErrNotFound
-	}
-	cur.AssigneeID, cur.DueDate = l.AssigneeID, l.DueDate
-	cur.UpdatedAt = nowUTC()
-	return nil
-}
-
-func (f *fakeRepo) IsLiveMember(_ context.Context, _ authctx.Scope, teacherID uuid.UUID) (bool, error) {
-	_, ok := f.members[teacherID]
-	return ok, nil
-}
-
-func (f *fakeRepo) ListAssignees(_ context.Context, _ authctx.Scope) ([]AssigneeRow, error) {
-	out := make([]AssigneeRow, 0, len(f.members))
-	for id, name := range f.members {
-		out = append(out, AssigneeRow{ID: id, FullName: name})
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].FullName != out[j].FullName {
-			return out[i].FullName < out[j].FullName
-		}
-		return out[i].ID.String() < out[j].ID.String()
-	})
-	return out, nil
-}
-
-func (f *fakeRepo) ListBoardCards(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) ([]BoardCard, error) {
-	rows, err := f.ListLessons(ctx, sc, versionID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]BoardCard, 0, len(rows))
-	for _, l := range rows {
-		card := BoardCard{Lesson: l.Lesson}
-		if l.AssigneeID != nil {
-			if name, ok := f.members[*l.AssigneeID]; ok {
-				card.AssigneeName = str(name)
-			}
-		}
-		out = append(out, card)
-	}
-	return out, nil
 }
 
 // ListVersionClasses reads from versionClasses, empty unless a test
@@ -1279,8 +1182,8 @@ func TestCreateTemplateWithLessonCountSeedsEmptyLessons(t *testing.T) {
 	if d.tx.calls != 1 {
 		t.Errorf("template, first draft and seeded lessons must share one transaction, got %d", d.tx.calls)
 	}
-	if tpl.Prep == nil || tpl.Prep.LessonCount != 8 || tpl.Prep.DoneCount != 0 || len(tpl.Prep.Assignees) != 0 {
-		t.Fatalf("summary must report the seeded draft, got %+v", tpl.Prep)
+	if tpl.LessonCount != 8 {
+		t.Fatalf("summary must report the seeded draft, got %+v", tpl)
 	}
 	draft := draftOf(t, svc, sc, tpl.ID)
 	lessons, err := svc.ListLessons(ctx, sc, draft.ID)
@@ -1289,37 +1192,29 @@ func TestCreateTemplateWithLessonCountSeedsEmptyLessons(t *testing.T) {
 	}
 	for i, l := range lessons {
 		want := "Buổi " + strconv.Itoa(i+1)
-		if l.Position != i+1 || l.Title != want || l.PrepStatus != PrepTodo || l.AssigneeID != nil || l.DueDate != nil || l.Checklist == nil || len(l.Checklist) != 0 {
-			t.Errorf("lesson %d: want %q at position %d, todo, unassigned, empty checklist; got %+v", i, want, i+1, l)
+		if l.Position != i+1 || l.Title != want {
+			t.Errorf("lesson %d: want %q at position %d, got %+v", i, want, i+1, l)
 		}
 	}
 
 	plain := mustTemplate(t, svc, sc, "CT09")
-	if plain.Prep == nil || plain.Prep.LessonCount != 0 {
-		t.Errorf("a template without lesson_count still has an empty draft summary, got %+v", plain.Prep)
+	if plain.LessonCount != 0 {
+		t.Errorf("a template without lesson_count still has an empty draft, got %+v", plain)
 	}
 	if got, err := svc.ListLessons(ctx, sc, draftOf(t, svc, sc, plain.ID).ID); err != nil || len(got) != 0 {
 		t.Errorf("no lesson_count must seed nothing, got %d (%v)", len(got), err)
 	}
 }
 
-func TestListTemplatesHasDraftFilterAndPrepSummary(t *testing.T) {
+func TestListTemplatesHasDraftFilter(t *testing.T) {
 	svc, d := newTestService()
 	ctx := context.Background()
 	sc := d.ownerScope()
-	minh := uuid.New()
-	d.repo.members[minh] = "Thầy Minh"
 
 	withDraft := mustTemplate(t, svc, sc, "CT01")
 	draft := draftOf(t, svc, sc, withDraft.ID)
-	l1 := mustLesson(t, svc, sc, draft.ID, "Buổi 1")
+	mustLesson(t, svc, sc, draft.ID, "Buổi 1")
 	mustLesson(t, svc, sc, draft.ID, "Buổi 2")
-	if _, err := svc.UpdateLessonPrep(ctx, sc, l1.ID, PrepRequest{PrepStatus: str(PrepDone)}); err != nil {
-		t.Fatalf("prep: %v", err)
-	}
-	if _, err := svc.UpdateLessonAssignment(ctx, sc, l1.ID, AssignmentRequest{AssigneeID: &minh}); err != nil {
-		t.Fatalf("assign: %v", err)
-	}
 	published := mustTemplate(t, svc, sc, "CT02")
 	if _, err := svc.Publish(ctx, sc, draftOf(t, svc, sc, published.ID).ID); err != nil {
 		t.Fatalf("publish: %v", err)
@@ -1330,11 +1225,6 @@ func TestListTemplatesHasDraftFilterAndPrepSummary(t *testing.T) {
 	if err != nil || total != 2 || len(all) != 2 {
 		t.Fatalf("unfiltered list: %v total=%d len=%d", err, total, len(all))
 	}
-	for _, row := range all {
-		if row.ID == published.ID && row.Prep != nil {
-			t.Errorf("a template without a draft has no prep summary, got %+v", row.Prep)
-		}
-	}
 	if d.repo.listVersionsForCalls != 1 || d.repo.listVersionsCalls != 0 {
 		t.Errorf("ListTemplates must batch versions in one ListVersionsFor call instead of looping ListVersions per template, got ListVersionsFor=%d ListVersions=%d",
 			d.repo.listVersionsForCalls, d.repo.listVersionsCalls)
@@ -1344,268 +1234,7 @@ func TestListTemplatesHasDraftFilterAndPrepSummary(t *testing.T) {
 	if err != nil || total != 1 || len(drafts) != 1 || drafts[0].ID != withDraft.ID {
 		t.Fatalf("has_draft must keep only templates with an open draft: %v total=%d rows=%+v", err, total, drafts)
 	}
-	prep := drafts[0].Prep
-	if prep == nil || prep.LessonCount != 2 || prep.DoneCount != 1 || len(prep.Assignees) != 1 || prep.Assignees[0] != "Thầy Minh" {
-		t.Errorf("prep summary must count draft lessons, done lessons and assignee names, got %+v", prep)
-	}
-}
-
-func TestPrepUpdatesOnlyOnDraft(t *testing.T) {
-	svc, d := newTestService()
-	ctx := context.Background()
-	sc := d.ownerScope()
-	tpl := mustTemplate(t, svc, sc, "CT01")
-	draft := draftOf(t, svc, sc, tpl.ID)
-	lesson := mustLesson(t, svc, sc, draft.ID, "Buổi 1")
-	d.repo.locks, d.tx.calls = 0, 0
-
-	checklist := []ChecklistItem{{Label: "In phiếu bài tập", Done: true}, {Label: "Soạn slide"}}
-	got, err := svc.UpdateLessonPrep(ctx, d.memberWith(authctx.PermLibraryEdit), lesson.ID, PrepRequest{PrepStatus: str(PrepDoing), Checklist: &checklist})
-	if err != nil {
-		t.Fatalf("prep update: %v", err)
-	}
-	if got.PrepStatus != PrepDoing || len(got.Checklist) != 2 || !got.Checklist[0].Done || got.Checklist[1].Label != "Soạn slide" {
-		t.Errorf("prep update must persist status and checklist, got %+v", got)
-	}
-	if d.repo.locks != 1 || d.tx.calls != 1 {
-		t.Errorf("prep update must lock the version inside one transaction, got locks=%d tx=%d", d.repo.locks, d.tx.calls)
-	}
-
-	// Each field is optional: omitting one keeps its current value.
-	got, err = svc.UpdateLessonPrep(ctx, sc, lesson.ID, PrepRequest{PrepStatus: str(PrepReview)})
-	if err != nil || got.PrepStatus != PrepReview || len(got.Checklist) != 2 {
-		t.Fatalf("status-only update must keep the checklist: %v %+v", err, got)
-	}
-	empty := []ChecklistItem{}
-	got, err = svc.UpdateLessonPrep(ctx, sc, lesson.ID, PrepRequest{Checklist: &empty})
-	if err != nil || got.PrepStatus != PrepReview || got.Checklist == nil || len(got.Checklist) != 0 {
-		t.Fatalf("checklist-only update must keep the status and store an empty list: %v %+v", err, got)
-	}
-	_, err = svc.UpdateLessonPrep(ctx, sc, lesson.ID, PrepRequest{PrepStatus: str("blocked")})
-	requireAppError(t, err, http.StatusUnprocessableEntity, "")
-
-	_, err = svc.UpdateLessonPrep(ctx, d.memberWith(authctx.PermLibraryRead), lesson.ID, PrepRequest{PrepStatus: str(PrepDone)})
-	requireAppError(t, err, http.StatusForbidden, "")
-	_, err = svc.UpdateLessonPrep(ctx, sc, uuid.New(), PrepRequest{PrepStatus: str(PrepDone)})
-	requireAppError(t, err, http.StatusNotFound, "")
-
-	if _, err := svc.Publish(ctx, sc, draft.ID); err != nil {
-		t.Fatalf("publish: %v", err)
-	}
-	_, err = svc.UpdateLessonPrep(ctx, sc, lesson.ID, PrepRequest{PrepStatus: str(PrepDone)})
-	requireAppError(t, err, http.StatusConflict, CodeVersionLocked)
-}
-
-// TestPrepUpdateWritesOnlyGivenFields guards against the lost-update window
-// in prepWrite: it reads the lesson before locking its version, so a write
-// built from that in-memory copy could clobber a field a concurrent request
-// just changed. A status-only PATCH must reach the repository without a
-// checklist key, and a checklist-only PATCH without a prep_status key.
-func TestPrepUpdateWritesOnlyGivenFields(t *testing.T) {
-	svc, d := newTestService()
-	ctx := context.Background()
-	sc := d.ownerScope()
-	tpl := mustTemplate(t, svc, sc, "CT01")
-	draft := draftOf(t, svc, sc, tpl.ID)
-	lesson := mustLesson(t, svc, sc, draft.ID, "Buổi 1")
-
-	if _, err := svc.UpdateLessonPrep(ctx, sc, lesson.ID, PrepRequest{PrepStatus: str(PrepDoing)}); err != nil {
-		t.Fatalf("status-only update: %v", err)
-	}
-	if _, ok := d.repo.lastPrepFields["checklist"]; ok {
-		t.Errorf("a status-only PATCH must not write checklist, got fields %+v", d.repo.lastPrepFields)
-	}
-	if _, ok := d.repo.lastPrepFields["prep_status"]; !ok {
-		t.Errorf("a status-only PATCH must write prep_status, got fields %+v", d.repo.lastPrepFields)
-	}
-
-	checklist := []ChecklistItem{{Label: "Soạn slide"}}
-	if _, err := svc.UpdateLessonPrep(ctx, sc, lesson.ID, PrepRequest{Checklist: &checklist}); err != nil {
-		t.Fatalf("checklist-only update: %v", err)
-	}
-	if _, ok := d.repo.lastPrepFields["prep_status"]; ok {
-		t.Errorf("a checklist-only PATCH must not write prep_status, got fields %+v", d.repo.lastPrepFields)
-	}
-	if _, ok := d.repo.lastPrepFields["checklist"]; !ok {
-		t.Errorf("a checklist-only PATCH must write checklist, got fields %+v", d.repo.lastPrepFields)
-	}
-}
-
-// TestPrepChecklistRejectsBlankLabel proves a whitespace-only label is
-// trimmed and refused, not silently stored as a checked-off item with
-// nothing to read: `binding:"required,min=1"` only checks byte length, so
-// "   " passes it.
-func TestPrepChecklistRejectsBlankLabel(t *testing.T) {
-	svc, d := newTestService()
-	ctx := context.Background()
-	sc := d.ownerScope()
-	tpl := mustTemplate(t, svc, sc, "CT01")
-	draft := draftOf(t, svc, sc, tpl.ID)
-	lesson := mustLesson(t, svc, sc, draft.ID, "Buổi 1")
-
-	blank := []ChecklistItem{{Label: "   "}}
-	_, err := svc.UpdateLessonPrep(ctx, sc, lesson.ID, PrepRequest{Checklist: &blank})
-	requireAppError(t, err, http.StatusUnprocessableEntity, "")
-
-	padded := []ChecklistItem{{Label: "  Soạn slide  "}}
-	got, err := svc.UpdateLessonPrep(ctx, sc, lesson.ID, PrepRequest{Checklist: &padded})
-	if err != nil {
-		t.Fatalf("padded label: %v", err)
-	}
-	if len(got.Checklist) != 1 || got.Checklist[0].Label != "Soạn slide" {
-		t.Errorf("a valid label must be trimmed before it is stored, got %+v", got.Checklist)
-	}
-}
-
-// TestListAssigneesRequiresPrepAssignNotMembersList proves the assign page's
-// picker never needs a members.list grant: prep.assign alone must return the
-// center's live members, and a caller with neither key is forbidden.
-func TestListAssigneesRequiresPrepAssignNotMembersList(t *testing.T) {
-	svc, d := newTestService()
-	ctx := context.Background()
-	minh := uuid.New()
-	d.repo.members[minh] = "Thầy Minh"
-
-	_, err := svc.ListAssignees(ctx, d.memberWith(authctx.PermMembersList))
-	requireAppError(t, err, http.StatusForbidden, "")
-
-	got, err := svc.ListAssignees(ctx, d.memberWith(authctx.PermPrepAssign))
-	if err != nil {
-		t.Fatalf("list assignees with prep.assign alone: %v", err)
-	}
-	if len(got) != 1 || got[0].ID != minh || got[0].FullName != "Thầy Minh" {
-		t.Errorf("must list the center's live members, got %+v", got)
-	}
-}
-
-func TestAssignmentRequiresPrepAssignAndLiveMember(t *testing.T) {
-	svc, d := newTestService()
-	ctx := context.Background()
-	sc := d.ownerScope()
-	minh := uuid.New()
-	d.repo.members[minh] = "Thầy Minh"
-	tpl := mustTemplate(t, svc, sc, "CT01")
-	draft := draftOf(t, svc, sc, tpl.ID)
-	lesson := mustLesson(t, svc, sc, draft.ID, "Buổi 1")
-
-	_, err := svc.UpdateLessonAssignment(ctx, d.memberWith(authctx.PermLibraryEdit), lesson.ID, AssignmentRequest{AssigneeID: &minh})
-	requireAppError(t, err, http.StatusForbidden, "")
-
-	outsider := uuid.New()
-	_, err = svc.UpdateLessonAssignment(ctx, sc, lesson.ID, AssignmentRequest{AssigneeID: &outsider})
-	appErr := appErrorOf(t, err, http.StatusUnprocessableEntity)
-	if appErr.Fields["assignee_id"] == "" {
-		t.Errorf("non-member assignee must be reported on assignee_id, got %+v", appErr.Fields)
-	}
-	_, err = svc.UpdateLessonAssignment(ctx, sc, lesson.ID, AssignmentRequest{DueDate: str("01/10/2026")})
-	appErr = appErrorOf(t, err, http.StatusUnprocessableEntity)
-	if appErr.Fields["due_date"] == "" {
-		t.Errorf("malformed due date must be reported on due_date, got %+v", appErr.Fields)
-	}
-
-	d.repo.locks, d.tx.calls = 0, 0
-	got, err := svc.UpdateLessonAssignment(ctx, d.memberWith(authctx.PermPrepAssign), lesson.ID, AssignmentRequest{AssigneeID: &minh, DueDate: str("2026-10-01")})
-	if err != nil {
-		t.Fatalf("assign: %v", err)
-	}
-	if got.AssigneeID == nil || *got.AssigneeID != minh || got.DueDate == nil || *got.DueDate != "2026-10-01" {
-		t.Errorf("assignment must persist assignee and due date, got %+v", got)
-	}
-	if d.repo.locks != 1 || d.tx.calls != 1 {
-		t.Errorf("assignment must lock the version inside one transaction, got locks=%d tx=%d", d.repo.locks, d.tx.calls)
-	}
-
-	// The body replaces both fields: an empty body clears them.
-	got, err = svc.UpdateLessonAssignment(ctx, sc, lesson.ID, AssignmentRequest{})
-	if err != nil || got.AssigneeID != nil || got.DueDate != nil {
-		t.Fatalf("empty assignment must clear assignee and due date: %v %+v", err, got)
-	}
-
-	if _, err := svc.Publish(ctx, sc, draft.ID); err != nil {
-		t.Fatalf("publish: %v", err)
-	}
-	_, err = svc.UpdateLessonAssignment(ctx, sc, lesson.ID, AssignmentRequest{AssigneeID: &minh})
-	requireAppError(t, err, http.StatusConflict, CodeVersionLocked)
-}
-
-func TestBoardGroupsLessonsByPrepStatus(t *testing.T) {
-	svc, d := newTestService()
-	ctx := context.Background()
-	sc := d.ownerScope()
-	minh := uuid.New()
-	d.repo.members[minh] = "Thầy Minh"
-	tpl := mustTemplate(t, svc, sc, "CT01")
-	draft := draftOf(t, svc, sc, tpl.ID)
-	l1 := mustLesson(t, svc, sc, draft.ID, "Buổi 1")
-	l2 := mustLesson(t, svc, sc, draft.ID, "Buổi 2")
-	l3 := mustLesson(t, svc, sc, draft.ID, "Buổi 3")
-	checklist := []ChecklistItem{{Label: "In phiếu", Done: true}, {Label: "Soạn slide"}, {Label: "Chuẩn bị đề", Done: true}}
-	if _, err := svc.UpdateLessonPrep(ctx, sc, l2.ID, PrepRequest{PrepStatus: str(PrepDoing), Checklist: &checklist}); err != nil {
-		t.Fatalf("prep: %v", err)
-	}
-	if _, err := svc.UpdateLessonAssignment(ctx, sc, l2.ID, AssignmentRequest{AssigneeID: &minh, DueDate: str("2026-10-01")}); err != nil {
-		t.Fatalf("assign: %v", err)
-	}
-	if _, err := svc.UpdateLessonPrep(ctx, sc, l3.ID, PrepRequest{PrepStatus: str(PrepDone)}); err != nil {
-		t.Fatalf("prep: %v", err)
-	}
-
-	_, err := svc.GetBoard(ctx, d.memberWith(authctx.PermTasksRead), draft.ID)
-	requireAppError(t, err, http.StatusForbidden, "")
-	_, err = svc.GetBoard(ctx, sc, uuid.New())
-	requireAppError(t, err, http.StatusNotFound, "")
-
-	board, err := svc.GetBoard(ctx, d.memberWith(authctx.PermLibraryRead), draft.ID)
-	if err != nil {
-		t.Fatalf("board: %v", err)
-	}
-	if board.Template.ID != tpl.ID || board.Version.ID != draft.ID || board.Version.Status != StatusDraft {
-		t.Errorf("board must carry the template and version, got %+v / %+v", board.Template, board.Version)
-	}
-	if len(board.Columns) != 4 {
-		t.Fatalf("board must always have the four fixed columns, got %d", len(board.Columns))
-	}
-	for i, want := range PrepStatuses {
-		if board.Columns[i].Status != want {
-			t.Errorf("column %d must be %s, got %s", i, want, board.Columns[i].Status)
-		}
-		if board.Columns[i].Lessons == nil {
-			t.Errorf("column %s must serialise as an array even when empty", want)
-		}
-	}
-	todo, doing, review, done := board.Columns[0].Lessons, board.Columns[1].Lessons, board.Columns[2].Lessons, board.Columns[3].Lessons
-	if len(todo) != 1 || todo[0].ID != l1.ID || len(review) != 0 || len(done) != 1 || done[0].ID != l3.ID {
-		t.Errorf("lessons must land in their status column, got todo=%+v review=%+v done=%+v", todo, review, done)
-	}
-	if len(doing) != 1 {
-		t.Fatalf("want one doing card, got %+v", doing)
-	}
-	card := doing[0]
-	if card.ID != l2.ID || card.Position != 2 || card.Title != "Buổi 2" || card.PrepStatus != PrepDoing {
-		t.Errorf("card identity: %+v", card)
-	}
-	if card.AssigneeID == nil || *card.AssigneeID != minh || card.AssigneeName == nil || *card.AssigneeName != "Thầy Minh" {
-		t.Errorf("card must name the assignee, got %+v", card)
-	}
-	if card.DueDate == nil || *card.DueDate != "2026-10-01" || card.ChecklistDone != 2 || card.ChecklistTotal != 3 {
-		t.Errorf("card must carry due date and checklist progress, got %+v", card)
-	}
-
-	// A new draft copies the lesson content but starts preparation over.
-	if _, err := svc.Publish(ctx, sc, draft.ID); err != nil {
-		t.Fatalf("publish: %v", err)
-	}
-	next, err := svc.CreateVersion(ctx, sc, tpl.ID, CreateVersionRequest{})
-	if err != nil {
-		t.Fatalf("new draft: %v", err)
-	}
-	copied, err := svc.ListLessons(ctx, sc, next.ID)
-	if err != nil || len(copied) != 3 {
-		t.Fatalf("copied lessons: %v (%d)", err, len(copied))
-	}
-	for _, l := range copied {
-		if l.PrepStatus != PrepTodo || l.AssigneeID != nil || l.DueDate != nil || len(l.Checklist) != 0 {
-			t.Errorf("copied lesson must reset preparation, got %+v", l)
-		}
+	if drafts[0].LessonCount != 2 {
+		t.Errorf("draft summary must count its lessons, got %+v", drafts[0])
 	}
 }

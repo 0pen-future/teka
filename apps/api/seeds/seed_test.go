@@ -68,15 +68,14 @@ func assertTeachingMenuSeeded(t *testing.T, db *gorm.DB) {
 	).Scan(&draftTemplates).Error)
 	require.Equal(t, int64(1), draftTemplates, "draft template MAU-VAN9 not seeded exactly once")
 
-	var draftPrepStatuses []string
+	var draftLessons int64
 	require.NoError(t, db.Raw(`
-		SELECT l.prep_status FROM template_lessons l
+		SELECT count(*) FROM template_lessons l
 		JOIN program_template_versions v ON v.id = l.version_id
 		JOIN program_templates t ON t.id = v.template_id
-		WHERE t.code = ? ORDER BY l.position`, "MAU-VAN9",
-	).Scan(&draftPrepStatuses).Error)
-	require.Equal(t, []string{"doing", "review", "todo", "todo"}, draftPrepStatuses,
-		"MAU-VAN9 lessons must keep their mixed prep status plus the new self-study lesson")
+		WHERE t.code = ?`, "MAU-VAN9",
+	).Scan(&draftLessons).Error)
+	require.Equal(t, int64(4), draftLessons, "MAU-VAN9 must keep its 3 seeded lessons plus the new self-study lesson")
 
 	assertLibraryBankSeeded(t, db)
 	assertDraftTemplateV5ContentSeeded(t, db)
@@ -118,7 +117,7 @@ func assertTeachingMenuSeeded(t *testing.T, db *gorm.DB) {
 		"SELECT permission_key FROM center_member_permissions WHERE teacher_id = ? AND allowed = TRUE ORDER BY permission_key",
 		demoTeacherID,
 	).Scan(&grants).Error)
-	require.Equal(t, []string{"courses.edit", "library.edit", "prep.assign"}, grants, "demo teacher must hold exactly the menu's three optIn grants")
+	require.Equal(t, []string{"courses.edit", "library.edit"}, grants, "demo teacher must hold exactly the menu's two optIn grants")
 
 	var invitationStatuses []string
 	require.NoError(t, db.Raw(

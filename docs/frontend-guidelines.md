@@ -36,7 +36,7 @@ into `components/shared` or `lib`.
 
 The Teaching menu ("Giảng dạy") spans three features that all lean on this
 rule at once: `roster` owns class list/detail (the API's `classes` feature),
-`library` owns the teaching library and the prep board, and `courses` owns
+`library` owns the teaching library, and `courses` owns
 the course catalog and learning paths. Each imports the other two only
 through their `index.ts` (e.g. `courses` reads `classesKeys`/`useClassesList`
 from `@/features/roster`, `roster`'s class-program and homework tabs read

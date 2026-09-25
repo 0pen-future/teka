@@ -41,18 +41,4 @@ export const libraryRoutes: RouteObject[] = [
       Component: (await import("./pages/template-lesson-page")).TemplateLessonPage,
     }),
   },
-  {
-    path: "prep",
-    lazy: async () => ({ Component: (await import("./pages/prep-page")).PrepPage }),
-  },
-  {
-    path: "prep/:vid/board",
-    lazy: async () => ({ Component: (await import("./pages/prep-board-page")).PrepBoardPage }),
-  },
-  {
-    path: "prep/:vid/assign",
-    lazy: async () => ({
-      Component: (await import("./pages/prep-assign-page")).PrepAssignPage,
-    }),
-  },
 ];

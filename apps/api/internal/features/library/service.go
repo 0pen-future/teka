@@ -62,11 +62,11 @@ func (s *Service) CreateTemplate(ctx context.Context, sc authctx.Scope, req Temp
 		if req.LessonCount == nil || *req.LessonCount <= 0 {
 			return nil
 		}
-		// Seed placeholder lessons so the preparation board has cards
-		// before anyone writes the content.
+		// Seed placeholder lessons so the draft has cards before anyone
+		// writes the content.
 		rows := make([]*Lesson, 0, *req.LessonCount)
 		for i := 1; i <= *req.LessonCount; i++ {
-			rows = append(rows, &Lesson{VersionID: draft.ID, Position: i, Title: "Buổi " + strconv.Itoa(i), PrepStatus: PrepTodo})
+			rows = append(rows, &Lesson{VersionID: draft.ID, Position: i, Title: "Buổi " + strconv.Itoa(i)})
 		}
 		return s.repo.CreateLessons(ctx, sc, rows)
 	})
@@ -564,179 +564,6 @@ func (s *Service) UpdateLesson(ctx context.Context, sc authctx.Scope, lessonID u
 	return s.GetLesson(ctx, sc, lessonID)
 }
 
-// UpdateLessonPrep changes the preparation status and/or checklist of a
-// draft lesson; both are optional and an omitted one keeps its value. Only
-// the fields the request actually included reach the database: prepWrite
-// reads the lesson before locking its version, so that in-memory copy can
-// already be stale by the time the write lands, and writing every field
-// back unconditionally would silently clobber whichever one a concurrent
-// request just changed.
-func (s *Service) UpdateLessonPrep(ctx context.Context, sc authctx.Scope, lessonID uuid.UUID, req PrepRequest) (*LessonResponse, error) {
-	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
-		return nil, err
-	}
-	if req.PrepStatus != nil && !validPrepStatus(*req.PrepStatus) {
-		return nil, apperror.Invalid("Trạng thái chuẩn bị không hợp lệ",
-			map[string]string{"prep_status": "phải là todo, doing, review hoặc done"})
-	}
-	var checklist Checklist
-	if req.Checklist != nil {
-		var err error
-		checklist, err = normalizeChecklist(*req.Checklist)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return s.prepWrite(ctx, sc, lessonID, func(l *Lesson) error {
-		fields := map[string]any{}
-		if req.PrepStatus != nil {
-			fields["prep_status"] = *req.PrepStatus
-		}
-		if req.Checklist != nil {
-			fields["checklist"] = checklist
-		}
-		if len(fields) == 0 {
-			return nil
-		}
-		return s.repo.UpdateLessonPrep(ctx, sc, l.ID, fields)
-	})
-}
-
-// normalizeChecklist trims each item's label and rejects one left blank
-// after trimming: the binding tag `required,min=1` only checks byte length,
-// so a whitespace-only label would otherwise be stored as a "done" item
-// with nothing to read.
-func normalizeChecklist(items []ChecklistItem) (Checklist, error) {
-	out := make(Checklist, len(items))
-	for i, item := range items {
-		label := strings.TrimSpace(item.Label)
-		if label == "" {
-			return nil, apperror.Invalid("Nội dung việc cần làm không được để trống",
-				map[string]string{fieldPath(i, "label"): "không được để trống"})
-		}
-		out[i] = ChecklistItem{Label: label, Done: item.Done}
-	}
-	return out, nil
-}
-
-// UpdateLessonAssignment replaces the assignee and due date of a draft
-// lesson. The assignee must currently be a member of the center: removing a
-// member from a center is a soft-leave (center_members.left_at is stamped,
-// the row is never deleted), so IsLiveMember's left_at IS NULL check — not
-// the assignee_id FK's ON DELETE SET NULL, which only fires on a hard delete
-// of the center_members row — is what actually keeps a departed member from
-// being (re)assigned.
-func (s *Service) UpdateLessonAssignment(ctx context.Context, sc authctx.Scope, lessonID uuid.UUID, req AssignmentRequest) (*LessonResponse, error) {
-	if err := authctx.Require(sc, authctx.PermPrepAssign); err != nil {
-		return nil, err
-	}
-	var due *time.Time
-	if req.DueDate != nil {
-		d, err := time.Parse(dueDateLayout, *req.DueDate)
-		if err != nil {
-			return nil, apperror.Invalid("Hạn chuẩn bị không hợp lệ",
-				map[string]string{"due_date": "phải có dạng YYYY-MM-DD"})
-		}
-		due = &d
-	}
-	if req.AssigneeID != nil {
-		ok, err := s.repo.IsLiveMember(ctx, sc, *req.AssigneeID)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, apperror.Invalid("Người được phân công không còn là thành viên của trung tâm",
-				map[string]string{"assignee_id": "phải là thành viên hiện tại của trung tâm"})
-		}
-	}
-	return s.prepWrite(ctx, sc, lessonID, func(l *Lesson) error {
-		l.AssigneeID, l.DueDate = req.AssigneeID, due
-		return s.repo.UpdateLessonAssignment(ctx, sc, l)
-	})
-}
-
-// ListAssignees lists the center's live members eligible for lesson
-// assignment. It takes prep.assign directly rather than members.list: a
-// holder of prep.assign must be able to pick someone even without the
-// separate, broader member-directory grant.
-func (s *Service) ListAssignees(ctx context.Context, sc authctx.Scope) ([]AssigneeResponse, error) {
-	if err := authctx.Require(sc, authctx.PermPrepAssign); err != nil {
-		return nil, err
-	}
-	rows, err := s.repo.ListAssignees(ctx, sc)
-	if err != nil {
-		return nil, apperror.Internal(err)
-	}
-	out := make([]AssigneeResponse, len(rows))
-	for i, row := range rows {
-		out[i] = AssigneeResponse(row)
-	}
-	return out, nil
-}
-
-// prepWrite loads the lesson, locks its version like any content write and
-// hands the row to fn, which persists its change; the fresh row is returned.
-func (s *Service) prepWrite(ctx context.Context, sc authctx.Scope, lessonID uuid.UUID, fn func(l *Lesson) error) (*LessonResponse, error) {
-	var out *LessonResponse
-	err := s.tx.WithinTx(ctx, func(ctx context.Context) error {
-		l, err := s.repo.GetLesson(ctx, sc, lessonID)
-		if err != nil {
-			return notFound(err, "template lesson")
-		}
-		return s.lessonWrite(ctx, sc, l.VersionID, func(ctx context.Context) error {
-			if err := notFound(fn(&l.Lesson), "template lesson"); err != nil {
-				return err
-			}
-			fresh, err := s.repo.GetLesson(ctx, sc, lessonID)
-			if err != nil {
-				return notFound(err, "template lesson")
-			}
-			resp := lessonRowResponse(fresh)
-			out = &resp
-			return nil
-		})
-	})
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func validPrepStatus(status string) bool {
-	for _, s := range PrepStatuses {
-		if s == status {
-			return true
-		}
-	}
-	return false
-}
-
-// GetBoard returns the preparation board of a version: its lessons grouped
-// into the four fixed status columns. Locked versions stay readable.
-func (s *Service) GetBoard(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) (*BoardResponse, error) {
-	if err := authctx.Require(sc, authctx.PermLibraryRead); err != nil {
-		return nil, err
-	}
-	version, err := s.version(ctx, sc, versionID)
-	if err != nil {
-		return nil, err
-	}
-	tpl, err := s.repo.GetTemplate(ctx, sc, version.TemplateID)
-	if err != nil {
-		return nil, notFound(err, "program template")
-	}
-	versions, err := s.repo.ListVersions(ctx, sc, tpl.ID)
-	if err != nil {
-		return nil, err
-	}
-	tpl.Versions = versionRefs(versions)
-	cards, err := s.repo.ListBoardCards(ctx, sc, versionID)
-	if err != nil {
-		return nil, err
-	}
-	return boardResponse(templateResponse(tpl), *version, cards), nil
-}
-
 // DeleteLesson removes a lesson from a draft and closes the position gap.
 func (s *Service) DeleteLesson(ctx context.Context, sc authctx.Scope, lessonID uuid.UUID) error {
 	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
@@ -787,8 +614,7 @@ func (s *Service) ReorderLessons(ctx context.Context, sc authctx.Scope, versionI
 // later lesson's position up by one. The copy carries over content — mode,
 // unit, objectives, duration, homework note, and its materials and exercise
 // links including group_id — the same distinction copyVersionContent draws.
-// It does not carry over board state: the copy starts at PrepTodo with no
-// assignee, due date or checklist. Its version must be a draft.
+// Its version must be a draft.
 func (s *Service) DuplicateLesson(ctx context.Context, sc authctx.Scope, lessonID uuid.UUID) (*DuplicateLessonResponse, error) {
 	if err := authctx.Require(sc, authctx.PermLibraryEdit); err != nil {
 		return nil, err
@@ -807,7 +633,7 @@ func (s *Service) DuplicateLesson(ctx context.Context, sc authctx.Scope, lessonI
 			dup := &Lesson{
 				VersionID: src.VersionID, Position: src.Position + 1, Title: duplicateTitle(src.Title),
 				Mode: src.Mode, Unit: src.Unit, Objectives: src.Objectives,
-				DurationMin: src.DurationMin, HomeworkNote: src.HomeworkNote, PrepStatus: PrepTodo,
+				DurationMin: src.DurationMin, HomeworkNote: src.HomeworkNote,
 			}
 			if err := s.repo.CreateLessons(ctx, sc, []*Lesson{dup}); err != nil {
 				return err

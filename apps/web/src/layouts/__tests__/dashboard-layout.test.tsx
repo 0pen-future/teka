@@ -635,7 +635,6 @@ describe("Kho học liệu nav group", () => {
       ["Lộ trình học", "/paths"],
       ["Khóa học", "/courses"],
       ["Kho học liệu", "/library"],
-      ["Chuẩn bị tài liệu", "/prep"],
     ]);
     // Giảng dạy keeps only the class entries.
     expect(
@@ -661,7 +660,6 @@ describe("Kho học liệu nav group", () => {
     await within(group).findByRole("link", { name: "Khóa học" });
     expect(within(group).getAllByRole("link")).toHaveLength(1);
     expect(screen.queryByText("Lộ trình học")).not.toBeInTheDocument();
-    expect(screen.queryByText("Chuẩn bị tài liệu")).not.toBeInTheDocument();
   });
 
   it("lists the entries inside the Thêm sheet", async () => {
@@ -678,7 +676,6 @@ describe("Kho học liệu nav group", () => {
     for (const [name, href] of [
       ["Lộ trình học", "/paths"],
       ["Khóa học", "/courses"],
-      ["Chuẩn bị tài liệu", "/prep"],
     ]) {
       expect(within(sheet).getByRole("link", { name })).toHaveAttribute("href", href);
     }

@@ -65,8 +65,7 @@ function belongsOnTemplateStep(error: unknown): boolean {
 /**
  * `/library/templates/new` — a three-step alternative to the template
  * dialog: the template's fields, how many lessons to pre-create, then a
- * summary. Creating lands on the new draft's preparation board so the
- * checklist work can start at once.
+ * summary. Creating lands on the new template's detail page.
  */
 export function TemplateCreateWizardPage() {
   const { has, isResolved } = useCenterContext();
@@ -122,11 +121,7 @@ export function TemplateCreateWizardPage() {
       { ...toTemplateInput(template), lesson_count: lessonCount },
       {
         onSuccess: (created) => {
-          void navigate(
-            created.draft_version_id
-              ? `/prep/${created.draft_version_id}/board`
-              : `/library/templates/${created.id}`,
-          );
+          void navigate(`/library/templates/${created.id}`);
         },
         onError: (error) => {
           // A duplicate code (409) lands on the code field, so the wizard

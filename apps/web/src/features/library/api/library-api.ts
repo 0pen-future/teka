@@ -2,10 +2,8 @@ import { apiClient } from "@/lib/api/client";
 import { parseArray, parseData, parseList, type Paginated } from "@/lib/api/envelope";
 
 import {
-  assigneeSchema,
   exerciseGroupSchema,
   exerciseSchema,
-  prepBoardSchema,
   lessonExerciseSchema,
   lessonMaterialSchema,
   logFieldSchema,
@@ -25,14 +23,10 @@ import {
   type LessonInput,
   type LessonMaterial,
   type LessonMaterialInput,
-  type Assignee,
   type LogField,
   type LogFieldInput,
   type Material,
   type MaterialInput,
-  type AssignmentInput,
-  type PrepBoard,
-  type PrepInput,
   type ProgramTemplate,
   type ScoreSetGroup,
   type ScoreSetGroupInput,
@@ -50,7 +44,7 @@ export interface ListTemplatesParams {
   per_page?: number;
   /** `name` (default) | `code` | `created_at`, `-` prefix for descending. */
   sort?: string;
-  /** Only templates with an open draft (the ones with a preparation board). */
+  /** Only templates with an open draft version. */
   has_draft?: boolean;
 }
 
@@ -162,37 +156,6 @@ export async function duplicateLesson(id: string): Promise<TemplateLesson> {
 /** `DELETE /library/versions/:vid/lessons` — clears every lesson of a draft version at once. */
 export async function clearLessons(versionId: string): Promise<void> {
   await apiClient.delete(`/library/versions/${versionId}/lessons`);
-}
-
-/** `GET /library/versions/:vid/board` — the preparation board; readable for every version status. */
-export async function getBoard(versionId: string): Promise<PrepBoard> {
-  const res = await apiClient.get<unknown>(`/library/versions/${versionId}/board`);
-  return parseData(prepBoardSchema, res.data);
-}
-
-/** `PATCH /library/lessons/:lid/prep` (`library.edit`) — 409 `VERSION_LOCKED` once the version is published. */
-export async function updateLessonPrep(id: string, input: PrepInput): Promise<TemplateLesson> {
-  const res = await apiClient.patch<unknown>(`/library/lessons/${id}/prep`, input);
-  return parseData(templateLessonSchema, res.data);
-}
-
-/** `PATCH /library/lessons/:lid/assignment` (`prep.assign`) — replaces assignee and due date together. */
-export async function updateLessonAssignment(
-  id: string,
-  input: AssignmentInput,
-): Promise<TemplateLesson> {
-  const res = await apiClient.patch<unknown>(`/library/lessons/${id}/assignment`, input);
-  return parseData(templateLessonSchema, res.data);
-}
-
-/**
- * `GET /library/assignees` (`prep.assign`) — the center's live members
- * eligible for assignment. Unlike the member directory, this does not need
- * `members.list`.
- */
-export async function listAssignees(): Promise<Assignee[]> {
-  const res = await apiClient.get<unknown>("/library/assignees");
-  return parseArray(assigneeSchema, res.data);
 }
 
 /**

@@ -33,13 +33,12 @@ import (
 // Thứ Bảy"; a shared actor would race that cleanup.
 var seedDemoTeacher = seedTeacher{Phone: "+84901000004", Password: "khoa-password", FullName: "Thầy Khoa"}
 
-// demoTeacherGrantKeys are the three optIn permissions the phase asks the
+// demoTeacherGrantKeys are the two optIn permissions the phase asks the
 // demo teacher to hold. BuildPermSet expands each key's implied read
-// permission automatically, so granting only these three is sufficient.
+// permission automatically, so granting only these two is sufficient.
 var demoTeacherGrantKeys = []string{
 	authctx.PermLibraryEdit,
 	authctx.PermCoursesEdit,
-	authctx.PermPrepAssign,
 }
 
 const (
@@ -104,16 +103,15 @@ func newTeachingMenuServices(db *gorm.DB) teachingMenuServices {
 }
 
 // seedTeachingMenu populates the Giảng dạy menu's demo data: two program
-// templates (one published, one with an open draft mid-preparation), a
-// small library bank (materials and exercises), the v5 draft content on top
-// of it (an exercise group with one exercise assigned, a self_study lesson,
-// a two-group score set and a student log field), three courses, a
-// three-stage learning path, the existing classes linked to their course,
-// one class with the published program applied, a demo teacher granted the
-// menu's three optIn permissions, and two invitations for that teacher
-// (pending and accepted). Every write goes through the real feature
-// services and is skipped when its natural key already exists, so reseeding
-// a populated database changes nothing.
+// templates (one published, one with an open draft), a small library bank
+// (materials and exercises), the v5 draft content on top of it (an exercise
+// group with one exercise assigned, a self_study lesson, a two-group score
+// set and a student log field), three courses, a three-stage learning path,
+// the existing classes linked to their course, one class with the published
+// program applied, a demo teacher granted the menu's two optIn permissions,
+// and two invitations for that teacher (pending and accepted). Every write
+// goes through the real feature services and is skipped when its natural
+// key already exists, so reseeding a populated database changes nothing.
 func seedTeachingMenu(ctx context.Context, db *gorm.DB, log *slog.Logger, ownerSc authctx.Scope, centerID uuid.UUID) error {
 	demoID, err := ensureMember(ctx, db, log, seedDemoTeacher, centerID)
 	if err != nil {
@@ -131,7 +129,7 @@ func seedTeachingMenu(ctx context.Context, db *gorm.DB, log *slog.Logger, ownerS
 		return err
 	}
 
-	publishedVersionID, err := seedProgramTemplates(ctx, db, log, svcs, ownerSc, demoID, exerciseIDs)
+	publishedVersionID, err := seedProgramTemplates(ctx, db, log, svcs, ownerSc, exerciseIDs)
 	if err != nil {
 		return err
 	}
@@ -165,13 +163,13 @@ func seedTeachingMenu(ctx context.Context, db *gorm.DB, log *slog.Logger, ownerS
 // class program steps below. exerciseIDs is the library bank's seeded
 // exercises, used to fill the draft template's exercise group.
 func seedProgramTemplates(
-	ctx context.Context, db *gorm.DB, log *slog.Logger, svcs teachingMenuServices, sc authctx.Scope, demoTeacherID uuid.UUID, exerciseIDs []uuid.UUID,
+	ctx context.Context, db *gorm.DB, log *slog.Logger, svcs teachingMenuServices, sc authctx.Scope, exerciseIDs []uuid.UUID,
 ) (uuid.UUID, error) {
 	publishedVersionID, err := ensurePublishedTemplate(ctx, db, log, svcs, sc)
 	if err != nil {
 		return uuid.Nil, err
 	}
-	if err := ensureDraftTemplate(ctx, db, log, svcs, sc, demoTeacherID, exerciseIDs); err != nil {
+	if err := ensureDraftTemplate(ctx, db, log, svcs, sc, exerciseIDs); err != nil {
 		return uuid.Nil, err
 	}
 	return publishedVersionID, nil
@@ -217,16 +215,14 @@ const draftExerciseGroupName = "Khởi động"
 // draft content adds to MAU-VAN9's draft version.
 const draftSelfStudyUnit = "Unit 1"
 
-// ensureDraftTemplate creates a template whose draft is mid-preparation: one
-// lesson done and assigned with a due date and a checklist, one lesson in
-// review, and one lesson left at the default "todo" — the mixed prep board
-// the phase asks for. It also seeds the v5 draft content: one exercise
+// ensureDraftTemplate creates a template with an open draft of three
+// lessons, then seeds the v5 draft content on top of it: one exercise
 // group carrying one bank exercise, a fourth lesson in self_study mode with
 // unit "Unit 1" the exercise is assigned into, a two-group score set and a
 // student-kind log field. exerciseIDs must hold at least one id (the
 // library bank the caller seeds first).
 func ensureDraftTemplate(
-	ctx context.Context, db *gorm.DB, log *slog.Logger, svcs teachingMenuServices, sc authctx.Scope, demoTeacherID uuid.UUID, exerciseIDs []uuid.UUID,
+	ctx context.Context, db *gorm.DB, log *slog.Logger, svcs teachingMenuServices, sc authctx.Scope, exerciseIDs []uuid.UUID,
 ) error {
 	var count int64
 	err := db.WithContext(ctx).Raw(
@@ -256,40 +252,6 @@ func ensureDraftTemplate(
 	if tpl.DraftVersionID == nil {
 		return fmt.Errorf("seed: template %s has no draft version", templateDraftCode)
 	}
-
-	lessonList, err := svcs.library.ListLessons(ctx, sc, *tpl.DraftVersionID)
-	if err != nil {
-		return fmt.Errorf("seed: list lessons of %s: %w", templateDraftCode, err)
-	}
-	if len(lessonList) < 3 {
-		return fmt.Errorf("seed: template %s expected 3 lessons, got %d", templateDraftCode, len(lessonList))
-	}
-
-	doing := library.PrepDoing
-	if _, err := svcs.library.UpdateLessonPrep(ctx, sc, lessonList[0].ID, library.PrepRequest{
-		PrepStatus: &doing,
-		Checklist: &[]library.ChecklistItem{
-			{Label: "Soạn slide", Done: true},
-			{Label: "In phiếu bài tập"},
-		},
-	}); err != nil {
-		return fmt.Errorf("seed: set prep for %s buổi 1: %w", templateDraftCode, err)
-	}
-	dueDate := "2026-10-15"
-	if _, err := svcs.library.UpdateLessonAssignment(ctx, sc, lessonList[0].ID, library.AssignmentRequest{
-		AssigneeID: &demoTeacherID,
-		DueDate:    &dueDate,
-	}); err != nil {
-		return fmt.Errorf("seed: assign %s buổi 1: %w", templateDraftCode, err)
-	}
-
-	review := library.PrepReview
-	if _, err := svcs.library.UpdateLessonPrep(ctx, sc, lessonList[1].ID, library.PrepRequest{
-		PrepStatus: &review,
-	}); err != nil {
-		return fmt.Errorf("seed: set prep for %s buổi 2: %w", templateDraftCode, err)
-	}
-	// Buổi 3 stays at the default "todo" status a new lesson is created with.
 
 	// One transaction for every v5 write: ensureDraftTemplate's natural-key
 	// guard above only checks the template itself, so a failure partway

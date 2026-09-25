@@ -515,139 +515,6 @@ func (h *Handler) updateLesson(c *gin.Context) {
 	response.OK(c, http.StatusOK, out)
 }
 
-// updateLessonPrep changes a lesson's preparation status and checklist.
-//
-//	@Summary		Update a lesson's preparation
-//	@Description	Sets the preparation status and/or replaces the checklist; an omitted field keeps its value. 409 VERSION_LOCKED when the lesson's version is not a draft.
-//	@Tags			library
-//	@Accept			json
-//	@Produce		json
-//	@Param			lid		path		string		true	"lesson id"
-//	@Param			body	body		PrepRequest	true	"preparation"
-//	@Success		200		{object}	response.Envelope{data=LessonResponse}
-//	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
-//	@Failure		403		{object}	response.Envelope{error=response.ErrorBody}
-//	@Failure		404		{object}	response.Envelope{error=response.ErrorBody}
-//	@Failure		409		{object}	response.Envelope{error=response.ErrorBody}
-//	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}
-//	@Security		BearerAuth
-//	@Router			/library/lessons/{lid}/prep [patch]
-func (h *Handler) updateLessonPrep(c *gin.Context) {
-	sc, ok := h.scope(c)
-	if !ok {
-		return
-	}
-	lid, ok := pathID(c, "lid", "template lesson")
-	if !ok {
-		return
-	}
-	var req PrepRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Err(c, validation.BindError(err))
-		return
-	}
-	out, err := h.svc.UpdateLessonPrep(c.Request.Context(), sc, lid, req)
-	if err != nil {
-		response.Err(c, err)
-		return
-	}
-	response.OK(c, http.StatusOK, out)
-}
-
-// updateLessonAssignment replaces a lesson's assignee and due date.
-//
-//	@Summary		Assign a lesson's preparation
-//	@Description	Replaces the assignee and due date as one block; an omitted field clears it. Needs prep.assign. 422 when the assignee is not a live member. 409 VERSION_LOCKED when the lesson's version is not a draft.
-//	@Tags			library
-//	@Accept			json
-//	@Produce		json
-//	@Param			lid		path		string				true	"lesson id"
-//	@Param			body	body		AssignmentRequest	true	"assignment"
-//	@Success		200		{object}	response.Envelope{data=LessonResponse}
-//	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
-//	@Failure		403		{object}	response.Envelope{error=response.ErrorBody}
-//	@Failure		404		{object}	response.Envelope{error=response.ErrorBody}
-//	@Failure		409		{object}	response.Envelope{error=response.ErrorBody}
-//	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}
-//	@Security		BearerAuth
-//	@Router			/library/lessons/{lid}/assignment [patch]
-func (h *Handler) updateLessonAssignment(c *gin.Context) {
-	sc, ok := h.scope(c)
-	if !ok {
-		return
-	}
-	lid, ok := pathID(c, "lid", "template lesson")
-	if !ok {
-		return
-	}
-	var req AssignmentRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Err(c, validation.BindError(err))
-		return
-	}
-	out, err := h.svc.UpdateLessonAssignment(c.Request.Context(), sc, lid, req)
-	if err != nil {
-		response.Err(c, err)
-		return
-	}
-	response.OK(c, http.StatusOK, out)
-}
-
-// listAssignees returns the center's live members eligible for lesson
-// assignment.
-//
-//	@Summary		List assignable members for lesson preparation
-//	@Description	The center's live members a lesson can be assigned to. Needs prep.assign; unlike the member directory, this does not need members.list.
-//	@Tags			library
-//	@Produce		json
-//	@Success		200	{object}	response.Envelope{data=[]AssigneeResponse}
-//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
-//	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}
-//	@Security		BearerAuth
-//	@Router			/library/assignees [get]
-func (h *Handler) listAssignees(c *gin.Context) {
-	sc, ok := h.scope(c)
-	if !ok {
-		return
-	}
-	out, err := h.svc.ListAssignees(c.Request.Context(), sc)
-	if err != nil {
-		response.Err(c, err)
-		return
-	}
-	response.OK(c, http.StatusOK, out)
-}
-
-// getBoard returns the preparation board of a version.
-//
-//	@Summary		Get a version's preparation board
-//	@Description	The version's lessons grouped into the four fixed preparation columns (todo, doing, review, done), each card with its assignee, due date and checklist progress.
-//	@Tags			library
-//	@Produce		json
-//	@Param			vid	path		string	true	"version id"
-//	@Success		200	{object}	response.Envelope{data=BoardResponse}
-//	@Failure		401	{object}	response.Envelope{error=response.ErrorBody}
-//	@Failure		403	{object}	response.Envelope{error=response.ErrorBody}
-//	@Failure		404	{object}	response.Envelope{error=response.ErrorBody}
-//	@Security		BearerAuth
-//	@Router			/library/versions/{vid}/board [get]
-func (h *Handler) getBoard(c *gin.Context) {
-	sc, ok := h.scope(c)
-	if !ok {
-		return
-	}
-	vid, ok := pathID(c, "vid", "template version")
-	if !ok {
-		return
-	}
-	out, err := h.svc.GetBoard(c.Request.Context(), sc, vid)
-	if err != nil {
-		response.Err(c, err)
-		return
-	}
-	response.OK(c, http.StatusOK, out)
-}
-
 // deleteLesson removes a lesson from a draft and closes the position gap.
 //
 //	@Summary		Delete a template lesson
@@ -681,7 +548,7 @@ func (h *Handler) deleteLesson(c *gin.Context) {
 // duplicateLesson inserts a copy of a lesson right after it.
 //
 //	@Summary		Duplicate a template lesson
-//	@Description	Inserts a copy right after the lesson, shifting later ones up by one position. Content (mode, unit, objectives, duration, homework note, materials, exercises) is copied; board state (prep status, assignee, due date, checklist) starts fresh. 409 VERSION_LOCKED when the lesson's version is not a draft.
+//	@Description	Inserts a copy right after the lesson, shifting later ones up by one position. Content (mode, unit, objectives, duration, homework note, materials, exercises) is copied. 409 VERSION_LOCKED when the lesson's version is not a draft.
 //	@Tags			library
 //	@Produce		json
 //	@Param			lid	path		string	true	"lesson id"

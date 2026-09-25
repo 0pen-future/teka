@@ -433,7 +433,7 @@ declares `AccountService` with only the `teachers.Service` methods it needs.
 ### Teaching menu features
 
 Six feature modules back the "Giảng dạy" and "Kho học liệu" sidebar groups
-(`library` serves "Kho học liệu" together with the prep board):
+(`library` serves "Kho học liệu"):
 
 - `classes` gained catalog fields (`code`, `tags`, `note`, `course_id`,
   `parent_class_id`, `lineage_note`) rather than becoming a new feature — see

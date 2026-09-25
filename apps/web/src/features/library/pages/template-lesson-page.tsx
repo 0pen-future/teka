@@ -15,7 +15,6 @@ import { ApiError } from "@/lib/api/errors";
 import { LessonContents } from "../components/lesson-contents";
 import { LessonExercises } from "../components/lesson-exercises";
 import { LessonInfoCard } from "../components/lesson-info-card";
-import { LessonPrepPanel } from "../components/lesson-prep-panel";
 import { useLesson, useTemplate, useVersions } from "../hooks/use-library";
 import { versionLabel, versionStatusVariant } from "../lib/library-labels";
 import type {
@@ -149,7 +148,6 @@ function LessonView({ template, version, lesson }: LessonViewProps) {
           <>
             <LessonInfoCard lesson={lesson} templateId={template.id} editable={editable} />
             <LessonContents lesson={lesson} templateId={template.id} editable={editable} />
-            <LessonPrepPanel key={`prep-${lesson.id}`} lesson={lesson} editable={editable} />
           </>
         ) : (
           <LessonExercises lesson={lesson} templateId={template.id} editable={editable} />

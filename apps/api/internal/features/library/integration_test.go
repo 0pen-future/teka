@@ -873,17 +873,17 @@ func TestAttachToLessonDeletedMeanwhileIsNotFound(t *testing.T) {
 	require.NoError(t, f.svc.DeleteMaterial(ctx, f.owner, m.ID))
 }
 
-func TestPrepBoardAndAssignment(t *testing.T) {
+// TestCreateTemplateWithLessonCountAndHasDraftFilter proves the real SQL
+// behind lesson_count seeding and the has_draft filter, on top of the unit
+// coverage in service_test.go's fakeRepo.
+func TestCreateTemplateWithLessonCountAndHasDraftFilter(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
 	page := pagination.Params{Page: 1, PerPage: 20}
 
 	tpl, err := f.svc.CreateTemplate(ctx, f.owner, library.TemplateRequest{Code: "CB-3", Name: "Chuẩn bị 3 buổi", LessonCount: intp(3)})
 	require.NoError(t, err)
-	require.NotNil(t, tpl.Prep)
-	require.Equal(t, 3, tpl.Prep.LessonCount)
-	require.Equal(t, 0, tpl.Prep.DoneCount)
-	require.Empty(t, tpl.Prep.Assignees)
+	require.Equal(t, 3, tpl.LessonCount)
 	draft := f.draft(t, f.owner, tpl.ID)
 	require.NotNil(t, tpl.DraftVersionID)
 	require.Equal(t, draft.ID, *tpl.DraftVersionID)
@@ -893,9 +893,6 @@ func TestPrepBoardAndAssignment(t *testing.T) {
 	for i, l := range lessons {
 		require.Equal(t, i+1, l.Position)
 		require.Equal(t, "Buổi "+strconv.Itoa(i+1), l.Title)
-		require.Equal(t, library.PrepTodo, l.PrepStatus)
-		require.NotNil(t, l.Checklist)
-		require.Empty(t, l.Checklist)
 	}
 
 	// A published-only template drops out of the has_draft list.
@@ -909,97 +906,6 @@ func TestPrepBoardAndAssignment(t *testing.T) {
 	rows, total, err = f.svc.ListTemplates(ctx, f.owner, library.ListFilter{}, page)
 	require.NoError(t, err)
 	require.Equal(t, int64(2), total)
-	for _, row := range rows {
-		if row.ID == other.ID {
-			require.Nil(t, row.Prep, "no draft, no prep summary")
-		}
-	}
-
-	editor := f.grant(t, f.member, authctx.PermLibraryEdit)
-	checklist := []library.ChecklistItem{{Label: "In phiếu bài tập", Done: true}, {Label: "Soạn slide"}}
-	got, err := f.svc.UpdateLessonPrep(ctx, editor, lessons[0].ID, library.PrepRequest{PrepStatus: strp(library.PrepDoing), Checklist: &checklist})
-	require.NoError(t, err)
-	require.Equal(t, library.PrepDoing, got.PrepStatus)
-	require.Equal(t, checklist, got.Checklist)
-	_, err = f.svc.UpdateLessonPrep(ctx, editor, lessons[1].ID, library.PrepRequest{PrepStatus: strp(library.PrepDone)})
-	require.NoError(t, err)
-
-	// Assignment needs prep.assign on top of library.edit, and only a live
-	// member of the center can be assigned.
-	_, err = f.svc.UpdateLessonAssignment(ctx, editor, lessons[0].ID, library.AssignmentRequest{AssigneeID: &f.member})
-	requireStatus(t, err, http.StatusForbidden, "")
-	assigner := f.grant(t, f.member, authctx.PermPrepAssign)
-	got, err = f.svc.UpdateLessonAssignment(ctx, assigner, lessons[0].ID, library.AssignmentRequest{AssigneeID: &f.member, DueDate: strp("2026-10-01")})
-	require.NoError(t, err)
-	require.Equal(t, &f.member, got.AssigneeID)
-	require.Equal(t, "2026-10-01", *got.DueDate)
-	_, err = f.svc.UpdateLessonAssignment(ctx, f.owner, lessons[0].ID, library.AssignmentRequest{AssigneeID: &f.outsider.TeacherID})
-	var appErr *apperror.AppError
-	require.True(t, errors.As(err, &appErr))
-	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
-	require.NotEmpty(t, appErr.Fields["assignee_id"])
-
-	// A member who has since left the center (soft-leave: left_at stamped,
-	// row kept) must also be rejected — IsLiveMember's left_at IS NULL check,
-	// not the assignee_id FK, is what keeps a departed member unassignable.
-	_, leftT := testutil.Teacher(t, f.db, testutil.WithFullName("Cô Lan"))
-	testutil.JoinCenter(t, f.db, leftT.ID, f.owner.CenterID)
-	require.NoError(t, f.db.Exec(
-		`UPDATE center_members SET left_at = now() WHERE teacher_id = ? AND center_id = ? AND left_at IS NULL`,
-		leftT.ID, f.owner.CenterID).Error)
-	_, err = f.svc.UpdateLessonAssignment(ctx, assigner, lessons[0].ID, library.AssignmentRequest{AssigneeID: &leftT.ID})
-	require.True(t, errors.As(err, &appErr))
-	require.Equal(t, http.StatusUnprocessableEntity, appErr.Status)
-	require.NotEmpty(t, appErr.Fields["assignee_id"])
-
-	board, err := f.svc.GetBoard(ctx, f.grant(t, f.member, authctx.PermLibraryRead), draft.ID)
-	require.NoError(t, err)
-	require.Equal(t, tpl.ID, board.Template.ID)
-	require.Equal(t, draft.ID, board.Version.ID)
-	require.Len(t, board.Columns, 4)
-	require.Equal(t, library.PrepStatuses, []string{board.Columns[0].Status, board.Columns[1].Status, board.Columns[2].Status, board.Columns[3].Status})
-	require.Len(t, board.Columns[0].Lessons, 1)
-	require.Len(t, board.Columns[1].Lessons, 1)
-	require.NotNil(t, board.Columns[2].Lessons)
-	require.Empty(t, board.Columns[2].Lessons)
-	require.Len(t, board.Columns[3].Lessons, 1)
-	card := board.Columns[1].Lessons[0]
-	require.Equal(t, lessons[0].ID, card.ID)
-	require.Equal(t, "Thầy Minh", *card.AssigneeName)
-	require.Equal(t, "2026-10-01", *card.DueDate)
-	require.Equal(t, 1, card.ChecklistDone)
-	require.Equal(t, 2, card.ChecklistTotal)
-
-	summary, err := f.svc.GetTemplate(ctx, f.owner, tpl.ID)
-	require.NoError(t, err)
-	require.Equal(t, &library.PrepSummaryResponse{LessonCount: 3, DoneCount: 1, Assignees: []string{"Thầy Minh"}}, summary.Prep)
-
-	// Locked versions reject preparation changes; a new draft starts over.
-	_, err = f.svc.Publish(ctx, f.owner, draft.ID)
-	require.NoError(t, err)
-	_, err = f.svc.UpdateLessonPrep(ctx, f.owner, lessons[0].ID, library.PrepRequest{PrepStatus: strp(library.PrepDone)})
-	requireStatus(t, err, http.StatusConflict, library.CodeVersionLocked)
-	_, err = f.svc.UpdateLessonAssignment(ctx, f.owner, lessons[0].ID, library.AssignmentRequest{})
-	requireStatus(t, err, http.StatusConflict, library.CodeVersionLocked)
-	board, err = f.svc.GetBoard(ctx, f.owner, draft.ID)
-	require.NoError(t, err, "the board of a locked version stays readable")
-	require.Equal(t, library.StatusPublished, board.Version.Status)
-
-	v2, err := f.svc.CreateVersion(ctx, f.owner, tpl.ID, library.CreateVersionRequest{})
-	require.NoError(t, err)
-	copied, err := f.svc.ListLessons(ctx, f.owner, v2.ID)
-	require.NoError(t, err)
-	require.Len(t, copied, 3)
-	for _, l := range copied {
-		require.Equal(t, library.PrepTodo, l.PrepStatus)
-		require.Nil(t, l.AssigneeID)
-		require.Nil(t, l.DueDate)
-		require.Empty(t, l.Checklist)
-	}
-	summary, err = f.svc.GetTemplate(ctx, f.owner, tpl.ID)
-	require.NoError(t, err)
-	require.Equal(t, &library.PrepSummaryResponse{LessonCount: 3, DoneCount: 0, Assignees: []string{}}, summary.Prep)
 }
 
-func intp(n int) *int       { return &n }
-func strp(s string) *string { return &s }
+func intp(n int) *int { return &n }

@@ -16,25 +16,10 @@ import type {
   LessonMode,
   LogFieldKind,
   MaterialKind,
-  PrepStatus,
   ProgramTemplate,
   TemplateVersion,
   TemplateVersionStatus,
 } from "../schemas/library-schemas";
-
-export const prepStatusLabel: Record<PrepStatus, string> = {
-  todo: "Cần làm",
-  doing: "Đang làm",
-  review: "Chờ duyệt",
-  done: "Hoàn thành",
-};
-
-export const prepStatusVariant: Record<PrepStatus, HvBadgeVariant> = {
-  todo: "neutral",
-  doing: "warning",
-  review: "warning",
-  done: "success",
-};
 
 export const versionStatusLabel: Record<TemplateVersionStatus, string> = {
   draft: "Bản nháp",

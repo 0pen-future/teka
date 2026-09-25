@@ -14,7 +14,7 @@ export const API_URL = "http://localhost:8080/api/v1";
 export const PUBLIC_API_URL = API_URL.replace(/\/api\/v1\/?$/, "");
 
 /** Version stamp of the mirrored catalog below (`authctx.CatalogVersion`). */
-export const CATALOG_VERSION = 5;
+export const CATALOG_VERSION = 6;
 
 function perm(
   key: string,
@@ -326,13 +326,6 @@ export const PERMISSION_CATALOG = [
     "special",
     "high",
     "Phát hành một bản nháp thành phiên bản chính thức, khoá nội dung của phiên bản đó.",
-  ),
-  perm(
-    "prep.assign",
-    "Phân công chuẩn bị tài liệu",
-    "special",
-    "medium",
-    "Phân công thành viên và đặt hạn hoàn thành cho từng buổi mẫu trong bản nháp chương trình.",
   ),
   perm(
     "courses.read",
