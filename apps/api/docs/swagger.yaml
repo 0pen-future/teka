@@ -691,6 +691,33 @@ definitions:
     required:
     - body
     type: object
+  classes.AvailabilityResponse:
+    properties:
+      rooms:
+        items:
+          $ref: '#/definitions/classes.AvailabilityRoomResponse'
+        type: array
+      teachers:
+        items:
+          $ref: '#/definitions/classes.AvailabilityTeacherResponse'
+        type: array
+    type: object
+  classes.AvailabilityRoomResponse:
+    properties:
+      free:
+        type: boolean
+      name:
+        type: string
+    type: object
+  classes.AvailabilityTeacherResponse:
+    properties:
+      free:
+        type: boolean
+      name:
+        type: string
+      teacher_id:
+        type: string
+    type: object
   classes.ClassResponse:
     properties:
       code:
@@ -720,6 +747,11 @@ definitions:
         type: array
       name:
         type: string
+      next_class_id:
+        description: |-
+          NextClassID is the earliest-created live child whose parent_class_id
+          is this class (lớp kế tiếp); null when it has none.
+        type: string
       note:
         type: string
       parent_class_id:
@@ -734,6 +766,9 @@ definitions:
         type: string
       recruiting:
         type: boolean
+      room:
+        description: Room and StudyMode are the wizard's "Hình thức học" fields.
+        type: string
       schedules:
         items:
           $ref: '#/definitions/classes.ScheduleResponse'
@@ -750,6 +785,8 @@ definitions:
           rows that endpoint lists. Like MyStaffRoles it is filled only by the
           readable GET paths; every other producer leaves it 0.
         type: integer
+      study_mode:
+        type: string
       tags:
         items:
           type: string
@@ -811,12 +848,27 @@ definitions:
       note:
         maxLength: 1000
         type: string
+      room:
+        description: |-
+          Room is the physical/virtual room name; blank or absent means
+          unassigned.
+        maxLength: 50
+        type: string
       schedules:
+        description: |-
+          Schedules is required for a scheduled class and must be empty for a
+          self_paced one; the service enforces that pairing since it depends on
+          StudyMode, not on binding tags alone.
         items:
           $ref: '#/definitions/classes.ScheduleRequest'
-        minItems: 1
         type: array
       start_date:
+        type: string
+      study_mode:
+        description: StudyMode defaults to "scheduled" when absent.
+        enum:
+        - scheduled
+        - self_paced
         type: string
       tags:
         items:
@@ -825,12 +877,12 @@ definitions:
         type: array
     required:
     - name
-    - schedules
     - start_date
     type: object
   classes.ScheduleRequest:
     properties:
       duration_min:
+        maximum: 600
         minimum: 1
         type: integer
       effective_from:
@@ -887,6 +939,13 @@ definitions:
         maxLength: 100
         minLength: 1
         type: string
+      next_class_id:
+        description: |-
+          NextClassID follows the same patch rule: nil keeps every existing
+          child link, "" unlinks every live child, a uuid links that live class
+          of the same center as the single child (see resolveNextClassLink).
+          Untagged for the same "" reason as course_id.
+        type: string
       note:
         description: Note replaces the stored note; an empty string clears it.
         maxLength: 1000
@@ -899,7 +958,18 @@ definitions:
         type: string
       recruiting:
         type: boolean
+      room:
+        description: 'Room follows the same patch rule: nil keeps, "" clears.'
+        maxLength: 50
+        type: string
       start_date:
+        type: string
+      study_mode:
+        description: |-
+          StudyMode follows the same patch rule: nil keeps the stored mode.
+          Untagged: an empty string is not a valid mode and must reach the
+          service to surface as a field error rather than being silently dropped
+          by a binding tag.
         type: string
       tags:
         items:
@@ -914,6 +984,7 @@ definitions:
   classes.UpdateScheduleRequest:
     properties:
       duration_min:
+        maximum: 600
         minimum: 1
         type: integer
       effective_from:
@@ -939,6 +1010,9 @@ definitions:
       class_id:
         type: string
       class_name:
+        type: string
+      course_name:
+        description: CourseName is the class's course, null when it has none.
         type: string
       id:
         type: string
@@ -974,6 +1048,9 @@ definitions:
       class_id:
         type: string
       class_name:
+        type: string
+      course_name:
+        description: CourseName is the class's course, null when it has none.
         type: string
       id:
         type: string
@@ -5953,7 +6030,8 @@ paths:
       description: 'status filters the list: active (default), archived, or all. The
         other filters combine with AND: q matches name or code, weekday/shift match
         a timetable row still in effect, tag matches one tag exactly, phase is derived
-        from the dates.'
+        from the dates, recruiting=true keeps the classes open for recruitment (flag
+        on, not ended or archived).'
       parameters:
       - description: active (default), archived, or all
         in: query
@@ -5983,6 +6061,10 @@ paths:
         in: query
         name: course_id
         type: string
+      - description: 'true: only classes open for recruitment'
+        in: query
+        name: recruiting
+        type: boolean
       - description: page number
         in: query
         name: page
@@ -8268,10 +8350,71 @@ paths:
       summary: Bàn giao lớp cho giáo viên khác
       tags:
       - classes
+  /classes/availability:
+    get:
+      description: slot is repeatable, "<weekday 0-6>-<HH:MM>-<duration minutes>"
+        (e.g. "1-08:00-90"). Rooms are the distinct non-empty rooms of live classes
+        in the center; teachers are the active center members. A room or teacher is
+        free only when no other live class's active schedule overlaps any requested
+        slot on the same weekday; exclude_class_id leaves one class out of that check
+        (the class being edited).
+      parameters:
+      - collectionFormat: csv
+        description: repeatable, <weekday 0-6>-<HH:MM>-<duration minutes>
+        in: query
+        items:
+          type: string
+        name: slot
+        type: array
+      - description: class id to leave out of the busy check
+        in: query
+        name: exclude_class_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/classes.AvailabilityResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Class availability
+      tags:
+      - classes
   /classes/stats:
     get:
       description: Counts every class the caller can read, bucketed by phase on today,
-        plus how many are recruiting.
+        plus how many are recruiting. recruiting=true scopes every counter to the
+        classes open for recruitment, as the list filter of the same name does.
+      parameters:
+      - description: 'true: count only classes open for recruitment'
+        in: query
+        name: recruiting
+        type: boolean
       produces:
       - application/json
       responses:
@@ -8286,6 +8429,15 @@ paths:
               type: object
         "401":
           description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: Unprocessable Entity
           schema:
             allOf:
             - $ref: '#/definitions/response.Envelope'

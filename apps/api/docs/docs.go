@@ -4328,7 +4328,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "status filters the list: active (default), archived, or all. The other filters combine with AND: q matches name or code, weekday/shift match a timetable row still in effect, tag matches one tag exactly, phase is derived from the dates.",
+                "description": "status filters the list: active (default), archived, or all. The other filters combine with AND: q matches name or code, weekday/shift match a timetable row still in effect, tag matches one tag exactly, phase is derived from the dates, recruiting=true keeps the classes open for recruitment (flag on, not ended or archived).",
                 "produces": [
                     "application/json"
                 ],
@@ -4377,6 +4377,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "only classes attached to this course",
                         "name": "course_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "true: only classes open for recruitment",
+                        "name": "recruiting",
                         "in": "query"
                     },
                     {
@@ -4565,6 +4571,97 @@ const docTemplate = `{
                 }
             }
         },
+        "/classes/availability": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "slot is repeatable, \"\u003cweekday 0-6\u003e-\u003cHH:MM\u003e-\u003cduration minutes\u003e\" (e.g. \"1-08:00-90\"). Rooms are the distinct non-empty rooms of live classes in the center; teachers are the active center members. A room or teacher is free only when no other live class's active schedule overlaps any requested slot on the same weekday; exclude_class_id leaves one class out of that check (the class being edited).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "classes"
+                ],
+                "summary": "Class availability",
+                "parameters": [
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "csv",
+                        "description": "repeatable, \u003cweekday 0-6\u003e-\u003cHH:MM\u003e-\u003cduration minutes\u003e",
+                        "name": "slot",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "class id to leave out of the busy check",
+                        "name": "exclude_class_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/classes.AvailabilityResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/classes/stats": {
             "get": {
                 "security": [
@@ -4572,7 +4669,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Counts every class the caller can read, bucketed by phase on today, plus how many are recruiting.",
+                "description": "Counts every class the caller can read, bucketed by phase on today, plus how many are recruiting. recruiting=true scopes every counter to the classes open for recruitment, as the list filter of the same name does.",
                 "produces": [
                     "application/json"
                 ],
@@ -4580,6 +4677,14 @@ const docTemplate = `{
                     "classes"
                 ],
                 "summary": "Class stats",
+                "parameters": [
+                    {
+                        "type": "boolean",
+                        "description": "true: count only classes open for recruitment",
+                        "name": "recruiting",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -4601,6 +4706,24 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
                         "schema": {
                             "allOf": [
                                 {
@@ -23665,6 +23788,48 @@ const docTemplate = `{
                 }
             }
         },
+        "classes.AvailabilityResponse": {
+            "type": "object",
+            "properties": {
+                "rooms": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/classes.AvailabilityRoomResponse"
+                    }
+                },
+                "teachers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/classes.AvailabilityTeacherResponse"
+                    }
+                }
+            }
+        },
+        "classes.AvailabilityRoomResponse": {
+            "type": "object",
+            "properties": {
+                "free": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "classes.AvailabilityTeacherResponse": {
+            "type": "object",
+            "properties": {
+                "free": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "teacher_id": {
+                    "type": "string"
+                }
+            }
+        },
         "classes.ClassResponse": {
             "type": "object",
             "properties": {
@@ -23704,6 +23869,10 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "next_class_id": {
+                    "description": "NextClassID is the earliest-created live child whose parent_class_id\nis this class (lớp kế tiếp); null when it has none.",
+                    "type": "string"
+                },
                 "note": {
                     "type": "string"
                 },
@@ -23717,6 +23886,10 @@ const docTemplate = `{
                 },
                 "recruiting": {
                     "type": "boolean"
+                },
+                "room": {
+                    "description": "Room and StudyMode are the wizard's \"Hình thức học\" fields.",
+                    "type": "string"
                 },
                 "schedules": {
                     "type": "array",
@@ -23733,6 +23906,9 @@ const docTemplate = `{
                 "student_count": {
                     "description": "StudentCount is the number of enrollments still open on the class\n(ended_on IS NULL, not deleted) — the same predicate GET /enrollments\napplies for active=true, so a picker showing this count matches the\nrows that endpoint lists. Like MyStaffRoles it is filled only by the\nreadable GET paths; every other producer leaves it 0.",
                     "type": "integer"
+                },
+                "study_mode": {
+                    "type": "string"
                 },
                 "tags": {
                     "type": "array",
@@ -23786,7 +23962,6 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "name",
-                "schedules",
                 "start_date"
             ],
             "properties": {
@@ -23816,15 +23991,28 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 1000
                 },
+                "room": {
+                    "description": "Room is the physical/virtual room name; blank or absent means\nunassigned.",
+                    "type": "string",
+                    "maxLength": 50
+                },
                 "schedules": {
+                    "description": "Schedules is required for a scheduled class and must be empty for a\nself_paced one; the service enforces that pairing since it depends on\nStudyMode, not on binding tags alone.",
                     "type": "array",
-                    "minItems": 1,
                     "items": {
                         "$ref": "#/definitions/classes.ScheduleRequest"
                     }
                 },
                 "start_date": {
                     "type": "string"
+                },
+                "study_mode": {
+                    "description": "StudyMode defaults to \"scheduled\" when absent.",
+                    "type": "string",
+                    "enum": [
+                        "scheduled",
+                        "self_paced"
+                    ]
                 },
                 "tags": {
                     "type": "array",
@@ -23845,6 +24033,7 @@ const docTemplate = `{
             "properties": {
                 "duration_min": {
                     "type": "integer",
+                    "maximum": 600,
                     "minimum": 1
                 },
                 "effective_from": {
@@ -23919,6 +24108,10 @@ const docTemplate = `{
                     "maxLength": 100,
                     "minLength": 1
                 },
+                "next_class_id": {
+                    "description": "NextClassID follows the same patch rule: nil keeps every existing\nchild link, \"\" unlinks every live child, a uuid links that live class\nof the same center as the single child (see resolveNextClassLink).\nUntagged for the same \"\" reason as course_id.",
+                    "type": "string"
+                },
                 "note": {
                     "description": "Note replaces the stored note; an empty string clears it.",
                     "type": "string",
@@ -23931,7 +24124,16 @@ const docTemplate = `{
                 "recruiting": {
                     "type": "boolean"
                 },
+                "room": {
+                    "description": "Room follows the same patch rule: nil keeps, \"\" clears.",
+                    "type": "string",
+                    "maxLength": 50
+                },
                 "start_date": {
+                    "type": "string"
+                },
+                "study_mode": {
+                    "description": "StudyMode follows the same patch rule: nil keeps the stored mode.\nUntagged: an empty string is not a valid mode and must reach the\nservice to surface as a field error rather than being silently dropped\nby a binding tag.",
                     "type": "string"
                 },
                 "tags": {
@@ -23954,6 +24156,7 @@ const docTemplate = `{
             "properties": {
                 "duration_min": {
                     "type": "integer",
+                    "maximum": 600,
                     "minimum": 1
                 },
                 "effective_from": {
@@ -23982,6 +24185,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "class_name": {
+                    "type": "string"
+                },
+                "course_name": {
+                    "description": "CourseName is the class's course, null when it has none.",
                     "type": "string"
                 },
                 "id": {
@@ -24035,6 +24242,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "class_name": {
+                    "type": "string"
+                },
+                "course_name": {
+                    "description": "CourseName is the class's course, null when it has none.",
                     "type": "string"
                 },
                 "id": {
