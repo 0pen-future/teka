@@ -14,16 +14,11 @@ import { useCenterContext } from "@/features/teaching";
 import { ApiError } from "@/lib/api/errors";
 import { cn } from "@/lib/utils";
 
+import { PathDeleteConfirm } from "../components/path-delete-confirm";
 import { PathDialog } from "../components/path-dialog";
 import { StageDialog } from "../components/stage-dialog";
 import { useCoursesList } from "../hooks/use-courses";
-import {
-  useDeletePath,
-  useDeleteStage,
-  usePath,
-  useReorderStages,
-  useSetStageCourses,
-} from "../hooks/use-paths";
+import { useDeleteStage, usePath, useReorderStages, useSetStageCourses } from "../hooks/use-paths";
 import { courseStatusLabel } from "../lib/course-labels";
 import { pathStatusLabel, pathStatusVariant } from "../lib/path-labels";
 import type { Course } from "../schemas/courses-schemas";
@@ -80,7 +75,6 @@ function PathWorkspace({ path }: { path: LearningPath }) {
   // Chips link into the catalog only for readers who can open it.
   const canOpenCourse = has("courses.read");
 
-  const remove = useDeletePath();
   const reorder = useReorderStages(path.id);
   // The picker offers the catalog's active courses; a stage keeps an archived
   // one it already holds until an editor drops it.
@@ -90,6 +84,11 @@ function PathWorkspace({ path }: { path: LearningPath }) {
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [addingStage, setAddingStage] = useState(false);
+
+  function onDeleted() {
+    hvToast(`Đã xoá lộ trình ${path.code}`);
+    void navigate("/paths");
+  }
 
   function move(index: number, delta: number) {
     const ids = path.stages.map((stage) => stage.id);
@@ -203,6 +202,7 @@ function PathWorkspace({ path }: { path: LearningPath }) {
             open={editing}
             onOpenChange={setEditing}
             onSaved={() => hvToast("Đã lưu lộ trình")}
+            onDeleted={onDeleted}
           />
           <StageDialog
             mode="create"
@@ -210,26 +210,11 @@ function PathWorkspace({ path }: { path: LearningPath }) {
             open={addingStage}
             onOpenChange={setAddingStage}
           />
-          <HvConfirmDialog
+          <PathDeleteConfirm
+            path={path}
             open={deleting}
             onOpenChange={setDeleting}
-            title={`Xoá lộ trình "${path.name}"?`}
-            description="Các giai đoạn và khóa học gợi ý trong lộ trình bị gỡ theo. Khóa học vẫn giữ nguyên trong danh mục."
-            confirmLabel="Xoá lộ trình"
-            tone="danger"
-            pending={remove.isPending}
-            onConfirm={() =>
-              remove.mutate(path.id, {
-                onSuccess: () => {
-                  hvToast(`Đã xoá lộ trình ${path.code}`);
-                  void navigate("/paths");
-                },
-                onError: (error) => {
-                  setDeleting(false);
-                  hvToast(apiMessage(error, "Không xoá được lộ trình."), { variant: "danger" });
-                },
-              })
-            }
+            onDeleted={onDeleted}
           />
         </>
       ) : null}
