@@ -31,7 +31,7 @@ export function ClassCollectionGroup({ className, rows }: ClassCollectionGroupPr
           <div key={row.invoice_id} className="flex items-center justify-between gap-3 px-4 py-3">
             <div>
               <p className="text-[14px] font-bold text-ink-900">{row.student_name}</p>
-              <p className="text-[13px] text-ink-400">{row.contact_name}</p>
+              <p className="text-[13px] text-ink-500">{row.contact_name}</p>
               {row.invoice_outstanding > 0 ? (
                 <p className="text-[13px] text-coral-600">
                   thiếu {formatMoney(row.invoice_outstanding)}

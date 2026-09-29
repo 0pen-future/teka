@@ -3,13 +3,16 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Spinner } from "@/components/shared/spinner";
 
 import { refreshSession } from "../api/auth-api";
-import { useAuthStore } from "../stores/auth-store";
+import { hasSessionHint, useAuthStore } from "../stores/auth-store";
 
-// Hardcoded rather than imported from "@/features/statement": that feature's
-// isolation boundary forbids it from depending on anything auth-related, so
-// the dependency cannot run the other way either. Keep this in sync with
-// STATEMENT_PATH_PREFIX in apps/web/src/features/statement/routes.tsx.
-const PUBLIC_STATEMENT_PATH_PREFIX = "/s/";
+/** Pages a signed-out visitor lands on, where a refresh usually just 401s. */
+const PUBLIC_AUTH_PATHS = ["/login", "/forgot-password", "/reset-password/", "/invite/"];
+
+function isPublicAuthPath(pathname: string): boolean {
+  return PUBLIC_AUTH_PATHS.some((path) =>
+    path.endsWith("/") ? pathname.startsWith(path) : pathname === path,
+  );
+}
 
 /**
  * On a full page load the in-memory access token is gone even when the
@@ -17,15 +20,15 @@ const PUBLIC_STATEMENT_PATH_PREFIX = "/s/";
  * rendering the app so ProtectedRoute doesn't bounce a logged-in user to
  * /login. A 401 just means "no session to restore".
  *
- * On the public parent-statement route this attempt is skipped entirely: a
- * parent visiting `/s/:token` never has a teacher session to restore, and
- * firing `/auth/refresh` there is a pointless request that also 401s for
- * every parent.
+ * On public auth pages the attempt runs only when this browser has signed in
+ * before (`hasSessionHint`), so a first-time visitor sees no failed request.
+ * Protected routes always try.
  */
 export function SessionRestore({ children }: { children: ReactNode }) {
-  const isPublicStatementRoute = window.location.pathname.startsWith(PUBLIC_STATEMENT_PATH_PREFIX);
   const [restoring, setRestoring] = useState(
-    () => !isPublicStatementRoute && useAuthStore.getState().accessToken === null,
+    () =>
+      useAuthStore.getState().accessToken === null &&
+      (hasSessionHint() || !isPublicAuthPath(window.location.pathname)),
   );
   const attempted = useRef(false);
 

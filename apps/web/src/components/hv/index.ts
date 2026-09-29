@@ -1,5 +1,7 @@
 export { HvButton } from "./hv-button";
-export type { HvButtonProps, HvButtonSize, HvButtonVariant } from "./hv-button";
+export type { HvButtonProps } from "./hv-button";
+export { hvButtonVariants } from "./hv-button-variants";
+export type { HvButtonSize, HvButtonVariant } from "./hv-button-variants";
 
 export { HvCard } from "./hv-card";
 export type { HvCardPadding, HvCardProps, HvCardVariant } from "./hv-card";
@@ -67,3 +69,5 @@ export type { HvIconName, HvIconProps } from "./hv-icon";
 
 export { HvSelect } from "./hv-select";
 export type { HvSelectOption, HvSelectProps } from "./hv-select";
+export { HvTableScroll } from "./hv-table-scroll";
+export type { HvTableScrollProps } from "./hv-table-scroll";

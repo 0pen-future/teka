@@ -26,7 +26,7 @@ export function RosterImportPage() {
   const { data: center, isPending, isError } = useCenter();
 
   if (isPending) {
-    return <p className="text-[14px] text-ink-400">Đang tải…</p>;
+    return <p className="text-[14px] text-ink-500">Đang tải…</p>;
   }
   if (isError || !center) {
     return <p className="text-[14px] text-ink-500">Không tải được thông tin trung tâm.</p>;
@@ -141,7 +141,7 @@ function ImportFlow() {
 
       <HvCard>
         <p className="font-display text-[16px] font-bold text-ink-900">1. Tải file mẫu</p>
-        <p className="mt-0.5 mb-3 text-[13px] text-ink-400">
+        <p className="mt-0.5 mb-3 text-[13px] text-ink-500">
           File mẫu có 2 sheet: <strong>Lop</strong> và <strong>HocSinh</strong>, kèm dòng ví dụ. Giữ
           nguyên tên sheet và dòng tiêu đề. Dòng 2 là dòng ví dụ — hệ thống bỏ qua; nhập dữ liệu
           thật từ <strong>dòng 3</strong> trở đi. Cột <strong>SĐT giáo viên</strong> có thể để
@@ -166,7 +166,7 @@ function ImportFlow() {
 
       <HvCard>
         <p className="font-display text-[16px] font-bold text-ink-900">2. Chọn file đã điền</p>
-        <p className="mt-0.5 mb-3 text-[13px] text-ink-400">Định dạng .xlsx, tối đa 2 MB.</p>
+        <p className="mt-0.5 mb-3 text-[13px] text-ink-500">Định dạng .xlsx, tối đa 2 MB.</p>
         <input
           ref={fileInputRef}
           type="file"
@@ -207,7 +207,7 @@ function ImportFlow() {
       </div>
 
       {runningCommit ? (
-        <p className="text-[13px] text-ink-400">
+        <p className="text-[13px] text-ink-500">
           Đang ghi dữ liệu, đừng đóng trang. File lớn có thể mất khoảng một phút.
         </p>
       ) : null}

@@ -23,7 +23,7 @@ export function sessionStatusInfo(session: Session, today: string): SessionStatu
   if (session.session_date <= today) {
     return { text: "Chưa điểm danh", textClass: "text-coral-600", dotClass: "bg-coral-400" };
   }
-  return { text: "Sắp tới", textClass: "text-ink-400", dotClass: "bg-line-300" };
+  return { text: "Sắp tới", textClass: "text-ink-500", dotClass: "bg-line-300" };
 }
 
 /**

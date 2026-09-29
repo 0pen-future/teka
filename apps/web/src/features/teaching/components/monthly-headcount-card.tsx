@@ -20,7 +20,7 @@ export function MonthlyHeadcountCard({
 
   return (
     <section className="rounded-[24px] bg-white px-5 py-[18px] shadow-soft-md">
-      <div className="text-[12.5px] font-extrabold tracking-[0.4px] text-ink-400">
+      <div className="text-[12.5px] font-extrabold tracking-[0.4px] text-ink-500">
         SĨ SỐ THEO THÁNG
       </div>
       <div className="mt-3.5 flex h-[92px] items-end gap-4">
@@ -34,7 +34,7 @@ export function MonthlyHeadcountCard({
               )}
               style={{ height: `${Math.max(8, Math.round((item.count / max) * 64))}px` }}
             />
-            <div className="text-[11.5px] font-bold text-ink-400">{item.label}</div>
+            <div className="text-[11.5px] font-bold text-ink-500">{item.label}</div>
           </div>
         ))}
       </div>

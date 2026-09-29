@@ -441,12 +441,6 @@ definitions:
     type: object
   centers.MemberResponse:
     properties:
-      can_send_reports:
-        description: |-
-          CanSendReports mirrors the member's effective reports.send permission
-          (computed, not stored); always false for the owner (member-only —
-          the owner's authority is implicit).
-        type: boolean
       full_name:
         type: string
       id:

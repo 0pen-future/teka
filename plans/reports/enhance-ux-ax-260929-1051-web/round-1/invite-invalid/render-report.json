@@ -1,0 +1,77 @@
+[
+  {
+    "viewport": "375x812",
+    "screenshot": "/home/cesc/Documents/personal-workspace/teka/plans/reports/enhance-ux-ax-260929-1051-web/round-1/invite-invalid/375x812.png",
+    "outline": [
+      "div#root \"Skip to content ! Không mở được lời mời \" @ x0 y0 375x812",
+      "  main#main-content.flex.min-h-svh \"! Không mở được lời mời nà @ x0 y0 375x812",
+      "    div.w-full.max-w-sm \"! Không mở được lời mời này. Liên kết c @ x16 y284 343x244",
+      "      div.rounded-[var(--radius-xl)].bg-white \"! Không mở được lời @ x16 y284 343x244"
+    ],
+    "findings": [
+      {
+        "severity": "error",
+        "type": "runtime-error",
+        "target": "",
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found) (http://localhost:55183/api/v1/invitations/preview)"
+      },
+      {
+        "severity": "error",
+        "type": "runtime-error",
+        "target": "",
+        "message": "Failed to load resource: the server responded with a status of 401 (Unauthorized) (http://localhost:55183/api/v1/auth/refresh)"
+      }
+    ],
+    "height": 812
+  },
+  {
+    "viewport": "768x1024",
+    "screenshot": "/home/cesc/Documents/personal-workspace/teka/plans/reports/enhance-ux-ax-260929-1051-web/round-1/invite-invalid/768x1024.png",
+    "outline": [
+      "div#root \"Skip to content ! Không mở được lời mời \" @ x0 y0 768x1024",
+      "  main#main-content.flex.min-h-svh \"! Không mở được lời mời nà @ x0 y0 768x1024",
+      "    div.w-full.max-w-sm \"! Không mở được lời mời này. Liên kết c @ x192 y401 384x222",
+      "      div.rounded-[var(--radius-xl)].bg-white \"! Không mở được lời @ x192 y401 384x222"
+    ],
+    "findings": [
+      {
+        "severity": "error",
+        "type": "runtime-error",
+        "target": "",
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found) (http://localhost:55183/api/v1/invitations/preview)"
+      },
+      {
+        "severity": "error",
+        "type": "runtime-error",
+        "target": "",
+        "message": "Failed to load resource: the server responded with a status of 401 (Unauthorized) (http://localhost:55183/api/v1/auth/refresh)"
+      }
+    ],
+    "height": 1024
+  },
+  {
+    "viewport": "1440x900",
+    "screenshot": "/home/cesc/Documents/personal-workspace/teka/plans/reports/enhance-ux-ax-260929-1051-web/round-1/invite-invalid/1440x900.png",
+    "outline": [
+      "div#root \"Skip to content ! Không mở được lời mời \" @ x0 y0 1440x900",
+      "  main#main-content.flex.min-h-svh \"! Không mở được lời mời nà @ x0 y0 1440x900",
+      "    div.w-full.max-w-sm \"! Không mở được lời mời này. Liên kết c @ x528 y339 384x222",
+      "      div.rounded-[var(--radius-xl)].bg-white \"! Không mở được lời @ x528 y339 384x222"
+    ],
+    "findings": [
+      {
+        "severity": "error",
+        "type": "runtime-error",
+        "target": "",
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found) (http://localhost:55183/api/v1/invitations/preview)"
+      },
+      {
+        "severity": "error",
+        "type": "runtime-error",
+        "target": "",
+        "message": "Failed to load resource: the server responded with a status of 401 (Unauthorized) (http://localhost:55183/api/v1/auth/refresh)"
+      }
+    ],
+    "height": 900
+  }
+]

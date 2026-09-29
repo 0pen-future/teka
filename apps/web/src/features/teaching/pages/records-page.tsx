@@ -189,7 +189,7 @@ export function RecordsPage() {
           compact={!wide}
         />
       ) : rows.length === 0 ? (
-        <div className="rounded-[24px] bg-white p-6 text-center text-[13px] text-ink-400 shadow-soft-md">
+        <div className="rounded-[24px] bg-white p-6 text-center text-[13px] text-ink-500 shadow-soft-md">
           Lớp chưa có học sinh đang học.
         </div>
       ) : (

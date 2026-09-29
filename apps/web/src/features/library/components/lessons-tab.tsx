@@ -156,7 +156,7 @@ export function LessonsTab({ version, templateId, authoring }: LessonsTabProps) 
           <div className="relative w-[220px]">
             <SearchIcon
               aria-hidden="true"
-              className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-400"
+              className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-500"
             />
             <Input
               type="search"

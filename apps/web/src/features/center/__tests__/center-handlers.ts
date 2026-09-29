@@ -20,7 +20,6 @@ export function makeMember(overrides: Partial<CenterMember> = {}): CenterMember 
     full_name: `Giáo Viên ${memberCounter}`,
     phone: `+8490200${String(memberCounter).padStart(4, "0")}`,
     is_owner: false,
-    can_send_reports: false,
     ...overrides,
   };
 }
@@ -44,7 +43,6 @@ export function makeCenterMeOwner(overrides: Partial<CenterMeOwner> = {}): Cente
 export function makeCenterMeMember(overrides: Partial<CenterMeMember> = {}): CenterMeMember {
   return {
     center_name: "Trung Tâm Bình Minh",
-    can_send_reports: false,
     permissions: [],
     ...overrides,
   };

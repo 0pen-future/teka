@@ -162,7 +162,7 @@ export function StudentDialog({
             />
             <FieldError errors={[errors.contact_id]} />
           </Field>
-          <p className="text-[12px] text-ink-400">
+          <p className="text-[12px] text-ink-500">
             Không thu thập tuổi, trường, địa chỉ hay bất kỳ dữ liệu nào khác của trẻ.
           </p>
           <FieldError errors={[errors.root]} />

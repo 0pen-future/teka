@@ -1,7 +1,15 @@
 import { useState } from "react";
 import { Link } from "react-router";
 
-import { HvBadge, HvButton, HvChip, HvConfirmDialog, HvStateBlock, hvToast } from "@/components/hv";
+import {
+  HvBadge,
+  HvButton,
+  HvChip,
+  HvConfirmDialog,
+  HvStateBlock,
+  HvTableScroll,
+  hvToast,
+} from "@/components/hv";
 import { useCenterContext } from "@/features/teaching";
 import { ApiError } from "@/lib/api/errors";
 import { cn } from "@/lib/utils";
@@ -40,7 +48,7 @@ const neutralActionClassName = cn(
 );
 const dangerActionClassName = cn(
   outlineActionClassName,
-  "text-coral-500 hover:border-coral-300 hover:bg-coral-100",
+  "text-coral-600 hover:border-coral-300 hover:bg-coral-100",
 );
 
 function apiMessage(error: unknown, fallback: string): string {
@@ -119,8 +127,13 @@ export function ClassInvitationsPage() {
             </HvButton>
           }
         />
+      ) : rows.length === 0 ? (
+        <HvStateBlock state="empty" title="Không có lời mời nào." />
       ) : (
-        <div className="overflow-x-auto rounded-[20px] bg-white shadow-soft-md">
+        <HvTableScroll
+          aria-label="Bảng lời mời vào lớp"
+          className="rounded-[20px] bg-white shadow-soft-md"
+        >
           <table className="w-full min-w-[820px] table-fixed border-collapse text-left text-[13.5px]">
             <colgroup>
               <col className="w-[62px]" />
@@ -143,22 +156,12 @@ export function ClassInvitationsPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={6}
-                    className="border-t border-line-100 p-[34px] text-center font-bold text-ink-400"
-                  >
-                    Không có lời mời nào.
-                  </td>
-                </tr>
-              ) : null}
               {rows.map((item, index) => {
                 const busy = busyId === item.id;
                 const open = item.status === "pending" || item.status === "accepted";
                 return (
                   <tr key={item.id} className="transition-colors hover:bg-cream-100">
-                    <td className={cn(cellClassName, "font-extrabold text-ink-400")}>
+                    <td className={cn(cellClassName, "font-extrabold text-ink-500")}>
                       {index + 1}
                     </td>
                     <td className={cellClassName}>
@@ -174,7 +177,7 @@ export function ClassInvitationsPage() {
                         // stint exists the invitee has nothing to open there.
                         <span className="font-extrabold text-ink-900">{item.class_name}</span>
                       )}
-                      <div className="truncate text-[12px] text-ink-400">
+                      <div className="truncate text-[12px] text-ink-500">
                         {item.course_name ?? "Chưa gắn khóa"}
                       </div>
                       {item.message ? (
@@ -185,12 +188,12 @@ export function ClassInvitationsPage() {
                     </td>
                     <td className={cellClassName}>
                       <div className="font-bold text-ink-900">{item.teacher_name}</div>
-                      <div className="text-[12px] text-ink-400">{item.role_label}</div>
+                      <div className="text-[12px] text-ink-500">{item.role_label}</div>
                     </td>
                     <td className={cn(cellClassName, "text-ink-500")}>
                       {formatDateTime(item.sent_at)}
                       {item.reminded_at ? (
-                        <span className="block text-[12px] text-ink-400">
+                        <span className="block text-[12px] text-ink-500">
                           Nhắc lại {formatDateTime(item.reminded_at)}
                         </span>
                       ) : null}
@@ -280,7 +283,7 @@ export function ClassInvitationsPage() {
               })}
             </tbody>
           </table>
-        </div>
+        </HvTableScroll>
       )}
 
       <HvConfirmDialog

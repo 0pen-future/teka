@@ -95,7 +95,7 @@ export function BankPickerModal<T extends { id: string }>({
         <div className="relative">
           <SearchIcon
             aria-hidden="true"
-            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-400"
+            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-500"
           />
           <Input
             type="search"

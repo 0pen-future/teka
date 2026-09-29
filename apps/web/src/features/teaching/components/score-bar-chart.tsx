@@ -23,12 +23,12 @@ function barColor(row: StudentSessionRow): string {
 /** ĐIỂM KIỂM TRA TỪNG BUỔI card: one hand-sized bar per held session. */
 export function ScoreBarChart({ rows, monthNumber }: ScoreBarChartProps) {
   return (
-    <section className="min-w-[340px] flex-1 rounded-[24px] bg-white px-5 py-[18px] shadow-soft-md">
-      <div className="text-[12.5px] font-extrabold tracking-[0.4px] text-ink-400">
+    <section className="min-w-[min(340px,100%)] flex-1 rounded-[24px] bg-white px-5 py-[18px] shadow-soft-md">
+      <div className="text-[12.5px] font-extrabold tracking-[0.4px] text-ink-500">
         ĐIỂM KIỂM TRA TỪNG BUỔI — THÁNG {String(monthNumber).padStart(2, "0")}
       </div>
       {rows.length === 0 ? (
-        <p className="mt-3.5 text-[13px] text-ink-400">
+        <p className="mt-3.5 text-[13px] text-ink-500">
           Chưa có buổi học nào trong tháng {monthNumber}.
         </p>
       ) : (
@@ -44,7 +44,7 @@ export function ScoreBarChart({ rows, monthNumber }: ScoreBarChartProps) {
                   height: `${Math.max(6, Math.round(((row.score ?? 0) / 10) * 80))}px`,
                 }}
               />
-              <div className="text-[10.5px] font-bold text-ink-400">
+              <div className="text-[10.5px] font-bold text-ink-500">
                 {row.session.session_date.slice(8, 10)}
               </div>
             </div>

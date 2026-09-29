@@ -43,14 +43,14 @@ test("blocks close on a pending session, then closes once attendance is confirme
 
   // Close is blocked while any past session in the period is unconfirmed
   // (R4 AC 1) — the button stays disabled and each offending session links
-  // straight to its attendance screen. The seeder leaves the most recent
+  // straight to the most overdue attendance screen. The seeder leaves the most recent
   // past sessions unconfirmed (more than one), so clear them one
   // confirm-and-return pass at a time until none remain.
   expect(pendingCount).toBeGreaterThan(0);
   while (pendingCount > 0) {
     await expect(blockedPanel).toBeVisible();
     await expect(closeButton).toBeDisabled();
-    await blockedPanel.locator("..").getByRole("link", { name: "Điểm danh" }).first().click();
+    await page.getByRole("link", { name: /^Điểm danh buổi còn thiếu/ }).click();
     await expect(page).toHaveURL(/\/sessions\/.+\/attendance$/);
 
     // Everyone defaults to Đúng giờ — the plain XÁC NHẬN (no exception

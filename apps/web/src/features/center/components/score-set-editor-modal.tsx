@@ -267,11 +267,11 @@ export function ScoreSetEditorModal({ open, onOpenChange, scoreSet }: ScoreSetEd
                   })}
                 </div>
                 <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-[12.5px] text-ink-400">
+                  <span className="text-[12.5px] text-ink-500">
                     {components.length}/{MAX_SCORE_SET_COMPONENTS} cột
                   </span>
                   {atLimit ? (
-                    <span className="text-[12.5px] text-ink-400">
+                    <span className="text-[12.5px] text-ink-500">
                       Tối đa {MAX_SCORE_SET_COMPONENTS} cột
                     </span>
                   ) : null}
@@ -302,7 +302,7 @@ export function ScoreSetEditorModal({ open, onOpenChange, scoreSet }: ScoreSetEd
                   }}
                   className="w-full min-w-0 rounded-[14px] border-2 border-line-200 bg-white px-3 py-2.5 text-[14.5px] text-ink-700 outline-none placeholder:text-ink-400 focus-visible:border-mint-400"
                 />
-                <p className="text-[12.5px] text-ink-400">
+                <p className="text-[12.5px] text-ink-500">
                   Mỗi dòng một cột, hoặc cách nhau bằng dấu phẩy. Tối đa {MAX_SCORE_SET_COMPONENTS}{" "}
                   cột.
                 </p>
@@ -329,7 +329,7 @@ export function ScoreSetEditorModal({ open, onOpenChange, scoreSet }: ScoreSetEd
           </Field>
 
           <div className="flex flex-col gap-1.5">
-            <p className="text-[12px] font-extrabold tracking-[0.3px] text-ink-400">XEM TRƯỚC</p>
+            <p className="text-[12px] font-extrabold tracking-[0.3px] text-ink-500">XEM TRƯỚC</p>
             <ScoreSetPreviewStrip names={previewNames} />
           </div>
 

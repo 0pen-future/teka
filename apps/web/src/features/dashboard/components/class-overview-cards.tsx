@@ -118,7 +118,7 @@ export function ClassOverviewCards({ className }: { className?: string }) {
         <p className="mt-3 text-[14px] text-ink-500">
           {/* Only the owner can reach the owner-only roster page the hint names. */}
           {isOwner
-            ? 'Chưa có lớp nào — tạo lớp đầu tiên ở mục "Lớp & học sinh".'
+            ? 'Chưa có lớp nào — tạo lớp đầu tiên ở mục "Quản trị học sinh".'
             : "Chưa có lớp nào."}
         </p>
       ) : (

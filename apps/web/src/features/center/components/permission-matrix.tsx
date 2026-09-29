@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { HvBadge, HvButton, HvModal, hvToast } from "@/components/hv";
+import { HvBadge, HvButton, HvModal, HvTableScroll, hvToast } from "@/components/hv";
 import { cn } from "@/lib/utils";
 
 import { isStaleConflict } from "../api/permission-api";
@@ -143,7 +143,7 @@ export function PermissionMatrix() {
   }
 
   if (isPending) {
-    return <p className="mt-3 text-[13px] text-ink-400">Đang tải…</p>;
+    return <p className="mt-3 text-[13px] text-ink-500">Đang tải…</p>;
   }
   if (isError || !data) {
     return <p className="mt-3 text-[13px] text-ink-500">Không tải được phân quyền.</p>;
@@ -165,7 +165,7 @@ export function PermissionMatrix() {
 
   function renderGroupTable(group: CatalogGroup) {
     return (
-      <div className="overflow-x-auto">
+      <HvTableScroll aria-label="Bảng phân quyền">
         {/* Fixed layout so column widths depend on the role set alone, not on
             the longest label of whichever tab is open — switching tabs must
             not shift the checkbox columns. */}
@@ -192,22 +192,25 @@ export function PermissionMatrix() {
                   ) : null}
                 </td>
                 {roles.map((role) => (
-                  <td key={role.id} className="px-2 py-2 text-center">
-                    <input
-                      type="checkbox"
-                      aria-label={`${permission.label} — ${role.name}`}
-                      checked={checkedOf(role).includes(permission.key)}
-                      disabled={mutation.isPending}
-                      onChange={() => toggle(role, permission.key)}
-                      className="size-4 accent-mint-600"
-                    />
+                  <td key={role.id} className="p-0 text-center">
+                    {/* The label fills the cell so the whole 44px square toggles the box. */}
+                    <label className="flex min-h-11 min-w-11 cursor-pointer items-center justify-center">
+                      <input
+                        type="checkbox"
+                        aria-label={`${permission.label} — ${role.name}`}
+                        checked={checkedOf(role).includes(permission.key)}
+                        disabled={mutation.isPending}
+                        onChange={() => toggle(role, permission.key)}
+                        className="size-5 cursor-pointer accent-mint-600"
+                      />
+                    </label>
                   </td>
                 ))}
               </tr>
             ))}
           </tbody>
         </table>
-      </div>
+      </HvTableScroll>
     );
   }
 
@@ -229,7 +232,7 @@ export function PermissionMatrix() {
               "border-b-[3px] px-0.5 py-2.5 text-[14.5px] font-extrabold focus-visible:ring-4 focus-visible:outline-none",
               activeTab?.id === tab.id
                 ? "border-mint-400 text-ink-900"
-                : "border-transparent text-ink-400",
+                : "border-transparent text-ink-500",
             )}
           >
             {tab.label}

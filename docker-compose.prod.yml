@@ -77,8 +77,9 @@ services:
     restart: unless-stopped
 
   # Static bundle behind unprivileged nginx (uid 101, listens on 8080).
-  # VITE_API_URL is baked in at image build time; rebuild the image to point
-  # the bundle at a different API origin.
+  # VITE_API_URL and VITE_PUBLIC_ORIGIN (this web origin, used by the
+  # og:image link preview) are baked in at image build time; rebuild the image
+  # to point the bundle at a different API or web origin.
   # No depends_on: nginx serves static files and never talks to the API
   # container — the browser does, through the reverse proxy.
   web:

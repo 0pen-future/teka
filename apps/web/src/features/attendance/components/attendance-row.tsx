@@ -65,7 +65,7 @@ export function AttendanceRow({
             ) : null}
           </span>
           {!duplicateName && row.display_note ? (
-            <span className="truncate text-[12px] text-ink-400">{row.display_note}</span>
+            <span className="truncate text-[12px] text-ink-500">{row.display_note}</span>
           ) : null}
           {excused ? (
             <span className="truncate text-[12px] font-bold text-sky-500">

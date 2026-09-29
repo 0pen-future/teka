@@ -93,7 +93,7 @@ export function ClassChatPanel({ klass, canPost, isOwner }: ClassChatPanelProps)
       ) : null}
 
       {thread.length === 0 ? (
-        <p className="text-[13px] text-ink-400">Chưa có tin nhắn nào.</p>
+        <p className="text-[13px] text-ink-500">Chưa có tin nhắn nào.</p>
       ) : (
         <ul className="flex flex-col gap-2">
           {thread.map((message) => {
@@ -106,7 +106,7 @@ export function ClassChatPanel({ klass, canPost, isOwner }: ClassChatPanelProps)
                 <div className="min-w-0 flex-1">
                   <p className="flex flex-wrap items-baseline gap-x-2 text-[13px]">
                     <span className="font-bold text-ink-900">{message.author_name}</span>
-                    <span className="text-ink-400">{formatDateTime(message.created_at)}</span>
+                    <span className="text-ink-500">{formatDateTime(message.created_at)}</span>
                   </p>
                   <p className="mt-1 text-[14px] whitespace-pre-wrap text-ink-900">
                     {message.body}
@@ -118,7 +118,7 @@ export function ClassChatPanel({ klass, canPost, isOwner }: ClassChatPanelProps)
                     aria-label={`Xoá tin nhắn của ${message.author_name} lúc ${formatDateTime(message.created_at)}`}
                     disabled={remove.isPending}
                     onClick={() => setPendingDelete(message.id)}
-                    className="shrink-0 rounded-md p-1 text-ink-400 hover:text-coral-600 disabled:opacity-50"
+                    className="shrink-0 rounded-md p-1 text-ink-500 hover:text-coral-600 disabled:opacity-50"
                   >
                     <Trash2Icon aria-hidden="true" className="size-4" />
                   </button>
@@ -153,7 +153,7 @@ export function ClassChatPanel({ klass, canPost, isOwner }: ClassChatPanelProps)
           </div>
         </form>
       ) : (
-        <p className="text-[13px] text-ink-400">Bạn không có quyền nhắn tin trong lớp này.</p>
+        <p className="text-[13px] text-ink-500">Bạn không có quyền nhắn tin trong lớp này.</p>
       )}
 
       <HvConfirmDialog

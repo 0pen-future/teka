@@ -28,7 +28,7 @@ export function QuickDoneButton({ onDone, disabled }: QuickDoneButtonProps) {
         "rounded-full border-2 border-line-300 bg-white text-mint-600 shadow-xs",
         "opacity-0 transition-[opacity,background-color,border-color] group-hover:opacity-100",
         "group-focus-within:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100",
-        "hover:border-mint-400 hover:bg-mint-400 hover:text-white",
+        "hover:border-mint-400 hover:bg-mint-400 hover:text-on-brand",
         "focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-mint-100",
         "disabled:cursor-not-allowed disabled:opacity-50",
       )}

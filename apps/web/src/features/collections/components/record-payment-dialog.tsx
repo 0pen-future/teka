@@ -210,7 +210,7 @@ export function RecordPaymentDialog({
     >
       <form id="record-payment-form" onSubmit={(event) => void onSubmit(event)} noValidate>
         <FieldGroup>
-          <p className="text-[13px] text-ink-400">Từ {contactName}</p>
+          <p className="text-[13px] text-ink-500">Từ {contactName}</p>
           <Field data-invalid={Boolean(errors.amount)}>
             <FieldLabel htmlFor="payment-amount">Số tiền</FieldLabel>
             <MoneyField

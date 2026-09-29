@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { z } from "zod";
 
-import { HvBadge, HvButton, HvStateBlock, hvToast } from "@/components/hv";
+import { HvBadge, HvButton, HvStateBlock, HvTableScroll, hvToast } from "@/components/hv";
 import { actorLabel, useAuditLogs, type AuditLog } from "@/features/audit";
 import {
   materialFormatLabel,
@@ -77,7 +77,7 @@ const opsHints: Partial<Record<Tab, string>> = {
 
 const cardClassName = "rounded-[24px] bg-white px-5 py-[18px] shadow-soft-md";
 const cardTitleClassName = "font-display text-[19px] font-bold text-ink-900";
-const cardNoteClassName = "text-[12.5px] text-ink-400";
+const cardNoteClassName = "text-[12.5px] text-ink-500";
 const linkButtonClassName =
   "cursor-pointer border-none bg-transparent p-0 font-extrabold text-sky-500 hover:text-sky-600";
 const outlineSmallClassName =
@@ -207,7 +207,7 @@ function CourseWorkspace({ course }: { course: Course }) {
             {course.name.slice(0, 1).toUpperCase()}
           </div>
           <div className="min-w-[240px] flex-1">
-            <div className="text-[12.5px] font-bold text-ink-400">Khóa học</div>
+            <div className="text-[12.5px] font-bold text-ink-500">Khóa học</div>
             <div className="flex flex-wrap items-center gap-2.5">
               <h1 className="m-0 font-display text-[28px] font-extrabold text-ink-900">
                 {course.name}
@@ -319,7 +319,7 @@ function CourseWorkspace({ course }: { course: Course }) {
             <div className={cardTitleClassName}>
               {tabLabels.find(([value]) => value === tab)?.[1]} — chưa có màn hình chi tiết
             </div>
-            <div className="mx-auto mt-1 max-w-[480px] text-[13.5px] text-ink-400">
+            <div className="mx-auto mt-1 max-w-[480px] text-[13.5px] text-ink-500">
               {opsHints[tab]}
             </div>
           </div>
@@ -383,7 +383,7 @@ function InfoTab({ course, canEdit, historyRef, onSetup, stageLabel, pathLabel }
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="text-[12px] font-bold text-ink-400">{label}</div>
+      <div className="text-[12px] font-bold text-ink-500">{label}</div>
       <div className="mt-0.5 text-[15px] font-extrabold text-ink-900">{children}</div>
     </div>
   );
@@ -538,17 +538,17 @@ function CourseHistory({ courseId }: { courseId: string }) {
 
   if (!canRead) {
     return (
-      <p className="border-t border-line-100 py-2.5 text-[13px] text-ink-400">
+      <p className="border-t border-line-100 py-2.5 text-[13px] text-ink-500">
         Chỉ chủ trung tâm xem được lịch sử thay đổi.
       </p>
     );
   }
   if (logs.isPending) {
-    return <p className="border-t border-line-100 py-2.5 text-[13px] text-ink-400">Đang tải…</p>;
+    return <p className="border-t border-line-100 py-2.5 text-[13px] text-ink-500">Đang tải…</p>;
   }
   if (logs.isError) {
     return (
-      <p className="border-t border-line-100 py-2.5 text-[13px] text-ink-400">
+      <p className="border-t border-line-100 py-2.5 text-[13px] text-ink-500">
         Không tải được lịch sử thay đổi.
       </p>
     );
@@ -556,7 +556,7 @@ function CourseHistory({ courseId }: { courseId: string }) {
   const rows = logs.data.pages.flatMap((page) => page.items).filter((log) => log.status_code < 400);
   if (rows.length === 0) {
     return (
-      <p className="border-t border-line-100 py-2.5 text-[13px] text-ink-400">
+      <p className="border-t border-line-100 py-2.5 text-[13px] text-ink-500">
         Chưa có thay đổi nào.
       </p>
     );
@@ -565,7 +565,7 @@ function CourseHistory({ courseId }: { courseId: string }) {
     <ul>
       {rows.map((log) => (
         <li key={log.id} className="flex gap-3 border-t border-line-100 py-[9px] text-[13px]">
-          <div className="w-[78px] flex-none font-bold text-ink-400">
+          <div className="w-[78px] flex-none font-bold text-ink-500">
             {formatDateTime(log.occurred_at)}
           </div>
           <div className="flex-1">
@@ -842,7 +842,7 @@ function SetupView({
           </p>
         ) : null}
         {canEdit && !has("library.read") ? (
-          <p className="mt-2 text-[12.5px] text-ink-400">
+          <p className="mt-2 text-[12.5px] text-ink-500">
             Cần quyền xem Kho học liệu để chọn chương trình mẫu.
           </p>
         ) : null}
@@ -857,7 +857,7 @@ function SetupView({
           </button>
         ) : null}
 
-        <div className="mt-4 text-[12px] font-extrabold tracking-[0.4px] text-ink-400">
+        <div className="mt-4 text-[12px] font-extrabold tracking-[0.4px] text-ink-500">
           LỚP THUỘC KHÓA — PHIÊN BẢN ĐANG DÙNG
         </div>
         {classRows.map((klass) => {
@@ -874,7 +874,7 @@ function SetupView({
                   ? `${inherited ? "Kế thừa" : "Override →"} v${version.version_no}`
                   : "Chưa áp dụng chương trình"}
               </span>
-              <div className="flex-1 text-[12.5px] text-ink-400">
+              <div className="flex-1 text-[12.5px] text-ink-500">
                 {inherited
                   ? "Theo phiên bản mặc định của khóa."
                   : "Lớp tự chọn phiên bản khác khóa. Điểm đã chấm giữ theo cấu trúc cũ."}
@@ -890,7 +890,7 @@ function SetupView({
           );
         })}
         {!classes.isPending && classRows.length === 0 ? (
-          <div className="py-3.5 text-[13px] font-bold text-ink-400">
+          <div className="py-3.5 text-[13px] font-bold text-ink-500">
             Chưa có lớp nào mở từ khóa này.
           </div>
         ) : null}
@@ -939,7 +939,7 @@ function TemplatePicker({
       </select>
       {templateId && !versions.isPending ? (
         published.length === 0 ? (
-          <span className="text-[12.5px] text-ink-400">
+          <span className="text-[12.5px] text-ink-500">
             Chương trình này chưa có phiên bản đã phát hành.
           </span>
         ) : (
@@ -1040,7 +1040,7 @@ function TuitionPacksCard({ course, canEdit }: { course: Course; canEdit: boolea
         );
       })}
       {packs.length === 0 ? (
-        <div className="border-t border-line-100 py-2.5 text-[13px] font-bold text-ink-400">
+        <div className="border-t border-line-100 py-2.5 text-[13px] font-bold text-ink-500">
           Chưa có gói học phí.
         </div>
       ) : null}
@@ -1101,7 +1101,7 @@ function TemplateTab({ course, onSetup }: { course: Course; onSetup: () => void 
     return (
       <div className={cn(cardClassName, "mt-3.5 px-5 py-[34px] text-center")}>
         <div className={cardTitleClassName}>Khóa chưa gắn chương trình mẫu</div>
-        <div className="mt-1 text-[13.5px] text-ink-400">
+        <div className="mt-1 text-[13.5px] text-ink-500">
           Gắn một phiên bản chương trình mẫu ở mục Thiết lập → Chương trình học.
         </div>
         <div className="mt-3.5 flex justify-center">
@@ -1163,7 +1163,10 @@ function TemplateTab({ course, onSetup }: { course: Course; onSetup: () => void 
         ) : lessons.isError ? (
           <HvStateBlock state="error" title="Không tải được buổi học" />
         ) : (
-          <div className={cn(tableCardClassName, "mt-3 max-h-[64vh]")}>
+          <HvTableScroll
+            aria-label="Bảng buổi học của khóa"
+            className={cn(tableCardClassName, "mt-3 max-h-[64vh]")}
+          >
             <table className="w-full min-w-[640px] border-collapse text-left text-[13.5px]">
               <thead className="sticky top-0">
                 <tr>
@@ -1185,7 +1188,7 @@ function TemplateTab({ course, onSetup }: { course: Course; onSetup: () => void 
                       )
                     }
                   >
-                    <td className={cn(cellClassName, "font-extrabold text-ink-400")}>
+                    <td className={cn(cellClassName, "font-extrabold text-ink-500")}>
                       {index + 1}
                     </td>
                     <td className={cn(cellClassName, "font-extrabold text-ink-900")}>
@@ -1198,7 +1201,7 @@ function TemplateTab({ course, onSetup }: { course: Course; onSetup: () => void 
                 ))}
               </tbody>
             </table>
-          </div>
+          </HvTableScroll>
         )
       ) : detail.isPending ? (
         <HvStateBlock state="loading" title="Đang tải chương trình mẫu" />
@@ -1232,7 +1235,7 @@ function TemplateExercises({ lessons }: { lessons: VersionLessons }) {
     }
   }
   return (
-    <div className={cn(tableCardClassName, "mt-3")}>
+    <HvTableScroll aria-label="Bảng bài tập của khóa" className={cn(tableCardClassName, "mt-3")}>
       <table className="w-full min-w-[700px] border-collapse text-left text-[13.5px]">
         <thead>
           <tr>
@@ -1249,7 +1252,7 @@ function TemplateExercises({ lessons }: { lessons: VersionLessons }) {
             <tr>
               <td
                 colSpan={6}
-                className="border-t border-line-100 p-[30px] text-center font-bold text-ink-400"
+                className="border-t border-line-100 p-[30px] text-center font-bold text-ink-500"
               >
                 Chưa có bài tập mẫu.
               </td>
@@ -1257,7 +1260,7 @@ function TemplateExercises({ lessons }: { lessons: VersionLessons }) {
           ) : null}
           {[...rows.values()].map(({ exercise, used }, index) => (
             <tr key={exercise.id} className="hover:bg-cream-100">
-              <td className={cn(cellClassName, "font-extrabold text-ink-400")}>{index + 1}</td>
+              <td className={cn(cellClassName, "font-extrabold text-ink-500")}>{index + 1}</td>
               <td className={cellClassName}>
                 <span className="rounded-[8px] bg-cream-200 px-2 py-1 text-[12px] font-extrabold text-ink-500">
                   {exercise.code}
@@ -1279,7 +1282,7 @@ function TemplateExercises({ lessons }: { lessons: VersionLessons }) {
           ))}
         </tbody>
       </table>
-    </div>
+    </HvTableScroll>
   );
 }
 
@@ -1296,7 +1299,7 @@ function TemplateMaterials({ lessons }: { lessons: VersionLessons }) {
     }
   }
   return (
-    <div className={cn(tableCardClassName, "mt-3")}>
+    <HvTableScroll aria-label="Bảng tài liệu của khóa" className={cn(tableCardClassName, "mt-3")}>
       <table className="w-full min-w-[660px] border-collapse text-left text-[13.5px]">
         <thead>
           <tr>
@@ -1312,7 +1315,7 @@ function TemplateMaterials({ lessons }: { lessons: VersionLessons }) {
             <tr>
               <td
                 colSpan={5}
-                className="border-t border-line-100 p-[30px] text-center font-bold text-ink-400"
+                className="border-t border-line-100 p-[30px] text-center font-bold text-ink-500"
               >
                 Chưa có tài liệu mẫu.
               </td>
@@ -1320,7 +1323,7 @@ function TemplateMaterials({ lessons }: { lessons: VersionLessons }) {
           ) : null}
           {[...rows.values()].map(({ material, used }, index) => (
             <tr key={material.id} className="hover:bg-cream-100">
-              <td className={cn(cellClassName, "font-extrabold text-ink-400")}>{index + 1}</td>
+              <td className={cn(cellClassName, "font-extrabold text-ink-500")}>{index + 1}</td>
               <td className={cellClassName}>
                 <span className={cn(pillClassName, "bg-cream-200 text-[11.5px] text-ink-700")}>
                   {materialKindLabel[material.kind]}
@@ -1335,7 +1338,7 @@ function TemplateMaterials({ lessons }: { lessons: VersionLessons }) {
           ))}
         </tbody>
       </table>
-    </div>
+    </HvTableScroll>
   );
 }
 
@@ -1369,7 +1372,7 @@ function ClassesTab({ course }: { course: Course }) {
   const classes = list.data.items;
 
   return (
-    <div className={cn(tableCardClassName, "mt-3")}>
+    <HvTableScroll aria-label="Bảng lớp dùng khóa" className={cn(tableCardClassName, "mt-3")}>
       <table className="w-full min-w-[560px] border-collapse text-left text-[13.5px]">
         <thead>
           <tr>
@@ -1384,7 +1387,7 @@ function ClassesTab({ course }: { course: Course }) {
             <tr>
               <td
                 colSpan={4}
-                className="border-t border-line-100 p-[30px] text-center font-bold text-ink-400"
+                className="border-t border-line-100 p-[30px] text-center font-bold text-ink-500"
               >
                 Chưa có lớp nào mở từ khóa này.
               </td>
@@ -1419,6 +1422,6 @@ function ClassesTab({ course }: { course: Course }) {
           })}
         </tbody>
       </table>
-    </div>
+    </HvTableScroll>
   );
 }

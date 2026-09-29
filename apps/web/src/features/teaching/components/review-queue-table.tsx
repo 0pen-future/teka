@@ -1,3 +1,4 @@
+import { HvTableScroll } from "@/components/hv";
 import { cn } from "@/lib/utils";
 
 import type { LessonPlanStatus } from "../lib/teaching-store";
@@ -27,12 +28,12 @@ export function ReviewQueueTable({
 }) {
   return (
     <div className="flex-[1.4] overflow-hidden rounded-[24px] bg-white shadow-soft-md">
-      <div className="overflow-x-auto">
+      <HvTableScroll aria-label="Bảng hàng chờ duyệt">
         <div className="min-w-[440px]">
           <div
             className={cn(
               gridClassName,
-              "border-b-[1.5px] border-line-200 px-[18px] py-3 text-[11.5px] font-extrabold tracking-[0.3px] text-ink-400",
+              "border-b-[1.5px] border-line-200 px-[18px] py-3 text-[11.5px] font-extrabold tracking-[0.3px] text-ink-500",
             )}
           >
             <div>LỚP</div>
@@ -62,7 +63,7 @@ export function ReviewQueueTable({
             </button>
           ))}
         </div>
-      </div>
+      </HvTableScroll>
     </div>
   );
 }

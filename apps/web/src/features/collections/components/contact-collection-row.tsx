@@ -30,9 +30,10 @@ export function ContactCollectionRow({
 }: ContactCollectionRowProps) {
   const [expanded, setExpanded] = useState(false);
   const navigate = useNavigate();
-  // D8: creating sends is owner/send-reports-holder work — a plain member
-  // keeps Thu tiền but loses the send entry point (server enforces anyway).
-  const { canRunSends } = useCenterContext();
+  // Creating sends takes reports.send (the owner holds it implicitly) — a
+  // plain member keeps Thu tiền but loses the send entry point (server
+  // enforces anyway).
+  const canRunSends = useCenterContext().has("reports.send");
 
   return (
     <HvCard variant="flat" className="flex flex-col gap-3">
@@ -44,7 +45,7 @@ export function ContactCollectionRow({
         >
           <div>
             <p className="font-display text-[15px] font-bold text-ink-900">{row.full_name}</p>
-            <p className="text-[13px] text-ink-400">
+            <p className="text-[13px] text-ink-500">
               {row.student_count} con
               {row.phone ? ` · ${formatPhoneLocal(row.phone)}` : ""}
             </p>

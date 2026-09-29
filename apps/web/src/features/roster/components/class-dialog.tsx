@@ -167,7 +167,7 @@ function CreateClassForm({
             <div className="flex items-baseline gap-2">
               <FieldLabel>Lịch học trong tuần</FieldLabel>
               {weeklySessionCount(slots) > 0 ? (
-                <span className="text-[12.5px] font-bold text-ink-400">
+                <span className="text-[12.5px] font-bold text-ink-500">
                   · {weeklySessionCount(slots)} buổi/tuần
                 </span>
               ) : null}
@@ -235,7 +235,7 @@ function CreateClassForm({
               <FieldError errors={[errors.end_date]} />
             </Field>
           </div>
-          <p className="text-[12px] text-ink-400">
+          <p className="text-[12px] text-ink-500">
             Đơn giá lưu ở từng lượt ghi danh (mặc định kế thừa đơn giá lớp).
           </p>
           <FieldError errors={[errors.root]} />

@@ -201,7 +201,7 @@ function OptionList({
         </div>
       ) : null}
       {groupLabel ? (
-        <div className="px-3 pt-1.5 pb-0.5 text-[11px] font-extrabold uppercase tracking-[0.4px] text-ink-400">
+        <div className="px-3 pt-1.5 pb-0.5 text-[11px] font-extrabold uppercase tracking-[0.4px] text-ink-500">
           {groupLabel}
         </div>
       ) : null}
@@ -235,7 +235,7 @@ function OptionList({
               />
               <span className="flex-1">{option.label}</span>
               {option.meta ? (
-                <span className="text-[12px] font-bold text-ink-400">{option.meta}</span>
+                <span className="text-[12px] font-bold text-ink-500">{option.meta}</span>
               ) : null}
             </button>
           );
@@ -243,7 +243,7 @@ function OptionList({
       </div>
       {emptyNote ? (
         <div className="px-3 py-2.5">
-          <p className="text-[13px] font-bold text-ink-400">{emptyNote}</p>
+          <p className="text-[13px] font-bold text-ink-500">{emptyNote}</p>
         </div>
       ) : null}
     </div>
@@ -319,13 +319,13 @@ export function HvSelect({
         {selected?.meta ? (
           <>
             {" "}
-            <span className="ml-0.5 text-[12.5px] font-bold text-ink-400">· {selected.meta}</span>
+            <span className="ml-0.5 text-[12.5px] font-bold text-ink-500">· {selected.meta}</span>
           </>
         ) : null}
       </span>
       <ChevronDown
         className={cn(
-          "size-4 shrink-0 text-ink-400 transition-transform motion-reduce:transition-none",
+          "size-4 shrink-0 text-ink-500 transition-transform motion-reduce:transition-none",
           open && "rotate-180",
         )}
         aria-hidden="true"

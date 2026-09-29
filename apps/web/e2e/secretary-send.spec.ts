@@ -32,14 +32,20 @@ const OVERRIDE_MODE_LABELS: Record<string, string> = {
  * The e2e database is reused between runs, so the grant must be
  * assert-then-set: the member permissions dialog shows the current
  * `reports.send` override, and only a differing state is saved. Returns
- * after the roster badge reflects the requested state.
+ * after a reopened dialog shows the requested override persisted (the
+ * roster carries no grant badge; the dialog is the grant's only surface).
  */
-async function setSendReportsGrant(page: Page, granted: boolean) {
-  await page.goto("/center");
+async function openReportsSendOverride(page: Page) {
   await page.getByRole("button", { name: "Phân quyền cho Cô Thu" }).click();
   const dialog = page.getByRole("dialog");
   const reportsSend = dialog.getByRole("combobox", { name: "Quyền Gửi báo cáo học phí" });
   await expect(reportsSend).toBeVisible();
+  return { dialog, reportsSend };
+}
+
+async function setSendReportsGrant(page: Page, granted: boolean) {
+  await page.goto("/center");
+  const { dialog, reportsSend } = await openReportsSendOverride(page);
 
   const target = granted ? "grant" : "inherit";
   if ((await reportsSend.getAttribute("data-value")) === target) {
@@ -52,7 +58,11 @@ async function setSendReportsGrant(page: Page, granted: boolean) {
     await expect(page.getByText("Đã lưu phân quyền")).toBeVisible();
   }
   await expect(dialog).toBeHidden();
-  await expect(page.getByText("Thư ký gửi báo cáo")).toHaveCount(granted ? 1 : 0);
+
+  const reopened = await openReportsSendOverride(page);
+  await expect(reopened.reportsSend).toHaveAttribute("data-value", target);
+  await reopened.dialog.getByRole("button", { name: "Đóng", exact: true }).click();
+  await expect(reopened.dialog).toBeHidden();
 }
 
 async function revokeGrant(browser: Browser) {
@@ -66,7 +76,7 @@ async function revokeGrant(browser: Browser) {
   }
 }
 
-// Leave the flag false for the next run and for unrelated specs, no matter
+// Leave the grant revoked for the next run and for unrelated specs, no matter
 // where the journey test stopped.
 test.afterEach(async ({ browser }) => {
   await revokeGrant(browser);

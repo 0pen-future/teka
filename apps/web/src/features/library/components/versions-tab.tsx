@@ -79,7 +79,7 @@ export function VersionsTab({
                     ))}
                   </span>
                 ) : (
-                  <span className="text-[13px] text-ink-400">Chưa có lớp nào gắn</span>
+                  <span className="text-[13px] text-ink-500">Chưa có lớp nào gắn</span>
                 )}
               </div>
               <div className="flex items-center gap-2 self-end sm:self-auto">

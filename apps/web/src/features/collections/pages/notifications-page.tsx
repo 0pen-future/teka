@@ -78,7 +78,7 @@ function LedgerRow({ row }: { row: NotificationRow }) {
     <div className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
       <div className="min-w-0">
         <p className="truncate text-[14px] font-bold text-ink-900">{row.contact_name}</p>
-        <p className="text-[12px] text-ink-400">
+        <p className="text-[12px] text-ink-500">
           {ledgerChannelLabels[row.channel]}
           {row.sent_at ? ` · ${formatDateTime(row.sent_at)}` : ""}
         </p>
@@ -151,11 +151,12 @@ export function NotificationsPage() {
   // the other purpose tab never bleeds in.
   const activeRun = run.data?.purpose === purpose && run.data.run_id ? run.data : undefined;
 
-  // Send-affordance gating (D8): only reports oversight (owner or
-  // can_send_reports holder) may create sends; a plain member keeps this
-  // page read-only over the ledger. In class mode a hoc_vu stint on the
-  // class opens the send instead. UX-only — the server is the authority.
-  const { canRunSends, isResolved } = useCenterContext();
+  // Send-affordance gating: only reports.send (the owner holds it
+  // implicitly) may create sends; a plain member keeps this page read-only
+  // over the ledger. In class mode a hoc_vu stint on the class opens the
+  // send instead. UX-only — the server is the authority.
+  const { has, isResolved } = useCenterContext();
+  const canRunSends = has("reports.send");
   const classQuery = useClass(classId);
   const klass = classQuery.data;
   const canSend = classId
@@ -314,7 +315,7 @@ export function NotificationsPage() {
             className={cn(
               "min-h-9 rounded-[var(--radius-pill)] px-4 font-display text-[14px] font-bold transition-colors",
               purpose === option.value
-                ? "bg-mint-400 text-white"
+                ? "bg-mint-400 text-on-brand"
                 : "text-ink-500 hover:bg-cream-100",
             )}
           >
@@ -334,14 +335,14 @@ export function NotificationsPage() {
     return (
       <div className="flex flex-col gap-4">
         {header}
-        <p className="text-[13px] text-ink-400">
+        <p className="text-[13px] text-ink-500">
           Việc gửi báo cáo do người được giao quyền hoặc chủ trung tâm thực hiện. Dưới đây là các
           thông báo đã tạo cho kỳ này.
         </p>
         {ledgerPending ? (
-          <p className="text-[14px] text-ink-400">Đang tải…</p>
+          <p className="text-[14px] text-ink-500">Đang tải…</p>
         ) : (ledger?.length ?? 0) === 0 ? (
-          <HvCard variant="flat" className="text-center text-[13px] text-ink-400">
+          <HvCard variant="flat" className="text-center text-[13px] text-ink-500">
             Chưa có thông báo nào cho kỳ này.
           </HvCard>
         ) : (
@@ -370,7 +371,7 @@ export function NotificationsPage() {
       <HvCard variant="flat" className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-[13px] text-ink-400">Số phụ huynh</p>
+            <p className="text-[13px] text-ink-500">Số phụ huynh</p>
             <p className="font-display text-[18px] font-bold text-ink-900">{totalCount}</p>
           </div>
           <p className="text-[14px] text-ink-500">
@@ -402,7 +403,7 @@ export function NotificationsPage() {
             <label
               className={cn(
                 "flex items-center gap-2 text-[14px]",
-                personalReady ? "text-ink-900" : "text-ink-400",
+                personalReady ? "text-ink-900" : "text-ink-500",
               )}
             >
               <input
@@ -424,13 +425,13 @@ export function NotificationsPage() {
               </Link>
             </p>
           ) : zalo && !zalo.linked ? (
-            <p id="send-channel-note" className="text-[13px] text-ink-400">
+            <p id="send-channel-note" className="text-[13px] text-ink-500">
               <Link to="/profile" className="underline">
                 Kết nối Zalo để gửi tự động
               </Link>
             </p>
           ) : zaloStatusError ? (
-            <p id="send-channel-note" className="text-[13px] text-ink-400">
+            <p id="send-channel-note" className="text-[13px] text-ink-500">
               Không kiểm tra được trạng thái Zalo — chỉ gửi thủ công được.
             </p>
           ) : null}
@@ -452,7 +453,7 @@ export function NotificationsPage() {
 
       {showEmptyState ? (
         <HvCard variant="flat" className="flex flex-col items-center gap-3 py-6 text-center">
-          <p className="text-[13px] text-ink-400">Chưa có thông báo nào cho kỳ này.</p>
+          <p className="text-[13px] text-ink-500">Chưa có thông báo nào cho kỳ này.</p>
           <HvButton variant="primary" onClick={generate} disabled={bulkSend.isPending}>
             {bulkSend.isPending ? "Đang tạo…" : generateLabel[purpose]}
           </HvButton>
@@ -460,7 +461,7 @@ export function NotificationsPage() {
       ) : null}
 
       {rows !== null && rows.length === 0 && !(bulkSend.data?.personal_queued_count ?? 0) ? (
-        <HvCard variant="flat" className="text-center text-[13px] text-ink-400">
+        <HvCard variant="flat" className="text-center text-[13px] text-ink-500">
           Không có phụ huynh nào phù hợp.
         </HvCard>
       ) : null}

@@ -47,13 +47,13 @@ export function AuditPage() {
         <p className="text-[13px] text-coral-600">Không tải được nhật ký hoạt động. Thử lại sau.</p>
       ) : null}
       {query.isPending ? (
-        <p className="text-[13px] text-ink-400">Đang tải…</p>
+        <p className="text-[13px] text-ink-500">Đang tải…</p>
       ) : logs.length > 0 ? (
         <AuditTable logs={logs} />
       ) : query.isError ? null : (
         // A filtered window may legitimately be empty (kể cả window ngược,
         // API trả 200 rỗng) — chỉ khi không có filter mới nói "chưa có gì".
-        <p className="text-[13px] text-ink-400">
+        <p className="text-[13px] text-ink-500">
           {hasFilters
             ? "Không có bản ghi phù hợp với bộ lọc."
             : "Chưa có hoạt động nào được ghi nhận."}

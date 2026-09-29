@@ -158,7 +158,7 @@ export function LessonPlansPage() {
       </header>
 
       {queue.length === 0 ? (
-        <div className="rounded-[24px] bg-white p-6 text-center text-[13px] text-ink-400 shadow-soft-md">
+        <div className="rounded-[24px] bg-white p-6 text-center text-[13px] text-ink-500 shadow-soft-md">
           Chưa có lớp nào đang hoạt động.
         </div>
       ) : (

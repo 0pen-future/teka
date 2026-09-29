@@ -17,7 +17,7 @@ export function AttendanceTableHeader() {
         "sticky top-0 z-10 border-b border-line-100 bg-white px-3 pb-2 pt-1",
       )}
     >
-      <span className="text-[11px] font-extrabold uppercase tracking-wide text-ink-400">
+      <span className="text-[11px] font-extrabold uppercase tracking-wide text-ink-500">
         Học sinh
       </span>
       {ATTENDANCE_STATUSES.map((status) => (

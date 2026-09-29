@@ -40,8 +40,8 @@ export function CurriculumCard({
 
   if (!curriculum) {
     return (
-      <section className="min-w-[340px] flex-[1.7] rounded-[24px] bg-white px-5 py-[18px] shadow-soft-md">
-        <div className="text-[12.5px] font-extrabold tracking-[0.4px] text-ink-400">
+      <section className="min-w-[min(340px,100%)] flex-[1.7] rounded-[24px] bg-white px-5 py-[18px] shadow-soft-md">
+        <div className="text-[12.5px] font-extrabold tracking-[0.4px] text-ink-500">
           CHƯƠNG TRÌNH
         </div>
         <p className="mt-2 text-[13.5px] text-ink-500">
@@ -60,9 +60,9 @@ export function CurriculumCard({
   const nextIndex = Math.min(done, total - 1);
 
   return (
-    <section className="min-w-[340px] flex-[1.7] rounded-[24px] bg-white px-5 py-[18px] shadow-soft-md">
+    <section className="min-w-[min(340px,100%)] flex-[1.7] rounded-[24px] bg-white px-5 py-[18px] shadow-soft-md">
       <div className="flex flex-wrap items-baseline gap-2.5">
-        <div className="text-[12.5px] font-extrabold tracking-[0.4px] text-ink-400">
+        <div className="text-[12.5px] font-extrabold tracking-[0.4px] text-ink-500">
           CHƯƠNG TRÌNH
         </div>
         <div className="font-display text-[17px] font-bold text-ink-900">
@@ -103,7 +103,7 @@ export function CurriculumCard({
                   ? "bg-mint-50 text-mint-600"
                   : index === done
                     ? "bg-sun-100 text-sun-600"
-                    : "text-ink-400",
+                    : "text-ink-500",
               )}
             >
               <span className="opacity-70">{String(index + 1).padStart(2, "0")}</span>

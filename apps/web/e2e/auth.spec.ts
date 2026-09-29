@@ -96,20 +96,20 @@ test("after logout the next load attempts refresh exactly once and gives up", as
   await expect(page).toHaveURL(/\/login$/);
 
   // The revoked family must yield exactly one failed refresh on the next
-  // load — more than one would mean the dead-session gate loops.
+  // load of a protected page — more than one would mean the dead-session gate
+  // loops. (Reloading /login itself makes none: logout clears the session hint.)
   const refreshCalls = trackRequests(page, "/auth/refresh");
-  await page.reload();
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/login$/);
   await expect(page.getByRole("button", { name: "Đăng nhập" })).toBeVisible();
   expect(refreshCalls).toHaveLength(1);
   expect((await refreshCalls[0].response())?.status()).toBe(401);
 });
 
-test("the public statement route never attempts a session refresh", async ({ page }) => {
+test("a first visit to /login makes no refresh request", async ({ page }) => {
   const refreshCalls = trackRequests(page, "/auth/refresh");
-  await page.goto("/s/unknown-token");
-  // The page settles into the statement feature's own neutral error state…
-  await expect(page.getByText(/không tìm thấy|không hợp lệ|hết hạn|không đúng/i)).toBeVisible();
-  // …without ever pinging the auth stack.
+  await page.goto("/login");
+  await expect(page.getByRole("button", { name: "Đăng nhập" })).toBeVisible();
   expect(refreshCalls).toHaveLength(0);
 });
 

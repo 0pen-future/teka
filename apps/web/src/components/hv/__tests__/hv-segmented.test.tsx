@@ -115,4 +115,31 @@ describe("HvSegmented", () => {
     await user.keyboard("{End}");
     expect(screen.getByRole("tab", { name: "Điểm" })).toHaveFocus();
   });
+
+  it("scrolls instead of wrapping when the row is wider than its container", () => {
+    render(<Harness variant="tabs" />);
+    expect(screen.getByRole("tablist")).toHaveClass("max-w-full", "overflow-x-auto");
+    expect(screen.getByRole("tab", { name: "Điểm" })).toHaveClass("shrink-0");
+  });
+
+  it("scrolls the row, not the page, to keep the selected item in view", async () => {
+    const user = userEvent.setup();
+    const rect = (left: number, width: number) =>
+      ({ left, right: left + width, top: 0, bottom: 44, width, height: 44 }) as DOMRect;
+    // A 200px-wide row whose third tab sits at 260–340px, out of view.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      if (this.getAttribute("role") === "tablist") return rect(0, 200);
+      const index = ["Ghi chú", "Kế hoạch", "Điểm"].indexOf(this.textContent ?? "");
+      return rect(index * 130 - this.parentElement!.scrollLeft, 80);
+    });
+    render(<Harness variant="tabs" />);
+    const tablist = screen.getByRole("tablist");
+    expect(tablist.scrollLeft).toBe(0);
+
+    await user.click(screen.getByRole("tab", { name: "Điểm" }));
+    expect(tablist.scrollLeft).toBe(140);
+    vi.restoreAllMocks();
+  });
 });

@@ -51,7 +51,7 @@ export function ClassStaffSection({ classId }: { classId: string }) {
     <HvCard className="max-w-[640px]">
       <p className="font-display text-[16px] font-bold text-ink-900">Nhân sự lớp</p>
       {isPending ? (
-        <p className="mt-2 text-[13px] text-ink-400">Đang tải…</p>
+        <p className="mt-2 text-[13px] text-ink-500">Đang tải…</p>
       ) : isError || !staff ? (
         <p className="mt-2 text-[13px] text-coral-600">Không tải được nhân sự lớp.</p>
       ) : (
@@ -156,7 +156,7 @@ function EndedStaffList({ classId, endedStaff }: { classId: string; endedStaff: 
         <ul className="mt-2 flex flex-col gap-1">
           {endedStaff.map((item) => (
             <li key={item.id} className="flex items-center justify-between gap-2">
-              <span className="text-[13px] text-ink-400">
+              <span className="text-[13px] text-ink-500">
                 {item.teacher_name} — {item.role_label} · kết thúc {formatDateTime(item.ended_at!)}
               </span>
               <HvButton size="sm" variant="ghost" onClick={() => setRevoking(item)}>
@@ -222,7 +222,7 @@ function StaffRoleGroup({
     <div>
       <p className="text-[13px] font-bold text-ink-700">{roleLabel}</p>
       {activeStaff.length === 0 ? (
-        <p className="mt-1 text-[13px] text-ink-400">Chưa gán {roleLabel.toLowerCase()}</p>
+        <p className="mt-1 text-[13px] text-ink-500">Chưa gán {roleLabel.toLowerCase()}</p>
       ) : (
         <ul className="mt-1 flex flex-col gap-1">
           {activeStaff.map((item) => (

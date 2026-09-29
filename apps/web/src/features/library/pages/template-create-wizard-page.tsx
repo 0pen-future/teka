@@ -162,7 +162,7 @@ export function TemplateCreateWizardPage() {
                 ? "border-mint-400 bg-mint-100 text-mint-700"
                 : index < step
                   ? "border-line-200 bg-white text-ink-700"
-                  : "border-line-200 bg-cream-100 text-ink-400",
+                  : "border-line-200 bg-cream-100 text-ink-500",
             )}
           >
             {index + 1}. {label}

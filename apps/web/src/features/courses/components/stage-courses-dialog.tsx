@@ -76,7 +76,7 @@ export function StageCoursesDialog({ pathId, stage, open, onOpenChange }: StageC
                   onClick={() =>
                     save(stage.courses.map((c) => c.id).filter((id) => id !== course.id))
                   }
-                  className="flex size-6 items-center justify-center rounded-full text-ink-400 hover:bg-cream-200 hover:text-coral-600 disabled:opacity-50"
+                  className="flex size-6 items-center justify-center rounded-full text-ink-500 hover:bg-cream-200 hover:text-coral-600 disabled:opacity-50"
                 >
                   <XIcon aria-hidden="true" className="size-3.5" />
                 </button>

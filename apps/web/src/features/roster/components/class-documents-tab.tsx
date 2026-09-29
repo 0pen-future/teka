@@ -65,7 +65,7 @@ export function ClassDocumentsTab({ klass }: ClassDocumentsTabProps) {
                 ? lesson.materials
                 : lesson.materials.filter((material) => material.shared_with_students);
               return materials.length === 0 ? (
-                <p className="text-[13px] text-ink-400">
+                <p className="text-[13px] text-ink-500">
                   {showAll ? "Chưa gắn tài liệu" : "Chưa có tài liệu chia sẻ với học sinh"}
                 </p>
               ) : (

@@ -59,7 +59,7 @@ export function PlanEditorModal({ lessonLabel, initial, onCancel, onSave }: Plan
         className={cn(fieldClassName, "resize-y")}
       />
       <label htmlFor="plan-activities" className={cn(labelClassName, "mt-3")}>
-        Hoạt động trên lớp <span className="font-bold text-ink-400">(mỗi dòng một hoạt động)</span>
+        Hoạt động trên lớp <span className="font-bold text-ink-500">(mỗi dòng một hoạt động)</span>
       </label>
       <textarea
         id="plan-activities"

@@ -13,7 +13,7 @@
   /* ---- Ink (warm green-gray text) ---- */
   --ink-900: #1c3a31; /* headings */
   --ink-700: #27433b; /* body */
-  --ink-500: #5b756c; /* muted / secondary text */
+  --ink-500: #536c63; /* muted / secondary text — ≥4.5:1 on white, cream-100…300, mint-50 */
   --ink-400: #86998f; /* placeholder, captions */
   --ink-300: #aab9b1; /* disabled text */
   --white: #ffffff;
@@ -25,7 +25,7 @@
   --mint-300: #7fd2b4;
   --mint-400: #5cc9a7; /* primary */
   --mint-500: #3fa888; /* primary pressed / shadow */
-  --mint-600: #2e8d6e; /* primary ink on light */
+  --mint-600: #24775c; /* primary ink on light — ≥4.5:1 on cream, white, mint-50 */
   --mint-700: #1f6b53;
 
   /* ---- Sky (SECONDARY · môn Tiếng Việt · info) ---- */
@@ -34,7 +34,7 @@
   --sky-200: #a9d8ee;
   --sky-300: #7fc8e8; /* secondary */
   --sky-400: #4fa9d4;
-  --sky-500: #2d7aa0; /* secondary ink */
+  --sky-500: #29739a; /* secondary ink — ≥4.5:1 on sky-50, white */
   --sky-600: #226383;
 
   /* ---- Sun (REWARD · sao, huy hiệu · warning) ---- */
@@ -43,7 +43,7 @@
   --sun-300: #ffd86b;
   --sun-400: #ffc83d; /* stars / streak */
   --sun-500: #f0a500;
-  --sun-600: #b87d00; /* ink on sun */
+  --sun-600: #8f6000; /* ink on sun — ≥4.5:1 on sun-100, white, cream-100 */
 
   /* ---- Coral (LIVES/tim · error) ---- */
   --coral-100: #ffe7e1;
@@ -66,7 +66,11 @@
   --text-muted: var(--ink-500);
   --text-soft: var(--ink-400);
   --text-disabled: var(--ink-300);
-  --text-on-primary: var(--white);
+  /* Text on the pastel brand fills (mint-400, sky-300, coral-400, sun-400).
+     White on these fails WCAG AA (1.9–2.6:1); ink-900 passes on all four.
+     Locked by src/styles/tokens/__tests__/contrast.test.ts. */
+  --text-on-brand: var(--ink-900);
+  --text-on-primary: var(--text-on-brand);
   --text-on-dark: #eafff7;
 
   /* surfaces */

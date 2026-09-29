@@ -143,17 +143,17 @@ export function EnrollExistingStudentDialog(props: EnrollExistingStudentDialogPr
                   className="mt-2 max-h-48 overflow-y-auto rounded-[var(--radius-md)] border border-line-200"
                 >
                   {debouncedQuery.trim().length < 2 ? (
-                    <p className="p-3 text-[13px] text-ink-400">
+                    <p className="p-3 text-[13px] text-ink-500">
                       Nhập ít nhất 2 ký tự để tìm theo tên.
                     </p>
                   ) : null}
                   {search.isFetching ? (
-                    <p className="p-3 text-[13px] text-ink-400">Đang tìm…</p>
+                    <p className="p-3 text-[13px] text-ink-500">Đang tìm…</p>
                   ) : null}
                   {debouncedQuery.trim().length >= 2 &&
                   !search.isFetching &&
                   students.length === 0 ? (
-                    <p className="p-3 text-[13px] text-ink-400">Không tìm thấy học sinh.</p>
+                    <p className="p-3 text-[13px] text-ink-500">Không tìm thấy học sinh.</p>
                   ) : null}
                   {students.map((student) => (
                     <button
@@ -189,7 +189,7 @@ export function EnrollExistingStudentDialog(props: EnrollExistingStudentDialogPr
               {formatMoney(klass.default_unit_price)}/buổi
             </div>
           </Field>
-          <p className="text-[12.5px] text-ink-400">
+          <p className="text-[12.5px] text-ink-500">
             Đơn giá kế thừa từ lớp, lưu ở lượt ghi danh này. Chỉ tính tiền từ buổi có mặt đầu tiên —
             kỳ đã chốt không đổi.
           </p>

@@ -87,7 +87,7 @@ export function MonthCalendarModal({
         {WEEKDAY_HEADERS.map((weekday) => (
           <span
             key={weekday}
-            className="py-1 text-[11px] font-extrabold uppercase tracking-[0.4px] text-ink-400"
+            className="py-1 text-[11px] font-extrabold uppercase tracking-[0.4px] text-ink-500"
           >
             {weekday}
           </span>
@@ -103,7 +103,7 @@ export function MonthCalendarModal({
               <span
                 key={day}
                 className={cn(
-                  "flex h-11 items-center justify-center text-[13px] font-semibold text-ink-400",
+                  "flex h-11 items-center justify-center text-[13px] font-semibold text-ink-500",
                   day === today && "rounded-full ring-2 ring-mint-300",
                 )}
               >

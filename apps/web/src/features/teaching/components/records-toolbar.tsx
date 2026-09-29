@@ -21,7 +21,7 @@ interface RecordsToolbarProps {
   compact: boolean;
 }
 
-const labelClassName = "text-[11.5px] font-extrabold uppercase tracking-[0.35px] text-ink-400";
+const labelClassName = "text-[11.5px] font-extrabold uppercase tracking-[0.35px] text-ink-500";
 
 function Field({ className, children }: { className?: string; children: React.ReactNode }) {
   return <div className={cn("flex flex-col gap-[5px]", className)}>{children}</div>;
@@ -89,7 +89,7 @@ function SearchBox({
       {query === "" ? (
         <kbd
           aria-hidden="true"
-          className="rounded-[6px] border-[1.5px] border-line-200 bg-cream-50 px-1.5 py-1 font-mono text-[11px] leading-none font-bold text-ink-400"
+          className="rounded-[6px] border-[1.5px] border-line-200 bg-cream-50 px-1.5 py-1 font-mono text-[11px] leading-none font-bold text-ink-500"
         >
           /
         </kbd>

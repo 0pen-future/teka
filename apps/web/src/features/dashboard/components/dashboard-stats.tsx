@@ -16,7 +16,7 @@ interface StatCardProps {
 function StatCard({ label, value, sub, error = false }: StatCardProps) {
   return (
     <div className="rounded-[var(--radius-lg)] bg-white px-[18px] py-4 shadow-soft-md">
-      <p className="text-[12.5px] font-extrabold tracking-[0.3px] text-ink-400">{label}</p>
+      <p className="text-[12.5px] font-extrabold tracking-[0.3px] text-ink-500">{label}</p>
       <p className="mt-[2px] font-display text-[26px] font-extrabold text-ink-900">{value}</p>
       <p className={cn("text-[12.5px]", error ? "font-semibold text-coral-600" : "text-ink-500")}>
         {sub}

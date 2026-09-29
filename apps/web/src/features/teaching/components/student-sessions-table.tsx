@@ -19,7 +19,7 @@ export function StudentSessionsTable({ rows, notes, onSaveNote }: StudentSession
       <div
         className={cn(
           gridClassName,
-          "border-b-[1.5px] border-line-200 px-[18px] py-3 text-[11.5px] font-extrabold tracking-[0.3px] text-ink-400",
+          "border-b-[1.5px] border-line-200 px-[18px] py-3 text-[11.5px] font-extrabold tracking-[0.3px] text-ink-500",
         )}
       >
         <div>BUỔI</div>
@@ -29,7 +29,7 @@ export function StudentSessionsTable({ rows, notes, onSaveNote }: StudentSession
       </div>
       <div className="max-h-[400px] overflow-auto">
         {rows.length === 0 ? (
-          <p className="px-[18px] py-4 text-[13px] text-ink-400">
+          <p className="px-[18px] py-4 text-[13px] text-ink-500">
             Chưa có buổi học nào được điểm danh trong tháng.
           </p>
         ) : (
@@ -52,7 +52,7 @@ export function StudentSessionsTable({ rows, notes, onSaveNote }: StudentSession
                       Vắng
                     </span>
                   ) : row.score === null ? (
-                    <span className="text-[13px] text-ink-400">—</span>
+                    <span className="text-[13px] text-ink-500">—</span>
                   ) : (
                     <span className="rounded-full bg-mint-50 px-2.5 py-[3px] text-center text-[13px] font-extrabold text-mint-600">
                       {row.score.toFixed(1)}

@@ -41,13 +41,13 @@ export function StaffList({
   emptyText: string;
 }) {
   if (isPending) {
-    return <p className="text-[13px] text-ink-400">Đang tải…</p>;
+    return <p className="text-[13px] text-ink-500">Đang tải…</p>;
   }
   if (isError) {
     return <p className="text-[13px] text-coral-600">Không tải được nhân sự lớp.</p>;
   }
   if (staff.length === 0) {
-    return <p className="text-[13px] text-ink-400">{emptyText}</p>;
+    return <p className="text-[13px] text-ink-500">{emptyText}</p>;
   }
   return (
     <ul className="flex flex-col gap-2">

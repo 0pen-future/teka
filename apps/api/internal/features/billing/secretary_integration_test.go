@@ -10,13 +10,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/pagination"
 	"teka/apps/api/internal/testutil"
 )
 
 // A reports.send-holding member reads billing center-wide — any member's period,
 // with the owning teacher's identity attached so the client can group by
-// teacher — but the flag never relaxes a single billing WRITE: close, void,
+// teacher — but the permission never relaxes a single billing WRITE: close, void,
 // and adjustment on another member's data still answer the same neutral 404
 // a stranger gets.
 func TestSecretaryReadsCenterWideButCannotWriteBilling(t *testing.T) {
@@ -30,7 +31,7 @@ func TestSecretaryReadsCenterWideButCannotWriteBilling(t *testing.T) {
 	_, secretary := testutil.Secretary(t, db, ownerCenter)
 	memberScope := testutil.ScopeFor(t, db, member.ID)
 	secScope := testutil.ScopeFor(t, db, secretary.ID)
-	require.True(t, secScope.CanSendReports)
+	require.True(t, secScope.Has(authctx.PermReportsSend))
 	require.False(t, secScope.IsOwner)
 
 	contact := testutil.Contact(t, db, member.ID)
@@ -63,7 +64,7 @@ func TestSecretaryReadsCenterWideButCannotWriteBilling(t *testing.T) {
 	}
 	require.True(t, found, "the center-wide list must include the member's period")
 
-	// Writes stay owner/self territory: the flag grants none of them.
+	// Writes stay owner/self territory: reports.send grants none of them.
 	_, err = svc.Close(ctx, secScope, period.ID)
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,

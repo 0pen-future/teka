@@ -10,7 +10,7 @@ export interface MemberListProps {
   onRemove: (member: CenterMember) => void;
   /**
    * Owner viewers also manage per-member roles and permission overrides
-   * (including the delegated send-reports grant); the action shares the
+   * (including reports.send); the action shares the
    * remove action's gating (owner-only, non-owner rows).
    */
   onManagePermissions?: (member: CenterMember) => void;
@@ -33,11 +33,6 @@ export function MemberList({ members, canRemove, onRemove, onManagePermissions }
               {member.is_owner ? (
                 <HvBadge variant="success" size="sm">
                   Chủ
-                </HvBadge>
-              ) : null}
-              {member.can_send_reports ? (
-                <HvBadge variant="info" size="sm">
-                  Thư ký gửi báo cáo
                 </HvBadge>
               ) : null}
             </p>

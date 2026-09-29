@@ -199,11 +199,7 @@ func ScopeFor(t *testing.T, db *gorm.DB, teacherID uuid.UUID) authctx.Scope {
 		TeacherID: teacherID,
 		CenterID:  row.CenterID,
 		IsOwner:   row.IsOwner,
-		// HasKey, not Has: the field mirrors the member's effective
-		// reports.send only — the owner's authority flows through
-		// ReportsOversight's IsOwner arm, never through this flag.
-		CanSendReports: perms.HasKey(authctx.PermReportsSend),
-		Perms:          perms,
+		Perms:     perms,
 	}
 }
 

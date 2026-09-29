@@ -4,7 +4,7 @@ import { planStatusLabels } from "../lib/plan-status";
 import type { LessonPlanStatus } from "../lib/teaching-store";
 
 const planStatusClasses: Record<LessonPlanStatus, string> = {
-  none: "bg-cream-200 text-ink-400",
+  none: "bg-cream-200 text-ink-500",
   draft: "bg-sky-50 text-sky-500",
   pending: "bg-sun-100 text-sun-600",
   approved: "bg-mint-50 text-mint-600",

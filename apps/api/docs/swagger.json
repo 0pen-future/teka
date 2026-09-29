@@ -22964,10 +22964,6 @@
         "centers.MemberResponse": {
             "type": "object",
             "properties": {
-                "can_send_reports": {
-                    "description": "CanSendReports mirrors the member's effective reports.send permission\n(computed, not stored); always false for the owner (member-only —\nthe owner's authority is implicit).",
-                    "type": "boolean"
-                },
                 "full_name": {
                     "type": "string"
                 },

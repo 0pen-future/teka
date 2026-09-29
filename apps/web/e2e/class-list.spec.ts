@@ -70,13 +70,13 @@ test.afterEach(async ({ request }) => {
   expect(failures, "cleanup left rows behind").toEqual([]);
 });
 
-test("owner filters the class list, opens a class and creates one from Danh sách lớp học", async ({
+test("owner filters the class list, opens a class and creates one from Danh mục lớp", async ({
   page,
 }) => {
   await loginAsOwner(page);
 
   await page.goto("/classes");
-  await expect(page.getByRole("heading", { name: "Danh sách lớp học" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Danh mục lớp" })).toBeVisible();
   const row = page.getByRole("row").filter({ hasText: CLASS_NAME });
   await expect(row).toBeVisible();
 

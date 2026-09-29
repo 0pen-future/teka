@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { HvBadge, type HvBadgeVariant } from "@/components/hv";
+import { HvBadge, type HvBadgeVariant, HvTableScroll } from "@/components/hv";
 import {
   Table,
   TableBody,
@@ -33,7 +33,10 @@ export function AuditTable({ logs }: { logs: AuditLog[] }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   return (
-    <div className="overflow-x-auto rounded-2xl border border-line-200 bg-white">
+    <HvTableScroll
+      aria-label="Bảng nhật ký hoạt động"
+      className="rounded-2xl border border-line-200 bg-white"
+    >
       <Table>
         <TableHeader>
           <TableRow>
@@ -57,7 +60,7 @@ export function AuditTable({ logs }: { logs: AuditLog[] }) {
           ))}
         </TableBody>
       </Table>
-    </div>
+    </HvTableScroll>
   );
 }
 
@@ -113,7 +116,7 @@ function AuditRow({
               </p>
               <p className="text-ink-500">{log.user_agent}</p>
               {log.metadata ? (
-                <pre className="overflow-x-auto rounded-[var(--radius-md)] bg-white p-3 font-mono text-[12px] text-ink-700">
+                <pre className="rounded-[var(--radius-md)] bg-white p-3 font-mono text-[12px] text-ink-700">
                   {JSON.stringify(log.metadata, null, 2)}
                 </pre>
               ) : null}

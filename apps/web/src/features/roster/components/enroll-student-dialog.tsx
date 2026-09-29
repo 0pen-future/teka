@@ -196,7 +196,7 @@ export function EnrollStudentDialog(props: EnrollStudentDialogProps) {
               {pickedClass ? `${formatMoney(pickedClass.default_unit_price)}/buổi` : "—"}
             </div>
           </Field>
-          <p className="text-[12.5px] text-ink-400">
+          <p className="text-[12.5px] text-ink-500">
             Đơn giá kế thừa từ lớp, lưu ở lượt ghi danh này. Chỉ tính tiền từ buổi có mặt đầu tiên —
             kỳ đã chốt không đổi.
           </p>

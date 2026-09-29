@@ -38,7 +38,7 @@ export const ATTENDANCE_STATUSES: readonly AttendanceStatusMeta[] = [
     icon: HvCheckIcon,
     inkClass: "text-mint-600",
     chipClass: "bg-mint-50 text-mint-600",
-    selectedClass: "bg-mint-400 text-white shadow-[0_3px_0_var(--mint-500)]",
+    selectedClass: "bg-mint-400 text-on-brand shadow-[0_3px_0_var(--mint-500)]",
     rowTintClass: "bg-cream-50",
   },
   {
@@ -47,7 +47,7 @@ export const ATTENDANCE_STATUSES: readonly AttendanceStatusMeta[] = [
     icon: HvClockIcon,
     inkClass: "text-sun-600",
     chipClass: "bg-sun-100 text-sun-600",
-    selectedClass: "bg-sun-400 text-sun-600 shadow-[0_3px_0_var(--sun-500)]",
+    selectedClass: "bg-sun-400 text-on-brand shadow-[0_3px_0_var(--sun-500)]",
     rowTintClass: "bg-sun-100",
   },
   {
@@ -56,7 +56,7 @@ export const ATTENDANCE_STATUSES: readonly AttendanceStatusMeta[] = [
     icon: HvXIcon,
     inkClass: "text-coral-600",
     chipClass: "bg-coral-100 text-coral-600",
-    selectedClass: "bg-coral-400 text-white shadow-[0_3px_0_var(--coral-500)]",
+    selectedClass: "bg-coral-400 text-on-brand shadow-[0_3px_0_var(--coral-500)]",
     rowTintClass: "bg-coral-100",
   },
   {
@@ -65,7 +65,7 @@ export const ATTENDANCE_STATUSES: readonly AttendanceStatusMeta[] = [
     icon: HvFileIcon,
     inkClass: "text-sky-500",
     chipClass: "bg-sky-50 text-sky-500",
-    selectedClass: "bg-sky-300 text-white shadow-[0_3px_0_var(--sky-400)]",
+    selectedClass: "bg-sky-300 text-on-brand shadow-[0_3px_0_var(--sky-400)]",
     rowTintClass: "bg-sky-50",
   },
 ];

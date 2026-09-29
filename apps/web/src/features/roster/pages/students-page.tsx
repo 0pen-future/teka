@@ -53,7 +53,7 @@ function resolveTab(params: URLSearchParams): PageTabId {
 }
 
 /**
- * Owner-only "Lớp & học sinh" center-administration screen. The guard is a
+ * Owner-only "Quản trị học sinh" center-administration screen. The guard is a
  * shell around the content component so the roster queries never mount for a
  * non-owner — an early return between hooks would still let them subscribe
  * and fire before <Navigate> takes effect. Same gate shape as the
@@ -72,7 +72,7 @@ export function StudentsPage() {
 }
 
 /**
- * Consolidated "Lớp & học sinh" screen, split into three page tabs: the
+ * Consolidated "Quản trị học sinh" screen, split into three page tabs: the
  * classes overview, the per-class student × contact table (filtered by pill
  * tabs rather than per-class routes), and the unenrolled list.
  */
@@ -243,7 +243,7 @@ function StudentsPageContent() {
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h1 className="font-display text-[26px] font-extrabold text-ink-900">Lớp &amp; học sinh</h1>
+        <h1 className="font-display text-[26px] font-extrabold text-ink-900">Quản trị học sinh</h1>
         <p className="mt-1 text-[13.5px] text-ink-500">
           Chỉ lưu: họ tên · ngày nhập học · lớp · người liên hệ. Không thu thập gì thêm.
         </p>
@@ -268,7 +268,7 @@ function StudentsPageContent() {
               "border-b-[3px] px-0.5 py-2.5 text-[14.5px] font-extrabold focus-visible:ring-4 focus-visible:outline-none",
               activeTab === tab.id
                 ? "border-mint-400 text-ink-900"
-                : "border-transparent text-ink-400",
+                : "border-transparent text-ink-500",
             )}
           >
             {tab.label}
@@ -288,7 +288,7 @@ function StudentsPageContent() {
         <>
           {isStudentsTab ? (
             <div className="flex flex-col gap-2">
-              <h2 className="text-[12px] font-extrabold tracking-[var(--tracking-wide)] text-ink-400">
+              <h2 className="text-[12px] font-extrabold tracking-[var(--tracking-wide)] text-ink-500">
                 CHỌN LỚP
               </h2>
               <div className="flex flex-wrap items-center gap-2">
@@ -312,7 +312,7 @@ function StudentsPageContent() {
                         // (same trap HvButton guards against).
                         "min-h-11 rounded-full px-[18px] font-display text-[14px] font-extrabold transition-[background-color,color,box-shadow] focus-visible:outline-none focus-visible:ring-4",
                         effectiveClassId === klass.id
-                          ? "bg-mint-400 text-white shadow-press-mint"
+                          ? "bg-mint-400 text-on-brand shadow-press-mint"
                           : "bg-white text-ink-500 shadow-soft-sm hover:bg-cream-100",
                       )}
                     >
@@ -363,9 +363,9 @@ function StudentsPageContent() {
             ) : null}
           </div>
 
-          {isPending ? <p className="text-[13px] text-ink-400">Đang tải…</p> : null}
+          {isPending ? <p className="text-[13px] text-ink-500">Đang tải…</p> : null}
           {!isPending && students.length === 0 ? (
-            <HvCard variant="flat" className="text-center text-[13px] text-ink-400">
+            <HvCard variant="flat" className="text-center text-[13px] text-ink-500">
               Không có học sinh nào.
             </HvCard>
           ) : null}

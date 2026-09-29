@@ -1,3 +1,5 @@
+import { HvTableScroll } from "@/components/hv";
+
 import type { ImportErrorsPayload } from "../schemas/import-schemas";
 
 const headCellClassName =
@@ -23,7 +25,7 @@ export function ImportErrorTable({ payload }: { payload: ImportErrorsPayload }) 
         sửa file rồi kiểm tra lại.
       </p>
       <div className="overflow-hidden rounded-[20px] bg-white shadow-soft-md">
-        <div className="max-h-[52vh] overflow-auto">
+        <HvTableScroll aria-label="Bảng các dòng lỗi" className="max-h-[52vh] overflow-auto">
           <table className="w-full min-w-[560px] border-collapse text-left text-[13.5px]">
             <thead>
               <tr>
@@ -48,10 +50,10 @@ export function ImportErrorTable({ payload }: { payload: ImportErrorsPayload }) 
               ))}
             </tbody>
           </table>
-        </div>
+        </HvTableScroll>
       </div>
       {payload.truncated ? (
-        <p className="text-[13px] text-ink-400">
+        <p className="text-[13px] text-ink-500">
           Còn {payload.truncated} lỗi nữa chưa hiển thị. Sửa các lỗi trên rồi kiểm tra lại.
         </p>
       ) : null}

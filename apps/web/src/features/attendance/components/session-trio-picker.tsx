@@ -36,7 +36,7 @@ function TrioCard({
 }) {
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-1">
-      <span className="px-1 text-[11px] font-extrabold uppercase tracking-[0.4px] text-ink-400">
+      <span className="px-1 text-[11px] font-extrabold uppercase tracking-[0.4px] text-ink-500">
         {caption}
       </span>
       {session ? (
@@ -51,7 +51,7 @@ function TrioCard({
           <span className="truncate text-[13.5px] font-extrabold text-ink-900">
             {formatSessionDate(session.session_date)}
             {session.start_time ? (
-              <span className="font-semibold text-ink-400"> · {session.start_time}</span>
+              <span className="font-semibold text-ink-500"> · {session.start_time}</span>
             ) : null}
           </span>
           <span
@@ -66,7 +66,7 @@ function TrioCard({
           ) : null}
         </Link>
       ) : (
-        <div className="flex min-h-[64px] items-center justify-center rounded-[14px] border-2 border-dashed border-line-200 text-[12.5px] font-semibold text-ink-300">
+        <div className="flex min-h-[64px] items-center justify-center rounded-[14px] border-2 border-dashed border-line-200 text-[12.5px] font-semibold text-ink-500">
           Chưa có buổi
         </div>
       )}

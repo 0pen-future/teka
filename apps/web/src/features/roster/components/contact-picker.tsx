@@ -67,7 +67,7 @@ export function ContactPicker({ value, onChange, id, ...rest }: ContactPickerPro
       >
         <div>
           <p className="font-display text-[14px] font-bold text-ink-900">{selected.full_name}</p>
-          <p className="text-[13px] text-ink-400">{selected.phone}</p>
+          <p className="text-[13px] text-ink-500">{selected.phone}</p>
         </div>
         <button
           type="button"
@@ -98,9 +98,9 @@ export function ContactPicker({ value, onChange, id, ...rest }: ContactPickerPro
         aria-label="Người liên hệ"
         className="mt-2 max-h-48 overflow-y-auto rounded-[var(--radius-md)] border border-line-200"
       >
-        {isFetching ? <p className="p-3 text-[13px] text-ink-400">Đang tìm…</p> : null}
+        {isFetching ? <p className="p-3 text-[13px] text-ink-500">Đang tìm…</p> : null}
         {!isFetching && contacts.length === 0 ? (
-          <p className="p-3 text-[13px] text-ink-400">Không tìm thấy người liên hệ.</p>
+          <p className="p-3 text-[13px] text-ink-500">Không tìm thấy người liên hệ.</p>
         ) : null}
         {contacts.map((contact) => (
           <button
@@ -112,7 +112,7 @@ export function ContactPicker({ value, onChange, id, ...rest }: ContactPickerPro
             className="flex w-full items-center justify-between px-3 py-2 text-left text-[14px] hover:bg-cream-100"
           >
             <span className="font-bold text-ink-900">{contact.full_name}</span>
-            <span className="text-ink-400">{contact.phone}</span>
+            <span className="text-ink-500">{contact.phone}</span>
           </button>
         ))}
         <button

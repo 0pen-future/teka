@@ -1,4 +1,4 @@
-import { HvButton, HvCard } from "@/components/hv";
+import { HvButton, HvCard, HvTableScroll } from "@/components/hv";
 import { cn, formatMoney } from "@/lib/utils";
 
 import { formatScheduleSummary } from "../lib/roster-format";
@@ -34,7 +34,7 @@ export function ClassesTab({
   const today = new Date().toISOString().slice(0, 10);
 
   if (isPending) {
-    return <p className="text-[13px] text-ink-400">Đang tải…</p>;
+    return <p className="text-[13px] text-ink-500">Đang tải…</p>;
   }
 
   // A failed list must not read as "no classes yet" — that empty state
@@ -85,7 +85,7 @@ export function ClassesTab({
       </div>
 
       <div className="hidden flex-col overflow-hidden rounded-[20px] bg-white shadow-soft-md sm:flex">
-        <div className="max-h-[62vh] overflow-auto">
+        <HvTableScroll aria-label="Bảng danh sách lớp" className="max-h-[62vh] overflow-auto">
           <table className="w-full min-w-[560px] border-collapse text-left text-[14px]">
             <colgroup>
               <col className="w-[30%]" />
@@ -130,7 +130,7 @@ export function ClassesTab({
               ))}
             </tbody>
           </table>
-        </div>
+        </HvTableScroll>
       </div>
     </div>
   );

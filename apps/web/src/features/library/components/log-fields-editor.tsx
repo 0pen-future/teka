@@ -153,7 +153,7 @@ export function LogFieldsEditor({ versionId, templateId, fields }: LogFieldsEdit
         Giáo viên điền các trường này sau mỗi buổi học của lớp dùng phiên bản này.
       </p>
       {rows.length === 0 ? (
-        <p className="text-[14px] text-ink-400">Chưa có trường nào.</p>
+        <p className="text-[14px] text-ink-500">Chưa có trường nào.</p>
       ) : (
         <ul className="flex flex-col">
           {rows.map((row, index) => {
@@ -258,7 +258,7 @@ export function LogFieldsReadOnly({ fields }: { fields: LogField[] }) {
     <section aria-label="Trường nhật ký" className={sectionClassName}>
       <h2 className="font-display text-[16px] font-extrabold text-ink-900">Trường nhật ký</h2>
       {fields.length === 0 ? (
-        <p className="text-[14px] text-ink-400">Chưa có trường nào.</p>
+        <p className="text-[14px] text-ink-500">Chưa có trường nào.</p>
       ) : (
         <ul className="flex flex-col">
           {fields.map((field) => (

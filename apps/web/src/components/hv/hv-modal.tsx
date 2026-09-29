@@ -94,7 +94,7 @@ function HvModalContent({
             data-slot="hv-modal-close"
             className={cn(
               "absolute right-2 top-2 inline-flex h-12 w-12 items-center justify-center rounded-full",
-              "text-ink-400 transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)]",
+              "text-ink-500 transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)]",
               "hover:bg-cream-200 hover:text-ink-700",
               "focus-visible:outline-none focus-visible:ring-4",
             )}

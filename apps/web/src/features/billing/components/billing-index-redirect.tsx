@@ -11,7 +11,7 @@ export function BillingIndexRedirect() {
   const { data: period, isPending, isError } = useCurrentPeriod();
 
   if (isPending) {
-    return <p className="p-4 text-[13px] text-ink-400">Đang tải…</p>;
+    return <p className="p-4 text-[13px] text-ink-500">Đang tải…</p>;
   }
 
   if (isError || !period) {

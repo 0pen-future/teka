@@ -142,7 +142,7 @@ export function InviteTeacherDialog({
             {directory.isError ? (
               <p className="text-[13px] text-coral-600">Không tải được danh sách thành viên.</p>
             ) : candidates.length === 0 && directory.isSuccess ? (
-              <p className="text-[13px] text-ink-400">Không còn thành viên nào để mời.</p>
+              <p className="text-[13px] text-ink-500">Không còn thành viên nào để mời.</p>
             ) : null}
             <FieldError errors={teacherError ? [{ message: teacherError }] : []} />
           </Field>

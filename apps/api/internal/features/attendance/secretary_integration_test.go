@@ -10,6 +10,7 @@ import (
 
 	"teka/apps/api/internal/features/attendance"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/testutil"
 )
 
@@ -26,7 +27,7 @@ func TestSecretaryCannotReadOrConfirmMembersAttendance(t *testing.T) {
 	testutil.JoinCenter(t, db, member.ID, ownerCenter)
 	_, secretary := testutil.Secretary(t, db, ownerCenter)
 	secScope := testutil.ScopeFor(t, db, secretary.ID)
-	require.True(t, secScope.CanSendReports)
+	require.True(t, secScope.Has(authctx.PermReportsSend))
 	require.False(t, secScope.IsOwner)
 
 	contact := testutil.Contact(t, db, member.ID)

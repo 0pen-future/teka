@@ -92,7 +92,6 @@ describe("PermissionMatrix on the owner permissions page", () => {
       screen.getByRole("checkbox", { name: "Xem nhật ký hoạt động — Học vụ" }),
     ).not.toBeChecked();
 
-    // The dual-life restriction retired with the can_send_reports column:
     // reports.send is a plain grantable key on role sets too.
     for (const role of ["Giáo viên", "Học vụ", "Trợ giảng"]) {
       expect(screen.getByRole("checkbox", { name: `Gửi báo cáo học phí — ${role}` })).toBeEnabled();

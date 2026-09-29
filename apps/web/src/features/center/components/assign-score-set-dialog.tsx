@@ -156,7 +156,7 @@ export function AssignScoreSetDialog({
         )}
 
         <div>
-          <p className="text-[12px] font-extrabold tracking-[0.3px] text-ink-400">
+          <p className="text-[12px] font-extrabold tracking-[0.3px] text-ink-500">
             CỘT ĐIỂM HIỆN TẠI
           </p>
           {isPending ? (
@@ -166,7 +166,7 @@ export function AssignScoreSetDialog({
               <ScoreSetPreviewStrip names={currentNames} />
             </div>
           ) : (
-            <p className="mt-1 text-[13px] text-ink-400">Chưa gán bộ điểm</p>
+            <p className="mt-1 text-[13px] text-ink-500">Chưa gán bộ điểm</p>
           )}
         </div>
 

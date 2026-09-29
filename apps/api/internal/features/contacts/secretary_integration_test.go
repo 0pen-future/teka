@@ -10,6 +10,7 @@ import (
 
 	"teka/apps/api/internal/features/contacts"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/testutil"
 )
 
@@ -30,7 +31,7 @@ func TestSecretaryReadsCenterWideButCannotManageContacts(t *testing.T) {
 	_, secretary := testutil.Secretary(t, db, ownerScope.CenterID)
 	memberScope := testutil.ScopeFor(t, db, member.ID)
 	secScope := testutil.ScopeFor(t, db, secretary.ID)
-	require.True(t, secScope.CanSendReports)
+	require.True(t, secScope.Has(authctx.PermReportsSend))
 	require.False(t, secScope.IsOwner)
 
 	contact := testutil.Contact(t, db, member.ID)

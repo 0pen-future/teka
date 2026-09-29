@@ -210,15 +210,10 @@ describe("CenterPage — owner", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("grants reports.send through the permissions dialog and shows the badge after refetch", async () => {
+  it("grants reports.send through the permissions dialog", async () => {
     mockInvites([]);
     const memberA = makeMember({ full_name: "Giáo Viên A" });
-    mockCenterMe(
-      makeCenterMeOwner({ members: [selfMember(true), memberA] }),
-      makeCenterMeOwner({
-        members: [selfMember(true), { ...memberA, can_send_reports: true }],
-      }),
-    );
+    mockCenterMe(makeCenterMeOwner({ members: [selfMember(true), memberA] }));
     // A single scripted payload: the dialog's own mount refetch would consume
     // a "post-save" second payload early and erase the draft's dirtiness.
     mockCenterPermissions(makeCenterPermissions({ members: [makeMemberPermissions(memberA)] }));
@@ -251,18 +246,12 @@ describe("CenterPage — owner", () => {
       catalog_version: CATALOG_VERSION,
       assignment_version: 1,
     });
-    expect(await screen.findByText("Thư ký gửi báo cáo")).toBeInTheDocument();
   });
 
-  it("clears the reports.send grant and drops the badge after refetch", async () => {
+  it("clears the reports.send grant through the permissions dialog", async () => {
     mockInvites([]);
-    const memberA = makeMember({ full_name: "Giáo Viên A", can_send_reports: true });
-    mockCenterMe(
-      makeCenterMeOwner({ members: [selfMember(true), memberA] }),
-      makeCenterMeOwner({
-        members: [selfMember(true), { ...memberA, can_send_reports: false }],
-      }),
-    );
+    const memberA = makeMember({ full_name: "Giáo Viên A" });
+    mockCenterMe(makeCenterMeOwner({ members: [selfMember(true), memberA] }));
     mockCenterPermissions(
       makeCenterPermissions({
         members: [makeMemberPermissions(memberA, { grants: ["reports.send"] })],
@@ -278,8 +267,7 @@ describe("CenterPage — owner", () => {
     renderCenter();
     const user = userEvent.setup();
 
-    expect(await screen.findByText("Thư ký gửi báo cáo")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Phân quyền cho Giáo Viên A" }));
+    await user.click(await screen.findByRole("button", { name: "Phân quyền cho Giáo Viên A" }));
     const dialog = await screen.findByRole("dialog");
     await within(dialog).findByRole("combobox", { name: "Quyền Gửi báo cáo học phí" });
     await pickOption(user, within(dialog), "Quyền Gửi báo cáo học phí", "Theo vai trò");
@@ -292,7 +280,6 @@ describe("CenterPage — owner", () => {
       catalog_version: CATALOG_VERSION,
       assignment_version: 1,
     });
-    await waitFor(() => expect(screen.queryByText("Thư ký gửi báo cáo")).not.toBeInTheDocument());
   });
 
   it("surfaces a failure toast when the override save errors", async () => {

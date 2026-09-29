@@ -31,7 +31,7 @@ export function PeriodSwitcher({ currentPeriodId }: PeriodSwitcherProps) {
             onClick={() => void navigate(`/billing/${period.id}`)}
             className={cn(
               "rounded-[var(--radius-pill)] px-3 py-1.5 font-display text-[13px] font-bold transition-colors",
-              active ? "bg-mint-400 text-white" : "text-ink-500 hover:bg-cream-100",
+              active ? "bg-mint-400 text-on-brand" : "text-ink-500 hover:bg-cream-100",
             )}
           >
             Tháng {period.month}/{period.year}

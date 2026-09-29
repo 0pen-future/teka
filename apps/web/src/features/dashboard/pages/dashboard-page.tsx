@@ -37,7 +37,7 @@ export function DashboardPage() {
         <h1 className="font-display text-[28px] font-extrabold text-ink-900">
           {teacher ? `${greetingLabel(now.getHours())}, ${teacher.full_name}!` : "Chào mừng!"}
         </h1>
-        <p className="text-[14px] text-ink-400">{todayLabel}</p>
+        <p className="text-[14px] text-ink-500">{todayLabel}</p>
       </div>
       {/* Order matters: the pending-attendance alert must render right after
           the header, without scrolling, per the unattended-session warning

@@ -71,7 +71,7 @@ export function ZaloFriendPicker({ open, onOpenChange, contactId }: ZaloFriendPi
   let body: ReactNode;
   if (sessionGone) {
     body = (
-      <p className="text-[13px] text-ink-400">
+      <p className="text-[13px] text-ink-500">
         Phiên Zalo không còn hiệu lực.{" "}
         <Link to="/profile" className="font-bold text-mint-600 underline-offset-4 hover:underline">
           Quét lại mã
@@ -81,7 +81,7 @@ export function ZaloFriendPicker({ open, onOpenChange, contactId }: ZaloFriendPi
   } else if (isError) {
     body = (
       <div className="flex flex-col items-start gap-2">
-        <p className="text-[13px] text-ink-400">Không tải được danh sách bạn bè.</p>
+        <p className="text-[13px] text-ink-500">Không tải được danh sách bạn bè.</p>
         <HvButton size="sm" variant="ghost" onClick={() => void refetch()}>
           Thử lại
         </HvButton>
@@ -106,15 +106,15 @@ export function ZaloFriendPicker({ open, onOpenChange, contactId }: ZaloFriendPi
           className="mt-2 max-h-64 overflow-y-auto rounded-[var(--radius-md)] border border-line-200"
         >
           {isPending ? (
-            <p className="p-3 text-[13px] text-ink-400">Đang tải danh sách bạn bè…</p>
+            <p className="p-3 text-[13px] text-ink-500">Đang tải danh sách bạn bè…</p>
           ) : null}
           {!isPending && foldedFriends.length === 0 ? (
-            <p className="p-3 text-[13px] text-ink-400">
+            <p className="p-3 text-[13px] text-ink-500">
               Tài khoản Zalo của bạn chưa có bạn bè nào.
             </p>
           ) : null}
           {!isPending && foldedFriends.length > 0 && matches.length === 0 ? (
-            <p className="p-3 text-[13px] text-ink-400">Không tìm thấy bạn nào.</p>
+            <p className="p-3 text-[13px] text-ink-500">Không tìm thấy bạn nào.</p>
           ) : null}
           {visible.map(({ friend }) => (
             <button
@@ -142,7 +142,7 @@ export function ZaloFriendPicker({ open, onOpenChange, contactId }: ZaloFriendPi
             </button>
           ))}
           {matches.length > FRIEND_RENDER_CAP ? (
-            <p className="border-t border-line-200 p-3 text-[13px] text-ink-400">
+            <p className="border-t border-line-200 p-3 text-[13px] text-ink-500">
               Đang hiển thị {FRIEND_RENDER_CAP} bạn đầu tiên. Gõ tên để thu hẹp.
             </p>
           ) : null}

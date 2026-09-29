@@ -98,7 +98,7 @@ export function ClassProgramCard({ klass, isOwner, canReadLibrary }: ClassProgra
   return (
     <SectionCard title="Chương trình học">
       {program.isPending ? (
-        <p className="text-[13px] text-ink-400">Đang tải…</p>
+        <p className="text-[13px] text-ink-500">Đang tải…</p>
       ) : program.isError ? (
         <p className="text-[13px] text-coral-600">Không tải được chương trình của lớp.</p>
       ) : (
@@ -132,7 +132,7 @@ export function ClassProgramCard({ klass, isOwner, canReadLibrary }: ClassProgra
               ) : null}
             </div>
           ) : (
-            <p className="text-[13px] text-ink-400">Lớp chưa áp dụng chương trình mẫu.</p>
+            <p className="text-[13px] text-ink-500">Lớp chưa áp dụng chương trình mẫu.</p>
           )}
 
           {isOwner && !picking ? (

@@ -55,7 +55,7 @@ export function CurriculumEditorModal({
         {rows.map((title, index) => (
           // Rows are positional (add/remove shifts them) — the index is the identity.
           <div key={index} className="flex items-center gap-2">
-            <span className="w-6 text-right text-[12px] font-extrabold text-ink-400">
+            <span className="w-6 text-right text-[12px] font-extrabold text-ink-500">
               {String(index + 1).padStart(2, "0")}
             </span>
             <input

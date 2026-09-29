@@ -1,3 +1,6 @@
+import { hvButtonVariants } from "@/components/hv";
+import { cn } from "@/lib/utils";
+
 import type { LessonPlan } from "../lib/teaching-store";
 import { PlanStatusPill } from "./plan-status-pill";
 
@@ -37,7 +40,7 @@ export function NextPlanCard({
   return (
     <section className="rounded-[24px] bg-white px-5 py-[18px] shadow-soft-md">
       <div className="flex items-center gap-2">
-        <div className="text-[12.5px] font-extrabold tracking-[0.4px] text-ink-400">
+        <div className="text-[12.5px] font-extrabold tracking-[0.4px] text-ink-500">
           GIÁO ÁN BUỔI TỚI
         </div>
         <PlanStatusPill status={status} />
@@ -65,7 +68,7 @@ export function NextPlanCard({
           >
             ✎ Soạn giáo án trực tiếp
           </button>
-          <label className="mt-2 block cursor-pointer rounded-[14px] border-2 border-dashed border-line-300 px-3.5 py-2 text-center text-[12.5px] font-extrabold text-ink-400 hover:border-sky-300 hover:bg-sky-50">
+          <label className="mt-2 block cursor-pointer rounded-[14px] border-2 border-dashed border-line-300 px-3.5 py-2 text-center text-[12.5px] font-extrabold text-ink-500 hover:border-sky-300 hover:bg-sky-50">
             hoặc đính kèm file Word/PDF
             <input
               type="file"
@@ -94,7 +97,7 @@ export function NextPlanCard({
         <button
           type="button"
           onClick={onSubmit}
-          className="mt-2 w-full rounded-[14px] bg-mint-400 px-3.5 py-2.5 text-[13px] font-extrabold text-white shadow-press-mint transition-transform active:translate-y-[3px] active:shadow-none"
+          className={cn(hvButtonVariants({ variant: "primary", size: "sm", block: true }), "mt-2")}
         >
           Nộp duyệt giáo án
         </button>

@@ -83,7 +83,7 @@ function ScoreSetsSection() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="font-display text-[16px] font-bold text-ink-900">Bộ điểm</p>
-          <p className="text-[12.5px] text-ink-400">Mỗi bộ điểm gồm tối đa 10 cột, theo thứ tự.</p>
+          <p className="text-[12.5px] text-ink-500">Mỗi bộ điểm gồm tối đa 10 cột, theo thứ tự.</p>
         </div>
         <HvButton size="sm" onClick={openCreate}>
           + Tạo bộ điểm
@@ -169,7 +169,7 @@ function ClassAssignmentSection() {
   return (
     <HvCard>
       <p className="font-display text-[16px] font-bold text-ink-900">Gán bộ điểm cho lớp</p>
-      <p className="mt-0.5 text-[12.5px] text-ink-400">
+      <p className="mt-0.5 text-[12.5px] text-ink-500">
         Lớp đã có điểm được ghi nhận không thể đổi hoặc xóa bộ điểm đang gán.
       </p>
       {!canAssign ? (

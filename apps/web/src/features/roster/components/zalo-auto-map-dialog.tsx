@@ -72,14 +72,14 @@ function ContactIdentity({ contact }: { contact: Contact }) {
   return (
     <span className="min-w-0 flex-1">
       <span className="block truncate text-[14px] font-bold text-ink-900">{contact.full_name}</span>
-      <span className="block text-[12px] text-ink-400">{formatPhoneLocal(contact.phone)}</span>
+      <span className="block text-[12px] text-ink-500">{formatPhoneLocal(contact.phone)}</span>
     </span>
   );
 }
 
 function GroupHeading({ children }: { children: ReactNode }) {
   return (
-    <p className="mt-3 mb-1 text-[11px] font-semibold tracking-wide text-ink-400 uppercase first:mt-0">
+    <p className="mt-3 mb-1 text-[11px] font-semibold tracking-wide text-ink-500 uppercase first:mt-0">
       {children}
     </p>
   );
@@ -262,7 +262,7 @@ export function ZaloAutoMapDialog({ open, onOpenChange }: ZaloAutoMapDialogProps
           Đã ghép {summary.done}/{summary.total}
         </p>
         {summary.done < summary.total ? (
-          <p className="text-[13px] text-ink-400">Các dòng còn lại chưa được ghép.</p>
+          <p className="text-[13px] text-ink-500">Các dòng còn lại chưa được ghép.</p>
         ) : null}
       </div>
     );
@@ -270,7 +270,7 @@ export function ZaloAutoMapDialog({ open, onOpenChange }: ZaloAutoMapDialogProps
   } else if (contactsQuery.isError) {
     body = (
       <div className="flex flex-col items-start gap-2">
-        <p className="text-[13px] text-ink-400">Không tải được danh sách người liên hệ.</p>
+        <p className="text-[13px] text-ink-500">Không tải được danh sách người liên hệ.</p>
         <HvButton size="sm" variant="ghost" onClick={() => void contactsQuery.refetch()}>
           Thử lại
         </HvButton>
@@ -278,7 +278,7 @@ export function ZaloAutoMapDialog({ open, onOpenChange }: ZaloAutoMapDialogProps
     );
   } else if (sessionGone) {
     body = (
-      <p className="text-[13px] text-ink-400">
+      <p className="text-[13px] text-ink-500">
         Phiên Zalo không còn hiệu lực.{" "}
         <Link to="/profile" className="font-bold text-mint-600 underline-offset-4 hover:underline">
           Quét lại mã
@@ -288,7 +288,7 @@ export function ZaloAutoMapDialog({ open, onOpenChange }: ZaloAutoMapDialogProps
   } else if (match.isError) {
     body = (
       <div className="flex flex-col items-start gap-2">
-        <p className="text-[13px] text-ink-400">Không đối chiếu được với Zalo.</p>
+        <p className="text-[13px] text-ink-500">Không đối chiếu được với Zalo.</p>
         <HvButton
           size="sm"
           variant="ghost"
@@ -300,9 +300,9 @@ export function ZaloAutoMapDialog({ open, onOpenChange }: ZaloAutoMapDialogProps
       </div>
     );
   } else if (contactsData?.contacts.length === 0) {
-    body = <p className="text-[13px] text-ink-400">Tất cả người liên hệ đã được ghép.</p>;
+    body = <p className="text-[13px] text-ink-500">Tất cả người liên hệ đã được ghép.</p>;
   } else if (!groups) {
-    body = <p className="text-[13px] text-ink-400">Đang đối chiếu với danh bạ Zalo…</p>;
+    body = <p className="text-[13px] text-ink-500">Đang đối chiếu với danh bạ Zalo…</p>;
   } else {
     body = (
       <div className="max-h-[55vh] overflow-y-auto">
@@ -383,7 +383,7 @@ export function ZaloAutoMapDialog({ open, onOpenChange }: ZaloAutoMapDialogProps
                   className="flex items-center gap-3 border-b border-line-200 py-2 last:border-b-0"
                 >
                   <ContactIdentity contact={contact} />
-                  <span className="text-[12.5px] text-ink-400">Không tìm thấy</span>
+                  <span className="text-[12.5px] text-ink-500">Không tìm thấy</span>
                 </li>
               ))}
             </ul>

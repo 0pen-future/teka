@@ -57,10 +57,7 @@ describe("ClassDetailPage", () => {
     expect(await screen.findByRole("heading", { name: "Toán 6A" })).toBeInTheDocument();
     expect(screen.getByText("Mã lớp: TOAN6A")).toBeInTheDocument();
     expect(screen.getByText("Đang học")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Danh sách lớp học" })).toHaveAttribute(
-      "href",
-      "/classes",
-    );
+    expect(screen.getByRole("link", { name: "Danh mục lớp" })).toHaveAttribute("href", "/classes");
     expect(screen.getByRole("button", { name: "Sửa lớp" })).toBeInTheDocument();
   });
 

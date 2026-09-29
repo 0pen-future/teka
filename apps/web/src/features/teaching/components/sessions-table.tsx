@@ -1,6 +1,6 @@
 import * as React from "react";
 
-import { ProgressBar } from "@/components/hv";
+import { HvTableScroll, ProgressBar } from "@/components/hv";
 import { cn, formatSessionDate } from "@/lib/utils";
 
 import { formatLedgerScore, sessionWorkStatus, type SessionDerived } from "../lib/classbook-stats";
@@ -32,7 +32,7 @@ function expandRowId(sessionId: string): string {
 const COLUMN_COUNT = 8;
 
 const headClassName =
-  "px-3 py-3 text-left text-[11.5px] font-extrabold tracking-[0.3px] text-ink-400 whitespace-nowrap";
+  "px-3 py-3 text-left text-[11.5px] font-extrabold tracking-[0.3px] text-ink-500 whitespace-nowrap";
 const cellClassName = "px-3 py-[9px] align-middle text-[13.5px]";
 const muted = <span className="text-ink-300">·</span>;
 
@@ -93,7 +93,7 @@ export function SessionsTable({
 
   return (
     <div className="overflow-hidden rounded-[var(--radius-lg)] bg-white shadow-soft-md">
-      <div className="overflow-x-auto">
+      <HvTableScroll aria-label="Bảng buổi học">
         <table className="w-full border-collapse sm:min-w-[960px]">
           <thead>
             <tr className="border-b-[1.5px] border-line-200">
@@ -158,7 +158,7 @@ export function SessionsTable({
                     className={cn(
                       "cursor-pointer border-b border-line-100 transition-colors",
                       selected ? "bg-mint-50" : "hover:bg-cream-100",
-                      cancelled && !selected && "text-ink-400",
+                      cancelled && !selected && "text-ink-500",
                     )}
                   >
                     <td className={cellClassName}>
@@ -182,7 +182,7 @@ export function SessionsTable({
                         <span
                           className={cn(
                             "font-extrabold whitespace-nowrap",
-                            cancelled ? "text-ink-400" : "text-ink-900",
+                            cancelled ? "text-ink-500" : "text-ink-900",
                           )}
                         >
                           {dateLabel}
@@ -190,7 +190,7 @@ export function SessionsTable({
                         {selected ? (
                           <span className="text-[11px] font-bold text-mint-600">đang mở</span>
                         ) : lessonNumber !== null ? (
-                          <span className="text-[11px] text-ink-400 sm:hidden">
+                          <span className="text-[11px] text-ink-500 sm:hidden">
                             Bài {lessonNumber}
                           </span>
                         ) : null}
@@ -312,8 +312,8 @@ export function SessionsTable({
             })}
           </tbody>
         </table>
-      </div>
-      <p className="px-4 py-[10px] text-[12px] text-ink-400">
+      </HvTableScroll>
+      <p className="px-4 py-[10px] text-[12px] text-ink-500">
         Doanh thu buổi = học phí của học sinh có mặt − 300.000đ chi phí buổi (phòng + trợ giảng).
         Bấm vào buổi để mở nhận xét, giáo án &amp; điểm.
       </p>

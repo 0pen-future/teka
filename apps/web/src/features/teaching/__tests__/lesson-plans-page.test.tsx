@@ -172,9 +172,7 @@ describe("LessonPlansPage review actions", () => {
     renderPage();
 
     expect(
-      await screen.findByText(
-        "Chưa có giáo án để duyệt — giáo viên nộp trong màn Quản lý lớp học.",
-      ),
+      await screen.findByText("Chưa có giáo án để duyệt — giáo viên nộp trong màn Sổ lớp."),
     ).toBeInTheDocument();
     expect(screen.getAllByText("Chưa nộp").length).toBeGreaterThanOrEqual(1);
 

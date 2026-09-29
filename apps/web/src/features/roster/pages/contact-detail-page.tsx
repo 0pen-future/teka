@@ -29,13 +29,13 @@ function ContactZaloCard({ contact }: { contact: Contact }) {
 
   let body: ReactNode;
   if (isPending) {
-    body = <p className="text-[13px] text-ink-400">Đang tải…</p>;
+    body = <p className="text-[13px] text-ink-500">Đang tải…</p>;
   } else if (isError) {
     // An unreadable status must not be drawn as "not connected": a linked
     // teacher would be sent to the profile page to link a second time.
     body = (
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-[13px] text-ink-400">Không tải được trạng thái Zalo.</p>
+        <p className="text-[13px] text-ink-500">Không tải được trạng thái Zalo.</p>
         <HvButton variant="ghost" size="sm" onClick={() => void refetch()}>
           Thử lại
         </HvButton>
@@ -43,7 +43,7 @@ function ContactZaloCard({ contact }: { contact: Contact }) {
     );
   } else if (!status?.linked) {
     body = (
-      <p className="text-[13px] text-ink-400">
+      <p className="text-[13px] text-ink-500">
         Chưa kết nối Zalo để gửi thông báo học phí.{" "}
         <Link to="/profile" className="font-bold text-mint-600 underline-offset-4 hover:underline">
           Kết nối Zalo trước
@@ -52,7 +52,7 @@ function ContactZaloCard({ contact }: { contact: Contact }) {
     );
   } else if (status.status === "expired") {
     body = (
-      <p className="text-[13px] text-ink-400">
+      <p className="text-[13px] text-ink-500">
         Phiên Zalo đã hết hạn.{" "}
         <Link to="/profile" className="font-bold text-mint-600 underline-offset-4 hover:underline">
           Quét lại mã
@@ -73,7 +73,7 @@ function ContactZaloCard({ contact }: { contact: Contact }) {
   } else {
     body = (
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-[13px] text-ink-400">Chưa liên kết bạn Zalo nào.</p>
+        <p className="text-[13px] text-ink-500">Chưa liên kết bạn Zalo nào.</p>
         <HvButton size="sm" onClick={() => setPickerOpen(true)}>
           Chọn bạn Zalo
         </HvButton>
@@ -121,11 +121,11 @@ export function ContactDetailPage() {
   const { isOwner } = useCenterContext();
 
   if (isPending) {
-    return <p className="text-[13px] text-ink-400">Đang tải…</p>;
+    return <p className="text-[13px] text-ink-500">Đang tải…</p>;
   }
 
   if (!contact) {
-    return <p className="text-[13px] text-ink-400">Không tìm thấy người liên hệ.</p>;
+    return <p className="text-[13px] text-ink-500">Không tìm thấy người liên hệ.</p>;
   }
 
   return (
@@ -169,7 +169,7 @@ export function ContactDetailPage() {
           </Link>
         ))}
         {students.length === 0 ? (
-          <p className="text-[13px] text-ink-400">Người liên hệ này chưa có học sinh nào.</p>
+          <p className="text-[13px] text-ink-500">Người liên hệ này chưa có học sinh nào.</p>
         ) : null}
       </div>
 

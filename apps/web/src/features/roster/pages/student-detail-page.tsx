@@ -29,11 +29,11 @@ export function StudentDetailPage() {
   const { isOwner } = useCenterContext();
 
   if (isPending) {
-    return <p className="text-[13px] text-ink-400">Đang tải…</p>;
+    return <p className="text-[13px] text-ink-500">Đang tải…</p>;
   }
 
   if (!student) {
-    return <p className="text-[13px] text-ink-400">Không tìm thấy học sinh.</p>;
+    return <p className="text-[13px] text-ink-500">Không tìm thấy học sinh.</p>;
   }
 
   return (
@@ -87,7 +87,7 @@ export function StudentDetailPage() {
               <p className="font-display text-[15px] font-bold text-ink-900">
                 {enrollment.class_name}
               </p>
-              <p className="text-[13px] text-ink-400">
+              <p className="text-[13px] text-ink-500">
                 {enrollment.started_on} — {enrollment.ended_on ?? "Đang học"} ·{" "}
                 {formatMoney(enrollment.unit_price)}
               </p>
@@ -100,7 +100,7 @@ export function StudentDetailPage() {
           </HvCard>
         ))}
         {enrollments.length === 0 ? (
-          <p className="text-[13px] text-ink-400">Học sinh chưa được ghi danh vào lớp nào.</p>
+          <p className="text-[13px] text-ink-500">Học sinh chưa được ghi danh vào lớp nào.</p>
         ) : null}
       </div>
 

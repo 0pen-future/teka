@@ -22,5 +22,5 @@ export function ClassSearchInput({
 }
 
 export function ClassSearchEmptyNote({ note }: { note: string }) {
-  return <p className="text-[13px] font-bold text-ink-400">{note}</p>;
+  return <p className="text-[13px] font-bold text-ink-500">{note}</p>;
 }

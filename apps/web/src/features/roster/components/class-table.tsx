@@ -1,6 +1,6 @@
 import { Link } from "react-router";
 
-import { HvBadge } from "@/components/hv";
+import { HvBadge, HvStateBlock, HvTableScroll } from "@/components/hv";
 import { cn } from "@/lib/utils";
 
 import type { ClassShift } from "../api/classes-api";
@@ -34,7 +34,7 @@ interface ClassTableProps {
 }
 
 /**
- * The class catalog table (prototype "Danh sách lớp học"). The whole row
+ * The class catalog table (prototype "Danh mục lớp"). The whole row
  * opens the detail; the trailing "Sửa" / "Mở" actions stop the row click.
  */
 export function ClassTable({
@@ -45,8 +45,14 @@ export function ClassTable({
   canEdit,
   emptyLabel,
 }: ClassTableProps) {
+  // An empty row inside the wide table would sit off-screen on a phone.
+  if (classes.length === 0 && emptyLabel) return <HvStateBlock state="empty" title={emptyLabel} />;
+
   return (
-    <div className="overflow-x-auto rounded-[20px] bg-white shadow-soft-md">
+    <HvTableScroll
+      aria-label="Bảng danh sách lớp"
+      className="rounded-[20px] bg-white shadow-soft-md"
+    >
       <table className="w-full min-w-[980px] table-fixed border-collapse text-left text-[13.5px]">
         <colgroup>
           <col className="w-[62px]" />
@@ -73,16 +79,6 @@ export function ClassTable({
           </tr>
         </thead>
         <tbody>
-          {classes.length === 0 && emptyLabel ? (
-            <tr>
-              <td
-                colSpan={8}
-                className="border-t border-line-100 p-[34px] text-center font-bold text-ink-400"
-              >
-                {emptyLabel}
-              </td>
-            </tr>
-          ) : null}
           {classes.map((klass, index) => {
             const lines = formatScheduleLines(klass.schedules, today);
             const courseLine = [klass.course?.name, klass.code].filter(Boolean).join(" · ");
@@ -92,7 +88,7 @@ export function ClassTable({
                 onClick={() => onOpen(klass)}
                 className="cursor-pointer align-middle transition-colors hover:bg-cream-100"
               >
-                <td className={cn(cellClassName, "font-extrabold text-ink-400")}>{index + 1}</td>
+                <td className={cn(cellClassName, "font-extrabold text-ink-500")}>{index + 1}</td>
                 <td className={cellClassName}>
                   <Link
                     to={`/classes/${klass.id}`}
@@ -102,7 +98,7 @@ export function ClassTable({
                     {klass.name}
                   </Link>
                   {courseLine ? (
-                    <div title={courseLine} className="mt-0.5 truncate text-[12px] text-ink-400">
+                    <div title={courseLine} className="mt-0.5 truncate text-[12px] text-ink-500">
                       {courseLine}
                     </div>
                   ) : null}
@@ -193,6 +189,6 @@ export function ClassTable({
           })}
         </tbody>
       </table>
-    </div>
+    </HvTableScroll>
   );
 }

@@ -8,6 +8,7 @@ import {
   HvConfirmDialog,
   HvSegmented,
   HvStateBlock,
+  HvTableScroll,
   hvToast,
 } from "@/components/hv";
 import type { HvSegmentedOption } from "@/components/hv";
@@ -86,7 +87,7 @@ export function ExercisesBank({ canEdit }: { canEdit: boolean }) {
         <div className="relative flex-1">
           <SearchIcon
             aria-hidden="true"
-            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-400"
+            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-500"
           />
           <Input
             type="search"
@@ -135,7 +136,10 @@ export function ExercisesBank({ canEdit }: { canEdit: boolean }) {
           }
         />
       ) : (
-        <div className="overflow-x-auto rounded-[var(--radius-lg)] border border-line-200 bg-white">
+        <HvTableScroll
+          aria-label="Bảng ngân hàng bài tập"
+          className="rounded-[var(--radius-lg)] border border-line-200 bg-white"
+        >
           <table className="w-full min-w-[860px] border-collapse text-left text-[14px]">
             <thead>
               <tr>
@@ -214,7 +218,7 @@ export function ExercisesBank({ canEdit }: { canEdit: boolean }) {
               ))}
             </tbody>
           </table>
-        </div>
+        </HvTableScroll>
       )}
 
       {canEdit ? (

@@ -51,11 +51,11 @@ export function SendReportsPage() {
 
       <div className="mt-[18px] flex flex-col gap-4">
         {isPending ? (
-          <p className="text-[14px] text-ink-400">Đang tải…</p>
+          <p className="text-[14px] text-ink-500">Đang tải…</p>
         ) : isError ? (
           <p className="text-[14px] text-ink-500">Không tải được danh sách kỳ học phí.</p>
         ) : (data?.items.length ?? 0) === 0 ? (
-          <HvCard variant="flat" className="text-center text-[13px] text-ink-400">
+          <HvCard variant="flat" className="text-center text-[13px] text-ink-500">
             Chưa có kỳ học phí nào trong trung tâm.
           </HvCard>
         ) : (

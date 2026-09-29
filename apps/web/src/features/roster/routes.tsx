@@ -1,5 +1,7 @@
 import type { RouteObject } from "react-router";
 
+import type { RouteHandle } from "@/components/shared/document-title";
+
 /**
  * Mounted by the app router inside the protected dashboard layout. Pages
  * load through route.lazy so each lands in its own build chunk, following
@@ -8,57 +10,67 @@ import type { RouteObject } from "react-router";
 export const rosterRoutes: RouteObject[] = [
   {
     path: "contacts",
+    handle: { title: "Phụ huynh" } satisfies RouteHandle,
     lazy: async () => ({ Component: (await import("./pages/contacts-page")).ContactsPage }),
   },
   {
     path: "contacts/:id",
+    handle: { title: "Chi tiết phụ huynh" } satisfies RouteHandle,
     lazy: async () => ({
       Component: (await import("./pages/contact-detail-page")).ContactDetailPage,
     }),
   },
   {
     path: "students",
+    handle: { title: "Quản trị học sinh" } satisfies RouteHandle,
     lazy: async () => ({ Component: (await import("./pages/students-page")).StudentsPage }),
   },
   {
     // Also matched by "students/:id" below; react-router ranks the static
     // segment higher, so /students/import never resolves "import" as an id.
     path: "students/import",
+    handle: { title: "Nhập từ Excel" } satisfies RouteHandle,
     lazy: async () => ({
       Component: (await import("./pages/roster-import-page")).RosterImportPage,
     }),
   },
   {
     path: "students/:id",
+    handle: { title: "Chi tiết học sinh" } satisfies RouteHandle,
     lazy: async () => ({
       Component: (await import("./pages/student-detail-page")).StudentDetailPage,
     }),
   },
   {
     path: "classes",
+    handle: { title: "Danh mục lớp" } satisfies RouteHandle,
     lazy: async () => ({ Component: (await import("./pages/class-list-page")).ClassListPage }),
   },
   {
     // Static segment, so react-router ranks it above "classes/:id".
     path: "classes/recruiting",
+    handle: { title: "Lớp cần tuyển sinh" } satisfies RouteHandle,
     lazy: async () => ({
       Component: (await import("./pages/class-list-page")).RecruitingClassListPage,
     }),
   },
   {
     path: "classes/:id",
+    handle: { title: "Chi tiết lớp" } satisfies RouteHandle,
     lazy: async () => ({
       Component: (await import("./pages/class-detail-page")).ClassDetailPage,
     }),
   },
   {
     path: "class-invitations",
+    handle: { title: "Lời mời nhận lớp" } satisfies RouteHandle,
     lazy: async () => ({
       Component: (await import("./pages/class-invitations-page")).ClassInvitationsPage,
     }),
   },
   {
     path: "classes/:id/settings",
+    handle: { title: "Chi tiết lớp" } satisfies RouteHandle,
     lazy: async () => ({
       Component: (await import("./components/class-settings-redirect")).ClassSettingsRedirect,
     }),

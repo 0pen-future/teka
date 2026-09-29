@@ -60,7 +60,7 @@ jobs:
       - name: Build image
         run: |
           if [ "${{ matrix.app }}" = "web" ]; then
-            docker build --build-arg VITE_API_URL=/api/v1 -t scan-target:${{ matrix.app }} apps/web
+            docker build --build-arg VITE_API_URL=/api/v1 --build-arg VITE_PUBLIC_ORIGIN=http://localhost -t scan-target:${{ matrix.app }} apps/web
           else
             docker build -t scan-target:${{ matrix.app }} apps/api
           fi

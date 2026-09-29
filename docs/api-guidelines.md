@@ -85,7 +85,7 @@ without exception:
   request body, query string, or path segment. A client-supplied `center_id`
   or `teacher_id` is an authorization bypass, and it looks completely ordinary
   in a diff.
-- `Scope{TeacherID, CenterID, IsOwner, CanSendReports, Perms}` is resolved
+- `Scope{TeacherID, CenterID, IsOwner, Perms}` is resolved
   fresh from the database on every request by `middleware.ResolveScope` and
   never cached in the JWT, so a membership or permission change (kick, leave,
   join, grant, revoke, role edit) takes effect on the very next request.
@@ -305,15 +305,17 @@ already owner/`contacts.view_all`-only. Zalo friend-match and per-contact
 zalo-mapping stay open to assigned hoc_vu — their send path depends on
 mapping.
 
-**Delegated report sending (`reports.send`, mirrored on the wire as
-`can_send_reports`)**: an ordinary permission-catalog key, granted and revoked
-only by the owner through the member override endpoint (`PUT
-/centers/me/members/:teacherId/overrides`) like any other key. It is
-member-only in practice — the owner sits outside the role/override tables, so
-their authority flows through `IsOwner` instead — `IsOwner` and
-`CanSendReports` never combine. `Scope.ReportsOversight()` (`IsOwner ||
-CanSendReports`) now gates
-**sending only**; the read cluster it used to gate directly is widened through
+**Delegated report sending (`reports.send`)**: an ordinary permission-catalog
+key, granted and revoked only by the owner through roles or the member
+override endpoint (`PUT /centers/me/members/:teacherId/overrides`) like any
+other key. There is no separate flag on the scope or on the wire: clients read
+it from the `permissions` array of `GET /centers/me`, and the server checks
+the key itself. The owner holds it implicitly (`Scope.Has` is true for every
+key), so `Scope.ReportsOversight()` is exactly `Has(reports.send)`. The one
+place that asks for the key as an actual member grant — `Perms.HasKey`, no
+owner bypass — is the cross-teacher `zalo_personal` send, which DMs another
+teacher's families from the sender's own Zalo session. `ReportsOversight()`
+gates **sending only**; the read cluster it used to gate directly is widened through
 `reports.send`'s [implied keys](./adding-permissions.md#3-consider-an-implied-key-instead-of-a-new-grant)
 instead, so the two capabilities are governed by different helpers even though
 one permission still carries both by default:
@@ -343,8 +345,8 @@ one permission still carries both by default:
 
 *Release note (behavior removal)*: before this permission existed every
 teacher could generate and send statements for their own periods. Now sending
-is exclusive to the owner and `can_send_reports` holders — a teacher keeps
-that ability only after the owner grants them the flag.
+is exclusive to the owner and `reports.send` holders — a teacher keeps that
+ability only after the owner grants them the permission.
 
 **Configurable permissions (resource-action RBAC, migrations 000013/000018)**:
 authorization checks branch on a permission catalog, not on `IsOwner` (the
@@ -402,11 +404,9 @@ Developer workflow for adding or reusing a permission on a new endpoint:
   Member removal and the send-reports grant stay owner-only for the same
   reason.
 - **`reports.send` lives solely in the permission tables** (migration
-  000019 dropped the legacy `can_send_reports` column the permission
-  dual-wrote during the migration soak window). The role matrix still rejects
-  it — it stays a per-member override, never a role default — and
-  `ResolveScope` computes `CanSendReports = Has(reports.send)` straight from
-  the effective permission set.
+  000019 dropped the legacy boolean column the permission dual-wrote during
+  the migration soak window). Every check reads the resolved effective
+  permission set; nothing mirrors the key into a separate field.
 - Permission mutations are audited twice under the same action name: the
   request middleware row is the HTTP evidence (status, IP, failed attempts)
   and a service-published event row carries the committed before/after diff

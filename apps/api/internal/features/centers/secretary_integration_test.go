@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/testutil"
 )
 
@@ -26,7 +27,7 @@ func TestSecretaryCannotRemoveMembers(t *testing.T) {
 	e.join(t, member.ID, owner.ID)
 	_, secretary := testutil.Secretary(t, e.db, e.scope(t, owner.ID).CenterID)
 	secScope := e.scope(t, secretary.ID)
-	require.True(t, secScope.CanSendReports)
+	require.True(t, secScope.Has(authctx.PermReportsSend))
 	require.False(t, secScope.IsOwner)
 
 	err := e.centersSvc.RemoveMember(ctx, secScope, member.ID)

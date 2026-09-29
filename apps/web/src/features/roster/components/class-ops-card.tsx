@@ -107,10 +107,10 @@ export function ClassOpsCard({ klass, canWrite }: ClassOpsCardProps) {
       ) : (
         <dl className="mt-3 flex flex-col gap-3">
           <div>
-            <dt className="text-[12px] font-bold tracking-[0.3px] text-ink-400">Thẻ</dt>
+            <dt className="text-[12px] font-bold tracking-[0.3px] text-ink-500">Thẻ</dt>
             <dd className="mt-1">
               {klass.tags.length === 0 ? (
-                <span className="text-[13px] text-ink-400">Chưa có thẻ</span>
+                <span className="text-[13px] text-ink-500">Chưa có thẻ</span>
               ) : (
                 <div className="flex flex-wrap gap-1">
                   {klass.tags.map((tag) => (
@@ -123,9 +123,9 @@ export function ClassOpsCard({ klass, canWrite }: ClassOpsCardProps) {
             </dd>
           </div>
           <div>
-            <dt className="text-[12px] font-bold tracking-[0.3px] text-ink-400">Ghi chú</dt>
+            <dt className="text-[12px] font-bold tracking-[0.3px] text-ink-500">Ghi chú</dt>
             <dd className="mt-1 text-[14px] whitespace-pre-wrap text-ink-900">
-              {klass.note ?? <span className="text-ink-400">Chưa có ghi chú</span>}
+              {klass.note ?? <span className="text-ink-500">Chưa có ghi chú</span>}
             </dd>
           </div>
         </dl>

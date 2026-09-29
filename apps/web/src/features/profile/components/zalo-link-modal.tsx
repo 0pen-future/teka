@@ -210,7 +210,7 @@ export function ZaloLinkModal({ open, onOpenChange, onLinked }: ZaloLinkModalPro
                 style={{ width: `${(secondsLeft / ATTEMPT_TTL_SECONDS) * 100}%` }}
               />
             </div>
-            <p role="timer" className="mt-1.5 text-center text-[12.5px] text-ink-400">
+            <p role="timer" className="mt-1.5 text-center text-[12.5px] text-ink-500">
               <span aria-hidden>Mã hết hạn sau {secondsLeft}s</span>
               {/* Announced in 10-second steps: a per-second live region would
                   talk over everything else on the screen. */}
@@ -233,7 +233,7 @@ export function ZaloLinkModal({ open, onOpenChange, onLinked }: ZaloLinkModalPro
           >
             Lưu ảnh QR
           </a>
-          <p className="text-center text-[12px] text-ink-400 md:hidden">
+          <p className="text-center text-[12px] text-ink-500 md:hidden">
             Đang dùng điện thoại? Lưu ảnh, mở Zalo → Quét mã → chọn ảnh từ thư viện.
           </p>
         </div>

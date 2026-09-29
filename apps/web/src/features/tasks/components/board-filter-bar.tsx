@@ -44,7 +44,7 @@ function FilterChip({ pressed, warn = false, count, leading, onClick, children }
       {leading}
       {children}
       {/* Explicit space so the accessible name reads "Quá hạn 3", not "Quá hạn3"; the flex gap swallows it visually. */}{" "}
-      <span className="tabular-nums opacity-75">{count}</span>
+      <span className="font-semibold tabular-nums">{count}</span>
     </button>
   );
 }

@@ -12,7 +12,7 @@ TanStack Query, Zustand. Scripts and env setup: `README.md` in this folder.
   hv-modal, status-pill, …). Prefer these over raw shadcn or new one-off
   components.
 - `src/lib/api/` — API access layer (`client.ts`, `envelope.ts`, `errors.ts`,
-  `interceptors.ts`, `public-client.ts`). Feature `api/` files go through this
+  `interceptors.ts`). Feature `api/` files go through this
   layer, never raw axios/fetch.
 - `src/lib/kanban/` — headless board state (reducer, hook, keyboard nav).
   May import only `react` (ESLint `no-restricted-imports`); the `tasks`
@@ -35,3 +35,5 @@ TanStack Query, Zustand. Scripts and env setup: `README.md` in this folder.
 
 - Conventions (module contract, server/client state split, API error handling,
   forms, a11y, testing): `docs/frontend-guidelines.md` at repo root.
+- Design-system rules for UI changes: its `hv kit`, `Color and contrast`,
+  `Accessibility baseline`, and `UX review checklist` sections.

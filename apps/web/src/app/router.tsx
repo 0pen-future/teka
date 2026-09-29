@@ -1,5 +1,6 @@
 import { createBrowserRouter } from "react-router";
 
+import type { RouteHandle } from "@/components/shared/document-title";
 import { NotFound } from "@/components/shared/not-found";
 import { ProtectedRoute } from "@/features/auth";
 import { authRoutes } from "@/features/auth/routes";
@@ -15,12 +16,10 @@ import { profileRoutes } from "@/features/profile/routes";
 import { reportsRoutes } from "@/features/reports";
 import { libraryRoutes } from "@/features/library/routes";
 import { rosterRoutes } from "@/features/roster/routes";
-import { statementRoutes } from "@/features/statement";
 import { tasksRoutes } from "@/features/tasks/routes";
 import { teachingRoutes } from "@/features/teaching/routes";
 import { AuthLayout } from "@/layouts/auth-layout";
 import { DashboardLayout } from "@/layouts/dashboard-layout";
-import { PublicLayout } from "@/layouts/public-layout";
 import { RootLayout } from "@/layouts/root-layout";
 
 // Features export their route arrays; this file owns the tree (layouts,
@@ -59,10 +58,10 @@ export const router = createBrowserRouter([
         ],
       },
       {
-        element: <PublicLayout />,
-        children: statementRoutes,
+        path: "*",
+        handle: { title: "Không tìm thấy trang" } satisfies RouteHandle,
+        element: <NotFound />,
       },
-      { path: "*", element: <NotFound /> },
     ],
   },
 ]);

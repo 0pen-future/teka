@@ -84,7 +84,7 @@ export function ConfirmInvitationDialog({
     >
       {isHandoff ? (
         staff.isPending ? (
-          <p className="text-ink-400">Đang tải giáo viên hiện tại…</p>
+          <p className="text-ink-500">Đang tải giáo viên hiện tại…</p>
         ) : staff.isError ? (
           <p className="text-coral-600">
             Không tải được giáo viên hiện tại của lớp.{" "}

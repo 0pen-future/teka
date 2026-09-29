@@ -25,10 +25,6 @@ type MemberResponse struct {
 	FullName string    `json:"full_name"`
 	Phone    string    `json:"phone"`
 	IsOwner  bool      `json:"is_owner"`
-	// CanSendReports mirrors the member's effective reports.send permission
-	// (computed, not stored); always false for the owner (member-only —
-	// the owner's authority is implicit).
-	CanSendReports bool `json:"can_send_reports"`
 }
 
 // MeResponse is the body of GET /centers/me for the owner: the center plus
@@ -43,10 +39,9 @@ type MeResponse struct {
 
 // MemberMeResponse is the body of GET /centers/me for a non-owner member —
 // the roster is owner-only data, so a member sees only the center's name
-// plus their own effective reports.send permission.
+// plus their own effective permission keys.
 type MemberMeResponse struct {
-	CenterName     string `json:"center_name"`
-	CanSendReports bool   `json:"can_send_reports"`
+	CenterName string `json:"center_name"`
 	// Permissions is the caller's effective permission key list — the client's
 	// source for gating navigation and pages.
 	Permissions []string `json:"permissions"`
@@ -132,7 +127,7 @@ type MemberOverridesRequest struct {
 
 // DirectoryEntry is one live member on GET /centers/me/members/directory —
 // deliberately narrower than MemberResponse: no phone, since pickers (task
-// assignment) never need it and directory has no can_send_reports either.
+// assignment) never need it.
 type DirectoryEntry struct {
 	TeacherID   uuid.UUID `json:"teacher_id"`
 	DisplayName string    `json:"display_name"`

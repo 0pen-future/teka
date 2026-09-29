@@ -69,7 +69,7 @@ interface NavGroup {
 function useNavGroups(): NavGroup[] {
   const { data: period } = useCurrentPeriod();
   const { data: pendingSessionsResponse } = usePendingSessions();
-  const { isOwner, canSendReports, isResolved, has } = useCenterContext();
+  const { isOwner, isResolved, has } = useCenterContext();
   const pendingPlanCount = usePendingPlanCount();
   const periodId = period?.id ?? null;
   const hasPending = (pendingSessionsResponse?.total ?? 0) > 0;
@@ -86,7 +86,7 @@ function useNavGroups(): NavGroup[] {
           pending: hasPending,
           perm: "sessions.list",
         },
-        { label: "Quản lý lớp học", to: "/classbook", Icon: BookOpenIcon, perm: "classes.list" },
+        { label: "Sổ lớp", to: "/classbook", Icon: BookOpenIcon, perm: "classes.list" },
         { label: "Hồ sơ học sinh", to: "/records", Icon: IdCardIcon, perm: "students.list" },
         { label: "Phụ huynh", to: "/contacts", Icon: BookUserIcon, perm: "contacts.list" },
       ],
@@ -95,7 +95,7 @@ function useNavGroups(): NavGroup[] {
       header: "Giảng dạy",
       entries: [
         {
-          label: "Danh sách lớp học",
+          label: "Danh mục lớp",
           to: "/classes",
           Icon: BookMarkedIcon,
           perm: "classes.list",
@@ -163,15 +163,15 @@ function useNavGroups(): NavGroup[] {
         },
         { label: "Nhật ký hoạt động", to: "/audit", Icon: HistoryIcon, perm: "audit.read" },
         { label: "Công việc", to: "/tasks", Icon: KanbanIcon, perm: "tasks.list" },
-        // Secretary-only (owner reaches every period through Học phí already;
-        // the flag itself is member-only, so owner never matches).
-        ...(isResolved && !isOwner && canSendReports
+        // Members holding reports.send only: the owner (implicitly holding
+        // every key) already reaches every period through Học phí.
+        ...(isResolved && !isOwner && has("reports.send")
           ? [{ label: "Gửi báo cáo", to: "/reports", Icon: HvSendIcon }]
           : []),
         // Owner-only: class and student records are owner-managed center
         // data; the page itself redirects non-owners.
         ...(isResolved && isOwner
-          ? [{ label: "Lớp & học sinh", to: "/students", Icon: HvUsersIcon }]
+          ? [{ label: "Quản trị học sinh", to: "/students", Icon: HvUsersIcon }]
           : []),
         // Owner-only: the role-permission read model itself is owner-only.
         ...(isResolved && isOwner
@@ -205,9 +205,9 @@ function useNavGroups(): NavGroup[] {
  * group live behind the Thêm sheet so the bar stays uncrowded at 360px.
  */
 const OVERFLOW_LABELS = new Set([
-  "Quản lý lớp học",
+  "Sổ lớp",
   "Hồ sơ học sinh",
-  "Danh sách lớp học",
+  "Danh mục lớp",
   "Lớp cần tuyển sinh",
   "Lời mời nhận lớp",
   "Lộ trình học",
@@ -217,7 +217,7 @@ const OVERFLOW_LABELS = new Set([
   "Gửi thông báo",
   "Phụ huynh",
   "Gửi báo cáo",
-  "Lớp & học sinh",
+  "Quản trị học sinh",
   "Duyệt giáo án",
   "Nhập từ Excel",
   "Nhật ký hoạt động",
@@ -448,7 +448,7 @@ function CenterCard() {
     <div className="mx-4 mb-2 flex items-center gap-2.5 rounded-2xl border-[1.5px] border-line-200 bg-cream-100 px-2.5 py-2">
       <span
         aria-hidden
-        className="flex size-[34px] shrink-0 items-center justify-center rounded-[10px] bg-mint-400 font-display text-[15px] font-extrabold text-white"
+        className="flex size-[34px] shrink-0 items-center justify-center rounded-[10px] bg-mint-400 font-display text-[15px] font-extrabold text-on-brand"
       >
         {name ? centerInitial(name) : ""}
       </span>
@@ -456,7 +456,7 @@ function CenterCard() {
         <span className="block truncate text-[13.5px] font-extrabold text-ink-900">
           {name ?? "Đang tải…"}
         </span>
-        <span className="block text-[11.5px] text-ink-400">
+        <span className="block text-[11.5px] text-ink-500">
           {name ? (isOwner ? "Chủ trung tâm" : "Giáo viên") : " "}
         </span>
       </span>
@@ -468,7 +468,7 @@ function CurrentPeriodCard() {
   const { data: period } = useCurrentPeriod();
   return (
     <div className="m-4 rounded-[var(--radius-lg)] bg-mint-50 p-4">
-      <p className="text-[11px] font-semibold tracking-wide text-ink-400 uppercase">Kỳ hiện tại</p>
+      <p className="text-[11px] font-semibold tracking-wide text-ink-500 uppercase">Kỳ hiện tại</p>
       {period ? (
         <>
           <p className="mt-1 font-display text-[15px] font-bold text-mint-600">
@@ -479,7 +479,7 @@ function CurrentPeriodCard() {
           </p>
         </>
       ) : (
-        <p className="mt-1 text-[12px] text-ink-400">Đang tải…</p>
+        <p className="mt-1 text-[12px] text-ink-500">Đang tải…</p>
       )}
     </div>
   );
@@ -545,14 +545,14 @@ function SidebarFooter() {
           <span className="block truncate text-[13.5px] font-extrabold text-ink-900">
             {user?.full_name}
           </span>
-          <span className="block text-[12px] text-ink-400">Hồ sơ giáo viên</span>
+          <span className="block text-[12px] text-ink-500">Hồ sơ giáo viên</span>
         </span>
       </NavLink>
       <button
         type="button"
         onClick={() => logoutMutation.mutate()}
         disabled={logoutMutation.isPending}
-        className="flex w-full cursor-pointer items-center gap-2.5 rounded-[14px] px-2.5 py-2 text-left text-[13.5px] font-extrabold text-ink-400 transition-colors hover:bg-cream-200 hover:text-coral-500 disabled:opacity-50"
+        className="flex w-full cursor-pointer items-center gap-2.5 rounded-[14px] px-2.5 py-2 text-left text-[13.5px] font-extrabold text-ink-500 transition-colors hover:bg-cream-200 hover:text-coral-500 disabled:opacity-50"
       >
         <span className="inline-flex w-9 justify-center">
           <LogOutIcon aria-hidden className="size-[18px]" />
@@ -599,7 +599,7 @@ export function DashboardLayout() {
             <img src="/favicon.svg" alt="" aria-hidden="true" className="h-10 w-10 shrink-0" />
             <div>
               <p className="font-display text-[22px] font-extrabold text-ink-900">Teka</p>
-              <p className="text-[12px] text-ink-400">Quản lý lớp học</p>
+              <p className="text-[12px] text-ink-500">Quản lý lớp học</p>
             </div>
           </div>
           <CenterCard />
@@ -616,7 +616,7 @@ export function DashboardLayout() {
                 {group.header ? (
                   <p
                     aria-hidden
-                    className="px-3 pb-1 pt-3.5 text-[11px] font-extrabold uppercase tracking-[0.8px] text-ink-300"
+                    className="px-3 pb-1 pt-3.5 text-[11px] font-extrabold uppercase tracking-[0.8px] text-ink-500"
                   >
                     {group.header}
                   </p>

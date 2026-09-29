@@ -50,15 +50,11 @@ type OwnerRow struct {
 }
 
 // MemberRow is one member of a center joined with their account phone.
-// CanSendReports is computed from the member's effective reports.send
-// permission — the roster's JSON contract predates the permission catalog and
-// keeps exposing the flag.
 type MemberRow struct {
-	ID             uuid.UUID
-	FullName       string
-	Phone          string
-	IsOwner        bool
-	CanSendReports bool
+	ID       uuid.UUID
+	FullName string
+	Phone    string
+	IsOwner  bool
 }
 
 // RoleRow is one center role with its permission keys, comma-joined like
@@ -296,30 +292,14 @@ func (r *gormRepository) ListMembers(ctx context.Context, centerID uuid.UUID) ([
 	// soft-deleted one. teachers.center_id is not the source of truth here on
 	// its own: it stays pointing at a removed member's last center until they
 	// are reactivated elsewhere.
-	// can_send_reports is the member's effective reports.send: a member
-	// override grant or a role-held grant, minus a deny override — the same
-	// algebra ResolveScope's BuildPermSet applies, evaluated in SQL for the
-	// roster projection.
 	err := database.FromContext(ctx, r.db).Raw(`
-		SELECT t.id, t.full_name, ua.phone, (c.owner_id = t.id) AS is_owner,
-			(cm.teacher_id IS NOT NULL
-				AND (EXISTS (SELECT 1 FROM center_member_permissions mp
-						WHERE mp.teacher_id = cm.teacher_id AND mp.center_id = cm.center_id
-							AND mp.permission_key = @perm AND mp.allowed)
-					OR EXISTS (SELECT 1 FROM center_role_permissions rp
-						WHERE rp.role_id = cm.role_id AND rp.permission_key = @perm))
-				AND NOT EXISTS (SELECT 1 FROM center_member_permissions mp
-					WHERE mp.teacher_id = cm.teacher_id AND mp.center_id = cm.center_id
-						AND mp.permission_key = @perm AND NOT mp.allowed)
-			) AS can_send_reports
+		SELECT t.id, t.full_name, ua.phone, (c.owner_id = t.id) AS is_owner
 		FROM teachers t
 		JOIN user_accounts ua ON ua.id = t.id AND ua.deleted_at IS NULL AND ua.status = @status
 		JOIN centers c ON c.id = t.center_id
-		LEFT JOIN center_members cm ON cm.teacher_id = t.id
-			AND cm.center_id = t.center_id AND cm.left_at IS NULL
 		WHERE t.center_id = @cid AND t.deleted_at IS NULL
 		ORDER BY is_owner DESC, t.full_name, t.id`,
-		map[string]any{"perm": authctx.PermReportsSend, "status": teachers.StatusActive, "cid": centerID}).
+		map[string]any{"status": teachers.StatusActive, "cid": centerID}).
 		Scan(&rows).Error
 	return rows, err
 }

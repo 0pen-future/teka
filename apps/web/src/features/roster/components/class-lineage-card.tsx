@@ -67,7 +67,7 @@ export function ClassLineageCard({ klass, canWrite, canReadAudit }: ClassLineage
       ) : (
         <div className="flex flex-col gap-3">
           {klass.parent_class_id === null ? (
-            <p className="text-[13px] text-ink-400">Lớp không tách từ lớp nào.</p>
+            <p className="text-[13px] text-ink-500">Lớp không tách từ lớp nào.</p>
           ) : (
             <p className="text-[14px] text-ink-900">
               {parent ? (
@@ -75,7 +75,7 @@ export function ClassLineageCard({ klass, canWrite, canReadAudit }: ClassLineage
               ) : (
                 <span className="text-ink-500">Lớp gốc</span>
               )}
-              <span className="mx-2 text-ink-400">→</span>
+              <span className="mx-2 text-ink-500">→</span>
               <span className="font-bold">{klass.name}</span>
             </p>
           )}
@@ -84,7 +84,7 @@ export function ClassLineageCard({ klass, canWrite, canReadAudit }: ClassLineage
           ) : null}
           {children.length > 0 ? (
             <div>
-              <p className="text-[12px] font-bold tracking-[0.3px] text-ink-400">Lớp tách ra</p>
+              <p className="text-[12px] font-bold tracking-[0.3px] text-ink-500">Lớp tách ra</p>
               <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[14px]">
                 {children.map((child) => (
                   <li key={child.id}>
@@ -217,13 +217,13 @@ function ClassAuditList({ classId }: { classId: string }) {
   const items = (logs.data?.pages.flatMap((page) => page.items) ?? []).filter(isClassEditLog);
 
   if (logs.isPending) {
-    return <p className="mt-2 text-[13px] text-ink-400">Đang tải…</p>;
+    return <p className="mt-2 text-[13px] text-ink-500">Đang tải…</p>;
   }
   if (logs.isError) {
     return <p className="mt-2 text-[13px] text-coral-600">Không tải được lịch sử thay đổi.</p>;
   }
   if (items.length === 0) {
-    return <p className="mt-2 text-[13px] text-ink-400">Chưa có thay đổi nào được ghi lại.</p>;
+    return <p className="mt-2 text-[13px] text-ink-500">Chưa có thay đổi nào được ghi lại.</p>;
   }
   return (
     <div className="mt-2 flex flex-col gap-2">
@@ -231,9 +231,9 @@ function ClassAuditList({ classId }: { classId: string }) {
         {items.map((log) => (
           <li key={log.id} className="flex flex-wrap items-center gap-x-2 text-ink-700">
             <span className="font-bold text-ink-900">{actorLabel(log)}</span>
-            <span className="text-ink-400">·</span>
+            <span className="text-ink-500">·</span>
             <span>{log.action}</span>
-            <span className="text-ink-400">·</span>
+            <span className="text-ink-500">·</span>
             <span className="text-ink-500">{formatDateTime(log.occurred_at)}</span>
           </li>
         ))}

@@ -95,19 +95,19 @@ const StudentRow = React.memo(function StudentRow({
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[13.5px] font-bold text-ink-900">{name}</span>
           {displayNote || late ? (
-            <span className="block truncate text-[12px] text-ink-400">
+            <span className="block truncate text-[12px] text-ink-500">
               {[displayNote, late ? "Đi muộn" : null].filter(Boolean).join(" · ")}
             </span>
           ) : null}
         </span>
         {average !== null ? <StatPill kind="star" value={formatAverage(average)} /> : null}
-        <span className="text-[12.5px] font-bold text-ink-400 tabular-nums">
+        <span className="text-[12.5px] font-bold text-ink-500 tabular-nums">
           {scored}/{cells.length}
         </span>
         <HvIcon
           name="chevron-down"
           size={18}
-          className={cn("text-ink-400 transition-transform", open && "rotate-180")}
+          className={cn("text-ink-500 transition-transform", open && "rotate-180")}
         />
       </button>
       {open ? (
@@ -248,7 +248,7 @@ export const ScoreEntryByStudent = React.forwardRef<ScoreEntryHandle, ScoreEntry
     return (
       <div className="flex flex-col">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
-          <p className="text-[12px] text-ink-400">{intro}</p>
+          <p className="text-[12px] text-ink-500">{intro}</p>
           {held && canWrite && components.length > 0 ? (
             <HvButton
               type="button"

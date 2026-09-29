@@ -67,7 +67,7 @@ export function ZaloConnectCard() {
       </p>
 
       {isPending ? (
-        <p className="mt-3.5 text-[13px] text-ink-400">Đang tải trạng thái kết nối…</p>
+        <p className="mt-3.5 text-[13px] text-ink-500">Đang tải trạng thái kết nối…</p>
       ) : null}
 
       {/* An unreadable status must not be drawn as "not connected": a teacher
@@ -91,7 +91,7 @@ export function ZaloConnectCard() {
               Phiên Zalo đã hết hạn — quét lại mã để tiếp tục gửi thông báo.
             </p>
           ) : (
-            <p className="text-[12.5px] text-ink-400">
+            <p className="text-[12.5px] text-ink-500">
               Thông báo học phí sẽ gửi từ tài khoản Zalo này.
             </p>
           )}
@@ -123,7 +123,7 @@ export function ZaloConnectCard() {
             </span>
             Đăng nhập với Zalo
           </button>
-          <p className="mt-2.5 text-[12px] text-ink-400">
+          <p className="mt-2.5 text-[12px] text-ink-500">
             Chưa kết nối — thông báo học phí sẽ phải sao chép và gửi thủ công.
           </p>
         </>

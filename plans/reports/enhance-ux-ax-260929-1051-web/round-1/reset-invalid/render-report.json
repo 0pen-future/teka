@@ -1,0 +1,77 @@
+[
+  {
+    "viewport": "375x812",
+    "screenshot": "/home/cesc/Documents/personal-workspace/teka/plans/reports/enhance-ux-ax-260929-1051-web/round-1/reset-invalid/375x812.png",
+    "outline": [
+      "div#root \"Skip to content Đặt lại mật khẩu Mật khẩ\" @ x0 y0 375x812",
+      "  main#main-content.flex.min-h-svh \"Đặt lại mật khẩu Mật khẩu  @ x0 y0 375x812",
+      "    div.w-full.max-w-sm \"Đặt lại mật khẩu Mật khẩu mới Xác nhận  @ x16 y231 343x350",
+      "      div.rounded-[var(--radius-xl)].bg-white \"Đặt lại mật khẩu Mậ @ x16 y231 343x350"
+    ],
+    "findings": [
+      {
+        "severity": "error",
+        "type": "runtime-error",
+        "target": "",
+        "message": "Failed to load resource: the server responded with a status of 401 (Unauthorized) (http://localhost:55183/api/v1/auth/refresh)"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "button.select-none.items-center \"Đặt lại mật khẩu\"",
+        "message": "text contrast 2.03:1"
+      }
+    ],
+    "height": 812
+  },
+  {
+    "viewport": "768x1024",
+    "screenshot": "/home/cesc/Documents/personal-workspace/teka/plans/reports/enhance-ux-ax-260929-1051-web/round-1/reset-invalid/768x1024.png",
+    "outline": [
+      "div#root \"Skip to content Đặt lại mật khẩu Mật khẩ\" @ x0 y0 768x1024",
+      "  main#main-content.flex.min-h-svh \"Đặt lại mật khẩu Mật khẩu  @ x0 y0 768x1024",
+      "    div.w-full.max-w-sm \"Đặt lại mật khẩu Mật khẩu mới Xác nhận  @ x192 y337 384x350",
+      "      div.rounded-[var(--radius-xl)].bg-white \"Đặt lại mật khẩu Mậ @ x192 y337 384x350"
+    ],
+    "findings": [
+      {
+        "severity": "error",
+        "type": "runtime-error",
+        "target": "",
+        "message": "Failed to load resource: the server responded with a status of 401 (Unauthorized) (http://localhost:55183/api/v1/auth/refresh)"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "button.select-none.items-center \"Đặt lại mật khẩu\"",
+        "message": "text contrast 2.03:1"
+      }
+    ],
+    "height": 1024
+  },
+  {
+    "viewport": "1440x900",
+    "screenshot": "/home/cesc/Documents/personal-workspace/teka/plans/reports/enhance-ux-ax-260929-1051-web/round-1/reset-invalid/1440x900.png",
+    "outline": [
+      "div#root \"Skip to content Đặt lại mật khẩu Mật khẩ\" @ x0 y0 1440x900",
+      "  main#main-content.flex.min-h-svh \"Đặt lại mật khẩu Mật khẩu  @ x0 y0 1440x900",
+      "    div.w-full.max-w-sm \"Đặt lại mật khẩu Mật khẩu mới Xác nhận  @ x528 y275 384x350",
+      "      div.rounded-[var(--radius-xl)].bg-white \"Đặt lại mật khẩu Mậ @ x528 y275 384x350"
+    ],
+    "findings": [
+      {
+        "severity": "error",
+        "type": "runtime-error",
+        "target": "",
+        "message": "Failed to load resource: the server responded with a status of 401 (Unauthorized) (http://localhost:55183/api/v1/auth/refresh)"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "button.select-none.items-center \"Đặt lại mật khẩu\"",
+        "message": "text contrast 2.03:1"
+      }
+    ],
+    "height": 900
+  }
+]

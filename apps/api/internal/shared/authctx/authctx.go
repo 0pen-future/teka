@@ -40,13 +40,6 @@ type Scope struct {
 	TeacherID uuid.UUID
 	CenterID  uuid.UUID
 	IsOwner   bool
-	// CanSendReports mirrors the caller's effective reports.send permission
-	// (role grant or member override, minus denies). It exists as a resolved
-	// field — not a Has() call at the check site — because the notifications
-	// run manager snapshots it at send creation and re-probes it per item.
-	// The owner never carries it (they sit outside the role tables); their
-	// authority flows through ReportsOversight's IsOwner arm.
-	CanSendReports bool
 	// Perms is the caller's effective permission set, resolved fresh from
 	// the database alongside the rest of the scope. Read-only after
 	// SetScope — Scope copies share the map.
@@ -56,7 +49,8 @@ type Scope struct {
 // ReportsOversight reports whether the caller may CREATE a report send — bulk
 // send, send preview, resume, the class-send gate's oversight arm, and the
 // zalo-mapping rewrite that redirects where a family's messages land: the
-// owner, or a member holding the delegated reports.send permission. It is no
+// owner, or a member holding the delegated reports.send permission — exactly
+// Has(PermReportsSend), the owner being the implicit superuser. It is no
 // longer a read gate: reading the billing/statements/notifications/contacts
 // data a send touches goes through CenterWideFor(<resource>.view_all)
 // instead, because reports.send implies those four view_all keys (see
@@ -67,7 +61,7 @@ type Scope struct {
 // notifications.view_all/contacts.view_all for reading without ever gaining
 // the ability to send.
 func (s Scope) ReportsOversight() bool {
-	return s.IsOwner || s.CanSendReports
+	return s.Has(PermReportsSend)
 }
 
 // PhoneVisible is the single phone-privacy rule for every surface that could

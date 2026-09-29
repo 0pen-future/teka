@@ -86,8 +86,11 @@ jobs:
           context: apps/web
           # Deployment-specific: override with a repository variable when the
           # real API origin is known; /api/v1 assumes same-origin serving.
+          # VITE_PUBLIC_ORIGIN (the web origin, for the og:image preview URL)
+          # has no safe default: the build fails until the variable is set.
           build-args: |
             VITE_API_URL=${{ vars.VITE_API_URL || '/api/v1' }}
+            VITE_PUBLIC_ORIGIN=${{ vars.VITE_PUBLIC_ORIGIN }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

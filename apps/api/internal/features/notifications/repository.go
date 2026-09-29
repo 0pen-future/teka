@@ -139,17 +139,17 @@ type Repository interface {
 	// reports.send permission on their live membership, or being the
 	// center's owner. A deleted class reads as false. This is the mid-run
 	// revocation probe for a class-scoped run — the class counterpart of
-	// CanSendReports.
+	// HoldsReportsSend.
 	ClassSendAllowed(ctx context.Context, centerID, teacherID, classID uuid.UUID) (bool, error)
 	// PeriodTeacher returns the owning teacher of one billing period in
 	// centerID, or ErrPeriodNotFound. Backs the pre-send preview's
 	// cross-teacher check without a statements refresh.
 	PeriodTeacher(ctx context.Context, centerID, periodID uuid.UUID) (uuid.UUID, error)
-	// CanSendReports reports whether the teacher currently holds an
+	// HoldsReportsSend reports whether the teacher currently holds an
 	// effective reports.send permission on a live membership in centerID. A
 	// missing or closed membership reads as false — removal revokes like an
 	// explicit deny does.
-	CanSendReports(ctx context.Context, centerID, teacherID uuid.UUID) (bool, error)
+	HoldsReportsSend(ctx context.Context, centerID, teacherID uuid.UUID) (bool, error)
 	// UpdateRunStatus moves a run to status. A terminal status stamps
 	// finished_at; moving back to RunStatusRunning (manual resume) clears it,
 	// so finished_at is always "when this run last stopped", never a stale
@@ -443,7 +443,7 @@ func (r *gormRepository) HasStatementSendForPeriod(ctx context.Context, centerID
 func (r *gormRepository) ClassSendAllowed(ctx context.Context, centerID, teacherID, classID uuid.UUID) (bool, error) {
 	stintFrag, _ := classscope.WriteExists("classes.id")
 	var rows []struct{ Allowed bool }
-	// The delegation arm mirrors CanSendReports: effective reports.send on
+	// The delegation arm mirrors HoldsReportsSend: effective reports.send on
 	// the live stint (grant or role minus deny), never a closed one.
 	err := database.FromContext(ctx, r.db).
 		Table("classes").
@@ -485,7 +485,7 @@ func (r *gormRepository) PeriodTeacher(ctx context.Context, centerID, periodID u
 	return row.TeacherID, nil
 }
 
-func (r *gormRepository) CanSendReports(ctx context.Context, centerID, teacherID uuid.UUID) (bool, error) {
+func (r *gormRepository) HoldsReportsSend(ctx context.Context, centerID, teacherID uuid.UUID) (bool, error) {
 	// Effective reports.send on the LIVE stint only: a member override grant
 	// or a role-held grant, minus a deny override — the same algebra
 	// BuildPermSet applies at scope resolution. left_at IS NULL is

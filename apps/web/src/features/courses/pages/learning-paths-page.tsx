@@ -2,7 +2,15 @@ import { Fragment, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { z } from "zod";
 
-import { HvBadge, HvButton, HvChip, HvConfirmDialog, HvStateBlock, hvToast } from "@/components/hv";
+import {
+  HvBadge,
+  HvButton,
+  HvChip,
+  HvConfirmDialog,
+  HvStateBlock,
+  HvTableScroll,
+  hvToast,
+} from "@/components/hv";
 import { useCenterContext } from "@/features/teaching";
 import { ApiError } from "@/lib/api/errors";
 import { cn } from "@/lib/utils";
@@ -125,8 +133,10 @@ export function LearningPathsPage() {
             </HvButton>
           }
         />
+      ) : rows.length === 0 ? (
+        <HvStateBlock state="empty" title="Không có lộ trình nào ở trạng thái này." />
       ) : (
-        <div className={tableCardClassName}>
+        <HvTableScroll aria-label="Bảng lộ trình học" className={tableCardClassName}>
           <table className="w-full min-w-[760px] table-fixed border-collapse text-left text-[13.5px]">
             <colgroup>
               <col className="w-[56px]" />
@@ -149,16 +159,6 @@ export function LearningPathsPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={6}
-                    className="border-t border-line-100 p-[30px] text-center font-bold text-ink-400"
-                  >
-                    Không có lộ trình nào ở trạng thái này.
-                  </td>
-                </tr>
-              ) : null}
               {rows.map((path, index) => {
                 const expanded = Boolean(open[path.id]);
                 return (
@@ -167,7 +167,7 @@ export function LearningPathsPage() {
                       className="cursor-pointer transition-colors hover:bg-cream-100"
                       onClick={() => toggle(path.id)}
                     >
-                      <td className={cn(cellClassName, "font-extrabold text-ink-400")}>
+                      <td className={cn(cellClassName, "font-extrabold text-ink-500")}>
                         {index + 1}
                       </td>
                       <td className={cn(cellClassName, "font-extrabold text-ink-900")}>
@@ -222,7 +222,7 @@ export function LearningPathsPage() {
               })}
             </tbody>
           </table>
-        </div>
+        </HvTableScroll>
       )}
 
       {canEdit ? (
@@ -278,7 +278,7 @@ function PathStages({ path, canEdit, canOpenCourse }: PathStagesProps) {
   return (
     <div className="flex flex-col gap-2">
       {path.stages.length === 0 && !canEdit ? (
-        <p className="py-2 text-[13px] font-bold text-ink-400">Lộ trình chưa có chặng nào.</p>
+        <p className="py-2 text-[13px] font-bold text-ink-500">Lộ trình chưa có chặng nào.</p>
       ) : null}
       {path.stages.map((stage, index) => (
         <StageRow
@@ -357,7 +357,7 @@ function StageRow({
     >
       <span
         aria-hidden="true"
-        className="flex size-[30px] flex-none items-center justify-center rounded-full bg-mint-400 font-display text-[14px] font-extrabold text-white"
+        className="flex size-[30px] flex-none items-center justify-center rounded-full bg-mint-400 font-display text-[14px] font-extrabold text-on-brand"
       >
         {number}
       </span>
@@ -377,7 +377,7 @@ function StageRow({
         {stage.courses.map((course) => {
           const chipClassName = cn(
             "inline-flex items-center rounded-full px-2.5 py-1 text-[12px] font-extrabold",
-            course.status === "active" ? "bg-mint-50 text-mint-600" : "bg-cream-200 text-ink-400",
+            course.status === "active" ? "bg-mint-50 text-mint-600" : "bg-cream-200 text-ink-500",
           );
           const label = `${course.code} · ${course.name}`;
           return canOpenCourse ? (

@@ -37,7 +37,7 @@ function statusText(session: Session, unconfirmedPast: boolean): string {
  */
 function rowColor(session: Session, unconfirmedPast: boolean) {
   if (session.status === "cancelled") {
-    return "text-ink-400";
+    return "text-ink-500";
   }
   if (session.attendance_confirmed_at) {
     return "text-mint-600";
@@ -45,7 +45,7 @@ function rowColor(session: Session, unconfirmedPast: boolean) {
   if (unconfirmedPast) {
     return "text-coral-600";
   }
-  return "text-ink-400";
+  return "text-ink-500";
 }
 
 /** The whole row is the link target — thumb-friendly, min-height 44px. */
@@ -65,7 +65,7 @@ export function SessionListItem({ session, unconfirmedPast, selected }: SessionL
           {session.class_name} — {formatSessionDate(session.session_date)}
         </span>
         {session.start_time ? (
-          <span className="text-[12.5px] font-semibold text-ink-400">{session.start_time}</span>
+          <span className="text-[12.5px] font-semibold text-ink-500">{session.start_time}</span>
         ) : null}
       </span>
       <span className="ml-auto shrink-0 text-[12.5px] font-bold">{status}</span>

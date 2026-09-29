@@ -28,7 +28,7 @@ function backTarget(state: unknown): { to: string; label: string } {
   ) {
     return { to: "/classes/recruiting", label: "Lớp cần tuyển sinh" };
   }
-  return { to: "/classes", label: "Danh sách lớp học" };
+  return { to: "/classes", label: "Danh mục lớp" };
 }
 
 /** Back link, name, code with a copy button, phase badge and edit action. */

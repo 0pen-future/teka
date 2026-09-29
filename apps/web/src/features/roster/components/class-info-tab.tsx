@@ -56,7 +56,7 @@ export function ClassInfoTab({
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <SectionCard title="Lịch học hàng tuần">
         {schedules.length === 0 ? (
-          <p className="text-[13px] text-ink-400">Lớp chưa có lịch học hàng tuần.</p>
+          <p className="text-[13px] text-ink-500">Lớp chưa có lịch học hàng tuần.</p>
         ) : (
           <>
             <p className="font-display text-[20px] font-extrabold text-ink-900">

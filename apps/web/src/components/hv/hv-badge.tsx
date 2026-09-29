@@ -34,8 +34,8 @@ const hvBadgeVariants = cva(
 
 /** Solid-fill overrides for subject badges only (`solid` prop). */
 const solidVariantClasses: Partial<Record<HvBadgeVariant, string>> = {
-  math: "bg-mint-400 text-white",
-  viet: "bg-sky-300 text-white",
+  math: "bg-mint-400 text-on-brand",
+  viet: "bg-sky-300 text-on-brand",
 };
 
 export interface HvBadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
