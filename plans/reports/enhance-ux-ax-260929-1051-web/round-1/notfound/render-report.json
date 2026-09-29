@@ -1,0 +1,77 @@
+[
+  {
+    "viewport": "375x812",
+    "screenshot": "/home/cesc/Documents/personal-workspace/teka/plans/reports/enhance-ux-ax-260929-1051-web/round-1/notfound/375x812.png",
+    "outline": [
+      "div#root \"Skip to content 404 Page not found Back \" @ x0 y0 375x812",
+      "  main#main-content.flex.min-h-svh \"404 Page not found Back to @ x0 y0 375x812"
+    ],
+    "findings": [
+      {
+        "severity": "error",
+        "type": "runtime-error",
+        "target": "",
+        "message": "Failed to load resource: the server responded with a status of 401 (Unauthorized) (http://localhost:55183/api/v1/auth/refresh)"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "p.font-mono.text-sm \"404\"",
+        "message": "text contrast 2.81:1"
+      },
+      {
+        "severity": "warn",
+        "type": "small-touch-target",
+        "target": "",
+        "message": "1 controls smaller than 44px; e.g. a.group/button.inline-flex \"Back to dashboard\""
+      }
+    ],
+    "height": 812
+  },
+  {
+    "viewport": "768x1024",
+    "screenshot": "/home/cesc/Documents/personal-workspace/teka/plans/reports/enhance-ux-ax-260929-1051-web/round-1/notfound/768x1024.png",
+    "outline": [
+      "div#root \"Skip to content 404 Page not found Back \" @ x0 y0 768x1024",
+      "  main#main-content.flex.min-h-svh \"404 Page not found Back to @ x0 y0 768x1024"
+    ],
+    "findings": [
+      {
+        "severity": "error",
+        "type": "runtime-error",
+        "target": "",
+        "message": "Failed to load resource: the server responded with a status of 401 (Unauthorized) (http://localhost:55183/api/v1/auth/refresh)"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "p.font-mono.text-sm \"404\"",
+        "message": "text contrast 2.81:1"
+      }
+    ],
+    "height": 1024
+  },
+  {
+    "viewport": "1440x900",
+    "screenshot": "/home/cesc/Documents/personal-workspace/teka/plans/reports/enhance-ux-ax-260929-1051-web/round-1/notfound/1440x900.png",
+    "outline": [
+      "div#root \"Skip to content 404 Page not found Back \" @ x0 y0 1440x900",
+      "  main#main-content.flex.min-h-svh \"404 Page not found Back to @ x0 y0 1440x900"
+    ],
+    "findings": [
+      {
+        "severity": "error",
+        "type": "runtime-error",
+        "target": "",
+        "message": "Failed to load resource: the server responded with a status of 401 (Unauthorized) (http://localhost:55183/api/v1/auth/refresh)"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "p.font-mono.text-sm \"404\"",
+        "message": "text contrast 2.81:1"
+      }
+    ],
+    "height": 900
+  }
+]

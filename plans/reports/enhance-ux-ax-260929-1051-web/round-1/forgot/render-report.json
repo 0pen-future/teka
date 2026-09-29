@@ -1,0 +1,95 @@
+[
+  {
+    "viewport": "375x812",
+    "screenshot": "/home/cesc/Documents/personal-workspace/teka/plans/reports/enhance-ux-ax-260929-1051-web/round-1/forgot/375x812.png",
+    "outline": [
+      "div#root \"Skip to content Quên mật khẩu? Nhập số đ\" @ x0 y0 375x812",
+      "  main#main-content.flex.min-h-svh \"Quên mật khẩu? Nhập số điệ @ x0 y0 375x812",
+      "    div.w-full.max-w-sm \"Quên mật khẩu? Nhập số điện thoại đăng  @ x16 y254 343x305",
+      "      div.rounded-[var(--radius-xl)].bg-white \"Quên mật khẩu? Nhập @ x16 y254 343x305"
+    ],
+    "findings": [
+      {
+        "severity": "error",
+        "type": "runtime-error",
+        "target": "",
+        "message": "Failed to load resource: the server responded with a status of 401 (Unauthorized) (http://localhost:55183/api/v1/auth/refresh)"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "button.select-none.items-center \"Gửi liên kết đặt lại\"",
+        "message": "text contrast 2.03:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "p.mt-1.text-[13px] \"Nhập số điện thoại đăng nhập để nhận liê\"",
+        "message": "text contrast 3.01:1"
+      }
+    ],
+    "height": 812
+  },
+  {
+    "viewport": "768x1024",
+    "screenshot": "/home/cesc/Documents/personal-workspace/teka/plans/reports/enhance-ux-ax-260929-1051-web/round-1/forgot/768x1024.png",
+    "outline": [
+      "div#root \"Skip to content Quên mật khẩu? Nhập số đ\" @ x0 y0 768x1024",
+      "  main#main-content.flex.min-h-svh \"Quên mật khẩu? Nhập số điệ @ x0 y0 768x1024",
+      "    div.w-full.max-w-sm \"Quên mật khẩu? Nhập số điện thoại đăng  @ x192 y360 384x305",
+      "      div.rounded-[var(--radius-xl)].bg-white \"Quên mật khẩu? Nhập @ x192 y360 384x305"
+    ],
+    "findings": [
+      {
+        "severity": "error",
+        "type": "runtime-error",
+        "target": "",
+        "message": "Failed to load resource: the server responded with a status of 401 (Unauthorized) (http://localhost:55183/api/v1/auth/refresh)"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "button.select-none.items-center \"Gửi liên kết đặt lại\"",
+        "message": "text contrast 2.03:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "p.mt-1.text-[13px] \"Nhập số điện thoại đăng nhập để nhận liê\"",
+        "message": "text contrast 3.01:1"
+      }
+    ],
+    "height": 1024
+  },
+  {
+    "viewport": "1440x900",
+    "screenshot": "/home/cesc/Documents/personal-workspace/teka/plans/reports/enhance-ux-ax-260929-1051-web/round-1/forgot/1440x900.png",
+    "outline": [
+      "div#root \"Skip to content Quên mật khẩu? Nhập số đ\" @ x0 y0 1440x900",
+      "  main#main-content.flex.min-h-svh \"Quên mật khẩu? Nhập số điệ @ x0 y0 1440x900",
+      "    div.w-full.max-w-sm \"Quên mật khẩu? Nhập số điện thoại đăng  @ x528 y298 384x305",
+      "      div.rounded-[var(--radius-xl)].bg-white \"Quên mật khẩu? Nhập @ x528 y298 384x305"
+    ],
+    "findings": [
+      {
+        "severity": "error",
+        "type": "runtime-error",
+        "target": "",
+        "message": "Failed to load resource: the server responded with a status of 401 (Unauthorized) (http://localhost:55183/api/v1/auth/refresh)"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "button.select-none.items-center \"Gửi liên kết đặt lại\"",
+        "message": "text contrast 2.03:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "p.mt-1.text-[13px] \"Nhập số điện thoại đăng nhập để nhận liê\"",
+        "message": "text contrast 3.01:1"
+      }
+    ],
+    "height": 900
+  }
+]

@@ -1,0 +1,113 @@
+[
+  {
+    "viewport": "375x812",
+    "screenshot": "/home/cesc/Documents/personal-workspace/teka/plans/reports/enhance-ux-ax-260929-1051-web/round-1/root/375x812.png",
+    "outline": [
+      "div#root \"Skip to content Teka Đăng nhập để tiếp t\" @ x0 y0 375x812",
+      "  main#main-content.flex.min-h-svh \"Teka Đăng nhập để tiếp tục @ x0 y0 375x812",
+      "    div.w-full.max-w-sm \"Teka Đăng nhập để tiếp tục Số điện thoạ @ x16 y196 343x420",
+      "      div.rounded-[var(--radius-xl)].bg-white \"Teka Đăng nhập để t @ x16 y196 343x420"
+    ],
+    "findings": [
+      {
+        "severity": "error",
+        "type": "runtime-error",
+        "target": "",
+        "message": "Failed to load resource: the server responded with a status of 401 (Unauthorized) (http://localhost:55183/api/v1/auth/refresh)"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "button.select-none.items-center \"Đăng nhập\"",
+        "message": "text contrast 2.03:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "p.mt-1.text-[13px] \"Đăng nhập để tiếp tục\"",
+        "message": "text contrast 3.01:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "a.font-bold.text-mint-600 \"Quên mật khẩu?\"",
+        "message": "text contrast 4.08:1"
+      }
+    ],
+    "height": 812
+  },
+  {
+    "viewport": "768x1024",
+    "screenshot": "/home/cesc/Documents/personal-workspace/teka/plans/reports/enhance-ux-ax-260929-1051-web/round-1/root/768x1024.png",
+    "outline": [
+      "div#root \"Skip to content Teka Đăng nhập để tiếp t\" @ x0 y0 768x1024",
+      "  main#main-content.flex.min-h-svh \"Teka Đăng nhập để tiếp tục @ x0 y0 768x1024",
+      "    div.w-full.max-w-sm \"Teka Đăng nhập để tiếp tục Số điện thoạ @ x192 y302 384x420",
+      "      div.rounded-[var(--radius-xl)].bg-white \"Teka Đăng nhập để t @ x192 y302 384x420"
+    ],
+    "findings": [
+      {
+        "severity": "error",
+        "type": "runtime-error",
+        "target": "",
+        "message": "Failed to load resource: the server responded with a status of 401 (Unauthorized) (http://localhost:55183/api/v1/auth/refresh)"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "button.select-none.items-center \"Đăng nhập\"",
+        "message": "text contrast 2.03:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "p.mt-1.text-[13px] \"Đăng nhập để tiếp tục\"",
+        "message": "text contrast 3.01:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "a.font-bold.text-mint-600 \"Quên mật khẩu?\"",
+        "message": "text contrast 4.08:1"
+      }
+    ],
+    "height": 1024
+  },
+  {
+    "viewport": "1440x900",
+    "screenshot": "/home/cesc/Documents/personal-workspace/teka/plans/reports/enhance-ux-ax-260929-1051-web/round-1/root/1440x900.png",
+    "outline": [
+      "div#root \"Skip to content Teka Đăng nhập để tiếp t\" @ x0 y0 1440x900",
+      "  main#main-content.flex.min-h-svh \"Teka Đăng nhập để tiếp tục @ x0 y0 1440x900",
+      "    div.w-full.max-w-sm \"Teka Đăng nhập để tiếp tục Số điện thoạ @ x528 y240 384x420",
+      "      div.rounded-[var(--radius-xl)].bg-white \"Teka Đăng nhập để t @ x528 y240 384x420"
+    ],
+    "findings": [
+      {
+        "severity": "error",
+        "type": "runtime-error",
+        "target": "",
+        "message": "Failed to load resource: the server responded with a status of 401 (Unauthorized) (http://localhost:55183/api/v1/auth/refresh)"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "button.select-none.items-center \"Đăng nhập\"",
+        "message": "text contrast 2.03:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "p.mt-1.text-[13px] \"Đăng nhập để tiếp tục\"",
+        "message": "text contrast 3.01:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "a.font-bold.text-mint-600 \"Quên mật khẩu?\"",
+        "message": "text contrast 4.08:1"
+      }
+    ],
+    "height": 900
+  }
+]

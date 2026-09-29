@@ -1,0 +1,23 @@
+Discovery surfaces for http://localhost:55183: 0 URL(s) in sitemap, 1 page(s) checked
+
+ERROR (4)
+- [robots] http://localhost:55183/robots.txt: robots.txt not served as text (status 200)
+- [sitemap] http://localhost:55183/sitemap.xml: sitemap missing or not XML (status 200)
+- [meta-description] http://localhost:55183/: missing meta description
+- [open-graph] http://localhost:55183/: missing og:image
+
+WARN (10)
+- [llms-txt] http://localhost:55183/llms.txt: llms.txt missing (status 200)
+- [llms-full-txt] http://localhost:55183/llms-full.txt: llms-full.txt missing (status 200); expected when the site has docs or long-form content
+- [canonical] http://localhost:55183/: missing canonical link
+- [open-graph] http://localhost:55183/: missing og:title
+- [open-graph] http://localhost:55183/: missing og:description
+- [open-graph] http://localhost:55183/: missing og:url
+- [twitter-card] http://localhost:55183/: missing twitter:card
+- [json-ld] http://localhost:55183/: no JSON-LD structured data
+- [server-render] http://localhost:55183/: server HTML has under 200 characters of text; crawlers that skip JavaScript see an empty page
+- [markdown-variant] http://localhost:55183/index.html.md: markdown twin returns HTML
+
+INFO (2)
+- [markdown-alternate] http://localhost:55183/: no <link rel="alternate" type="text/markdown">
+- [content-negotiation] http://localhost:55183/: no markdown for Accept: text/markdown (optional)

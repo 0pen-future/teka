@@ -1,0 +1,215 @@
+[
+  {
+    "viewport": "375x812",
+    "screenshot": "/home/cesc/Documents/personal-workspace/teka/plans/reports/enhance-ux-ax-260929-1051-web/round-1/statement-invalid/375x812.png",
+    "outline": [
+      "div#root \"Skip to content ! Không mở được liên kết\" @ x0 y0 375x812",
+      "  div#main-content.mx-auto.flex \"! Không mở được liên kết này. @ x0 y0 375x812",
+      "    div.rounded-[var(--radius-xl)].bg-white \"! Không mở được liê @ x16 y24 343x222",
+      "      div.flex.flex-col \"Không mở được liên kết này. Liên kết có \" @ x37 y129 301x76",
+      "    footer.mt-auto.w-full \"Teka Điểm danh 1 chạm, học phí tính đ @ x16 y255 343x533",
+      "      div.flex.flex-wrap \"Teka Điểm danh 1 chạm, học phí tính đúng @ x16 y315 343x351",
+      "      div.mt-6.flex \"© 2026 Teka. Dữ liệu của bạn thuộc về bạ\" @ x16 y691 343x97"
+    ],
+    "findings": [
+      {
+        "severity": "error",
+        "type": "runtime-error",
+        "target": "",
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found) (http://localhost:55183/public/statements/invalid-token)"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "p.text-[12px].font-extrabold \"SẢN PHẨM\"",
+        "message": "text contrast 2.81:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "p.text-[12px].font-extrabold \"HỖ TRỢ\"",
+        "message": "text contrast 2.81:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "span \"© 2026 Teka. Dữ liệu của bạn thuộc về bạ\"",
+        "message": "text contrast 2.81:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "span.sm:ml-auto \"Chỉ lưu tên, ngày nhập học và lớp của họ\"",
+        "message": "text contrast 2.81:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "span.text-mint-600 \"Hướng dẫn sử dụng\"",
+        "message": "text contrast 3.80:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "span.text-mint-600 \"Bảng giá\"",
+        "message": "text contrast 3.80:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "span.text-mint-600 \"Câu hỏi thường gặp\"",
+        "message": "text contrast 3.80:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "a.text-mint-600.transition-colors \"Zalo: 0900 000 000\"",
+        "message": "text contrast 3.80:1"
+      },
+      {
+        "severity": "warn",
+        "type": "small-touch-target",
+        "target": "",
+        "message": "2 controls smaller than 44px; e.g. a.text-mint-600.transition-colors \"Zalo: 0900 000 000\"; a.text-mint-600.transition-colors \"hotro@teka.vn\""
+      }
+    ],
+    "height": 812
+  },
+  {
+    "viewport": "768x1024",
+    "screenshot": "/home/cesc/Documents/personal-workspace/teka/plans/reports/enhance-ux-ax-260929-1051-web/round-1/statement-invalid/768x1024.png",
+    "outline": [
+      "div#root \"Skip to content ! Không mở được liên kết\" @ x0 y0 768x1024",
+      "  div#main-content.mx-auto.flex \"! Không mở được liên kết này. @ x160 y0 448x1024",
+      "    div.rounded-[var(--radius-xl)].bg-white \"! Không mở được liê @ x176 y24 416x222",
+      "    footer.mt-auto.w-full \"Teka Điểm danh 1 chạm, học phí tính đ @ x176 y590 416x410",
+      "      div.flex.flex-wrap \"Teka Điểm danh 1 chạm, học phí tính đúng @ x176 y650 416x247",
+      "      div.mt-6.flex \"© 2026 Teka. Dữ liệu của bạn thuộc về bạ\" @ x176 y921 416x79"
+    ],
+    "findings": [
+      {
+        "severity": "error",
+        "type": "runtime-error",
+        "target": "",
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found) (http://localhost:55183/public/statements/invalid-token)"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "p.text-[12px].font-extrabold \"SẢN PHẨM\"",
+        "message": "text contrast 2.81:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "p.text-[12px].font-extrabold \"HỖ TRỢ\"",
+        "message": "text contrast 2.81:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "span \"© 2026 Teka. Dữ liệu của bạn thuộc về bạ\"",
+        "message": "text contrast 2.81:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "span.sm:ml-auto \"Chỉ lưu tên, ngày nhập học và lớp của họ\"",
+        "message": "text contrast 2.81:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "span.text-mint-600 \"Hướng dẫn sử dụng\"",
+        "message": "text contrast 3.80:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "span.text-mint-600 \"Bảng giá\"",
+        "message": "text contrast 3.80:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "span.text-mint-600 \"Câu hỏi thường gặp\"",
+        "message": "text contrast 3.80:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "a.text-mint-600.transition-colors \"Zalo: 0900 000 000\"",
+        "message": "text contrast 3.80:1"
+      }
+    ],
+    "height": 1024
+  },
+  {
+    "viewport": "1440x900",
+    "screenshot": "/home/cesc/Documents/personal-workspace/teka/plans/reports/enhance-ux-ax-260929-1051-web/round-1/statement-invalid/1440x900.png",
+    "outline": [
+      "div#root \"Skip to content ! Không mở được liên kết\" @ x0 y0 1440x900",
+      "  div#main-content.mx-auto.flex \"! Không mở được liên kết này. @ x496 y0 448x900",
+      "    div.rounded-[var(--radius-xl)].bg-white \"! Không mở được liê @ x512 y24 416x222",
+      "    footer.mt-auto.w-full \"Teka Điểm danh 1 chạm, học phí tính đ @ x512 y466 416x410",
+      "      div.flex.flex-wrap \"Teka Điểm danh 1 chạm, học phí tính đúng @ x512 y526 416x247"
+    ],
+    "findings": [
+      {
+        "severity": "error",
+        "type": "runtime-error",
+        "target": "",
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found) (http://localhost:55183/public/statements/invalid-token)"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "p.text-[12px].font-extrabold \"SẢN PHẨM\"",
+        "message": "text contrast 2.81:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "p.text-[12px].font-extrabold \"HỖ TRỢ\"",
+        "message": "text contrast 2.81:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "span \"© 2026 Teka. Dữ liệu của bạn thuộc về bạ\"",
+        "message": "text contrast 2.81:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "span.sm:ml-auto \"Chỉ lưu tên, ngày nhập học và lớp của họ\"",
+        "message": "text contrast 2.81:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "span.text-mint-600 \"Hướng dẫn sử dụng\"",
+        "message": "text contrast 3.80:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "span.text-mint-600 \"Bảng giá\"",
+        "message": "text contrast 3.80:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "span.text-mint-600 \"Câu hỏi thường gặp\"",
+        "message": "text contrast 3.80:1"
+      },
+      {
+        "severity": "warn",
+        "type": "low-contrast",
+        "target": "a.text-mint-600.transition-colors \"Zalo: 0900 000 000\"",
+        "message": "text contrast 3.80:1"
+      }
+    ],
+    "height": 900
+  }
+]
