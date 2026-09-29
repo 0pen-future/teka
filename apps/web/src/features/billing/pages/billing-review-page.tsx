@@ -100,9 +100,9 @@ export function BillingReviewPage() {
     <div className="flex flex-col gap-4 pb-24">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="font-display text-[18px] font-bold text-ink-900">
+          <h1 className="font-display text-[18px] font-bold text-ink-900">
             Chốt sổ tháng {period.month}/{period.year}
-          </p>
+          </h1>
           <p className="text-[13px] text-ink-500">{closed ? "Kỳ đã khoá" : "Kỳ đang mở"}</p>
         </div>
         <PeriodSwitcher currentPeriodId={periodId} />

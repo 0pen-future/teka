@@ -55,12 +55,15 @@ describe("BillingReviewPage", () => {
     expect(tableUtils.getAllByText("Trần Thị Cúc")).toHaveLength(1);
   });
 
-  it("disables close and lists each blocking session with a link to its attendance screen", async () => {
+  it("disables close and links the blocking session's attendance screen", async () => {
     seedBlockingSession();
     renderReviewPage();
 
+    expect(
+      await screen.findByRole("heading", { level: 1, name: /^Chốt sổ tháng / }),
+    ).toBeInTheDocument();
     expect(await screen.findByText("Chưa thể chốt sổ")).toBeInTheDocument();
-    const link = screen.getByRole("link", { name: "Điểm danh" });
+    const link = screen.getByRole("link", { name: "Điểm danh buổi còn thiếu (1)" });
     expect(link).toHaveAttribute(
       "href",
       `/sessions/${fixtureBlockingSession.session_id}/attendance`,
