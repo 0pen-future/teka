@@ -1,7 +1,7 @@
 ---
 title: "Gỡ trùng lặp sidebar và dọn các tính năng thừa"
 description: "Bỏ các mục sidebar trùng (Lớp cần tuyển sinh, Hồ sơ học sinh, Gửi báo cáo, Cấu hình lớp học), gộp Gửi thông báo, lấy bộ điểm của mẫu chương trình làm nguồn duy nhất, sửa perm và lỗi nhỏ."
-status: in-progress
+status: completed
 priority: P2
 effort: 22h
 branch: feat/unified-students-page
@@ -29,7 +29,7 @@ Ngoài phạm vi: không xoá sidebar, không đổi quyền mặc định, khô
 | 4 | [Bộ điểm: gỡ trang web và redirect](./phase-04-score-set-web-removal.md) | Completed | 2h | 3 |
 | 5 | [Gate và lỗi nhỏ](./phase-05-gates-and-small-bugs.md) | Completed | 3h | 1 |
 | 6 | [E2E và docs](./phase-06-e2e-and-docs.md) | Completed | 3h | 1, 2, 3, 4, 5 |
-| 7 | [Xoá bảng bộ điểm cũ](./phase-07-drop-legacy-score-set-tables.md) | In progress (chờ duyệt migrate prod) | 2h | 3, 4 đã lên prod |
+| 7 | [Xoá bảng bộ điểm cũ](./phase-07-drop-legacy-score-set-tables.md) | Completed | 2h | 3, 4 đã lên prod |
 
 ## Dependencies
 
