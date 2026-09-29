@@ -27,7 +27,7 @@ async function login(page: Page, user: { phone: string; password: string; name: 
  * diverge there: tro_giang may confirm attendance, hoc_vu may not.
  */
 async function assertStaffReadJourney(page: Page) {
-  // "Lớp & học sinh" is owner-only center administration now — a member
+  // "Quản trị học sinh" is owner-only center administration now — a member
   // landing on it is sent straight back to the dashboard.
   await page.goto("/students");
   await expect(page).toHaveURL(/\/$/);

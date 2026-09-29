@@ -34,7 +34,7 @@ interface ClassTableProps {
 }
 
 /**
- * The class catalog table (prototype "Danh sách lớp học"). The whole row
+ * The class catalog table (prototype "Danh mục lớp"). The whole row
  * opens the detail; the trailing "Sửa" / "Mở" actions stop the row click.
  */
 export function ClassTable({

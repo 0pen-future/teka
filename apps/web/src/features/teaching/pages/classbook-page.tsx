@@ -58,7 +58,7 @@ const viewOptions: HvSegmentedOption<ClassbookView>[] = [
 ];
 
 /**
- * Quản lý lớp học — the teaching screen's default view: one toolbar (class,
+ * Sổ lớp — the teaching screen's default view: one toolbar (class,
  * month, view), a four-figure KPI strip, and the month's session ledger
  * with the open session expanded in place. Everything is server data
  * through React Query: sessions, rosters, and enrollments from their
@@ -321,7 +321,7 @@ export function ClassbookPage() {
   return (
     <div className="flex flex-col gap-4">
       <header className="flex flex-col gap-3">
-        <h1 className="font-display text-[26px] font-extrabold text-ink-900">Quản lý lớp học</h1>
+        <h1 className="font-display text-[26px] font-extrabold text-ink-900">Sổ lớp</h1>
         <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap">
           {classes.length > 0 ? (
             <ClassSelect

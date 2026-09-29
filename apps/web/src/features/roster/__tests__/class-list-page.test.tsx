@@ -89,7 +89,7 @@ describe("ClassListPage", () => {
 
   it("renders the header, then the table with schedule, tags, phase and dates", async () => {
     renderPage();
-    expect(screen.getByRole("heading", { name: "Danh sách lớp học" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Danh mục lớp" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Tải lại" })).toBeInTheDocument();
     expect(screen.getByRole("searchbox", { name: "Tìm lớp học" })).toHaveAttribute(
       "placeholder",

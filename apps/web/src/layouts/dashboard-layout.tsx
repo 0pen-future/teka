@@ -86,7 +86,7 @@ function useNavGroups(): NavGroup[] {
           pending: hasPending,
           perm: "sessions.list",
         },
-        { label: "Quản lý lớp học", to: "/classbook", Icon: BookOpenIcon, perm: "classes.list" },
+        { label: "Sổ lớp", to: "/classbook", Icon: BookOpenIcon, perm: "classes.list" },
         { label: "Hồ sơ học sinh", to: "/records", Icon: IdCardIcon, perm: "students.list" },
         { label: "Phụ huynh", to: "/contacts", Icon: BookUserIcon, perm: "contacts.list" },
       ],
@@ -95,7 +95,7 @@ function useNavGroups(): NavGroup[] {
       header: "Giảng dạy",
       entries: [
         {
-          label: "Danh sách lớp học",
+          label: "Danh mục lớp",
           to: "/classes",
           Icon: BookMarkedIcon,
           perm: "classes.list",
@@ -171,7 +171,7 @@ function useNavGroups(): NavGroup[] {
         // Owner-only: class and student records are owner-managed center
         // data; the page itself redirects non-owners.
         ...(isResolved && isOwner
-          ? [{ label: "Lớp & học sinh", to: "/students", Icon: HvUsersIcon }]
+          ? [{ label: "Quản trị học sinh", to: "/students", Icon: HvUsersIcon }]
           : []),
         // Owner-only: the role-permission read model itself is owner-only.
         ...(isResolved && isOwner
@@ -205,9 +205,9 @@ function useNavGroups(): NavGroup[] {
  * group live behind the Thêm sheet so the bar stays uncrowded at 360px.
  */
 const OVERFLOW_LABELS = new Set([
-  "Quản lý lớp học",
+  "Sổ lớp",
   "Hồ sơ học sinh",
-  "Danh sách lớp học",
+  "Danh mục lớp",
   "Lớp cần tuyển sinh",
   "Lời mời nhận lớp",
   "Lộ trình học",
@@ -217,7 +217,7 @@ const OVERFLOW_LABELS = new Set([
   "Gửi thông báo",
   "Phụ huynh",
   "Gửi báo cáo",
-  "Lớp & học sinh",
+  "Quản trị học sinh",
   "Duyệt giáo án",
   "Nhập từ Excel",
   "Nhật ký hoạt động",
@@ -616,7 +616,7 @@ export function DashboardLayout() {
                 {group.header ? (
                   <p
                     aria-hidden
-                    className="px-3 pb-1 pt-3.5 text-[11px] font-extrabold uppercase tracking-[0.8px] text-ink-300"
+                    className="px-3 pb-1 pt-3.5 text-[11px] font-extrabold uppercase tracking-[0.8px] text-ink-500"
                   >
                     {group.header}
                   </p>

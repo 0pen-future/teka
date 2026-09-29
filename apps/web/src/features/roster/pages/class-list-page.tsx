@@ -25,7 +25,7 @@ const variantCopy: Record<
   { title: string; subtitle: string; emptyLabel: string; path: string }
 > = {
   all: {
-    title: "Danh sách lớp học",
+    title: "Danh mục lớp",
     subtitle: "Theo dõi, tổ chức và quản lý các lớp học của trung tâm.",
     emptyLabel: "Chưa có lớp học nào. Tạo lớp đầu tiên bằng nút + Lớp học.",
     path: "/classes",

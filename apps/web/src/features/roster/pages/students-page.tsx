@@ -53,7 +53,7 @@ function resolveTab(params: URLSearchParams): PageTabId {
 }
 
 /**
- * Owner-only "Lớp & học sinh" center-administration screen. The guard is a
+ * Owner-only "Quản trị học sinh" center-administration screen. The guard is a
  * shell around the content component so the roster queries never mount for a
  * non-owner — an early return between hooks would still let them subscribe
  * and fire before <Navigate> takes effect. Same gate shape as the
@@ -72,7 +72,7 @@ export function StudentsPage() {
 }
 
 /**
- * Consolidated "Lớp & học sinh" screen, split into three page tabs: the
+ * Consolidated "Quản trị học sinh" screen, split into three page tabs: the
  * classes overview, the per-class student × contact table (filtered by pill
  * tabs rather than per-class routes), and the unenrolled list.
  */
@@ -243,7 +243,7 @@ function StudentsPageContent() {
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h1 className="font-display text-[26px] font-extrabold text-ink-900">Lớp &amp; học sinh</h1>
+        <h1 className="font-display text-[26px] font-extrabold text-ink-900">Quản trị học sinh</h1>
         <p className="mt-1 text-[13.5px] text-ink-500">
           Chỉ lưu: họ tên · ngày nhập học · lớp · người liên hệ. Không thu thập gì thêm.
         </p>

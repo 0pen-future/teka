@@ -93,7 +93,7 @@ export function PlanReviewPanel({
         {notSubmitted ? (
           <>
             <div className="mt-3.5 rounded-[14px] bg-cream-100 px-3.5 py-3 text-[13px] text-ink-500">
-              Chưa có giáo án để duyệt — giáo viên nộp trong màn Quản lý lớp học.
+              Chưa có giáo án để duyệt — giáo viên nộp trong màn Sổ lớp.
             </div>
             <button
               type="button"
