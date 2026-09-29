@@ -470,6 +470,8 @@ Six feature modules back the "Giảng dạy" and "Kho học liệu" sidebar grou
   (422) when newly attached. List endpoints filter on `active`.
 - An exercise `code` is optional on create; the server assigns the next
   `BT-NNNN` per center, and a duplicate code answers 409 `EXERCISE_CODE_TAKEN`.
+  A caller-chosen code is upper-cased and may use letters, digits, `-` and `_`
+  (e.g. `PP1_U3L1`).
 - Exercise groups belong to one template version
   (`/library/versions/:vid/exercise-groups`); a lesson exercise points at a
   group through `group_id`, which clears when the group is deleted. Creating a

@@ -11664,7 +11664,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Code, when given, is upper-cased and must match ^[A-Za-z0-9-]+$ (409 EXERCISE_CODE_TAKEN on a clash); omitted, the next BT-0001-style code of the center is assigned.",
+                "description": "Code, when given, is upper-cased and must match ^[A-Za-z0-9_-]+$ (409 EXERCISE_CODE_TAKEN on a clash); omitted, the next BT-0001-style code of the center is assigned.",
                 "consumes": [
                     "application/json"
                 ],

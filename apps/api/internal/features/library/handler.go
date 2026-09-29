@@ -1163,7 +1163,7 @@ func (h *Handler) listExercises(c *gin.Context) {
 // createExercise adds an exercise.
 //
 //	@Summary		Create a library exercise
-//	@Description	Code, when given, is upper-cased and must match ^[A-Za-z0-9-]+$ (409 EXERCISE_CODE_TAKEN on a clash); omitted, the next BT-0001-style code of the center is assigned.
+//	@Description	Code, when given, is upper-cased and must match ^[A-Za-z0-9_-]+$ (409 EXERCISE_CODE_TAKEN on a clash); omitted, the next BT-0001-style code of the center is assigned.
 //	@Tags			library
 //	@Accept			json
 //	@Produce		json

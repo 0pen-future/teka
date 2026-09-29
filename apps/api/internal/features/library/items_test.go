@@ -1041,7 +1041,12 @@ func TestExerciseCodeExplicitIsNormalizedAndUniquePerCenter(t *testing.T) {
 
 	appErr := appErrorOf(t, mustErr(svc.CreateExercise(ctx, sc, ExerciseRequest{Title: "x", Code: str("BT 01")})), http.StatusUnprocessableEntity)
 	if appErr.Fields["code"] == "" {
-		t.Fatalf("a code outside letters/digits/dashes must be rejected, got %+v", appErr.Fields)
+		t.Fatalf("a code outside letters/digits/dashes/underscores must be rejected, got %+v", appErr.Fields)
+	}
+
+	textbook, err := svc.CreateExercise(ctx, sc, ExerciseRequest{Title: "PP1, U3L1", Code: str("pp1_u3l1")})
+	if err != nil || textbook.Code != "PP1_U3L1" {
+		t.Fatalf("an underscore code must be accepted and upper-cased: %v %+v", err, textbook)
 	}
 
 	// Updating without a code keeps the current one; updating with a taken

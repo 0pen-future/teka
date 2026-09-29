@@ -866,10 +866,11 @@ func mapCodeClash(err error) error {
 }
 
 // exerciseCodePattern is the shape of a caller-supplied exercise code:
-// letters, digits and dashes, no length minimum (an auto-generated code is
-// always BT-0001-style, but a caller may label an exercise with anything
-// short, e.g. a single letter).
-var exerciseCodePattern = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
+// letters, digits, dashes and underscores, no length minimum (an
+// auto-generated code is always BT-0001-style, but a caller may label an
+// exercise with anything short, e.g. a single letter, or a textbook
+// reference such as PP1_U3L1).
+var exerciseCodePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // normalizeExerciseCode upper-cases and validates a caller-supplied exercise
 // code. A blank or omitted one returns (nil, nil): CreateExercise then
@@ -885,7 +886,7 @@ func normalizeExerciseCode(raw *string) (*string, error) {
 	}
 	if !exerciseCodePattern.MatchString(code) {
 		return nil, apperror.Invalid("Mã bài tập không hợp lệ",
-			map[string]string{"code": "chỉ gồm chữ, số và dấu gạch ngang"})
+			map[string]string{"code": "chỉ gồm chữ, số, dấu gạch ngang và gạch dưới"})
 	}
 	return &code, nil
 }
