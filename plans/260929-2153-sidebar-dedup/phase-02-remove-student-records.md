@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Gỡ Hồ sơ học sinh"
-status: pending
+status: completed
 priority: P2
 effort: "2h"
 dependencies: []
@@ -89,11 +89,11 @@ Phase này gỡ hai route `/records` và `/records/:studentId` cùng mọi file 
 
 ## Todo
 
-- [ ] `RecordsRedirect` và `StudentRecordRedirect`
-- [ ] Đổi hai route sang redirect
-- [ ] Xoá 8 file nguồn và 5 file test
-- [ ] Sửa bốn comment
-- [ ] Test redirect
+- [x] `RecordsRedirect` và `StudentRecordRedirect`
+- [x] Đổi hai route sang redirect
+- [x] Xoá 8 file nguồn và 5 file test
+- [x] Sửa bốn comment
+- [x] Test redirect
 
 ## Verification
 

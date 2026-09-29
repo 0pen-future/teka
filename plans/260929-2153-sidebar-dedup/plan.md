@@ -23,12 +23,12 @@ Ngoài phạm vi: không xoá sidebar, không đổi quyền mặc định, khô
 
 | # | Phase | Status | Effort | Phụ thuộc |
 |---|-------|--------|--------|-----------|
-| 1 | [Nav, redirect, đổi tên Gửi thông báo](./phase-01-nav-redirects-and-reports-rename.md) | Pending | 4h | — |
-| 2 | [Gỡ Hồ sơ học sinh](./phase-02-remove-student-records.md) | Pending | 2h | — |
-| 3 | [Bộ điểm: backend chép khi áp dụng mẫu](./phase-03-score-set-backend.md) | Pending | 6h | — |
-| 4 | [Bộ điểm: gỡ trang web và redirect](./phase-04-score-set-web-removal.md) | Pending | 2h | 3 |
-| 5 | [Gate và lỗi nhỏ](./phase-05-gates-and-small-bugs.md) | Pending | 3h | 1 |
-| 6 | [E2E và docs](./phase-06-e2e-and-docs.md) | Pending | 3h | 1, 2, 3, 4, 5 |
+| 1 | [Nav, redirect, đổi tên Gửi thông báo](./phase-01-nav-redirects-and-reports-rename.md) | Completed | 4h | — |
+| 2 | [Gỡ Hồ sơ học sinh](./phase-02-remove-student-records.md) | Completed | 2h | — |
+| 3 | [Bộ điểm: backend chép khi áp dụng mẫu](./phase-03-score-set-backend.md) | Completed | 6h | — |
+| 4 | [Bộ điểm: gỡ trang web và redirect](./phase-04-score-set-web-removal.md) | Completed | 2h | 3 |
+| 5 | [Gate và lỗi nhỏ](./phase-05-gates-and-small-bugs.md) | Completed | 3h | 1 |
+| 6 | [E2E và docs](./phase-06-e2e-and-docs.md) | Completed | 3h | 1, 2, 3, 4, 5 |
 | 7 | [Xoá bảng bộ điểm cũ](./phase-07-drop-legacy-score-set-tables.md) | Pending | 2h | 3, 4 đã lên prod |
 
 ## Dependencies

@@ -1,7 +1,7 @@
 ---
 phase: 6
 title: "E2E và docs"
-status: pending
+status: completed
 priority: P2
 effort: "3h"
 dependencies: [1, 2, 3, 4, 5]
@@ -117,12 +117,12 @@ Phase này đưa các spec Playwright và tài liệu về khớp với sidebar 
 
 ## Todo
 
-- [ ] `secretary-send.spec.ts`
-- [ ] `ux-routes.ts` và xoá `records-search.spec.ts`
-- [ ] `class-staff-read.spec.ts` và `class-staff-write.spec.ts`, xác nhận đọc lịch sử sau bàn giao
-- [ ] Comment ở `courses.spec.ts`
-- [ ] Ba file docs
-- [ ] Quét `rg` và chạy e2e toàn bộ
+- [x] `secretary-send.spec.ts`
+- [x] `ux-routes.ts` và xoá `records-search.spec.ts`
+- [x] `class-staff-read.spec.ts` và `class-staff-write.spec.ts`, xác nhận đọc lịch sử sau bàn giao
+- [x] Comment ở `courses.spec.ts`
+- [x] Ba file docs
+- [x] Quét `rg` và chạy e2e toàn bộ
 
 ## Verification
 
@@ -153,4 +153,6 @@ Phase này không đổi code chạy thật. Các spec phân quyền (`class-sta
 
 ## Open decisions
 
-Kết quả xác nhận đọc lịch sử học sinh sau bàn giao trên `/students` sẽ được điền vào đây sau bước 4.
+Đã xác nhận: sau bàn giao, Thầy Minh vẫn đọc được "Bé Phúc" trên `/students?tab=by-class&class_id=`, nên không cần phương án thay thế và không mất khả năng đọc lịch sử. Spec `class-staff-write.spec.ts` ("a handed-off teacher keeps reading history but loses every write") xanh trên `make e2e-isolated`.
+
+Lần chạy e2e toàn bộ đầu tiên có 3 spec fail vì strict mode: bảng học sinh render cả danh sách thẻ (ẩn từ `sm`) lẫn bảng, nên tên học sinh khớp hai phần tử. Các assert tên học sinh giờ lọc `filter({ visible: true })`. Chạy lại hai spec `class-staff-*` được 4/4 xanh; phần còn lại của bộ e2e đã xanh ở lần chạy đầu (115 passed).

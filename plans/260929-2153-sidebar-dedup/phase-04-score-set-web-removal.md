@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Bộ điểm: gỡ trang web và redirect"
-status: pending
+status: completed
 priority: P2
 effort: "2h"
 dependencies: [3]
@@ -81,10 +81,10 @@ Phase này gỡ trang `/center/class-config` cùng toàn bộ mã web chỉ ph�
 
 ## Todo
 
-- [ ] `ClassConfigRedirect` và route
-- [ ] Xoá 10 file nguồn và 3 file test
-- [ ] Invalidate `scoreComponents` khi áp dụng hoặc gỡ chương trình
-- [ ] Test redirect và test invalidate
+- [x] `ClassConfigRedirect` và route
+- [x] Xoá 10 file nguồn và 3 file test
+- [x] Invalidate `scoreComponents` khi áp dụng hoặc gỡ chương trình
+- [x] Test redirect và test invalidate
 
 ## Verification
 

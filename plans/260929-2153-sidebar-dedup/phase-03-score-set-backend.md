@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Bộ điểm: backend chép khi áp dụng mẫu"
-status: pending
+status: completed
 priority: P2
 effort: "6h"
 dependencies: []
@@ -180,14 +180,14 @@ Luồng dữ liệu như sau. PUT `/classes/:id/program` đi vào `classprogram.
 
 ## Todo
 
-- [ ] `library.PublishedScoreSet`
-- [ ] `grading.SyncTemplateComponents` và `flattenTemplateComponents`
-- [ ] Gỡ CRUD, assign và clear bộ điểm khỏi grading
-- [ ] `classprogram.Apply` gọi snapshot store trong tx
-- [ ] Wiring ở router, seeds và stub test
-- [ ] routespec, policy tests và audit action test
-- [ ] Test grading và classprogram mới
-- [ ] `make api-docs`
+- [x] `library.PublishedScoreSet`
+- [x] `grading.SyncTemplateComponents` và `flattenTemplateComponents`
+- [x] Gỡ CRUD, assign và clear bộ điểm khỏi grading
+- [x] `classprogram.Apply` gọi snapshot store trong tx
+- [x] Wiring ở router, seeds và stub test
+- [x] routespec, policy tests và audit action test
+- [x] Test grading và classprogram mới
+- [x] `make api-docs`
 
 ## Verification
 

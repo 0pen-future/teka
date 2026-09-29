@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Nav, redirect và đổi tên Gửi thông báo"
-status: pending
+status: completed
 priority: P2
 effort: "4h"
 dependencies: []
@@ -154,15 +154,15 @@ Ngoài ra phase này gỡ trang "Lớp cần tuyển sinh" (thay bằng redirect
 
 ## Todo
 
-- [ ] `NavEntry.activePrefixes` và `useNavActive(to, activePrefixes)` ở cả ba item
-- [ ] Gỡ bốn mục trùng, gộp "Gửi thông báo" → `/reports`
-- [ ] Header "Học liệu", perm "Sổ lớp" = `teaching.read`
-- [ ] Dọn `OVERFLOW_LABELS`, `OVERFLOW_PATH_PREFIXES` và comment
-- [ ] Gate `CurrentPeriodDisc` theo `billing.read`
-- [ ] Đổi tiêu đề, h1 và aria-label của `/reports`, sửa comment route
-- [ ] Toast 409 kỳ của giáo viên khác trên trang gửi, kèm test
-- [ ] `RecruitingRedirect` và dọn biến thể, chips, header
-- [ ] Cập nhật test layout, class-list và send-reports
+- [x] `NavEntry.activePrefixes` và `useNavActive(to, activePrefixes)` ở cả ba item
+- [x] Gỡ bốn mục trùng, gộp "Gửi thông báo" → `/reports`
+- [x] Header "Học liệu", perm "Sổ lớp" = `teaching.read`
+- [x] Dọn `OVERFLOW_LABELS`, `OVERFLOW_PATH_PREFIXES` và comment
+- [x] Gate `CurrentPeriodDisc` theo `billing.read`
+- [x] Đổi tiêu đề, h1 và aria-label của `/reports`, sửa comment route
+- [x] Toast 409 kỳ của giáo viên khác trên trang gửi, kèm test
+- [x] `RecruitingRedirect` và dọn biến thể, chips, header
+- [x] Cập nhật test layout, class-list và send-reports
 
 ## Verification
 

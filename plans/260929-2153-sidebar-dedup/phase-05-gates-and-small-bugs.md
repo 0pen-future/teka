@@ -1,7 +1,7 @@
 ---
 phase: 5
 title: "Gate và lỗi nhỏ"
-status: pending
+status: completed
 priority: P2
 effort: "3h"
 dependencies: [1]
@@ -101,12 +101,12 @@ Phase này sửa các lỗi nhỏ mà bản audit tìm thấy ngoài sidebar:
 
 ## Todo
 
-- [ ] Gate "Thêm học viên"
-- [ ] Sửa lối tắt ở tab thông tin lớp
-- [ ] Sửa link trùng ở tab Buổi học
-- [ ] `/classes?create=1` và nút "Tạo lớp" của Sổ lớp
-- [ ] Sửa comment và gợi ý ở `class-overview-cards`
-- [ ] Cập nhật và thêm test
+- [x] Gate "Thêm học viên"
+- [x] Sửa lối tắt ở tab thông tin lớp
+- [x] Sửa link trùng ở tab Buổi học
+- [x] `/classes?create=1` và nút "Tạo lớp" của Sổ lớp
+- [x] Sửa comment và gợi ý ở `class-overview-cards`
+- [x] Cập nhật và thêm test
 
 ## Verification
 
