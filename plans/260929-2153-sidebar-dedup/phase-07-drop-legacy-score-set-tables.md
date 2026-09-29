@@ -1,7 +1,7 @@
 ---
 phase: 7
 title: "Xoá bảng bộ điểm cũ"
-status: pending
+status: in-progress
 priority: P3
 effort: "2h"
 dependencies: [3, 4]
@@ -87,10 +87,10 @@ Phase này thêm migration `000037` để xoá hai bảng `score_sets` và `scor
 
 ## Todo
 
-- [ ] `000037_drop_score_sets.up.sql`
-- [ ] `000037_drop_score_sets.down.sql`
-- [ ] `domainTables` và `TestDropLegacyScoreSetTables`
-- [ ] Round-trip trên stack e2e cô lập
+- [x] `000037_drop_score_sets.up.sql`
+- [x] `000037_drop_score_sets.down.sql`
+- [x] `domainTables` và `TestDropLegacyScoreSetTables`
+- [x] Round-trip up → down → up: thay bằng `TestDropLegacyScoreSetTables` và `TestMigrationRoundTrip` trên Postgres 16 thật (testcontainers), không dựng lại stack e2e
 - [ ] Backup và migrate trên prod (sau khi được duyệt)
 
 ## Verification
@@ -122,3 +122,5 @@ Phase này không đổi quyền hay route. Việc xoá dữ liệu có chủ đ
 ## Open decisions
 
 Xoá bảng (phase này) hay giữ làm schema chết. Plan đề xuất xoá, nhưng chỉ khi phase 3 và 4 đã ổn trên prod và đã có backup.
+
+Trạng thái 2026-09-29 23:59: phase 3 và 4 đã lên prod lúc 23:53 (ảnh `teka-{api,web}:71e0f01-260929-2353`, schema vẫn là 36, backup `~/teka-backups/teka-prod-260929-2353.dump`). Migration 000037 đã nằm trên nhánh và test xanh; `TestDownFoldsPersonalChannelIntoManual` phải lùi 33 bước thay vì 32 vì có thêm 000037. Bước backup, deploy và `migrate up` 000037 trên prod **đang chờ người dùng duyệt**.
