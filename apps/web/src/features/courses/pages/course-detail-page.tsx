@@ -333,6 +333,10 @@ function CourseWorkspace({ course }: { course: Course }) {
           open={editing}
           onOpenChange={setEditing}
           onSaved={() => hvToast("Đã lưu khóa học")}
+          onDeleted={(deleted) => {
+            hvToast(`Đã xoá khóa ${deleted.code}`);
+            void navigate("/courses");
+          }}
         />
       ) : null}
     </div>

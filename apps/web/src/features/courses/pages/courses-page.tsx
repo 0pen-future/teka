@@ -274,6 +274,10 @@ export function CoursesPage() {
                 if (!next) setEditing(null);
               }}
               onSaved={() => hvToast("Đã lưu khóa học")}
+              onDeleted={(course) => {
+                setEditing(null);
+                hvToast(`Đã xoá khóa ${course.code}`);
+              }}
             />
           ) : null}
         </>

@@ -87,34 +87,42 @@ const optionalWhole = (min: number, max: number, message: string) =>
     .transform((value) => (value === "" ? null : Number(value)));
 
 /**
- * Form state for the course dialog; empty optional fields travel as `null`
- * and the default template is carried outside the form (see `toCourseInput`).
+ * Form state for the course dialog; empty optional fields travel as `null`.
+ * `template_id` only drives the version picker: the API stores the version
+ * alone, so a chosen template must end on one of its versions.
  */
-export const courseFormSchema = z.object({
-  code: z
-    .string()
-    .trim()
-    .transform((value) => value.toUpperCase())
-    .pipe(
-      z
-        .string()
-        .min(2, "Mã từ 2 đến 20 ký tự")
-        .max(20, "Mã từ 2 đến 20 ký tự")
-        .regex(courseCodePattern, "Chỉ dùng chữ, số và dấu gạch ngang"),
-    ),
-  name: z.string().trim().min(1, "Bắt buộc nhập tên").max(200, "Tối đa 200 ký tự"),
-  subject: optionalText(100),
-  level: optionalText(100),
-  description: optionalText(2000),
-  status: courseStatusSchema,
-  default_unit_price: z
-    .string()
-    .trim()
-    .regex(/^\d+$/, "Đơn giá phải là số nguyên không âm")
-    .transform(Number),
-  total_sessions: optionalWhole(1, 1000, "Số buổi từ 1 đến 1000"),
-  duration_min: optionalWhole(1, 1440, "Thời lượng từ 1 đến 1440 phút"),
-});
+export const courseFormSchema = z
+  .object({
+    code: z
+      .string()
+      .trim()
+      .transform((value) => value.toUpperCase())
+      .pipe(
+        z
+          .string()
+          .min(2, "Mã từ 2 đến 20 ký tự")
+          .max(20, "Mã từ 2 đến 20 ký tự")
+          .regex(courseCodePattern, "Chỉ dùng chữ, số và dấu gạch ngang"),
+      ),
+    name: z.string().trim().min(1, "Bắt buộc nhập tên").max(200, "Tối đa 200 ký tự"),
+    subject: optionalText(100),
+    level: optionalText(100),
+    description: optionalText(2000),
+    status: courseStatusSchema,
+    default_unit_price: z
+      .string()
+      .trim()
+      .regex(/^\d+$/, "Đơn giá phải là số nguyên không âm")
+      .transform(Number),
+    total_sessions: optionalWhole(1, 1000, "Số buổi từ 1 đến 1000"),
+    duration_min: optionalWhole(1, 1440, "Thời lượng từ 1 đến 1440 phút"),
+    template_id: z.string(),
+    default_template_version_id: z.string(),
+  })
+  .refine((values) => values.template_id === "" || values.default_template_version_id !== "", {
+    path: ["default_template_version_id"],
+    message: "Chọn phiên bản mặc định cho chương trình mẫu",
+  });
 export type CourseFormInput = z.input<typeof courseFormSchema>;
 export type CourseFormValues = z.output<typeof courseFormSchema>;
 
@@ -122,10 +130,7 @@ function blankToNull(value: string): string | null {
   return value === "" ? null : value;
 }
 
-export function toCourseInput(
-  values: CourseFormValues,
-  defaultTemplateVersionId: string | null,
-): CourseInput {
+export function toCourseInput(values: CourseFormValues): CourseInput {
   return {
     code: values.code,
     name: values.name,
@@ -133,7 +138,7 @@ export function toCourseInput(
     level: blankToNull(values.level),
     description: blankToNull(values.description),
     status: values.status,
-    default_template_version_id: defaultTemplateVersionId,
+    default_template_version_id: blankToNull(values.default_template_version_id),
     default_unit_price: values.default_unit_price,
     total_sessions: values.total_sessions,
     duration_min: values.duration_min,
@@ -167,5 +172,8 @@ export function toCourseForm(course: Course): CourseFormInput {
     default_unit_price: String(course.default_unit_price),
     total_sessions: course.total_sessions === null ? "" : String(course.total_sessions),
     duration_min: course.duration_min === null ? "" : String(course.duration_min),
+    // A version whose template was deleted keeps its id with no template to show.
+    template_id: course.default_template?.template_id ?? "",
+    default_template_version_id: course.default_template_version_id ?? "",
   };
 }

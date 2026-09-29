@@ -60,9 +60,9 @@ test("owner creates a course, prices it, opens a class on it and stops it once t
   await createDialog.getByLabel("Cấp / trình độ").fill("Lớp 6");
   // Only an active course is offered when a class is created.
   await pickOption(page, "Trạng thái", "Đang hoạt động");
-  await createDialog.getByLabel("Đơn giá / buổi (đ)").fill("150000");
+  await createDialog.getByLabel("Giá / buổi (đ)").fill("150000");
   await createDialog.getByLabel("Tổng số buổi").fill("24");
-  await createDialog.getByRole("button", { name: "Tạo" }).click();
+  await createDialog.getByRole("button", { name: "Tạo mới" }).click();
 
   // Creating lands on the detail page.
   await expect(page).toHaveURL(/\/courses\/[0-9a-f-]+$/);
@@ -78,7 +78,7 @@ test("owner creates a course, prices it, opens a class on it and stops it once t
   await page.getByRole("button", { name: "Sửa khóa" }).click();
   const editDialog = page.getByRole("dialog", { name: "Sửa khóa học" });
   await editDialog.getByLabel("Tên khóa học").fill(COURSE_NAME_EDITED);
-  await editDialog.getByRole("button", { name: "Lưu" }).click();
+  await editDialog.getByRole("button", { name: "Lưu thay đổi" }).click();
   await expect(page.getByText("Đã lưu khóa học")).toBeVisible();
   await expect(page.getByRole("heading", { name: COURSE_NAME_EDITED })).toBeVisible();
   await expect(info.getByText("150.000đ")).toBeVisible();
