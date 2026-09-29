@@ -34,7 +34,7 @@ chains (avoiding circular feature imports) and leaves room for route-level
 lazy loading later. Promote anything shared by multiple features
 into `components/shared` or `lib`.
 
-The class and teaching-library menus ("Lớp học", "Kho học liệu") span three
+The class and teaching-library menus ("Lớp học", "Học liệu") span three
 features that all lean on this rule at once: `roster` owns the students page
 and class list/detail (the API's `classes` feature), `library` owns the
 teaching library, and `courses` owns the course catalog and learning paths. Each imports the other two only
@@ -154,15 +154,20 @@ build without it renders a readable startup error, not a working app.
 Sidebar groups and entries are declared in one place,
 [`layouts/dashboard-layout.tsx`](../apps/web/src/layouts/dashboard-layout.tsx)
 (an unlabeled group holding only "Tổng quan", then the headed groups Dạy học,
-Lớp học, Kho học liệu, Học phí, Trung tâm). Entries are filtered by the
+Lớp học, Học liệu, Học phí, Trung tâm). Entries are filtered by the
 caller's permission keys and a group whose every entry is filtered away is
 dropped with its header. "Lớp học" opens with "Học sinh" (`/students`), the
 one page for students and contacts: its tabs "Tất cả", "Theo lớp" and "Chưa vào
 lớp" need `students.list`, "Người liên hệ" needs `contacts.view_all`, and the old
-`/contacts` path redirects to its contacts tab. "Kho học liệu" points its three
-bank entries at child routes of one page — `/library`, `/library/materials`,
-`/library/exercises` — so each tab is linkable; the legacy `/library?tab=`
-query redirects to the matching child route. Below
+`/contacts` path redirects to its contacts tab. "Kho học liệu" in the Học liệu
+group opens `/library`, one page whose tabs are child routes
+(`/library/materials`, `/library/exercises`) so each tab is linkable; the
+legacy `/library?tab=` query redirects to the matching child route. An entry's
+optional `activePrefixes` keeps it highlighted on routes outside its own `to`
+— "Gửi thông báo" (`/reports`) stays lit on `/notifications/:periodId`. Retired
+paths redirect instead of 404ing: `/classes/recruiting` to the class list's
+recruiting filter, `/records` to the students page (a `class_id` opens its
+by-class tab), and `/center/class-config` to the center settings. Below
 `md` the sidebar collapses into a bottom bar plus a "Thêm" overflow sheet, so
 every entry needs a second, independent registration: its exact `label` in
 `OVERFLOW_LABELS` and its route's prefix in `OVERFLOW_PATH_PREFIXES`. The

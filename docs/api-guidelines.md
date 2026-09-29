@@ -444,8 +444,8 @@ declares `AccountService` with only the `teachers.Service` methods it needs.
 
 ### Teaching menu features
 
-Six feature modules back the "Giảng dạy" and "Kho học liệu" sidebar groups
-(`library` serves "Kho học liệu"):
+Six feature modules back the "Lớp học", "Học liệu" and "Dạy học" sidebar
+groups (`library` serves "Học liệu"):
 
 - `classes` gained catalog fields (`code`, `tags`, `note`, `course_id`,
   `parent_class_id`, `lineage_note`) rather than becoming a new feature — see
@@ -477,7 +477,11 @@ Six feature modules back the "Giảng dạy" and "Kho học liệu" sidebar grou
   group through `group_id`, which clears when the group is deleted. Creating a
   draft from a published version copies its groups.
 - `score_set` is an array of named score sets, each with its own weighted
-  components; log fields add the `long_text` and `student` kinds.
+  components; log fields add the `long_text` and `student` kinds. Applying a
+  published version to a class copies its `score_set` into the class's score
+  components (the set title prefixes each label when more than one set has
+  components); a class that already holds scores keeps its components. There
+  is no separate score-set CRUD — the template is the only place to edit one.
 - A published version is immutable: every write to it or its lessons answers
   409 `VERSION_LOCKED`.
 
