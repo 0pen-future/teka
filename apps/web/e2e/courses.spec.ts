@@ -48,7 +48,7 @@ test("owner creates a course, prices it, opens a class on it and stops it once t
 }) => {
   await loginAsOwner(page);
 
-  // The nav entry lives in the Kho học liệu group, next to Lộ trình học.
+  // The nav entry lives in the Học liệu group, next to Lộ trình học.
   await page.goto("/courses");
   await expect(page.getByRole("heading", { name: "Khóa học", exact: true })).toBeVisible();
 

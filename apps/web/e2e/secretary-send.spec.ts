@@ -98,12 +98,14 @@ test("owner grants send-reports; secretary sends another teacher's period; audit
 
   // The flag unlocks exactly one nav entry; the owner-only surfaces stay out
   // of reach for her.
-  await expect(secretary.getByRole("link", { name: "Gửi báo cáo" }).first()).toBeVisible();
+  await expect(
+    secretary.getByRole("link", { name: "Gửi thông báo", exact: true }).first(),
+  ).toBeVisible();
   await expect(secretary.getByRole("link", { name: "Duyệt giáo án" })).toHaveCount(0);
   await expect(secretary.getByRole("link", { name: "Nhật ký hoạt động" })).toHaveCount(0);
 
   await secretary.goto("/reports");
-  await expect(secretary.getByRole("heading", { name: "Gửi báo cáo" })).toBeVisible();
+  await expect(secretary.getByRole("heading", { name: "Gửi thông báo" })).toBeVisible();
 
   // Center-wide read: Thầy Minh's seeded open period is listed under his name
   // even though the secretary teaches nothing. Newest period first.
@@ -116,7 +118,7 @@ test("owner grants send-reports; secretary sends another teacher's period; audit
       response.url().includes("/notifications?") && response.request().method() === "GET",
   );
   await secretary
-    .getByRole("link", { name: /^Gửi báo cáo tháng \d+\/\d+ của Thầy Minh$/ })
+    .getByRole("link", { name: /^Gửi thông báo tháng \d+\/\d+ của Thầy Minh$/ })
     .first()
     .click();
   await expect(secretary).toHaveURL(/\/notifications\/.+$/);
@@ -171,7 +173,7 @@ test("plain teacher keeps a read-only ledger and no send entry points (D8)", asy
   await login(page, TEACHER_PHONE, TEACHER_PASSWORD, "Thầy Minh");
 
   // No delegated-send entry: the nav link belongs to flag holders only.
-  await expect(page.getByRole("link", { name: "Gửi báo cáo" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Gửi thông báo", exact: true })).toHaveCount(0);
 
   // His own period's review (seeded closed) never offers a send link.
   await page.goto("/billing");
