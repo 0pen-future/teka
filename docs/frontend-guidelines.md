@@ -69,9 +69,49 @@ inputmode="decimal"`, accepts "7,5", exposes `data-state`
   sheet below, a filter box once the list passes `searchThreshold`; read the
   value from the trigger text or `data-value`, width comes from the consumer's
   `className`), `HvBadge`, `HvIcon`.
+- `hvButtonVariants` (from `components/hv/hv-button-variants.ts`, re-exported
+  by the index): the button classes as a function. A `<Link>` that must look
+  like a button uses `className={hvButtonVariants({ variant, size })}` instead
+  of copying class strings, so it keeps the same colors, 44px hit area, and
+  contrast guarantees as `HvButton`.
+- `HvTableScroll`: every table (or any row that can outgrow a phone) sits
+  inside one. It is the horizontal scroll box (`role="region"`, required
+  `aria-label`, keyboard-focusable) and, being `relative`, the containing block
+  for the `sr-only` helpers inside cells; without it those absolutely
+  positioned nodes escape to the page and widen it at 320–375px. Empty states
+  render `HvStateBlock` in place of the table, not inside a wide one.
+  `HvSegmented` scrolls its own options instead of wrapping for the same reason.
 
 New shared primitives belong here, with a test under `components/hv/__tests__`;
 feature-specific composition stays in the feature folder.
+
+## Color and contrast
+
+Tokens live in `src/styles/tokens/colors.css`. Text must reach WCAG AA
+(4.5:1) on the surface it sits on; the verified pairs:
+
+| Text | Surface | Ratio | Use |
+|---|---|---|---|
+| `ink-900` / `--text-on-brand` | `mint-400` · `sky-300` · `coral-400` · `sun-400` | 6.1 · 6.67 · 4.84 · 7.99 | Text on brand pastel fills (buttons, chips, avatars) |
+| `ink-900` | `cream-100` | 11.52 | Headings |
+| `ink-500` | `white` · `cream-100` · `cream-200` · `cream-300` | 5.69 · 5.3 · 4.95 · 4.57 | Secondary text, table headers, neutral chips |
+| `mint-600` (#24775c) | `cream-100` · `white` | 5.06 · 5.43 | Links and accented text |
+| `coral-600` | `coral-100` | 5.04 | Danger text on danger-soft panels |
+| `sun-600` (#8f6000) | `sun-100` · `white` | 4.99 · 5.47 | Warning text and chips |
+| `sky-500` (#29739a) | `sky-50` · `white` | 4.72 · 5.23 | Info text and chips |
+| `coral-600` | `white` | 5.95 | Danger text actions (never `coral-500` for text) |
+
+Rules:
+
+- Brand pastel fills always carry `--text-on-brand` (`text-on-brand`, which is
+  `ink-900`), never `text-white`: white on `mint-400` is only 2.03:1.
+- `ink-400` (3.01:1 on white) and `ink-300` are for placeholders, disabled states, icons, and decoration only,
+  never for text a user needs to read.
+- A link styled as a button takes `hvButtonVariants(...)` (see hv kit) rather
+  than hand-copied classes.
+- `src/styles/tokens/__tests__/contrast.test.ts` locks these pairs and every
+  `HvButton` variant against the real `colors.css`. Adding a token or a new
+  text/surface pairing means adding the pair there first.
 
 ## Server/client state split
 
@@ -148,6 +188,24 @@ field-level API validation errors from `ApiError.fields`.
 Radix primitives for interactive components, `eslint-plugin-jsx-a11y` in CI,
 a skip link in the root layout, `aria-label` on icon-only buttons, and both
 color schemes (class-based dark mode via the theme provider).
+
+**Page structure.** Every route renders exactly one `h1`; layouts and cards
+never add their own. Every route declares its tab title next to its
+declaration as `handle: { title: "…" } satisfies RouteHandle`;
+`RouteDocumentTitle` (`components/shared/document-title.tsx`, mounted in the
+root layout) turns the deepest match into "<title> · Teka". Titles are static
+per page: no student, parent, or amount in them, since tab titles surface in
+browser history and shared screens.
+
+**Targets and scrolling.** Interactive targets are at least 24×24px and
+44×44px where the layout allows (a small checkbox gets a `<label>` filling its
+cell, as in the permission matrix). A horizontally scrolling area is a
+labeled, focusable region (`HvTableScroll`), and the page itself never
+scrolls sideways at 320px.
+
+**Crawling.** The app is private: nginx sends `X-Robots-Tag: noindex, nofollow`
+on every response, `robots.txt` disallows all crawlers, and `index.html`
+carries `<meta name="robots">`. Public auth pages keep this too.
 
 **Drag-and-drop (task board).** dnd-kit lives only in the `tasks` feature
 (`hooks/use-board-dnd.ts` adapts it onto the headless `src/lib/kanban`, which
@@ -234,6 +292,23 @@ Two layers, two runners:
   the API, `board.ts` seeds tasks over the API and reads column order,
   `drag.ts` walks a pointer or a CDP touch across the board in steps, since
   dnd-kit only reacts to successive move events).
+
+## UX review checklist
+
+Questions a reviewer asks of any UI change; `e2e/ux-audit.spec.ts` checks the
+mechanical ones on every audited route (overflow at 1440/768/375 and 320 for
+dense routes, one `h1`, a distinct `· Teka` title, axe color-contrast and
+target-size):
+
+- Does a new table or wide row sit inside `HvTableScroll`, and does
+  `ux-audit` stay green at 320 and 375px?
+- Is there `text-white` (or any unverified pair) on a pastel fill?
+- Does a new route declare `handle.title` and render exactly one `h1`?
+- Is a new route listed in `e2e/helpers/ux-routes.ts`?
+- Are there placeholder strings (fake phone numbers or emails, dead links)?
+- Does a screen show one primary action, or a wall of same-colored buttons?
+- Is there a new public surface that needs `X-Robots-Tag`, or an HTML
+  response served outside nginx?
 
 ## Verification
 

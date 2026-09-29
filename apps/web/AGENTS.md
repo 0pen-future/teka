@@ -35,3 +35,5 @@ TanStack Query, Zustand. Scripts and env setup: `README.md` in this folder.
 
 - Conventions (module contract, server/client state split, API error handling,
   forms, a11y, testing): `docs/frontend-guidelines.md` at repo root.
+- Design-system rules for UI changes: its `hv kit`, `Color and contrast`,
+  `Accessibility baseline`, and `UX review checklist` sections.
