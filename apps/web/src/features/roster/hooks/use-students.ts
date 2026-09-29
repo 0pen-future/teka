@@ -17,7 +17,7 @@ import {
   type ListStudentsParams,
 } from "../api/students-api";
 import type { StudentInput } from "../schemas/roster-schemas";
-import { nextPageAfter } from "./next-page";
+import { keepWhileSearching, nextPageAfter } from "./next-page";
 import { contactsKeys, enrollmentsKeys, studentsKeys } from "./roster-keys";
 
 export { studentsKeys };
@@ -47,7 +47,7 @@ export function useStudentsInfinite(
     queryFn: ({ pageParam }) => listStudents({ ...params, page: pageParam }),
     initialPageParam: 1,
     getNextPageParam: (_last, pages) => nextPageAfter(pages),
-    placeholderData: keepPreviousData,
+    placeholderData: keepWhileSearching(params),
     enabled: options.enabled ?? true,
   });
 }

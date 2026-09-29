@@ -52,7 +52,6 @@ export function useContactMonthlyBalances(year: number, month: number, enabled: 
   return useQuery({
     queryKey: collectionsKeys.monthlyBalances(year, month),
     queryFn: () => listContactMonthlyBalances(year, month),
-    placeholderData: keepPreviousData,
     enabled,
   });
 }
