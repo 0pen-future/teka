@@ -32,9 +32,27 @@ các route này đều xanh. Không có lỗi mới nào khác so với baseline
   `hvButtonVariants`. Không bị cắt ở 375.
 - Forgot password: tiêu đề là h1, cùng nền `cream-100` như login.
 
+## Prod sau deploy local (2026-09-29 13:35)
+
+Web image `teka-web:e4d262b-260929-1334` đã được dựng với các URL prod và chạy
+qua `compose -p teka` (prod + homelab). API image giữ nguyên
+`ab092bc-260925-1126` vì `apps/api` không đổi; `migrate` exit 0.
+
+- `/readyz` của API trả 200.
+- `/`, `/login`, `/s/x`, `/invite/x`, `/reset-password/x`: 200, có
+  `x-robots-tag: noindex, nofollow`. `/s/x` giờ render trang 404 của SPA.
+- `robots.txt` là `text/plain` với `Disallow: /`. `/sitemap.xml`, `/llms.txt`
+  và `/llms-full.txt` trả 404.
+- HTML có meta `description`, `robots`, `og:*` (gồm `og:image` tuyệt đối
+  1200×630) và `twitter:card`. `/og-image.png` là `image/png`. Nhờ vậy ba lỗi
+  `[robots]`, `[meta-description]` và `[open-graph]` của discovery scan đã
+  được xử lý tận gốc.
+- Login, forgot và 404 ở 1440/768/375/320: overflow 0, đúng một h1, title
+  riêng. Ảnh nằm trong `app-prod/`, thư mục này bị git-ignore.
+
 ## Chưa chạy được ở round này
 
-- Mục 7–10 của phase 7 (curl header prod, discovery scan prod, chụp 23 route
-  prod, preview Zalo) cần bản deploy prod. Chúng được làm sau bước deploy
-  local bằng `.env.production`. Preview Zalo cần người dùng tự dán link và
-  báo lại, nên chưa tính là đạt.
+- Chưa chụp 23 route cần đăng nhập trên prod. Việc này cần thông tin đăng
+  nhập prod, nên không làm. Các route này đã đạt trên stack e2e (xem bảng trên).
+- Preview Zalo: người dùng cần dán link `/login` vào Zalo và báo lại. Chưa
+  tính là đạt.
