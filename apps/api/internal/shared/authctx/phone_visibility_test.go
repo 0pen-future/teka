@@ -37,8 +37,7 @@ func TestPhoneVisible(t *testing.T) {
 			if tc.contacts {
 				grants = append(grants, PermContactsViewAll)
 			}
-			perms := BuildPermSet(nil, grants, nil)
-			sc := Scope{CanSendReports: perms.HasKey(PermReportsSend), Perms: perms}
+			sc := Scope{Perms: BuildPermSet(nil, grants, nil)}
 			if got := sc.PhoneVisible(tc.rowVisible); got != tc.want {
 				t.Errorf("PhoneVisible(%v) = %v, want %v", tc.rowVisible, got, tc.want)
 			}
@@ -48,13 +47,5 @@ func TestPhoneVisible(t *testing.T) {
 	otherWide := Scope{Perms: BuildPermSet(nil, []string{PermStudentsViewAll}, nil)}
 	if otherWide.PhoneVisible(false) {
 		t.Error("another resource's view_all must not leak phones")
-	}
-
-	// A scope whose CanSendReports flag is set without the key in Perms is
-	// not a resolvable state (every resolver derives the flag from the key);
-	// the phone rule reads the key, so such a scope sees nothing extra.
-	stale := Scope{CanSendReports: true}
-	if stale.PhoneVisible(false) {
-		t.Error("phone visibility must follow the resolved key set, not the bare flag")
 	}
 }

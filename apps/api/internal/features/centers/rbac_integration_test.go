@@ -70,8 +70,7 @@ func TestCreateCenterSeedsSystemRoles(t *testing.T) {
 }
 
 // Granting and revoking the reports.send override lands in the very next
-// resolved scope — the single-source-of-truth invariant that replaced the
-// retired can_send_reports column's dual-write.
+// resolved scope: the permission set is the single source of truth.
 func TestSendReportsOverrideResolvesToScope(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -83,13 +82,13 @@ func TestSendReportsOverrideResolvesToScope(t *testing.T) {
 	grantReportsSend(t, e, owner.ID, member.ID, true)
 	require.Equal(t, []string{"reports.send"}, e.overrideKeys(t, member.ID, ownerScope.CenterID))
 	memberScope := e.scope(t, member.ID)
-	require.True(t, memberScope.CanSendReports)
+	require.True(t, memberScope.Has(authctx.PermReportsSend))
 	require.True(t, memberScope.Has(authctx.PermReportsSend))
 
 	grantReportsSend(t, e, owner.ID, member.ID, false)
 	require.Empty(t, e.overrideKeys(t, member.ID, ownerScope.CenterID))
 	memberScope = e.scope(t, member.ID)
-	require.False(t, memberScope.CanSendReports)
+	require.False(t, memberScope.Has(authctx.PermReportsSend))
 	require.False(t, memberScope.Has(authctx.PermReportsSend))
 }
 
@@ -167,7 +166,7 @@ func TestMembershipReopenResetsRoleAndOverrides(t *testing.T) {
 	require.Empty(t, e.overrideKeys(t, member.ID, centerID))
 
 	sc := e.scope(t, member.ID)
-	require.False(t, sc.CanSendReports, "no source may resurrect the revoked permission")
+	require.False(t, sc.Has(authctx.PermReportsSend), "no source may resurrect the revoked permission")
 	require.False(t, sc.Has(authctx.PermReportsSend))
 }
 

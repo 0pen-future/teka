@@ -10,12 +10,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/pagination"
 	"teka/apps/api/internal/testutil"
 )
 
 // A reports.send-holding member reads statements center-wide — list, get, and the
-// period figures the send flow consumes — but the flag never widens a
+// period figures the send flow consumes — but the permission never widens a
 // statement WRITE: the standalone generate endpoint and revoke on another
 // member's data still answer the same neutral 404 a peer gets.
 func TestSecretaryReadsStatementsCenterWideButCannotGenerateOrRevoke(t *testing.T) {
@@ -29,7 +30,7 @@ func TestSecretaryReadsStatementsCenterWideButCannotGenerateOrRevoke(t *testing.
 	_, secretary := testutil.Secretary(t, db, ownerCenter)
 	memberScope := testutil.ScopeFor(t, db, member.ID)
 	secScope := testutil.ScopeFor(t, db, secretary.ID)
-	require.True(t, secScope.CanSendReports)
+	require.True(t, secScope.Has(authctx.PermReportsSend))
 	require.False(t, secScope.IsOwner)
 
 	contact := testutil.Contact(t, db, member.ID)
@@ -39,7 +40,7 @@ func TestSecretaryReadsStatementsCenterWideButCannotGenerateOrRevoke(t *testing.
 	_, err = billingSvc.Close(ctx, memberScope, period.ID)
 	require.NoError(t, err)
 
-	// The standalone generate endpoint stays owner/self-only: the flag holder
+	// The standalone generate endpoint stays owner/self-only: the reports.send holder
 	// is refused with the same neutral 404 before any statement exists.
 	_, err = statementsSvc.Generate(ctx, secScope, period.ID)
 	require.Error(t, err)

@@ -32,14 +32,14 @@ type fakeRunStore struct {
 	// canSend answers the delegated per-item permission probe; nil means
 	// always permitted, matching a run whose flag never moves.
 	canSend func(call int) (bool, error)
-	sendChk int // how many times CanSendReports was asked
+	sendChk int // how many times HoldsReportsSend was asked
 	// classAllowed answers the class-scoped per-item probe; nil means always
 	// permitted. classChk counts the asks.
 	classAllowed func(call int) (bool, error)
 	classChk     int
 }
 
-func (s *fakeRunStore) CanSendReports(_ context.Context, _, _ uuid.UUID) (bool, error) {
+func (s *fakeRunStore) HoldsReportsSend(_ context.Context, _, _ uuid.UUID) (bool, error) {
 	s.mu.Lock()
 	call := s.sendChk
 	s.sendChk++

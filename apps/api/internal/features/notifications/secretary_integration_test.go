@@ -14,6 +14,7 @@ import (
 	"teka/apps/api/internal/features/notifications"
 	"teka/apps/api/internal/features/zalo"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/id"
 	"teka/apps/api/internal/testutil"
 )
@@ -57,8 +58,8 @@ func TestSecretaryDelegatedPersonalSendStampsHerAsSender(t *testing.T) {
 	// contacts[2] stays unmapped — must fall back to the manual channel.
 
 	secScope := testutil.ScopeFor(t, d.db, secretary)
-	require.True(t, secScope.CanSendReports, "secretary fixture must carry the flag")
-	require.False(t, secScope.IsOwner, "the flag holder must be an ordinary member, never the owner")
+	require.True(t, secScope.Has(authctx.PermReportsSend), "secretary fixture must hold reports.send")
+	require.False(t, secScope.IsOwner, "the reports.send holder must be an ordinary member, never the owner")
 
 	resp, err := d.notifications.BulkSend(ctx, secScope, periodID, notifications.BulkSendRequest{
 		Purpose: "statement",
@@ -104,7 +105,7 @@ func TestSecretaryDelegatedPersonalSendStampsHerAsSender(t *testing.T) {
 	// The period's own teacher — plain, no flag — sees the delegated rows and
 	// the run in their period's ledger, so they will not double-send by hand.
 	xScope := testutil.ScopeFor(t, d.db, teacherX)
-	require.False(t, xScope.CanSendReports)
+	require.False(t, xScope.Has(authctx.PermReportsSend))
 	rows, err := d.notifications.List(ctx, xScope, periodID, notifications.ListFilter{})
 	require.NoError(t, err)
 	require.Len(t, rows, 3, "the period teacher must see rows a secretary sent on their period")
@@ -254,9 +255,9 @@ func TestRevokeMidRunFailsRemainingRowsAndBlocksResume(t *testing.T) {
 	require.Equal(t, 2, failed)
 
 	// A resume under the revoked scope is refused honestly — the permission
-	// gate reloads the flag per request.
+	// gate reloads reports.send per request.
 	revokedScope := testutil.ScopeFor(t, d.db, secretary)
-	require.False(t, revokedScope.CanSendReports)
+	require.False(t, revokedScope.Has(authctx.PermReportsSend))
 	_, err = d.notifications.ResumeRun(ctx, revokedScope, periodID, nil)
 	require.Error(t, err)
 	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code,
@@ -354,7 +355,7 @@ func TestPlainMemberCannotCreateSendsOnAnyChannelButKeepsMarkSent(t *testing.T) 
 	member, _ := testutil.Teacher(t, d.db)
 	testutil.JoinCenter(t, d.db, member.ID, centerID)
 	memberScope := testutil.ScopeFor(t, d.db, member.ID)
-	require.False(t, memberScope.CanSendReports)
+	require.False(t, memberScope.Has(authctx.PermReportsSend))
 	require.False(t, memberScope.IsOwner)
 
 	periodID, contacts := closedPeriodWithContacts(t, d, member.ID, 1)

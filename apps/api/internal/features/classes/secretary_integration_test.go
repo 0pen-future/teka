@@ -10,6 +10,7 @@ import (
 
 	"teka/apps/api/internal/features/classes"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/testutil"
 )
 
@@ -27,7 +28,7 @@ func TestSecretaryCannotReadOrMutateMembersClasses(t *testing.T) {
 	_, secretary := testutil.Secretary(t, db, ownerCenter)
 	memberScope := testutil.ScopeFor(t, db, member.ID)
 	secScope := testutil.ScopeFor(t, db, secretary.ID)
-	require.True(t, secScope.CanSendReports)
+	require.True(t, secScope.Has(authctx.PermReportsSend))
 	require.False(t, secScope.IsOwner)
 
 	created, err := svc.Create(ctx, memberScope, createRequest())

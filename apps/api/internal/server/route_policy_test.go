@@ -67,8 +67,8 @@ func TestRoutePolicyEntriesWellFormed(t *testing.T) {
 // The owner-only list is frozen by the phase-1 inventory: permission
 // administration, class staffing and handoff, sensitive lesson-plan review
 // writes, and score-set configuration. None of these may ever appear with a
-// grantable policy. (The legacy send-reports toggle routes retired with the
-// can_send_reports column — reports.send is granted through overrides now.)
+// grantable policy. (reports.send itself is an ordinary grantable key, set
+// through roles and member overrides.)
 func TestOwnerOnlyRoutesStayHardGated(t *testing.T) {
 	frozen := []string{
 		"GET /api/v1/centers/me/permissions",

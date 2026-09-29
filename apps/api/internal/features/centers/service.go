@@ -129,11 +129,7 @@ func (s *Service) ResolveScope(ctx context.Context, teacherID uuid.UUID) (authct
 		TeacherID: teacherID,
 		CenterID:  row.CenterID,
 		IsOwner:   row.IsOwner,
-		// HasKey, not Has: the field mirrors the member's effective
-		// reports.send only — the owner's authority flows through
-		// ReportsOversight's IsOwner arm, never through this flag.
-		CanSendReports: perms.HasKey(authctx.PermReportsSend),
-		Perms:          perms,
+		Perms:     perms,
 	}, nil
 }
 
@@ -285,9 +281,8 @@ func (s *Service) Me(ctx context.Context, scope authctx.Scope) (any, error) {
 	}
 	if !scope.IsOwner {
 		return &MemberMeResponse{
-			CenterName:     center.Name,
-			CanSendReports: scope.CanSendReports,
-			Permissions:    scope.EffectiveKeys(),
+			CenterName:  center.Name,
+			Permissions: scope.EffectiveKeys(),
 		}, nil
 	}
 	members, err := s.repo.ListMembers(ctx, scope.CenterID)

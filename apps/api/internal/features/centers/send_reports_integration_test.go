@@ -39,19 +39,17 @@ func TestSendReportsScopeResolution(t *testing.T) {
 	member, _ := testutil.Teacher(t, e.db)
 	e.join(t, member.ID, owner.ID)
 
-	// Default off, for the owner and the member alike.
-	require.False(t, e.scope(t, owner.ID).CanSendReports,
-		"the owner never carries reports.send — oversight flows through IsOwner")
-	require.True(t, e.scope(t, owner.ID).ReportsOversight(), "the owner has oversight without the permission")
-	require.False(t, e.scope(t, member.ID).CanSendReports)
+	// The owner holds reports.send implicitly; a fresh member does not.
+	require.True(t, e.scope(t, owner.ID).ReportsOversight(), "the owner is the implicit superuser")
+	require.False(t, e.scope(t, member.ID).Has(authctx.PermReportsSend))
 	require.False(t, e.scope(t, member.ID).ReportsOversight())
 
 	grantReportsSend(t, e, owner.ID, member.ID, true)
-	require.True(t, e.scope(t, member.ID).CanSendReports)
+	require.True(t, e.scope(t, member.ID).Has(authctx.PermReportsSend))
 	require.True(t, e.scope(t, member.ID).ReportsOversight())
 
 	grantReportsSend(t, e, owner.ID, member.ID, false)
-	require.False(t, e.scope(t, member.ID).CanSendReports)
+	require.False(t, e.scope(t, member.ID).Has(authctx.PermReportsSend))
 
 	// A granted member whose stint closes resolves false: the LEFT JOIN only
 	// matches the live stint. The teachers.center_id pointer still aims at the
@@ -60,7 +58,7 @@ func TestSendReportsScopeResolution(t *testing.T) {
 	require.NoError(t, e.db.Exec(
 		"UPDATE center_members SET left_at = now() WHERE teacher_id = ? AND left_at IS NULL",
 		member.ID).Error)
-	require.False(t, e.scope(t, member.ID).CanSendReports,
+	require.False(t, e.scope(t, member.ID).Has(authctx.PermReportsSend),
 		"a closed stint must not leak the permission into scope")
 }
 
@@ -96,13 +94,13 @@ func TestSendReportsDoesNotSurviveRejoin(t *testing.T) {
 	// RemoveMember disabled the account, and only the invitation accept flow
 	// reactivates it — so resolve the scope straight from SQL: the reopened
 	// stint must not carry the old grant.
-	require.False(t, testutil.ScopeFor(t, e.db, member.ID).CanSendReports)
+	require.False(t, testutil.ScopeFor(t, e.db, member.ID).Has(authctx.PermReportsSend))
 }
 
-// TestMeExposesSendReportsFlag pins the two /centers/me read shapes: the
-// owner's roster carries each member's computed effective reports.send, a
-// member sees their own.
-func TestMeExposesSendReportsFlag(t *testing.T) {
+// TestMeExposesSendReportsPermission pins how a member learns their own
+// send authority from /centers/me: reports.send appears in, then leaves, the
+// effective permission list as the grant comes and goes.
+func TestMeExposesSendReportsPermission(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
@@ -112,25 +110,14 @@ func TestMeExposesSendReportsFlag(t *testing.T) {
 	e.join(t, member.ID, owner.ID)
 	grantReportsSend(t, e, owner.ID, member.ID, true)
 
-	ownerMe, err := e.centersSvc.Me(ctx, e.scope(t, owner.ID))
-	require.NoError(t, err)
-	me, ok := ownerMe.(*centers.MeResponse)
-	require.True(t, ok)
-	byID := map[uuid.UUID]centers.MemberResponse{}
-	for _, m := range me.Members {
-		byID[m.ID] = m
-	}
-	require.True(t, byID[member.ID].CanSendReports)
-	require.False(t, byID[owner.ID].CanSendReports, "the owner never carries the permission")
-
 	memberMe, err := e.centersSvc.Me(ctx, e.scope(t, member.ID))
 	require.NoError(t, err)
 	memberResp, ok := memberMe.(*centers.MemberMeResponse)
 	require.True(t, ok)
-	require.True(t, memberResp.CanSendReports)
+	require.Contains(t, memberResp.Permissions, authctx.PermReportsSend)
 
 	grantReportsSend(t, e, owner.ID, member.ID, false)
 	memberMe, err = e.centersSvc.Me(ctx, e.scope(t, member.ID))
 	require.NoError(t, err)
-	require.False(t, memberMe.(*centers.MemberMeResponse).CanSendReports)
+	require.NotContains(t, memberMe.(*centers.MemberMeResponse).Permissions, authctx.PermReportsSend)
 }

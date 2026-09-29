@@ -66,15 +66,15 @@ type RunStore interface {
 	MarkOutcome(ctx context.Context, a authctx.Anchor, id uuid.UUID, status string, providerMsgID, errorMessage *string) error
 	FailQueuedInRun(ctx context.Context, a authctx.Anchor, runID uuid.UUID, reason string) error
 	UpdateRunStatus(ctx context.Context, a authctx.Anchor, runID uuid.UUID, status string) error
-	// CanSendReports is the delegated run's per-item permission probe:
+	// HoldsReportsSend is the delegated run's per-item permission probe:
 	// revoking the reports.send permission cannot reach into a goroutine
 	// holding its items in memory, so the loop asks before every send instead.
-	CanSendReports(ctx context.Context, centerID, teacherID uuid.UUID) (bool, error)
+	HoldsReportsSend(ctx context.Context, centerID, teacherID uuid.UUID) (bool, error)
 	// ClassSendAllowed is the class-scoped run's per-item probe — the same
 	// mid-run revocation idea, but keyed on the sender's standing toward the
 	// class (active stint, delegation, or ownership) rather than the
 	// reports.send permission alone. A class sender need not hold it, so
-	// probing CanSendReports for such a run would revoke it instantly.
+	// probing HoldsReportsSend for such a run would revoke it instantly.
 	ClassSendAllowed(ctx context.Context, centerID, teacherID, classID uuid.UUID) (bool, error)
 }
 
@@ -373,7 +373,7 @@ func (m *RunManager) stillPermitted(ctx context.Context, job *runJob) bool {
 	if job.grant.ClassID != nil {
 		can, err = m.store.ClassSendAllowed(ctx, job.centerID, job.teacherID, *job.grant.ClassID)
 	} else {
-		can, err = m.store.CanSendReports(ctx, job.centerID, job.teacherID)
+		can, err = m.store.HoldsReportsSend(ctx, job.centerID, job.teacherID)
 	}
 	if err != nil {
 		if ctx.Err() != nil {
@@ -389,7 +389,7 @@ func (m *RunManager) stillPermitted(ctx context.Context, job *runJob) bool {
 // revokeRun is the permission-revoked ending: like expireRun, every remaining
 // queued row fails with one sweep — here with the revoked reason — and the run
 // record says interrupted, truthfully "stopped before finishing". A resume
-// needs the flag back, and by then finds nothing queued.
+// needs reports.send back, and by then finds nothing queued.
 func (m *RunManager) revokeRun(ctx context.Context, job *runJob) {
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runWriteTimeout)
 	defer cancel()

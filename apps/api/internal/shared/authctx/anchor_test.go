@@ -16,15 +16,14 @@ func TestAnchorCarriesIdentityOnly(t *testing.T) {
 	require.Equal(t, 2, anchorType.NumField())
 	_, hasOwner := anchorType.FieldByName("IsOwner")
 	_, hasPerms := anchorType.FieldByName("Perms")
-	_, hasSend := anchorType.FieldByName("CanSendReports")
-	require.False(t, hasOwner || hasPerms || hasSend)
+	require.False(t, hasOwner || hasPerms)
 	require.Zero(t, anchorType.NumMethod(), "an Anchor has no widening helpers")
 	require.False(t, reflect.TypeOf(Scope{}).ConvertibleTo(anchorType))
 	require.False(t, anchorType.ConvertibleTo(reflect.TypeOf(Scope{})))
 }
 
 func TestAnchorToKeepsTheCallersCenter(t *testing.T) {
-	sc := Scope{TeacherID: uuid.New(), CenterID: uuid.New(), IsOwner: true, CanSendReports: true,
+	sc := Scope{TeacherID: uuid.New(), CenterID: uuid.New(), IsOwner: true,
 		Perms: BuildPermSet(nil, []string{PermBillingViewAll}, nil)}
 	other := uuid.New()
 

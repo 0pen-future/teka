@@ -141,7 +141,7 @@ func TestReplaceRolePermissions(t *testing.T) {
 		centers.RolePermissionsRequest{Permissions: []string{authctx.PermReportsSend}}))
 	require.NoError(t, e.centersSvc.AssignMemberRole(ctx, ownerScope, member.ID,
 		centers.MemberRoleRequest{RoleID: hocVu}))
-	require.True(t, e.scope(t, member.ID).CanSendReports,
+	require.True(t, e.scope(t, member.ID).Has(authctx.PermReportsSend),
 		"role-granted reports.send must resolve into the member's scope")
 
 	require.NoError(t, e.centersSvc.ReplaceRolePermissions(ctx, ownerScope, hocVu,
@@ -301,7 +301,7 @@ func TestReplaceMemberOverrides(t *testing.T) {
 			Grants: []string{authctx.PermReportsSend, authctx.PermAuditRead},
 			Denies: []string{authctx.PermDashboardView}}))
 	sc := e.scope(t, member.ID)
-	require.True(t, sc.CanSendReports)
+	require.True(t, sc.Has(authctx.PermReportsSend))
 	require.True(t, sc.Has(authctx.PermAuditRead))
 	require.False(t, sc.Has(authctx.PermDashboardView))
 
@@ -316,7 +316,7 @@ func TestReplaceMemberOverrides(t *testing.T) {
 		centers.MemberOverridesRequest{Grants: []string{authctx.PermAuditRead}}))
 	require.Equal(t, []string{"audit.read"}, e.overrideKeys(t, member.ID, ownerScope.CenterID))
 	sc = e.scope(t, member.ID)
-	require.False(t, sc.CanSendReports)
+	require.False(t, sc.Has(authctx.PermReportsSend))
 	require.False(t, sc.Has(authctx.PermReportsSend))
 }
 

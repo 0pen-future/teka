@@ -202,13 +202,13 @@ func (s *Service) BulkSend(ctx context.Context, sc authctx.Scope, periodID uuid.
 		// A Zalo account is personal: DMs go out from the caller's own linked
 		// session. A reports.send holder is exactly the person trusted to
 		// do that for other teachers' periods (delegated send); the owner
-		// never holds the permission (member-only, decision D2), so for the
-		// owner this refusal is unchanged — an owner opening a member's period
+		// holds it only implicitly, never as a key (see delegatedSender), so
+		// for the owner this refusal stands — an owner opening a member's period
 		// here would find the member's mappings but no basis to DM those parents.
 		// The rollback also undoes the statement refresh, so nothing is
 		// written. A class send is exempt: the class stint itself is the basis
 		// to DM that class's parents, whoever owns the period (handoffs).
-		if personal && crossTeacher && classID == nil && !sc.CanSendReports {
+		if personal && crossTeacher && classID == nil && !delegatedSender(sc) {
 			return apperror.Conflict("this period belongs to another teacher; zalo_personal sends only their own periods — ask them to send it, or use zalo_manual")
 		}
 
@@ -388,13 +388,22 @@ func (s *Service) BulkSend(ctx context.Context, sc authctx.Scope, periodID uuid.
 	return &resp, nil
 }
 
+// delegatedSender reports whether the caller holds reports.send as an actual
+// key in their effective set — the basis for DMing another teacher's families
+// from their own Zalo session. Perms.HasKey, not Has: the owner's implicit
+// superuser bypass must not open that path (an owner run would also fail the
+// per-item HoldsReportsSend probe at once, since the owner holds no key rows).
+func delegatedSender(sc authctx.Scope) bool {
+	return sc.Perms.HasKey(authctx.PermReportsSend)
+}
+
 // runGrant names the authority a run sends under. A class run held by a
 // class-role sender (not oversight) is probed against the class standing; a
 // cross-teacher family run held under reports.send is probed against that
 // permission; everything else — own period, or oversight whose standing does
 // not expire mid-run — needs no per-item re-check.
 func runGrant(sc authctx.Scope, crossTeacher bool, classID *uuid.UUID) RunGrant {
-	grant := RunGrant{Delegated: crossTeacher && classID == nil && sc.CanSendReports}
+	grant := RunGrant{Delegated: crossTeacher && classID == nil && delegatedSender(sc)}
 	if classID != nil && !sc.ReportsOversight() {
 		grant.ClassID = classID
 	}
@@ -509,7 +518,7 @@ func (s *Service) SendPreview(ctx context.Context, sc authctx.Scope, periodID uu
 	}
 	// The class stint is the basis to DM the class's parents whoever owns the
 	// period, so the cross-teacher refusal only guards the family dimension.
-	if classID == nil && periodTeacher != sc.TeacherID && !sc.CanSendReports {
+	if classID == nil && periodTeacher != sc.TeacherID && !delegatedSender(sc) {
 		return nil, apperror.Conflict("this period belongs to another teacher; zalo_personal sends only their own periods — ask them to send it, or use zalo_manual")
 	}
 

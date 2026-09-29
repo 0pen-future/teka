@@ -10,6 +10,7 @@ import (
 
 	"teka/apps/api/internal/features/invitations"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/testutil"
 )
 
@@ -25,7 +26,7 @@ func TestSecretaryCannotCreateInvitations(t *testing.T) {
 	ownerCenter := testutil.ScopeFor(t, e.db, owner.ID).CenterID
 	_, secretary := testutil.Secretary(t, e.db, ownerCenter)
 	secScope := testutil.ScopeFor(t, e.db, secretary.ID)
-	require.True(t, secScope.CanSendReports)
+	require.True(t, secScope.Has(authctx.PermReportsSend))
 	require.False(t, secScope.IsOwner)
 
 	_, err := e.invitationsSvc.Create(ctx, secScope, invitations.CreateRequest{Phone: "+84901234567"})
