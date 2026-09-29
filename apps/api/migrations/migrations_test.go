@@ -33,8 +33,7 @@ var domainTables = []string{
 	"center_members", "invitations", "password_reset_tokens",
 	"class_curricula", "lesson_plans", "session_notes", "session_marks",
 	"audit_logs",
-	"score_sets", "score_set_components", "class_score_components",
-	"student_scores",
+	"class_score_components", "student_scores",
 	"owner_anchor_backfill",
 	"rbac_backfill_rows", "rbac_backfill_ledger",
 	"task_columns", "tasks",
@@ -326,10 +325,10 @@ func TestDownFoldsPersonalChannelIntoManual(t *testing.T) {
 		 VALUES (?, ?, ?, ?, 'zalo_personal')`,
 		notifID, f.teacherID, f.centerID, f.statementID).Error)
 
-	// Roll back through 000005 (zalo_personal_mapping): thirty-two steps now
-	// that the additive 000008-000036 sit on top of the migrations this
+	// Roll back through 000005 (zalo_personal_mapping): thirty-three steps now
+	// that the additive 000008-000037 sit on top of the migrations this
 	// test predates.
-	require.NoError(t, database.MigrateDown(m, 32))
+	require.NoError(t, database.MigrateDown(m, 33))
 
 	var channel string
 	require.NoError(t, db.Raw(
@@ -3274,6 +3273,89 @@ func TestDropTemplateLessonPrepSchemaAndPermission(t *testing.T) {
 	require.NoError(t, db.Raw(
 		`SELECT title FROM template_lessons WHERE id = ?`, lessonID).Scan(&title).Error)
 	require.Equal(t, "Buổi 1", title, "the lesson's own content survives the column drop")
+}
+
+// Score sets now come from the program template and are copied into the
+// class on apply, so the center-level score_sets catalog, its components and
+// the class_score_components.source_set_id trace column are dropped. A class's
+// score snapshot and the scores hanging off it must survive the drop; the
+// down rebuilds the empty structure without restoring the catalog.
+func TestDropLegacyScoreSetTables(t *testing.T) {
+	t.Parallel()
+	url := startBarePostgres(t)
+
+	m, err := database.NewMigrator(url)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, database.MigrateUp(m))
+	// Step back below the drop and seed the legacy shape it must clean up.
+	require.NoError(t, m.Migrate(36))
+
+	db := openDB(t, url)
+	f := seedTeachingParents(t, db, "+84900002501")
+
+	setID, componentID := uuid.New(), uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO score_sets (id, center_id, name) VALUES (?, ?, 'IELTS')`,
+		setID, f.centerID).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO score_set_components (id, set_id, name, position) VALUES (?, ?, 'Listening', 1)`,
+		uuid.New(), setID).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO class_score_components (id, class_id, center_id, name, position, source_set_id)
+		 VALUES (?, ?, ?, 'Listening', 1, ?)`,
+		componentID, f.classID, f.centerID, setID).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO student_scores (id, class_id, session_id, component_id, student_id, teacher_id, center_id, score)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 7.5)`,
+		uuid.New(), f.classID, f.sessionID, componentID, f.studentID, f.teacherID, f.centerID).Error)
+
+	regclassIsNull := func(table string) bool {
+		t.Helper()
+		var missing bool
+		require.NoError(t, db.Raw(`SELECT to_regclass(?) IS NULL`, table).Scan(&missing).Error)
+		return missing
+	}
+	hasSourceSetColumn := func() bool {
+		t.Helper()
+		cols := nameSet(t, db,
+			`SELECT column_name FROM information_schema.columns WHERE table_name = 'class_score_components'`)
+		return cols["source_set_id"]
+	}
+	countRows := func(query string, args ...any) int64 {
+		t.Helper()
+		var n int64
+		require.NoError(t, db.Raw(query, args...).Scan(&n).Error)
+		return n
+	}
+
+	require.NoError(t, database.MigrateUp(m))
+
+	require.True(t, regclassIsNull("score_sets"), "score_sets must be dropped")
+	require.True(t, regclassIsNull("score_set_components"), "score_set_components must be dropped")
+	require.False(t, hasSourceSetColumn(), "class_score_components.source_set_id must be dropped")
+	require.EqualValues(t, 1, countRows(
+		`SELECT count(*) FROM class_score_components WHERE id = ? AND name = 'Listening'`, componentID),
+		"the class score snapshot survives the drop")
+	require.EqualValues(t, 1, countRows(
+		`SELECT count(*) FROM student_scores WHERE component_id = ? AND score = 7.5`, componentID),
+		"the student score survives the drop")
+
+	// Down rebuilds the structure empty; the catalog and trace link are gone.
+	require.NoError(t, m.Migrate(36))
+	require.False(t, regclassIsNull("score_sets"), "down must recreate score_sets")
+	require.False(t, regclassIsNull("score_set_components"), "down must recreate score_set_components")
+	require.Zero(t, countRows(`SELECT count(*) FROM score_sets`), "down does not restore the catalog")
+	require.Zero(t, countRows(`SELECT count(*) FROM score_set_components`), "down does not restore components")
+	require.True(t, hasSourceSetColumn(), "down must re-add class_score_components.source_set_id")
+	require.EqualValues(t, 1, countRows(
+		`SELECT count(*) FROM class_score_components WHERE id = ? AND source_set_id IS NULL`, componentID),
+		"the re-added trace column comes back NULL")
+
+	require.NoError(t, database.MigrateUp(m), "re-applying the drop after a down must be clean")
+	require.True(t, regclassIsNull("score_sets"))
+	require.True(t, regclassIsNull("score_set_components"))
+	require.False(t, hasSourceSetColumn())
 }
 
 func TestLibraryBankFieldsBackfill(t *testing.T) {
