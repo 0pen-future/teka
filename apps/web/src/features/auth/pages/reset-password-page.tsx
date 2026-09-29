@@ -49,9 +49,9 @@ export function ResetPasswordPage() {
     return (
       <HvCard variant="raised" padding="lg" className="mx-auto w-full max-w-[var(--w-phone)]">
         <div className="flex flex-col items-center gap-3 text-center">
-          <p className="font-display text-[17px] font-bold text-ink-900">
+          <h1 className="font-display text-[17px] font-bold text-ink-900">
             Không mở được liên kết này.
-          </p>
+          </h1>
           <Link
             to="/forgot-password"
             className="font-bold text-mint-600 underline-offset-4 hover:underline"
@@ -66,7 +66,7 @@ export function ResetPasswordPage() {
   return (
     <HvCard variant="raised" padding="lg" className="mx-auto w-full max-w-[var(--w-phone)]">
       <div className="mb-6 text-center">
-        <p className="font-display text-[17px] font-bold text-ink-900">Đặt lại mật khẩu</p>
+        <h1 className="font-display text-[17px] font-bold text-ink-900">Đặt lại mật khẩu</h1>
       </div>
       <form onSubmit={(event) => void onSubmit(event)} noValidate>
         <FieldGroup>

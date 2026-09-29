@@ -67,9 +67,9 @@ export function AcceptInvitePage() {
   return (
     <HvCard variant="raised" padding="lg" className="mx-auto w-full max-w-[var(--w-phone)]">
       <div className="mb-6 text-center">
-        <p className="font-display text-[22px] font-extrabold text-ink-900">
+        <h1 className="font-display text-[22px] font-extrabold text-ink-900">
           {preview.center_name}
-        </p>
+        </h1>
         <p className="mt-1 text-[13px] text-ink-500">Tạo tài khoản cho số {preview.phone_masked}</p>
       </div>
       <form onSubmit={(event) => void onSubmit(event)} noValidate>

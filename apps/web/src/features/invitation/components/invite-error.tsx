@@ -19,9 +19,9 @@ export function InviteError() {
         !
       </span>
       <div className="flex flex-col gap-2">
-        <p className="font-display text-[17px] font-bold text-ink-900">
+        <h1 className="font-display text-[17px] font-bold text-ink-900">
           Không mở được lời mời này.
-        </p>
+        </h1>
         <p className="text-[15px] text-ink-500">
           Liên kết có thể đã hết hạn hoặc đã được dùng. Vui lòng liên hệ chủ trung tâm để nhận lời
           mời mới.

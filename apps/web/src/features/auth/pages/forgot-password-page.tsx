@@ -33,7 +33,7 @@ export function ForgotPasswordPage() {
     return (
       <HvCard variant="raised" padding="lg" className="mx-auto w-full max-w-[var(--w-phone)]">
         <div className="flex flex-col items-center gap-3 text-center">
-          <p className="font-display text-[17px] font-bold text-ink-900">Đã gửi yêu cầu</p>
+          <h1 className="font-display text-[17px] font-bold text-ink-900">Đã gửi yêu cầu</h1>
           <p className="text-[14px] text-ink-500">
             Nếu số điện thoại hợp lệ, liên kết đặt lại đã được gửi qua Zalo.
           </p>
@@ -48,7 +48,7 @@ export function ForgotPasswordPage() {
   return (
     <HvCard variant="raised" padding="lg" className="mx-auto w-full max-w-[var(--w-phone)]">
       <div className="mb-6 text-center">
-        <p className="font-display text-[17px] font-bold text-ink-900">Quên mật khẩu?</p>
+        <h1 className="font-display text-[17px] font-bold text-ink-900">Quên mật khẩu?</h1>
         <p className="mt-1 text-[13px] text-ink-500">
           Nhập số điện thoại đăng nhập để nhận liên kết đặt lại mật khẩu.
         </p>

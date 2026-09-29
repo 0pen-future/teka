@@ -16,7 +16,7 @@ export function AuthLayout() {
     return <Navigate to={from ?? "/"} replace />;
   }
   return (
-    <main id="main-content" className="flex min-h-svh items-center justify-center bg-muted/40 p-4">
+    <main id="main-content" className="flex min-h-svh items-center justify-center bg-cream-100 p-4">
       <div className="w-full max-w-sm">
         <Outlet />
       </div>
