@@ -150,7 +150,12 @@ function LessonView({ template, version, lesson }: LessonViewProps) {
             <LessonContents lesson={lesson} templateId={template.id} editable={editable} />
           </>
         ) : (
-          <LessonExercises lesson={lesson} templateId={template.id} editable={editable} />
+          <LessonExercises
+            lesson={lesson}
+            templateId={template.id}
+            templateLevel={template.level}
+            editable={editable}
+          />
         )}
       </div>
     </div>

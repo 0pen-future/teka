@@ -348,14 +348,18 @@ describe("TemplateLessonPage", () => {
       renderPage();
       await openExercisesTab(user);
 
-      await user.click(screen.getByRole("button", { name: "Bài tập tự soạn" }));
-      const dialog = await screen.findByRole("dialog", { name: "Thêm bài tập" });
+      await user.click(screen.getByRole("button", { name: "+ Bài tập tự soạn" }));
+      const dialog = await screen.findByRole("dialog", {
+        name: "Tạo bài tập — thêm vào buổi này",
+      });
+      // "Cấp độ" starts from the template's level.
+      expect(within(dialog).getByLabelText("Cấp độ")).toHaveValue(templateToan6.level);
       await user.type(within(dialog).getByLabelText("Tên bài tập"), "Bài 3: Phép cộng");
-      await user.click(within(dialog).getByRole("button", { name: "Thêm" }));
+      await user.click(within(dialog).getByRole("button", { name: "Tạo mới" }));
 
-      expect(await screen.findByText("Đã thêm bài tập vào buổi học")).toBeInTheDocument();
+      expect(await screen.findByText("Đã tạo BT-0003 và gán vào buổi")).toBeInTheDocument();
       const created = getLibraryStore().exercises.find((e) => e.title === "Bài 3: Phép cộng");
-      expect(created).toBeDefined();
+      expect(created).toMatchObject({ level: templateToan6.level, skill: "Tổng hợp" });
       expect(exerciseLinksOf(lessonDraftSoTuNhien.id).map((l) => l.exercise_id)).toEqual([
         exerciseBai1.id,
         created?.id,
@@ -364,6 +368,40 @@ describe("TemplateLessonPage", () => {
         exerciseLinksOf(lessonDraftSoTuNhien.id).find((l) => l.exercise_id === created?.id)
           ?.group_id,
       ).toBeNull();
+    });
+
+    it("attaches a self-authored exercise to the version's first exercise group", async () => {
+      const user = userEvent.setup();
+      getLibraryStore().exerciseGroups.push(
+        {
+          id: "86000000-0000-4000-8000-000000000001",
+          version_id: versionToan6Draft.id,
+          name: "Bài tập trên lớp",
+          position: 1,
+        },
+        {
+          id: "86000000-0000-4000-8000-000000000002",
+          version_id: versionToan6Draft.id,
+          name: "Bài tập về nhà",
+          position: 2,
+        },
+      );
+      renderPage();
+      await openExercisesTab(user);
+
+      await user.click(screen.getByRole("button", { name: "+ Bài tập tự soạn" }));
+      const dialog = await screen.findByRole("dialog", {
+        name: "Tạo bài tập — thêm vào buổi này",
+      });
+      await user.type(within(dialog).getByLabelText("Tên bài tập"), "Bài 3: Phép cộng");
+      await user.click(within(dialog).getByRole("button", { name: "Tạo mới" }));
+
+      expect(await screen.findByText("Đã tạo BT-0003 và gán vào buổi")).toBeInTheDocument();
+      const created = getLibraryStore().exercises.find((e) => e.title === "Bài 3: Phép cộng");
+      expect(
+        exerciseLinksOf(lessonDraftSoTuNhien.id).find((l) => l.exercise_id === created?.id)
+          ?.group_id,
+      ).toBe("86000000-0000-4000-8000-000000000001");
     });
 
     it("moves an exercise into a group with an immediate save", async () => {
@@ -421,8 +459,8 @@ describe("TemplateLessonPage", () => {
       await openExercisesTab(user);
 
       expect(screen.getByText("Chưa có bài tập nào trong buổi.")).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "Bài tập tự soạn" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "Bài tập có sẵn" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "+ Bài tập tự soạn" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "+ Bài tập có sẵn" })).not.toBeInTheDocument();
     });
 
     it("clears a lesson's stale group selection once its exercise group is deleted elsewhere", async () => {

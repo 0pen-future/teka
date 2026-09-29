@@ -120,11 +120,11 @@ test("owner builds a template through the hub, its lessons, groups, grading and 
   // and its copy button both shows and copies that code.
   await hubTabs.getByRole("tab", { name: "Ngân hàng bài tập" }).click();
   await expect(page).toHaveURL(/\/library\/exercises$/);
-  await page.getByRole("button", { name: "Thêm bài tập" }).click();
-  const exerciseDialog = page.getByRole("dialog", { name: "Thêm bài tập" });
+  await page.getByRole("button", { name: "+ Soạn bài tập" }).click();
+  const exerciseDialog = page.getByRole("dialog", { name: "Tạo bài tập" });
   await exerciseDialog.getByLabel("Tên bài tập").fill(EXERCISE_TITLE);
-  await exerciseDialog.getByRole("button", { name: "Thêm" }).click();
-  await expect(page.getByText("Đã thêm bài tập")).toBeVisible();
+  await exerciseDialog.getByRole("button", { name: "Tạo mới" }).click();
+  await expect(page.getByText(/^Đã thêm BT-\d+ vào ngân hàng$/)).toBeVisible();
   await page.getByRole("searchbox", { name: "Tìm bài tập" }).fill(RUN_CODE);
   const exerciseRow = page.getByRole("row").filter({ hasText: EXERCISE_TITLE });
   const copyButton = exerciseRow.getByRole("button", { name: /^Sao chép mã / });
@@ -214,7 +214,7 @@ test("owner builds a template through the hub, its lessons, groups, grading and 
 
   // Attach the exercise from the bank picker, then assign it to the group.
   await page.getByRole("tab", { name: "Bài tập" }).click();
-  await page.getByRole("button", { name: "Bài tập có sẵn" }).click();
+  await page.getByRole("button", { name: "+ Bài tập có sẵn" }).click();
   const exercisePicker = page.getByRole("dialog", { name: "Chọn từ ngân hàng bài tập" });
   await exercisePicker.getByRole("searchbox", { name: "Tìm bài tập" }).fill(RUN_CODE);
   await exercisePicker.getByRole("checkbox", { name: EXERCISE_TITLE, exact: true }).check();
