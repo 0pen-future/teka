@@ -192,15 +192,18 @@ export function PermissionMatrix() {
                   ) : null}
                 </td>
                 {roles.map((role) => (
-                  <td key={role.id} className="px-2 py-2 text-center">
-                    <input
-                      type="checkbox"
-                      aria-label={`${permission.label} — ${role.name}`}
-                      checked={checkedOf(role).includes(permission.key)}
-                      disabled={mutation.isPending}
-                      onChange={() => toggle(role, permission.key)}
-                      className="size-4 accent-mint-600"
-                    />
+                  <td key={role.id} className="p-0 text-center">
+                    {/* The label fills the cell so the whole 44px square toggles the box. */}
+                    <label className="flex min-h-11 min-w-11 cursor-pointer items-center justify-center">
+                      <input
+                        type="checkbox"
+                        aria-label={`${permission.label} — ${role.name}`}
+                        checked={checkedOf(role).includes(permission.key)}
+                        disabled={mutation.isPending}
+                        onChange={() => toggle(role, permission.key)}
+                        className="size-5 cursor-pointer accent-mint-600"
+                      />
+                    </label>
                   </td>
                 ))}
               </tr>
