@@ -1,7 +1,7 @@
 ---
 phase: 7
 title: "Design-system docs and final verification"
-status: pending
+status: completed
 priority: P1
 effort: "0.5d"
 dependencies: [1, 2, 3, 4, 5, 6]

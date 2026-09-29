@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "UX guard harness"
-status: pending
+status: completed
 priority: P1
 effort: "0.5d"
 dependencies: []
@@ -35,14 +35,18 @@ surface, nên một thay đổi token sau này sẽ fail ngay trong `npm test` m
 
 ```ts
 export type Viewport = { width: number; height: number };
-export const VIEWPORTS = { desktop: {width:1440,height:900}, tablet: {width:768,height:1024},
-  phone: {width:375,height:812}, narrow: {width:320,height:720} } as const;
+export const VIEWPORTS = {
+  desktop: { width: 1440, height: 900 },
+  tablet: { width: 768, height: 1024 },
+  phone: { width: 375, height: 812 },
+  narrow: { width: 320, height: 720 },
+} as const;
 
 export interface UxRoute {
-  name: string;              // dùng làm tên test và tên ảnh
+  name: string; // dùng làm tên test và tên ảnh
   path: string | ((page: Page) => Promise<string>); // dynamic: đọc href từ nav
   auth: "owner" | "public";
-  narrow?: boolean;          // thêm 320×720 (các route liệt kê ở M1)
+  narrow?: boolean; // thêm 320×720 (các route liệt kê ở M1)
 }
 ```
 

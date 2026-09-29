@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Color tokens and button contrast"
-status: pending
+status: completed
 priority: P1
 effort: "1d"
 dependencies: [1]
@@ -17,7 +17,6 @@ nền thương hiệu mint/sky/coral/sun. Quyết định đã chốt: **chữ `
 ## Files
 
 Không sửa màu trong `features/statement/`: phase 5 xoá cả feature.
-
 
 - Modify: `apps/web/src/styles/tokens/colors.css`: `--mint-600` → `#24775c`; thêm token `--text-on-brand: var(--ink-900)` và đổi `--text-on-primary` trỏ vào đó.
 - Modify: `apps/web/src/components/hv/hv-button.tsx`: đổi màu chữ các biến thể, export `hvButtonVariants`.
@@ -43,14 +42,14 @@ Không sửa màu trong `features/statement/`: phase 5 xoá cả feature.
 
 ### Biến thể `HvButton`
 
-| Variant | Nền | Chữ mới | Ratio |
-|---|---|---|---|
-| primary | `mint-400` | `ink-900` | 6.10 |
-| secondary | `sky-300` | `ink-900` | 6.67 |
-| danger | `coral-400` | `ink-900` | 4.84 |
-| reward | `sun-400` | `ink-900` | 7.99 |
-| ghost | `white` | `mint-600` (mới `#24775c`) | 5.43 |
-| disabled | `line-200` | `ink-300` | Được miễn theo WCAG 1.4.3 (control bị vô hiệu); giữ nguyên |
+| Variant   | Nền         | Chữ mới                    | Ratio                                                      |
+| --------- | ----------- | -------------------------- | ---------------------------------------------------------- |
+| primary   | `mint-400`  | `ink-900`                  | 6.10                                                       |
+| secondary | `sky-300`   | `ink-900`                  | 6.67                                                       |
+| danger    | `coral-400` | `ink-900`                  | 4.84                                                       |
+| reward    | `sun-400`   | `ink-900`                  | 7.99                                                       |
+| ghost     | `white`     | `mint-600` (mới `#24775c`) | 5.43                                                       |
+| disabled  | `line-200`  | `ink-300`                  | Được miễn theo WCAG 1.4.3 (control bị vô hiệu); giữ nguyên |
 
 Dùng class `text-[var(--text-on-brand)]` (hoặc utility `text-ink-900`) để quy tắc
 nằm ở một token: nếu sau này đổi hướng sang "nền đậm + chữ trắng", chỉ sửa token và bảng nền.

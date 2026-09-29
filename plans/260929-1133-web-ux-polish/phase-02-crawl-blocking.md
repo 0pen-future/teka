@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Crawl blocking (robots, X-Robots-Tag, meta)"
-status: pending
+status: completed
 priority: P1
 effort: "0.25d"
 dependencies: []

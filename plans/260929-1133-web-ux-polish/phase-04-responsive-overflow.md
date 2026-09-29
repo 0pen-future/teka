@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Responsive overflow"
-status: pending
+status: completed
 priority: P1
 effort: "1d"
 dependencies: [1, 3]
@@ -61,7 +61,10 @@ export function HvTableScroll({ className, ...rest }: HvTableScrollProps) {
     <div
       role="region"
       tabIndex={0}
-      className={cn("relative max-w-full overflow-x-auto overscroll-x-contain focus-visible:ring-4", className)}
+      className={cn(
+        "relative max-w-full overflow-x-auto overscroll-x-contain focus-visible:ring-4",
+        className,
+      )}
       {...rest}
     />
   );
@@ -94,7 +97,9 @@ Thêm test: khi active item nằm ngoài vùng nhìn thấy thì gọi `scrollIn
 4. Sửa `HvSegmented`.
 5. Chạy `ux-audit` ở 320/375/768; với các trang còn tràn, dùng snippet sau trong spec debug để tìm thủ phạm rồi sửa tại gốc (thường là `min-w-*` cố định hoặc `whitespace-nowrap` trong flex):
    ```js
-   [...document.querySelectorAll('body *')].filter(e => e.getBoundingClientRect().right > innerWidth + 1)
+   [...document.querySelectorAll("body *")].filter(
+     (e) => e.getBoundingClientRect().right > innerWidth + 1,
+   );
    ```
 
 ## Verification

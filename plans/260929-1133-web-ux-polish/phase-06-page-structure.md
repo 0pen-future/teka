@@ -1,7 +1,7 @@
 ---
 phase: 6
 title: "Structure: titles, h1, billing, sidebar, touch targets"
-status: pending
+status: completed
 priority: P1
 effort: "1d"
 dependencies: [3]
@@ -102,3 +102,17 @@ Giữ `aria-label` hiện có trên input. Ma trận nằm trong `HvTableScroll`
 
 - Đổi nhãn sidebar làm fail e2e hiện có: grep `apps/web/e2e` cho 3 nhãn cũ và sửa cùng commit.
 - `handle.title` bị quên ở route mới trong tương lai: test "unique titles" trong `ux-audit` và quy tắc ở guidelines (phase 7) bắt được.
+
+## Completion notes
+
+- Billing CTA: nút duy nhất dẫn tới trang điểm danh của buổi quá hạn lâu nhất,
+  không phải `/sessions`, vì trang buổi học không có bộ lọc "còn thiếu" và chỉ
+  xem theo từng lớp. Danh sách theo lớp nằm trong `<details>` đóng mặc định.
+- `ux-audit` round cuối lộ thêm vi phạm contrast ngoài phạm vi phase 3: chữ nhóm
+  sidebar (`ink-300`), `sun-600` trên `sun-100` (3.21), `ink-500` trên
+  `cream-200` (4.34), `sky-500` trên `sky-50` (4.30), nút huỷ lời mời
+  `coral-500`; sau khi suite khác tạo dữ liệu còn lộ avatar giao việc (chữ trắng), số đếm chip lọc `opacity-75` và ô "Chưa có buổi" (`ink-300`). Sửa tại token: `--sun-600` #8f6000, `--ink-500` #536c63,
+  `--sky-500` #29739a; nhóm sidebar dùng `ink-500`; nút huỷ dùng `coral-600`.
+  `contrast.test.ts` khoá thêm các cặp này.
+  Avatar dùng nền pastel thương hiệu + `text-on-brand`; số đếm bỏ opacity;
+  ô trống dùng `ink-500`.
