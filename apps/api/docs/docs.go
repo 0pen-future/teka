@@ -9124,7 +9124,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Stores the picked friend's id and display name on the contact. Values come from GET /me/zalo/friends; the backend does not re-check them against the live friend list.",
+                "description": "Stores the picked friend's id and display name on the contact. Values come from GET /me/zalo/friends; the backend does not re-check them against the live friend list. Owner or send-reports holders only — rewiring the mapping redirects the family's messages, so contacts.view_all alone does not grant it; anyone else gets 404.",
                 "consumes": [
                     "application/json"
                 ],
@@ -9252,7 +9252,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Nulls both mapping fields. Idempotent: unmapping an unmapped contact is still 204.",
+                "description": "Nulls both mapping fields. Idempotent: unmapping an unmapped contact is still 204. Owner or send-reports holders only; anyone else gets 404.",
                 "produces": [
                     "application/json"
                 ],
@@ -16265,7 +16265,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Looks up 1–200 phone numbers against Zalo in paced chunks, intersects the hits with the linked account's friend list, and returns one row per phone in request order. Rows echo the phone exactly as sent; unresolved phones come back matched=false. Owner and send-reports holders match any phone; an active hoc_vu matches only phones of contacts their assignments make phone-visible (out-of-reach phones come back matched=false without a lookup); other staff get 403. Nothing is persisted — confirming a suggestion goes through PUT /contacts/{id}/zalo-mapping. 404 when no account is linked, 409 when the stored session no longer works.",
+                "description": "Looks up 1–200 phone numbers against Zalo in paced chunks, intersects the hits with the linked account's friend list, and returns one row per phone in request order. Rows echo the phone exactly as sent; unresolved phones come back matched=false. Requires contacts.view_all (the owner holds it implicitly; send-reports implies it); every other caller gets 403 before any phone leaves. Nothing is persisted — confirming a suggestion goes through PUT /contacts/{id}/zalo-mapping. 404 when no account is linked, 409 when the stored session no longer works.",
                 "consumes": [
                     "application/json"
                 ],
@@ -16346,7 +16346,7 @@ const docTemplate = `{
                         }
                     },
                     "403": {
-                        "description": "caller has neither oversight nor an active hoc_vu assignment",
+                        "description": "caller lacks contacts.view_all",
                         "schema": {
                             "allOf": [
                                 {
@@ -23987,7 +23987,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "phone": {
-                    "description": "Phone is null unless the caller may see the contact's phone (owner,\nreports oversight, or an active hoc_vu stint over one of the contact's\nenrolled students). The repository always fills it; the service nils it\nby PhoneVisible before the row leaves.",
+                    "description": "Phone is null unless the caller may see contacts' phones — the owner,\ncontacts.view_all, or reports.send through the keys it implies\n(Scope.PhoneVisible). The repository always fills it; the service nils\nit before the row leaves.",
                     "type": "string"
                 },
                 "student_count": {
@@ -25749,7 +25749,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "phone": {
-                    "description": "Phone is null unless the caller may see the contact's phone (owner,\nreports oversight, or an active hoc_vu stint over one of the contact's\nenrolled students).",
+                    "description": "Phone is null unless the caller may see the contact's phone (owner or\ncontacts.view_all, which reports oversight implies).",
                     "type": "string"
                 },
                 "purpose": {

@@ -7,21 +7,22 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"teka/apps/api/internal/features/zalo"
 	"teka/apps/api/internal/features/zalo/protocol"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/secrets"
 	"teka/apps/api/internal/testutil"
 )
 
 // The one phone rule on the zalo match surface: matching phones against Zalo
 // necessarily sends them to a third party, so the endpoint stays open only to
-// owner/oversight (full center reach) and to an active hoc_vu (limited to the
-// contacts their stints already let them phone). Everyone else is refused, and
-// a hoc_vu's out-of-reach phones never travel to Zalo at all — they come back
-// matched=false without a lookup.
+// callers who may see phones at all: the owner or a contacts.view_all holder
+// (oversight through the key it implies). Everyone else is refused before any
+// phone leaves — a class teacher and an active hoc_vu alike.
 func TestMatchFriendsScopedFollowsTheOnePhoneRule(t *testing.T) {
 	t.Parallel()
 	db := testutil.StartPostgres(t)
@@ -36,7 +37,7 @@ func TestMatchFriendsScopedFollowsTheOnePhoneRule(t *testing.T) {
 	testutil.JoinCenter(t, db, hocVu.ID, center)
 
 	// Contact A's student sits in a class the hoc_vu is assigned to; contact
-	// B's student sits in a class they are not. Both under the same center.
+	// B's student sits in a class they are not. The stint opens neither.
 	contactA := testutil.Contact(t, db, member.ID, testutil.WithContactPhone("+84903334444"))
 	contactB := testutil.Contact(t, db, member.ID, testutil.WithContactPhone("+84907778888"))
 	classA := testutil.Class(t, db, member.ID, testutil.WithClassName("ZaloReachA"))
@@ -100,29 +101,28 @@ func TestMatchFriendsScopedFollowsTheOnePhoneRule(t *testing.T) {
 		lookedUp = nil
 	}
 
-	// A plain class teacher — giao_vien stints only, no oversight — may not
-	// send anyone's phone to Zalo at all.
-	_, err = svc.MatchFriendsScoped(ctx, testutil.ScopeFor(t, db, member.ID),
-		[]string{"0903334444"})
-	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code,
-		"matching phones against Zalo requires oversight or an active hoc_vu stint")
+	// Neither a plain class teacher nor an active hoc_vu may send anyone's
+	// phone to Zalo.
+	for name, id := range map[string]uuid.UUID{"giao_vien": member.ID, "hoc_vu": hocVu.ID} {
+		_, err = svc.MatchFriendsScoped(ctx, testutil.ScopeFor(t, db, id), []string{"0903334444"})
+		require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code,
+			"%s must not match phones against Zalo", name)
+	}
 	require.Empty(t, sawPhones(), "a refused call must not have touched Zalo")
 
-	// An active hoc_vu matches only within reach: the assigned class's contact
-	// resolves, the out-of-reach one comes back unmatched WITHOUT a lookup.
-	rows, err := svc.MatchFriendsScoped(ctx, testutil.ScopeFor(t, db, hocVu.ID),
-		[]string{"0903334444", "0907778888"})
+	// contacts.view_all opens it with full reach.
+	viewerScope := testutil.ScopeFor(t, db, hocVu.ID)
+	viewerScope.Perms = authctx.BuildPermSet(nil, []string{authctx.PermContactsViewAll}, nil)
+	rows, err := svc.MatchFriendsScoped(ctx, viewerScope, []string{"0903334444", "0907778888"})
 	require.NoError(t, err)
 	require.Len(t, rows, 2)
 	require.Equal(t, "0903334444", rows[0].Phone, "rows keep request order and echo the phone as sent")
-	require.True(t, rows[0].Matched, "the in-reach contact resolves")
-	require.Equal(t, "0907778888", rows[1].Phone)
-	require.False(t, rows[1].Matched, "the out-of-reach phone is answered unmatched")
-	require.Equal(t, []string{"84903334444"}, sawPhones(),
-		"only the in-reach phone may travel to Zalo, in the country-code wire form")
+	require.True(t, rows[0].Matched)
+	require.True(t, rows[1].Matched)
+	require.ElementsMatch(t, []string{"84903334444", "84907778888"}, sawPhones(),
+		"phones travel to Zalo in the country-code wire form")
 
-	// Owner (and any oversight holder) keeps the unscoped behavior: every
-	// phone is forwarded.
+	// The owner holds the key implicitly: every phone is forwarded.
 	resetSaw()
 	rows, err = svc.MatchFriendsScoped(ctx, ownerScope, []string{"0903334444", "0907778888"})
 	require.NoError(t, err)

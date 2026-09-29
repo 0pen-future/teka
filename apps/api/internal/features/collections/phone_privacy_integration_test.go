@@ -11,15 +11,16 @@ import (
 
 	"teka/apps/api/internal/features/collections"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/pagination"
 	"teka/apps/api/internal/testutil"
 )
 
 // The one phone rule on the collection board: a contact-balance row carries
-// the contact's phone only to the owner, a reports-oversight holder, or a
-// caller with an ACTIVE hoc_vu stint on a live class where one of the
-// contact's students is actively enrolled. Callers outside the period's reach
-// get a 404, exactly as if the period did not exist.
+// the contact's phone only to the owner or a contacts.view_all holder (a
+// reports-oversight holder through the key it implies). No class assignment
+// opens it, hoc_vu included. Callers outside the period's reach get a 404,
+// exactly as if the period did not exist.
 func TestCollectionsPhoneFollowsTheOnePhoneRule(t *testing.T) {
 	t.Parallel()
 	collectionsSvc, billingSvc, _, db := newIntegrationDeps(t)
@@ -78,9 +79,9 @@ func TestCollectionsPhoneFollowsTheOnePhoneRule(t *testing.T) {
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
 		"another teacher's period must look nonexistent to a non-oversight caller")
 
-	// The row grant is the ONE rule: an active hoc_vu stint on another
-	// teacher's class with this contact's student actively enrolled unlocks
-	// the phone on the period teacher's own board.
+	// Class assignments never widen the phone: an active hoc_vu stint on
+	// another teacher's class with this contact's student actively enrolled
+	// leaves the period teacher's own board masked.
 	classB := testutil.Class(t, db, memberB.ID, testutil.WithClassName("BoardPrivacyB"), testutil.WithClassStartDate(classStart))
 	testutil.Enrollment(t, db, memberB.ID, student.ID, classB.ID, classStart)
 	testutil.StaffAssignment(t, db, classB, member.ID, "hoc_vu")
@@ -88,6 +89,14 @@ func TestCollectionsPhoneFollowsTheOnePhoneRule(t *testing.T) {
 	memberRes, err = collectionsSvc.List(ctx, memberScope, period.ID, collections.ViewContact, collections.Filter{}, page)
 	require.NoError(t, err)
 	require.Len(t, memberRes.ContactRows, 1)
-	require.NotNil(t, memberRes.ContactRows[0].Phone, "an active hoc_vu stint over the contact's student unlocks the phone")
-	require.Equal(t, "+84907778888", *memberRes.ContactRows[0].Phone)
+	require.Nil(t, memberRes.ContactRows[0].Phone, "an active hoc_vu stint no longer unlocks the phone")
+
+	// contacts.view_all is the one grant that opens it.
+	viewerScope := memberScope
+	viewerScope.Perms = authctx.BuildPermSet(nil, []string{authctx.PermContactsViewAll}, nil)
+	viewerRes, err := collectionsSvc.List(ctx, viewerScope, period.ID, collections.ViewContact, collections.Filter{}, page)
+	require.NoError(t, err)
+	require.Len(t, viewerRes.ContactRows, 1)
+	require.NotNil(t, viewerRes.ContactRows[0].Phone, "contacts.view_all unlocks the phone")
+	require.Equal(t, "+84907778888", *viewerRes.ContactRows[0].Phone)
 }

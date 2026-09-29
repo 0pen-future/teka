@@ -17,12 +17,12 @@ import (
 
 // TestContactAccessAcrossRoles pins the contacts surface of the one phone
 // rule. Contacts ARE phone rows, so read reach and phone visibility collapse
-// into a single predicate: the owner and reports oversight read the whole
-// center; an ACTIVE hoc_vu stint reaches exactly the contacts whose students
-// are actively enrolled in the assigned class; everyone else gets an honest
-// empty list and 404s — including the member who anchored the row. Writes are
-// the owner's alone (honest 403), except zalo-mapping, which follows the read
-// predicate so hoc_vu can wire up the parents of their own class.
+// into a single predicate: the owner and a contacts.view_all holder (reports
+// oversight through the key it implies) read the whole center; everyone else
+// gets an honest empty list and 404s — including the member who anchored the
+// row and an active hoc_vu on the class. Writes are the owner's alone (honest
+// 403), except zalo-mapping, which is reports oversight's (owner or
+// reports.send): a read grant never rewires where a family's messages go.
 func TestContactAccessAcrossRoles(t *testing.T) {
 	t.Parallel()
 	svc, db := newIntegrationService(t)
@@ -45,13 +45,15 @@ func TestContactAccessAcrossRoles(t *testing.T) {
 	student := testutil.Student(t, db, gv.ID, contact.ID)
 	testutil.Enrollment(t, db, gv.ID, student.ID, class.ID,
 		time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
-	hocVuStint := testutil.StaffAssignment(t, db, class, hocVu.ID, authctx.StaffRoleHocVu)
+	testutil.StaffAssignment(t, db, class, hocVu.ID, authctx.StaffRoleHocVu)
 	testutil.StaffAssignment(t, db, class, troGiang.ID, authctx.StaffRoleTroGiang)
 
 	scGv := testutil.ScopeFor(t, db, gv.ID)
 	scHocVu := testutil.ScopeFor(t, db, hocVu.ID)
 	scTroGiang := testutil.ScopeFor(t, db, troGiang.ID)
 	scSecretary := testutil.ScopeFor(t, db, secretary.ID)
+	scViewer := testutil.ScopeFor(t, db, troGiang.ID)
+	scViewer.Perms = authctx.BuildPermSet(nil, []string{authctx.PermContactsViewAll}, nil)
 
 	reads := func(sc authctx.Scope) (int64, error) {
 		t.Helper()
@@ -67,13 +69,16 @@ func TestContactAccessAcrossRoles(t *testing.T) {
 	total, err = reads(scSecretary)
 	require.NoError(t, err, "reports oversight reads center-wide")
 	require.EqualValues(t, 1, total)
-	total, err = reads(scHocVu)
-	require.NoError(t, err, "active hoc_vu reaches the assigned class's contacts")
+	total, err = reads(scViewer)
+	require.NoError(t, err, "contacts.view_all reads center-wide")
 	require.EqualValues(t, 1, total)
-	row, err := svc.Get(ctx, scHocVu, contact.ID)
+	row, err := svc.Get(ctx, scViewer, contact.ID)
 	require.NoError(t, err)
 	require.Equal(t, "+84911222333", row.Phone, "a reachable contact row carries its phone")
 
+	total, err = reads(scHocVu)
+	require.Equal(t, 404, apperror.From(err).Status, "an active hoc_vu stint no longer reaches contacts")
+	require.EqualValues(t, 0, total)
 	total, err = reads(scGv)
 	require.Equal(t, 404, apperror.From(err).Status, "the anchoring giao_vien is a plain member now")
 	require.EqualValues(t, 0, total)
@@ -92,23 +97,20 @@ func TestContactAccessAcrossRoles(t *testing.T) {
 		contacts.UpdateRequest{FullName: "Phụ huynh Na", Phone: "0911222333"})
 	require.NoError(t, err, "the owner edits member-anchored rows")
 
-	// Zalo mapping follows the read predicate: hoc_vu and oversight may wire
-	// their reachable contacts; an unreachable member gets a neutral 404.
+	// Zalo mapping is reports oversight's: a read grant or a class stint gets
+	// the same neutral 404 as an unreachable row.
 	mapping := contacts.ZaloMappingRequest{ZaloUserID: "zalo-1", ZaloName: "Na's mom"}
-	_, err = svc.UpdateZaloMapping(ctx, scHocVu, contact.ID, mapping)
-	require.NoError(t, err, "active hoc_vu maps the contacts of the assigned class")
-	require.NoError(t, svc.ClearZaloMapping(ctx, scHocVu, contact.ID))
 	_, err = svc.UpdateZaloMapping(ctx, scSecretary, contact.ID, mapping)
 	require.NoError(t, err, "reports oversight maps center-wide")
-	_, err = svc.UpdateZaloMapping(ctx, scTroGiang, contact.ID, mapping)
-	require.Equal(t, 404, apperror.From(err).Status)
-	_, err = svc.UpdateZaloMapping(ctx, scGv, contact.ID, mapping)
-	require.Equal(t, 404, apperror.From(err).Status)
-
-	// Ending the stint ends the reach: unlike student rows, contact rows are
-	// pure phone data, so no history-read survives.
-	require.NoError(t, db.Exec(
-		"UPDATE class_staff SET ended_at = now() WHERE id = ?", hocVuStint).Error)
-	_, err = svc.Get(ctx, scHocVu, contact.ID)
-	require.Equal(t, 404, apperror.From(err).Status, "an ended stint drops contact reach")
+	require.NoError(t, svc.ClearZaloMapping(ctx, scSecretary, contact.ID))
+	_, err = svc.UpdateZaloMapping(ctx, scOwner, contact.ID, mapping)
+	require.NoError(t, err, "the owner maps center-wide")
+	for name, sc := range map[string]authctx.Scope{
+		"contacts.view_all": scViewer, "hoc_vu": scHocVu, "tro_giang": scTroGiang, "giao_vien": scGv,
+	} {
+		_, err = svc.UpdateZaloMapping(ctx, sc, contact.ID, mapping)
+		require.Equal(t, 404, apperror.From(err).Status, "%s must not write the mapping", name)
+		require.Equal(t, 404, apperror.From(svc.ClearZaloMapping(ctx, sc, contact.ID)).Status,
+			"%s must not clear the mapping", name)
+	}
 }

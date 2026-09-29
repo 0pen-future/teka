@@ -46,10 +46,10 @@ func (s *Service) List(ctx context.Context, sc authctx.Scope, periodID uuid.UUID
 		if err != nil {
 			return nil, err
 		}
-		// The one phone rule: null the phone unless sc is owner/oversight or
-		// the row carries the caller's hoc_vu grant.
-		for i := range rows {
-			if !sc.PhoneVisible(rows[i].PhoneVisible) {
+		// The one phone rule: null the phone unless sc reads contacts
+		// center-wide.
+		if !sc.PhoneVisible() {
+			for i := range rows {
 				rows[i].Phone = nil
 			}
 		}

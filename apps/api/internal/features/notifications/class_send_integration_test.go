@@ -83,6 +83,7 @@ func TestClassBulkSendDeliversClassCopiesOnTheStaffSession(t *testing.T) {
 	require.Equal(t, 1, resp.PersonalQueuedCount)
 	require.Len(t, resp.Rows, 1)
 	require.Equal(t, notifications.ChannelZaloPersonal, resp.Rows[0].Channel)
+	require.Nil(t, resp.Rows[0].Phone, "a class sender without contacts.view_all gets the row with the phone masked")
 	require.NotNil(t, resp.RunID)
 
 	require.Equal(t, notifications.RunStatusCompleted, waitForRunOutcome(t, d.db, *resp.RunID))

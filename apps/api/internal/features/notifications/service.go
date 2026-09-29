@@ -325,7 +325,7 @@ func (s *Service) BulkSend(ctx context.Context, sc authctx.Scope, periodID uuid.
 				NotificationID: n.ID,
 				ContactID:      target.ContactID,
 				ContactName:    cf.ContactName,
-				Phone:          target.ContactPhone,
+				Phone:          visiblePhone(sc, target.ContactPhone),
 				Channel:        rowChannel,
 				Purpose:        purpose,
 				Status:         n.Status,
@@ -386,6 +386,14 @@ func (s *Service) BulkSend(ctx context.Context, sc authctx.Scope, periodID uuid.
 		reservation.Start(runID, runItems, runGrant(sc, crossTeacher, classID))
 	}
 	return &resp, nil
+}
+
+// visiblePhone applies the one phone rule to a phone a send response echoes.
+func visiblePhone(sc authctx.Scope, phone string) *string {
+	if !sc.PhoneVisible() {
+		return nil
+	}
+	return &phone
 }
 
 // delegatedSender reports whether the caller holds reports.send as an actual

@@ -26,14 +26,11 @@ type ListFilter struct {
 
 // Row is a student joined with its contact's name and phone, so the roster
 // screen needs no second call. ContactPhone is a pointer because the service
-// nulls it for callers outside the phone rule; PhoneVisible is the repo-derived
-// row grant (active hoc_vu stint on a class with an active enrollment) that
-// Scope.PhoneVisible combines with the owner/oversight bypass.
+// nulls it for callers outside the phone rule (Scope.PhoneVisible).
 type Row struct {
 	Student      `gorm:"embedded"`
 	ContactName  string
 	ContactPhone *string
-	PhoneVisible bool
 }
 
 // Repository is the persistence contract for students; the service depends on
@@ -123,17 +120,13 @@ func (r *gormRepository) readScoped(ctx context.Context, sc authctx.Scope) *gorm
 }
 
 // withContact joins the owning contact and selects its name and phone
-// alongside the student columns, plus the phone_visible derived column the
-// service needs to apply the phone rule. The EXISTS runs for every caller —
-// owner included — because whether the CALLER may bypass it is the service's
-// call, not this query's. Takes the two identity columns directly, not a
-// Scope, so an anchor-only caller (GetByIDAnchored) can use it too.
-func withContact(q *gorm.DB, teacherID, centerID uuid.UUID) *gorm.DB {
-	frag, _ := classscope.PhoneVisibleViaStudent("students.id")
+// alongside the student columns. The phone always rides along; whether the
+// caller may see it is the service's call (Scope.PhoneVisible), not this
+// query's.
+func withContact(q *gorm.DB) *gorm.DB {
 	return q.
 		Joins("JOIN contacts ON contacts.id = students.contact_id AND contacts.center_id = students.center_id").
-		Select("students.*, contacts.full_name AS contact_name, contacts.phone AS contact_phone, "+
-			frag+" AS phone_visible", teacherID, centerID)
+		Select("students.*, contacts.full_name AS contact_name, contacts.phone AS contact_phone")
 }
 
 func (r *gormRepository) Create(ctx context.Context, s *Student) error {
@@ -148,7 +141,7 @@ func (r *gormRepository) Create(ctx context.Context, s *Student) error {
 
 func (r *gormRepository) GetByID(ctx context.Context, sc authctx.Scope, studentID uuid.UUID) (*Row, error) {
 	var row Row
-	err := withContact(r.readScoped(ctx, sc).Model(&Student{}), sc.TeacherID, sc.CenterID).
+	err := withContact(r.readScoped(ctx, sc).Model(&Student{})).
 		Where("students.id = ?", studentID).
 		Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -162,12 +155,11 @@ func (r *gormRepository) GetByID(ctx context.Context, sc authctx.Scope, studentI
 
 // GetByIDAnchored reads a student bound unconditionally to a. It backs
 // CreateAnchored's read-back: the roster import has no caller scope to
-// consult for the phone rule, so the returned row's phone_visible column
-// reflects only a's own hoc_vu-stint reach — the service still nulls the
-// phone unless a caller scope grants it, and the import path never does.
+// consult for the phone rule, so the phone is returned as stored and the
+// import path never forwards it to a response.
 func (r *gormRepository) GetByIDAnchored(ctx context.Context, a authctx.Anchor, studentID uuid.UUID) (*Row, error) {
 	var row Row
-	err := withContact(r.anchored(ctx, a).Model(&Student{}), a.TeacherID, a.CenterID).
+	err := withContact(r.anchored(ctx, a).Model(&Student{})).
 		Where("students.id = ?", studentID).
 		Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -206,7 +198,7 @@ func (r *gormRepository) List(ctx context.Context, sc authctx.Scope, filter List
 		return nil, 0, err
 	}
 	var rows []Row
-	if err := withContact(q, sc.TeacherID, sc.CenterID).Scopes(p.Scope).Find(&rows).Error; err != nil {
+	if err := withContact(q).Scopes(p.Scope).Find(&rows).Error; err != nil {
 		return nil, 0, err
 	}
 	return rows, total, nil
@@ -245,7 +237,7 @@ func (r *gormRepository) ContactExists(ctx context.Context, sc authctx.Scope, co
 	// Keys on contacts.view_all, not students.view_all: this probes which
 	// CONTACTS the caller may anchor a student to, so it follows contact
 	// visibility, not student visibility. Deliberately narrower than the
-	// contacts read predicate: no oversight or hoc_vu-stint arm, and the
+	// contacts read predicate: no oversight arm, and the
 	// teacher_id arm is dead for non-owners (contacts anchor to the owner) —
 	// anchoring students to foreign contacts stays an explicit-grant action.
 	q = r.readNarrowContacts(q, sc)

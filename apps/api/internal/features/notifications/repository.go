@@ -3,7 +3,6 @@ package notifications
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -40,15 +39,11 @@ type ListRow struct {
 	StatementID uuid.UUID
 	ContactID   uuid.UUID
 	ContactName string
-	Phone       string
-	// PhoneVisible is the phone-privacy derived column: whether the caller
-	// holds an active hoc_vu stint over one of the contact's actively
-	// enrolled students. Owner/oversight bypass happens in the service via
-	// Scope.PhoneVisible.
-	PhoneVisible bool
-	Channel      string
-	Purpose      string
-	Status       string
+	// Phone always rides along; fromListRow masks it by Scope.PhoneVisible.
+	Phone   string
+	Channel string
+	Purpose string
+	Status  string
 	// ErrorMessage carries a failed row's teacher-facing reason; nil on any
 	// row that has not failed.
 	ErrorMessage *string
@@ -179,11 +174,10 @@ type Repository interface {
 	// ZaloMappings returns contactID -> zalo_user_id for the given contacts,
 	// covering live (non-deleted) contacts in sc's center that sc may read:
 	// every contact when sc holds contacts.view_all (owner, explicit grant,
-	// or reports.send via the key it implies), otherwise only contacts whose
-	// student sc is currently assigned to as hoc_vu. Contacts anchor to the
-	// owner, so there is no "own contacts" arm. Every current caller sits
-	// behind the send gate and therefore takes the center-wide arm; the
-	// stint arm is defence in depth for a future caller. The mapping stays the period
+	// or reports.send via the key it implies), otherwise none — a mapping
+	// resolves a phone-bearing identity, so it follows the phone rule, and
+	// class staff reach mappings only through ZaloMappingsClass. Every current
+	// caller sits behind the send gate. The mapping stays the period
 	// owner's consent artifact: this read never rewrites it. A contact absent
 	// from the result is unmapped (or out of scope) and falls back to the
 	// manual channel. An owner sending a member's period never reaches here
@@ -231,13 +225,6 @@ func (r *gormRepository) writeScoped(ctx context.Context, sc authctx.Scope) *gor
 // MarkSent and the other writes go through writeScoped.
 func readWide(sc authctx.Scope) bool {
 	return sc.CenterWideFor(authctx.PermNotificationsViewAll)
-}
-
-// contactsReadWide is the contact-book visibility rule ZaloMappings needs:
-// a mapping row is a contact's phone-adjacent identity, so it follows
-// contacts.view_all (implied by reports.send), not the notifications key.
-func contactsReadWide(sc authctx.Scope) bool {
-	return sc.CenterWideFor(authctx.PermContactsViewAll)
 }
 
 // runsPeriodScoped binds a notification_runs-table query to sc's center,
@@ -291,7 +278,7 @@ func (r *gormRepository) InsertBatch(ctx context.Context, rows []*Notification) 
 // and nothing to anyone else.
 const listByPeriodQuery = `
 	SELECT n.id AS id, n.statement_id AS statement_id, s.contact_id AS contact_id,
-	       c.full_name AS contact_name, c.phone AS phone, %s AS phone_visible,
+	       c.full_name AS contact_name, c.phone AS phone,
 	       n.channel AS channel, n.purpose AS purpose, n.status AS status,
 	       n.error_message AS error_message, n.run_id AS run_id,
 	       n.sent_at AS sent_at, n.created_at AS created_at
@@ -305,13 +292,9 @@ const listByPeriodQuery = `
 `
 
 func (r *gormRepository) ListByPeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, filter ListFilter) ([]ListRow, error) {
-	// The phone_visible fragment sits in the SELECT clause, so its two bind
-	// args (the CALLER's teacher, then center) come first in the Raw list.
-	frag, _ := classscope.PhoneVisibleViaContact("s.contact_id")
 	var rows []ListRow
 	err := database.FromContext(ctx, r.db).
-		Raw(fmt.Sprintf(listByPeriodQuery, frag),
-			sc.TeacherID, sc.CenterID,
+		Raw(listByPeriodQuery,
 			sc.CenterID, readWide(sc), sc.TeacherID, periodID, filter.Purpose, filter.Purpose, filter.Status, filter.Status).
 		Scan(&rows).Error
 	return rows, err
@@ -593,30 +576,27 @@ func (r *gormRepository) QueuedRunRows(ctx context.Context, a authctx.Anchor, ru
 }
 
 // ZaloMappings resolves the zalo_user_id of every contact in contactIDs that
-// sc may reach. Contacts anchor to the center's owner regardless of who is
-// asking (migration 000016), so a plain member's own teacher_id never matches
-// a contact row — the caller's reach here is center + (contacts.view_all,
-// including a reports.send holder through the key it implies, OR the same
-// ACTIVE hoc_vu stint arm contacts/repository.go's scopedRead uses), never a
-// teacher_id filter.
+// sc may reach. A mapping row is a contact's phone-adjacent identity, so it
+// follows the one phone rule (Scope.PhoneVisible: contacts.view_all, implied
+// by reports.send), not the notifications key; anyone else gets no mappings.
+// Contacts anchor to the center's owner regardless of who is asking
+// (migration 000016), so the reach is the center, never a teacher_id filter.
+// The class send path uses ZaloMappingsClass instead, which scopes by
+// enrollment and never exposes a phone.
 func (r *gormRepository) ZaloMappings(ctx context.Context, sc authctx.Scope, contactIDs []uuid.UUID) (map[uuid.UUID]string, error) {
-	if len(contactIDs) == 0 {
+	if len(contactIDs) == 0 || !sc.PhoneVisible() {
 		return map[uuid.UUID]string{}, nil
 	}
 	var rows []struct {
 		ID         uuid.UUID
 		ZaloUserID string
 	}
-	q := database.FromContext(ctx, r.db).
+	err := database.FromContext(ctx, r.db).
 		Table("contacts").
 		Select("id, zalo_user_id").
 		Where("center_id = ? AND id IN ? AND zalo_user_id IS NOT NULL AND deleted_at IS NULL",
-			sc.CenterID, contactIDs)
-	if !contactsReadWide(sc) {
-		frag, _ := classscope.PhoneVisibleViaContact("contacts.id")
-		q = q.Where(frag, sc.TeacherID, sc.CenterID)
-	}
-	err := q.Scan(&rows).Error
+			sc.CenterID, contactIDs).
+		Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}

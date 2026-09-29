@@ -267,7 +267,7 @@ interface StoredNotification {
   id: string;
   contact_id: string;
   contact_name: string;
-  phone: string;
+  phone: string | null;
   channel: "zalo_manual" | "zalo_zns" | "sms" | "zalo_personal";
   purpose: "statements" | "reminder";
   status: "queued" | "sent" | "delivered" | "failed";
@@ -746,9 +746,9 @@ export const collectionsHandlers = [
         id: nextId("notification-"),
         contact_id: row.contact_id,
         contact_name: row.full_name,
-        // These fixtures model the owner view, where the phone is always
-        // visible; the wire type is nullable only for phone-hidden callers.
-        phone: row.phone ?? "",
+        // The phone rule masks both the source row and the send response, so
+        // a hidden phone stays null end to end.
+        phone: row.phone,
         channel,
         purpose: body.purpose,
         status: "queued",

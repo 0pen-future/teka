@@ -155,7 +155,7 @@ func (h *Handler) friends(c *gin.Context) {
 // matchFriends resolves phone numbers against Zalo and the friend list.
 //
 //	@Summary		Match phones against Zalo accounts
-//	@Description	Looks up 1–200 phone numbers against Zalo in paced chunks, intersects the hits with the linked account's friend list, and returns one row per phone in request order. Rows echo the phone exactly as sent; unresolved phones come back matched=false. Owner and send-reports holders match any phone; an active hoc_vu matches only phones of contacts their assignments make phone-visible (out-of-reach phones come back matched=false without a lookup); other staff get 403. Nothing is persisted — confirming a suggestion goes through PUT /contacts/{id}/zalo-mapping. 404 when no account is linked, 409 when the stored session no longer works.
+//	@Description	Looks up 1–200 phone numbers against Zalo in paced chunks, intersects the hits with the linked account's friend list, and returns one row per phone in request order. Rows echo the phone exactly as sent; unresolved phones come back matched=false. Requires contacts.view_all (the owner holds it implicitly; send-reports implies it); every other caller gets 403 before any phone leaves. Nothing is persisted — confirming a suggestion goes through PUT /contacts/{id}/zalo-mapping. 404 when no account is linked, 409 when the stored session no longer works.
 //	@Tags			zalo
 //	@Accept			json
 //	@Produce		json
@@ -163,7 +163,7 @@ func (h *Handler) friends(c *gin.Context) {
 //	@Success		200		{object}	response.Envelope{data=[]FriendMatchResponse}
 //	@Failure		400		{object}	response.Envelope{error=response.ErrorBody}	"empty or oversized phone list"
 //	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
-//	@Failure		403		{object}	response.Envelope{error=response.ErrorBody}	"caller has neither oversight nor an active hoc_vu assignment"
+//	@Failure		403		{object}	response.Envelope{error=response.ErrorBody}	"caller lacks contacts.view_all"
 //	@Failure		404		{object}	response.Envelope{error=response.ErrorBody}	"no linked account"
 //	@Failure		409		{object}	response.Envelope{error=response.ErrorBody}	"session expired"
 //	@Security		BearerAuth

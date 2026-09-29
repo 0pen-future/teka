@@ -65,14 +65,13 @@ func (s Scope) ReportsOversight() bool {
 }
 
 // PhoneVisible is the single phone-privacy rule for every surface that could
-// carry a contact's phone: whoever reads contacts center-wide sees it (the
-// owner, an explicit contacts.view_all grant, or reports.send through the
-// keys it implies); anyone else only when the row itself is visible to them
-// (their own contact, or a student they are assigned to as hoc_vu). Surfaces
-// pass their own row-visibility verdict in; nothing else may decide phone
-// privacy on its own.
-func (s Scope) PhoneVisible(rowVisible bool) bool {
-	return s.CenterWideFor(PermContactsViewAll) || rowVisible
+// carry a contact's phone: only whoever reads contacts center-wide sees it —
+// the owner, an explicit contacts.view_all grant, or reports.send through the
+// keys it implies. Class staff assignments (hoc_vu included) never widen it;
+// a centre that wants a role to call families grants contacts.view_all.
+// Nothing else may decide phone privacy on its own.
+func (s Scope) PhoneVisible() bool {
+	return s.CenterWideFor(PermContactsViewAll)
 }
 
 const (

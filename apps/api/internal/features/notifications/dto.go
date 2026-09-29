@@ -41,11 +41,13 @@ type BulkSendRequest struct {
 // BulkSendRow is one contact's queued notification, with everything a
 // teacher needs to copy and send it by hand under zalo_manual: the rendered
 // text (never persisted — see model.go) and the statement link it ends with.
+// Phone follows the one phone rule (Scope.PhoneVisible): a class sender
+// without contacts.view_all still gets the message but a null phone.
 type BulkSendRow struct {
 	NotificationID uuid.UUID `json:"notification_id"`
 	ContactID      uuid.UUID `json:"contact_id"`
 	ContactName    string    `json:"contact_name"`
-	Phone          string    `json:"phone"`
+	Phone          *string   `json:"phone"`
 	Channel        string    `json:"channel"`
 	Purpose        string    `json:"purpose"`
 	Status         string    `json:"status"`
@@ -110,9 +112,8 @@ type NotificationResponse struct {
 	ID          uuid.UUID `json:"id"`
 	ContactID   uuid.UUID `json:"contact_id"`
 	ContactName string    `json:"contact_name"`
-	// Phone is null unless the caller may see the contact's phone (owner,
-	// reports oversight, or an active hoc_vu stint over one of the contact's
-	// enrolled students).
+	// Phone is null unless the caller may see the contact's phone (owner or
+	// contacts.view_all, which reports oversight implies).
 	Phone   *string `json:"phone"`
 	Channel string  `json:"channel"`
 	Purpose string  `json:"purpose"`
@@ -157,11 +158,10 @@ type SendPreviewResponse struct {
 }
 
 // fromListRow maps a ledger row onto its wire DTO, masking the phone by the
-// one phone rule: null unless sc is owner/oversight or the row carries the
-// caller's hoc_vu grant.
+// one phone rule (Scope.PhoneVisible).
 func fromListRow(sc authctx.Scope, r ListRow) NotificationResponse {
 	var phone *string
-	if sc.PhoneVisible(r.PhoneVisible) {
+	if sc.PhoneVisible() {
 		phone = &r.Phone
 	}
 	return NotificationResponse{

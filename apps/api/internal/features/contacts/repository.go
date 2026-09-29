@@ -10,7 +10,6 @@ import (
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/shared/authctx"
-	"teka/apps/api/internal/shared/classscope"
 	"teka/apps/api/internal/shared/pagination"
 )
 
@@ -87,32 +86,28 @@ func (r *gormRepository) centerScoped(ctx context.Context, sc authctx.Scope) *go
 // grant (including a reports.send holder, through the key it implies) read
 // the whole center — the widening mirrors Scope.PhoneVisible exactly, because
 // a contact row IS its phone: reach and phone visibility must stay one
-// predicate, so this surface needs no per-row masking. Anyone else reaches
-// exactly what the one phone rule shows them: contacts with a student
-// actively enrolled in a live class the caller holds an ACTIVE hoc_vu stint
-// on. The row's teacher_id deliberately plays no part: contacts are center
-// data, whoever anchored them. Reads only — the zalo-mapping write keeps its
-// own predicate below.
+// predicate, so this surface needs no per-row masking. Anyone else reaches no
+// contact at all; class staff assignments never widen it. The row's
+// teacher_id deliberately plays no part: contacts are center data, whoever
+// anchored them. Reads only — the zalo-mapping write keeps its own predicate
+// below.
 func (r *gormRepository) scopedRead(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("contacts.center_id = ?", sc.CenterID)
-	if !sc.CenterWideFor(authctx.PermContactsViewAll) {
-		frag, _ := classscope.PhoneVisibleViaContact("contacts.id")
-		q = q.Where(frag, sc.TeacherID, sc.CenterID)
+	if !sc.PhoneVisible() {
+		q = q.Where("false")
 	}
 	return q
 }
 
-// scopedMappingWrite bounds the zalo-mapping write: reports oversight, or an
-// ACTIVE hoc_vu stint reaching the contact — so hoc_vu can wire up the
-// parents they serve. contacts.view_all deliberately does NOT reach here:
-// it is a visibility grant, and rewiring a family's Zalo mapping redirects
-// their statement messages, so letting a read key do it would be an
+// scopedMappingWrite bounds the zalo-mapping write to reports oversight — the
+// owner or a reports.send holder. contacts.view_all deliberately does NOT
+// reach here: it is a visibility grant, and rewiring a family's Zalo mapping
+// redirects their statement messages, so letting a read key do it would be an
 // escalation.
 func (r *gormRepository) scopedMappingWrite(ctx context.Context, sc authctx.Scope) *gorm.DB {
 	q := database.FromContext(ctx, r.db).Where("contacts.center_id = ?", sc.CenterID)
 	if !sc.ReportsOversight() {
-		frag, _ := classscope.PhoneVisibleViaContact("contacts.id")
-		q = q.Where(frag, sc.TeacherID, sc.CenterID)
+		q = q.Where("false")
 	}
 	return q
 }

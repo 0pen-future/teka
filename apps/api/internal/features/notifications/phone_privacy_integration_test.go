@@ -11,15 +11,16 @@ import (
 
 	"teka/apps/api/internal/features/notifications"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/testutil"
 )
 
 // The one phone rule on the notification ledger, plus the send gate: bulk
 // sending is reports-oversight work (owner or reports.send holder) — a
 // plain class teacher may read their own period's ledger but never trigger a
-// send. Ledger rows carry the contact's phone only to owner/oversight or a
-// caller holding an ACTIVE hoc_vu stint over one of the contact's actively
-// enrolled students.
+// send. Ledger rows and the bulk-send response carry the contact's phone only
+// to the owner or a contacts.view_all holder (oversight through the key it
+// implies) — never through a class staff assignment, hoc_vu included.
 func TestLedgerPhoneAndSendGateFollowTheOnePhoneRule(t *testing.T) {
 	t.Parallel()
 	d := newDeps(t)
@@ -67,6 +68,9 @@ func TestLedgerPhoneAndSendGateFollowTheOnePhoneRule(t *testing.T) {
 	sendResp, err := d.notifications.BulkSend(ctx, secScope, period.ID, notifications.BulkSendRequest{Purpose: "statement"})
 	require.NoError(t, err)
 	require.Equal(t, 1, sendResp.QueuedCount)
+	require.Len(t, sendResp.Rows, 1)
+	require.NotNil(t, sendResp.Rows[0].Phone, "oversight gets the phone on the rows it must send by hand")
+	require.Equal(t, "+84905556666", *sendResp.Rows[0].Phone)
 
 	// Owner and secretary read the ledger with the phone.
 	ownerRows, err := d.notifications.List(ctx, ownerScope, period.ID, notifications.ListFilter{})
@@ -95,9 +99,9 @@ func TestLedgerPhoneAndSendGateFollowTheOnePhoneRule(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, troGiangRows)
 
-	// The row grant is the ONE rule: an active hoc_vu stint on another
-	// teacher's class with this contact's student actively enrolled unlocks
-	// the phone on the period teacher's own ledger read.
+	// Class assignments never widen the phone: an active hoc_vu stint on
+	// another teacher's class with this contact's student actively enrolled
+	// leaves the period teacher's own ledger read masked.
 	classB := testutil.Class(t, db, memberB.ID, testutil.WithClassName("LedgerPrivacyB"), testutil.WithClassStartDate(classStart))
 	testutil.Enrollment(t, db, memberB.ID, student.ID, classB.ID, classStart)
 	testutil.StaffAssignment(t, db, classB, member.ID, "hoc_vu")
@@ -105,6 +109,14 @@ func TestLedgerPhoneAndSendGateFollowTheOnePhoneRule(t *testing.T) {
 	memberRows, err = d.notifications.List(ctx, memberScope, period.ID, notifications.ListFilter{})
 	require.NoError(t, err)
 	require.Len(t, memberRows, 1)
-	require.NotNil(t, memberRows[0].Phone, "an active hoc_vu stint over the contact's student unlocks the phone")
-	require.Equal(t, "+84905556666", *memberRows[0].Phone)
+	require.Nil(t, memberRows[0].Phone, "an active hoc_vu stint no longer unlocks the phone")
+
+	// contacts.view_all is the one grant that opens it.
+	viewerScope := memberScope
+	viewerScope.Perms = authctx.BuildPermSet(nil, []string{authctx.PermContactsViewAll}, nil)
+	viewerRows, err := d.notifications.List(ctx, viewerScope, period.ID, notifications.ListFilter{})
+	require.NoError(t, err)
+	require.Len(t, viewerRows, 1)
+	require.NotNil(t, viewerRows[0].Phone, "contacts.view_all unlocks the phone")
+	require.Equal(t, "+84905556666", *viewerRows[0].Phone)
 }

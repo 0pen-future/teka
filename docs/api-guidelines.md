@@ -288,22 +288,34 @@ student records, and a member sees a contact's phone only through the
 phone-privacy rule below.
 
 **Phone privacy**: one rule for every surface, list and detail alike — a
-caller sees a contact's phone iff `IsOwner || CenterWideFor(contacts.view_all)`
-or the caller holds an active hoc_vu stint on a class where a student of that
-contact is actively enrolled. Repositories compute the per-row arm as a
-derived `phone_visible` column (an EXISTS in the same query — fragments
-`classscope.PhoneVisibleViaStudent` / `PhoneVisibleViaContact`); services
-combine it through `Scope.PhoneVisible(rowVisible)` and null the DTO field —
-`null`, never an empty string. Masked surfaces: student reads, statements
-(including the family statement URL, which is a bearer token and is returned
-only to `ReportsOversight()` callers — that field stays send-gated, not
-read-gated, since exposing the link is itself a sending act), the notification
-ledger, and collections. Sending paths (statements, notifications, zalo) read
-the phone server-side, so a sender who cannot see a phone can still send.
-`ContactResponse.Phone` stays a non-null string because contact reads are
-already owner/`contacts.view_all`-only. Zalo friend-match and per-contact
-zalo-mapping stay open to assigned hoc_vu — their send path depends on
-mapping.
+caller sees a contact's phone iff `Scope.PhoneVisible()`, which is exactly
+`CenterWideFor(contacts.view_all)`: the owner, an explicit grant, or
+`reports.send` through the key it implies. No class staff assignment widens it,
+hoc_vu included, so repositories always return the stored phone and services
+null the DTO field — `null`, never an empty string. Masked surfaces: student
+reads, statements (including the family statement URL, which is a bearer token
+and is returned only to `ReportsOversight()` callers — that field stays
+send-gated, not read-gated, since exposing the link is itself a sending act),
+the notification ledger, collections, and the rows of a bulk-send response
+(`BulkSendRow.phone`). Sending paths (statements, notifications, zalo) read the
+phone server-side, so a sender who cannot see a phone can still send — a
+hoc_vu's class-scoped `zalo_personal` send resolves Zalo ids through
+`ZaloMappingsClass` (the class's active enrollments) and never exposes the
+phone. Contact rows are phone rows, so `GET /contacts` and `GET /contacts/:id`
+return nothing to a caller without `contacts.view_all`, and
+`ContactResponse.Phone` stays a non-null string. Matching phones against Zalo
+friends (`POST /me/zalo/friends/match`) sends them to a third party and requires
+`contacts.view_all` (403 otherwise). Writing or clearing a contact's
+zalo-mapping redirects that family's messages, so it is reports oversight's
+alone (owner or `reports.send`; 404 otherwise) — `contacts.view_all` is a read
+grant and does not reach it.
+
+*Release note (behavior change)*: an active hoc_vu assignment used to unlock
+the phones of the class's families, contact reads, Zalo friend matching and
+zalo-mapping writes for those contacts. It no longer does: a hoc_vu reads
+students without phones until the owner grants `contacts.view_all` to the
+hoc_vu role (or the member) in role permissions; mapping writes additionally
+need `reports.send`. Class-scoped sends keep working unchanged.
 
 **Delegated report sending (`reports.send`)**: an ordinary permission-catalog
 key, granted and revoked only by the owner through roles or the member

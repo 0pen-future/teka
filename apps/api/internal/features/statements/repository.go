@@ -17,27 +17,22 @@ import (
 
 // Row is a statement plus the contact display fields the teacher-facing
 // endpoints need, produced in one query so listing a period's statements
-// never becomes an N+1. PhoneVisible is the phone-privacy derived column:
-// whether the reading caller holds an active hoc_vu stint over one of the
-// contact's actively enrolled students (owner/oversight bypass happens in
-// the service via Scope.PhoneVisible).
+// never becomes an N+1. The phone always rides along; the service masks it
+// by Scope.PhoneVisible before it leaves.
 type Row struct {
 	Statement       `gorm:"embedded"`
 	ContactFullName string
 	ContactPhone    string
-	PhoneVisible    bool
 }
 
 // TargetContact is one contact eligible for a statement in a period: they
 // have at least one non-void invoice there. Carries the display fields
 // Generate's response needs so building it never requires a second,
-// per-contact lookup. PhoneVisible is computed against the calling teacher
-// (see TargetContacts).
+// per-contact lookup.
 type TargetContact struct {
-	ContactID    uuid.UUID
-	FullName     string
-	Phone        string
-	PhoneVisible bool
+	ContactID uuid.UUID
+	FullName  string
+	Phone     string
 }
 
 // PeriodInfo is one billing period's status plus its own owning teacher —
@@ -86,10 +81,8 @@ type Repository interface {
 	ClassSendAccess(ctx context.Context, sc authctx.Scope, classID uuid.UUID, roles []string) (sendable, readable bool, err error)
 	// TargetContacts returns every contact with at least one non-void
 	// invoice in periodID — Generate's candidate set. a must anchor the
-	// period's own teacher/center (see Service.generate's periodAnchor);
-	// viewer is the calling teacher's scope, which PhoneVisible is derived
-	// for — the two differ whenever someone opens another teacher's period.
-	TargetContacts(ctx context.Context, a authctx.Anchor, viewer authctx.Scope, periodID uuid.UUID) ([]TargetContact, error)
+	// period's own teacher/center (see Service.generate's periodAnchor).
+	TargetContacts(ctx context.Context, a authctx.Anchor, periodID uuid.UUID) ([]TargetContact, error)
 	// ContactTotals reads v_contact_balance's total_due per contact for
 	// periodID — the money Generate writes onto each statement. a must
 	// anchor the period's own teacher/center, like TargetContacts.
@@ -100,9 +93,9 @@ type Repository interface {
 	// filter applies only to targeting (who receives a class statement);
 	// the money on the copy still counts every class line of the period, so
 	// a family whose child just left the class stops receiving new class
-	// links without any historical figure changing. a/viewer as in
+	// links without any historical figure changing. a as in
 	// TargetContacts.
-	TargetContactsClass(ctx context.Context, a authctx.Anchor, viewer authctx.Scope, periodID, classID uuid.UUID) ([]TargetContact, error)
+	TargetContactsClass(ctx context.Context, a authctx.Anchor, periodID, classID uuid.UUID) ([]TargetContact, error)
 	// ContactClassTotals sums, per contact, the invoice_lines amounts billed
 	// to classID's enrollments on periodID's non-void invoices — the class
 	// copy's total_due. Deliberately NOT filtered by enrollment liveness:
@@ -306,10 +299,8 @@ func (r *gormRepository) scopedRead(ctx context.Context, sc authctx.Scope) *gorm
 // center, so matching on teacher_id here would silently drop a member's own
 // contacts from such a read.
 func (r *gormRepository) withContact(ctx context.Context, sc authctx.Scope) *gorm.DB {
-	frag, _ := classscope.PhoneVisibleViaContact("statements.contact_id")
 	return r.scopedRead(ctx, sc).
-		Select(`statements.*, contacts.full_name AS contact_full_name, contacts.phone AS contact_phone, `+frag+` AS phone_visible`,
-			sc.TeacherID, sc.CenterID).
+		Select(`statements.*, contacts.full_name AS contact_full_name, contacts.phone AS contact_phone`).
 		Joins("JOIN contacts ON contacts.id = statements.contact_id AND contacts.center_id = statements.center_id")
 }
 
@@ -374,17 +365,11 @@ func (r *gormRepository) periodStatus(ctx context.Context, sc authctx.Scope, per
 // that same teacher_id — no owner short-circuit is needed here, only the
 // plain center_id+teacher_id match.
 
-func (r *gormRepository) TargetContacts(ctx context.Context, a authctx.Anchor, viewer authctx.Scope, periodID uuid.UUID) ([]TargetContact, error) {
-	// phone_visible is derived for the CALLER (viewer), never the period's
-	// teacher: the period lookup opens center-wide, so someone may reach
-	// another teacher's period here, and the phone mask must follow what that
-	// caller may see — running it on the period owner's anchor would leak.
-	frag, _ := classscope.PhoneVisibleViaContact("invoices.contact_id")
+func (r *gormRepository) TargetContacts(ctx context.Context, a authctx.Anchor, periodID uuid.UUID) ([]TargetContact, error) {
 	var rows []TargetContact
 	err := database.FromContext(ctx, r.db).
 		Table("invoices").
-		Select(`DISTINCT invoices.contact_id AS contact_id, contacts.full_name AS full_name, contacts.phone AS phone, `+frag+` AS phone_visible`,
-			viewer.TeacherID, viewer.CenterID).
+		Select(`DISTINCT invoices.contact_id AS contact_id, contacts.full_name AS full_name, contacts.phone AS phone`).
 		Joins("JOIN contacts ON contacts.id = invoices.contact_id AND contacts.center_id = invoices.center_id").
 		Where("invoices.center_id = ? AND invoices.teacher_id = ? AND invoices.period_id = ? AND invoices.status <> ?",
 			a.CenterID, a.TeacherID, periodID, invoiceStatusVoid).
@@ -392,8 +377,7 @@ func (r *gormRepository) TargetContacts(ctx context.Context, a authctx.Anchor, v
 	return rows, err
 }
 
-func (r *gormRepository) TargetContactsClass(ctx context.Context, a authctx.Anchor, viewer authctx.Scope, periodID, classID uuid.UUID) ([]TargetContact, error) {
-	frag, _ := classscope.PhoneVisibleViaContact("invoices.contact_id")
+func (r *gormRepository) TargetContactsClass(ctx context.Context, a authctx.Anchor, periodID, classID uuid.UUID) ([]TargetContact, error) {
 	var rows []TargetContact
 	// The EXISTS is the targeting rule: at least one of the invoice's lines
 	// is billed to a STILL-ACTIVE enrollment in the class. Money queries
@@ -401,8 +385,7 @@ func (r *gormRepository) TargetContactsClass(ctx context.Context, a authctx.Anch
 	// liveness filter — see the interface doc comments.
 	err := database.FromContext(ctx, r.db).
 		Table("invoices").
-		Select(`DISTINCT invoices.contact_id AS contact_id, contacts.full_name AS full_name, contacts.phone AS phone, `+frag+` AS phone_visible`,
-			viewer.TeacherID, viewer.CenterID).
+		Select(`DISTINCT invoices.contact_id AS contact_id, contacts.full_name AS full_name, contacts.phone AS phone`).
 		Joins("JOIN contacts ON contacts.id = invoices.contact_id AND contacts.center_id = invoices.center_id").
 		Where("invoices.center_id = ? AND invoices.teacher_id = ? AND invoices.period_id = ? AND invoices.status <> ?",
 			a.CenterID, a.TeacherID, periodID, invoiceStatusVoid).

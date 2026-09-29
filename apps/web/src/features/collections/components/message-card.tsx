@@ -38,7 +38,7 @@ export function MessageCard({ row, onMarkSent, marking }: MessageCardProps) {
           <p className="truncate font-display text-[15px] font-bold text-ink-900">
             {row.contact_name}
           </p>
-          <p className="text-[13px] text-ink-500">{row.phone}</p>
+          {row.phone ? <p className="text-[13px] text-ink-500">{row.phone}</p> : null}
         </div>
         {sent ? (
           <span className="shrink-0 rounded-[var(--radius-pill)] bg-mint-50 px-3 py-1 text-[13px] font-bold text-mint-600">

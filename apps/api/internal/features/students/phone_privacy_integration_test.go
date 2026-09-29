@@ -15,10 +15,11 @@ import (
 )
 
 // TestPhonePrivacyAcrossRoles pins the one phone rule on the students surface:
-// the contact's phone reaches the owner, a reports-oversight secretary, and a
-// hoc_vu holder with an ACTIVE stint on a class the student is actively
-// enrolled in — nobody else, not even the class's giao_vien. The masked form
-// is a nil pointer (JSON null), never an empty string.
+// the contact's phone reaches the owner, a contacts.view_all holder, and a
+// reports-oversight secretary (through the key it implies) — nobody else. No
+// class assignment opens it: not the class's giao_vien, not tro_giang, not
+// even an active hoc_vu, who still reads the student row. The masked form is
+// a nil pointer (JSON null), never an empty string.
 func TestPhonePrivacyAcrossRoles(t *testing.T) {
 	t.Parallel()
 	svc, db := newIntegrationService(t)
@@ -45,7 +46,7 @@ func TestPhonePrivacyAcrossRoles(t *testing.T) {
 	student := testutil.Student(t, db, gv.ID, contact.ID)
 	testutil.Enrollment(t, db, gv.ID, student.ID, class.ID,
 		time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
-	hocVuStint := testutil.StaffAssignment(t, db, class, hocVu.ID, authctx.StaffRoleHocVu)
+	testutil.StaffAssignment(t, db, class, hocVu.ID, authctx.StaffRoleHocVu)
 	testutil.StaffAssignment(t, db, class, troGiang.ID, authctx.StaffRoleTroGiang)
 	testutil.StaffAssignment(t, db, class, secretary.ID, authctx.StaffRoleTroGiang)
 
@@ -69,15 +70,12 @@ func TestPhonePrivacyAcrossRoles(t *testing.T) {
 	require.NotNil(t, phoneOf(scOwner), "owner always sees the phone")
 	require.Equal(t, "+84911222333", *phoneOf(scOwner))
 	require.NotNil(t, phoneOf(scSecretary), "reports oversight sees the phone")
-	require.NotNil(t, phoneOf(scHocVu), "active hoc_vu on the class sees the phone")
+	require.Nil(t, phoneOf(scHocVu), "an active hoc_vu reads the student but not the phone")
 	require.Nil(t, phoneOf(scGv), "the class's giao_vien creator does not see the phone")
 	require.Nil(t, phoneOf(scTroGiang), "tro_giang does not see the phone")
 
-	// Ending the hoc_vu stint keeps the read (R4.1) but drops the phone.
-	require.NoError(t, db.Exec(
-		"UPDATE class_staff SET ended_at = now() WHERE id = ?", hocVuStint).Error)
-	scHocVu = testutil.ScopeFor(t, db, hocVu.ID)
-	row, err := svc.Get(ctx, scHocVu, student.ID)
-	require.NoError(t, err, "ended stint still reads the student")
-	require.Nil(t, row.ContactPhone, "ended stint no longer carries the phone")
+	// contacts.view_all is the grant that opens the phone for a class role.
+	scHocVu.Perms = authctx.BuildPermSet(nil, []string{authctx.PermContactsViewAll}, nil)
+	require.NotNil(t, phoneOf(scHocVu), "contacts.view_all sees the phone")
+	require.Equal(t, "+84911222333", *phoneOf(scHocVu))
 }

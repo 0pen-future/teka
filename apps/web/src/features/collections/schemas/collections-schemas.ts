@@ -207,7 +207,8 @@ export const bulkSendRowSchema = z.object({
   notification_id: z.string(),
   contact_id: z.string(),
   contact_name: z.string(),
-  phone: z.string(),
+  // null when the sender lacks contacts.view_all — the phone rule masks it.
+  phone: z.string().nullable(),
   channel: notificationChannelSchema,
   purpose: notificationPurposeSchema,
   status: notificationStatusSchema,

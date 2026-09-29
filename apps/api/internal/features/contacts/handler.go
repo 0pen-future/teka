@@ -211,7 +211,7 @@ func (h *Handler) remove(c *gin.Context) {
 // setZaloMapping binds the contact to a Zalo friend chosen in the picker.
 //
 //	@Summary		Map contact to a Zalo friend
-//	@Description	Stores the picked friend's id and display name on the contact. Values come from GET /me/zalo/friends; the backend does not re-check them against the live friend list.
+//	@Description	Stores the picked friend's id and display name on the contact. Values come from GET /me/zalo/friends; the backend does not re-check them against the live friend list. Owner or send-reports holders only — rewiring the mapping redirects the family's messages, so contacts.view_all alone does not grant it; anyone else gets 404.
 //	@Tags			contacts
 //	@Accept			json
 //	@Produce		json
@@ -249,7 +249,7 @@ func (h *Handler) setZaloMapping(c *gin.Context) {
 // clearZaloMapping detaches the contact from its Zalo friend.
 //
 //	@Summary		Unmap contact from its Zalo friend
-//	@Description	Nulls both mapping fields. Idempotent: unmapping an unmapped contact is still 204.
+//	@Description	Nulls both mapping fields. Idempotent: unmapping an unmapped contact is still 204. Owner or send-reports holders only; anyone else gets 404.
 //	@Tags			contacts
 //	@Produce		json
 //	@Param			id	path	string	true	"contact id"

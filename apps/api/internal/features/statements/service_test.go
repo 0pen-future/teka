@@ -139,11 +139,11 @@ func (f *fakeRepository) ClassSendAccess(_ context.Context, _ authctx.Scope, cla
 	return entry.sendable, entry.readable, nil
 }
 
-func (f *fakeRepository) TargetContacts(_ context.Context, _ authctx.Anchor, _ authctx.Scope, periodID uuid.UUID) ([]TargetContact, error) {
+func (f *fakeRepository) TargetContacts(_ context.Context, _ authctx.Anchor, periodID uuid.UUID) ([]TargetContact, error) {
 	return f.targets[periodID], nil
 }
 
-func (f *fakeRepository) TargetContactsClass(_ context.Context, _ authctx.Anchor, _ authctx.Scope, periodID, classID uuid.UUID) ([]TargetContact, error) {
+func (f *fakeRepository) TargetContactsClass(_ context.Context, _ authctx.Anchor, periodID, classID uuid.UUID) ([]TargetContact, error) {
 	return f.classTargets[classPeriodKey{periodID: periodID, classID: classID}], nil
 }
 
@@ -490,14 +490,15 @@ func TestToResponseWithholdsURLAndPhoneBelowOversight(t *testing.T) {
 		t.Fatalf("a non-oversight caller must never receive the family URL, got %q", *resp.URL)
 	}
 	if resp.Phone != nil {
-		t.Fatalf("a non-oversight caller without a row grant must not see the phone, got %q", *resp.Phone)
+		t.Fatalf("a caller without contacts.view_all must not see the phone, got %q", *resp.Phone)
 	}
 
-	granted := svc.ToResponse(authctx.Scope{}, Row{Statement: row.Statement, ContactPhone: "+84900000000", PhoneVisible: true})
+	viewer := authctx.Scope{Perms: authctx.BuildPermSet(nil, []string{authctx.PermContactsViewAll}, nil)}
+	granted := svc.ToResponse(viewer, row)
 	if granted.Phone == nil || *granted.Phone != "+84900000000" {
-		t.Fatalf("a row-granted caller must see the phone, got %v", granted.Phone)
+		t.Fatalf("a contacts.view_all holder must see the phone, got %v", granted.Phone)
 	}
 	if granted.URL != nil {
-		t.Fatal("a row grant unlocks the phone, never the family URL")
+		t.Fatal("contacts.view_all unlocks the phone, never the family URL")
 	}
 }
