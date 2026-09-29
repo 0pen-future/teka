@@ -34,8 +34,7 @@ export function useRevokeInvite() {
 }
 
 /**
- * `retry: false` and `gcTime: 0` mirror the public statement preview
- * (`features/statement/hooks/use-statement.ts`): a wrong or since-revoked
+ * `retry: false` and `gcTime: 0`: a wrong or since-revoked
  * token should fail fast, not spend three retries on a 404, and a stale
  * cached preview must not survive to be shown for a token that has since
  * been revoked or accepted on a shared device.

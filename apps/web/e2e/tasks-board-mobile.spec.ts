@@ -1,3 +1,4 @@
+/// <reference lib="dom" />
 import { expect, test } from "@playwright/test";
 
 import { apiLoginAsOwner, loginAsOwner } from "./helpers/auth.js";

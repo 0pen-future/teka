@@ -1,3 +1,4 @@
+/// <reference lib="dom" />
 import { AxeBuilder } from "@axe-core/playwright";
 import { expect, test as base, type BrowserContext, type Page } from "@playwright/test";
 
