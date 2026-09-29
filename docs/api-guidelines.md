@@ -171,8 +171,8 @@ exactly `center_id = a.CenterID AND teacher_id = a.TeacherID` through an
 you whether widening may apply: `sc Scope` means "the caller; `view_all`,
 stints, or ownership may widen this", `a Anchor` means "these rows, no
 widening, ever". A method with both is the exemplar of the split —
-`statements.TargetContacts(ctx, a Anchor, viewer Scope, periodID)` takes the
-rows from the anchored period while judging `phone_visible` for the viewer.
+`enrollments.CreateAnchored(ctx, actor Scope, a Anchor, req)` writes the row
+onto the anchored class teacher while the audit event names the actor.
 Where the teacher is irrelevant (dedupe of contacts/students by center, the
 roster of a class for reconciliation) the query is center-keyed through a
 `centerScoped(ctx, sc)` helper with the real caller's scope rather than an
