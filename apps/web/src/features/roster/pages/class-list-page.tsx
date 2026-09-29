@@ -1,6 +1,6 @@
 import { RefreshCwIcon } from "lucide-react";
 import { useCallback, useState } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 
 import { HvButton, HvNotice, HvStateBlock } from "@/components/hv";
 import { useCenterContext } from "@/features/teaching";
@@ -21,13 +21,16 @@ import { canWriteClass } from "../lib/class-permissions";
 /**
  * `/classes` — the class catalog. Filters live in the URL; the status chip
  * maps to the API's `phase` filter and "Cần tuyển sinh" to its `recruiting`
- * filter, so every view is filtered server-side.
+ * filter, so every view is filtered server-side. `?create=1` opens the
+ * create dialog, so other pages can link straight into it.
  */
 export function ClassListPage() {
   const navigate = useNavigate();
   const { has, isOwner } = useCenterContext();
   const canCreate = has("classes.create");
-  const [creating, setCreating] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  // The URL is the only source of the create dialog's state; without the permission the param is ignored.
+  const creating = canCreate && searchParams.get("create") === "1";
   const [editingId, setEditingId] = useState<string | null>(null);
   const { view, q, weekday, shift, set } = useClassListUrlState();
   const today = new Date().toISOString().slice(0, 10);
@@ -57,6 +60,13 @@ export function ClassListPage() {
   const total = list.data?.meta.total ?? 0;
   const truncated = fetched < total;
   const filtered = view !== "all" || q !== "" || weekday !== "" || shift !== "";
+
+  function setCreating(open: boolean) {
+    const params = new URLSearchParams(searchParams);
+    if (open) params.set("create", "1");
+    else params.delete("create");
+    setSearchParams(params, { replace: true });
+  }
 
   const handleFilterChange = useCallback(
     (partial: Partial<ClassListUrlValues>) => set(partial),

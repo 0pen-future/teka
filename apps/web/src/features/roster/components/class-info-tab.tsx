@@ -103,7 +103,7 @@ export function ClassInfoTab({
             <ShortcutLink to={`/classbook?class_id=${klass.id}`}>Sổ đầu bài</ShortcutLink>
           </li>
           <li>
-            <ShortcutLink to={`/records?class_id=${klass.id}`}>Hồ sơ học sinh</ShortcutLink>
+            <ShortcutLink to={`/students?class_id=${klass.id}`}>Học sinh của lớp</ShortcutLink>
           </li>
           <li>
             <ShortcutLink to="/sessions">Điểm danh</ShortcutLink>
@@ -117,11 +117,6 @@ export function ClassInfoTab({
               >
                 Thiết lập lớp
               </button>
-            </li>
-          ) : null}
-          {isOwner ? (
-            <li>
-              <ShortcutLink to="/center/class-config">Cấu hình lớp học</ShortcutLink>
             </li>
           ) : null}
         </ul>

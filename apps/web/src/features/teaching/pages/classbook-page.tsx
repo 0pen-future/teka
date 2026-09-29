@@ -81,7 +81,7 @@ export function ClassbookPage() {
   const [pendingNavigation, setPendingNavigation] = useState<Navigation | null>(null);
   const [pendingSaving, setPendingSaving] = useState(false);
 
-  const { centerId, isOwner } = useCenterContext();
+  const { centerId, isOwner, has } = useCenterContext();
 
   // per_page mirrors the students page: the class-search empty note asserts
   // over the full active-class list, so it must not be a truncated page.
@@ -368,8 +368,8 @@ export function ClassbookPage() {
           title="Chưa có lớp đang hoạt động"
           description="Tạo lớp trước, rồi quay lại đây để ghi sổ từng buổi."
           action={
-            isOwner ? (
-              <HvButton type="button" size="sm" onClick={() => void navigate("/center/classes")}>
+            has("classes.create") ? (
+              <HvButton type="button" size="sm" onClick={() => void navigate("/classes?create=1")}>
                 Tạo lớp
               </HvButton>
             ) : undefined

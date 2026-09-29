@@ -312,6 +312,30 @@ describe("ClassListPage", () => {
     expect(await screen.findByRole("dialog", { name: "Tạo lớp mới" })).toBeInTheDocument();
   });
 
+  it("opens the create dialog from ?create=1 and drops the param on close, keeping filters", async () => {
+    const user = userEvent.setup();
+    const { router } = renderPage("/classes?q=toan&create=1");
+    expect(await screen.findByRole("dialog", { name: "Tạo lớp mới" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Hủy" }));
+    await waitFor(() => expect(router.state.location.search).not.toContain("create"));
+    expect(router.state.location.search).toContain("q=toan");
+    expect(screen.queryByRole("dialog", { name: "Tạo lớp mới" })).not.toBeInTheDocument();
+  });
+
+  it("ignores ?create=1 for a member without classes.create", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(
+          ok({ center_name: "Trung Tâm Bình Minh", permissions: ["classes.list"] }),
+        ),
+      ),
+    );
+    const { queryClient } = renderPage("/classes?create=1");
+    await screen.findByRole("table");
+    await waitFor(() => expect(queryClient.getQueryState(centerKeys.me)?.status).toBe("success"));
+    expect(screen.queryByRole("dialog", { name: "Tạo lớp mới" })).not.toBeInTheDocument();
+  });
+
   it("hides + Lớp học from a member without classes.create", async () => {
     server.use(
       http.get(`${API_URL}/centers/me`, () =>
