@@ -29,7 +29,7 @@ export function canRecordAttendance(
 
 /**
  * Whether the caller may send this class's statement copies (the class-scoped
- * bulk send): reports oversight (owner or can_send_reports delegate) passes
+ * bulk send): reports.send (held implicitly by the owner) passes
  * center-wide, and the class's `hoc_vu` staff role grants it per class. The
  * teaching roles read the class but the API 403s their sends.
  */

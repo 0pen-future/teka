@@ -45,9 +45,10 @@ export function BillingReviewPage() {
     period?.period_end,
   );
   const closeMutation = useClosePeriod(periodId ?? "");
-  // Sending is owner/send-reports-holder work — a plain member still closes
-  // periods but loses the send entry point (server enforces regardless).
-  const { canRunSends } = useCenterContext();
+  // Sending takes reports.send (the owner holds it implicitly) — a plain
+  // member still closes periods but loses the send entry point (server
+  // enforces regardless).
+  const canRunSends = useCenterContext().has("reports.send");
 
   const [adjustRow, setAdjustRow] = useState<ReviewRow | null>(null);
   const [closeDialogOpen, setCloseDialogOpen] = useState(false);

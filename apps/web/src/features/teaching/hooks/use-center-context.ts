@@ -5,10 +5,6 @@ export interface CenterContext {
   centerId: string | null;
   centerName: string | null;
   isOwner: boolean;
-  /** The member's own send-reports flag; always false for the owner (flag is member-only). */
-  canSendReports: boolean;
-  /** Mirrors the server's ReportsOversight(): owner or flagged member may create sends. */
-  canRunSends: boolean;
   /** True once /centers/me resolved — gate owner-only UI on this to avoid flicker. */
   isResolved: boolean;
   /** True when /centers/me failed after retries — callers must not blank forever. */
@@ -36,8 +32,6 @@ export function useCenterContext(): CenterContext {
       centerId: null,
       centerName: null,
       isOwner: false,
-      canSendReports: false,
-      canRunSends: false,
       isResolved: false,
       isError,
       permissions: [],
@@ -46,14 +40,11 @@ export function useCenterContext(): CenterContext {
   }
   const isOwner = "members" in data;
   const centerName = isOwner ? data.center.name : data.center_name;
-  const canSendReports = isOwner ? false : data.can_send_reports;
   const permissions = data.permissions;
   return {
     centerId: centerName,
     centerName,
     isOwner,
-    canSendReports,
-    canRunSends: isOwner || canSendReports,
     isResolved: true,
     isError: false,
     permissions,

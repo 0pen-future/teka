@@ -121,10 +121,12 @@ describe("NotificationsPage member gating (D8)", () => {
     expect(screen.queryByRole("radio")).not.toBeInTheDocument();
   });
 
-  it("keeps the full send UI for a member holding can_send_reports", async () => {
+  it("keeps the full send UI for a member holding reports.send", async () => {
     server.use(
       http.get(`${API_URL}/centers/me`, () =>
-        HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh", can_send_reports: true })),
+        HttpResponse.json(
+          ok({ center_name: "Trung Tâm Bình Minh", permissions: ["reports.send"] }),
+        ),
       ),
     );
     renderNotificationsPage();

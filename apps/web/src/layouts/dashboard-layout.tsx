@@ -69,7 +69,7 @@ interface NavGroup {
 function useNavGroups(): NavGroup[] {
   const { data: period } = useCurrentPeriod();
   const { data: pendingSessionsResponse } = usePendingSessions();
-  const { isOwner, canSendReports, isResolved, has } = useCenterContext();
+  const { isOwner, isResolved, has } = useCenterContext();
   const pendingPlanCount = usePendingPlanCount();
   const periodId = period?.id ?? null;
   const hasPending = (pendingSessionsResponse?.total ?? 0) > 0;
@@ -163,9 +163,9 @@ function useNavGroups(): NavGroup[] {
         },
         { label: "Nhật ký hoạt động", to: "/audit", Icon: HistoryIcon, perm: "audit.read" },
         { label: "Công việc", to: "/tasks", Icon: KanbanIcon, perm: "tasks.list" },
-        // Secretary-only (owner reaches every period through Học phí already;
-        // the flag itself is member-only, so owner never matches).
-        ...(isResolved && !isOwner && canSendReports
+        // Members holding reports.send only: the owner (implicitly holding
+        // every key) already reaches every period through Học phí.
+        ...(isResolved && !isOwner && has("reports.send")
           ? [{ label: "Gửi báo cáo", to: "/reports", Icon: HvSendIcon }]
           : []),
         // Owner-only: class and student records are owner-managed center

@@ -477,10 +477,12 @@ describe("teaching v2 nav", () => {
     expect(queueRequests).toBe(0);
   });
 
-  it("shows Gửi báo cáo to a member holding can_send_reports, linking /reports", async () => {
+  it("shows Gửi báo cáo to a member holding reports.send, linking /reports", async () => {
     server.use(
       http.get(`${API_URL}/centers/me`, () =>
-        HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh", can_send_reports: true })),
+        HttpResponse.json(
+          ok({ center_name: "Trung Tâm Bình Minh", permissions: ["reports.send"] }),
+        ),
       ),
     );
     const user = userEvent.setup();

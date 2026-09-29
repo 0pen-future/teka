@@ -151,11 +151,12 @@ export function NotificationsPage() {
   // the other purpose tab never bleeds in.
   const activeRun = run.data?.purpose === purpose && run.data.run_id ? run.data : undefined;
 
-  // Send-affordance gating (D8): only reports oversight (owner or
-  // can_send_reports holder) may create sends; a plain member keeps this
-  // page read-only over the ledger. In class mode a hoc_vu stint on the
-  // class opens the send instead. UX-only — the server is the authority.
-  const { canRunSends, isResolved } = useCenterContext();
+  // Send-affordance gating: only reports.send (the owner holds it
+  // implicitly) may create sends; a plain member keeps this page read-only
+  // over the ledger. In class mode a hoc_vu stint on the class opens the
+  // send instead. UX-only — the server is the authority.
+  const { has, isResolved } = useCenterContext();
+  const canRunSends = has("reports.send");
   const classQuery = useClass(classId);
   const klass = classQuery.data;
   const canSend = classId
