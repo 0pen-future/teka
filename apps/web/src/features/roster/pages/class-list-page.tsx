@@ -18,59 +18,25 @@ import {
 } from "../hooks/use-class-list-url-state";
 import { canWriteClass } from "../lib/class-permissions";
 
-export type ClassListVariant = "all" | "recruiting";
-
-const variantCopy: Record<
-  ClassListVariant,
-  { title: string; subtitle: string; emptyLabel: string; path: string }
-> = {
-  all: {
-    title: "Danh mục lớp",
-    subtitle: "Theo dõi, tổ chức và quản lý các lớp học của trung tâm.",
-    emptyLabel: "Chưa có lớp học nào. Tạo lớp đầu tiên bằng nút + Lớp học.",
-    path: "/classes",
-  },
-  recruiting: {
-    title: "Lớp cần tuyển sinh",
-    subtitle: "Các lớp đang bật “Cần tuyển sinh” — chưa đủ sĩ số hoặc sắp khai giảng.",
-    emptyLabel: "Không có lớp nào cần tuyển sinh.",
-    path: "/classes/recruiting",
-  },
-};
-
-interface ClassListPageProps {
-  /**
-   * `recruiting` is `/classes/recruiting`: the same table narrowed to the
-   * classes open for recruitment, with chip counts over that set.
-   */
-  variant?: ClassListVariant;
-}
-
 /**
  * `/classes` — the class catalog. Filters live in the URL; the status chip
  * maps to the API's `phase` filter and "Cần tuyển sinh" to its `recruiting`
  * filter, so every view is filtered server-side.
  */
-export function ClassListPage({ variant = "all" }: ClassListPageProps) {
+export function ClassListPage() {
   const navigate = useNavigate();
   const { has, isOwner } = useCenterContext();
   const canCreate = has("classes.create");
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const url = useClassListUrlState();
-  const { q, weekday, shift, set } = url;
-  const recruitingPage = variant === "recruiting";
-  // The recruiting page has no "Cần tuyển sinh" chip; a shared link carrying
-  // it falls back to "all", which is the same set there.
-  const view = recruitingPage && url.view === "recruiting" ? "all" : url.view;
-  const copy = variantCopy[variant];
+  const { view, q, weekday, shift, set } = useClassListUrlState();
   const today = new Date().toISOString().slice(0, 10);
 
   const params: ListClassesParams = { status: "all", per_page: 100 };
   if (isClassPhaseView(view)) {
     params.phase = view;
   }
-  if (recruitingPage || view === "recruiting") {
+  if (view === "recruiting") {
     params.recruiting = true;
   }
   if (q !== "") {
@@ -84,7 +50,7 @@ export function ClassListPage({ variant = "all" }: ClassListPageProps) {
   }
 
   const list = useClassesList(params);
-  const stats = useClassStats(recruitingPage ? { recruiting: true } : {});
+  const stats = useClassStats();
   const classes = list.data?.items ?? [];
   // The page fetches one API page; past it the catalog is cut.
   const fetched = list.data?.items.length ?? 0;
@@ -103,9 +69,11 @@ export function ClassListPage({ variant = "all" }: ClassListPageProps) {
       <div className="mb-1 flex flex-wrap items-start gap-3">
         <div className="min-w-[260px] flex-1">
           <h1 className="mb-1 font-display text-[26px] font-extrabold text-ink-900">
-            {copy.title}
+            Danh mục lớp
           </h1>
-          <p className="text-[14px] text-ink-500">{copy.subtitle}</p>
+          <p className="text-[14px] text-ink-500">
+            Theo dõi, tổ chức và quản lý các lớp học của trung tâm.
+          </p>
         </div>
         <button
           type="button"
@@ -135,7 +103,6 @@ export function ClassListPage({ variant = "all" }: ClassListPageProps) {
           stats={stats.data}
           value={view}
           onChange={(next) => set({ view: next })}
-          includeRecruiting={!recruitingPage}
         />
       </div>
 
@@ -162,17 +129,13 @@ export function ClassListPage({ variant = "all" }: ClassListPageProps) {
         <ClassTable
           classes={classes}
           today={today}
-          onOpen={(klass) =>
-            void navigate(`/classes/${klass.id}`, {
-              state: { from: copy.path },
-            })
-          }
+          onOpen={(klass) => void navigate(`/classes/${klass.id}`)}
           canEdit={(klass) => canWriteClass(isOwner, klass)}
           onEdit={(klass) => setEditingId(klass.id)}
           emptyLabel={
-            filtered && !recruitingPage
+            filtered
               ? "Không có lớp nào khớp bộ lọc. Đổi bộ lọc hoặc xoá từ khoá."
-              : copy.emptyLabel
+              : "Chưa có lớp học nào. Tạo lớp đầu tiên bằng nút + Lớp học."
           }
         />
       )}
@@ -190,9 +153,4 @@ export function ClassListPage({ variant = "all" }: ClassListPageProps) {
       ) : null}
     </div>
   );
-}
-
-/** `/classes/recruiting` — "Lớp cần tuyển sinh", the catalog narrowed to classes open for recruitment. */
-export function RecruitingClassListPage() {
-  return <ClassListPage variant="recruiting" />;
 }

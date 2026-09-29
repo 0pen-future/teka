@@ -6,14 +6,12 @@ import {
   EllipsisIcon,
   GraduationCapIcon,
   HistoryIcon,
-  IdCardIcon,
   KanbanIcon,
   LibraryBigIcon,
   LogOutIcon,
   MailPlusIcon,
   RouteIcon,
   ShieldCheckIcon,
-  SlidersHorizontalIcon,
   type LucideProps,
 } from "lucide-react";
 import { createContext, useContext, useState, type ComponentType } from "react";
@@ -46,6 +44,11 @@ interface NavEntry {
    * means visible to every member (e.g. Tổng quan, Cài đặt trung tâm).
    */
   perm?: string;
+  /**
+   * Route families beyond `to` that still light the entry up — e.g. the
+   * per-period send page opened from the period list the entry links to.
+   */
+  activePrefixes?: readonly string[];
 }
 
 interface NavGroup {
@@ -56,13 +59,12 @@ interface NavGroup {
 
 /**
  * The prototype sidebar's grouped nav: Tổng quan ungrouped, then Dạy học /
- * Lớp học / Kho học liệu / Học phí / Trung tâm sections. Entries carrying a
+ * Lớp học / Học liệu / Học phí / Trung tâm sections. Entries carrying a
  * `perm` render only after `/centers/me` resolves with that key in the
  * caller's effective set — rendering optimistically would flash entries a
- * narrowed role then loses. The three period-scoped routes (Chốt sổ, Gửi
- * thông báo, Thu tiền) build their link once `useCurrentPeriod` resolves
- * rather than routing through a redirect page, since phase 1 owns no
- * `/billing/current`-style route.
+ * narrowed role then loses. The two period-scoped routes (Chốt sổ, Thu tiền)
+ * build their link once `useCurrentPeriod` resolves rather than routing
+ * through a redirect page, since no `/billing/current`-style route exists.
  */
 function useNavGroups(): NavGroup[] {
   const { data: period } = useCurrentPeriod();
@@ -84,8 +86,7 @@ function useNavGroups(): NavGroup[] {
           pending: hasPending,
           perm: "sessions.list",
         },
-        { label: "Sổ lớp", to: "/classbook", Icon: BookOpenIcon, perm: "classes.list" },
-        { label: "Hồ sơ học sinh", to: "/records", Icon: IdCardIcon, perm: "students.list" },
+        { label: "Sổ lớp", to: "/classbook", Icon: BookOpenIcon, perm: "teaching.read" },
       ],
     },
     {
@@ -100,19 +101,13 @@ function useNavGroups(): NavGroup[] {
           Icon: BookMarkedIcon,
           perm: "classes.list",
         },
-        {
-          label: "Lớp cần tuyển sinh",
-          to: "/classes/recruiting",
-          Icon: HvUsersIcon,
-          perm: "classes.list",
-        },
         // No perm: every member can receive an invitation, and the API
         // already scopes the list to the caller's own rows.
         { label: "Lời mời nhận lớp", to: "/class-invitations", Icon: MailPlusIcon },
       ],
     },
     {
-      header: "Kho học liệu",
+      header: "Học liệu",
       entries: [
         { label: "Lộ trình học", to: "/paths", Icon: RouteIcon, perm: "paths.read" },
         { label: "Khóa học", to: "/courses", Icon: GraduationCapIcon, perm: "courses.read" },
@@ -129,13 +124,15 @@ function useNavGroups(): NavGroup[] {
           Icon: HvFileIcon,
           perm: "billing.read",
         },
-        // The whole notifications surface enforces reports.send, so members
-        // without the delegated key never see the entry.
+        // Opens the period list rather than one period, so it never waits on
+        // the current period; each period's send page still lights it up. The
+        // whole notifications surface enforces reports.send.
         {
           label: "Gửi thông báo",
-          to: periodId ? `/notifications/${periodId}` : null,
+          to: "/reports",
           Icon: HvSendIcon,
           perm: "reports.send",
+          activePrefixes: ["/notifications"],
         },
         {
           label: "Thu tiền",
@@ -157,24 +154,9 @@ function useNavGroups(): NavGroup[] {
         },
         { label: "Nhật ký hoạt động", to: "/audit", Icon: HistoryIcon, perm: "audit.read" },
         { label: "Công việc", to: "/tasks", Icon: KanbanIcon, perm: "tasks.list" },
-        // Members holding reports.send only: the owner (implicitly holding
-        // every key) already reaches every period through Học phí.
-        ...(isResolved && !isOwner && has("reports.send")
-          ? [{ label: "Gửi báo cáo", to: "/reports", Icon: HvSendIcon }]
-          : []),
         // Owner-only: the role-permission read model itself is owner-only.
         ...(isResolved && isOwner
           ? [{ label: "Phân quyền vai trò", to: "/center/permissions", Icon: ShieldCheckIcon }]
-          : []),
-        // Owner-only: the score-set CRUD and class assignment endpoints are owner-only.
-        ...(isResolved && isOwner
-          ? [
-              {
-                label: "Cấu hình lớp học",
-                to: "/center/class-config",
-                Icon: SlidersHorizontalIcon,
-              },
-            ]
           : []),
         { label: "Cài đặt trung tâm", to: "/center", Icon: Building2Icon },
       ],
@@ -192,28 +174,25 @@ function useNavGroups(): NavGroup[] {
 
 /**
  * Bottom-bar split (<md only; the sidebar and rail render every entry, in
- * groups): daily actions keep a direct tab, while the billing-cycle entries
- * (Chốt sổ, Gửi thông báo), the Lớp học entries including Học sinh, and the
- * whole Trung tâm group live behind the Thêm sheet so the bar stays uncrowded at 360px.
+ * groups): daily actions keep a direct tab, while Sổ lớp, the Lớp học and
+ * Học liệu entries, the billing-cycle entries (Chốt sổ, Gửi thông báo), and
+ * the whole Trung tâm group live behind the Thêm sheet so the bar stays
+ * uncrowded at 360px.
  */
 const OVERFLOW_LABELS = new Set([
   "Sổ lớp",
-  "Hồ sơ học sinh",
   "Học sinh",
   "Danh mục lớp",
-  "Lớp cần tuyển sinh",
   "Lời mời nhận lớp",
   "Lộ trình học",
   "Khóa học",
   "Kho học liệu",
   "Chốt sổ",
   "Gửi thông báo",
-  "Gửi báo cáo",
   "Duyệt giáo án",
   "Nhật ký hoạt động",
   "Công việc",
   "Phân quyền vai trò",
-  "Cấu hình lớp học",
   "Cài đặt trung tâm",
 ]);
 
@@ -229,7 +208,6 @@ const OVERFLOW_PATH_PREFIXES = [
   "/library",
   "/courses",
   "/paths",
-  "/records",
   "/billing",
   "/notifications",
   "/contacts",
@@ -255,7 +233,7 @@ const NavPathsContext = createContext<readonly string[]>([]);
  * `NavLink`'s prefix matching cannot express without also dropping the parent
  * on genuine children like /students/:id.
  */
-function useNavActive(to: string | null): boolean {
+function useNavActive(to: string | null, activePrefixes?: readonly string[]): boolean {
   const { pathname } = useLocation();
   const paths = useContext(NavPathsContext);
   if (!to) {
@@ -265,6 +243,9 @@ function useNavActive(to: string | null): boolean {
     return pathname === "/";
   }
   const covers = (base: string) => pathname === base || pathname.startsWith(`${base}/`);
+  if (activePrefixes?.some(covers)) {
+    return true;
+  }
   if (!covers(to)) {
     return false;
   }
@@ -280,9 +261,10 @@ function SidebarNavItem({
   label,
   Icon,
   pending,
+  activePrefixes,
   onNavigate,
 }: NavEntry & { onNavigate?: () => void }) {
-  const active = useNavActive(to);
+  const active = useNavActive(to, activePrefixes);
   if (!to) {
     return (
       <span
@@ -313,8 +295,8 @@ function SidebarNavItem({
   );
 }
 
-function RailNavItem({ to, label, Icon, pending }: NavEntry) {
-  const active = useNavActive(to);
+function RailNavItem({ to, label, Icon, pending, activePrefixes }: NavEntry) {
+  const active = useNavActive(to, activePrefixes);
   if (!to) {
     return (
       <span
@@ -343,8 +325,8 @@ function RailNavItem({ to, label, Icon, pending }: NavEntry) {
   );
 }
 
-function BottomTabItem({ to, label, Icon, pending }: NavEntry) {
-  const active = useNavActive(to);
+function BottomTabItem({ to, label, Icon, pending, activePrefixes }: NavEntry) {
+  const active = useNavActive(to, activePrefixes);
   if (!to) {
     return (
       <span
@@ -475,9 +457,11 @@ function CurrentPeriodCard() {
   );
 }
 
+/** Links into Chốt sổ, so it follows that entry's billing.read gate. */
 function CurrentPeriodDisc() {
+  const { has } = useCenterContext();
   const { data: period } = useCurrentPeriod();
-  if (!period) {
+  if (!has("billing.read") || !period) {
     return null;
   }
   return (

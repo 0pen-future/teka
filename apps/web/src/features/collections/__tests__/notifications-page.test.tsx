@@ -4,7 +4,7 @@ import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
-import { API_URL, ok } from "@/test/msw/handlers";
+import { API_URL, fail, ok } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
 
@@ -134,5 +134,84 @@ describe("NotificationsPage member gating (D8)", () => {
     expect(await screen.findByText("Chưa có thông báo nào cho kỳ này.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Tạo thông báo học phí" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Zalo thủ công" })).toBeInTheDocument();
+  });
+});
+
+describe("NotificationsPage personal send conflicts", () => {
+  it("explains a cross-teacher refusal instead of reporting a busy run", async () => {
+    server.use(
+      http.get(`${API_URL}/me/zalo`, () =>
+        HttpResponse.json(
+          ok({
+            linked: true,
+            display_name: "Cô Lan",
+            status: "linked",
+            linked_at: "2026-08-01T08:00:00Z",
+          }),
+        ),
+      ),
+      http.post(`${API_URL}/billing-periods/:id/notifications/bulk`, () =>
+        HttpResponse.json(
+          fail(
+            "CONFLICT",
+            "this period belongs to another teacher; zalo_personal sends only their own periods — ask them to send it, or use zalo_manual",
+          ),
+          { status: 409 },
+        ),
+      ),
+    );
+    const user = userEvent.setup();
+    renderNotificationsPage();
+
+    await screen.findByText("Chưa có thông báo nào cho kỳ này.");
+    await user.click(screen.getByRole("radio", { name: "Gửi qua Zalo (tự động)" }));
+    await user.click(screen.getByRole("button", { name: "Tạo thông báo học phí" }));
+    const send = await screen.findByRole("button", { name: "Gửi" });
+    await waitFor(() => expect(send).toBeEnabled());
+    await user.click(send);
+
+    expect(
+      await screen.findByText(
+        "Kỳ này của giáo viên khác — Zalo cá nhân chỉ gửi kỳ của bạn, hãy chọn Zalo thủ công",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Đang có lượt gửi chạy, đợi xong đã")).not.toBeInTheDocument();
+  });
+
+  it("explains a cross-teacher refusal in the confirm dialog when the preview is refused", async () => {
+    server.use(
+      http.get(`${API_URL}/me/zalo`, () =>
+        HttpResponse.json(
+          ok({
+            linked: true,
+            display_name: "Cô Lan",
+            status: "linked",
+            linked_at: "2026-08-01T08:00:00Z",
+          }),
+        ),
+      ),
+      http.get(`${API_URL}/billing-periods/:id/notifications/preview`, () =>
+        HttpResponse.json(
+          fail(
+            "CONFLICT",
+            "this period belongs to another teacher; zalo_personal sends only their own periods — ask them to send it, or use zalo_manual",
+          ),
+          { status: 409 },
+        ),
+      ),
+    );
+    const user = userEvent.setup();
+    renderNotificationsPage();
+
+    await screen.findByText("Chưa có thông báo nào cho kỳ này.");
+    await user.click(screen.getByRole("radio", { name: "Gửi qua Zalo (tự động)" }));
+    await user.click(screen.getByRole("button", { name: "Tạo thông báo học phí" }));
+
+    expect(
+      await screen.findByText(
+        "Kỳ này của giáo viên khác — Zalo cá nhân chỉ gửi kỳ của bạn, hãy chọn Zalo thủ công",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Không kiểm tra được danh sách bạn bè Zalo/)).not.toBeInTheDocument();
   });
 });

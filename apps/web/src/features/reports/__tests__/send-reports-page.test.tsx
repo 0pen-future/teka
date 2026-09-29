@@ -84,7 +84,7 @@ describe("SendReportsPage", () => {
       "/notifications/d1000000-0000-4000-8000-000000000002",
     ]);
     expect(
-      screen.getByRole("link", { name: "Gửi báo cáo tháng 7/2026 của Cô Lan" }),
+      screen.getByRole("link", { name: "Gửi thông báo tháng 7/2026 của Cô Lan" }),
     ).toBeInTheDocument();
 
     // Status badges: open → Đang mở, closed → Đã chốt.

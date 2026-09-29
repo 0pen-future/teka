@@ -34,10 +34,21 @@ const generateLabel: Record<Purpose, string> = {
   reminder: "Tạo nhắc nợ",
 };
 
-// Both zalo_personal conflicts come back as a plain 409 CONFLICT; the only
+// Every zalo_personal conflict comes back as a plain 409 CONFLICT; the only
 // wire-level discriminator is the server's fixed message text. Keep the
-// coupled substring in one visible place.
+// coupled substrings in one visible place.
 const EXPIRED_SESSION_409 = "session has expired";
+const CROSS_TEACHER_409 = "belongs to another teacher";
+
+function personalSendConflictMessage(message: string): string {
+  if (message.includes(EXPIRED_SESSION_409)) {
+    return "Phiên Zalo đã hết hạn — quét lại mã ở trang cá nhân";
+  }
+  if (message.includes(CROSS_TEACHER_409)) {
+    return "Kỳ này của giáo viên khác — Zalo cá nhân chỉ gửi kỳ của bạn, hãy chọn Zalo thủ công";
+  }
+  return "Đang có lượt gửi chạy, đợi xong đã";
+}
 
 /**
  * The server's overlap warning (the OTHER statement dimension — family vs
@@ -226,12 +237,7 @@ export function NotificationsPage() {
         onError: (error) => {
           setConfirmOpen(false);
           if (error instanceof ApiError && error.status === 409) {
-            hvToast(
-              error.message.includes(EXPIRED_SESSION_409)
-                ? "Phiên Zalo đã hết hạn — quét lại mã ở trang cá nhân"
-                : "Đang có lượt gửi chạy, đợi xong đã",
-              { variant: "danger" },
-            );
+            hvToast(personalSendConflictMessage(error.message), { variant: "danger" });
             return;
           }
           hvToast("Không thể tạo thông báo", { variant: "danger" });
@@ -486,6 +492,8 @@ export function NotificationsPage() {
         description={
           preview.isPending ? (
             "Đang kiểm tra danh sách bạn bè Zalo…"
+          ) : preview.error?.message.includes(CROSS_TEACHER_409) ? (
+            personalSendConflictMessage(preview.error.message)
           ) : preview.isError ? (
             "Không kiểm tra được danh sách bạn bè Zalo — vẫn gửi được, nhưng tin tới người chưa là bạn có thể không đến nơi."
           ) : (

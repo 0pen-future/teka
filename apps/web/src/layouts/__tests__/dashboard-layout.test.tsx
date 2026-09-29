@@ -104,7 +104,7 @@ describe("Học sinh nav entry", () => {
   });
 
   it("drops the header of a group whose every entry is filtered away", async () => {
-    // Every Kho học liệu and Học phí entry is gated on a key this member lacks.
+    // Every Học liệu and Học phí entry is gated on a key this member lacks.
     asMember(["sessions.list"]);
     renderLayout();
     const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
@@ -113,9 +113,7 @@ describe("Học sinh nav entry", () => {
     expect(within(sidebarNav).getByRole("group", { name: "Dạy học" })).toBeInTheDocument();
     // Lời mời nhận lớp is ungated, so Lớp học stays.
     expect(within(sidebarNav).getByRole("group", { name: "Lớp học" })).toBeInTheDocument();
-    expect(
-      within(sidebarNav).queryByRole("group", { name: "Kho học liệu" }),
-    ).not.toBeInTheDocument();
+    expect(within(sidebarNav).queryByRole("group", { name: "Học liệu" })).not.toBeInTheDocument();
     expect(within(sidebarNav).queryByRole("group", { name: "Học phí" })).not.toBeInTheDocument();
   });
 });
@@ -128,7 +126,7 @@ describe("grouped sidebar", () => {
     await within(sidebarNav).findByRole("link", { name: "Duyệt giáo án" });
 
     const expected: Record<string, string[]> = {
-      "Dạy học": ["Điểm danh", "Sổ lớp", "Hồ sơ học sinh"],
+      "Dạy học": ["Điểm danh", "Sổ lớp"],
       "Học phí": ["Chốt sổ", "Gửi thông báo", "Thu tiền"],
       "Trung tâm": [
         "Duyệt giáo án",
@@ -191,8 +189,9 @@ describe("bottom tab bar", () => {
 
     const billing = await within(sheet).findByRole("link", { name: "Chốt sổ" });
     expect(billing.getAttribute("href")).toMatch(/^\/billing\//);
-    expect(within(sheet).getByRole("link", { name: "Gửi thông báo" }).getAttribute("href")).toMatch(
-      /^\/notifications\//,
+    expect(within(sheet).getByRole("link", { name: "Gửi thông báo" })).toHaveAttribute(
+      "href",
+      "/reports",
     );
     const students = await within(sheet).findByRole("link", { name: "Học sinh" });
     expect(students).toHaveAttribute("href", "/students");
@@ -260,14 +259,14 @@ describe("bottom tab bar", () => {
       "href",
       "/classbook",
     );
-    expect(within(sheet).getByRole("link", { name: "Hồ sơ học sinh" })).toHaveAttribute(
-      "href",
-      "/records",
-    );
     expect(await within(sheet).findByRole("link", { name: "Duyệt giáo án" })).toHaveAttribute(
       "href",
       "/lesson-plans",
     );
+    // The retired duplicates are gone from the sheet too.
+    for (const label of ["Hồ sơ học sinh", "Lớp cần tuyển sinh", "Cấu hình lớp học"]) {
+      expect(within(sheet).queryByText(label)).not.toBeInTheDocument();
+    }
     // The owner-only roster entry lives here too, never on the primary tabs.
     expect(await within(sheet).findByRole("link", { name: "Học sinh" })).toHaveAttribute(
       "href",
@@ -281,7 +280,7 @@ describe("bottom tab bar", () => {
     expect(moreTab).toHaveClass("text-mint-600");
   });
 
-  it("renders period-scoped sheet entries disabled while no period resolves", async () => {
+  it("renders only the period-scoped entries disabled while no period resolves", async () => {
     server.use(
       http.post(`${API_URL}/billing-periods`, () =>
         HttpResponse.json(fail("INTERNAL_ERROR", "boom"), { status: 500 }),
@@ -289,14 +288,20 @@ describe("bottom tab bar", () => {
     );
     const user = userEvent.setup();
     renderLayout();
-    const { moreTab } = await findBottomNav();
+    const { moreTab, nav } = await findBottomNav();
+    expect(await within(nav).findByText("Thu tiền")).toBeInTheDocument();
+    expect(within(nav).queryByRole("link", { name: "Thu tiền" })).not.toBeInTheDocument();
 
     await user.click(moreTab);
     const sheet = await screen.findByRole("dialog");
 
     expect(within(sheet).getByText("Chốt sổ")).toBeInTheDocument();
     expect(within(sheet).queryByRole("link", { name: "Chốt sổ" })).not.toBeInTheDocument();
-    expect(within(sheet).queryByRole("link", { name: "Gửi thông báo" })).not.toBeInTheDocument();
+    // Gửi thông báo opens the period list, so it never waits on the period.
+    expect(within(sheet).getByRole("link", { name: "Gửi thông báo" })).toHaveAttribute(
+      "href",
+      "/reports",
+    );
     // Học sinh is not period-scoped and stays a live link.
     expect(await within(sheet).findByRole("link", { name: "Học sinh" })).toBeInTheDocument();
   });
@@ -312,15 +317,31 @@ describe("teaching v2 nav", () => {
     const labels = within(group)
       .getAllByRole("link")
       .map((link) => link.textContent);
-    expect(labels).toEqual(["Điểm danh", "Sổ lớp", "Hồ sơ học sinh"]);
+    expect(labels).toEqual(["Điểm danh", "Sổ lớp"]);
     expect(within(group).getByRole("link", { name: "Sổ lớp" })).toHaveAttribute(
       "href",
       "/classbook",
     );
-    expect(within(group).getByRole("link", { name: "Hồ sơ học sinh" })).toHaveAttribute(
+    // Student records live on the students page; the duplicate entry is gone.
+    expect(within(sidebarNav).queryByText("Hồ sơ học sinh")).not.toBeInTheDocument();
+  });
+
+  it("shows Sổ lớp to a member holding teaching.read", async () => {
+    asMember(["teaching.read"]);
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+    expect(await within(sidebarNav).findByRole("link", { name: "Sổ lớp" })).toHaveAttribute(
       "href",
-      "/records",
+      "/classbook",
     );
+  });
+
+  it("hides Sổ lớp from a member without teaching.read, even with classes.list", async () => {
+    asMember(["classes.list", "sessions.list"]);
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+    await within(sidebarNav).findByRole("link", { name: "Điểm danh" });
+    expect(within(sidebarNav).queryByText("Sổ lớp")).not.toBeInTheDocument();
   });
 
   it("shows Duyệt giáo án to owners before Cài đặt trung tâm", async () => {
@@ -338,9 +359,10 @@ describe("teaching v2 nav", () => {
       "Nhật ký hoạt động",
       "Công việc",
       "Phân quyền vai trò",
-      "Cấu hình lớp học",
       "Cài đặt trung tâm",
     ]);
+    // Score sets are applied from the program template; the owner-only entry is gone.
+    expect(screen.queryByText("Cấu hình lớp học")).not.toBeInTheDocument();
   });
 
   it("shows Phân quyền vai trò to owners linking /center/permissions", async () => {
@@ -468,7 +490,6 @@ describe("teaching v2 nav", () => {
       "href",
       "/sessions",
     );
-    expect(within(sidebarNav).getByRole("link", { name: "Hồ sơ học sinh" })).toBeInTheDocument();
     // students.list alone opens the unified students page.
     expect(within(sidebarNav).getByRole("link", { name: "Học sinh" })).toBeInTheDocument();
     // Entries whose route key the member lacks disappear entirely — no
@@ -501,51 +522,57 @@ describe("teaching v2 nav", () => {
     expect(queueRequests).toBe(0);
   });
 
-  it("shows Gửi báo cáo to a member holding reports.send, linking /reports", async () => {
-    server.use(
-      http.get(`${API_URL}/centers/me`, () =>
-        HttpResponse.json(
-          ok({ center_name: "Trung Tâm Bình Minh", permissions: ["reports.send"] }),
-        ),
-      ),
-    );
+  it("gives the owner exactly one Gửi thông báo entry, linking the period list", async () => {
     const user = userEvent.setup();
-    renderLayout();
-    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
-
-    const link = await within(sidebarNav).findByRole("link", { name: "Gửi báo cáo" });
-    expect(link).toHaveAttribute("href", "/reports");
-    const group = within(sidebarNav).getByRole("group", { name: "Trung tâm" });
-    expect(within(group).getByRole("link", { name: "Gửi báo cáo" })).toBeInTheDocument();
-
-    // The entry also reaches the mobile Thêm sheet, never the primary tabs.
-    const moreTab = await screen.findByRole("button", { name: "Thêm" });
-    await user.click(moreTab);
-    const sheet = await screen.findByRole("dialog");
-    expect(within(sheet).getByRole("link", { name: "Gửi báo cáo" })).toHaveAttribute(
-      "href",
-      "/reports",
-    );
-  });
-
-  it("hides Gửi báo cáo from a plain member without the flag", async () => {
-    server.use(
-      http.get(`${API_URL}/centers/me`, () =>
-        HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh" })),
-      ),
-    );
-    renderLayout();
-    // Member role label proves /centers/me resolved member-shaped.
-    await screen.findByText("Giáo viên");
-    expect(screen.queryByRole("link", { name: "Gửi báo cáo" })).not.toBeInTheDocument();
-  });
-
-  it("hides Gửi báo cáo from the owner, who reaches every period through Học phí", async () => {
     renderLayout();
     const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
     // Owner-shaped default: wait for the slowest owner entry to appear first.
     await within(sidebarNav).findByRole("link", { name: "Duyệt giáo án" });
+
+    const links = within(sidebarNav).getAllByRole("link", { name: "Gửi thông báo" });
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAttribute("href", "/reports");
+    const group = within(sidebarNav).getByRole("group", { name: "Học phí" });
+    expect(within(group).getByRole("link", { name: "Gửi thông báo" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Gửi báo cáo" })).not.toBeInTheDocument();
+
+    // The entry also reaches the mobile Thêm sheet, never the primary tabs.
+    const { moreTab } = await findBottomNav();
+    await user.click(moreTab);
+    const sheet = await screen.findByRole("dialog");
+    expect(within(sheet).getAllByRole("link", { name: "Gửi thông báo" })).toHaveLength(1);
+    expect(within(sheet).queryByRole("link", { name: "Gửi báo cáo" })).not.toBeInTheDocument();
+  });
+
+  it("gives a member holding reports.send the same single entry", async () => {
+    asMember(["reports.send"]);
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+
+    await within(sidebarNav).findByRole("link", { name: "Gửi thông báo" });
+    const links = within(sidebarNav).getAllByRole("link", { name: "Gửi thông báo" });
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAttribute("href", "/reports");
+    expect(screen.queryByRole("link", { name: "Gửi báo cáo" })).not.toBeInTheDocument();
+  });
+
+  it("hides Gửi thông báo from a plain member without reports.send", async () => {
+    asMember([]);
+    renderLayout();
+    // Member role label proves /centers/me resolved member-shaped.
+    await screen.findByText("Giáo viên");
+    expect(screen.queryByText("Gửi thông báo")).not.toBeInTheDocument();
+    expect(screen.queryByText("Gửi báo cáo")).not.toBeInTheDocument();
+  });
+
+  it("keeps Gửi thông báo active on the period list and on a period's send page", async () => {
+    for (const route of ["/reports", "/notifications/p1"]) {
+      const { unmount } = renderLayout(route);
+      const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+      const send = await within(sidebarNav).findByRole("link", { name: "Gửi thông báo" });
+      expect(send).toHaveAttribute("aria-current", "page");
+      unmount();
+    }
   });
 
   it("marks Duyệt giáo án pending while a plan awaits review", async () => {
@@ -582,22 +609,12 @@ describe("Lớp học nav group", () => {
     expect(teaching.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("lists Lớp cần tuyển sinh between the class list and the invitations", async () => {
-    renderLayout("/classes/recruiting");
+  it("has no Lớp cần tuyển sinh entry; the catalog owns the recruiting view", async () => {
+    renderLayout("/classes");
     const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
     const group = await within(sidebarNav).findByRole("group", { name: "Lớp học" });
-    const recruiting = await within(group).findByRole("link", { name: "Lớp cần tuyển sinh" });
-    expect(recruiting).toHaveAttribute("href", "/classes/recruiting");
-
-    const labels = within(group)
-      .getAllByRole("link")
-      .map((link) => link.textContent);
-    expect(labels.slice(1, 4)).toEqual(["Danh mục lớp", "Lớp cần tuyển sinh", "Lời mời nhận lớp"]);
-    // Most specific wins: the recruiting route does not also light up /classes.
-    expect(recruiting).toHaveAttribute("aria-current", "page");
-    expect(within(group).getByRole("link", { name: "Danh mục lớp" })).not.toHaveAttribute(
-      "aria-current",
-    );
+    await within(group).findByRole("link", { name: "Danh mục lớp" });
+    expect(within(sidebarNav).queryByText("Lớp cần tuyển sinh")).not.toBeInTheDocument();
   });
 
   it("shows the entry to a member holding classes.list", async () => {
@@ -644,13 +661,13 @@ describe("Lớp học nav group", () => {
   });
 });
 
-describe("Kho học liệu nav group", () => {
+describe("Học liệu nav group", () => {
   it("shows its own group after Lớp học with the prototype's entries in order", async () => {
     renderLayout();
     const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
     const teaching = await within(sidebarNav).findByRole("group", { name: "Lớp học" });
     // Its entries are all gated, so the header waits for /centers/me.
-    const group = await within(sidebarNav).findByRole("group", { name: "Kho học liệu" });
+    const group = await within(sidebarNav).findByRole("group", { name: "Học liệu" });
     expect(teaching.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     await within(group).findByRole("link", { name: "Kho học liệu" });
@@ -665,7 +682,7 @@ describe("Kho học liệu nav group", () => {
       within(teaching)
         .getAllByRole("link")
         .map((link) => link.textContent),
-    ).toEqual(["Học sinh", "Danh mục lớp", "Lớp cần tuyển sinh", "Lời mời nhận lớp"]);
+    ).toEqual(["Học sinh", "Danh mục lớp", "Lời mời nhận lớp"]);
     expect(screen.queryByText("Danh mục khóa học")).not.toBeInTheDocument();
     expect(screen.queryByText("Ngân hàng nội dung")).not.toBeInTheDocument();
   });
@@ -680,7 +697,7 @@ describe("Kho học liệu nav group", () => {
     );
     renderLayout();
     const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
-    const group = await within(sidebarNav).findByRole("group", { name: "Kho học liệu" });
+    const group = await within(sidebarNav).findByRole("group", { name: "Học liệu" });
     await within(group).findByRole("link", { name: "Khóa học" });
     expect(within(group).getAllByRole("link")).toHaveLength(1);
     expect(screen.queryByText("Lộ trình học")).not.toBeInTheDocument();
@@ -720,5 +737,24 @@ describe("Kho học liệu nav group", () => {
     const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
     const courses = await within(sidebarNav).findByRole("link", { name: "Khóa học" });
     expect(courses).toHaveAttribute("aria-current", "page");
+  });
+});
+
+describe("current period disc", () => {
+  it("shows the rail's period disc to a member holding billing.read", async () => {
+    asMember(["billing.read"]);
+    renderLayout();
+    expect(await screen.findByRole("link", { name: /^Kỳ hiện tại: tháng / })).toHaveAttribute(
+      "href",
+      expect.stringMatching(/^\/billing\//),
+    );
+  });
+
+  it("hides the rail's period disc from a member without billing.read", async () => {
+    asMember(["sessions.list"]);
+    renderLayout();
+    // The sidebar period card proves the current period resolved.
+    await screen.findByText(/^Tháng \d+\/\d+$/);
+    expect(screen.queryByRole("link", { name: /^Kỳ hiện tại: tháng / })).not.toBeInTheDocument();
   });
 });
