@@ -22,9 +22,9 @@ export const centerRoutes: RouteObject[] = [
   },
   {
     path: "center/class-config",
-    handle: { title: "Cấu hình lớp học" } satisfies RouteHandle,
+    handle: { title: "Cài đặt trung tâm" } satisfies RouteHandle,
     lazy: async () => ({
-      Component: (await import("./pages/class-config-page")).ClassConfigPage,
+      Component: (await import("./components/class-config-redirect")).ClassConfigRedirect,
     }),
   },
 ];
