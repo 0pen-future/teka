@@ -1,8 +1,8 @@
 import { z } from "zod";
 
 /**
- * Teaching domain vocabulary shared by the classbook, records, and review
- * screens: the store-shaped types the components consume, the giáo án state
+ * Teaching domain vocabulary shared by the classbook and review screens:
+ * the store-shaped types the components consume, the giáo án state
  * machine, and the composite key helpers. Persistence lives server-side
  * (`apps/api/internal/features/teaching`); the React Query hooks in
  * `../hooks` adapt the wire shapes to these types, so no component ever

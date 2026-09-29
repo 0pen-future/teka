@@ -21,8 +21,7 @@ const EMPTY_MARKS: Omit<ClassMarks, "pending"> = {
 /**
  * The month's session notes, scores, and per-student personal notes for a
  * class, reassembled from the batch read into the record-map slices the
- * classbook/records components consume (`TeachingState`). `month` is
- * `YYYY-MM`.
+ * classbook components consume (`TeachingState`). `month` is `YYYY-MM`.
  */
 export function useClassMarks(classId: string | undefined, month: string): ClassMarks {
   const query = useQuery({

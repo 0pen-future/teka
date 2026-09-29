@@ -10,10 +10,10 @@ export interface DebouncedSave<T> {
 }
 
 /**
- * Trailing-edge debounce for per-keystroke saves (records-screen scores and
- * notes): typing keeps replacing the pending payload, only the last one is
- * sent once the user pauses for `delayMs`. Flushes on unmount so navigating
- * away never drops input. `save` is read through a ref, so an inline mutation
+ * Trailing-edge debounce for per-keystroke saves (classbook score entry):
+ * typing keeps replacing the pending payload, only the last one is sent once
+ * the user pauses for `delayMs`. Flushes on unmount so navigating away never
+ * drops input. `save` is read through a ref, so an inline mutation
  * callback doesn't reset the timer every render.
  */
 export function useDebouncedSave<T>(save: (payload: T) => void, delayMs = 500): DebouncedSave<T> {
