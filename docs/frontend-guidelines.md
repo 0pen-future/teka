@@ -107,6 +107,8 @@ Rules:
   `ink-900`), never `text-white`: white on `mint-400` is only 2.03:1.
 - `ink-400` (3.01:1 on white) and `ink-300` are for placeholders, disabled states, icons, and decoration only,
   never for text a user needs to read.
+- Do not dim readable text with `opacity-*`: axe measures the blended color,
+  so `ink-500` at 75% opacity drops below AA. Pick a lighter weight instead.
 - A link styled as a button takes `hvButtonVariants(...)` (see hv kit) rather
   than hand-copied classes.
 - `src/styles/tokens/__tests__/contrast.test.ts` locks these pairs and every

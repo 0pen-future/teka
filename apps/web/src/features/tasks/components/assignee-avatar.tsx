@@ -11,8 +11,11 @@ export interface AssigneeAvatarProps {
   className?: string;
 }
 
-/** Solid hue rotation, keyed by a simple hash of the name so the same person always gets the same hue. */
-const HUES = ["bg-mint-500", "bg-sky-400", "bg-sun-500", "bg-ink-400"] as const;
+/**
+ * Brand pastel hue rotation, keyed by a simple hash of the name so the same
+ * person always gets the same hue. Each fill carries `text-on-brand` for AA.
+ */
+const HUES = ["bg-mint-400", "bg-sky-300", "bg-sun-400", "bg-coral-400"] as const;
 
 const SIZE_CLASS: Record<AssigneeAvatarSize, string> = {
   md: "size-7 text-[11px]",
@@ -57,7 +60,7 @@ export function AssigneeAvatar({
     <span
       {...a11y}
       className={cn(
-        "inline-flex shrink-0 items-center justify-center rounded-full font-display font-extrabold text-white",
+        "inline-flex shrink-0 items-center justify-center rounded-full font-display font-extrabold text-on-brand",
         SIZE_CLASS[size],
         hashHue(name),
         className,

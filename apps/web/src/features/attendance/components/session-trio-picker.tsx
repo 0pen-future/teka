@@ -66,7 +66,7 @@ function TrioCard({
           ) : null}
         </Link>
       ) : (
-        <div className="flex min-h-[64px] items-center justify-center rounded-[14px] border-2 border-dashed border-line-200 text-[12.5px] font-semibold text-ink-300">
+        <div className="flex min-h-[64px] items-center justify-center rounded-[14px] border-2 border-dashed border-line-200 text-[12.5px] font-semibold text-ink-500">
           Chưa có buổi
         </div>
       )}
