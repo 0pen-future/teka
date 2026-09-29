@@ -4,6 +4,7 @@ package students_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -511,4 +512,37 @@ func TestViewAllWidensStudentReadsNotWrites(t *testing.T) {
 	_, err = svc.Update(ctx, scMember, own.ID,
 		students.UpdateRequest{FullName: "Bé Đổi Tên", ContactID: ownContact.ID})
 	require.NoError(t, err)
+}
+
+// Students sharing a name still page in one stable order: walking the list
+// one row at a time visits every student exactly once.
+func TestListPagesSameNameStudentsWithoutRepeats(t *testing.T) {
+	t.Parallel()
+	svc, db := newIntegrationService(t)
+	ctx := context.Background()
+	teacher, _ := testutil.Teacher(t, db)
+	sc := testutil.ScopeFor(t, db, teacher.ID)
+	contact := testutil.Contact(t, db, teacher.ID)
+
+	want := map[uuid.UUID]bool{}
+	for range 5 {
+		created, err := svc.Create(ctx, sc, students.CreateRequest{FullName: "Bé Trùng Tên", ContactID: contact.ID})
+		require.NoError(t, err)
+		want[created.ID] = true
+	}
+
+	gin.SetMode(gin.TestMode)
+	seen := map[uuid.UUID]bool{}
+	for page := 1; page <= len(want); page++ {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/?page=%d&per_page=1", page), nil)
+		params := pagination.Parse(c, "full_name", map[string]string{"full_name": "students.full_name"})
+		rows, total, err := svc.List(ctx, sc, students.ListFilter{}, params)
+		require.NoError(t, err)
+		require.EqualValues(t, len(want), total)
+		require.Len(t, rows, 1)
+		require.False(t, seen[rows[0].ID], "page %d repeats a student", page)
+		seen[rows[0].ID] = true
+	}
+	require.Equal(t, want, seen)
 }

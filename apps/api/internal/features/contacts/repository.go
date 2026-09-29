@@ -159,7 +159,9 @@ func (r *gormRepository) List(ctx context.Context, sc authctx.Scope, filter List
 		return nil, 0, err
 	}
 	var rows []Row
-	if err := q.Scopes(p.Scope).Find(&rows).Error; err != nil {
+	// The id tiebreaker keeps same-name rows in one stable order, so paging
+	// ("Xem thêm") neither repeats nor skips a contact.
+	if err := q.Scopes(p.Scope).Order("contacts.id").Find(&rows).Error; err != nil {
 		return nil, 0, err
 	}
 	return rows, total, nil
