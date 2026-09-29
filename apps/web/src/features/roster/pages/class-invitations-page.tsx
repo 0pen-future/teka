@@ -48,7 +48,7 @@ const neutralActionClassName = cn(
 );
 const dangerActionClassName = cn(
   outlineActionClassName,
-  "text-coral-500 hover:border-coral-300 hover:bg-coral-100",
+  "text-coral-600 hover:border-coral-300 hover:bg-coral-100",
 );
 
 function apiMessage(error: unknown, fallback: string): string {
