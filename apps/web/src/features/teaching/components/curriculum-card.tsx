@@ -40,7 +40,7 @@ export function CurriculumCard({
 
   if (!curriculum) {
     return (
-      <section className="min-w-[340px] flex-[1.7] rounded-[24px] bg-white px-5 py-[18px] shadow-soft-md">
+      <section className="min-w-[min(340px,100%)] flex-[1.7] rounded-[24px] bg-white px-5 py-[18px] shadow-soft-md">
         <div className="text-[12.5px] font-extrabold tracking-[0.4px] text-ink-500">
           CHƯƠNG TRÌNH
         </div>
@@ -60,7 +60,7 @@ export function CurriculumCard({
   const nextIndex = Math.min(done, total - 1);
 
   return (
-    <section className="min-w-[340px] flex-[1.7] rounded-[24px] bg-white px-5 py-[18px] shadow-soft-md">
+    <section className="min-w-[min(340px,100%)] flex-[1.7] rounded-[24px] bg-white px-5 py-[18px] shadow-soft-md">
       <div className="flex flex-wrap items-baseline gap-2.5">
         <div className="text-[12.5px] font-extrabold tracking-[0.4px] text-ink-500">
           CHƯƠNG TRÌNH

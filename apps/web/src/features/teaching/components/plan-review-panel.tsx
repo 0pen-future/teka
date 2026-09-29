@@ -56,7 +56,7 @@ export function PlanReviewPanel({
   const hasComment = comment.trim().length > 0;
 
   return (
-    <section className="min-w-[340px] flex-1 overflow-hidden rounded-[24px] bg-white shadow-soft-lg">
+    <section className="min-w-[min(340px,100%)] flex-1 overflow-hidden rounded-[24px] bg-white shadow-soft-lg">
       <div className="bg-sky-300 px-[18px] py-[14px] text-on-brand">
         <h2 className="font-display text-[17px] font-bold">
           {classTitle} — {teacher}

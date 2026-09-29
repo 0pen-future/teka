@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { z } from "zod";
 
-import { HvBadge, HvButton, HvStateBlock, hvToast } from "@/components/hv";
+import { HvBadge, HvButton, HvStateBlock, HvTableScroll, hvToast } from "@/components/hv";
 import { actorLabel, useAuditLogs, type AuditLog } from "@/features/audit";
 import {
   materialFormatLabel,
@@ -1163,7 +1163,10 @@ function TemplateTab({ course, onSetup }: { course: Course; onSetup: () => void 
         ) : lessons.isError ? (
           <HvStateBlock state="error" title="Không tải được buổi học" />
         ) : (
-          <div className={cn(tableCardClassName, "mt-3 max-h-[64vh]")}>
+          <HvTableScroll
+            aria-label="Bảng buổi học của khóa"
+            className={cn(tableCardClassName, "mt-3 max-h-[64vh]")}
+          >
             <table className="w-full min-w-[640px] border-collapse text-left text-[13.5px]">
               <thead className="sticky top-0">
                 <tr>
@@ -1198,7 +1201,7 @@ function TemplateTab({ course, onSetup }: { course: Course; onSetup: () => void 
                 ))}
               </tbody>
             </table>
-          </div>
+          </HvTableScroll>
         )
       ) : detail.isPending ? (
         <HvStateBlock state="loading" title="Đang tải chương trình mẫu" />
@@ -1232,7 +1235,7 @@ function TemplateExercises({ lessons }: { lessons: VersionLessons }) {
     }
   }
   return (
-    <div className={cn(tableCardClassName, "mt-3")}>
+    <HvTableScroll aria-label="Bảng bài tập của khóa" className={cn(tableCardClassName, "mt-3")}>
       <table className="w-full min-w-[700px] border-collapse text-left text-[13.5px]">
         <thead>
           <tr>
@@ -1279,7 +1282,7 @@ function TemplateExercises({ lessons }: { lessons: VersionLessons }) {
           ))}
         </tbody>
       </table>
-    </div>
+    </HvTableScroll>
   );
 }
 
@@ -1296,7 +1299,7 @@ function TemplateMaterials({ lessons }: { lessons: VersionLessons }) {
     }
   }
   return (
-    <div className={cn(tableCardClassName, "mt-3")}>
+    <HvTableScroll aria-label="Bảng tài liệu của khóa" className={cn(tableCardClassName, "mt-3")}>
       <table className="w-full min-w-[660px] border-collapse text-left text-[13.5px]">
         <thead>
           <tr>
@@ -1335,7 +1338,7 @@ function TemplateMaterials({ lessons }: { lessons: VersionLessons }) {
           ))}
         </tbody>
       </table>
-    </div>
+    </HvTableScroll>
   );
 }
 
@@ -1369,7 +1372,7 @@ function ClassesTab({ course }: { course: Course }) {
   const classes = list.data.items;
 
   return (
-    <div className={cn(tableCardClassName, "mt-3")}>
+    <HvTableScroll aria-label="Bảng lớp dùng khóa" className={cn(tableCardClassName, "mt-3")}>
       <table className="w-full min-w-[560px] border-collapse text-left text-[13.5px]">
         <thead>
           <tr>
@@ -1419,6 +1422,6 @@ function ClassesTab({ course }: { course: Course }) {
           })}
         </tbody>
       </table>
-    </div>
+    </HvTableScroll>
   );
 }

@@ -1,7 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
 
-import { HvBadge, HvNotice, HvStateBlock, type HvBadgeVariant } from "@/components/hv";
+import {
+  HvBadge,
+  type HvBadgeVariant,
+  HvNotice,
+  HvStateBlock,
+  HvTableScroll,
+} from "@/components/hv";
 import { listClassSessions, sessionsKeys, type Session } from "@/features/attendance";
 import { cn } from "@/lib/utils";
 
@@ -123,7 +129,10 @@ export function ClassSessionsTab({ klass, today }: ClassSessionsTabProps) {
           title="Chưa có buổi học. Áp dụng chương trình mẫu để sinh danh sách buổi theo lịch hàng tuần."
         />
       ) : (
-        <div className="overflow-x-auto rounded-[var(--radius-lg)] border border-line-200 bg-white">
+        <HvTableScroll
+          aria-label="Bảng buổi học của lớp"
+          className="rounded-[var(--radius-lg)] border border-line-200 bg-white"
+        >
           <table className="w-full min-w-[640px] border-collapse text-left text-[14px]">
             <thead>
               <tr>
@@ -168,7 +177,7 @@ export function ClassSessionsTab({ klass, today }: ClassSessionsTabProps) {
               })}
             </tbody>
           </table>
-        </div>
+        </HvTableScroll>
       )}
     </div>
   );

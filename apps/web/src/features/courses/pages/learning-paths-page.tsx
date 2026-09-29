@@ -2,7 +2,15 @@ import { Fragment, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { z } from "zod";
 
-import { HvBadge, HvButton, HvChip, HvConfirmDialog, HvStateBlock, hvToast } from "@/components/hv";
+import {
+  HvBadge,
+  HvButton,
+  HvChip,
+  HvConfirmDialog,
+  HvStateBlock,
+  HvTableScroll,
+  hvToast,
+} from "@/components/hv";
 import { useCenterContext } from "@/features/teaching";
 import { ApiError } from "@/lib/api/errors";
 import { cn } from "@/lib/utils";
@@ -125,8 +133,10 @@ export function LearningPathsPage() {
             </HvButton>
           }
         />
+      ) : rows.length === 0 ? (
+        <HvStateBlock state="empty" title="Không có lộ trình nào ở trạng thái này." />
       ) : (
-        <div className={tableCardClassName}>
+        <HvTableScroll aria-label="Bảng lộ trình học" className={tableCardClassName}>
           <table className="w-full min-w-[760px] table-fixed border-collapse text-left text-[13.5px]">
             <colgroup>
               <col className="w-[56px]" />
@@ -149,16 +159,6 @@ export function LearningPathsPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={6}
-                    className="border-t border-line-100 p-[30px] text-center font-bold text-ink-500"
-                  >
-                    Không có lộ trình nào ở trạng thái này.
-                  </td>
-                </tr>
-              ) : null}
               {rows.map((path, index) => {
                 const expanded = Boolean(open[path.id]);
                 return (
@@ -222,7 +222,7 @@ export function LearningPathsPage() {
               })}
             </tbody>
           </table>
-        </div>
+        </HvTableScroll>
       )}
 
       {canEdit ? (

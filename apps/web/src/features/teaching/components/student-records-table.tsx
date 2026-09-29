@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
 
+import { HvTableScroll } from "@/components/hv";
 import { cn, findFoldedMatch } from "@/lib/utils";
 
 import type { Trend, TrendTone } from "../lib/student-stats";
@@ -232,7 +233,7 @@ export function StudentRecordsTable({
   return (
     <div className="overflow-hidden rounded-[24px] bg-white shadow-soft-md">
       {compact ? null : <TableHeader />}
-      <div className="max-h-[520px] overflow-auto">
+      <HvTableScroll aria-label="Bảng hồ sơ học sinh" className="max-h-[520px] overflow-auto">
         {loading ? (
           <SkeletonRows label={loadingLabel} compact={compact} />
         ) : rows.length === 0 && query ? (
@@ -246,7 +247,7 @@ export function StudentRecordsTable({
             ),
           )
         )}
-      </div>
+      </HvTableScroll>
     </div>
   );
 }

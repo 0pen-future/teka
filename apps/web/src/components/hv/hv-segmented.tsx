@@ -37,11 +37,19 @@ export interface HvSegmentedProps<T extends string> {
  * mint-filled active item borrow `HvButton`'s vocabulary so the control reads
  * as clickable at a glance, not as a label strip.
  */
-const containerClassName =
-  "inline-flex gap-1 rounded-[var(--radius-md)] border-2 border-line-200 bg-white p-1";
+/**
+ * Never wraps: a wrapped group loses its one-row button shape and its arrow-key
+ * order. On a narrow screen the row scrolls horizontally instead (scrollbar
+ * hidden, snap per item) and the selected item is kept in view.
+ */
+const containerClassName = cn(
+  "inline-flex max-w-full gap-1 rounded-[var(--radius-md)] border-2 border-line-200 bg-white p-1",
+  "snap-x snap-proximity overflow-x-auto overscroll-x-contain [scrollbar-width:none]",
+  "[&::-webkit-scrollbar]:hidden",
+);
 
 const itemClassName = cn(
-  "inline-flex min-h-11 flex-1 cursor-pointer select-none items-center justify-center gap-1.5",
+  "inline-flex min-h-11 flex-1 shrink-0 snap-start cursor-pointer select-none items-center justify-center gap-1.5",
   "whitespace-nowrap rounded-[calc(var(--radius-md)-4px)] px-3.5 font-display",
   "text-[length:var(--text-sm)] font-bold",
   "text-ink-500 transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)]",
@@ -86,6 +94,21 @@ export function HvSegmented<T extends string>({
   const generatedId = React.useId();
   const base = idBase ?? generatedId;
   const tabRefs = React.useRef<Map<T, HTMLButtonElement>>(new Map());
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  // Keep the selected item visible when the row scrolls on a narrow screen.
+  // Scrolls only the row: `scrollIntoView` would also move the page.
+  React.useEffect(() => {
+    const container = containerRef.current;
+    const selected = container?.querySelector<HTMLElement>(
+      '[data-state="active"], [data-state="checked"]',
+    );
+    if (!container || !selected) return;
+    const box = container.getBoundingClientRect();
+    const item = selected.getBoundingClientRect();
+    if (item.left < box.left) container.scrollLeft -= box.left - item.left;
+    else if (item.right > box.right) container.scrollLeft += item.right - box.right;
+  }, [value]);
 
   if (variant === "tabs") {
     const enabled = options.filter((option) => !option.disabled);
@@ -125,6 +148,7 @@ export function HvSegmented<T extends string>({
 
     return (
       <div
+        ref={containerRef}
         role="tablist"
         aria-label={ariaLabel}
         aria-orientation="horizontal"
@@ -162,6 +186,7 @@ export function HvSegmented<T extends string>({
 
   return (
     <RadioGroup.Root
+      ref={containerRef}
       aria-label={ariaLabel}
       orientation="horizontal"
       value={value}

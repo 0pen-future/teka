@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { HvBadge, HvButton, HvModal, hvToast } from "@/components/hv";
+import { HvBadge, HvButton, HvModal, HvTableScroll, hvToast } from "@/components/hv";
 import { cn } from "@/lib/utils";
 
 import { isStaleConflict } from "../api/permission-api";
@@ -165,7 +165,7 @@ export function PermissionMatrix() {
 
   function renderGroupTable(group: CatalogGroup) {
     return (
-      <div className="overflow-x-auto">
+      <HvTableScroll aria-label="Bảng phân quyền">
         {/* Fixed layout so column widths depend on the role set alone, not on
             the longest label of whichever tab is open — switching tabs must
             not shift the checkbox columns. */}
@@ -207,7 +207,7 @@ export function PermissionMatrix() {
             ))}
           </tbody>
         </table>
-      </div>
+      </HvTableScroll>
     );
   }
 

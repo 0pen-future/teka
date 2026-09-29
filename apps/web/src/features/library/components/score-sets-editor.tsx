@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { HvButton, HvCard, hvToast } from "@/components/hv";
+import { HvButton, HvCard, HvTableScroll, hvToast } from "@/components/hv";
 import { FieldError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { ApiError } from "@/lib/api/errors";
@@ -302,7 +302,7 @@ export function ScoreSetsEditor({
             {group.rows.length === 0 ? (
               <p className="text-[14px] text-ink-500">Chưa có thành phần nào.</p>
             ) : (
-              <div className="overflow-x-auto">
+              <HvTableScroll aria-label="Bảng bộ điểm">
                 <table className="w-full min-w-[640px] border-collapse">
                   <thead>
                     <tr>
@@ -385,7 +385,7 @@ export function ScoreSetsEditor({
                     })}
                   </tbody>
                 </table>
-              </div>
+              </HvTableScroll>
             )}
             <div>
               <HvButton type="button" size="sm" variant="secondary" onClick={() => addRow(gi)}>

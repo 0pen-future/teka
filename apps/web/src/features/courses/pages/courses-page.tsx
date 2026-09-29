@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { z } from "zod";
 
-import { HvBadge, HvButton, HvChip, HvStateBlock, hvToast } from "@/components/hv";
+import { HvBadge, HvButton, HvChip, HvStateBlock, HvTableScroll, hvToast } from "@/components/hv";
 import { useCenterContext } from "@/features/teaching";
 import { cn } from "@/lib/utils";
 
@@ -145,8 +145,10 @@ export function CoursesPage() {
             </HvButton>
           }
         />
+      ) : rows.length === 0 ? (
+        <HvStateBlock state="empty" title="Không có khóa nào khớp." />
       ) : (
-        <div className={tableCardClassName}>
+        <HvTableScroll aria-label="Bảng khóa học" className={tableCardClassName}>
           <table className="w-full min-w-[1000px] table-fixed border-collapse text-left text-[13.5px]">
             <colgroup>
               <col className="w-[44px]" />
@@ -177,16 +179,6 @@ export function CoursesPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={10}
-                    className="border-t border-line-100 p-[30px] text-center font-bold text-ink-500"
-                  >
-                    Không có khóa nào khớp.
-                  </td>
-                </tr>
-              ) : null}
               {rows.map((course, index) => (
                 <tr
                   key={course.id}
@@ -259,7 +251,7 @@ export function CoursesPage() {
               ))}
             </tbody>
           </table>
-        </div>
+        </HvTableScroll>
       )}
 
       {canEdit ? (

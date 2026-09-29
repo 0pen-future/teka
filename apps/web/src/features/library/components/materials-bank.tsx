@@ -7,6 +7,7 @@ import {
   HvConfirmDialog,
   HvSegmented,
   HvStateBlock,
+  HvTableScroll,
   hvToast,
 } from "@/components/hv";
 import type { HvSegmentedOption } from "@/components/hv";
@@ -135,7 +136,10 @@ export function MaterialsBank({ canEdit }: { canEdit: boolean }) {
         />
       ) : (
         <>
-          <div className="overflow-x-auto rounded-[var(--radius-lg)] border border-line-200 bg-white">
+          <HvTableScroll
+            aria-label="Bảng ngân hàng tài liệu"
+            className="rounded-[var(--radius-lg)] border border-line-200 bg-white"
+          >
             <table className="w-full min-w-[860px] border-collapse text-left text-[14px]">
               <thead>
                 <tr>
@@ -224,7 +228,7 @@ export function MaterialsBank({ canEdit }: { canEdit: boolean }) {
                 })}
               </tbody>
             </table>
-          </div>
+          </HvTableScroll>
           <p className="text-[13px] text-ink-500">
             Không xóa cứng nội dung còn được phiên bản đang hoạt động tham chiếu — chỉ ngừng hoạt
             động. Cờ &quot;chia sẻ cho học viên&quot; nằm ở từng buổi, không nằm ở file.

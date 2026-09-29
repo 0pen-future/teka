@@ -1,6 +1,6 @@
 import { SearchIcon } from "lucide-react";
 
-import { HvStateBlock } from "@/components/hv";
+import { HvStateBlock, HvTableScroll } from "@/components/hv";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
@@ -72,7 +72,10 @@ export function VersionMaterialsTab({ version }: VersionMaterialsTabProps) {
       {filtered.length === 0 ? (
         <HvStateBlock state="empty" title="Không có tài liệu nào khớp." />
       ) : (
-        <div className="overflow-x-auto rounded-[var(--radius-lg)] border border-line-200 bg-white">
+        <HvTableScroll
+          aria-label="Bảng tài liệu của phiên bản"
+          className="rounded-[var(--radius-lg)] border border-line-200 bg-white"
+        >
           <table className="w-full min-w-[720px] border-collapse text-left text-[14px]">
             <thead>
               <tr>
@@ -125,7 +128,7 @@ export function VersionMaterialsTab({ version }: VersionMaterialsTabProps) {
               })}
             </tbody>
           </table>
-        </div>
+        </HvTableScroll>
       )}
     </div>
   );

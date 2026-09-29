@@ -1,3 +1,4 @@
+import { HvTableScroll } from "@/components/hv";
 import { cn } from "@/lib/utils";
 
 import type { LessonPlanStatus } from "../lib/teaching-store";
@@ -27,7 +28,7 @@ export function ReviewQueueTable({
 }) {
   return (
     <div className="flex-[1.4] overflow-hidden rounded-[24px] bg-white shadow-soft-md">
-      <div className="overflow-x-auto">
+      <HvTableScroll aria-label="Bảng hàng chờ duyệt">
         <div className="min-w-[440px]">
           <div
             className={cn(
@@ -62,7 +63,7 @@ export function ReviewQueueTable({
             </button>
           ))}
         </div>
-      </div>
+      </HvTableScroll>
     </div>
   );
 }

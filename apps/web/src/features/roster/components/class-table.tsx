@@ -1,6 +1,6 @@
 import { Link } from "react-router";
 
-import { HvBadge } from "@/components/hv";
+import { HvBadge, HvStateBlock, HvTableScroll } from "@/components/hv";
 import { cn } from "@/lib/utils";
 
 import type { ClassShift } from "../api/classes-api";
@@ -45,8 +45,14 @@ export function ClassTable({
   canEdit,
   emptyLabel,
 }: ClassTableProps) {
+  // An empty row inside the wide table would sit off-screen on a phone.
+  if (classes.length === 0 && emptyLabel) return <HvStateBlock state="empty" title={emptyLabel} />;
+
   return (
-    <div className="overflow-x-auto rounded-[20px] bg-white shadow-soft-md">
+    <HvTableScroll
+      aria-label="Bảng danh sách lớp"
+      className="rounded-[20px] bg-white shadow-soft-md"
+    >
       <table className="w-full min-w-[980px] table-fixed border-collapse text-left text-[13.5px]">
         <colgroup>
           <col className="w-[62px]" />
@@ -73,16 +79,6 @@ export function ClassTable({
           </tr>
         </thead>
         <tbody>
-          {classes.length === 0 && emptyLabel ? (
-            <tr>
-              <td
-                colSpan={8}
-                className="border-t border-line-100 p-[34px] text-center font-bold text-ink-500"
-              >
-                {emptyLabel}
-              </td>
-            </tr>
-          ) : null}
           {classes.map((klass, index) => {
             const lines = formatScheduleLines(klass.schedules, today);
             const courseLine = [klass.course?.name, klass.code].filter(Boolean).join(" · ");
@@ -193,6 +189,6 @@ export function ClassTable({
           })}
         </tbody>
       </table>
-    </div>
+    </HvTableScroll>
   );
 }

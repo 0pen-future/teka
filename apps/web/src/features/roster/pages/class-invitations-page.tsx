@@ -1,7 +1,15 @@
 import { useState } from "react";
 import { Link } from "react-router";
 
-import { HvBadge, HvButton, HvChip, HvConfirmDialog, HvStateBlock, hvToast } from "@/components/hv";
+import {
+  HvBadge,
+  HvButton,
+  HvChip,
+  HvConfirmDialog,
+  HvStateBlock,
+  HvTableScroll,
+  hvToast,
+} from "@/components/hv";
 import { useCenterContext } from "@/features/teaching";
 import { ApiError } from "@/lib/api/errors";
 import { cn } from "@/lib/utils";
@@ -119,8 +127,13 @@ export function ClassInvitationsPage() {
             </HvButton>
           }
         />
+      ) : rows.length === 0 ? (
+        <HvStateBlock state="empty" title="Không có lời mời nào." />
       ) : (
-        <div className="overflow-x-auto rounded-[20px] bg-white shadow-soft-md">
+        <HvTableScroll
+          aria-label="Bảng lời mời vào lớp"
+          className="rounded-[20px] bg-white shadow-soft-md"
+        >
           <table className="w-full min-w-[820px] table-fixed border-collapse text-left text-[13.5px]">
             <colgroup>
               <col className="w-[62px]" />
@@ -143,16 +156,6 @@ export function ClassInvitationsPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={6}
-                    className="border-t border-line-100 p-[34px] text-center font-bold text-ink-500"
-                  >
-                    Không có lời mời nào.
-                  </td>
-                </tr>
-              ) : null}
               {rows.map((item, index) => {
                 const busy = busyId === item.id;
                 const open = item.status === "pending" || item.status === "accepted";
@@ -280,7 +283,7 @@ export function ClassInvitationsPage() {
               })}
             </tbody>
           </table>
-        </div>
+        </HvTableScroll>
       )}
 
       <HvConfirmDialog

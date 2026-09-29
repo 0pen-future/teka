@@ -5,7 +5,7 @@ export const headCellClassName =
 export const cellClassName =
   "border-t border-line-100 px-1 py-[11px] align-middle first:pl-[18px] last:pr-[18px]";
 
-export const tableCardClassName = "overflow-x-auto rounded-[20px] bg-white shadow-soft-md";
+export const tableCardClassName = "rounded-[20px] bg-white shadow-soft-md";
 
 const rowActionBase =
   "rounded-[10px] border-[1.5px] border-line-200 bg-transparent px-2.5 py-[5px] text-[12px] font-extrabold text-ink-500 disabled:cursor-not-allowed disabled:opacity-50";

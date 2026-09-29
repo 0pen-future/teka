@@ -335,11 +335,12 @@ export function ClassbookPage() {
             month={month}
             onChange={(next) => requestNavigation({ kind: "month", month: next })}
           />
-          <div className="ml-auto flex shrink-0 items-center gap-2">
+          <div className="ml-auto flex min-w-0 max-w-full items-center gap-2 sm:shrink-0">
             <HvSegmented<ClassbookView>
               variant="tabs"
               idBase="classbook-view"
               aria-label="Chế độ xem"
+              className="min-w-0"
               options={viewOptions}
               value={view}
               onValueChange={(next) => {

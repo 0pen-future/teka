@@ -1,6 +1,6 @@
 import { Link } from "react-router";
 
-import { HvBadge, HvButton, HvCard } from "@/components/hv";
+import { HvBadge, HvButton, HvCard, HvTableScroll } from "@/components/hv";
 import { cn, formatPhoneLocal } from "@/lib/utils";
 
 import type { Student } from "../schemas/roster-schemas";
@@ -93,7 +93,7 @@ export function RosterTable({
           card while the document keeps its own scroll for the rest of the
           page and the footer. */}
       <div className="hidden flex-col overflow-hidden rounded-[20px] bg-white shadow-soft-md sm:flex">
-        <div className="max-h-[62vh] overflow-auto">
+        <HvTableScroll aria-label="Bảng danh sách học sinh" className="max-h-[62vh] overflow-auto">
           <table className="w-full min-w-[640px] border-collapse text-left text-[14px]">
             {/* Prototype grid 2fr 2fr 1.1fr 1fr 1.6fr as column ratios. */}
             <colgroup>
@@ -177,7 +177,7 @@ export function RosterTable({
               ))}
             </tbody>
           </table>
-        </div>
+        </HvTableScroll>
       </div>
     </>
   );

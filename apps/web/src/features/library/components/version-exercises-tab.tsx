@@ -1,6 +1,6 @@
 import { SearchIcon } from "lucide-react";
 
-import { HvStateBlock } from "@/components/hv";
+import { HvStateBlock, HvTableScroll } from "@/components/hv";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
@@ -80,7 +80,10 @@ export function VersionExercisesTab({ version }: VersionExercisesTabProps) {
       {filtered.length === 0 ? (
         <HvStateBlock state="empty" title="Không có bài tập nào khớp." />
       ) : (
-        <div className="overflow-x-auto rounded-[var(--radius-lg)] border border-line-200 bg-white">
+        <HvTableScroll
+          aria-label="Bảng bài tập của phiên bản"
+          className="rounded-[var(--radius-lg)] border border-line-200 bg-white"
+        >
           <table className="w-full min-w-[720px] border-collapse text-left text-[14px]">
             <thead>
               <tr>
@@ -114,7 +117,7 @@ export function VersionExercisesTab({ version }: VersionExercisesTabProps) {
               ))}
             </tbody>
           </table>
-        </div>
+        </HvTableScroll>
       )}
     </div>
   );

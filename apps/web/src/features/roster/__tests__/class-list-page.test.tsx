@@ -137,11 +137,12 @@ describe("ClassListPage", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("Đang tải danh sách lớp");
   });
 
-  it("shows the empty note inside the table when there is no class", async () => {
+  it("shows the empty note in place of the table when there is no class", async () => {
     getRosterStore().classes.length = 0;
     renderPage();
-    const table = await screen.findByRole("table");
-    expect(within(table).getByText(/^Chưa có lớp học nào\./)).toBeInTheDocument();
+    // Outside the wide table, so it stays on screen on a phone.
+    expect(await screen.findByText(/^Chưa có lớp học nào\./)).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 
   it("shows an error block, never the empty copy, when the list fails", async () => {
@@ -424,8 +425,8 @@ describe("RecruitingClassListPage", () => {
   it("says there is nothing to recruit for when no class is open", async () => {
     getRosterStore().classes.length = 0;
     renderRecruiting();
-    const table = await screen.findByRole("table");
-    expect(within(table).getByText("Không có lớp nào cần tuyển sinh.")).toBeInTheDocument();
+    expect(await screen.findByText("Không có lớp nào cần tuyển sinh.")).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 
   it("a stale recruiting view in the URL falls back to Tất cả", async () => {

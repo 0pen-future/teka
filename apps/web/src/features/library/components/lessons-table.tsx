@@ -1,6 +1,6 @@
 import { Link } from "react-router";
 
-import { HvBadge, HvButton, HvIcon } from "@/components/hv";
+import { HvBadge, HvButton, HvIcon, HvTableScroll } from "@/components/hv";
 import { cn } from "@/lib/utils";
 
 import { formatDuration, lessonModeLabel } from "../lib/library-labels";
@@ -25,7 +25,10 @@ interface LessonsTableProps {
 /** Ordered lessons of one version. Callers pass `lessons` already sorted by position. */
 export function LessonsTable({ lessons, templateId, editing }: LessonsTableProps) {
   return (
-    <div className="overflow-x-auto rounded-[var(--radius-lg)] border border-line-200 bg-white">
+    <HvTableScroll
+      aria-label="Bảng danh sách buổi học"
+      className="rounded-[var(--radius-lg)] border border-line-200 bg-white"
+    >
       <table className="w-full min-w-[760px] border-collapse text-left text-[14px]">
         <thead>
           <tr>
@@ -117,6 +120,6 @@ export function LessonsTable({ lessons, templateId, editing }: LessonsTableProps
           ))}
         </tbody>
       </table>
-    </div>
+    </HvTableScroll>
   );
 }

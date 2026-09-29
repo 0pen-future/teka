@@ -1,6 +1,6 @@
 import * as React from "react";
 
-import { ProgressBar } from "@/components/hv";
+import { HvTableScroll, ProgressBar } from "@/components/hv";
 import { cn, formatSessionDate } from "@/lib/utils";
 
 import { formatLedgerScore, sessionWorkStatus, type SessionDerived } from "../lib/classbook-stats";
@@ -93,7 +93,7 @@ export function SessionsTable({
 
   return (
     <div className="overflow-hidden rounded-[var(--radius-lg)] bg-white shadow-soft-md">
-      <div className="overflow-x-auto">
+      <HvTableScroll aria-label="Bảng buổi học">
         <table className="w-full border-collapse sm:min-w-[960px]">
           <thead>
             <tr className="border-b-[1.5px] border-line-200">
@@ -312,7 +312,7 @@ export function SessionsTable({
             })}
           </tbody>
         </table>
-      </div>
+      </HvTableScroll>
       <p className="px-4 py-[10px] text-[12px] text-ink-500">
         Doanh thu buổi = học phí của học sinh có mặt − 300.000đ chi phí buổi (phòng + trợ giảng).
         Bấm vào buổi để mở nhận xét, giáo án &amp; điểm.

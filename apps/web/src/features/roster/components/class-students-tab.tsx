@@ -1,6 +1,6 @@
 import { Link } from "react-router";
 
-import { HvNotice, HvStateBlock } from "@/components/hv";
+import { HvNotice, HvStateBlock, HvTableScroll } from "@/components/hv";
 import { useCenterContext } from "@/features/teaching";
 import { cn, formatPhoneLocal } from "@/lib/utils";
 
@@ -64,7 +64,10 @@ export function ClassStudentsTab({ klass }: { klass: Class }) {
           title="Lớp chưa có học viên. Bật “Cần tuyển sinh” để đưa lớp vào danh sách tuyển sinh."
         />
       ) : (
-        <div className="overflow-x-auto rounded-[var(--radius-lg)] border border-line-200 bg-white">
+        <HvTableScroll
+          aria-label="Bảng học sinh của lớp"
+          className="rounded-[var(--radius-lg)] border border-line-200 bg-white"
+        >
           <table className="w-full min-w-[640px] border-collapse text-left text-[14px]">
             <thead>
               <tr>
@@ -101,7 +104,7 @@ export function ClassStudentsTab({ klass }: { klass: Class }) {
               })}
             </tbody>
           </table>
-        </div>
+        </HvTableScroll>
       )}
     </div>
   );

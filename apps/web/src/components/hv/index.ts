@@ -69,3 +69,5 @@ export type { HvIconName, HvIconProps } from "./hv-icon";
 
 export { HvSelect } from "./hv-select";
 export type { HvSelectOption, HvSelectProps } from "./hv-select";
+export { HvTableScroll } from "./hv-table-scroll";
+export type { HvTableScrollProps } from "./hv-table-scroll";

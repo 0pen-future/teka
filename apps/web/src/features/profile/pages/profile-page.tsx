@@ -87,7 +87,7 @@ export function ProfilePage() {
         <form
           onSubmit={(event) => void onSubmit(event)}
           noValidate
-          className="flex min-w-[340px] flex-[1.3] flex-col gap-4"
+          className="flex min-w-[min(340px,100%)] flex-[1.3] flex-col gap-4"
         >
           <HvCard>
             <div className="flex items-center gap-4">
