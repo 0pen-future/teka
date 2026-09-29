@@ -150,6 +150,9 @@ GIT_SHA := $(shell git rev-parse HEAD 2>/dev/null || echo dev)
 # Same-origin default; override for a split topology:
 #   make build-image-web VITE_API_URL=https://api.example.com/api/v1
 VITE_API_URL ?= /api/v1
+# The web app's own origin, for the absolute og:image link-preview URL:
+#   make build-image-web VITE_PUBLIC_ORIGIN=https://app.example.com
+VITE_PUBLIC_ORIGIN ?= http://localhost:8080
 
 .PHONY: build-image-api
 build-image-api: ## Build the production API image (teka-api:local)
@@ -157,7 +160,8 @@ build-image-api: ## Build the production API image (teka-api:local)
 
 .PHONY: build-image-web
 build-image-web: ## Build the production web image (teka-web:local)
-	@docker build --build-arg VITE_API_URL=$(VITE_API_URL) -t teka-web:local $(WEB_DIR)
+	@docker build --build-arg VITE_API_URL=$(VITE_API_URL) \
+		--build-arg VITE_PUBLIC_ORIGIN=$(VITE_PUBLIC_ORIGIN) -t teka-web:local $(WEB_DIR)
 
 .PHONY: build-api
 build-api: ## Build the API binary (host, no Docker)

@@ -44,7 +44,8 @@ Build the same images locally:
 ```bash
 make build                 # both images: teka-api:local, teka-web:local
 make build-image-api       # GIT_SHA is stamped automatically from git
-make build-image-web VITE_API_URL=https://api.example.com/api/v1
+make build-image-web VITE_API_URL=https://api.example.com/api/v1 \
+  VITE_PUBLIC_ORIGIN=https://app.example.com
 ```
 
 ### API image specifics
@@ -64,6 +65,13 @@ make build-image-web VITE_API_URL=https://api.example.com/api/v1
   `/api/v1` — to the API and everything else to the web container). For a
   split-origin topology, rebuild with the real API origin and add that web
   origin to the API's `API_CORS_ORIGINS`.
+- `VITE_PUBLIC_ORIGIN` is a required **build argument**: the web app's own
+  origin (no trailing slash). `index.html` uses it for the absolute `og:image`
+  URL that Zalo and Facebook link previews fetch (`/og-image.png`, rendered
+  from `public/og-image.svg` by `apps/web/scripts/render-og-image.mjs`). The
+  Docker build fails when it is missing, because Vite would otherwise ship the
+  `%VITE_PUBLIC_ORIGIN%` placeholder verbatim. CI release builds read the
+  repository variable `VITE_PUBLIC_ORIGIN`.
 - nginx serves the SPA with history-API fallback (deep links resolve to
   `index.html`), immutable caching for hashed `/assets/*`, `no-cache` for
   `index.html`, and baseline security headers. The header set lives in one
@@ -172,7 +180,7 @@ of git). Nothing under version control contains a production credential; the
 only tracked env file is `.env.example` with dev defaults.
 
 The web image takes no runtime configuration — everything is baked at build
-time via `VITE_API_URL`.
+time via `VITE_API_URL` and `VITE_PUBLIC_ORIGIN`.
 
 ## Homelab deployment with Traefik
 
@@ -276,13 +284,15 @@ the production API origin:
 ```bash
 make build-image-api
 make build-image-web \
-  VITE_API_URL=https://teka-api.cauchuyenlaptrinh.com/api/v1
+  VITE_API_URL=https://teka-api.cauchuyenlaptrinh.com/api/v1 \
+  VITE_PUBLIC_ORIGIN=https://teka-web.cauchuyenlaptrinh.com
 ```
 
 Those commands create local `teka-api:local` and `teka-web:local` images. Tag
 and push them to your registry using the release version, then put those
 exact references in `.env.production`. If CI publishes the images instead, set
-the repository's `VITE_API_URL` variable to the production API URL before the
+the repository's `VITE_API_URL` variable to the production API URL and
+`VITE_PUBLIC_ORIGIN` to the production web origin before the
 `vX.Y.Z` release tag is pushed:
 
 ```bash
@@ -344,7 +354,7 @@ docker compose --env-file .env.production \
 
 For an update, change `API_IMAGE` and `WEB_IMAGE` in `.env.production` to the
 new immutable SHA tags, ensure that the web image was built with the production
-`VITE_API_URL`, run `config` again, and repeat `up -d`. To roll back, restore
+`VITE_API_URL` and `VITE_PUBLIC_ORIGIN`, run `config` again, and repeat `up -d`. To roll back, restore
 the previous SHA tags and repeat the same validation and startup commands.
 Database migrations are normally forward-only, so confirm migration
 compatibility before rolling the API image back.
