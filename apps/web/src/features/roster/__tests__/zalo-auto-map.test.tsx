@@ -9,7 +9,7 @@ import { API_URL, fail, listMeta, ok } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
 
-import { ContactsPage } from "../pages/contacts-page";
+import { StudentsPage } from "../pages/students-page";
 import {
   contactSingleChild,
   contactTwoChildren,
@@ -95,9 +95,9 @@ function addUnmatchedContact() {
 
 function renderContacts() {
   signInAs(testPrimaryTeacher);
-  return renderWithProviders(<ContactsPage />, {
-    route: "/contacts",
-    path: "/contacts",
+  return renderWithProviders(<StudentsPage />, {
+    route: "/students?tab=contacts",
+    path: "/students",
     extraRoutes: [{ path: "/profile", element: <div>Trang cá nhân</div> }],
   });
 }

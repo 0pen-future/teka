@@ -10,7 +10,7 @@ import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
 
 import { ContactDetailPage } from "../pages/contact-detail-page";
-import { ContactsPage } from "../pages/contacts-page";
+import { StudentsPage } from "../pages/students-page";
 import {
   contactSingleChild,
   getRosterStore,
@@ -274,7 +274,7 @@ describe("mapped badge on the contacts list", () => {
   it("marks mapped contacts with the stored Zalo name", async () => {
     mapStoredContact(friendMeLan);
     signInAs(testPrimaryTeacher);
-    renderWithProviders(<ContactsPage />, { route: "/contacts", path: "/contacts" });
+    renderWithProviders(<StudentsPage />, { route: "/students?tab=contacts", path: "/students" });
 
     const mappedRow = (await screen.findByText("Nguyễn Thị Lan")).closest("a");
     const otherRow = screen.getByText("Phạm Văn Hùng").closest("a");

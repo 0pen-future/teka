@@ -1,4 +1,10 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 
 import { sessionsKeys } from "@/features/attendance";
 
@@ -11,6 +17,7 @@ import {
   type ListStudentsParams,
 } from "../api/students-api";
 import type { StudentInput } from "../schemas/roster-schemas";
+import { nextPageAfter } from "./next-page";
 import { contactsKeys, enrollmentsKeys, studentsKeys } from "./roster-keys";
 
 export { studentsKeys };
@@ -22,6 +29,24 @@ export function useStudentsList(
   return useQuery({
     queryKey: studentsKeys.list(params),
     queryFn: () => listStudents(params),
+    placeholderData: keepPreviousData,
+    enabled: options.enabled ?? true,
+  });
+}
+
+/**
+ * Page-by-page student list behind a "Xem thêm" button. The params live in the
+ * key, so a new search or filter restarts from page 1.
+ */
+export function useStudentsInfinite(
+  params: Omit<ListStudentsParams, "page">,
+  options: { enabled?: boolean } = {},
+) {
+  return useInfiniteQuery({
+    queryKey: studentsKeys.infinite(params),
+    queryFn: ({ pageParam }) => listStudents({ ...params, page: pageParam }),
+    initialPageParam: 1,
+    getNextPageParam: (_last, pages) => nextPageAfter(pages),
     placeholderData: keepPreviousData,
     enabled: options.enabled ?? true,
   });

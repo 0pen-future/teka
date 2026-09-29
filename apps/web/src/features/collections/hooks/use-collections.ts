@@ -5,6 +5,7 @@ import {
   getPeriod,
   listClassCollections,
   listContactCollections,
+  listContactMonthlyBalances,
   recordPayment,
   reallocatePayment,
 } from "../api/collections-api";
@@ -28,6 +29,9 @@ export const collectionsKeys = {
     [...collectionsKeys.lists(), "contact", periodId, params] as const,
   classList: (periodId: string, params: ListClassCollectionsParams) =>
     [...collectionsKeys.lists(), "class", periodId, params] as const,
+  /** Under `lists()` so a recorded payment refreshes the monthly figures too. */
+  monthlyBalances: (year: number, month: number) =>
+    [...collectionsKeys.lists(), "monthly-balances", year, month] as const,
   summaries: () => [...collectionsKeys.all, "summary"] as const,
   summary: (periodId: string) => [...collectionsKeys.summaries(), periodId] as const,
 };
@@ -37,6 +41,19 @@ export function usePeriod(periodId: string | undefined) {
     queryKey: collectionsKeys.period(periodId ?? ""),
     queryFn: () => getPeriod(periodId!),
     enabled: Boolean(periodId),
+  });
+}
+
+/**
+ * Month-wide outstanding balance per family. `enabled` keeps the request off
+ * for callers without billing.view_all, whose call would only 403.
+ */
+export function useContactMonthlyBalances(year: number, month: number, enabled: boolean) {
+  return useQuery({
+    queryKey: collectionsKeys.monthlyBalances(year, month),
+    queryFn: () => listContactMonthlyBalances(year, month),
+    placeholderData: keepPreviousData,
+    enabled,
   });
 }
 

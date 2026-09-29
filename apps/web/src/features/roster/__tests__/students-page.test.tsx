@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,6 +17,7 @@ import {
   getRosterStore,
   resetRosterStore,
   rosterHandlers,
+  studentOnlyChild,
   studentSiblingTwo,
 } from "./roster-handlers";
 
@@ -66,81 +67,27 @@ afterEach(() => {
 });
 
 describe("StudentsPage tabs", () => {
-  it("defaults a bare URL to the classes tab: name, schedule, price, edit action", async () => {
+  it("opens a bare URL on every student of the center, without the enrollment columns", async () => {
     renderStudentsPage();
 
     const tabs = await screen.findByRole("tablist", { name: "Khu vực" });
-    expect(within(tabs).getByRole("tab", { name: "Lớp học" })).toHaveAttribute(
+    expect(await within(tabs).findByRole("tab", { name: "Tất cả (3)" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
     const table = await screen.findByRole("table");
-    expect(await within(table).findByText("Toán 6A")).toBeInTheDocument();
-    // classSchedule: weekday 2 (T3) at 18:00; default_unit_price 150000.
-    expect(within(table).getByText("T3 — 18:00")).toBeInTheDocument();
-    expect(within(table).getByText("150.000 ₫/buổi")).toBeInTheDocument();
-    await userEvent.click(within(table).getByRole("button", { name: "⚙ Cài đặt" }));
-    expect(await screen.findByRole("dialog", { name: "Sửa lớp học" })).toBeInTheDocument();
-  });
-
-  it("opens the same edit dialog from the mobile class card", async () => {
-    renderStudentsPage();
-    const buttons = await screen.findAllByRole("button", { name: "⚙ Cài đặt" });
-    await userEvent.click(buttons[0]!);
-    expect(await screen.findByRole("dialog", { name: "Sửa lớp học" })).toBeInTheDocument();
-  });
-
-  it("switches panels when clicking the page tabs", async () => {
-    renderStudentsPage();
-
-    await screen.findByRole("tablist", { name: "Khu vực" });
-    await userEvent.click(within(pageTabs()).getByRole("tab", { name: "Học sinh" }));
-    // The students panel brings the class pill strip with it.
-    expect(await screen.findByRole("tablist", { name: "Lớp" })).toBeInTheDocument();
-    expect(within(pageTabs()).getByRole("tab", { name: "Học sinh" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-
-    await userEvent.click(within(pageTabs()).getByRole("tab", { name: "Lớp học" }));
-    // Mobile card + desktop table both render the per-class edit action.
-    expect(await screen.findAllByRole("button", { name: "⚙ Cài đặt" })).toHaveLength(2);
+    expect(await within(table).findByRole("link", { name: "Trần Minh Khôi" })).toBeInTheDocument();
+    expect(within(table).getAllByRole("link", { name: "Nguyễn Văn An" })).toHaveLength(2);
+    expect(screen.getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
+      "Học sinh",
+      "Người liên hệ",
+      "Ghi chú và hành động",
+    ]);
+    // The class pills belong to the by-class tab only.
     expect(screen.queryByRole("tablist", { name: "Lớp" })).not.toBeInTheDocument();
   });
 
-  it("opens the students tab for a legacy ?class_id= link without a tab param", async () => {
-    renderStudentsPage(`/students?class_id=${classWithSchedule.id}`);
-
-    const pill = await screen.findByRole("tab", { name: "Toán 6A" });
-    expect(pill).toHaveAttribute("aria-selected", "true");
-    expect(within(pageTabs()).getByRole("tab", { name: "Học sinh" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-  });
-
-  it("lets an explicit ?tab= win over a class_id in the URL", async () => {
-    renderStudentsPage(`/students?tab=classes&class_id=${classWithSchedule.id}`);
-
-    const tabs = await screen.findByRole("tablist", { name: "Khu vực" });
-    expect(within(tabs).getByRole("tab", { name: "Lớp học" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    expect(await screen.findAllByRole("button", { name: "⚙ Cài đặt" })).toHaveLength(2);
-  });
-
-  it("falls back to the resolution rule on an unknown ?tab= value", async () => {
-    renderStudentsPage("/students?tab=bogus");
-
-    const tabs = await screen.findByRole("tablist", { name: "Khu vực" });
-    expect(within(tabs).getByRole("tab", { name: "Lớp học" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-  });
-
-  it("issues no roster queries on the classes tab", async () => {
+  it("issues no class, session or enrollment queries on the all tab", async () => {
     const requested: string[] = [];
     const onRequest = ({ request }: { request: Request }) => {
       requested.push(request.url);
@@ -148,14 +95,13 @@ describe("StudentsPage tabs", () => {
     server.events.on("request:start", onRequest);
     try {
       renderStudentsPage();
-      const table = await screen.findByRole("table");
-      await within(table).findByText("Toán 6A");
-      // Only the classes list may load here: the students query is disabled
-      // and no class is selected, so sessions/enrollments stay silent too.
+      await within(await screen.findByRole("table")).findByRole("link", {
+        name: "Trần Minh Khôi",
+      });
       expect(
         requested.filter(
           (url) =>
-            url.includes("/students") || url.includes("/sessions") || url.includes("/enrollments"),
+            url.includes("/classes") || url.includes("/sessions") || url.includes("/enrollments"),
         ),
       ).toEqual([]);
     } finally {
@@ -163,28 +109,68 @@ describe("StudentsPage tabs", () => {
     }
   });
 
-  it("creates a class from the classes tab", async () => {
+  it("switches panels when clicking the page tabs", async () => {
     renderStudentsPage();
 
-    await userEvent.click(await screen.findByRole("button", { name: "+ Tạo lớp mới" }));
-    expect(await screen.findByRole("dialog", { name: "Tạo lớp mới" })).toBeInTheDocument();
+    await screen.findByRole("tablist", { name: "Khu vực" });
+    await userEvent.click(within(pageTabs()).getByRole("tab", { name: "Theo lớp" }));
+    // The by-class panel brings the class pill strip with it.
+    expect(await screen.findByRole("tablist", { name: "Lớp" })).toBeInTheDocument();
+    expect(within(pageTabs()).getByRole("tab", { name: "Theo lớp" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    await userEvent.click(within(pageTabs()).getByRole("tab", { name: "Người liên hệ" }));
+    const contacts = await screen.findByRole("list", { name: "Danh sách người liên hệ" });
+    expect(await within(contacts).findByText("Phạm Văn Hùng")).toBeInTheDocument();
+    expect(screen.queryByRole("tablist", { name: "Lớp" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 
-  it("offers class creation from the classes-tab empty state", async () => {
-    server.use(http.get(`${API_URL}/classes`, () => HttpResponse.json(ok([], listMeta(0)))));
-    renderStudentsPage();
+  it("opens the by-class tab for a legacy ?class_id= link without a tab param", async () => {
+    renderStudentsPage(`/students?class_id=${classWithSchedule.id}`);
 
-    expect(await screen.findByText("Chưa có lớp nào.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "+ Tạo lớp mới" })).toBeInTheDocument();
+    const pill = await screen.findByRole("tab", { name: "Toán 6A" });
+    expect(pill).toHaveAttribute("aria-selected", "true");
+    expect(within(pageTabs()).getByRole("tab", { name: "Theo lớp" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
   });
 
-  it("shows an error instead of the empty state when the class list fails", async () => {
-    server.use(http.get(`${API_URL}/classes`, () => HttpResponse.error()));
-    renderStudentsPage();
+  it.each(["classes", "students"])("maps the retired ?tab=%s to the by-class tab", async (tab) => {
+    renderStudentsPage(`/students?tab=${tab}`);
 
-    expect(await screen.findByText("Không tải được danh sách lớp")).toBeInTheDocument();
-    expect(screen.queryByText("Chưa có lớp nào.")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "+ Tạo lớp mới" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "Toán 6A" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(within(pageTabs()).getByRole("tab", { name: "Theo lớp" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("falls back to the all tab on an unknown ?tab= value", async () => {
+    renderStudentsPage("/students?tab=bogus");
+
+    const tabs = await screen.findByRole("tablist", { name: "Khu vực" });
+    expect(await within(tabs).findByRole("tab", { name: "Tất cả (3)" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("filters the list by the ?q= search from the URL", async () => {
+    renderStudentsPage("/students?q=khôi");
+
+    expect(await screen.findByRole("searchbox", { name: "Tìm theo tên học sinh" })).toHaveValue(
+      "khôi",
+    );
+    const table = await screen.findByRole("table");
+    expect(await within(table).findByRole("link", { name: "Trần Minh Khôi" })).toBeInTheDocument();
+    expect(within(table).queryByRole("link", { name: "Nguyễn Văn An" })).not.toBeInTheDocument();
   });
 });
 
@@ -215,7 +201,7 @@ describe("StudentsPage v2 layout", () => {
   });
 
   it("renders the v2 columns with the current month in the sessions header", async () => {
-    renderStudentsPage("/students?tab=students");
+    renderStudentsPage("/students?tab=by-class");
 
     await screen.findByRole("table");
     const headers = screen.getAllByRole("columnheader").map((th) => th.textContent);
@@ -229,7 +215,7 @@ describe("StudentsPage v2 layout", () => {
   });
 
   it("keeps only the roster actions in the students-tab header, in order", async () => {
-    renderStudentsPage("/students?tab=students");
+    renderStudentsPage("/students?tab=by-class");
 
     // Owner-gated: waits for `/centers/me` to resolve, not just `/classes`.
     const enrollExisting = await screen.findByRole("button", { name: "+ Ghi danh học sinh" });
@@ -248,7 +234,7 @@ describe("StudentsPage v2 layout", () => {
   });
 
   it("shows enrollment start and this month's non-cancelled session count", async () => {
-    renderStudentsPage("/students?tab=students");
+    renderStudentsPage("/students?tab=by-class");
 
     const table = await screen.findByRole("table");
     const link = await within(table).findByRole("link", { name: "Nguyễn Văn An" });
@@ -270,7 +256,7 @@ describe("StudentsPage v2 layout", () => {
       student_name: studentSiblingTwo.full_name,
       started_on: dayOfCurrentMonth(15),
     });
-    renderStudentsPage("/students?tab=students");
+    renderStudentsPage("/students?tab=by-class");
 
     const table = await screen.findByRole("table");
     // Two enrolled students share the same full name; the display-note badge
@@ -293,7 +279,7 @@ describe("StudentsPage v2 layout", () => {
       // Legacy sentinel deep link — must still resolve to the unenrolled tab.
       renderStudentsPage("/students?class_id=none");
       await screen.findAllByRole("link", { name: "Trần Minh Khôi" });
-      expect(within(pageTabs()).getByRole("tab", { name: "Chưa ghi danh" })).toHaveAttribute(
+      expect(within(pageTabs()).getByRole("tab", { name: /^Chưa vào lớp/ })).toHaveAttribute(
         "aria-selected",
         "true",
       );
@@ -311,7 +297,7 @@ describe("StudentsPage v2 layout", () => {
     renderStudentsPage();
 
     await screen.findByRole("tablist", { name: "Khu vực" });
-    await userEvent.click(within(pageTabs()).getByRole("tab", { name: "Chưa ghi danh" }));
+    await userEvent.click(within(pageTabs()).getByRole("tab", { name: "Chưa vào lớp" }));
     const table = await screen.findByRole("table");
     const link = await within(table).findByRole("link", { name: "Trần Minh Khôi" });
     const row = link.closest("tr")!;
@@ -322,7 +308,7 @@ describe("StudentsPage v2 layout", () => {
 
 describe("StudentsPage roster flows", () => {
   it("opens the edit dialog from Sửa and the anonymize dialog from Xoá", async () => {
-    renderStudentsPage("/students?tab=students");
+    renderStudentsPage("/students?tab=by-class");
 
     // Anchor on the class-scoped row: the first students fetch runs before
     // the classes list resolves the default class, so the initial unscoped
@@ -355,14 +341,14 @@ describe("StudentsPage roster flows", () => {
       "aria-selected",
       "true",
     );
-    expect(within(pageTabs()).getByRole("tab", { name: "Học sinh" })).toHaveAttribute(
+    expect(within(pageTabs()).getByRole("tab", { name: "Theo lớp" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
   });
 
   it("postponing step 2 of the add-student wizard opens the unenrolled tab", async () => {
-    renderStudentsPage("/students?tab=students");
+    renderStudentsPage("/students?tab=by-class");
 
     await userEvent.click(await screen.findByRole("button", { name: "+ Thêm học sinh" }));
     const wizard = await screen.findByRole("dialog", { name: /Thêm học sinh/ });
@@ -376,9 +362,9 @@ describe("StudentsPage roster flows", () => {
     await userEvent.click(within(stepTwo).getByRole("button", { name: "Để sau" }));
 
     expect(
-      await screen.findByText('Đã lưu hồ sơ — ghi danh sau ở tab "Chưa ghi danh"'),
+      await screen.findByText('Đã lưu hồ sơ — ghi danh sau ở tab "Chưa vào lớp"'),
     ).toBeInTheDocument();
-    expect(within(pageTabs()).getByRole("tab", { name: "Chưa ghi danh" })).toHaveAttribute(
+    expect(within(pageTabs()).getByRole("tab", { name: /^Chưa vào lớp/ })).toHaveAttribute(
       "aria-selected",
       "true",
     );
@@ -387,7 +373,7 @@ describe("StudentsPage roster flows", () => {
 
 describe("StudentsPage class search", () => {
   it("hides the class search while five or fewer classes exist", async () => {
-    renderStudentsPage("/students?tab=students");
+    renderStudentsPage("/students?tab=by-class");
 
     await screen.findByRole("tab", { name: "Toán 6A" });
     expect(screen.queryByRole("searchbox", { name: "Tìm lớp" })).not.toBeInTheDocument();
@@ -395,7 +381,7 @@ describe("StudentsPage class search", () => {
 
   it("filters the class pills without touching the page tabs", async () => {
     useSixClasses();
-    renderStudentsPage("/students?tab=students");
+    renderStudentsPage("/students?tab=by-class");
 
     const search = await screen.findByRole("searchbox", { name: "Tìm lớp" });
     expect(within(classPills()).getAllByRole("tab")).toHaveLength(6);
@@ -407,7 +393,7 @@ describe("StudentsPage class search", () => {
         .map((tab) => tab.textContent),
     ).toEqual(["Văn 6A", "Văn 8C"]);
     // The page-level tabs are a separate tablist and never filter away.
-    expect(within(pageTabs()).getAllByRole("tab")).toHaveLength(3);
+    expect(within(pageTabs()).getAllByRole("tab")).toHaveLength(4);
 
     await userEvent.clear(search);
     expect(within(classPills()).getAllByRole("tab")).toHaveLength(6);
@@ -415,7 +401,7 @@ describe("StudentsPage class search", () => {
 
   it("notes when no class matches", async () => {
     useSixClasses();
-    renderStudentsPage("/students?tab=students");
+    renderStudentsPage("/students?tab=by-class");
 
     const search = await screen.findByRole("searchbox", { name: "Tìm lớp" });
     await userEvent.type(search, "hoá 12");
@@ -425,14 +411,87 @@ describe("StudentsPage class search", () => {
   });
 });
 
-describe("StudentsPage owner guard", () => {
-  it("redirects a non-owner member to the dashboard without any roster request", async () => {
-    server.use(
-      // Member-shaped `/centers/me` (no `members` array).
-      http.get(`${API_URL}/centers/me`, () =>
-        HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh" })),
-      ),
+/** A member-shaped `/centers/me` holding exactly `permissions`. */
+function asMember(permissions: string[]) {
+  server.use(
+    http.get(`${API_URL}/centers/me`, () =>
+      HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh", permissions })),
+    ),
+  );
+}
+
+describe("StudentsPage permissions", () => {
+  it("gives the owner every write action and the contacts tab", async () => {
+    renderStudentsPage("/students?tab=unenrolled");
+
+    const table = await screen.findByRole("table");
+    const row = (await within(table).findByRole("link", { name: "Trần Minh Khôi" })).closest("tr")!;
+    expect(within(row).getByRole("button", { name: "Ghi danh vào lớp" })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Sửa" })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Xoá" })).toBeInTheDocument();
+    expect(within(row).getByRole("link", { name: "Nguyễn Thị Lan" })).toHaveAttribute(
+      "href",
+      `/contacts/${studentOnlyChild.contact_id}`,
     );
+    expect(screen.getByRole("button", { name: "+ Thêm học sinh" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Nhập từ Excel" })).toHaveAttribute(
+      "href",
+      "/students/import",
+    );
+    expect(within(pageTabs()).getByRole("tab", { name: "Người liên hệ" })).toBeInTheDocument();
+    expect(
+      screen.queryByText("Liên hệ chủ trung tâm để thêm hoặc sửa học sinh."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows a students.list-only teacher a read-only list", async () => {
+    asMember(["students.list"]);
+    renderStudentsPage("/students?tab=unenrolled");
+
+    const table = await screen.findByRole("table");
+    const row = (await within(table).findByRole("link", { name: "Trần Minh Khôi" })).closest("tr")!;
+    expect(
+      await screen.findByText("Liên hệ chủ trung tâm để thêm hoặc sửa học sinh."),
+    ).toBeInTheDocument();
+    expect(within(row).queryByRole("button")).not.toBeInTheDocument();
+    // Without contacts.view_all the contact name is plain text, not a link
+    // to a page that would redirect away.
+    expect(within(row).getByText("Nguyễn Thị Lan")).toBeInTheDocument();
+    expect(within(row).queryByRole("link", { name: "Nguyễn Thị Lan" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "+ Thêm học sinh" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Nhập từ Excel" })).not.toBeInTheDocument();
+    expect(
+      within(pageTabs())
+        .getAllByRole("tab")
+        .map((tab) => tab.textContent),
+    ).toEqual(["Tất cả", "Theo lớp", "Chưa vào lớp (2)"]);
+  });
+
+  it("falls back to the all tab when ?tab=contacts is opened without contacts.view_all", async () => {
+    asMember(["students.list"]);
+    renderStudentsPage("/students?tab=contacts");
+
+    await screen.findByRole("tablist", { name: "Khu vực" });
+    expect(await within(pageTabs()).findByRole("tab", { name: "Tất cả (3)" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.queryByRole("list", { name: "Danh sách người liên hệ" })).not.toBeInTheDocument();
+  });
+
+  it("offers the Excel import to a member holding imports.run", async () => {
+    asMember(["students.list", "imports.run"]);
+    renderStudentsPage();
+
+    expect(await screen.findByRole("link", { name: "Nhập từ Excel" })).toHaveAttribute(
+      "href",
+      "/students/import",
+    );
+    expect(screen.queryByRole("button", { name: "+ Thêm học sinh" })).not.toBeInTheDocument();
+  });
+
+  it("redirects a member without students.list to the dashboard without any roster request", async () => {
+    asMember([]);
     const requested: string[] = [];
     const onRequest = ({ request }: { request: Request }) => {
       requested.push(request.url);
@@ -454,6 +513,7 @@ describe("StudentsPage owner guard", () => {
           (url) =>
             url.includes("/classes") ||
             url.includes("/students") ||
+            url.includes("/contacts") ||
             url.includes("/sessions") ||
             url.includes("/enrollments"),
         ),
@@ -461,5 +521,30 @@ describe("StudentsPage owner guard", () => {
     } finally {
       server.events.removeListener("request:start", onRequest);
     }
+  });
+});
+
+describe("StudentsPage load more", () => {
+  it("loads the next page on demand and hides the button once every row is in", async () => {
+    const store = getRosterStore();
+    for (let index = store.students.length; index < 60; index++) {
+      store.students.push({
+        ...studentOnlyChild,
+        id: `50000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+        full_name: `Học sinh ${index}`,
+      });
+    }
+    renderStudentsPage();
+
+    const table = await screen.findByRole("table");
+    // Plain DOM count: role queries over a hundred-row table are slow.
+    const bodyRows = () => table.querySelectorAll("tbody tr").length;
+    expect(await screen.findByText("Đang hiện 50 / 60")).toBeInTheDocument();
+    expect(bodyRows()).toBe(50);
+    expect(within(pageTabs()).getByRole("tab", { name: "Tất cả (60)" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Xem thêm" }));
+    await waitFor(() => expect(bodyRows()).toBe(60));
+    expect(screen.queryByRole("button", { name: "Xem thêm" })).not.toBeInTheDocument();
   });
 });

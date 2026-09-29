@@ -24,9 +24,11 @@ export function StudentDetailPage() {
   const [anonymizeOpen, setAnonymizeOpen] = useState(false);
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [ending, setEnding] = useState<Enrollment | undefined>(undefined);
-  // Student records are owner-managed center data; members may enroll but
-  // never edit or delete the record, so those controls are hidden.
-  const { isOwner } = useCenterContext();
+  // Student records are owner-managed center data: only the owner edits,
+  // deletes, enrolls or ends an enrollment. The contact page needs
+  // contacts.view_all, so without it the contact name is plain text.
+  const { isOwner, has } = useCenterContext();
+  const canOpenContact = has("contacts.view_all");
 
   if (isPending) {
     return <p className="text-[13px] text-ink-500">Đang tải…</p>;
@@ -44,12 +46,18 @@ export function StudentDetailPage() {
             <h1 className="font-display text-[22px] font-bold text-ink-900">{student.full_name}</h1>
             {student.display_note ? <HvBadge variant="info">{student.display_note}</HvBadge> : null}
           </div>
-          <Link
-            to={`/contacts/${student.contact_id}`}
-            className="mt-1 inline-block text-[14px] text-ink-500 hover:text-mint-600"
-          >
-            {student.contact_name}
-          </Link>
+          {canOpenContact ? (
+            <Link
+              to={`/contacts/${student.contact_id}`}
+              className="mt-1 inline-block text-[14px] text-ink-500 hover:text-mint-600"
+            >
+              {student.contact_name}
+            </Link>
+          ) : (
+            <span className="mt-1 inline-block text-[14px] text-ink-500">
+              {student.contact_name}
+            </span>
+          )}
           {student.contact_phone ? (
             <>
               {" · "}
@@ -76,9 +84,11 @@ export function StudentDetailPage() {
 
       <div className="flex items-center justify-between">
         <h2 className="font-display text-[16px] font-bold text-ink-900">Ghi danh</h2>
-        <HvButton size="sm" onClick={() => setEnrollOpen(true)}>
-          Ghi danh vào lớp
-        </HvButton>
+        {isOwner ? (
+          <HvButton size="sm" onClick={() => setEnrollOpen(true)}>
+            Ghi danh vào lớp
+          </HvButton>
+        ) : null}
       </div>
       <div className="flex flex-col gap-2">
         {enrollments.map((enrollment) => (
@@ -92,7 +102,7 @@ export function StudentDetailPage() {
                 {formatMoney(enrollment.unit_price)}
               </p>
             </div>
-            {!enrollment.ended_on ? (
+            {isOwner && !enrollment.ended_on ? (
               <HvButton variant="ghost" size="sm" onClick={() => setEnding(enrollment)}>
                 Kết thúc ghi danh
               </HvButton>

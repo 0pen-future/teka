@@ -9,9 +9,12 @@ import type { RouteHandle } from "@/components/shared/document-title";
  */
 export const rosterRoutes: RouteObject[] = [
   {
+    // The contact list lives in the students page's contacts tab now.
     path: "contacts",
-    handle: { title: "Phụ huynh" } satisfies RouteHandle,
-    lazy: async () => ({ Component: (await import("./pages/contacts-page")).ContactsPage }),
+    handle: { title: "Người liên hệ" } satisfies RouteHandle,
+    lazy: async () => ({
+      Component: (await import("./components/contacts-redirect")).ContactsRedirect,
+    }),
   },
   {
     path: "contacts/:id",
@@ -22,7 +25,7 @@ export const rosterRoutes: RouteObject[] = [
   },
   {
     path: "students",
-    handle: { title: "Quản trị học sinh" } satisfies RouteHandle,
+    handle: { title: "Học sinh" } satisfies RouteHandle,
     lazy: async () => ({ Component: (await import("./pages/students-page")).StudentsPage }),
   },
   {

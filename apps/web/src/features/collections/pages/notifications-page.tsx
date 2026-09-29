@@ -499,7 +499,7 @@ export function NotificationsPage() {
                   <strong className="font-display">{notFriendCount}</strong> phụ huynh đã ghép Zalo
                   nhưng chưa là bạn bè của bạn — tin có thể rơi vào hộp thư người lạ hoặc không đến
                   nơi.{" "}
-                  <Link to="/contacts" className="font-bold underline">
+                  <Link to="/students?tab=contacts" className="font-bold underline">
                     Kết bạn trước
                   </Link>
                 </span>

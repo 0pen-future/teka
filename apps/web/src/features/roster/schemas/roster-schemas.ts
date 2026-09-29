@@ -65,8 +65,7 @@ export const studentSchema = z.object({
   display_note: z.string(),
   contact_id: z.string(),
   contact_name: z.string(),
-  // Null when the caller may not see the contact's phone (phone privacy:
-  // owner, oversight, and assigned hoc_vu see it; other members do not).
+  // Null unless the caller holds contacts.view_all (the owner always does).
   contact_phone: z.string().nullable(),
   created_at: z.string(),
 });
