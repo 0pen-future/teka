@@ -121,6 +121,7 @@ var routePolicySnapshot = []RoutePolicy{
 	{Method: "GET", Path: "/api/v1/billing-periods/:id/preview", Kind: PolicyPermission, Key: "billing.read"},
 	{Method: "GET", Path: "/api/v1/billing-periods/:id/collections", Kind: PolicyPermission, Key: "billing.read"},
 	{Method: "GET", Path: "/api/v1/billing-periods/:id/collections/summary", Kind: PolicyPermission, Key: "billing.read"},
+	{Method: "GET", Path: "/api/v1/collections/contact-balances", Kind: PolicyPermission, Key: "billing.view_all"},
 	{Method: "GET", Path: "/api/v1/invoices/:id/adjustments", Kind: PolicyPermission, Key: "billing.read"},
 	{Method: "POST", Path: "/api/v1/billing-periods/:id/draft", Kind: PolicyPermission, Key: "billing.draft"},
 	{Method: "POST", Path: "/api/v1/billing-periods/:id/close", Kind: PolicyPermission, Key: "billing.close"},

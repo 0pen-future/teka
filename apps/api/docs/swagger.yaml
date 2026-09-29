@@ -1215,6 +1215,13 @@ definitions:
       total_due:
         type: integer
     type: object
+  collections.ContactOutstanding:
+    properties:
+      contact_id:
+        type: string
+      outstanding:
+        type: integer
+    type: object
   collections.SummaryResponse:
     properties:
       contact_count:
@@ -8319,6 +8326,80 @@ paths:
       summary: Class stats
       tags:
       - classes
+  /collections/contact-balances:
+    get:
+      description: 'Sums each contact''s outstanding balance over every billing period
+        of the center in the given month (periods are per teacher, so one family may
+        owe on several). Uses the same figures as the collection board: draft invoices
+        of an open period count, void invoices do not. Only contacts whose sum is
+        non-zero are returned; a month with no period returns an empty list. Not paginated.
+        Requires billing.view_all.'
+      parameters:
+      - description: calendar year (2020-2100)
+        in: query
+        name: year
+        required: true
+        type: integer
+      - description: calendar month (1-12)
+        in: query
+        name: month
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/collections.ContactOutstanding'
+                  type: array
+              type: object
+        "400":
+          description: non-numeric year or month
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "403":
+          description: caller lacks billing.view_all
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+        "422":
+          description: validation failed
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Envelope'
+            - properties:
+                error:
+                  $ref: '#/definitions/response.ErrorBody'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: List monthly outstanding balances per contact
+      tags:
+      - collections
   /contacts:
     get:
       description: Paginated; query matches full_name or phone case-insensitively.

@@ -342,6 +342,7 @@ var Specs = []Spec{
 	perm("GET", "/api/v1/billing-periods/:id/preview", authctx.PermBillingRead, none()),
 	perm("GET", "/api/v1/billing-periods/:id/collections", authctx.PermBillingRead, none()),
 	perm("GET", "/api/v1/billing-periods/:id/collections/summary", authctx.PermBillingRead, none()),
+	perm("GET", "/api/v1/collections/contact-balances", authctx.PermBillingViewAll, none()),
 	perm("GET", "/api/v1/invoices/:id/adjustments", authctx.PermBillingRead, none()),
 	perm("POST", "/api/v1/billing-periods/:id/draft", authctx.PermBillingDraft,
 		req("billing.period.draft", "billing_period", "id")),

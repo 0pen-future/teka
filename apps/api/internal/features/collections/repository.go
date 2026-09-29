@@ -32,6 +32,7 @@ type Repository interface {
 	ContactBalances(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, filter Filter, p pagination.Params) ([]ContactBalanceRow, int64, error)
 	ClassCollections(ctx context.Context, sc authctx.Scope, periodID uuid.UUID, filter Filter, p pagination.Params) ([]ClassCollectionRow, int64, error)
 	PeriodSummary(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) (*SummaryResponse, error)
+	ContactOutstandingByMonth(ctx context.Context, sc authctx.Scope, year, month int) ([]ContactOutstanding, error)
 }
 
 type gormRepository struct {
@@ -411,4 +412,25 @@ func (r *gormRepository) PeriodSummary(ctx context.Context, sc authctx.Scope, pe
 		PartialContactCount: statusCounts.Partial,
 		UnallocatedCredit:   unallocated,
 	}, nil
+}
+
+// ContactOutstandingByMonth sums each contact's outstanding balance over every
+// live billing period of sc's center for (year, month). Periods are per
+// teacher, so one family can owe on several periods in the same month; this
+// collapses them into one row. It reads v_contact_balance exactly like the
+// collection board — draft invoices of an open period count, void ones do
+// not — and drops families whose sum is zero. Center-wide by construction:
+// the service admits only billing.view_all callers.
+func (r *gormRepository) ContactOutstandingByMonth(ctx context.Context, sc authctx.Scope, year, month int) ([]ContactOutstanding, error) {
+	rows := []ContactOutstanding{}
+	err := database.FromContext(ctx, r.db).
+		Table("v_contact_balance AS vcb").
+		Select("vcb.contact_id, SUM(vcb.outstanding) AS outstanding").
+		Joins("JOIN billing_periods bp ON bp.id = vcb.period_id AND bp.center_id = vcb.center_id AND bp.deleted_at IS NULL").
+		Where("vcb.center_id = ? AND bp.year = ? AND bp.month = ?", sc.CenterID, year, month).
+		Group("vcb.contact_id").
+		Having("SUM(vcb.outstanding) <> 0").
+		Order("vcb.contact_id").
+		Scan(&rows).Error
+	return rows, err
 }

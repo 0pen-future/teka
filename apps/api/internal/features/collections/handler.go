@@ -10,6 +10,7 @@ import (
 	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/pagination"
 	"teka/apps/api/internal/shared/response"
+	"teka/apps/api/internal/shared/validation"
 )
 
 // Handler exposes the collection board endpoints.
@@ -147,4 +148,37 @@ func (h *Handler) summary(c *gin.Context) {
 		return
 	}
 	response.OK(c, http.StatusOK, resp)
+}
+
+// contactBalances returns each family's outstanding balance for one month.
+//
+//	@Summary		List monthly outstanding balances per contact
+//	@Description	Sums each contact's outstanding balance over every billing period of the center in the given month (periods are per teacher, so one family may owe on several). Uses the same figures as the collection board: draft invoices of an open period count, void invoices do not. Only contacts whose sum is non-zero are returned; a month with no period returns an empty list. Not paginated. Requires billing.view_all.
+//	@Tags			collections
+//	@Produce		json
+//	@Param			year	query		int	true	"calendar year (2020-2100)"
+//	@Param			month	query		int	true	"calendar month (1-12)"
+//	@Success		200		{object}	response.Envelope{data=[]ContactOutstanding}
+//	@Failure		400		{object}	response.Envelope{error=response.ErrorBody}	"non-numeric year or month"
+//	@Failure		401		{object}	response.Envelope{error=response.ErrorBody}
+//	@Failure		403		{object}	response.Envelope{error=response.ErrorBody}	"caller lacks billing.view_all"
+//	@Failure		422		{object}	response.Envelope{error=response.ErrorBody}	"validation failed"
+//	@Security		BearerAuth
+//	@Router			/collections/contact-balances [get]
+func (h *Handler) contactBalances(c *gin.Context) {
+	sc, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	var q MonthBalancesQuery
+	if err := c.ShouldBindQuery(&q); err != nil {
+		response.Err(c, validation.BindError(err))
+		return
+	}
+	rows, err := h.svc.ContactOutstandingByMonth(c.Request.Context(), sc, q.Year, q.Month)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, http.StatusOK, rows)
 }

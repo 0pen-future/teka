@@ -67,3 +67,18 @@ type SummaryResponse struct {
 	PartialContactCount int64 `json:"partial_contact_count"`
 	UnallocatedCredit   int64 `json:"unallocated_credit"`
 }
+
+// MonthBalancesQuery selects one calendar month for the contact-balances
+// read; bounds match billing.EnsurePeriodRequest.
+type MonthBalancesQuery struct {
+	Year  int `form:"year" binding:"required,min=2020,max=2100"`
+	Month int `form:"month" binding:"required,min=1,max=12"`
+}
+
+// ContactOutstanding is one family's outstanding balance summed over every
+// billing period of the center in the requested month — one row per contact
+// even when several teachers hold a period that month.
+type ContactOutstanding struct {
+	ContactID   uuid.UUID `json:"contact_id"`
+	Outstanding int64     `json:"outstanding"`
+}
