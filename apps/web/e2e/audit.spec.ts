@@ -33,11 +33,12 @@ test("owner sees their mutation in the audit trail", async ({ page }) => {
   // /contacts/:id, so its audit row carries this run's contact id — that is
   // what proves the row below came from this run and not an earlier one on a
   // reused database.
-  await page.goto("/contacts");
+  await page.goto("/students?tab=contacts");
   await page.getByRole("button", { name: "Thêm người liên hệ" }).click();
-  await page.getByLabel("Họ và tên").fill(contactName);
-  await page.getByLabel("Số điện thoại").fill(contactPhone);
-  await page.getByRole("button", { name: "Lưu" }).click();
+  const contactDialog = page.getByRole("dialog");
+  await contactDialog.getByLabel("Họ và tên").fill(contactName);
+  await contactDialog.getByLabel("Số điện thoại").fill(contactPhone);
+  await contactDialog.getByRole("button", { name: "Lưu" }).click();
   await expect(page.getByText(contactName)).toBeVisible();
 
   await page.getByText(contactName).click();

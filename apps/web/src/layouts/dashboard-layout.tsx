@@ -1,11 +1,9 @@
 import {
   BookMarkedIcon,
   BookOpenIcon,
-  BookUserIcon,
   Building2Icon,
   ClipboardCheckIcon,
   EllipsisIcon,
-  FileSpreadsheetIcon,
   GraduationCapIcon,
   HistoryIcon,
   IdCardIcon,
@@ -58,7 +56,7 @@ interface NavGroup {
 
 /**
  * The prototype sidebar's grouped nav: Tổng quan ungrouped, then Dạy học /
- * Giảng dạy / Kho học liệu / Học phí / Trung tâm sections. Entries carrying a
+ * Lớp học / Kho học liệu / Học phí / Trung tâm sections. Entries carrying a
  * `perm` render only after `/centers/me` resolves with that key in the
  * caller's effective set — rendering optimistically would flash entries a
  * narrowed role then loses. The three period-scoped routes (Chốt sổ, Gửi
@@ -88,12 +86,14 @@ function useNavGroups(): NavGroup[] {
         },
         { label: "Sổ lớp", to: "/classbook", Icon: BookOpenIcon, perm: "classes.list" },
         { label: "Hồ sơ học sinh", to: "/records", Icon: IdCardIcon, perm: "students.list" },
-        { label: "Phụ huynh", to: "/contacts", Icon: BookUserIcon, perm: "contacts.list" },
       ],
     },
     {
-      header: "Giảng dạy",
+      header: "Lớp học",
       entries: [
+        // One page for every student, the per-class roster and — for
+        // contacts.view_all — the contacts; the page gates its own actions.
+        { label: "Học sinh", to: "/students", Icon: HvUsersIcon, perm: "students.list" },
         {
           label: "Danh mục lớp",
           to: "/classes",
@@ -155,23 +155,12 @@ function useNavGroups(): NavGroup[] {
           pending: pendingPlanCount > 0,
           perm: "teaching.review_queue",
         },
-        {
-          label: "Nhập từ Excel",
-          to: "/students/import",
-          Icon: FileSpreadsheetIcon,
-          perm: "imports.run",
-        },
         { label: "Nhật ký hoạt động", to: "/audit", Icon: HistoryIcon, perm: "audit.read" },
         { label: "Công việc", to: "/tasks", Icon: KanbanIcon, perm: "tasks.list" },
         // Members holding reports.send only: the owner (implicitly holding
         // every key) already reaches every period through Học phí.
         ...(isResolved && !isOwner && has("reports.send")
           ? [{ label: "Gửi báo cáo", to: "/reports", Icon: HvSendIcon }]
-          : []),
-        // Owner-only: class and student records are owner-managed center
-        // data; the page itself redirects non-owners.
-        ...(isResolved && isOwner
-          ? [{ label: "Quản trị học sinh", to: "/students", Icon: HvUsersIcon }]
           : []),
         // Owner-only: the role-permission read model itself is owner-only.
         ...(isResolved && isOwner
@@ -192,21 +181,25 @@ function useNavGroups(): NavGroup[] {
     },
   ];
 
-  return groups.map((group) => ({
-    ...group,
-    entries: group.entries.filter((entry) => !entry.perm || (isResolved && has(entry.perm))),
-  }));
+  // A group whose every entry is filtered away renders no bare header.
+  return groups
+    .map((group) => ({
+      ...group,
+      entries: group.entries.filter((entry) => !entry.perm || (isResolved && has(entry.perm))),
+    }))
+    .filter((group) => group.entries.length > 0);
 }
 
 /**
  * Bottom-bar split (<md only; the sidebar and rail render every entry, in
  * groups): daily actions keep a direct tab, while the billing-cycle entries
- * (Chốt sổ, Gửi thông báo), the setup-time Phụ huynh, and the whole Trung tâm
- * group live behind the Thêm sheet so the bar stays uncrowded at 360px.
+ * (Chốt sổ, Gửi thông báo), the Lớp học entries including Học sinh, and the
+ * whole Trung tâm group live behind the Thêm sheet so the bar stays uncrowded at 360px.
  */
 const OVERFLOW_LABELS = new Set([
   "Sổ lớp",
   "Hồ sơ học sinh",
+  "Học sinh",
   "Danh mục lớp",
   "Lớp cần tuyển sinh",
   "Lời mời nhận lớp",
@@ -215,11 +208,8 @@ const OVERFLOW_LABELS = new Set([
   "Kho học liệu",
   "Chốt sổ",
   "Gửi thông báo",
-  "Phụ huynh",
   "Gửi báo cáo",
-  "Quản trị học sinh",
   "Duyệt giáo án",
-  "Nhập từ Excel",
   "Nhật ký hoạt động",
   "Công việc",
   "Phân quyền vai trò",

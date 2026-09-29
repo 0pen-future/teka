@@ -19,18 +19,20 @@ async function login(page: Page, user: { phone: string; password: string; name: 
 }
 
 /**
- * The read journey both staff roles share: the owner-only roster screen
- * bounces the member home, the assigned class's students read on Hồ sơ học
+ * The read journey both staff roles share: the students page opens read-only
+ * (students.list is a default key), the assigned class's students read on Hồ sơ học
  * sinh, the class detail hides edit actions, and the classbook opens without
  * edit affordances. Purely read-only — it must not mutate the shared seeded
  * stack. Attendance is asserted per role below, because the two staff roles
  * diverge there: tro_giang may confirm attendance, hoc_vu may not.
  */
 async function assertStaffReadJourney(page: Page) {
-  // "Quản trị học sinh" is owner-only center administration now — a member
-  // landing on it is sent straight back to the dashboard.
+  // The students page opens for any member holding students.list, but its
+  // write actions stay the owner's.
   await page.goto("/students");
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("tab", { name: /^Tất cả/ })).toBeVisible();
+  await expect(page).toHaveURL(/\/students$/);
+  await expect(page.getByRole("button", { name: "+ Thêm học sinh" })).toHaveCount(0);
 
   // The member's read surface for the class's students is Hồ sơ học sinh:
   // the assigned class is offered by the class picker and its active

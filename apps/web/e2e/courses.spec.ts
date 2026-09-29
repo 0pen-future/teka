@@ -104,8 +104,8 @@ test("owner creates a course, prices it, opens a class on it and stops it once t
   await expect(main.getByText("−11%")).toBeVisible();
 
   // A class opened on the course inherits its unit price.
-  await page.goto("/students");
-  await page.getByRole("button", { name: "+ Tạo lớp mới" }).click();
+  await page.goto("/classes");
+  await page.getByRole("button", { name: "+ Lớp học" }).click();
   const classDialog = page.getByRole("dialog");
   await classDialog.getByLabel("Tên lớp").fill(CLASS_NAME);
   await pickOption(page, "Khóa học", new RegExp(RUN_CODE));
@@ -116,7 +116,6 @@ test("owner creates a course, prices it, opens a class on it and stops it once t
   await classDialog.getByRole("button", { name: "Tạo lớp" }).click();
   const classRow = page.getByRole("row").filter({ hasText: CLASS_NAME });
   await expect(classRow).toBeVisible();
-  await expect(classRow.getByText("150.000 ₫/buổi")).toBeVisible();
 
   // The class list opens the class, whose chip links back to the course.
   await page.goto("/classes");

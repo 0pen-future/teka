@@ -34,32 +34,89 @@ afterEach(() => {
   localStorage.clear();
 });
 
-describe("Phụ huynh nav entry", () => {
-  it("links to /contacts from the sidebar and the icon rail", async () => {
+/** A member-shaped `/centers/me` holding exactly `permissions`. */
+function asMember(permissions: string[]) {
+  server.use(
+    http.get(`${API_URL}/centers/me`, () =>
+      HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh", permissions })),
+    ),
+  );
+}
+
+describe("Học sinh nav entry", () => {
+  it("links to /students from the sidebar and the icon rail", async () => {
     renderLayout();
 
     // Sidebar (text label) + rail (aria-label); the bottom bar holds it only
     // inside the closed "Thêm" sheet, so exactly two links exist up front.
-    const links = await screen.findAllByRole("link", { name: "Phụ huynh" });
+    const links = await screen.findAllByRole("link", { name: "Học sinh" });
     expect(links).toHaveLength(2);
     for (const link of links) {
-      expect(link).toHaveAttribute("href", "/contacts");
+      expect(link).toHaveAttribute("href", "/students");
     }
   });
 
-  it("sits after Hồ sơ học sinh in the sidebar order", async () => {
+  it("leads the Lớp học group", async () => {
     renderLayout();
-    await screen.findAllByRole("link", { name: "Phụ huynh" });
-
-    // Entry links keep their document order inside the grouped sidebar nav.
     const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
-    const labels = within(sidebarNav)
-      .getAllByRole("link")
-      .map((link) => link.textContent);
-    const records = labels.indexOf("Hồ sơ học sinh");
-    const contacts = labels.indexOf("Phụ huynh");
-    expect(records).toBeGreaterThanOrEqual(0);
-    expect(contacts).toBe(records + 1);
+    const group = await within(sidebarNav).findByRole("group", { name: "Lớp học" });
+
+    await within(group).findByRole("link", { name: "Học sinh" });
+    expect(within(group).getAllByRole("link")[0]).toHaveTextContent("Học sinh");
+  });
+
+  it("replaces the retired contacts, import and student-admin entries everywhere", async () => {
+    const user = userEvent.setup();
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+    await within(sidebarNav).findByRole("link", { name: "Duyệt giáo án" });
+
+    const { moreTab } = await findBottomNav();
+    await user.click(moreTab);
+    const sheet = await screen.findByRole("dialog");
+    await within(sheet).findByRole("link", { name: "Học sinh" });
+
+    for (const label of ["Phụ huynh", "Nhập từ Excel", "Quản trị học sinh"]) {
+      expect(within(sidebarNav).queryByText(label)).not.toBeInTheDocument();
+      expect(within(sheet).queryByText(label)).not.toBeInTheDocument();
+    }
+    expect(within(sidebarNav).queryByText("Giảng dạy")).not.toBeInTheDocument();
+  });
+
+  it("shows the entry to a member holding students.list", async () => {
+    asMember(["students.list"]);
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+
+    expect(await within(sidebarNav).findByRole("link", { name: "Học sinh" })).toHaveAttribute(
+      "href",
+      "/students",
+    );
+  });
+
+  it("hides the entry from a member without students.list", async () => {
+    asMember(["sessions.list"]);
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+
+    await within(sidebarNav).findByRole("link", { name: "Điểm danh" });
+    expect(within(sidebarNav).queryByRole("link", { name: "Học sinh" })).not.toBeInTheDocument();
+  });
+
+  it("drops the header of a group whose every entry is filtered away", async () => {
+    // Every Kho học liệu and Học phí entry is gated on a key this member lacks.
+    asMember(["sessions.list"]);
+    renderLayout();
+    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
+
+    await within(sidebarNav).findByRole("link", { name: "Điểm danh" });
+    expect(within(sidebarNav).getByRole("group", { name: "Dạy học" })).toBeInTheDocument();
+    // Lời mời nhận lớp is ungated, so Lớp học stays.
+    expect(within(sidebarNav).getByRole("group", { name: "Lớp học" })).toBeInTheDocument();
+    expect(
+      within(sidebarNav).queryByRole("group", { name: "Kho học liệu" }),
+    ).not.toBeInTheDocument();
+    expect(within(sidebarNav).queryByRole("group", { name: "Học phí" })).not.toBeInTheDocument();
   });
 });
 
@@ -71,14 +128,12 @@ describe("grouped sidebar", () => {
     await within(sidebarNav).findByRole("link", { name: "Duyệt giáo án" });
 
     const expected: Record<string, string[]> = {
-      "Dạy học": ["Điểm danh", "Sổ lớp", "Hồ sơ học sinh", "Phụ huynh"],
+      "Dạy học": ["Điểm danh", "Sổ lớp", "Hồ sơ học sinh"],
       "Học phí": ["Chốt sổ", "Gửi thông báo", "Thu tiền"],
       "Trung tâm": [
         "Duyệt giáo án",
-        "Nhập từ Excel",
         "Nhật ký hoạt động",
         "Công việc",
-        "Quản trị học sinh",
         "Phân quyền vai trò",
         "Cài đặt trung tâm",
       ],
@@ -122,9 +177,8 @@ describe("bottom tab bar", () => {
     expect(tabLabels).toEqual(["Tổng quan", "Điểm danh", "Thu tiền"]);
     expect(within(nav).queryByText("Chốt sổ")).not.toBeInTheDocument();
     expect(within(nav).queryByText("Gửi thông báo")).not.toBeInTheDocument();
-    expect(within(nav).queryByText("Phụ huynh")).not.toBeInTheDocument();
-    // Now an owner-only Trung tâm entry, reachable through the Thêm sheet.
-    expect(within(nav).queryByText("Quản trị học sinh")).not.toBeInTheDocument();
+    // Reachable through the Thêm sheet, never a primary tab.
+    expect(within(nav).queryByText("Học sinh")).not.toBeInTheDocument();
   });
 
   it("opens the Thêm sheet listing the overflow entries and navigates from it", async () => {
@@ -140,28 +194,24 @@ describe("bottom tab bar", () => {
     expect(within(sheet).getByRole("link", { name: "Gửi thông báo" }).getAttribute("href")).toMatch(
       /^\/notifications\//,
     );
-    const contacts = within(sheet).getByRole("link", { name: "Phụ huynh" });
-    expect(contacts).toHaveAttribute("href", "/contacts");
+    const students = await within(sheet).findByRole("link", { name: "Học sinh" });
+    expect(students).toHaveAttribute("href", "/students");
     expect(within(sheet).getByRole("link", { name: "Cài đặt trung tâm" })).toHaveAttribute(
       "href",
       "/center",
     );
 
-    await user.click(contacts);
-    await waitFor(() => expect(router.state.location.pathname).toBe("/contacts"));
+    await user.click(students);
+    await waitFor(() => expect(router.state.location.pathname).toBe("/students"));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("keeps only Nhập từ Excel active on /students/import, not its parent entry", async () => {
+  it("keeps Học sinh active on /students/import, which has no entry of its own", async () => {
     renderLayout("/students/import");
     const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
 
-    const importLink = await within(sidebarNav).findByRole("link", { name: "Nhập từ Excel" });
-    // Both entries are owner-gated behind /centers/me now — wait for each.
-    const studentsLink = await within(sidebarNav).findByRole("link", { name: "Quản trị học sinh" });
-    // /students/import is a subpath of /students; only the deeper entry lights up.
-    expect(importLink).toHaveAttribute("aria-current", "page");
-    expect(studentsLink).not.toHaveAttribute("aria-current");
+    const studentsLink = await within(sidebarNav).findByRole("link", { name: "Học sinh" });
+    expect(studentsLink).toHaveAttribute("aria-current", "page");
   });
 
   it("keeps only Phân quyền vai trò active on /center/permissions, not Cài đặt trung tâm", async () => {
@@ -181,7 +231,7 @@ describe("bottom tab bar", () => {
     renderLayout("/students/42");
     const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
 
-    const studentsLink = await within(sidebarNav).findByRole("link", { name: "Quản trị học sinh" });
+    const studentsLink = await within(sidebarNav).findByRole("link", { name: "Học sinh" });
     // A genuine child (/students/:id) still highlights its parent nav entry.
     expect(studentsLink).toHaveAttribute("aria-current", "page");
   });
@@ -219,7 +269,7 @@ describe("bottom tab bar", () => {
       "/lesson-plans",
     );
     // The owner-only roster entry lives here too, never on the primary tabs.
-    expect(await within(sheet).findByRole("link", { name: "Quản trị học sinh" })).toHaveAttribute(
+    expect(await within(sheet).findByRole("link", { name: "Học sinh" })).toHaveAttribute(
       "href",
       "/students",
     );
@@ -247,8 +297,8 @@ describe("bottom tab bar", () => {
     expect(within(sheet).getByText("Chốt sổ")).toBeInTheDocument();
     expect(within(sheet).queryByRole("link", { name: "Chốt sổ" })).not.toBeInTheDocument();
     expect(within(sheet).queryByRole("link", { name: "Gửi thông báo" })).not.toBeInTheDocument();
-    // Phụ huynh is not period-scoped and stays a live link.
-    expect(within(sheet).getByRole("link", { name: "Phụ huynh" })).toBeInTheDocument();
+    // Học sinh is not period-scoped and stays a live link.
+    expect(await within(sheet).findByRole("link", { name: "Học sinh" })).toBeInTheDocument();
   });
 });
 
@@ -262,7 +312,7 @@ describe("teaching v2 nav", () => {
     const labels = within(group)
       .getAllByRole("link")
       .map((link) => link.textContent);
-    expect(labels).toEqual(["Điểm danh", "Sổ lớp", "Hồ sơ học sinh", "Phụ huynh"]);
+    expect(labels).toEqual(["Điểm danh", "Sổ lớp", "Hồ sơ học sinh"]);
     expect(within(group).getByRole("link", { name: "Sổ lớp" })).toHaveAttribute(
       "href",
       "/classbook",
@@ -285,10 +335,8 @@ describe("teaching v2 nav", () => {
       .map((l) => l.textContent);
     expect(labels).toEqual([
       "Duyệt giáo án",
-      "Nhập từ Excel",
       "Nhật ký hoạt động",
       "Công việc",
-      "Quản trị học sinh",
       "Phân quyền vai trò",
       "Cấu hình lớp học",
       "Cài đặt trung tâm",
@@ -384,7 +432,7 @@ describe("teaching v2 nav", () => {
         HttpResponse.json(
           ok({
             center_name: "Trung Tâm Bình Minh",
-            permissions: ["audit.read", "imports.run"],
+            permissions: ["audit.read", "students.list"],
           }),
         ),
       ),
@@ -394,9 +442,9 @@ describe("teaching v2 nav", () => {
     expect(
       await within(sidebarNav).findByRole("link", { name: "Nhật ký hoạt động" }),
     ).toHaveAttribute("href", "/audit");
-    expect(within(sidebarNav).getByRole("link", { name: "Nhập từ Excel" })).toHaveAttribute(
+    expect(within(sidebarNav).getByRole("link", { name: "Học sinh" })).toHaveAttribute(
       "href",
-      "/students/import",
+      "/students",
     );
     // Keys the member does not hold stay hidden.
     expect(screen.queryByRole("link", { name: "Duyệt giáo án" })).not.toBeInTheDocument();
@@ -421,41 +469,17 @@ describe("teaching v2 nav", () => {
       "/sessions",
     );
     expect(within(sidebarNav).getByRole("link", { name: "Hồ sơ học sinh" })).toBeInTheDocument();
-    // Quản trị học sinh is owner-only now — students.list alone no longer
-    // surfaces it anywhere, in any group.
-    expect(screen.queryByText("Quản trị học sinh")).not.toBeInTheDocument();
+    // students.list alone opens the unified students page.
+    expect(within(sidebarNav).getByRole("link", { name: "Học sinh" })).toBeInTheDocument();
     // Entries whose route key the member lacks disappear entirely — no
     // disabled placeholder that would only 403 on click.
     expect(within(sidebarNav).queryByText("Sổ lớp")).not.toBeInTheDocument();
-    expect(within(sidebarNav).queryByText("Phụ huynh")).not.toBeInTheDocument();
     expect(within(sidebarNav).queryByText("Chốt sổ")).not.toBeInTheDocument();
     expect(within(sidebarNav).queryByText("Thu tiền")).not.toBeInTheDocument();
     expect(within(sidebarNav).queryByText("Gửi thông báo")).not.toBeInTheDocument();
     // Ungated entries stay for every member.
     expect(within(sidebarNav).getByRole("link", { name: "Tổng quan" })).toBeInTheDocument();
     expect(within(sidebarNav).getByRole("link", { name: "Cài đặt trung tâm" })).toBeInTheDocument();
-  });
-
-  it("shows Nhập từ Excel to owners and hides it from members", async () => {
-    renderLayout();
-    const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
-    // Default /centers/me is owner-shaped: the import entry links into the group.
-    expect(await within(sidebarNav).findByRole("link", { name: "Nhập từ Excel" })).toHaveAttribute(
-      "href",
-      "/students/import",
-    );
-  });
-
-  it("hides Nhập từ Excel from non-owner members", async () => {
-    server.use(
-      http.get(`${API_URL}/centers/me`, () =>
-        HttpResponse.json(ok({ center_name: "Trung Tâm Bình Minh" })),
-      ),
-    );
-    renderLayout();
-    // Member role label proves /centers/me resolved member-shaped.
-    await screen.findByText("Giáo viên");
-    expect(screen.queryByRole("link", { name: "Nhập từ Excel" })).not.toBeInTheDocument();
   });
 
   it("hides Duyệt giáo án from non-owner members and never fetches their queue", async () => {
@@ -543,11 +567,11 @@ describe("teaching v2 nav", () => {
   });
 });
 
-describe("Giảng dạy nav group", () => {
+describe("Lớp học nav group", () => {
   it("shows Danh mục lớp to owners in its own group after Dạy học", async () => {
     renderLayout();
     const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
-    const group = await within(sidebarNav).findByRole("group", { name: "Giảng dạy" });
+    const group = await within(sidebarNav).findByRole("group", { name: "Lớp học" });
 
     // Permission-gated entries appear once /centers/me resolves.
     expect(await within(group).findByRole("link", { name: "Danh mục lớp" })).toHaveAttribute(
@@ -561,14 +585,14 @@ describe("Giảng dạy nav group", () => {
   it("lists Lớp cần tuyển sinh between the class list and the invitations", async () => {
     renderLayout("/classes/recruiting");
     const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
-    const group = await within(sidebarNav).findByRole("group", { name: "Giảng dạy" });
+    const group = await within(sidebarNav).findByRole("group", { name: "Lớp học" });
     const recruiting = await within(group).findByRole("link", { name: "Lớp cần tuyển sinh" });
     expect(recruiting).toHaveAttribute("href", "/classes/recruiting");
 
     const labels = within(group)
       .getAllByRole("link")
       .map((link) => link.textContent);
-    expect(labels.slice(0, 3)).toEqual(["Danh mục lớp", "Lớp cần tuyển sinh", "Lời mời nhận lớp"]);
+    expect(labels.slice(1, 4)).toEqual(["Danh mục lớp", "Lớp cần tuyển sinh", "Lời mời nhận lớp"]);
     // Most specific wins: the recruiting route does not also light up /classes.
     expect(recruiting).toHaveAttribute("aria-current", "page");
     expect(within(group).getByRole("link", { name: "Danh mục lớp" })).not.toHaveAttribute(
@@ -621,11 +645,12 @@ describe("Giảng dạy nav group", () => {
 });
 
 describe("Kho học liệu nav group", () => {
-  it("shows its own group after Giảng dạy with the prototype's entries in order", async () => {
+  it("shows its own group after Lớp học with the prototype's entries in order", async () => {
     renderLayout();
     const sidebarNav = screen.getAllByRole("navigation", { name: "Main" })[0]!;
-    const teaching = await within(sidebarNav).findByRole("group", { name: "Giảng dạy" });
-    const group = within(sidebarNav).getByRole("group", { name: "Kho học liệu" });
+    const teaching = await within(sidebarNav).findByRole("group", { name: "Lớp học" });
+    // Its entries are all gated, so the header waits for /centers/me.
+    const group = await within(sidebarNav).findByRole("group", { name: "Kho học liệu" });
     expect(teaching.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     await within(group).findByRole("link", { name: "Kho học liệu" });
@@ -635,12 +660,12 @@ describe("Kho học liệu nav group", () => {
       ["Khóa học", "/courses"],
       ["Kho học liệu", "/library"],
     ]);
-    // Giảng dạy keeps only the class entries.
+    // Lớp học keeps the students page and the class entries.
     expect(
       within(teaching)
         .getAllByRole("link")
         .map((link) => link.textContent),
-    ).toEqual(["Danh mục lớp", "Lớp cần tuyển sinh", "Lời mời nhận lớp"]);
+    ).toEqual(["Học sinh", "Danh mục lớp", "Lớp cần tuyển sinh", "Lời mời nhận lớp"]);
     expect(screen.queryByText("Danh mục khóa học")).not.toBeInTheDocument();
     expect(screen.queryByText("Ngân hàng nội dung")).not.toBeInTheDocument();
   });

@@ -25,6 +25,8 @@ export interface UxRoute {
   auth: "owner" | "public";
   /** Also audit at 320×720 (routes that overflowed at reflow width in round 1). */
   narrow?: boolean;
+  /** A tab of another audited page, so it shares that page's tab title. */
+  tabOf?: string;
 }
 
 /** `/billing` redirects to the current period; follow it instead of hardcoding an id. */
@@ -39,7 +41,7 @@ export const UX_ROUTES: readonly UxRoute[] = [
   { name: "sessions", path: "/sessions", auth: "owner" },
   { name: "classbook", path: "/classbook", auth: "owner", narrow: true },
   { name: "records", path: "/records", auth: "owner" },
-  { name: "contacts", path: "/contacts", auth: "owner" },
+  { name: "contacts", path: "/students?tab=contacts", auth: "owner", tabOf: "students" },
   { name: "classes", path: "/classes", auth: "owner", narrow: true },
   { name: "classes-recruiting", path: "/classes/recruiting", auth: "owner" },
   { name: "class-invitations", path: "/class-invitations", auth: "owner" },

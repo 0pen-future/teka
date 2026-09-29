@@ -100,7 +100,6 @@ test("owner grants send-reports; secretary sends another teacher's period; audit
   // of reach for her.
   await expect(secretary.getByRole("link", { name: "Gửi báo cáo" }).first()).toBeVisible();
   await expect(secretary.getByRole("link", { name: "Duyệt giáo án" })).toHaveCount(0);
-  await expect(secretary.getByRole("link", { name: "Nhập từ Excel" })).toHaveCount(0);
   await expect(secretary.getByRole("link", { name: "Nhật ký hoạt động" })).toHaveCount(0);
 
   await secretary.goto("/reports");

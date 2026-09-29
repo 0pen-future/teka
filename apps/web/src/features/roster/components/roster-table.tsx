@@ -101,7 +101,10 @@ export function RosterTable({
             {isUnenrolled ? <HvBadge variant="warning">Chưa vào lớp nào</HvBadge> : null}
             {contactName(student, "text-[13px] text-ink-500")}
             {student.contact_phone ? (
-              <a href={`tel:${student.contact_phone}`} className="text-[13px] text-mint-600">
+              <a
+                href={`tel:${student.contact_phone}`}
+                className="inline-flex min-h-6 items-center self-start text-[13px] text-mint-600"
+              >
                 {formatPhoneLocal(student.contact_phone)}
               </a>
             ) : null}
@@ -169,7 +172,7 @@ export function RosterTable({
                     {student.contact_phone ? (
                       <a
                         href={`tel:${student.contact_phone}`}
-                        className="text-[12.5px] text-ink-500 hover:text-mint-600"
+                        className="inline-flex min-h-6 items-center text-[12.5px] text-ink-500 hover:text-mint-600"
                       >
                         {formatPhoneLocal(student.contact_phone)}
                       </a>

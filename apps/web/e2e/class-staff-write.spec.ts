@@ -26,9 +26,8 @@ async function login(page: Page, user: { phone: string; password: string; name: 
 
 /**
  * Resolves a class id by picking the class on Hồ sơ học sinh and reading the
- * URL. That screen is readable by every class-staff role (the roster screen
- * behind /students is owner-only now), so both the owner and Thầy Minh can
- * use it.
+ * URL. That screen is readable by every class-staff role and lists a class's
+ * enrollments directly, so both the owner and Thầy Minh can use it.
  */
 async function classIdFromRecordsPicker(page: Page, className: string): Promise<string> {
   await page.goto("/records");
@@ -197,8 +196,7 @@ test("a handed-off teacher keeps reading history but loses every write", async (
   await ensureClassTeacher(owner, classId, OWNER.name, `${OWNER.name} (chủ trung tâm)`);
 
   // History reads survive the handoff: the students he taught stay visible
-  // on Hồ sơ học sinh — the member-readable surface, since /students is
-  // owner-only now.
+  // on Hồ sơ học sinh, which reads the class's enrollment history.
   await minh.goto(`/records?class_id=${classId}`);
   await expect(minh.getByText("Bé Phúc", { exact: true })).toBeVisible();
 

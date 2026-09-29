@@ -34,10 +34,10 @@ chains (avoiding circular feature imports) and leaves room for route-level
 lazy loading later. Promote anything shared by multiple features
 into `components/shared` or `lib`.
 
-The Teaching menu ("Giảng dạy") spans three features that all lean on this
-rule at once: `roster` owns class list/detail (the API's `classes` feature),
-`library` owns the teaching library, and `courses` owns
-the course catalog and learning paths. Each imports the other two only
+The class and teaching-library menus ("Lớp học", "Kho học liệu") span three
+features that all lean on this rule at once: `roster` owns the students page
+and class list/detail (the API's `classes` feature), `library` owns the
+teaching library, and `courses` owns the course catalog and learning paths. Each imports the other two only
 through their `index.ts` (e.g. `courses` reads `classesKeys`/`useClassesList`
 from `@/features/roster`, `roster`'s class-program and homework tabs read
 `@/features/library`) — no file in one reaches into another's `components/`
@@ -154,7 +154,12 @@ build without it renders a readable startup error, not a working app.
 Sidebar groups and entries are declared in one place,
 [`layouts/dashboard-layout.tsx`](../apps/web/src/layouts/dashboard-layout.tsx)
 (an unlabeled group holding only "Tổng quan", then the headed groups Dạy học,
-Giảng dạy, Kho học liệu, Học phí, Trung tâm). "Kho học liệu" points its three
+Lớp học, Kho học liệu, Học phí, Trung tâm). Entries are filtered by the
+caller's permission keys and a group whose every entry is filtered away is
+dropped with its header. "Lớp học" opens with "Học sinh" (`/students`), the
+one page for students and contacts: its tabs "Tất cả", "Theo lớp" and "Chưa vào
+lớp" need `students.list`, "Người liên hệ" needs `contacts.view_all`, and the old
+`/contacts` path redirects to its contacts tab. "Kho học liệu" points its three
 bank entries at child routes of one page — `/library`, `/library/materials`,
 `/library/exercises` — so each tab is linkable; the legacy `/library?tab=`
 query redirects to the matching child route. Below
