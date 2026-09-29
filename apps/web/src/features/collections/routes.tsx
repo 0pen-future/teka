@@ -1,5 +1,7 @@
 import type { RouteObject } from "react-router";
 
+import type { RouteHandle } from "@/components/shared/document-title";
+
 /**
  * Mounted by the app router inside the protected dashboard layout. Pages
  * load through route.lazy so each lands in its own build chunk, following
@@ -12,10 +14,12 @@ import type { RouteObject } from "react-router";
 export const collectionsRoutes: RouteObject[] = [
   {
     path: "collections/:periodId",
+    handle: { title: "Thu tiền" } satisfies RouteHandle,
     lazy: async () => ({ Component: (await import("./pages/collections-page")).CollectionsPage }),
   },
   {
     path: "notifications/:periodId",
+    handle: { title: "Gửi thông báo" } satisfies RouteHandle,
     lazy: async () => ({
       Component: (await import("./pages/notifications-page")).NotificationsPage,
     }),

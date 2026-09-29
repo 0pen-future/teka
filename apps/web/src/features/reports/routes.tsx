@@ -1,5 +1,7 @@
 import type { RouteObject } from "react-router";
 
+import type { RouteHandle } from "@/components/shared/document-title";
+
 /**
  * Mounted by the app router inside the protected dashboard layout. Lazy so
  * the page lands in its own build chunk, following
@@ -10,6 +12,7 @@ import type { RouteObject } from "react-router";
 export const reportsRoutes: RouteObject[] = [
   {
     path: "reports",
+    handle: { title: "Gửi báo cáo" } satisfies RouteHandle,
     lazy: async () => ({
       Component: (await import("./pages/send-reports-page")).SendReportsPage,
     }),

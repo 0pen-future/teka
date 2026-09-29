@@ -1,5 +1,6 @@
 import { createBrowserRouter } from "react-router";
 
+import type { RouteHandle } from "@/components/shared/document-title";
 import { NotFound } from "@/components/shared/not-found";
 import { ProtectedRoute } from "@/features/auth";
 import { authRoutes } from "@/features/auth/routes";
@@ -56,7 +57,11 @@ export const router = createBrowserRouter([
           ...tasksRoutes,
         ],
       },
-      { path: "*", element: <NotFound /> },
+      {
+        path: "*",
+        handle: { title: "Không tìm thấy trang" } satisfies RouteHandle,
+        element: <NotFound />,
+      },
     ],
   },
 ]);

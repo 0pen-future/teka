@@ -1,5 +1,7 @@
 import type { RouteObject } from "react-router";
 
+import type { RouteHandle } from "@/components/shared/document-title";
+
 /**
  * Mounted by the app router inside the protected dashboard layout, following
  * `apps/web/src/features/dashboard/routes.tsx`. `:id/attendance` nests under
@@ -10,10 +12,12 @@ import type { RouteObject } from "react-router";
 export const attendanceRoutes: RouteObject[] = [
   {
     path: "sessions",
+    handle: { title: "Điểm danh" } satisfies RouteHandle,
     lazy: async () => ({ Component: (await import("./pages/sessions-page")).SessionsPage }),
     children: [
       {
         path: ":id/attendance",
+        handle: { title: "Điểm danh buổi học" } satisfies RouteHandle,
         lazy: async () => ({ Component: (await import("./pages/attendance-page")).AttendancePage }),
       },
     ],

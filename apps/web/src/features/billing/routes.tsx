@@ -1,5 +1,7 @@
 import type { RouteObject } from "react-router";
 
+import type { RouteHandle } from "@/components/shared/document-title";
+
 import { BillingIndexRedirect } from "./components/billing-index-redirect";
 
 /**
@@ -10,10 +12,12 @@ import { BillingIndexRedirect } from "./components/billing-index-redirect";
 export const billingRoutes: RouteObject[] = [
   {
     path: "billing",
+    handle: { title: "Chốt sổ" } satisfies RouteHandle,
     Component: BillingIndexRedirect,
   },
   {
     path: "billing/:periodId",
+    handle: { title: "Chốt sổ" } satisfies RouteHandle,
     lazy: async () => ({
       Component: (await import("./pages/billing-review-page")).BillingReviewPage,
     }),

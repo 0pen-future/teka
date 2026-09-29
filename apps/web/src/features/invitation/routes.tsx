@@ -1,5 +1,7 @@
 import type { RouteObject } from "react-router";
 
+import type { RouteHandle } from "@/components/shared/document-title";
+
 /**
  * Public-only route; the app router mounts this under the auth layout
  * alongside `authRoutes` (login has nothing to do with accepting an invite,
@@ -9,6 +11,7 @@ import type { RouteObject } from "react-router";
 export const invitationRoutes: RouteObject[] = [
   {
     path: "/invite/:token",
+    handle: { title: "Nhận lời mời" } satisfies RouteHandle,
     lazy: async () => ({
       Component: (await import("./pages/accept-invite-page")).AcceptInvitePage,
     }),
