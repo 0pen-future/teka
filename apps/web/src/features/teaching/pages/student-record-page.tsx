@@ -142,9 +142,9 @@ export function StudentRecordPage() {
 
       {!enrollment ? (
         sessionsPending || !enrollmentsPage ? (
-          <p className="text-[13px] text-ink-400">Đang tải hồ sơ…</p>
+          <p className="text-[13px] text-ink-500">Đang tải hồ sơ…</p>
         ) : (
-          <div className="rounded-[24px] bg-white p-6 text-center text-[13px] text-ink-400 shadow-soft-md">
+          <div className="rounded-[24px] bg-white p-6 text-center text-[13px] text-ink-500 shadow-soft-md">
             Không tìm thấy hồ sơ học sinh này.
           </div>
         )
@@ -174,7 +174,7 @@ export function StudentRecordPage() {
           <div className="grid max-w-[620px] grid-cols-3 gap-3">
             {stats.map((stat) => (
               <div key={stat.label} className="rounded-[20px] bg-white px-4 py-3.5 shadow-soft-md">
-                <div className="text-[11.5px] font-extrabold tracking-[0.3px] text-ink-400">
+                <div className="text-[11.5px] font-extrabold tracking-[0.3px] text-ink-500">
                   {stat.label}
                 </div>
                 <div className="mt-0.5 font-display text-[21px] font-extrabold text-ink-900">

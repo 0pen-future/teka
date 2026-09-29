@@ -67,7 +67,7 @@ export function ActionsMenu({
       >
         {targets.length > 0 ? (
           <>
-            <DropdownMenuLabel className="px-2.5 pb-1 pt-1.5 font-display text-[11px] font-extrabold uppercase tracking-[0.06em] text-ink-400">
+            <DropdownMenuLabel className="px-2.5 pb-1 pt-1.5 font-display text-[11px] font-extrabold uppercase tracking-[0.06em] text-ink-500">
               Chuyển tới
             </DropdownMenuLabel>
             {targets.map((column) => (

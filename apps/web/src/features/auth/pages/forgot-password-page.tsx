@@ -49,7 +49,7 @@ export function ForgotPasswordPage() {
     <HvCard variant="raised" padding="lg" className="mx-auto w-full max-w-[var(--w-phone)]">
       <div className="mb-6 text-center">
         <p className="font-display text-[17px] font-bold text-ink-900">Quên mật khẩu?</p>
-        <p className="mt-1 text-[13px] text-ink-400">
+        <p className="mt-1 text-[13px] text-ink-500">
           Nhập số điện thoại đăng nhập để nhận liên kết đặt lại mật khẩu.
         </p>
       </div>

@@ -43,7 +43,7 @@ export function MoneyField({ id, value, onChange, disabled, ...rest }: MoneyFiel
         onBlur={() => setFocused(false)}
         {...rest}
       />
-      <p className="mt-1 text-[13px] text-ink-400">{formatMoney(value)}</p>
+      <p className="mt-1 text-[13px] text-ink-500">{formatMoney(value)}</p>
     </div>
   );
 }

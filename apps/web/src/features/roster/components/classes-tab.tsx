@@ -34,7 +34,7 @@ export function ClassesTab({
   const today = new Date().toISOString().slice(0, 10);
 
   if (isPending) {
-    return <p className="text-[13px] text-ink-400">Đang tải…</p>;
+    return <p className="text-[13px] text-ink-500">Đang tải…</p>;
   }
 
   // A failed list must not read as "no classes yet" — that empty state

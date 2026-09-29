@@ -14,7 +14,7 @@ export function InviteList() {
   const revokeMutation = useRevokeInvite();
 
   if (isPending) {
-    return <p className="text-[13px] text-ink-400">Đang tải lời mời…</p>;
+    return <p className="text-[13px] text-ink-500">Đang tải lời mời…</p>;
   }
   if (isError) {
     return <p className="text-[13px] text-ink-500">Không tải được danh sách lời mời.</p>;
@@ -34,7 +34,7 @@ export function InviteList() {
     <div>
       <p className="font-display text-[15px] font-bold text-ink-900">Lời mời đang chờ</p>
       {pending.length === 0 ? (
-        <p className="mt-2 text-[13px] text-ink-400">Chưa có lời mời nào đang chờ.</p>
+        <p className="mt-2 text-[13px] text-ink-500">Chưa có lời mời nào đang chờ.</p>
       ) : (
         <ul className="mt-2 flex flex-col divide-y divide-line-200">
           {pending.map((invite) => (

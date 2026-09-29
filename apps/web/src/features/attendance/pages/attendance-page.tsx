@@ -75,7 +75,7 @@ function PanelHeader({
   subtitle?: string;
 }) {
   return (
-    <div className="rounded-t-[28px] bg-mint-400 px-5 py-4 text-white">
+    <div className="rounded-t-[28px] bg-mint-400 px-5 py-4 text-on-brand">
       <p className="font-display text-[19px] font-bold">
         {session.class_name} — {formatSessionDate(session.session_date)}
         {session.start_time ? ` · ${session.start_time}` : ""}
@@ -229,7 +229,7 @@ export function AttendancePage({ sessionId: sessionIdProp }: AttendancePageProps
   }
 
   if (sessionPending || rosterPending) {
-    return <p className="p-4 text-[13px] text-ink-400">Đang tải…</p>;
+    return <p className="p-4 text-[13px] text-ink-500">Đang tải…</p>;
   }
 
   if (sessionError || rosterError || !session || !roster) {
@@ -272,7 +272,7 @@ export function AttendancePage({ sessionId: sessionIdProp }: AttendancePageProps
       <div className="flex items-center gap-[10px] border-b border-line-100 px-4 py-3">
         <StatusCountChips counts={counts} />
         {confirmed ? (
-          <span className="ml-auto shrink-0 text-[12.5px] text-ink-400">
+          <span className="ml-auto shrink-0 text-[12.5px] text-ink-500">
             Sửa được cả buổi đã qua
           </span>
         ) : null}

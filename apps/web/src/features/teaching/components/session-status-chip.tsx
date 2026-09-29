@@ -6,7 +6,7 @@ const toneClasses: Record<SessionChipTone, string> = {
   mint: "bg-mint-50 text-mint-600",
   sun: "bg-sun-100 text-sun-600",
   coral: "bg-coral-100 text-coral-600",
-  muted: "bg-cream-200 text-ink-400",
+  muted: "bg-cream-200 text-ink-500",
 };
 
 /** The ledger's small state pill — "Đã có", "3/12", "Buổi hủy"… */

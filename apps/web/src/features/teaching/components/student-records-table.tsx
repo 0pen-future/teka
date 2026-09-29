@@ -46,7 +46,7 @@ const SKELETON_ROWS = 5;
 const trendColor: Record<TrendTone, string> = {
   up: "text-mint-600",
   down: "text-coral-600",
-  flat: "text-ink-400",
+  flat: "text-ink-500",
 };
 
 function averageColor(row: StudentRecordSummary): string {
@@ -88,7 +88,7 @@ function TableHeader() {
     <div
       className={cn(
         gridClassName,
-        "border-b-[1.5px] border-line-200 px-5 py-3 text-[11.5px] font-extrabold tracking-[0.3px] text-ink-400",
+        "border-b-[1.5px] border-line-200 px-5 py-3 text-[11.5px] font-extrabold tracking-[0.3px] text-ink-500",
       )}
     >
       <div>HỌC SINH</div>
@@ -202,7 +202,7 @@ function SkeletonRows({ label, compact }: { label: string; compact: boolean }) {
 
 function SearchEmptyState({ query, onClear }: { query: string; onClear?: () => void }) {
   return (
-    <div className="px-5 py-[30px] text-center text-[13.5px] text-ink-400">
+    <div className="px-5 py-[30px] text-center text-[13.5px] text-ink-500">
       <b className="mb-1.5 block font-display text-[15px] text-ink-700">
         Không tìm thấy học sinh nào khớp “{query}”
       </b>

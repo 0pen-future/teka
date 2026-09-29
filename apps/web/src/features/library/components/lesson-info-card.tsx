@@ -86,7 +86,7 @@ function ViewField({
       {value ? (
         <p className="whitespace-pre-wrap text-[14px] text-ink-900">{value}</p>
       ) : (
-        <p className="text-[14px] text-ink-400">Chưa có</p>
+        <p className="text-[14px] text-ink-500">Chưa có</p>
       )}
     </div>
   );

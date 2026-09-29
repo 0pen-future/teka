@@ -117,7 +117,7 @@ export function ProfilePage() {
               <Field>
                 <FieldLabel htmlFor="profile-subject">Môn dạy</FieldLabel>
                 <Input id="profile-subject" {...form.register("subject")} />
-                <p className="text-[12px] text-ink-400">
+                <p className="text-[12px] text-ink-500">
                   Chưa lưu trên máy chủ — tính năng đang phát triển.
                 </p>
               </Field>
@@ -125,7 +125,7 @@ export function ProfilePage() {
             <Field className="mt-3">
               <FieldLabel htmlFor="profile-phone">Số điện thoại (Zalo)</FieldLabel>
               <Input id="profile-phone" readOnly value={user ? formatPhoneLocal(user.phone) : ""} />
-              <p className="text-[12px] text-ink-400">
+              <p className="text-[12px] text-ink-500">
                 Phụ huynh nhận thông báo học phí từ số Zalo này.
               </p>
             </Field>
@@ -155,7 +155,7 @@ export function ProfilePage() {
               <FieldLabel htmlFor="profile-holder">Chủ tài khoản</FieldLabel>
               <Input id="profile-holder" {...form.register("holder")} />
             </Field>
-            <p className="mt-2.5 text-[12px] text-ink-400">
+            <p className="mt-2.5 text-[12px] text-ink-500">
               Chưa lưu trên máy chủ — tính năng đang phát triển.
             </p>
           </HvCard>

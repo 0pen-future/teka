@@ -49,7 +49,7 @@ export interface SessionExpandRowHandle {
   discard: () => void;
 }
 
-const blockLabelClassName = "text-[12px] font-extrabold tracking-[0.3px] text-ink-400";
+const blockLabelClassName = "text-[12px] font-extrabold tracking-[0.3px] text-ink-500";
 
 function Kbd({ children }: { children: React.ReactNode }) {
   return (
@@ -317,7 +317,7 @@ export const SessionExpandRow = React.forwardRef<SessionExpandRowHandle, Session
             />
           ) : (
             <>
-              <div className="mb-1.5 text-[12px] text-ink-400">
+              <div className="mb-1.5 text-[12px] text-ink-500">
                 Chấm điểm kiểm tra cuối buổi (0–10) rồi bấm lưu.
               </div>
               {rosterQuery.isPending ? (
@@ -363,7 +363,7 @@ export const SessionExpandRow = React.forwardRef<SessionExpandRowHandle, Session
                               "ml-auto rounded-full px-2.5 py-[3px] text-[13px] font-extrabold",
                               absent && held
                                 ? "bg-coral-100 text-coral-600"
-                                : "bg-cream-200 text-ink-400",
+                                : "bg-cream-200 text-ink-500",
                             )}
                           >
                             {!held ? "—" : absent ? "Vắng" : "—"}
@@ -422,7 +422,7 @@ export const SessionExpandRow = React.forwardRef<SessionExpandRowHandle, Session
           </div>
           <div className="px-4 py-3.5">{scoresBlock}</div>
         </div>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line-100 bg-white px-4 py-2.5 text-[12px] text-ink-400">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line-100 bg-white px-4 py-2.5 text-[12px] text-ink-500">
           <span className="hidden items-center gap-1.5 sm:inline-flex">
             Di chuyển <Kbd>↑</Kbd> <Kbd>↓</Kbd> · mở/đóng <Kbd>Enter</Kbd>
           </span>

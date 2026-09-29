@@ -263,7 +263,7 @@ export function ScoreSetsEditor({
         phiên bản, không qua khóa.
       </p>
       {groups.length === 0 ? (
-        <p className="text-[14px] text-ink-400">Chưa có bộ điểm nào.</p>
+        <p className="text-[14px] text-ink-500">Chưa có bộ điểm nào.</p>
       ) : null}
       {groups.map((group, gi) => {
         const groupErrors = byGroup[gi];
@@ -300,7 +300,7 @@ export function ScoreSetsEditor({
               Mã là tên máy dùng trong bảng điểm của lớp; trọng số 0 nghĩa là không tính vào tổng.
             </p>
             {group.rows.length === 0 ? (
-              <p className="text-[14px] text-ink-400">Chưa có thành phần nào.</p>
+              <p className="text-[14px] text-ink-500">Chưa có thành phần nào.</p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[640px] border-collapse">
@@ -415,13 +415,13 @@ export function ScoreSetsReadOnly({ groups }: { groups: ScoreSetGroup[] }) {
   return (
     <section aria-label="Cơ cấu điểm" className="flex flex-col gap-3">
       {groups.length === 0 ? (
-        <p className="text-[14px] text-ink-400">Chưa có bộ điểm nào.</p>
+        <p className="text-[14px] text-ink-500">Chưa có bộ điểm nào.</p>
       ) : (
         groups.map((group) => (
           <HvCard key={group.key} variant="flat" className="flex flex-col gap-2">
             <h3 className="font-display text-[15px] font-extrabold text-ink-900">{group.title}</h3>
             {group.components.length === 0 ? (
-              <p className="text-[14px] text-ink-400">Chưa có thành phần nào.</p>
+              <p className="text-[14px] text-ink-500">Chưa có thành phần nào.</p>
             ) : (
               <table className="w-full border-collapse text-[14px]">
                 <thead>

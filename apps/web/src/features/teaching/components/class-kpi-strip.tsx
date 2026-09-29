@@ -14,7 +14,7 @@ export function ClassKpiStrip({ items }: { items: ClassKpi[] }) {
     <dl className="grid grid-cols-2 gap-x-8 gap-y-3 border-b-[1.5px] border-line-200 px-1 py-3 sm:grid-cols-4">
       {items.map((item) => (
         <div key={item.label} className="min-w-0">
-          <dt className="text-[11.5px] font-extrabold tracking-[0.3px] text-ink-400">
+          <dt className="text-[11.5px] font-extrabold tracking-[0.3px] text-ink-500">
             {item.label}
           </dt>
           <dd

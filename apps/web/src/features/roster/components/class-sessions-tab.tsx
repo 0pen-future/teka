@@ -151,7 +151,7 @@ export function ClassSessionsTab({ klass, today }: ClassSessionsTabProps) {
                         {statusLabel[session.status]}
                       </HvBadge>
                       {session.cancel_reason ? (
-                        <span className="ml-2 text-[13px] text-ink-400">
+                        <span className="ml-2 text-[13px] text-ink-500">
                           {session.cancel_reason}
                         </span>
                       ) : null}

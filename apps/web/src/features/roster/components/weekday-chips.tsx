@@ -54,7 +54,7 @@ export function WeekdayChipsMulti({
             className={cn(
               "min-h-11 min-w-11 rounded-full border-2 px-3 font-display text-[13px] font-bold transition-colors",
               selected
-                ? "border-mint-400 bg-mint-400 text-white"
+                ? "border-mint-400 bg-mint-400 text-on-brand"
                 : "border-line-200 bg-white text-ink-500 hover:bg-cream-100",
             )}
           >

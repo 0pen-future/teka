@@ -29,7 +29,9 @@ export function CollectionsViewToggle({ value, onChange }: CollectionsViewToggle
           onClick={() => onChange(option.value)}
           className={cn(
             "min-h-9 rounded-[var(--radius-pill)] px-4 font-display text-[14px] font-bold transition-colors",
-            value === option.value ? "bg-mint-400 text-white" : "text-ink-500 hover:bg-cream-100",
+            value === option.value
+              ? "bg-mint-400 text-on-brand"
+              : "text-ink-500 hover:bg-cream-100",
           )}
         >
           {option.label}

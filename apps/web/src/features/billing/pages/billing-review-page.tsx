@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 
-import { HvButton, hvToast } from "@/components/hv";
+import { HvButton, hvButtonVariants, hvToast } from "@/components/hv";
 import { useCenterContext } from "@/features/teaching";
-import { cn, formatMoney } from "@/lib/utils";
+import { formatMoney } from "@/lib/utils";
 
 import { AdjustmentDialog } from "../components/adjustment-dialog";
 import { BlockingSessionsPanel } from "../components/blocking-sessions-panel";
@@ -15,18 +15,11 @@ import { useBlockingSessions, useClosePeriod, usePeriod, useReview } from "../ho
 import type { ReviewRow } from "../schemas/billing-schemas";
 
 /**
- * Manually composed to match `HvButton` variant="secondary" size="sm" —
  * `HvButton` renders a `<button>`, which can't nest inside this footer's
- * `<Link>` to the notifications screen without invalid nested-interactive
- * markup (same constraint as `BlockingSessionsPanel`'s link-button).
+ * `<Link>` to the notifications screen, so the link takes the button's
+ * classes from `hvButtonVariants`.
  */
-const secondaryLinkButtonClassName = cn(
-  "inline-flex min-h-[44px] select-none items-center justify-center gap-2 rounded-[var(--radius-md)]",
-  "border-0 bg-sky-300 px-[18px] font-display text-[length:var(--text-sm)] font-bold text-white",
-  "shadow-press-sky transition-[transform,box-shadow,filter] duration-[var(--dur-fast)] ease-[var(--ease-out)]",
-  "hover:brightness-[1.04] active:translate-y-[var(--press-depth)] active:shadow-none",
-  "focus-visible:outline-none focus-visible:ring-4",
-);
+const secondaryLinkButtonClassName = hvButtonVariants({ variant: "secondary", size: "sm" });
 
 /**
  * The chốt sổ (close) screen (PRD R3, R4). Composes the period switcher,
@@ -75,7 +68,7 @@ export function BillingReviewPage() {
   }
 
   if (periodPending || reviewPending) {
-    return <p className="p-4 text-[13px] text-ink-400">Đang tải…</p>;
+    return <p className="p-4 text-[13px] text-ink-500">Đang tải…</p>;
   }
 
   if (reviewError || !period || !review) {
@@ -110,7 +103,7 @@ export function BillingReviewPage() {
           <p className="font-display text-[18px] font-bold text-ink-900">
             Chốt sổ tháng {period.month}/{period.year}
           </p>
-          <p className="text-[13px] text-ink-400">{closed ? "Kỳ đã khoá" : "Kỳ đang mở"}</p>
+          <p className="text-[13px] text-ink-500">{closed ? "Kỳ đã khoá" : "Kỳ đang mở"}</p>
         </div>
         <PeriodSwitcher currentPeriodId={periodId} />
       </div>
@@ -133,7 +126,7 @@ export function BillingReviewPage() {
       )}
 
       <div className="fixed inset-x-0 bottom-14 z-10 flex flex-wrap items-center justify-between gap-3 border-t border-line-200 bg-white p-3 md:bottom-0">
-        <span className="text-[13px] text-ink-400">
+        <span className="text-[13px] text-ink-500">
           {review.totals.student_count} học sinh · {contactCount} phụ huynh
         </span>
         <span className="font-display text-[22px] font-bold text-mint-600">

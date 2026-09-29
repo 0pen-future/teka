@@ -1,21 +1,19 @@
 import { Link } from "react-router";
 
+import { hvButtonVariants } from "@/components/hv";
 import { cn, formatSessionDate } from "@/lib/utils";
 
 import { usePendingSessions } from "../hooks/use-dashboard";
 
 /**
- * Manually composed to match `HvButton` variant="danger" size="md" — HvButton
- * itself renders a `<button>`, which can't wrap this banner's navigation
- * without producing invalid nested-interactive-element markup, so the link is
- * styled directly from the same token utilities instead.
+ * `HvButton` renders a `<button>`, which can't wrap this banner's navigation
+ * without invalid nested-interactive markup, so the link takes the button's
+ * classes from `hvButtonVariants` instead.
  */
-const dangerLinkButtonClassName =
-  "inline-flex min-h-[44px] shrink-0 items-center justify-center rounded-[var(--radius-md)] " +
-  "bg-coral-400 px-[18px] text-[length:var(--text-sm)] font-display font-bold text-white " +
-  "shadow-press-coral transition-[transform,box-shadow,filter] duration-[var(--dur-fast)] " +
-  "ease-[var(--ease-out)] hover:brightness-[1.04] active:translate-y-[var(--press-depth)] " +
-  "active:shadow-none focus-visible:outline-none focus-visible:ring-4";
+const dangerLinkButtonClassName = cn(
+  hvButtonVariants({ variant: "danger", size: "sm" }),
+  "shrink-0",
+);
 
 /**
  * The prototype `home` screen's warning banner (PRD R2 AC 3): sessions
@@ -69,7 +67,7 @@ export function PendingAttendanceAlert({ className }: { className?: string }) {
     >
       <span
         aria-hidden
-        className="flex size-10 shrink-0 items-center justify-center rounded-full bg-coral-400 font-display text-[20px] font-black text-white"
+        className="flex size-10 shrink-0 items-center justify-center rounded-full bg-coral-400 font-display text-[20px] font-black text-on-brand"
       >
         !
       </span>

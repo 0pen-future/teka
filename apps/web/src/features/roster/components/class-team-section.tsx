@@ -60,7 +60,7 @@ export function ClassTeamSection({ klass, isOwner }: { klass: Class; isOwner: bo
           {invitations.isError ? (
             <p className="mt-1 text-[13px] text-coral-600">Không tải được lời mời.</p>
           ) : open.length === 0 ? (
-            <p className="mt-1 text-[13px] text-ink-400">
+            <p className="mt-1 text-[13px] text-ink-500">
               {invitations.isPending ? "Đang tải…" : "Không có lời mời nào đang mở."}
             </p>
           ) : (

@@ -45,7 +45,7 @@ export function TeacherHandoffCard({ klass, members }: { klass: Class; members: 
   return (
     <HvCard id="teacher-handoff">
       <p className="font-display text-[16px] font-bold text-ink-900">Giáo viên phụ trách</p>
-      <p className="mt-0.5 text-[13px] text-ink-400">
+      <p className="mt-0.5 text-[13px] text-ink-500">
         Giáo viên hiện tại:{" "}
         <span className="font-bold text-ink-700">
           {currentTeacher ? currentTeacher.full_name : "Không rõ"}
@@ -54,7 +54,7 @@ export function TeacherHandoffCard({ klass, members }: { klass: Class; members: 
         giáo viên mới. Buổi đã dạy, đã hủy và học phí đã chốt vẫn giữ nguyên.
       </p>
       {targets.length === 0 ? (
-        <p className="mt-3 text-[13px] text-ink-400">
+        <p className="mt-3 text-[13px] text-ink-500">
           Chưa có giáo viên khác trong trung tâm để bàn giao.
         </p>
       ) : (

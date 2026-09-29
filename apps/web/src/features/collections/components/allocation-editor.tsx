@@ -54,7 +54,7 @@ export function AllocationEditor({
   return (
     <div className="rounded-[var(--radius-lg)] bg-cream-100 p-3">
       <div className="flex items-center justify-between">
-        <p className="text-[11px] font-bold uppercase tracking-wide text-ink-400">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-ink-500">
           Phân bổ tự động — nợ cũ trước, rồi kỳ này
         </p>
         <HvButton
@@ -83,7 +83,7 @@ export function AllocationEditor({
         ))}
       </div>
       <div className="mt-2 flex items-center justify-between border-t border-line-200 pt-2">
-        <span className="text-[13px] text-ink-400">Còn lại chưa phân bổ</span>
+        <span className="text-[13px] text-ink-500">Còn lại chưa phân bổ</span>
         <span
           className={
             remainder === 0

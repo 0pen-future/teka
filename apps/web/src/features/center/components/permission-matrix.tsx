@@ -143,7 +143,7 @@ export function PermissionMatrix() {
   }
 
   if (isPending) {
-    return <p className="mt-3 text-[13px] text-ink-400">Đang tải…</p>;
+    return <p className="mt-3 text-[13px] text-ink-500">Đang tải…</p>;
   }
   if (isError || !data) {
     return <p className="mt-3 text-[13px] text-ink-500">Không tải được phân quyền.</p>;
@@ -229,7 +229,7 @@ export function PermissionMatrix() {
               "border-b-[3px] px-0.5 py-2.5 text-[14.5px] font-extrabold focus-visible:ring-4 focus-visible:outline-none",
               activeTab?.id === tab.id
                 ? "border-mint-400 text-ink-900"
-                : "border-transparent text-ink-400",
+                : "border-transparent text-ink-500",
             )}
           >
             {tab.label}

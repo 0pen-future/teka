@@ -147,7 +147,7 @@ export function ClassInvitationsPage() {
                 <tr>
                   <td
                     colSpan={6}
-                    className="border-t border-line-100 p-[34px] text-center font-bold text-ink-400"
+                    className="border-t border-line-100 p-[34px] text-center font-bold text-ink-500"
                   >
                     Không có lời mời nào.
                   </td>
@@ -158,7 +158,7 @@ export function ClassInvitationsPage() {
                 const open = item.status === "pending" || item.status === "accepted";
                 return (
                   <tr key={item.id} className="transition-colors hover:bg-cream-100">
-                    <td className={cn(cellClassName, "font-extrabold text-ink-400")}>
+                    <td className={cn(cellClassName, "font-extrabold text-ink-500")}>
                       {index + 1}
                     </td>
                     <td className={cellClassName}>
@@ -174,7 +174,7 @@ export function ClassInvitationsPage() {
                         // stint exists the invitee has nothing to open there.
                         <span className="font-extrabold text-ink-900">{item.class_name}</span>
                       )}
-                      <div className="truncate text-[12px] text-ink-400">
+                      <div className="truncate text-[12px] text-ink-500">
                         {item.course_name ?? "Chưa gắn khóa"}
                       </div>
                       {item.message ? (
@@ -185,12 +185,12 @@ export function ClassInvitationsPage() {
                     </td>
                     <td className={cellClassName}>
                       <div className="font-bold text-ink-900">{item.teacher_name}</div>
-                      <div className="text-[12px] text-ink-400">{item.role_label}</div>
+                      <div className="text-[12px] text-ink-500">{item.role_label}</div>
                     </td>
                     <td className={cn(cellClassName, "text-ink-500")}>
                       {formatDateTime(item.sent_at)}
                       {item.reminded_at ? (
-                        <span className="block text-[12px] text-ink-400">
+                        <span className="block text-[12px] text-ink-500">
                           Nhắc lại {formatDateTime(item.reminded_at)}
                         </span>
                       ) : null}

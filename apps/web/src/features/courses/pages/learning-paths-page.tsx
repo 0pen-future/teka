@@ -153,7 +153,7 @@ export function LearningPathsPage() {
                 <tr>
                   <td
                     colSpan={6}
-                    className="border-t border-line-100 p-[30px] text-center font-bold text-ink-400"
+                    className="border-t border-line-100 p-[30px] text-center font-bold text-ink-500"
                   >
                     Không có lộ trình nào ở trạng thái này.
                   </td>
@@ -167,7 +167,7 @@ export function LearningPathsPage() {
                       className="cursor-pointer transition-colors hover:bg-cream-100"
                       onClick={() => toggle(path.id)}
                     >
-                      <td className={cn(cellClassName, "font-extrabold text-ink-400")}>
+                      <td className={cn(cellClassName, "font-extrabold text-ink-500")}>
                         {index + 1}
                       </td>
                       <td className={cn(cellClassName, "font-extrabold text-ink-900")}>
@@ -278,7 +278,7 @@ function PathStages({ path, canEdit, canOpenCourse }: PathStagesProps) {
   return (
     <div className="flex flex-col gap-2">
       {path.stages.length === 0 && !canEdit ? (
-        <p className="py-2 text-[13px] font-bold text-ink-400">Lộ trình chưa có chặng nào.</p>
+        <p className="py-2 text-[13px] font-bold text-ink-500">Lộ trình chưa có chặng nào.</p>
       ) : null}
       {path.stages.map((stage, index) => (
         <StageRow
@@ -357,7 +357,7 @@ function StageRow({
     >
       <span
         aria-hidden="true"
-        className="flex size-[30px] flex-none items-center justify-center rounded-full bg-mint-400 font-display text-[14px] font-extrabold text-white"
+        className="flex size-[30px] flex-none items-center justify-center rounded-full bg-mint-400 font-display text-[14px] font-extrabold text-on-brand"
       >
         {number}
       </span>
@@ -377,7 +377,7 @@ function StageRow({
         {stage.courses.map((course) => {
           const chipClassName = cn(
             "inline-flex items-center rounded-full px-2.5 py-1 text-[12px] font-extrabold",
-            course.status === "active" ? "bg-mint-50 text-mint-600" : "bg-cream-200 text-ink-400",
+            course.status === "active" ? "bg-mint-50 text-mint-600" : "bg-cream-200 text-ink-500",
           );
           const label = `${course.code} · ${course.name}`;
           return canOpenCourse ? (

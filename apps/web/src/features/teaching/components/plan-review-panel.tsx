@@ -1,5 +1,8 @@
 import { useState } from "react";
 
+import { hvButtonVariants } from "@/components/hv";
+import { cn } from "@/lib/utils";
+
 import type { LessonPlan } from "../lib/teaching-store";
 import { PlanStatusPill } from "./plan-status-pill";
 import { PlanSummary } from "./plan-summary";
@@ -54,7 +57,7 @@ export function PlanReviewPanel({
 
   return (
     <section className="min-w-[340px] flex-1 overflow-hidden rounded-[24px] bg-white shadow-soft-lg">
-      <div className="bg-sky-300 px-[18px] py-[14px] text-white">
+      <div className="bg-sky-300 px-[18px] py-[14px] text-on-brand">
         <h2 className="font-display text-[17px] font-bold">
           {classTitle} — {teacher}
         </h2>
@@ -66,7 +69,7 @@ export function PlanReviewPanel({
       <div className="px-[18px] pt-4 pb-[18px]">
         <div className="flex items-center gap-2">
           {lessonNumber ? (
-            <div className="text-[12px] font-extrabold tracking-[0.3px] text-ink-400">
+            <div className="text-[12px] font-extrabold tracking-[0.3px] text-ink-500">
               {lessonNumber}
             </div>
           ) : null}
@@ -106,7 +109,7 @@ export function PlanReviewPanel({
           <>
             <label
               htmlFor="owner-review-comment"
-              className="mt-3.5 block text-[12px] font-extrabold tracking-[0.3px] text-ink-400"
+              className="mt-3.5 block text-[12px] font-extrabold tracking-[0.3px] text-ink-500"
             >
               NHẬN XÉT CỦA CHỦ TRUNG TÂM
             </label>
@@ -122,7 +125,7 @@ export function PlanReviewPanel({
               <button
                 type="button"
                 onClick={() => onApprove(comment.trim())}
-                className="flex-1 rounded-[16px] bg-mint-400 px-4 py-[11px] text-[14px] font-extrabold text-white shadow-press-mint transition-transform active:translate-y-[3px] active:shadow-none"
+                className={cn(hvButtonVariants({ variant: "primary", size: "sm" }), "flex-1")}
               >
                 Duyệt giáo án
               </button>
@@ -136,7 +139,7 @@ export function PlanReviewPanel({
               </button>
             </div>
             {!hasComment ? (
-              <p className="mt-1.5 text-[12px] text-ink-400">
+              <p className="mt-1.5 text-[12px] text-ink-500">
                 Ghi rõ cần sửa gì để giáo viên biết đường sửa.
               </p>
             ) : null}

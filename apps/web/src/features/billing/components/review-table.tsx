@@ -65,7 +65,7 @@ export function ReviewTable({ rows, closed, onAdjust }: ReviewTableProps) {
                       className={`${cellClassName} sticky left-0 bg-white font-semibold`}
                     >
                       {row.student_name}
-                      <p className="text-[12px] font-normal text-ink-400">{row.contact_name}</p>
+                      <p className="text-[12px] font-normal text-ink-500">{row.contact_name}</p>
                     </td>
                   ) : null}
                   {line ? (

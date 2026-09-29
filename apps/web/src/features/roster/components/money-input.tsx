@@ -70,7 +70,7 @@ export function MoneyInput({ id, value, onChange, step = 5000, ...rest }: MoneyI
           +
         </button>
       </div>
-      <p className="mt-1 text-[13px] text-ink-400">{formatMoney(value)}</p>
+      <p className="mt-1 text-[13px] text-ink-500">{formatMoney(value)}</p>
     </div>
   );
 }

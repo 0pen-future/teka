@@ -51,7 +51,7 @@ export function ImportErrorTable({ payload }: { payload: ImportErrorsPayload }) 
         </div>
       </div>
       {payload.truncated ? (
-        <p className="text-[13px] text-ink-400">
+        <p className="text-[13px] text-ink-500">
           Còn {payload.truncated} lỗi nữa chưa hiển thị. Sửa các lỗi trên rồi kiểm tra lại.
         </p>
       ) : null}

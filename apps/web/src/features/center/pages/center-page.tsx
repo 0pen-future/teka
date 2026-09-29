@@ -25,7 +25,7 @@ export function CenterPage() {
   const [permissionsTarget, setPermissionsTarget] = useState<CenterMember | null>(null);
 
   if (isPending) {
-    return <p className="text-[14px] text-ink-400">Đang tải…</p>;
+    return <p className="text-[14px] text-ink-500">Đang tải…</p>;
   }
   if (isError || !data) {
     return <p className="text-[14px] text-ink-500">Không tải được thông tin trung tâm.</p>;

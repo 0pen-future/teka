@@ -204,7 +204,7 @@ export function LessonContents({ lesson, templateId, editable }: LessonContentsP
       </div>
 
       {rows.length === 0 ? (
-        <p className="text-[14px] text-ink-400">Chưa thêm nội dung cho buổi học mẫu.</p>
+        <p className="text-[14px] text-ink-500">Chưa thêm nội dung cho buổi học mẫu.</p>
       ) : (
         <ul className="flex flex-col">
           {rows.map((material, index) => (
@@ -335,7 +335,7 @@ function MaterialRow({
           aria-label={expanded ? `Thu gọn ${material.title}` : `Xem thêm ${material.title}`}
           aria-expanded={expanded}
           onClick={() => onToggleExpand(material.id)}
-          className="inline-flex size-7 items-center justify-center rounded-full text-ink-400 hover:bg-cream-100 hover:text-ink-700"
+          className="inline-flex size-7 items-center justify-center rounded-full text-ink-500 hover:bg-cream-100 hover:text-ink-700"
         >
           <ChevronDownIcon
             aria-hidden="true"

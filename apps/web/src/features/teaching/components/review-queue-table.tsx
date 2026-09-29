@@ -32,7 +32,7 @@ export function ReviewQueueTable({
           <div
             className={cn(
               gridClassName,
-              "border-b-[1.5px] border-line-200 px-[18px] py-3 text-[11.5px] font-extrabold tracking-[0.3px] text-ink-400",
+              "border-b-[1.5px] border-line-200 px-[18px] py-3 text-[11.5px] font-extrabold tracking-[0.3px] text-ink-500",
             )}
           >
             <div>LỚP</div>

@@ -52,12 +52,12 @@ const itemClassName = cn(
 /** Hover only lifts idle items; the selected one keeps its fill under the pointer. */
 const tabStateClassName = cn(
   "data-[state=inactive]:hover:bg-cream-100 data-[state=inactive]:hover:text-ink-900",
-  "data-[state=active]:bg-mint-400 data-[state=active]:text-white",
+  "data-[state=active]:bg-mint-400 data-[state=active]:text-on-brand",
 );
 
 const radioStateClassName = cn(
   "data-[state=unchecked]:hover:bg-cream-100 data-[state=unchecked]:hover:text-ink-900",
-  "data-[state=checked]:bg-mint-400 data-[state=checked]:text-white",
+  "data-[state=checked]:bg-mint-400 data-[state=checked]:text-on-brand",
 );
 
 function ItemBody<T extends string>({ option }: { option: HvSegmentedOption<T> }) {

@@ -39,7 +39,7 @@ export function LoginPage() {
     <HvCard variant="raised" padding="lg" className="mx-auto w-full max-w-[var(--w-phone)]">
       <div className="mb-6 text-center">
         <p className="font-display text-[22px] font-extrabold text-ink-900">Teka</p>
-        <p className="mt-1 text-[13px] text-ink-400">Đăng nhập để tiếp tục</p>
+        <p className="mt-1 text-[13px] text-ink-500">Đăng nhập để tiếp tục</p>
       </div>
       <form onSubmit={(event) => void onSubmit(event)} noValidate>
         <FieldGroup>
@@ -88,7 +88,7 @@ export function LoginPage() {
           >
             {loginMutation.isPending ? "Đang đăng nhập…" : "Đăng nhập"}
           </HvButton>
-          <p className="text-center text-[13px] text-ink-400">
+          <p className="text-center text-[13px] text-ink-500">
             <Link
               to="/forgot-password"
               className="font-bold text-mint-600 underline-offset-4 hover:underline"

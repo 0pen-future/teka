@@ -122,7 +122,7 @@ export function LessonExercises({ lesson, templateId, editable }: LessonExercise
       </div>
 
       {lesson.exercises.length === 0 ? (
-        <p className="text-[14px] text-ink-400">Chưa có bài tập nào trong buổi.</p>
+        <p className="text-[14px] text-ink-500">Chưa có bài tập nào trong buổi.</p>
       ) : (
         <table className="w-full border-collapse text-left text-[14px]">
           <thead>

@@ -80,19 +80,19 @@ export function CollectionsPage() {
         <HvCard variant="flat" className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center gap-6">
             <div>
-              <p className="text-[13px] text-ink-400">Phải thu</p>
+              <p className="text-[13px] text-ink-500">Phải thu</p>
               <p className="font-display text-[18px] font-bold text-ink-900">
                 {formatMoney(summary.total_due)}
               </p>
             </div>
             <div>
-              <p className="text-[13px] text-ink-400">Đã thu</p>
+              <p className="text-[13px] text-ink-500">Đã thu</p>
               <p className="font-display text-[18px] font-bold text-mint-600">
                 {formatMoney(summary.total_paid)}
               </p>
             </div>
             <div>
-              <p className="text-[13px] text-ink-400">Còn lại</p>
+              <p className="text-[13px] text-ink-500">Còn lại</p>
               <p className="font-display text-[18px] font-bold text-coral-600">
                 {formatMoney(summary.total_outstanding)}
               </p>
@@ -143,7 +143,7 @@ export function CollectionsPage() {
               className={cn(
                 "min-h-9 rounded-[var(--radius-pill)] border px-4 font-display text-[13px] font-bold transition-colors",
                 classId === klass.id
-                  ? "border-mint-400 bg-mint-400 text-white"
+                  ? "border-mint-400 bg-mint-400 text-on-brand"
                   : "border-line-200 bg-white text-ink-500 hover:bg-cream-100",
               )}
             >
@@ -155,9 +155,9 @@ export function CollectionsPage() {
 
       {view === "contact" ? (
         <div className="flex flex-col gap-3">
-          {contactPending ? <p className="text-[13px] text-ink-400">Đang tải…</p> : null}
+          {contactPending ? <p className="text-[13px] text-ink-500">Đang tải…</p> : null}
           {!contactPending && rows.length === 0 ? (
-            <HvCard variant="flat" className="text-center text-[13px] text-ink-400">
+            <HvCard variant="flat" className="text-center text-[13px] text-ink-500">
               Không có phụ huynh nào.
             </HvCard>
           ) : null}
@@ -173,13 +173,13 @@ export function CollectionsPage() {
       ) : (
         <div className="flex flex-col gap-3">
           {!classId ? (
-            <HvCard variant="flat" className="text-center text-[13px] text-ink-400">
+            <HvCard variant="flat" className="text-center text-[13px] text-ink-500">
               Chọn một lớp để xem.
             </HvCard>
           ) : null}
-          {classId && classPending ? <p className="text-[13px] text-ink-400">Đang tải…</p> : null}
+          {classId && classPending ? <p className="text-[13px] text-ink-500">Đang tải…</p> : null}
           {classId && !classPending && rowsByClass.length === 0 ? (
-            <HvCard variant="flat" className="text-center text-[13px] text-ink-400">
+            <HvCard variant="flat" className="text-center text-[13px] text-ink-500">
               Lớp này chưa có buổi học nào trong kỳ.
             </HvCard>
           ) : null}

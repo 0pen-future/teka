@@ -98,7 +98,7 @@ export function ScheduleRowsEditor({
                     })
                   }
                 />
-                <span className="text-[13px] font-bold text-ink-400">phút</span>
+                <span className="text-[13px] font-bold text-ink-500">phút</span>
               </div>
               <span className="min-w-0 flex-1 text-[13px] font-bold text-ink-500">
                 {scheduleRowSummary(row)}
@@ -107,7 +107,7 @@ export function ScheduleRowsEditor({
                 type="button"
                 aria-label={`Xóa lịch ${number}`}
                 onClick={() => onChange(value.filter((_, at) => at !== index))}
-                className="inline-flex size-9 items-center justify-center rounded-full text-ink-400 transition-colors hover:bg-coral-100 hover:text-coral-500"
+                className="inline-flex size-9 items-center justify-center rounded-full text-ink-500 transition-colors hover:bg-coral-100 hover:text-coral-500"
               >
                 <Trash2 className="size-4" strokeWidth={2.2} />
               </button>

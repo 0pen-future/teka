@@ -17,9 +17,9 @@ function EntityRow({ label, entity }: { label: string; entity: ImportReportEntit
       <span className="text-[13.5px] text-ink-500">{label}</span>
       <span className="text-[13.5px]">
         <span className="font-extrabold text-mint-600">{entity.created}</span>
-        <span className="text-ink-400"> tạo mới · </span>
+        <span className="text-ink-500"> tạo mới · </span>
         <span className="font-extrabold text-ink-900">{entity.reused}</span>
-        <span className="text-ink-400"> đã có sẵn</span>
+        <span className="text-ink-500"> đã có sẵn</span>
       </span>
     </div>
   );
@@ -57,7 +57,7 @@ export function ImportReportSummary({ report }: { report: ImportReport }) {
       <p className="font-display text-[16px] font-bold text-ink-900">
         {report.committed ? "Đã nhập xong" : "File hợp lệ"}
       </p>
-      <p className="mt-0.5 text-[13px] text-ink-400">
+      <p className="mt-0.5 text-[13px] text-ink-500">
         {report.committed
           ? "Dữ liệu đã được ghi vào hệ thống."
           : "Chưa ghi gì cả — bấm “Nhập dữ liệu” để lưu vào hệ thống."}

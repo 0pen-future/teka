@@ -79,7 +79,7 @@ const TableRow = React.memo(function TableRow({
       >
         <span className="block truncate text-[13.5px] font-extrabold text-ink-900">{name}</span>
         {displayNote || late ? (
-          <span className="block truncate text-[12px] text-ink-400">
+          <span className="block truncate text-[12px] text-ink-500">
             {[displayNote, late ? "Đi muộn" : null].filter(Boolean).join(" · ")}
           </span>
         ) : null}

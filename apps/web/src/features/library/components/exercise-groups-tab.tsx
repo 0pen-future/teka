@@ -68,7 +68,7 @@ export function ExerciseGroupsTab({ version, templateId, authoring }: ExerciseGr
         Mỗi bài tập trong buổi mẫu gán vào một nhóm. Nhóm gắn theo phiên bản.
       </p>
       {rows.length === 0 ? (
-        <p className="text-[14px] text-ink-400">Chưa có nhóm nào.</p>
+        <p className="text-[14px] text-ink-500">Chưa có nhóm nào.</p>
       ) : (
         <ul className="flex flex-col rounded-[var(--radius-lg)] border border-line-200 bg-white">
           {rows.map((group) => (

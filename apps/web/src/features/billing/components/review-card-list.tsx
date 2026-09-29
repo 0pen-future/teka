@@ -22,7 +22,7 @@ export function ReviewCardList({ rows, closed, onAdjust }: ReviewCardListProps) 
           <div className="flex items-start justify-between gap-2">
             <div>
               <p className="font-display text-[15px] font-bold text-ink-900">{row.student_name}</p>
-              <p className="text-[12px] text-ink-400">{row.contact_name}</p>
+              <p className="text-[12px] text-ink-500">{row.contact_name}</p>
             </div>
             <HvButton
               type="button"
@@ -55,7 +55,7 @@ export function ReviewCardList({ rows, closed, onAdjust }: ReviewCardListProps) 
               ))}
             </ul>
           ) : (
-            <p className="mt-3 text-[13px] text-ink-400">Kỳ này chưa có buổi học nào</p>
+            <p className="mt-3 text-[13px] text-ink-500">Kỳ này chưa có buổi học nào</p>
           )}
 
           <div className="mt-3 flex flex-col gap-1 border-t border-line-100 pt-3 text-[13px]">

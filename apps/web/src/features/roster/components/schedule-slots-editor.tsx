@@ -56,7 +56,7 @@ export function ScheduleSlotsEditor({
             className="rounded-[16px] border-[1.5px] border-line-200 bg-cream-100 px-3 py-2.5"
           >
             <div className="flex flex-wrap items-center gap-2.5">
-              <span className="text-[11.5px] font-extrabold tracking-[0.3px] text-ink-400">
+              <span className="text-[11.5px] font-extrabold tracking-[0.3px] text-ink-500">
                 KHUNG GIỜ {index + 1}
               </span>
               <Input
@@ -72,7 +72,7 @@ export function ScheduleSlotsEditor({
                 className={
                   slot.days.length
                     ? "text-[12px] font-extrabold text-mint-600"
-                    : "text-[12px] font-bold text-ink-400"
+                    : "text-[12px] font-bold text-ink-500"
                 }
               >
                 {slot.days.length ? `${slot.days.length} buổi/tuần` : "Chưa chọn ngày"}

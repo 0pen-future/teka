@@ -172,7 +172,7 @@ function SectionCard({
 }
 
 function Hint({ children }: { children: React.ReactNode }) {
-  return <p className="text-[12.5px] font-semibold text-ink-400">{children}</p>;
+  return <p className="text-[12.5px] font-semibold text-ink-500">{children}</p>;
 }
 
 /**
@@ -760,7 +760,7 @@ export function ClassEditWizard({
                       idPrefix="wiz-slot"
                     />
                   ) : (
-                    <p className="rounded-[16px] border-2 border-dashed border-line-200 px-4 py-5 text-center text-[13px] font-bold text-ink-400">
+                    <p className="rounded-[16px] border-2 border-dashed border-line-200 px-4 py-5 text-center text-[13px] font-bold text-ink-500">
                       Chưa có lịch. Dùng “Chọn nhanh” hoặc “+ Thêm lịch học”.
                     </p>
                   )}
@@ -771,7 +771,7 @@ export function ClassEditWizard({
                   />
                 </>
               ) : (
-                <p className="rounded-[16px] border-2 border-dashed border-line-200 px-4 py-5 text-center text-[13px] font-bold text-ink-400">
+                <p className="rounded-[16px] border-2 border-dashed border-line-200 px-4 py-5 text-center text-[13px] font-bold text-ink-500">
                   Lớp tự học — không cần lịch cố định.
                 </p>
               )}
@@ -866,7 +866,7 @@ export function ClassEditWizard({
                 <FieldError errors={[errors.note]} />
               </Field>
               {!canWrite ? (
-                <p className="text-[13px] text-ink-400">
+                <p className="text-[13px] text-ink-500">
                   Chỉ giáo viên phụ trách hoặc chủ trung tâm mới sửa được lớp.
                 </p>
               ) : null}

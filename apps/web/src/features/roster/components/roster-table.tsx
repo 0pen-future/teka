@@ -138,7 +138,7 @@ export function RosterTable({
                     {student.contact_phone ? (
                       <a
                         href={`tel:${student.contact_phone}`}
-                        className="text-[12.5px] text-ink-400 hover:text-mint-600"
+                        className="text-[12.5px] text-ink-500 hover:text-mint-600"
                       >
                         {formatPhoneLocal(student.contact_phone)}
                       </a>

@@ -290,7 +290,7 @@ export function TaskDescriptionEditor({
         <p
           className={cn(
             "px-3 pb-2 text-right text-[11.5px]",
-            overLimit ? "font-semibold text-coral-400" : "text-ink-400",
+            overLimit ? "font-semibold text-coral-400" : "text-ink-500",
           )}
         >
           {state.count}/{DESCRIPTION_MAX_CHARS}

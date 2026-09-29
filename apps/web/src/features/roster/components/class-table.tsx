@@ -77,7 +77,7 @@ export function ClassTable({
             <tr>
               <td
                 colSpan={8}
-                className="border-t border-line-100 p-[34px] text-center font-bold text-ink-400"
+                className="border-t border-line-100 p-[34px] text-center font-bold text-ink-500"
               >
                 {emptyLabel}
               </td>
@@ -92,7 +92,7 @@ export function ClassTable({
                 onClick={() => onOpen(klass)}
                 className="cursor-pointer align-middle transition-colors hover:bg-cream-100"
               >
-                <td className={cn(cellClassName, "font-extrabold text-ink-400")}>{index + 1}</td>
+                <td className={cn(cellClassName, "font-extrabold text-ink-500")}>{index + 1}</td>
                 <td className={cellClassName}>
                   <Link
                     to={`/classes/${klass.id}`}
@@ -102,7 +102,7 @@ export function ClassTable({
                     {klass.name}
                   </Link>
                   {courseLine ? (
-                    <div title={courseLine} className="mt-0.5 truncate text-[12px] text-ink-400">
+                    <div title={courseLine} className="mt-0.5 truncate text-[12px] text-ink-500">
                       {courseLine}
                     </div>
                   ) : null}

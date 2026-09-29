@@ -23,7 +23,7 @@ export function ClassHomeworkTab({ klass }: ClassHomeworkTabProps) {
         <LessonSections lessons={items}>
           {(lesson) =>
             lesson.exercises.length === 0 ? (
-              <p className="text-[13px] text-ink-400">Chưa gắn bài tập</p>
+              <p className="text-[13px] text-ink-500">Chưa gắn bài tập</p>
             ) : (
               <ul className="flex flex-col gap-2">
                 {lesson.exercises.map((exercise) => (

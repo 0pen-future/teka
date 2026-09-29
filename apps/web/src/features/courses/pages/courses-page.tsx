@@ -181,7 +181,7 @@ export function CoursesPage() {
                 <tr>
                   <td
                     colSpan={10}
-                    className="border-t border-line-100 p-[30px] text-center font-bold text-ink-400"
+                    className="border-t border-line-100 p-[30px] text-center font-bold text-ink-500"
                   >
                     Không có khóa nào khớp.
                   </td>
@@ -193,7 +193,7 @@ export function CoursesPage() {
                   className="cursor-pointer transition-colors hover:bg-cream-100"
                   onClick={() => void navigate(`/courses/${course.id}`)}
                 >
-                  <td className={cn(cellClassName, "font-extrabold text-ink-400")}>{index + 1}</td>
+                  <td className={cn(cellClassName, "font-extrabold text-ink-500")}>{index + 1}</td>
                   <td className={cn(cellClassName, "text-[12.5px] font-extrabold text-ink-500")}>
                     {course.code}
                   </td>

@@ -363,7 +363,7 @@ function StageCard({
               ) : (
                 <span>{course.name}</span>
               )}
-              <span className="font-mono text-[12px] text-ink-400">{course.code}</span>
+              <span className="font-mono text-[12px] text-ink-500">{course.code}</span>
               {course.status !== "active" ? (
                 <HvBadge variant="neutral" size="sm">
                   {courseStatusLabel[course.status]}
@@ -377,7 +377,7 @@ function StageCard({
                   onClick={() =>
                     save(stage.courses.map((c) => c.id).filter((id) => id !== course.id))
                   }
-                  className="flex size-6 items-center justify-center rounded-full text-ink-400 hover:bg-cream-100 hover:text-coral-600 disabled:opacity-50"
+                  className="flex size-6 items-center justify-center rounded-full text-ink-500 hover:bg-cream-100 hover:text-coral-600 disabled:opacity-50"
                 >
                   <XIcon aria-hidden="true" className="size-3.5" />
                 </button>

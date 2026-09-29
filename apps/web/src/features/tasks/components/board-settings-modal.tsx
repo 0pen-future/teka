@@ -163,7 +163,7 @@ function ColumnRow({
       </div>
       {nameError ? <p className="pl-6 text-[12px] text-coral-600">{nameError}</p> : null}
       <div className="flex items-center justify-between gap-2 pl-6">
-        <p className="text-[11.5px] text-ink-400">{taskCount} việc</p>
+        <p className="text-[11.5px] text-ink-500">{taskCount} việc</p>
         <ColumnColorPicker
           value={column.color}
           aria-label={`Màu cột ${column.name}`}
@@ -255,7 +255,7 @@ export function BoardSettingsModal({
         size="lg"
       >
         <div className="flex flex-col gap-3">
-          <p className="text-[12.5px] text-ink-400">
+          <p className="text-[12.5px] text-ink-500">
             {sorted.length}/{MAX_COLUMNS} cột
           </p>
           {sorted.map((column, index) => (

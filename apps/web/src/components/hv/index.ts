@@ -1,5 +1,7 @@
 export { HvButton } from "./hv-button";
-export type { HvButtonProps, HvButtonSize, HvButtonVariant } from "./hv-button";
+export type { HvButtonProps } from "./hv-button";
+export { hvButtonVariants } from "./hv-button-variants";
+export type { HvButtonSize, HvButtonVariant } from "./hv-button-variants";
 
 export { HvCard } from "./hv-card";
 export type { HvCardPadding, HvCardProps, HvCardVariant } from "./hv-card";

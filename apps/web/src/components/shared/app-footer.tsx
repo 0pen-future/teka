@@ -28,7 +28,7 @@ export function AppFooter() {
           </p>
         </div>
         <div className="min-w-[150px] flex-1">
-          <p className="text-[12px] font-extrabold tracking-[0.5px] text-ink-400 uppercase">
+          <p className="text-[12px] font-extrabold tracking-[0.5px] text-ink-500 uppercase">
             Sản phẩm
           </p>
           <div className="mt-[10px] flex flex-col gap-2 text-[13.5px] font-bold">
@@ -38,7 +38,7 @@ export function AppFooter() {
           </div>
         </div>
         <div className="min-w-[170px] flex-1">
-          <p className="text-[12px] font-extrabold tracking-[0.5px] text-ink-400 uppercase">
+          <p className="text-[12px] font-extrabold tracking-[0.5px] text-ink-500 uppercase">
             Hỗ trợ
           </p>
           <div className="mt-[10px] flex flex-col gap-2 text-[13.5px] font-bold">
@@ -56,7 +56,7 @@ export function AppFooter() {
           </div>
         </div>
       </div>
-      <div className="mt-6 flex flex-wrap items-center gap-[14px] border-t border-line-100 py-[14px] text-[12.5px] text-ink-400">
+      <div className="mt-6 flex flex-wrap items-center gap-[14px] border-t border-line-100 py-[14px] text-[12.5px] text-ink-500">
         <span>© 2026 Teka. Dữ liệu của bạn thuộc về bạn.</span>
         <span className="sm:ml-auto">
           Chỉ lưu tên, ngày nhập học và lớp của học sinh — không gì thêm.

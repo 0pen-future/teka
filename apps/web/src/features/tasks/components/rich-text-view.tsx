@@ -23,7 +23,7 @@ export function RichTextView({ html, className, emptyText }: RichTextViewProps) 
   const clean = useMemo(() => normalizeIncoming(html), [html]);
   if (clean === "") {
     return emptyText ? (
-      <p className={cn("text-[13px] text-ink-400", className)}>{emptyText}</p>
+      <p className={cn("text-[13px] text-ink-500", className)}>{emptyText}</p>
     ) : null;
   }
   return (

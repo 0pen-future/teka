@@ -77,7 +77,7 @@ export function ContactsPage() {
       {zaloStatus && !zaloReady ? (
         // `title` on the disabled button never surfaces on touch, and phones
         // are the primary device — the reason has to live in the page itself.
-        <p className="text-[13px] text-ink-400">
+        <p className="text-[13px] text-ink-500">
           Muốn tự động ghép?{" "}
           <Link
             to="/profile"
@@ -94,9 +94,9 @@ export function ContactsPage() {
         onChange={(event) => setQuery(event.target.value)}
         className="max-w-sm"
       />
-      {isPending ? <p className="text-[13px] text-ink-400">Đang tải…</p> : null}
+      {isPending ? <p className="text-[13px] text-ink-500">Đang tải…</p> : null}
       {!isPending && contacts.length === 0 ? (
-        <HvCard variant="flat" className="text-center text-[13px] text-ink-400">
+        <HvCard variant="flat" className="text-center text-[13px] text-ink-500">
           {isOwner
             ? "Không tìm thấy người liên hệ."
             : "Chủ trung tâm quản lý danh bạ & hồ sơ học sinh."}
@@ -110,14 +110,14 @@ export function ContactsPage() {
                 <p className="font-display text-[15px] font-bold text-ink-900">
                   {contact.full_name}
                 </p>
-                <p className="text-[13px] text-ink-400">{formatPhoneLocal(contact.phone)}</p>
+                <p className="text-[13px] text-ink-500">{formatPhoneLocal(contact.phone)}</p>
                 {contact.zalo_name ? (
                   <HvBadge variant="success" size="sm" dot className="mt-1">
                     {contact.zalo_name}
                   </HvBadge>
                 ) : null}
               </div>
-              <span className="text-[13px] text-ink-400">{contact.student_count} học sinh</span>
+              <span className="text-[13px] text-ink-500">{contact.student_count} học sinh</span>
             </HvCard>
           </Link>
         ))}

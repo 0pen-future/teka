@@ -61,7 +61,7 @@ export function AcceptInvitePage() {
     return <InviteError />;
   }
   if (isPending || !preview) {
-    return <p className="text-center text-[14px] text-ink-400">Đang tải…</p>;
+    return <p className="text-center text-[14px] text-ink-500">Đang tải…</p>;
   }
 
   return (
@@ -70,7 +70,7 @@ export function AcceptInvitePage() {
         <p className="font-display text-[22px] font-extrabold text-ink-900">
           {preview.center_name}
         </p>
-        <p className="mt-1 text-[13px] text-ink-400">Tạo tài khoản cho số {preview.phone_masked}</p>
+        <p className="mt-1 text-[13px] text-ink-500">Tạo tài khoản cho số {preview.phone_masked}</p>
       </div>
       <form onSubmit={(event) => void onSubmit(event)} noValidate>
         <FieldGroup>

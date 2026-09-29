@@ -1,21 +1,18 @@
 import { Link } from "react-router";
 
-import { formatSessionDate } from "@/lib/utils";
+import { hvButtonVariants } from "@/components/hv";
+import { cn, formatSessionDate } from "@/lib/utils";
 
 import type { BlockingSession } from "../schemas/billing-schemas";
 
 /**
- * Manually composed to match `HvButton` variant="danger" size="sm" — `HvButton`
- * itself renders a `<button>`, which can't nest inside this row's `<Link>`
- * without producing invalid nested-interactive-element markup (same
- * constraint as `PendingAttendanceAlert`'s `dangerLinkButtonClassName`).
+ * `HvButton` renders a `<button>`, which can't nest inside this row's
+ * `<Link>`, so the link takes the button's classes from `hvButtonVariants`.
  */
-const dangerLinkButtonClassName =
-  "inline-flex min-h-[44px] shrink-0 items-center justify-center rounded-[var(--radius-md)] " +
-  "bg-coral-400 px-[18px] text-[length:var(--text-sm)] font-display font-bold text-white " +
-  "shadow-press-coral transition-[transform,box-shadow,filter] duration-[var(--dur-fast)] " +
-  "ease-[var(--ease-out)] hover:brightness-[1.04] active:translate-y-[var(--press-depth)] " +
-  "active:shadow-none focus-visible:outline-none focus-visible:ring-4";
+const dangerLinkButtonClassName = cn(
+  hvButtonVariants({ variant: "danger", size: "sm" }),
+  "shrink-0",
+);
 
 export interface BlockingSessionsPanelProps {
   sessions: BlockingSession[];

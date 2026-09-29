@@ -25,7 +25,7 @@
   --mint-300: #7fd2b4;
   --mint-400: #5cc9a7; /* primary */
   --mint-500: #3fa888; /* primary pressed / shadow */
-  --mint-600: #2e8d6e; /* primary ink on light */
+  --mint-600: #24775c; /* primary ink on light — ≥4.5:1 on cream, white, mint-50 */
   --mint-700: #1f6b53;
 
   /* ---- Sky (SECONDARY · môn Tiếng Việt · info) ---- */
@@ -66,7 +66,11 @@
   --text-muted: var(--ink-500);
   --text-soft: var(--ink-400);
   --text-disabled: var(--ink-300);
-  --text-on-primary: var(--white);
+  /* Text on the pastel brand fills (mint-400, sky-300, coral-400, sun-400).
+     White on these fails WCAG AA (1.9–2.6:1); ink-900 passes on all four.
+     Locked by src/styles/tokens/__tests__/contrast.test.ts. */
+  --text-on-brand: var(--ink-900);
+  --text-on-primary: var(--text-on-brand);
   --text-on-dark: #eafff7;
 
   /* surfaces */
