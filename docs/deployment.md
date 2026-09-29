@@ -66,7 +66,13 @@ make build-image-web VITE_API_URL=https://api.example.com/api/v1
   origin to the API's `API_CORS_ORIGINS`.
 - nginx serves the SPA with history-API fallback (deep links resolve to
   `index.html`), immutable caching for hashed `/assets/*`, `no-cache` for
-  `index.html`, and baseline security headers.
+  `index.html`, and baseline security headers. The header set lives in one
+  snippet (`apps/web/nginx-security-headers.conf`, installed to
+  `/etc/nginx/snippets/`) that every location includes.
+- The app is private and never indexed: every response carries
+  `X-Robots-Tag: noindex, nofollow`, `robots.txt` is `text/plain` with
+  `Disallow: /`, `index.html` has a `robots` meta, and `/sitemap.xml`,
+  `/llms.txt`, `/llms-full.txt` return 404 instead of the SPA shell.
 
 ## Migrations
 
