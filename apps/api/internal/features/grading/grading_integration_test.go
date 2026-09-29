@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
@@ -18,6 +19,7 @@ import (
 	"teka/apps/api/internal/features/sessions"
 	"teka/apps/api/internal/features/teachers"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/testutil"
 )
 
@@ -54,66 +56,24 @@ func names(comps []grading.ClassComponentResponse) []string {
 	return out
 }
 
-// The owner's score-set lifecycle against real Postgres: create with
-// components, list resolving names in position order, rename + whole-replace the
-// component list, then soft-delete out of the live listing.
-func TestScoreSetCRUDRoundTrip(t *testing.T) {
-	t.Parallel()
-	svc, db := newIntegrationService(t)
+// applyComponents gives a class a one-group snapshot through the template
+// copy path and returns the snapshot's components, position order.
+func applyComponents(t *testing.T, svc *grading.Service, sc authctx.Scope, classID uuid.UUID, labels ...string) []grading.ClassComponentResponse {
+	t.Helper()
 	ctx := context.Background()
-	_, owner := testutil.Teacher(t, db)
-	sc := testutil.ScopeFor(t, db, owner.ID)
-
-	created, err := svc.CreateSet(ctx, sc, grading.ScoreSetRequest{
-		Name: "IELTS", Components: []string{"Listening", "Speaking"},
-	})
+	outcome, err := svc.SyncTemplateComponents(ctx, sc, classID, []grading.TemplateScoreGroup{{Title: "Bộ điểm", Labels: labels}})
 	require.NoError(t, err)
-	require.Equal(t, []string{"Listening", "Speaking"}, created.Components)
-
-	sets, err := svc.ListSets(ctx, sc)
+	require.Equal(t, grading.SnapshotReplaced, outcome)
+	got, err := svc.GetClassComponents(ctx, sc, classID)
 	require.NoError(t, err)
-	require.Len(t, sets, 1)
-	require.Equal(t, "IELTS", sets[0].Name)
-	require.Equal(t, []string{"Listening", "Speaking"}, sets[0].Components)
-
-	_, err = svc.UpdateSet(ctx, sc, created.ID, grading.ScoreSetRequest{
-		Name: "IELTS Academic", Components: []string{"Listening", "Speaking", "Reading"},
-	})
-	require.NoError(t, err)
-	sets, err = svc.ListSets(ctx, sc)
-	require.NoError(t, err)
-	require.Len(t, sets, 1)
-	require.Equal(t, "IELTS Academic", sets[0].Name)
-	require.Equal(t, []string{"Listening", "Speaking", "Reading"}, sets[0].Components)
-
-	require.NoError(t, svc.DeleteSet(ctx, sc, created.ID))
-	sets, err = svc.ListSets(ctx, sc)
-	require.NoError(t, err)
-	require.Empty(t, sets, "a soft-deleted set drops out of the live listing")
+	return got.Components
 }
 
-// A duplicate live name in the same center is a 409; the same name is free
-// again after the first is soft-deleted.
-func TestScoreSetDuplicateName(t *testing.T) {
-	t.Parallel()
-	svc, db := newIntegrationService(t)
-	ctx := context.Background()
-	_, owner := testutil.Teacher(t, db)
-	sc := testutil.ScopeFor(t, db, owner.ID)
-
-	first, err := svc.CreateSet(ctx, sc, grading.ScoreSetRequest{Name: "TOEIC", Components: []string{"Reading"}})
-	require.NoError(t, err)
-	_, err = svc.CreateSet(ctx, sc, grading.ScoreSetRequest{Name: "TOEIC", Components: []string{"Listening"}})
-	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code)
-
-	require.NoError(t, svc.DeleteSet(ctx, sc, first.ID))
-	_, err = svc.CreateSet(ctx, sc, grading.ScoreSetRequest{Name: "TOEIC", Components: []string{"Listening"}})
-	require.NoError(t, err, "the name frees up once the first set is soft-deleted")
-}
-
-// Every score-set surface refuses a plain member with 403 against the real
-// membership chain.
-func TestScoreSetsAreOwnerOnly(t *testing.T) {
+// The template copy replaces a class's snapshot only while the class has no
+// score: a repeat is a no-op, a recorded score freezes the snapshot and the
+// grade (replacing would cascade-delete it), and an empty template keeps
+// whatever the class has.
+func TestSyncTemplateComponentsReplacesUntilScored(t *testing.T) {
 	t.Parallel()
 	svc, db := newIntegrationService(t)
 	ctx := context.Background()
@@ -123,81 +83,6 @@ func TestScoreSetsAreOwnerOnly(t *testing.T) {
 	testutil.JoinCenter(t, db, member.ID, ownerCenter)
 	ownerScope := testutil.ScopeFor(t, db, owner.ID)
 	memberScope := testutil.ScopeFor(t, db, member.ID)
-	require.False(t, memberScope.IsOwner)
-
-	set, err := svc.CreateSet(ctx, ownerScope, grading.ScoreSetRequest{Name: "IELTS", Components: []string{"Listening"}})
-	require.NoError(t, err)
-	class := testutil.Class(t, db, member.ID)
-
-	forbidden := func(err error) {
-		t.Helper()
-		require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code)
-	}
-
-	_, err = svc.ListSets(ctx, memberScope)
-	forbidden(err)
-	_, err = svc.CreateSet(ctx, memberScope, grading.ScoreSetRequest{Name: "x", Components: []string{"a"}})
-	forbidden(err)
-	_, err = svc.UpdateSet(ctx, memberScope, set.ID, grading.ScoreSetRequest{Name: "x", Components: []string{"a"}})
-	forbidden(err)
-	err = svc.DeleteSet(ctx, memberScope, set.ID)
-	forbidden(err)
-	_, err = svc.AssignScoreSet(ctx, memberScope, class.ID, set.ID)
-	forbidden(err)
-	err = svc.ClearScoreSet(ctx, memberScope, class.ID)
-	forbidden(err)
-}
-
-// AC3 — the per-class snapshot is independent of its source set: assigning
-// copies the components with fresh ids, and later editing the source set leaves
-// the assigned class untouched.
-func TestAssignSnapshotIsIndependentOfSource(t *testing.T) {
-	t.Parallel()
-	svc, db := newIntegrationService(t)
-	ctx := context.Background()
-	_, owner := testutil.Teacher(t, db)
-	ownerScope := testutil.ScopeFor(t, db, owner.ID)
-
-	set, err := svc.CreateSet(ctx, ownerScope, grading.ScoreSetRequest{Name: "IELTS", Components: []string{"Listening", "Speaking"}})
-	require.NoError(t, err)
-	class := testutil.Class(t, db, owner.ID)
-
-	assigned, err := svc.AssignScoreSet(ctx, ownerScope, class.ID, set.ID)
-	require.NoError(t, err)
-	require.Equal(t, []string{"Listening", "Speaking"}, names(assigned.Components))
-	for _, comp := range assigned.Components {
-		require.NotEqual(t, set.ID, comp.ID, "a snapshot component gets its own id, not the template's")
-	}
-
-	// Edit the source set: rename and swap the whole component list.
-	_, err = svc.UpdateSet(ctx, ownerScope, set.ID, grading.ScoreSetRequest{
-		Name: "IELTS v2", Components: []string{"Reading", "Writing", "Grammar"},
-	})
-	require.NoError(t, err)
-
-	got, err := svc.GetClassComponents(ctx, ownerScope, class.ID)
-	require.NoError(t, err)
-	require.Equal(t, []string{"Listening", "Speaking"}, names(got.Components),
-		"the class snapshot must not follow edits to the source set")
-}
-
-// A class that already carries any recorded score refuses re-assign and clear
-// with 409 — replacing the components would cascade-delete the grades.
-func TestAssignAndClearRefusedWhenClassHasScores(t *testing.T) {
-	t.Parallel()
-	svc, db := newIntegrationService(t)
-	ctx := context.Background()
-	_, owner := testutil.Teacher(t, db)
-	_, member := testutil.Teacher(t, db)
-	ownerCenter := testutil.ScopeFor(t, db, owner.ID).CenterID
-	testutil.JoinCenter(t, db, member.ID, ownerCenter)
-	ownerScope := testutil.ScopeFor(t, db, owner.ID)
-	memberScope := testutil.ScopeFor(t, db, member.ID)
-
-	set, err := svc.CreateSet(ctx, ownerScope, grading.ScoreSetRequest{Name: "IELTS", Components: []string{"Listening"}})
-	require.NoError(t, err)
-	other, err := svc.CreateSet(ctx, ownerScope, grading.ScoreSetRequest{Name: "TOEIC", Components: []string{"Reading"}})
-	require.NoError(t, err)
 
 	class := testutil.Class(t, db, member.ID, testutil.WithClassStartDate(date("2026-08-01")))
 	contact := testutil.Contact(t, db, member.ID)
@@ -205,38 +90,57 @@ func TestAssignAndClearRefusedWhenClassHasScores(t *testing.T) {
 	testutil.Enrollment(t, db, member.ID, student.ID, class.ID, date("2026-08-01"))
 	session := testutil.Session(t, db, member.ID, class.ID, date("2026-08-04"))
 
-	assigned, err := svc.AssignScoreSet(ctx, ownerScope, class.ID, set.ID)
+	ielts := []grading.TemplateScoreGroup{
+		{Title: "Giữa kỳ", Labels: []string{"Nghe", "Nói"}},
+		{Title: "Cuối kỳ", Labels: []string{"Viết"}},
+	}
+	outcome, err := svc.SyncTemplateComponents(ctx, ownerScope, class.ID, ielts)
 	require.NoError(t, err)
-	comp := assigned.Components[0].ID
+	require.Equal(t, grading.SnapshotReplaced, outcome)
+	got, err := svc.GetClassComponents(ctx, ownerScope, class.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"Giữa kỳ · Nghe", "Giữa kỳ · Nói", "Cuối kỳ · Viết"}, names(got.Components))
+	for i, comp := range got.Components {
+		require.EqualValues(t, i, comp.Position)
+	}
+
+	outcome, err = svc.SyncTemplateComponents(ctx, ownerScope, class.ID, ielts)
+	require.NoError(t, err)
+	require.Equal(t, grading.SnapshotUnchanged, outcome)
+	again, err := svc.GetClassComponents(ctx, ownerScope, class.ID)
+	require.NoError(t, err)
+	require.Equal(t, got.Components, again.Components, "an identical template keeps the same component ids")
 
 	// The class's teacher records one score — now the class is "scored".
 	_, err = svc.PutSessionScores(ctx, memberScope, session.ID, []grading.ScoreEntryRequest{
-		{StudentID: student.ID, ComponentID: comp, Score: fptr(7.5)},
+		{StudentID: student.ID, ComponentID: got.Components[0].ID, Score: fptr(7.5)},
 	})
 	require.NoError(t, err)
 
-	_, err = svc.AssignScoreSet(ctx, ownerScope, class.ID, other.ID)
-	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code, "re-assign over recorded scores must 409")
-	err = svc.ClearScoreSet(ctx, ownerScope, class.ID)
-	require.Equal(t, apperror.CodeConflict, apperror.From(err).Code, "clear over recorded scores must 409")
-}
-
-// Assigning a soft-deleted set is a 404 — the set no longer resolves in the
-// center.
-func TestAssignSoftDeletedSetIsNotFound(t *testing.T) {
-	t.Parallel()
-	svc, db := newIntegrationService(t)
-	ctx := context.Background()
-	_, owner := testutil.Teacher(t, db)
-	ownerScope := testutil.ScopeFor(t, db, owner.ID)
-
-	set, err := svc.CreateSet(ctx, ownerScope, grading.ScoreSetRequest{Name: "IELTS", Components: []string{"Listening"}})
+	outcome, err = svc.SyncTemplateComponents(ctx, ownerScope, class.ID, []grading.TemplateScoreGroup{
+		{Title: "TOEIC", Labels: []string{"Reading"}},
+	})
 	require.NoError(t, err)
-	require.NoError(t, svc.DeleteSet(ctx, ownerScope, set.ID))
-	class := testutil.Class(t, db, owner.ID)
+	require.Equal(t, grading.SnapshotKeptScored, outcome)
+	kept, err := svc.GetClassComponents(ctx, ownerScope, class.ID)
+	require.NoError(t, err)
+	require.Equal(t, got.Components, kept.Components, "a scored class keeps its snapshot")
+	grid, err := svc.GetSessionScores(ctx, ownerScope, session.ID)
+	require.NoError(t, err)
+	require.Len(t, grid.Scores, 1, "the recorded grade survives")
+	require.Equal(t, 7.5, grid.Scores[0].Score)
 
-	_, err = svc.AssignScoreSet(ctx, ownerScope, class.ID, set.ID)
-	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code)
+	empty := testutil.Class(t, db, member.ID)
+	applyComponents(t, svc, ownerScope, empty.ID, "Chuyên cần")
+	outcome, err = svc.SyncTemplateComponents(ctx, ownerScope, empty.ID, []grading.TemplateScoreGroup{{Title: "Trống"}})
+	require.NoError(t, err)
+	require.Equal(t, grading.SnapshotKeptEmptyTemplate, outcome)
+	unchanged, err := svc.GetClassComponents(ctx, ownerScope, empty.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"Chuyên cần"}, names(unchanged.Components), "an empty template keeps the class's snapshot")
+
+	_, err = svc.SyncTemplateComponents(ctx, memberScope, class.ID, ielts)
+	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code, "only the owner changes a class's components")
 }
 
 // The score write path against real rows: the session's teacher writes, edits,
@@ -257,19 +161,15 @@ func TestSessionScoreWriteAuthorizationAndValidation(t *testing.T) {
 	memberScope := testutil.ScopeFor(t, db, member.ID)
 	peerScope := testutil.ScopeFor(t, db, peer.ID)
 
-	set, err := svc.CreateSet(ctx, ownerScope, grading.ScoreSetRequest{Name: "IELTS", Components: []string{"Listening", "Speaking"}})
-	require.NoError(t, err)
-
 	class := testutil.Class(t, db, member.ID, testutil.WithClassStartDate(date("2026-08-01")))
 	contact := testutil.Contact(t, db, member.ID)
 	student := testutil.Student(t, db, member.ID, contact.ID)
 	testutil.Enrollment(t, db, member.ID, student.ID, class.ID, date("2026-08-01"))
 	session := testutil.Session(t, db, member.ID, class.ID, date("2026-08-04"))
 
-	assigned, err := svc.AssignScoreSet(ctx, ownerScope, class.ID, set.ID)
-	require.NoError(t, err)
-	listening := assigned.Components[0].ID
-	speaking := assigned.Components[1].ID
+	components := applyComponents(t, svc, ownerScope, class.ID, "Listening", "Speaking")
+	listening := components[0].ID
+	speaking := components[1].ID
 
 	// The session's teacher writes a cell.
 	got, err := svc.PutSessionScores(ctx, memberScope, session.ID, []grading.ScoreEntryRequest{
@@ -314,10 +214,9 @@ func TestSessionScoreWriteAuthorizationAndValidation(t *testing.T) {
 
 	// A component from a different class is refused as a validation error.
 	otherClass := testutil.Class(t, db, member.ID)
-	otherAssigned, err := svc.AssignScoreSet(ctx, ownerScope, otherClass.ID, set.ID)
-	require.NoError(t, err)
+	otherComponents := applyComponents(t, svc, ownerScope, otherClass.ID, "Listening", "Speaking")
 	_, err = svc.PutSessionScores(ctx, memberScope, session.ID, []grading.ScoreEntryRequest{
-		{StudentID: student.ID, ComponentID: otherAssigned.Components[0].ID, Score: fptr(5)},
+		{StudentID: student.ID, ComponentID: otherComponents[0].ID, Score: fptr(5)},
 	})
 	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code, "a component of another class must be rejected")
 
@@ -338,17 +237,13 @@ func TestSessionScoreRosterGate(t *testing.T) {
 	_, teacher := testutil.Teacher(t, db)
 	ownerScope := testutil.ScopeFor(t, db, teacher.ID)
 
-	set, err := svc.CreateSet(ctx, ownerScope, grading.ScoreSetRequest{Name: "IELTS", Components: []string{"Listening"}})
-	require.NoError(t, err)
 	class := testutil.Class(t, db, teacher.ID, testutil.WithClassStartDate(date("2026-08-01")))
 	contact := testutil.Contact(t, db, teacher.ID)
 	outsider := testutil.Student(t, db, teacher.ID, contact.ID)
 	session := testutil.Session(t, db, teacher.ID, class.ID, date("2026-08-04"))
-	assigned, err := svc.AssignScoreSet(ctx, ownerScope, class.ID, set.ID)
-	require.NoError(t, err)
-	comp := assigned.Components[0].ID
+	comp := applyComponents(t, svc, ownerScope, class.ID, "Listening")[0].ID
 
-	_, err = svc.PutSessionScores(ctx, ownerScope, session.ID, []grading.ScoreEntryRequest{
+	_, err := svc.PutSessionScores(ctx, ownerScope, session.ID, []grading.ScoreEntryRequest{
 		{StudentID: outsider.ID, ComponentID: comp, Score: fptr(5)},
 	})
 	require.Equal(t, apperror.CodeValidation, apperror.From(err).Code, "a never-enrolled student must be refused a new cell")

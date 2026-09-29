@@ -105,7 +105,7 @@ func (h *Handler) lessons(c *gin.Context) {
 // apply links a published template version to the class.
 //
 //	@Summary		Apply a program template version to the class
-//	@Description	Owner only. Copies the version's lesson titles into the class curriculum. When the class already keeps a different lesson list the call returns 409 CURRICULUM_DIFFERS (fields.current_count / fields.template_count) until re-sent with confirm=true; the curriculum pointer and every lesson plan are kept.
+//	@Description	Owner only. Copies the version's lesson titles into the class curriculum. When the class already keeps a different lesson list the call returns 409 CURRICULUM_DIFFERS (fields.current_count / fields.template_count) until re-sent with confirm=true; the curriculum pointer and every lesson plan are kept. In the same transaction the version's score set becomes the class's score components (groups flattened in order, "Group · Label" once two or more groups carry components) — unless the class already has a recorded score, in which case its components and grades are kept silently; a version without score components also keeps the class's current ones.
 //	@Tags			classes
 //	@Accept			json
 //	@Produce		json

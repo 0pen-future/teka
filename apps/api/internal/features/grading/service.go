@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/classes"
@@ -27,8 +28,8 @@ const maxScoreEntries = 500
 // class under the caller's scope — the read/authz gate (non-owners cannot
 // resolve another teacher's class). *classes.Service satisfies this.
 type ClassSource interface {
-	// Get is the write gate: own classes only for a member. Score-set
-	// assignment and clearing resolve through it.
+	// Get is the write gate: own classes only for a member.
+	// SyncTemplateComponents resolves through it.
 	Get(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (*classes.Class, error)
 	// GetReadable is the read port: classes the caller holds a class_staff
 	// stint on (ended included) or sees center-wide.
@@ -56,9 +57,9 @@ type RosterSource interface {
 	ActiveOn(ctx context.Context, sc authctx.Scope, classID uuid.UUID, on time.Time) ([]enrollments.Enrollment, error)
 }
 
-// Service owns the grading rules: owner-curated score-set templates, the
-// per-class snapshot taken at assignment, and the per-student component scores
-// teachers and the owner enter in the classbook.
+// Service owns the grading rules: the per-class component snapshot copied from
+// the applied program template, and the per-student component scores teachers
+// and the owner enter in the classbook.
 type Service struct {
 	repo     Repository
 	classes  ClassSource
@@ -72,206 +73,112 @@ func NewService(repo Repository, classSource ClassSource, sessionSource SessionS
 	return &Service{repo: repo, classes: classSource, sessions: sessionSource, roster: roster, tx: tx}
 }
 
-// ─── Score sets (owner CRUD) ────────────────────────────────────────────────
+// ─── Class snapshot (template copy + shared read) ───────────────────────────
 
-// ListSets returns the center's live score sets with their component names.
-// Owner only — the sets are a center-configuration surface.
-func (s *Service) ListSets(ctx context.Context, sc authctx.Scope) ([]ScoreSetResponse, error) {
-	if !sc.IsOwner {
-		return nil, ownerOnly()
-	}
-	sets, err := s.repo.ListSets(ctx, sc)
-	if err != nil {
-		return nil, apperror.Internal(err)
-	}
-	ids := make([]uuid.UUID, len(sets))
-	for i, set := range sets {
-		ids[i] = set.ID
-	}
-	components, err := s.repo.ListComponentsForSets(ctx, ids)
-	if err != nil {
-		return nil, apperror.Internal(err)
-	}
-	bySet := make(map[uuid.UUID][]string, len(sets))
-	for _, comp := range components {
-		bySet[comp.SetID] = append(bySet[comp.SetID], comp.Name)
-	}
-	out := make([]ScoreSetResponse, len(sets))
-	for i, set := range sets {
-		names := bySet[set.ID]
-		if names == nil {
-			names = []string{}
-		}
-		out[i] = ScoreSetResponse{ID: set.ID, Name: set.Name, Components: names}
-	}
-	return out, nil
+// TemplateScoreGroup is one score group of a program template version as the
+// class-program feature hands it over: the group title and its component
+// labels in order. grading owns the shape so it never imports library.
+type TemplateScoreGroup struct {
+	Title  string
+	Labels []string
 }
 
-// CreateSet inserts a named set and its components in one transaction. Owner
-// only; a duplicate live name in the center is a 409.
-func (s *Service) CreateSet(ctx context.Context, sc authctx.Scope, req ScoreSetRequest) (*ScoreSetResponse, error) {
-	if !sc.IsOwner {
-		return nil, ownerOnly()
-	}
-	names, msg := normalizeComponentNames(req.Components)
-	if msg != "" {
-		return nil, componentInvalid(msg)
-	}
-	set := &ScoreSet{ID: id.New(), CenterID: sc.CenterID, Name: req.Name}
-	components := buildSetComponents(set.ID, names)
-	err := s.tx.WithinTx(ctx, func(ctx context.Context) error {
-		if err := s.repo.CreateSet(ctx, set); err != nil {
-			return err
-		}
-		return s.repo.ReplaceSetComponents(ctx, set.ID, components)
-	})
-	if err != nil {
-		if errors.Is(err, gorm.ErrDuplicatedKey) {
-			return nil, duplicateSetName()
-		}
-		return nil, apperror.Internal(err)
-	}
-	return &ScoreSetResponse{ID: set.ID, Name: set.Name, Components: names}, nil
-}
+// SnapshotOutcome reports what SyncTemplateComponents did to a class's
+// snapshot.
+type SnapshotOutcome string
 
-// UpdateSet renames a set and whole-replaces its components. Owner only. The
-// per-class snapshots copied earlier are untouched — that is the whole point of
-// the two-tier design.
-func (s *Service) UpdateSet(ctx context.Context, sc authctx.Scope, setID uuid.UUID, req ScoreSetRequest) (*ScoreSetResponse, error) {
-	if !sc.IsOwner {
-		return nil, ownerOnly()
-	}
-	names, msg := normalizeComponentNames(req.Components)
-	if msg != "" {
-		return nil, componentInvalid(msg)
-	}
-	set, err := s.repo.GetSet(ctx, sc, setID)
-	if err != nil {
-		return nil, apperror.Internal(err)
-	}
-	if set == nil {
-		return nil, scoreSetNotFound()
-	}
-	set.Name = req.Name
-	components := buildSetComponents(set.ID, names)
-	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
-		if err := s.repo.UpdateSet(ctx, sc, set); err != nil {
-			return err
-		}
-		return s.repo.ReplaceSetComponents(ctx, set.ID, components)
-	})
-	if err != nil {
-		if errors.Is(err, gorm.ErrDuplicatedKey) {
-			return nil, duplicateSetName()
-		}
-		return nil, apperror.Internal(err)
-	}
-	return &ScoreSetResponse{ID: set.ID, Name: set.Name, Components: names}, nil
-}
+// The four SyncTemplateComponents outcomes.
+const (
+	// SnapshotReplaced: the class had no score, so its snapshot now holds the
+	// template's flattened components.
+	SnapshotReplaced SnapshotOutcome = "replaced"
+	// SnapshotUnchanged: the snapshot already carried the same names in the
+	// same order, so nothing was written.
+	SnapshotUnchanged SnapshotOutcome = "unchanged"
+	// SnapshotKeptScored: the class already carries a score, so its snapshot
+	// and grades were left alone.
+	SnapshotKeptScored SnapshotOutcome = "kept_scored"
+	// SnapshotKeptEmptyTemplate: the template defines no component, so the
+	// class keeps whatever snapshot it had.
+	SnapshotKeptEmptyTemplate SnapshotOutcome = "kept_empty_template"
+)
 
-// DeleteSet soft-deletes a set. Owner only. Assigned classes keep their
-// snapshot; source_set_id on those snapshots stays valid (soft delete, so the
-// FK is never violated).
-func (s *Service) DeleteSet(ctx context.Context, sc authctx.Scope, setID uuid.UUID) error {
-	if !sc.IsOwner {
-		return ownerOnly()
-	}
-	set, err := s.repo.GetSet(ctx, sc, setID)
-	if err != nil {
-		return apperror.Internal(err)
-	}
-	if set == nil {
-		return scoreSetNotFound()
-	}
-	if err := s.repo.SoftDeleteSet(ctx, sc, setID); err != nil {
-		return apperror.Internal(err)
-	}
-	return nil
-}
+// maxComponentNameRunes is class_score_components.name's VARCHAR(50) bound,
+// which Postgres counts in characters, not bytes.
+const maxComponentNameRunes = 50
 
-// ─── Class snapshot (owner assign/clear + shared read) ──────────────────────
+// componentGroupSeparator joins a group title and a component label once the
+// template has more than one non-empty group.
+const componentGroupSeparator = " · "
 
-// AssignScoreSet snapshots a set onto a class: it copies the set's components
-// into class_score_components, replacing whatever the class had. Owner only. A
-// class that already carries any score refuses with 409 — replacing the
-// components would cascade-delete recorded grades.
-func (s *Service) AssignScoreSet(ctx context.Context, sc authctx.Scope, classID, setID uuid.UUID) (*ClassComponentsResponse, error) {
+// SyncTemplateComponents copies a program template's score groups into the
+// class's snapshot (class_score_components). Owner only; classprogram calls it
+// inside its Apply transaction, which the nested WithinTx joins, so a failure
+// here rolls the whole apply back.
+//
+// The snapshot is replaced only while the class has no recorded score:
+// replacing it cascade-deletes student_scores, so a scored class keeps its
+// components and grades and the apply still succeeds. A template without
+// components keeps whatever the class has, and an identical flattened list
+// writes nothing. Lock → check → replace run in one tx, the same atomicity the
+// score write relies on.
+func (s *Service) SyncTemplateComponents(ctx context.Context, sc authctx.Scope, classID uuid.UUID, groups []TemplateScoreGroup) (SnapshotOutcome, error) {
 	if !sc.IsOwner {
-		return nil, ownerOnly()
+		return "", ownerOnly()
 	}
 	class, err := s.resolveClass(ctx, sc, classID)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	set, err := s.repo.GetSet(ctx, sc, setID)
-	if err != nil {
-		return nil, apperror.Internal(err)
+	names := flattenTemplateComponents(groups)
+	if len(names) == 0 {
+		return SnapshotKeptEmptyTemplate, nil
 	}
-	if set == nil {
-		return nil, scoreSetNotFound()
-	}
-	srcComponents, err := s.repo.ListComponentsForSets(ctx, []uuid.UUID{setID})
-	if err != nil {
-		return nil, apperror.Internal(err)
-	}
-	snapshot := make([]ClassComponent, len(srcComponents))
-	for i, comp := range srcComponents {
-		src := setID
-		snapshot[i] = ClassComponent{
-			ID:          id.New(),
-			ClassID:     class.ID,
-			CenterID:    class.CenterID,
-			Name:        comp.Name,
-			Position:    comp.Position,
-			SourceSetID: &src,
-		}
-	}
-	// Lock → guard → replace, all in one tx: the guard's "no scores yet" reading
-	// and the cascade-deleting replace must be atomic against a concurrent score
-	// write, or a grade committed in the gap is silently cascade-deleted.
-	if err := s.tx.WithinTx(ctx, func(ctx context.Context) error {
+	var outcome SnapshotOutcome
+	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
 		if err := s.repo.LockClassForScoring(ctx, classID); err != nil {
 			return err
 		}
-		if err := s.guardNoScores(ctx, sc, classID); err != nil {
+		scored, err := s.repo.ClassHasScores(ctx, sc, classID)
+		if err != nil {
 			return err
 		}
-		return s.repo.ReplaceClassComponents(ctx, classID, snapshot)
-	}); err != nil {
-		return nil, txError(err)
+		if scored {
+			outcome = SnapshotKeptScored
+			return nil
+		}
+		current, err := s.repo.GetClassComponents(ctx, sc, classID)
+		if err != nil {
+			return err
+		}
+		if sameComponents(current, names) {
+			outcome = SnapshotUnchanged
+			return nil
+		}
+		snapshot := make([]ClassComponent, len(names))
+		for i, name := range names {
+			snapshot[i] = ClassComponent{
+				ID:       id.New(),
+				ClassID:  class.ID,
+				CenterID: class.CenterID,
+				Name:     name,
+				Position: int16(i), //nolint:gosec // at most 10 groups × 20 components
+			}
+		}
+		if err := s.repo.ReplaceClassComponents(ctx, classID, snapshot); err != nil {
+			return err
+		}
+		outcome = SnapshotReplaced
+		return nil
+	})
+	if err != nil {
+		return "", txError(err)
 	}
-	return classComponentsResponse(classID, snapshot), nil
+	return outcome, nil
 }
 
-// ClearScoreSet removes a class's snapshot — the fix for a wrong assignment.
-// Owner only, and gated by the same no-scores guard: clearing the components
-// would cascade-delete any recorded grades.
-func (s *Service) ClearScoreSet(ctx context.Context, sc authctx.Scope, classID uuid.UUID) error {
-	if !sc.IsOwner {
-		return ownerOnly()
-	}
-	if _, err := s.resolveClass(ctx, sc, classID); err != nil {
-		return err
-	}
-	// Same lock → guard → replace atomicity as AssignScoreSet: clearing the
-	// snapshot cascade-deletes student_scores, so the guard and the delete must
-	// be serialised against a concurrent score write.
-	if err := s.tx.WithinTx(ctx, func(ctx context.Context) error {
-		if err := s.repo.LockClassForScoring(ctx, classID); err != nil {
-			return err
-		}
-		if err := s.guardNoScores(ctx, sc, classID); err != nil {
-			return err
-		}
-		return s.repo.ReplaceClassComponents(ctx, classID, nil)
-	}); err != nil {
-		return txError(err)
-	}
-	return nil
-}
-
-// GetClassComponents returns a class's snapshot components — the shared read
-// behind both the owner config page and the classbook score grid. Read gate is
+// GetClassComponents returns a class's snapshot components — the read behind
+// the classbook score grid. Read gate is
 // readable class resolution: the class's own teacher, any center-wide reader,
 // and any class_staff assignment holder (ended included) see it; a member with
 // no relationship to the class gets the class's own 404.
@@ -337,7 +244,7 @@ func (s *Service) PutSessionScores(ctx context.Context, sc authctx.Scope, sessio
 	}
 
 	// One tx, taking the per-class lock first: the component set this write
-	// validates against is exactly the set a concurrent assign/clear would swap,
+	// validates against is exactly the set a concurrent template apply would swap,
 	// so the read, the validation, and the write must all see the same snapshot.
 	// Losing the race yields a clean 422 (the client's stale component ids no
 	// longer belong to the class) instead of an FK 500 or a silent cascade.
@@ -452,7 +359,7 @@ func (s *Service) PutSessionScores(ctx context.Context, sc authctx.Scope, sessio
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 // txError normalises an error escaping WithinTx: a domain *AppError raised
-// inside the closure (the 409 guard, a 422 validation) passes through as-is; a
+// inside the closure (a 422 validation) passes through as-is; a
 // raw repo/driver error becomes a 500. Lets the closures return typed errors
 // without every caller unwrapping.
 func txError(err error) error {
@@ -464,18 +371,6 @@ func txError(err error) error {
 		return appErr
 	}
 	return apperror.Internal(err)
-}
-
-// guardNoScores blocks assign/clear when the class already has ≥1 score.
-func (s *Service) guardNoScores(ctx context.Context, sc authctx.Scope, classID uuid.UUID) error {
-	has, err := s.repo.ClassHasScores(ctx, sc, classID)
-	if err != nil {
-		return apperror.Internal(err)
-	}
-	if has {
-		return classHasScores()
-	}
-	return nil
 }
 
 // validateScoreEntries bounds the batch shape: within the entry cap, no
@@ -508,16 +403,63 @@ func validateScoreEntries(entries []ScoreEntryRequest) error {
 	return nil
 }
 
-// buildSetComponents turns cleaned names into position-ordered rows.
-func buildSetComponents(setID uuid.UUID, names []string) []SetComponent {
-	out := make([]SetComponent, len(names))
-	for i, name := range names {
-		if i > 32767 {
-			break // gosec: prevent int overflow; position must fit in int16
+// flattenTemplateComponents turns a template's score groups into the ordered
+// snapshot names (position = index). A lone non-empty group keeps its bare
+// labels; two or more prefix each label with its group title so "Giữa kỳ ·
+// Nghe" and "Cuối kỳ · Nghe" stay apart. Each name is cut to the column's 50
+// characters, and a name that repeats an earlier one case-insensitively gets a
+// " (2)", " (3)", … suffix, its base cut further so the whole still fits.
+func flattenTemplateComponents(groups []TemplateScoreGroup) []string {
+	nonEmpty := 0
+	total := 0
+	for _, g := range groups {
+		if len(g.Labels) > 0 {
+			nonEmpty++
+			total += len(g.Labels)
 		}
-		out[i] = SetComponent{ID: id.New(), SetID: setID, Name: name, Position: int16(i)} //nolint:gosec
+	}
+	out := make([]string, 0, total)
+	seen := make(map[string]bool, total)
+	for _, g := range groups {
+		title := strings.TrimSpace(g.Title)
+		for _, label := range g.Labels {
+			base := strings.TrimSpace(label)
+			if nonEmpty > 1 {
+				base = title + componentGroupSeparator + base
+			}
+			name := truncateRunes(base, maxComponentNameRunes)
+			for n := 2; seen[strings.ToLower(name)]; n++ {
+				suffix := fmt.Sprintf(" (%d)", n)
+				name = truncateRunes(base, maxComponentNameRunes-utf8.RuneCountInString(suffix)) + suffix
+			}
+			seen[strings.ToLower(name)] = true
+			out = append(out, name)
+		}
 	}
 	return out
+}
+
+// truncateRunes cuts s to at most limit runes, dropping any whitespace the cut
+// leaves at the end.
+func truncateRunes(s string, limit int) string {
+	if utf8.RuneCountInString(s) <= limit {
+		return s
+	}
+	return strings.TrimRight(string([]rune(s)[:limit]), " ")
+}
+
+// sameComponents reports whether the class's current snapshot already holds
+// exactly names, in order.
+func sameComponents(current []ClassComponent, names []string) bool {
+	if len(current) != len(names) {
+		return false
+	}
+	for i, comp := range current {
+		if comp.Name != names[i] || int(comp.Position) != i {
+			return false
+		}
+	}
+	return true
 }
 
 func classComponentsResponse(classID uuid.UUID, components []ClassComponent) *ClassComponentsResponse {
@@ -582,14 +524,8 @@ func normalizeSessionErr(session *sessions.Session, err error) (*sessions.Sessio
 }
 
 func ownerOnly() error {
-	appErr := apperror.Forbidden("only the center owner can configure score sets")
+	appErr := apperror.Forbidden("only the center owner can change class score components")
 	appErr.Err = ErrOwnerOnly
-	return appErr
-}
-
-func scoreSetNotFound() error {
-	appErr := apperror.NotFound("score set")
-	appErr.Err = ErrScoreSetNotFound
 	return appErr
 }
 
@@ -603,20 +539,4 @@ func sessionNotFound() error {
 	appErr := apperror.NotFound("session")
 	appErr.Err = ErrSessionNotFound
 	return appErr
-}
-
-// classHasScores is the 409 that blocks changing a scored class's components.
-// The message is Vietnamese: it surfaces directly in the owner's config UI.
-func classHasScores() error {
-	appErr := apperror.Conflict("lớp đã có điểm thành phần, không thể đổi hoặc gỡ bộ điểm")
-	appErr.Err = ErrClassHasScores
-	return appErr
-}
-
-func duplicateSetName() error {
-	return apperror.Conflict("a score set with this name already exists")
-}
-
-func componentInvalid(msg string) error {
-	return apperror.Invalid("validation failed", map[string]string{"components": msg})
 }

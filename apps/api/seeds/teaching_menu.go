@@ -16,6 +16,7 @@ import (
 	"teka/apps/api/internal/features/classstaff"
 	"teka/apps/api/internal/features/courses"
 	"teka/apps/api/internal/features/enrollments"
+	"teka/apps/api/internal/features/grading"
 	"teka/apps/api/internal/features/handoff"
 	"teka/apps/api/internal/features/imports"
 	"teka/apps/api/internal/features/library"
@@ -89,7 +90,8 @@ func newTeachingMenuServices(db *gorm.DB) teachingMenuServices {
 	coursesSvc := courses.NewService(courses.NewRepository(db), txMgr)
 	pathsSvc := paths.NewService(paths.NewRepository(db), txMgr)
 	teachingSvc := teaching.NewService(teaching.NewRepository(db), classesSvc, sessionsSvc, enrollmentsSvc, txMgr)
-	classProgramSvc := classprogram.NewService(classprogram.NewRepository(db), classesSvc, teachingSvc, librarySvc, txMgr)
+	gradingSvc := grading.NewService(grading.NewRepository(db), classesSvc, sessionsSvc, enrollmentsSvc, txMgr)
+	classProgramSvc := classprogram.NewService(classprogram.NewRepository(db), classesSvc, teachingSvc, librarySvc, gradingSvc, txMgr)
 
 	return teachingMenuServices{
 		classes:      classesSvc,

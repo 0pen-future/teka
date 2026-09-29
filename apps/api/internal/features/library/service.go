@@ -195,6 +195,21 @@ func (s *Service) PublishedVersion(ctx context.Context, sc authctx.Scope, versio
 	return s.versionForClass(ctx, sc, versionID, func(status string) bool { return status == StatusPublished })
 }
 
+// PublishedScoreSet returns a published version's score set for the
+// class-program feature, which copies it into the class when the version is
+// applied. Like PublishedVersion it skips the library.read gate and refuses a
+// draft or archived version with a 409. The result is never nil.
+func (s *Service) PublishedScoreSet(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) ([]ScoreSetGroup, error) {
+	row, err := s.repo.GetVersion(ctx, sc, versionID)
+	if err != nil {
+		return nil, notFound(err, "template version")
+	}
+	if row.Status != StatusPublished {
+		return nil, errVersionNotPublishedForClass()
+	}
+	return scoreSet(row.ScoreSet), nil
+}
+
 // ReleasedVersion is PublishedVersion for reading back a version a class
 // already applies: a released (published or archived) version is immutable,
 // so retiring it in the library must not blank the class's lessons. Only a

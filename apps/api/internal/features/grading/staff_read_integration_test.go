@@ -17,8 +17,8 @@ import (
 // TestStaffAssignmentWidensGradingReads pins the read-port contract on
 // grading: a hoc_vu/tro_giang stint (ended included) reads the class's score
 // components and a session's score grid, while the score writes keep their
-// gates — PUT needs the scores capability (giao_vien), assign/clear stay
-// owner-only.
+// gates — PUT needs the scores capability (giao_vien), and changing the
+// class's components stays owner-only.
 func TestStaffAssignmentWidensGradingReads(t *testing.T) {
 	t.Parallel()
 	svc, db := newIntegrationService(t)
@@ -40,11 +40,8 @@ func TestStaffAssignmentWidensGradingReads(t *testing.T) {
 	session := testutil.Session(t, db, gv.ID, class.ID, date("2026-01-06"))
 	testutil.StaffAssignment(t, db, class, staff.ID, authctx.StaffRoleHocVu)
 
-	set, err := svc.CreateSet(ctx, scOwner, grading.ScoreSetRequest{
-		Name: "Bộ điểm chuẩn", Components: []string{"Giữa kỳ", "Cuối kỳ"},
-	})
-	require.NoError(t, err)
-	_, err = svc.AssignScoreSet(ctx, scOwner, class.ID, set.ID)
+	groups := []grading.TemplateScoreGroup{{Title: "Bộ điểm chuẩn", Labels: []string{"Giữa kỳ", "Cuối kỳ"}}}
+	_, err := svc.SyncTemplateComponents(ctx, scOwner, class.ID, groups)
 	require.NoError(t, err)
 
 	scStaff := testutil.ScopeFor(t, db, staff.ID)
@@ -66,16 +63,15 @@ func TestStaffAssignmentWidensGradingReads(t *testing.T) {
 	require.Equal(t, 404, apperror.From(err).Status)
 
 	// Write-freeze: the stint reaches no score write. PUT resolves through the
-	// write capability, so a reader without it gets an honest 403; assign/clear
-	// refuse every non-owner (403).
+	// write capability, so a reader without it gets an honest 403; changing
+	// the components refuses every non-owner (403).
 	score := 8.5
 	_, err = svc.PutSessionScores(ctx, scStaff, session.ID, []grading.ScoreEntryRequest{
 		{StudentID: student.ID, ComponentID: components.Components[0].ID, Score: &score},
 	})
 	require.Equal(t, 403, apperror.From(err).Status)
-	_, err = svc.AssignScoreSet(ctx, scStaff, class.ID, set.ID)
+	_, err = svc.SyncTemplateComponents(ctx, scStaff, class.ID, groups)
 	require.Equal(t, 403, apperror.From(err).Status)
-	require.Equal(t, 403, apperror.From(svc.ClearScoreSet(ctx, scStaff, class.ID)).Status)
 
 	// An ended stint keeps the grid readable.
 	require.NoError(t, db.Exec(
@@ -124,17 +120,11 @@ func TestPutSessionScoresCapabilityGateAndHandoff(t *testing.T) {
 	testutil.Enrollment(t, db, gv.ID, student.ID, class.ID, date("2026-01-01"))
 	session := testutil.Session(t, db, gv.ID, class.ID, date("2026-01-06"))
 
-	set, err := svc.CreateSet(ctx, scOwner, grading.ScoreSetRequest{
-		Name: "Bộ điểm", Components: []string{"Giữa kỳ"},
-	})
-	require.NoError(t, err)
-	assigned, err := svc.AssignScoreSet(ctx, scOwner, class.ID, set.ID)
-	require.NoError(t, err)
-	comp := assigned.Components[0].ID
+	comp := applyComponents(t, svc, scOwner, class.ID, "Giữa kỳ")[0].ID
 	score := 7.0
 	entries := []grading.ScoreEntryRequest{{StudentID: student.ID, ComponentID: comp, Score: &score}}
 
-	_, err = svc.PutSessionScores(ctx, scGV, session.ID, entries)
+	_, err := svc.PutSessionScores(ctx, scGV, session.ID, entries)
 	require.NoError(t, err, "active giáo viên enters scores")
 	_, err = svc.PutSessionScores(ctx, scOwner, session.ID, entries)
 	require.NoError(t, err, "owner enters scores center-wide")

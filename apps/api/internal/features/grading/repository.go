@@ -2,7 +2,6 @@ package grading
 
 import (
 	"context"
-	"errors"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -19,40 +18,17 @@ import (
 // the owner flag or a permission check (the owner gate lives in the service,
 // enforced by the scopelint analyzer under tools/).
 type Repository interface {
-	// ListSets returns the center's live (non-deleted) score sets, name order.
-	ListSets(ctx context.Context, sc authctx.Scope) ([]ScoreSet, error)
-	// GetSet returns one live set of the center, or nil when missing / soft
-	// deleted / another center's — the service maps nil to 404.
-	GetSet(ctx context.Context, sc authctx.Scope, setID uuid.UUID) (*ScoreSet, error)
-	// ListComponentsForSets returns the components of the given sets, ordered
-	// by (set, position) — one query behind the list read.
-	//
-	// INVARIANT: it filters only by set_id, not center_id, so every caller MUST
-	// pass set ids already resolved under the caller's scope (GetSet / ListSets).
-	// Passing an unscoped set id would read another center's component names.
-	ListComponentsForSets(ctx context.Context, setIDs []uuid.UUID) ([]SetComponent, error)
-	// CreateSet inserts a set row. A duplicate live name in the center loses to
-	// score_sets_center_name_live and surfaces as gorm.ErrDuplicatedKey.
-	CreateSet(ctx context.Context, set *ScoreSet) error
-	// UpdateSet writes name + updated_at back for a live set of the center.
-	UpdateSet(ctx context.Context, sc authctx.Scope, set *ScoreSet) error
-	// SoftDeleteSet stamps deleted_at on a live set of the center.
-	SoftDeleteSet(ctx context.Context, sc authctx.Scope, setID uuid.UUID) error
-	// ReplaceSetComponents hard-deletes a set's components and inserts the new
-	// list — safe because per-class snapshots already copied the values.
-	ReplaceSetComponents(ctx context.Context, setID uuid.UUID, components []SetComponent) error
-
 	// GetClassComponents returns a class's snapshot components, position order.
 	GetClassComponents(ctx context.Context, sc authctx.Scope, classID uuid.UUID) ([]ClassComponent, error)
 	// ReplaceClassComponents removes a class's current snapshot and inserts the
-	// new copies (empty list = clear). Deleting a snapshot row cascade-deletes
-	// its student_scores, so callers guard with ClassHasScores first.
+	// new copies. Deleting a snapshot row cascade-deletes its student_scores,
+	// so callers guard with ClassHasScores first.
 	ReplaceClassComponents(ctx context.Context, classID uuid.UUID, components []ClassComponent) error
 	// ClassHasScores reports whether the class carries ≥1 student score (any
-	// session, including past ones) — the re-apply / clear guard.
+	// session, including past ones) — the guard before a snapshot replace.
 	ClassHasScores(ctx context.Context, sc authctx.Scope, classID uuid.UUID) (bool, error)
 	// LockClassForScoring takes a transaction-scoped advisory lock keyed on the
-	// class. Both the component swap (assign/clear) and the score write take it,
+	// class. Both the component swap (template apply) and the score write take it,
 	// so a swap — which cascade-deletes student_scores — cannot interleave with
 	// a concurrent score write and silently drop a just-recorded grade. The lock
 	// releases on commit/rollback; call it as the first statement of the tx.
@@ -76,76 +52,6 @@ type gormRepository struct {
 // NewRepository returns the GORM-backed Repository.
 func NewRepository(db *gorm.DB) Repository {
 	return &gormRepository{db: db}
-}
-
-func (r *gormRepository) ListSets(ctx context.Context, sc authctx.Scope) ([]ScoreSet, error) {
-	var sets []ScoreSet
-	err := database.FromContext(ctx, r.db).
-		Where("center_id = ? AND deleted_at IS NULL", sc.CenterID).
-		Order("lower(name)").
-		Find(&sets).Error
-	return sets, err
-}
-
-func (r *gormRepository) GetSet(ctx context.Context, sc authctx.Scope, setID uuid.UUID) (*ScoreSet, error) {
-	var set ScoreSet
-	err := database.FromContext(ctx, r.db).
-		Where("id = ? AND center_id = ? AND deleted_at IS NULL", setID, sc.CenterID).
-		Take(&set).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &set, nil
-}
-
-func (r *gormRepository) ListComponentsForSets(ctx context.Context, setIDs []uuid.UUID) ([]SetComponent, error) {
-	if len(setIDs) == 0 {
-		return nil, nil
-	}
-	var components []SetComponent
-	err := database.FromContext(ctx, r.db).
-		Where("set_id IN ?", setIDs).
-		Order("set_id, position").
-		Find(&components).Error
-	return components, err
-}
-
-func (r *gormRepository) CreateSet(ctx context.Context, set *ScoreSet) error {
-	return database.FromContext(ctx, r.db).Create(set).Error
-}
-
-func (r *gormRepository) UpdateSet(ctx context.Context, sc authctx.Scope, set *ScoreSet) error {
-	return database.FromContext(ctx, r.db).
-		Model(&ScoreSet{}).
-		Where("id = ? AND center_id = ? AND deleted_at IS NULL", set.ID, sc.CenterID).
-		Updates(map[string]any{
-			"name":       set.Name,
-			"updated_at": gorm.Expr("now()"),
-		}).Error
-}
-
-func (r *gormRepository) SoftDeleteSet(ctx context.Context, sc authctx.Scope, setID uuid.UUID) error {
-	return database.FromContext(ctx, r.db).
-		Model(&ScoreSet{}).
-		Where("id = ? AND center_id = ? AND deleted_at IS NULL", setID, sc.CenterID).
-		Updates(map[string]any{
-			"deleted_at": gorm.Expr("now()"),
-			"updated_at": gorm.Expr("now()"),
-		}).Error
-}
-
-func (r *gormRepository) ReplaceSetComponents(ctx context.Context, setID uuid.UUID, components []SetComponent) error {
-	db := database.FromContext(ctx, r.db)
-	if err := db.Where("set_id = ?", setID).Delete(&SetComponent{}).Error; err != nil {
-		return err
-	}
-	if len(components) == 0 {
-		return nil
-	}
-	return db.Create(components).Error
 }
 
 func (r *gormRepository) GetClassComponents(ctx context.Context, sc authctx.Scope, classID uuid.UUID) ([]ClassComponent, error) {
@@ -178,7 +84,7 @@ func (r *gormRepository) ClassHasScores(ctx context.Context, sc authctx.Scope, c
 
 func (r *gormRepository) LockClassForScoring(ctx context.Context, classID uuid.UUID) error {
 	// Blocking, not the TRY variant imports uses: contention is per-class and
-	// rare (an owner reconfiguring a set while a teacher grades the same class),
+	// rare (an owner applying a program while a teacher grades the same class),
 	// the held work is a handful of small statements, and the caller's context
 	// deadline bounds the wait — so waiting the few ms is preferable to failing
 	// the write with a 409 the client would just retry. hashtext takes text;

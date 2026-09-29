@@ -14,11 +14,6 @@ func TestGradingRoutesAreRegistered(t *testing.T) {
 	cases := []struct {
 		method, route, action, entity, idParam string
 	}{
-		{"POST", "/api/v1/score-sets", "score_set.create", "score_set", ""},
-		{"PUT", "/api/v1/score-sets/:id", "score_set.update", "score_set", "id"},
-		{"DELETE", "/api/v1/score-sets/:id", "score_set.delete", "score_set", "id"},
-		{"POST", "/api/v1/classes/:id/score-set", "class.score_set.assign", "class", "id"},
-		{"DELETE", "/api/v1/classes/:id/score-set", "class.score_set.clear", "class", "id"},
 		{"PUT", "/api/v1/sessions/:id/scores", "session.scores.update", "session", "id"},
 	}
 	for _, c := range cases {
@@ -43,7 +38,6 @@ var actionSnapshot = []struct {
 	method, route string
 	spec          ActionSpec
 }{
-	{"DELETE", "/api/v1/score-sets/:id", ActionSpec{Action: "score_set.delete", EntityType: "score_set", IDParam: "id"}},
 	{"POST", "/api/v1/imports/roster", ActionSpec{Action: "import.roster", EntityType: "import", IDParam: ""}},
 	{"POST", "/api/v1/billing-periods/:id/notifications/run/resume", ActionSpec{Action: "notification.run.resume", EntityType: "billing_period", IDParam: "id"}},
 	{"DELETE", "/api/v1/contacts/:id/zalo-mapping", ActionSpec{Action: "contact.zalo_mapping.clear", EntityType: "contact", IDParam: "id"}},
@@ -61,7 +55,6 @@ var actionSnapshot = []struct {
 	{"POST", "/api/v1/contacts", ActionSpec{Action: "contact.create", EntityType: "contact", IDParam: ""}},
 	{"DELETE", "/api/v1/enrollments/:id", ActionSpec{Action: "enrollment.delete", EntityType: "enrollment", IDParam: "id"}},
 	{"POST", "/api/v1/classes/:id/lesson-plans/:index/reopen", ActionSpec{Action: "lesson_plan.reopen", EntityType: "class", IDParam: "id"}},
-	{"POST", "/api/v1/score-sets", ActionSpec{Action: "score_set.create", EntityType: "score_set", IDParam: ""}},
 	{"POST", "/api/v1/statements/:id/revoke", ActionSpec{Action: "statement.revoke", EntityType: "statement", IDParam: "id"}},
 	{"POST", "/api/v1/notifications/mark-sent", ActionSpec{Action: "notification.mark_sent", EntityType: "notification", IDParam: ""}},
 	{"PATCH", "/api/v1/centers/me", ActionSpec{Action: "center.rename", EntityType: "center", IDParam: ""}},
@@ -91,7 +84,6 @@ var actionSnapshot = []struct {
 	{"POST", "/api/v1/auth/forgot-password", ActionSpec{Action: "auth.password_reset_request", EntityType: "user", IDParam: ""}},
 	{"PUT", "/api/v1/centers/me/members/:teacherId/overrides", ActionSpec{Action: "center.member.overrides_update", EntityType: "teacher", IDParam: "teacherId"}},
 	{"PUT", "/api/v1/classes/:id", ActionSpec{Action: "class.update", EntityType: "class", IDParam: "id"}},
-	{"DELETE", "/api/v1/classes/:id/score-set", ActionSpec{Action: "class.score_set.clear", EntityType: "class", IDParam: "id"}},
 	{"DELETE", "/api/v1/me/zalo", ActionSpec{Action: "zalo.unlink", EntityType: "zalo_account", IDParam: ""}},
 	{"PUT", "/api/v1/classes/:id/teacher", ActionSpec{Action: "class.teacher.reassign", EntityType: "class", IDParam: "id"}},
 	{"DELETE", "/api/v1/classes/:id/staff/:staffId", ActionSpec{Action: "class.staff.remove", EntityType: "class_staff", IDParam: "staffId"}},
@@ -109,8 +101,6 @@ var actionSnapshot = []struct {
 	{"PUT", "/api/v1/payments/:id/allocations", ActionSpec{Action: "payment.reallocate", EntityType: "payment", IDParam: "id"}},
 	{"DELETE", "/api/v1/students/:id", ActionSpec{Action: "student.delete", EntityType: "student", IDParam: "id"}},
 	{"POST", "/api/v1/classes", ActionSpec{Action: "class.create", EntityType: "class", IDParam: ""}},
-	{"PUT", "/api/v1/score-sets/:id", ActionSpec{Action: "score_set.update", EntityType: "score_set", IDParam: "id"}},
-	{"POST", "/api/v1/classes/:id/score-set", ActionSpec{Action: "class.score_set.assign", EntityType: "class", IDParam: "id"}},
 	{"PUT", "/api/v1/sessions/:id/scores", ActionSpec{Action: "session.scores.update", EntityType: "session", IDParam: "id"}},
 	{"POST", "/api/v1/invoices/:id/adjustments", ActionSpec{Action: "billing.adjustment.create", EntityType: "invoice", IDParam: "id"}},
 	{"POST", "/api/v1/payments/:id/reverse", ActionSpec{Action: "payment.reverse", EntityType: "payment", IDParam: "id"}},

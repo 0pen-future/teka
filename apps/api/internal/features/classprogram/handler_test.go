@@ -15,6 +15,7 @@ import (
 
 	"teka/apps/api/internal/config"
 	"teka/apps/api/internal/features/classes"
+	"teka/apps/api/internal/features/grading"
 	"teka/apps/api/internal/features/library"
 	"teka/apps/api/internal/features/teaching"
 	"teka/apps/api/internal/middleware"
@@ -54,12 +55,22 @@ func (stubLibrarySource) PublishedVersion(_ context.Context, _ authctx.Scope, _ 
 	return &library.VersionResponse{}, nil, nil
 }
 
+func (stubLibrarySource) PublishedScoreSet(_ context.Context, _ authctx.Scope, _ uuid.UUID) ([]library.ScoreSetGroup, error) {
+	return []library.ScoreSetGroup{}, nil
+}
+
 func (stubLibrarySource) ReleasedVersion(_ context.Context, _ authctx.Scope, _ uuid.UUID) (*library.VersionResponse, []library.LessonDetailResponse, error) {
 	return &library.VersionResponse{}, nil, nil
 }
 
 func (stubLibrarySource) LockTemplateForVersion(_ context.Context, _ authctx.Scope, _ uuid.UUID) error {
 	return nil
+}
+
+type stubScoreSnapshotStore struct{}
+
+func (stubScoreSnapshotStore) SyncTemplateComponents(_ context.Context, _ authctx.Scope, _ uuid.UUID, _ []grading.TemplateScoreGroup) (grading.SnapshotOutcome, error) {
+	return grading.SnapshotKeptEmptyTemplate, nil
 }
 
 type stubRepository struct{}
@@ -91,7 +102,7 @@ func (fakeScopeResolver) ResolveScope(_ context.Context, teacherID uuid.UUID) (a
 func newClassProgramHTTPTest(t *testing.T) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	svc := NewService(stubRepository{}, stubClassSource{}, stubCurriculumStore{}, stubLibrarySource{}, stubTxManager{})
+	svc := NewService(stubRepository{}, stubClassSource{}, stubCurriculumStore{}, stubLibrarySource{}, stubScoreSnapshotStore{}, stubTxManager{})
 	r := gin.New()
 	jwtCfg := config.JWTConfig{Secret: handlerTestSecret, AccessTTL: 15 * time.Minute}
 	RegisterRoutes(r.Group("/api/v1"), NewHandler(svc), middleware.RequireAuth(jwtCfg), middleware.ResolveScope(fakeScopeResolver{}))

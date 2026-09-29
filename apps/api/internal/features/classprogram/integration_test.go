@@ -20,6 +20,7 @@ import (
 	"teka/apps/api/internal/features/classprogram"
 	"teka/apps/api/internal/features/classstaff"
 	"teka/apps/api/internal/features/enrollments"
+	"teka/apps/api/internal/features/grading"
 	"teka/apps/api/internal/features/library"
 	"teka/apps/api/internal/features/sessions"
 	"teka/apps/api/internal/features/teachers"
@@ -30,12 +31,15 @@ import (
 )
 
 // fixture wires the real dependency chain router.go uses: classprogram
-// consumes classes (read gate), teaching (the class curriculum) and library
-// (published versions) through consumer-defined interfaces.
+// consumes classes (read gate), teaching (the class curriculum), grading (the
+// class score components) and library (published versions) through
+// consumer-defined interfaces.
 type fixture struct {
 	db       *gorm.DB
 	svc      *classprogram.Service
+	classes  *classes.Service
 	teaching *teaching.Service
+	grading  *grading.Service
 	library  *library.Service
 	owner    authctx.Scope
 	teacher  authctx.Scope
@@ -52,8 +56,9 @@ func newFixture(t *testing.T) fixture {
 	enrollmentsSvc := enrollments.NewService(enrollments.NewRepository(db), nil)
 	sessionsSvc := sessions.NewService(sessions.NewRepository(db), classesSvc, teachersSvc, enrollmentsSvc)
 	teachingSvc := teaching.NewService(teaching.NewRepository(db), classesSvc, sessionsSvc, enrollmentsSvc, txMgr)
+	gradingSvc := grading.NewService(grading.NewRepository(db), classesSvc, sessionsSvc, enrollmentsSvc, txMgr)
 	librarySvc := library.NewService(library.NewRepository(db), txMgr)
-	svc := classprogram.NewService(classprogram.NewRepository(db), classesSvc, teachingSvc, librarySvc, txMgr)
+	svc := classprogram.NewService(classprogram.NewRepository(db), classesSvc, teachingSvc, librarySvc, gradingSvc, txMgr)
 
 	_, ownerT := testutil.Teacher(t, db)
 	_, teacherT := testutil.Teacher(t, db)
@@ -63,7 +68,9 @@ func newFixture(t *testing.T) fixture {
 	return fixture{
 		db:       db,
 		svc:      svc,
+		classes:  classesSvc,
 		teaching: teachingSvc,
+		grading:  gradingSvc,
 		library:  librarySvc,
 		owner:    testutil.ScopeFor(t, db, ownerT.ID),
 		teacher:  testutil.ScopeFor(t, db, teacherT.ID),
@@ -76,12 +83,22 @@ func newFixture(t *testing.T) fixture {
 // and publishes its first version.
 func (f fixture) publishedVersion(t *testing.T, sc authctx.Scope, code string, titles ...string) library.VersionResponse {
 	t.Helper()
+	return f.scoredVersion(t, sc, code, nil, titles...)
+}
+
+// scoredVersion is publishedVersion with a score set on the version.
+func (f fixture) scoredVersion(t *testing.T, sc authctx.Scope, code string, scoreSet []library.ScoreSetGroupInput, titles ...string) library.VersionResponse {
+	t.Helper()
 	ctx := context.Background()
 	tpl, err := f.library.CreateTemplate(ctx, sc, library.TemplateRequest{Code: code, Name: "Chương trình " + code})
 	require.NoError(t, err)
 	draft := f.draft(t, sc, tpl.ID)
 	for _, title := range titles {
 		_, err := f.library.CreateLesson(ctx, sc, draft.ID, library.LessonRequest{Title: title})
+		require.NoError(t, err)
+	}
+	if scoreSet != nil {
+		_, err := f.library.SetScoreSet(ctx, sc, draft.ID, scoreSet)
 		require.NoError(t, err)
 	}
 	published, err := f.library.Publish(ctx, sc, draft.ID)
@@ -404,4 +421,150 @@ func TestApplyRefusesMoreLessonsThanTheCurriculumHolds(t *testing.T) {
 	got, err := f.svc.Get(ctx, f.owner, f.class.ID)
 	require.NoError(t, err)
 	require.Nil(t, got)
+}
+
+// scoreGroup is a score set group input whose component keys follow the
+// labels' order.
+func scoreGroup(key, title string, labels ...string) library.ScoreSetGroupInput {
+	components := make([]library.ScoreComponentInput, len(labels))
+	for i, label := range labels {
+		components[i] = library.ScoreComponentInput{Key: "c" + strconv.Itoa(i+1), Label: label, Max: 10, Weight: 1}
+	}
+	return library.ScoreSetGroupInput{Key: key, Title: title, Components: components}
+}
+
+func (f fixture) componentNames(t *testing.T, classID uuid.UUID) []string {
+	t.Helper()
+	got, err := f.grading.GetClassComponents(context.Background(), f.teacher, classID)
+	require.NoError(t, err)
+	out := make([]string, len(got.Components))
+	for i, comp := range got.Components {
+		out[i] = comp.Name
+	}
+	return out
+}
+
+func TestApplyCopiesTemplateScoreSetIntoClassComponents(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	version := f.scoredVersion(t, f.owner, "IELTS-5", []library.ScoreSetGroupInput{
+		scoreGroup("giua_ky", "Giữa kỳ", "Nghe", "Nói"),
+		scoreGroup("cuoi_ky", "Cuối kỳ", "Viết"),
+	}, "Bài 1")
+
+	_, err := f.svc.Apply(ctx, f.owner, f.class.ID, classprogram.ApplyRequest{TemplateVersionID: version.ID})
+	require.NoError(t, err)
+	require.Equal(t, []string{"Giữa kỳ · Nghe", "Giữa kỳ · Nói", "Cuối kỳ · Viết"}, f.componentNames(t, f.class.ID))
+
+	// Another class applying a single-group version gets the bare labels.
+	single := f.scoredVersion(t, f.owner, "IELTS-6", []library.ScoreSetGroupInput{
+		scoreGroup("tong_ket", "Tổng kết", "Nghe", "Đọc"),
+	}, "Bài 1")
+	other := testutil.Class(t, f.db, f.teacher.TeacherID)
+	_, err = f.svc.Apply(ctx, f.owner, other.ID, classprogram.ApplyRequest{TemplateVersionID: single.ID})
+	require.NoError(t, err)
+	require.Equal(t, []string{"Nghe", "Đọc"}, f.componentNames(t, other.ID))
+}
+
+func TestReapplyKeepsComponentsOnceTheClassHasScores(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	first := f.scoredVersion(t, f.owner, "TOEIC-1", []library.ScoreSetGroupInput{
+		scoreGroup("chinh", "Chính", "Nghe", "Đọc"),
+	}, "Bài 1")
+	second := f.scoredVersion(t, f.owner, "TOEIC-2", []library.ScoreSetGroupInput{
+		scoreGroup("chinh", "Chính", "Nói", "Viết"),
+	}, "Bài 1")
+
+	_, err := f.svc.Apply(ctx, f.owner, f.class.ID, classprogram.ApplyRequest{TemplateVersionID: first.ID})
+	require.NoError(t, err)
+	// Before any score the class follows whichever version is applied.
+	_, err = f.svc.Apply(ctx, f.owner, f.class.ID, classprogram.ApplyRequest{TemplateVersionID: second.ID})
+	require.NoError(t, err)
+	require.Equal(t, []string{"Nói", "Viết"}, f.componentNames(t, f.class.ID))
+
+	contact := testutil.Contact(t, f.db, f.teacher.TeacherID)
+	student := testutil.Student(t, f.db, f.teacher.TeacherID, contact.ID)
+	testutil.Enrollment(t, f.db, f.teacher.TeacherID, student.ID, f.class.ID, date("2026-01-01"))
+	session := testutil.Session(t, f.db, f.teacher.TeacherID, f.class.ID, date("2026-01-06"))
+	components, err := f.grading.GetClassComponents(ctx, f.teacher, f.class.ID)
+	require.NoError(t, err)
+	score := 8.0
+	_, err = f.grading.PutSessionScores(ctx, f.teacher, session.ID, []grading.ScoreEntryRequest{
+		{StudentID: student.ID, ComponentID: components.Components[0].ID, Score: &score},
+	})
+	require.NoError(t, err)
+
+	got, err := f.svc.Apply(ctx, f.owner, f.class.ID, classprogram.ApplyRequest{TemplateVersionID: first.ID})
+	require.NoError(t, err, "a scored class still switches its program")
+	require.Equal(t, first.ID, got.TemplateVersionID)
+	after, err := f.grading.GetClassComponents(ctx, f.teacher, f.class.ID)
+	require.NoError(t, err)
+	require.Equal(t, components.Components, after.Components, "a scored class keeps its components")
+	grid, err := f.grading.GetSessionScores(ctx, f.teacher, session.ID)
+	require.NoError(t, err)
+	require.Len(t, grid.Scores, 1, "the recorded grade survives the re-apply")
+}
+
+func TestRemoveKeepsClassComponents(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	version := f.scoredVersion(t, f.owner, "VAN-9", []library.ScoreSetGroupInput{
+		scoreGroup("chinh", "Chính", "Miệng", "15 phút"),
+	}, "Bài 1")
+
+	_, err := f.svc.Apply(ctx, f.owner, f.class.ID, classprogram.ApplyRequest{TemplateVersionID: version.ID})
+	require.NoError(t, err)
+	require.NoError(t, f.svc.Remove(ctx, f.owner, f.class.ID))
+	require.Equal(t, []string{"Miệng", "15 phút"}, f.componentNames(t, f.class.ID))
+
+	// Applying a version without a score set keeps them as well.
+	plain := f.publishedVersion(t, f.owner, "VAN-9B", "Bài 1")
+	_, err = f.svc.Apply(ctx, f.owner, f.class.ID, classprogram.ApplyRequest{TemplateVersionID: plain.ID})
+	require.NoError(t, err)
+	require.Equal(t, []string{"Miệng", "15 phút"}, f.componentNames(t, f.class.ID))
+}
+
+// failingScoreStore writes the snapshot through the real grading service and
+// then fails, as a late error inside Apply's transaction would.
+type failingScoreStore struct {
+	inner *grading.Service
+}
+
+var errSnapshotFailed = errors.New("snapshot write failed")
+
+func (s failingScoreStore) SyncTemplateComponents(ctx context.Context, sc authctx.Scope, classID uuid.UUID, groups []grading.TemplateScoreGroup) (grading.SnapshotOutcome, error) {
+	if _, err := s.inner.SyncTemplateComponents(ctx, sc, classID, groups); err != nil {
+		return "", err
+	}
+	return "", errSnapshotFailed
+}
+
+func TestApplyRollsBackWhenTheScoreCopyFails(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	version := f.scoredVersion(t, f.owner, "LY-8", []library.ScoreSetGroupInput{
+		scoreGroup("chinh", "Chính", "Thực hành"),
+	}, "Bài 1", "Bài 2")
+	svc := classprogram.NewService(classprogram.NewRepository(f.db), f.classes, f.teaching, f.library,
+		failingScoreStore{inner: f.grading}, database.NewTxManager(f.db))
+
+	_, err := svc.Apply(ctx, f.owner, f.class.ID, classprogram.ApplyRequest{TemplateVersionID: version.ID})
+	require.ErrorIs(t, err, errSnapshotFailed)
+
+	program, err := f.svc.Get(ctx, f.owner, f.class.ID)
+	require.NoError(t, err)
+	require.Nil(t, program, "the class program link rolls back")
+	cur, err := f.teaching.GetCurriculum(ctx, f.owner, f.class.ID)
+	require.NoError(t, err)
+	require.Empty(t, cur.Lessons, "the curriculum copy rolls back")
+	require.Empty(t, f.componentNames(t, f.class.ID), "the score components roll back")
+}
+
+func date(s string) time.Time {
+	d, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		panic(err)
+	}
+	return d
 }

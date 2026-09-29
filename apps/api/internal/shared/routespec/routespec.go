@@ -168,7 +168,7 @@ var Specs = []Spec{
 	classified("GET", "/api/v1/centers/me", KindSelf, none()),
 
 	// Owner-only hard gates: permission administration, staffing/handoff,
-	// sensitive review writes, and score-set configuration.
+	// sensitive review writes, and class program changes.
 	classified("GET", "/api/v1/centers/me/permissions", KindOwnerOnly, none()),
 	classified("PUT", "/api/v1/centers/me/roles/:roleId/permissions", KindOwnerOnly,
 		req("center.role.permissions_update", "center_role", "roleId")),
@@ -181,9 +181,10 @@ var Specs = []Spec{
 		req("class.staff.remove", "class_staff", "staffId")),
 	classified("PUT", "/api/v1/classes/:id/teacher", KindOwnerOnly, req("class.teacher.reassign", "class", "id")),
 	// Class program: applying or removing a program template on a class
-	// rewrites the class's curriculum, so both are owner gates; reading the
-	// applied program and its lessons follows the class read port (any
-	// stint, ended included) and is decided in the service.
+	// rewrites the class's curriculum (and, on apply, its score components),
+	// so both are owner gates; reading the applied program and its lessons
+	// follows the class read port (any stint, ended included) and is decided
+	// in the service.
 	classified("GET", "/api/v1/classes/:id/program", KindService, none()),
 	classified("GET", "/api/v1/classes/:id/program/lessons", KindService, none()),
 	classified("PUT", "/api/v1/classes/:id/program", KindOwnerOnly, req("class_program.apply", "class", "id")),
@@ -219,12 +220,6 @@ var Specs = []Spec{
 		req("lesson_plan.request_redo", "class", "id")),
 	classified("POST", "/api/v1/classes/:id/lesson-plans/:index/reopen", KindOwnerOnly,
 		req("lesson_plan.reopen", "class", "id")),
-	classified("GET", "/api/v1/score-sets", KindOwnerOnly, none()),
-	classified("POST", "/api/v1/score-sets", KindOwnerOnly, req("score_set.create", "score_set", "")),
-	classified("PUT", "/api/v1/score-sets/:id", KindOwnerOnly, req("score_set.update", "score_set", "id")),
-	classified("DELETE", "/api/v1/score-sets/:id", KindOwnerOnly, req("score_set.delete", "score_set", "id")),
-	classified("POST", "/api/v1/classes/:id/score-set", KindOwnerOnly, req("class.score_set.assign", "class", "id")),
-	classified("DELETE", "/api/v1/classes/:id/score-set", KindOwnerOnly, req("class.score_set.clear", "class", "id")),
 
 	// Center administration.
 	perm("PATCH", "/api/v1/centers/me", authctx.PermCenterManage, req("center.rename", "center", "")),

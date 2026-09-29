@@ -245,12 +245,21 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, log *slog.Logger,
 	teachingSvc := teaching.NewService(teaching.NewRepository(db), classesSvc, sessionsSvc, enrollmentsSvc, txMgr)
 	teaching.RegisterRoutes(v1, teaching.NewHandler(teachingSvc), authChain...)
 
+	// grading (class score components + per-session scores) consumes the same
+	// three services through its own consumer interfaces; class/session
+	// resolution doubles as its read gate, and the component copy plus the
+	// score batch write rows inside one transaction via txMgr. It mounts
+	// before classprogram, which drives its component copy.
+	gradingSvc := grading.NewService(grading.NewRepository(db), classesSvc, sessionsSvc, enrollmentsSvc, txMgr)
+	grading.RegisterRoutes(v1, grading.NewHandler(gradingSvc), authChain...)
+
 	// classprogram applies a published library version to a class and copies
-	// its lesson titles into the teaching curriculum, so it sits above
-	// classes (read gate), teaching (curriculum) and library (published
-	// version), each consumed through its own interface; the row upsert and
-	// the curriculum write commit together via txMgr.
-	classprogramSvc := classprogram.NewService(classprogram.NewRepository(db), classesSvc, teachingSvc, librarySvc, txMgr)
+	// its lesson titles into the teaching curriculum and its score set into
+	// the grading components, so it sits above classes (read gate), teaching
+	// (curriculum), grading (score components) and library (published
+	// version), each consumed through its own interface; the row upsert, the
+	// curriculum write and the component copy commit together via txMgr.
+	classprogramSvc := classprogram.NewService(classprogram.NewRepository(db), classesSvc, teachingSvc, librarySvc, gradingSvc, txMgr)
 	classprogram.RegisterRoutes(v1, classprogram.NewHandler(classprogramSvc), authChain...)
 
 	// classchat is the class's internal chat. Its gate is "owner or active
@@ -258,13 +267,6 @@ func registerFeatures(v1 *gin.RouterGroup, cfg *config.Config, log *slog.Logger,
 	// the stint question.
 	classchatSvc := classchat.NewService(classchat.NewRepository(db), classesSvc, classStaffRepo)
 	classchat.RegisterRoutes(v1, classchat.NewHandler(classchatSvc), authChain...)
-
-	// grading (component score sets + per-session scores) consumes the same
-	// three services through its own consumer interfaces; class/session
-	// resolution doubles as its read gate, and assign/clear plus the score
-	// batch write rows inside one transaction via txMgr.
-	gradingSvc := grading.NewService(grading.NewRepository(db), classesSvc, sessionsSvc, enrollmentsSvc, txMgr)
-	grading.RegisterRoutes(v1, grading.NewHandler(gradingSvc), authChain...)
 
 	// The owner dashboard reads through classes, sessions, and attendance
 	// (ClassReader, SessionReader, AttendanceReader), so it mounts here —

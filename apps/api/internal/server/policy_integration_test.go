@@ -145,12 +145,12 @@ func TestPolicyHTTPOwnerAndBaselineMember(t *testing.T) {
 	memberTok := e.token(t, memberAcct.ID)
 
 	require.Equal(t, http.StatusOK, e.get(t, "/api/v1/classes", ownerTok).Code)
-	require.Equal(t, http.StatusOK, e.get(t, "/api/v1/score-sets", ownerTok).Code)
+	require.Equal(t, http.StatusOK, e.get(t, "/api/v1/centers/me/permissions", ownerTok).Code)
 	require.Equal(t, http.StatusOK, e.get(t, "/api/v1/audit-logs", ownerTok).Code)
 
 	require.Equal(t, http.StatusOK, e.get(t, "/api/v1/classes", memberTok).Code)
-	require.Equal(t, http.StatusForbidden, e.get(t, "/api/v1/score-sets", memberTok).Code,
-		"score-set configuration is owner-only")
+	require.Equal(t, http.StatusForbidden, e.get(t, "/api/v1/centers/me/permissions", memberTok).Code,
+		"permission administration is owner-only")
 	require.Equal(t, http.StatusForbidden, e.get(t, "/api/v1/audit-logs", memberTok).Code,
 		"audit.read is a legacy identity key and stays out of the baseline")
 
