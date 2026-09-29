@@ -117,6 +117,18 @@ func TestFlattenTemplateComponents(t *testing.T) {
 			want:   []string{strings.Repeat("Đ", 50), strings.Repeat("Đ", 46) + " (2)"},
 		},
 		{
+			name: "a long group title is cut so the labels stay apart",
+			groups: []TemplateScoreGroup{
+				{Title: "Kiểm tra định kỳ giữa học kỳ I năm học 2026-2027", Labels: []string{"Nghe", "Nói"}},
+				{Title: "Cuối kỳ", Labels: []string{"Viết"}},
+			},
+			want: []string{
+				"Kiểm tra định kỳ giữa học kỳ I năm học 2026 · Nghe",
+				"Kiểm tra định kỳ giữa học kỳ I năm học 2026- · Nói",
+				"Cuối kỳ · Viết",
+			},
+		},
+		{
 			name:   "no groups flatten to nothing",
 			groups: nil,
 			want:   []string{},

@@ -111,6 +111,11 @@ const maxComponentNameRunes = 50
 // template has more than one non-empty group.
 const componentGroupSeparator = " · "
 
+// minGroupTitleRunes is how much of a group title survives when a long title
+// and its label would not both fit: the title is cut first so the label, which
+// tells the columns apart, stays readable.
+const minGroupTitleRunes = 10
+
 // SyncTemplateComponents copies a program template's score groups into the
 // class's snapshot (class_score_components). Owner only; classprogram calls it
 // inside its Apply transaction, which the nested WithinTx joins, so a failure
@@ -406,8 +411,8 @@ func validateScoreEntries(entries []ScoreEntryRequest) error {
 // flattenTemplateComponents turns a template's score groups into the ordered
 // snapshot names (position = index). A lone non-empty group keeps its bare
 // labels; two or more prefix each label with its group title so "Giữa kỳ ·
-// Nghe" and "Cuối kỳ · Nghe" stay apart. Each name is cut to the column's 50
-// characters, and a name that repeats an earlier one case-insensitively gets a
+// Nghe" and "Cuối kỳ · Nghe" stay apart; a long title is cut before its label
+// is. Each name is cut to the column's 50 characters, and a name that repeats an earlier one case-insensitively gets a
 // " (2)", " (3)", … suffix, its base cut further so the whole still fits.
 func flattenTemplateComponents(groups []TemplateScoreGroup) []string {
 	nonEmpty := 0
@@ -425,7 +430,8 @@ func flattenTemplateComponents(groups []TemplateScoreGroup) []string {
 		for _, label := range g.Labels {
 			base := strings.TrimSpace(label)
 			if nonEmpty > 1 {
-				base = title + componentGroupSeparator + base
+				room := maxComponentNameRunes - utf8.RuneCountInString(componentGroupSeparator) - utf8.RuneCountInString(base)
+				base = truncateRunes(title, max(room, minGroupTitleRunes)) + componentGroupSeparator + base
 			}
 			name := truncateRunes(base, maxComponentNameRunes)
 			for n := 2; seen[strings.ToLower(name)]; n++ {
