@@ -1,5 +1,5 @@
 import { apiClient } from "@/lib/api/client";
-import { parseData, parseList, type Paginated } from "@/lib/api/envelope";
+import { parseArray, parseData, parseList, type Paginated } from "@/lib/api/envelope";
 
 import type {
   ListClassCollectionsParams,
@@ -9,11 +9,13 @@ import {
   classCollectionRowSchema,
   collectionsSummarySchema,
   contactBalanceRowSchema,
+  contactOutstandingSchema,
   paymentResponseSchema,
   periodSchema,
   type ClassCollectionRow,
   type CollectionsSummary,
   type ContactBalanceRow,
+  type ContactOutstanding,
   type Period,
   type PaymentResponse,
   type ReallocateInput,
@@ -56,6 +58,21 @@ export async function listClassCollections(
     params: { view: "class", ...params },
   });
   return parseList(classCollectionRowSchema, res.data);
+}
+
+/**
+ * `GET /collections/contact-balances?year=&month=` — each family's
+ * outstanding balance summed over every period of the month. Requires
+ * billing.view_all; unpaginated.
+ */
+export async function listContactMonthlyBalances(
+  year: number,
+  month: number,
+): Promise<ContactOutstanding[]> {
+  const res = await apiClient.get<unknown>("/collections/contact-balances", {
+    params: { year, month },
+  });
+  return parseArray(contactOutstandingSchema, res.data);
 }
 
 /** `GET /billing-periods/:id/collections/summary` — unfiltered period totals. */

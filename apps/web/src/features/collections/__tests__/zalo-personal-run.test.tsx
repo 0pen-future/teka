@@ -306,10 +306,10 @@ describe("NotificationsPage zalo_personal channel", () => {
     expect(
       screen.getByText(/phụ huynh đã ghép Zalo nhưng chưa là bạn bè của bạn/),
     ).toBeInTheDocument();
-    // The befriend CTA points at the contacts page, which owns the flow.
+    // The befriend CTA points at the contacts tab, which owns the flow.
     expect(screen.getByRole("link", { name: "Kết bạn trước" })).toHaveAttribute(
       "href",
-      "/contacts",
+      "/students?tab=contacts",
     );
     // A not-friend split warns but never blocks — the send stays available.
     const send = screen.getByRole("button", { name: "Gửi" });

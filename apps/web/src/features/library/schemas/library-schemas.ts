@@ -345,10 +345,9 @@ export interface MaterialInput {
 }
 
 /**
- * `library.ExerciseRequest`. `code`, `skill` and `level` are optional on the
- * wire and left unset by the exercise dialog for now, the same "do not send
- * what the form cannot yet edit" reasoning as `LessonInput.mode`/`unit`.
- * Active is not part of it: `setExerciseStatus` toggles that separately.
+ * `library.ExerciseRequest`. A blank `code` asks the API to generate one on
+ * create and to keep the current one on update. Active is not part of it:
+ * `setExerciseStatus` toggles that separately.
  */
 export interface ExerciseInput {
   title: string;
@@ -448,36 +447,5 @@ export function toMaterialForm(material: Material): MaterialFormInput {
     url: material.url ?? "",
     description: material.description ?? "",
     tags: material.tags.join(", "),
-  };
-}
-
-/** Exercise dialog state; difficulty is a select whose empty value means "not set". */
-export const exerciseFormSchema = z.object({
-  title: z.string().trim().min(1, "Bắt buộc nhập tên bài tập").max(200, "Tối đa 200 ký tự"),
-  description: optionalText(4000),
-  difficulty: z.enum(["", "1", "2", "3", "4", "5"]),
-  tags: tagsText,
-});
-export type ExerciseFormInput = z.input<typeof exerciseFormSchema>;
-export type ExerciseFormValues = z.output<typeof exerciseFormSchema>;
-
-export function toExerciseInput(values: ExerciseFormValues): ExerciseInput {
-  return {
-    title: values.title,
-    description: blankToNull(values.description),
-    difficulty: values.difficulty === "" ? null : Number(values.difficulty),
-    tags: splitTags(values.tags),
-  };
-}
-
-export function toExerciseForm(exercise: Exercise): ExerciseFormInput {
-  return {
-    title: exercise.title,
-    description: exercise.description ?? "",
-    difficulty:
-      exercise.difficulty === null
-        ? ""
-        : (String(exercise.difficulty) as ExerciseFormInput["difficulty"]),
-    tags: exercise.tags.join(", "),
   };
 }

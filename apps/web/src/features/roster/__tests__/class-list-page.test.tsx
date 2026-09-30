@@ -9,8 +9,8 @@ import { API_URL, fail, listMeta, ok } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
 
-import { ClassDetailHeader } from "../components/class-detail-header";
-import { ClassListPage, RecruitingClassListPage } from "../pages/class-list-page";
+import { RecruitingRedirect } from "../components/recruiting-redirect";
+import { ClassListPage } from "../pages/class-list-page";
 import type { Class } from "../schemas/roster-schemas";
 import {
   classWithSchedule,
@@ -312,6 +312,30 @@ describe("ClassListPage", () => {
     expect(await screen.findByRole("dialog", { name: "Tạo lớp mới" })).toBeInTheDocument();
   });
 
+  it("opens the create dialog from ?create=1 and drops the param on close, keeping filters", async () => {
+    const user = userEvent.setup();
+    const { router } = renderPage("/classes?q=toan&create=1");
+    expect(await screen.findByRole("dialog", { name: "Tạo lớp mới" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Hủy" }));
+    await waitFor(() => expect(router.state.location.search).not.toContain("create"));
+    expect(router.state.location.search).toContain("q=toan");
+    expect(screen.queryByRole("dialog", { name: "Tạo lớp mới" })).not.toBeInTheDocument();
+  });
+
+  it("ignores ?create=1 for a member without classes.create", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(
+          ok({ center_name: "Trung Tâm Bình Minh", permissions: ["classes.list"] }),
+        ),
+      ),
+    );
+    const { queryClient } = renderPage("/classes?create=1");
+    await screen.findByRole("table");
+    await waitFor(() => expect(queryClient.getQueryState(centerKeys.me)?.status).toBe("success"));
+    expect(screen.queryByRole("dialog", { name: "Tạo lớp mới" })).not.toBeInTheDocument();
+  });
+
   it("hides + Lớp học from a member without classes.create", async () => {
     server.use(
       http.get(`${API_URL}/centers/me`, () =>
@@ -365,100 +389,21 @@ describe("ClassListPage", () => {
   });
 });
 
-describe("RecruitingClassListPage", () => {
-  beforeEach(() => {
-    resetRosterStore();
-    getRosterStore().classes.push({ ...classEnded }, { ...classRecruiting });
-    server.use(...rosterHandlers);
-    signInAs(testPrimaryTeacher);
-  });
-
-  afterEach(() => {
-    useAuthStore.getState().clearSession();
-  });
-
-  function renderRecruiting(route = "/classes/recruiting") {
-    return renderWithProviders(<RecruitingClassListPage />, {
-      route,
+describe("RecruitingRedirect", () => {
+  it("sends old /classes/recruiting links to the catalog's recruiting chip, keeping the filters", async () => {
+    const { router } = renderWithProviders(<RecruitingRedirect />, {
+      route: "/classes/recruiting?q=a&weekday=2&shift=morning&phase=x",
       path: "/classes/recruiting",
-      extraRoutes: [{ path: "/classes/:id", element: <DetailStub /> }],
+      extraRoutes: [{ path: "/classes", element: <p>Danh mục lớp</p> }],
     });
-  }
 
-  it("lists only the classes open for recruitment under its own header", async () => {
-    const seen = captureListRequests();
-    const stats: URLSearchParams[] = [];
-    server.use(
-      http.get(`${API_URL}/classes/stats`, ({ request }) => {
-        stats.push(new URL(request.url).searchParams);
-        return HttpResponse.json(
-          ok({ all: 1, upcoming: 1, running: 0, ended: 0, archived: 0, recruiting: 1 }),
-        );
-      }),
-    );
-    renderRecruiting();
-
-    expect(screen.getByRole("heading", { name: "Lớp cần tuyển sinh" })).toBeInTheDocument();
-    expect(
-      screen.getByText("Các lớp đang bật “Cần tuyển sinh” — chưa đủ sĩ số hoặc sắp khai giảng."),
-    ).toBeInTheDocument();
-    await screen.findByRole("table");
-    await waitFor(() => expect(seen.at(-1)?.get("recruiting")).toBe("true"));
-    await waitFor(() => expect(stats.at(-1)?.get("recruiting")).toBe("true"));
-
-    const group = screen.getByRole("radiogroup", { name: "Lọc theo trạng thái" });
-    await waitFor(() => {
-      expect(within(group).getByRole("radio", { name: /Tất cả/ })).toHaveTextContent("1");
-    });
-    // The whole page is the recruiting set; a chip for it would repeat "Tất cả".
-    expect(within(group).queryByRole("radio", { name: /Cần tuyển sinh/ })).not.toBeInTheDocument();
-  });
-
-  it("shows only the open class from the store and its own empty copy", async () => {
-    renderRecruiting();
-    const table = await screen.findByRole("table");
-    await waitFor(() => expect(within(table).getAllByRole("row").slice(1)).toHaveLength(1));
-    expect(within(table).getByText("Toán 8C")).toBeInTheDocument();
-    expect(within(table).queryByText("Anh Văn 7B")).not.toBeInTheDocument();
-  });
-
-  it("says there is nothing to recruit for when no class is open", async () => {
-    getRosterStore().classes.length = 0;
-    renderRecruiting();
-    expect(await screen.findByText("Không có lớp nào cần tuyển sinh.")).toBeInTheDocument();
-    expect(screen.queryByRole("table")).not.toBeInTheDocument();
-  });
-
-  it("a stale recruiting view in the URL falls back to Tất cả", async () => {
-    renderRecruiting("/classes/recruiting?view=recruiting");
-    const group = await screen.findByRole("radiogroup", { name: "Lọc theo trạng thái" });
-    expect(within(group).getByRole("radio", { name: /Tất cả/ })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
-  });
-
-  it("Sửa opens the edit dialog in place", async () => {
-    const user = userEvent.setup();
-    const { router } = renderRecruiting();
-    await user.click(
-      await screen.findByRole("button", { name: `Sửa lớp ${classRecruiting.name}` }),
-    );
-    expect(await screen.findByRole("dialog", { name: "Sửa lớp học" })).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/classes/recruiting");
-  });
-
-  it("Mở opens the class detail, whose back link returns to Lớp cần tuyển sinh", async () => {
-    const user = userEvent.setup();
-    const { router } = renderRecruiting();
-    await user.click(await screen.findByRole("button", { name: `Mở lớp ${classRecruiting.name}` }));
-    const back = await screen.findByRole("link", { name: "Lớp cần tuyển sinh" });
-    expect(router.state.location.pathname).toBe(`/classes/${classRecruiting.id}`);
-    expect(back).toHaveAttribute("href", "/classes/recruiting");
+    expect(await screen.findByText("Danh mục lớp")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/classes");
+    const search = new URLSearchParams(router.state.location.search);
+    expect(search.get("view")).toBe("recruiting");
+    expect(search.get("q")).toBe("a");
+    expect(search.get("weekday")).toBe("2");
+    expect(search.get("shift")).toBe("morning");
+    expect(search.has("phase")).toBe(false);
   });
 });
-
-/** The real detail header over a fixed class, so the back link reads the router state. */
-function DetailStub() {
-  return <ClassDetailHeader klass={classRecruiting} canWrite={false} onEdit={() => undefined} />;
-}

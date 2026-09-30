@@ -41,8 +41,7 @@ export type ContactChildInvoiceRow = z.infer<typeof contactChildInvoiceRowSchema
 export const contactBalanceRowSchema = z.object({
   contact_id: z.string(),
   full_name: z.string(),
-  // Null when the caller may not see the contact's phone (phone privacy:
-  // owner/oversight or an assigned hoc_vu see it, other staff do not).
+  // Null unless the caller holds contacts.view_all (the owner always does).
   phone: z.string().nullable(),
   contact_archived: z.boolean(),
   student_count: z.number().int(),
@@ -54,6 +53,18 @@ export const contactBalanceRowSchema = z.object({
 });
 
 export type ContactBalanceRow = z.infer<typeof contactBalanceRowSchema>;
+
+/**
+ * `collections.ContactOutstanding` — one family's outstanding balance summed
+ * over every billing period of a month. Families with nothing owed are
+ * absent from the list.
+ */
+export const contactOutstandingSchema = z.object({
+  contact_id: z.string(),
+  outstanding: z.number(),
+});
+
+export type ContactOutstanding = z.infer<typeof contactOutstandingSchema>;
 
 /**
  * `collections.ClassCollectionRow` — the by-class view's row shape, one per
@@ -207,7 +218,8 @@ export const bulkSendRowSchema = z.object({
   notification_id: z.string(),
   contact_id: z.string(),
   contact_name: z.string(),
-  phone: z.string(),
+  // null when the sender lacks contacts.view_all — the phone rule masks it.
+  phone: z.string().nullable(),
   channel: notificationChannelSchema,
   purpose: notificationPurposeSchema,
   status: notificationStatusSchema,

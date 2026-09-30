@@ -1,4 +1,10 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 
 import {
   clearContactZaloMapping,
@@ -11,6 +17,7 @@ import {
   type ListContactsParams,
 } from "../api/contacts-api";
 import type { ContactInput, ZaloMappingInput } from "../schemas/roster-schemas";
+import { nextPageAfter } from "./next-page";
 import { contactsKeys, studentsKeys } from "./roster-keys";
 
 export { contactsKeys };
@@ -20,6 +27,24 @@ export function useContactsList(params: ListContactsParams = {}) {
     queryKey: contactsKeys.list(params),
     queryFn: () => listContacts(params),
     placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * Page-by-page contact list behind a "Xem thêm" button. `enabled` keeps the
+ * request off for viewers without contacts.view_all.
+ */
+export function useContactsInfinite(
+  params: Omit<ListContactsParams, "page">,
+  options: { enabled?: boolean } = {},
+) {
+  return useInfiniteQuery({
+    queryKey: contactsKeys.infinite(params),
+    queryFn: ({ pageParam }) => listContacts({ ...params, page: pageParam }),
+    initialPageParam: 1,
+    getNextPageParam: (_last, pages) => nextPageAfter(pages),
+    placeholderData: keepPreviousData,
+    enabled: options.enabled ?? true,
   });
 }
 

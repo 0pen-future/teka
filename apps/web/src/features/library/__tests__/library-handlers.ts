@@ -1107,7 +1107,11 @@ export const libraryHandlers = [
     const exercise = store.exercises.find((e) => e.id === params.id);
     if (!exercise) return notFound("exercise");
     const body = (await request.json()) as ExerciseInput;
-    Object.assign(exercise, body, { updated_at: NOW });
+    // Like the API, a blank code keeps the exercise's current one.
+    Object.assign(exercise, body, {
+      code: body.code?.toUpperCase() ?? exercise.code,
+      updated_at: NOW,
+    });
     return HttpResponse.json(ok(exerciseBankRow(exercise)));
   }),
   http.delete(`${API_URL}/library/exercises/:id`, ({ params }) => {

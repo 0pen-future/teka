@@ -20,6 +20,8 @@ import { ExerciseDialog } from "./exercise-dialog";
 interface LessonExercisesProps {
   lesson: TemplateLessonDetail;
   templateId: string;
+  /** The template's level, the starting "Cấp độ" of an exercise authored from this lesson. */
+  templateLevel: string | null;
   /** True only on a draft the viewer may author; otherwise the list renders read-only. */
   editable: boolean;
 }
@@ -40,7 +42,12 @@ function toInput(exercises: LessonExercise[]): LessonExerciseInput[] {
  * version's own exercise groups. Every change rewrites the full attachment
  * list — the API has no partial-update endpoint for this link either.
  */
-export function LessonExercises({ lesson, templateId, editable }: LessonExercisesProps) {
+export function LessonExercises({
+  lesson,
+  templateId,
+  templateLevel,
+  editable,
+}: LessonExercisesProps) {
   const save = useSetLessonExercises(lesson.id, lesson.version_id, templateId);
   const groups = useExerciseGroups(lesson.version_id);
   const [creating, setCreating] = useState(false);
@@ -73,11 +80,15 @@ export function LessonExercises({ lesson, templateId, editable }: LessonExercise
     );
   }
 
+  /** A self-authored exercise joins the version's first exercise group, if it has any. */
   function addCreated(exercise: Exercise) {
     setCreating(false);
     persist(
-      [...toInput(lesson.exercises), { exercise_id: exercise.id, group_id: null }],
-      "Đã thêm bài tập vào buổi học",
+      [
+        ...toInput(lesson.exercises),
+        { exercise_id: exercise.id, group_id: groups.data?.[0]?.id ?? null },
+      ],
+      `Đã tạo ${exercise.code} và gán vào buổi`,
     );
   }
 
@@ -112,10 +123,10 @@ export function LessonExercises({ lesson, templateId, editable }: LessonExercise
         {editable ? (
           <div className="flex flex-wrap items-center gap-2">
             <HvButton type="button" variant="secondary" size="sm" onClick={() => setCreating(true)}>
-              Bài tập tự soạn
+              + Bài tập tự soạn
             </HvButton>
             <HvButton type="button" size="sm" onClick={() => setPickerOpen(true)}>
-              Bài tập có sẵn
+              + Bài tập có sẵn
             </HvButton>
           </div>
         ) : null}
@@ -213,6 +224,7 @@ export function LessonExercises({ lesson, templateId, editable }: LessonExercise
             if (!open) setCreating(false);
           }}
           mode="create"
+          lesson={{ level: templateLevel }}
           onCreated={addCreated}
         />
       ) : null}

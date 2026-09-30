@@ -92,7 +92,7 @@ export function ExercisesBank({ canEdit }: { canEdit: boolean }) {
           <Input
             type="search"
             aria-label="Tìm bài tập"
-            placeholder="Tìm theo tên hoặc mã…"
+            placeholder="Tìm tên hoặc mã bài tập…"
             value={search.query}
             onChange={(event) => search.setQuery(event.target.value)}
             className="pl-9"
@@ -106,7 +106,7 @@ export function ExercisesBank({ canEdit }: { canEdit: boolean }) {
         />
         {canEdit ? (
           <HvButton size="sm" onClick={() => setCreating(true)}>
-            Thêm bài tập
+            + Soạn bài tập
           </HvButton>
         ) : null}
       </div>
@@ -131,7 +131,7 @@ export function ExercisesBank({ canEdit }: { canEdit: boolean }) {
             search.q
               ? "Đổi từ khoá hoặc xoá ô tìm."
               : canEdit
-                ? "Thêm bài tập đầu tiên bằng nút Thêm bài tập."
+                ? "Soạn bài tập đầu tiên bằng nút + Soạn bài tập."
                 : "Người có quyền soạn sẽ thêm bài tập tại đây."
           }
         />
@@ -227,7 +227,7 @@ export function ExercisesBank({ canEdit }: { canEdit: boolean }) {
             mode="create"
             open={creating}
             onOpenChange={setCreating}
-            onCreated={() => hvToast("Đã thêm bài tập")}
+            onCreated={(exercise) => hvToast(`Đã thêm ${exercise.code} vào ngân hàng`)}
           />
           {editing ? (
             <ExerciseDialog
@@ -238,6 +238,7 @@ export function ExercisesBank({ canEdit }: { canEdit: boolean }) {
                 if (!open) setEditing(null);
               }}
               onSaved={() => hvToast("Đã lưu bài tập")}
+              onDeleted={(exercise) => hvToast(`Đã xoá ${exercise.code}`)}
             />
           ) : null}
           <HvConfirmDialog

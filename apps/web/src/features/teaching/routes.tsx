@@ -15,14 +15,16 @@ export const teachingRoutes: RouteObject[] = [
   },
   {
     path: "records",
-    handle: { title: "Hồ sơ học sinh" } satisfies RouteHandle,
-    lazy: async () => ({ Component: (await import("./pages/records-page")).RecordsPage }),
+    handle: { title: "Học sinh" } satisfies RouteHandle,
+    lazy: async () => ({
+      Component: (await import("./components/records-redirect")).RecordsRedirect,
+    }),
   },
   {
     path: "records/:studentId",
-    handle: { title: "Hồ sơ của học sinh" } satisfies RouteHandle,
+    handle: { title: "Chi tiết học sinh" } satisfies RouteHandle,
     lazy: async () => ({
-      Component: (await import("./pages/student-record-page")).StudentRecordPage,
+      Component: (await import("./components/records-redirect")).StudentRecordRedirect,
     }),
   },
   {

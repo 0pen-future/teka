@@ -63,15 +63,16 @@ app. Each has a README describing its ports and the extraction procedure.
 Some backend features own no domain table of their own beyond a thin link or
 message row — they compose other features' services to implement a workflow
 that spans domains. `classprogram` (links a class to one published program
-template version, copying its lesson titles into the class curriculum on
-apply) and `classchat` (the class's internal chat) both sit above `classes`,
+template version, copying its lesson titles into the class curriculum and its
+score set into the class's score components through `grading` on apply) and
+`classchat` (the class's internal chat) both sit above `classes`,
 `teaching`, and `library`, wired the same way `handoff` composes `classes`,
 `sessions`, and `centers`: the constructor takes each dependency as a
 consumer-defined interface (never the dependency's repository — see
 [api-guidelines.md](api-guidelines.md#feature-modules)), and
 [`router.go`](../apps/api/internal/server/router.go) registers the
 orchestrating feature after every feature it depends on (`classes` and
-`library` before `teaching`, `teaching` before `classprogram`).
+`library` before `teaching`, `teaching` and `grading` before `classprogram`).
 
 ## Dependency injection (backend)
 

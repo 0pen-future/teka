@@ -11,14 +11,15 @@ import (
 
 	"teka/apps/api/internal/features/statements"
 	"teka/apps/api/internal/shared/apperror"
+	"teka/apps/api/internal/shared/authctx"
 	"teka/apps/api/internal/shared/pagination"
 	"teka/apps/api/internal/testutil"
 )
 
 // The one phone rule on the statements surface: a statement row carries the
-// contact's phone only to the owner, a reports-oversight holder, or a caller
-// with an ACTIVE hoc_vu stint on a live class where one of the contact's
-// students is actively enrolled. The family statement URL is stricter still —
+// contact's phone only to the owner or a contacts.view_all holder (a
+// reports-oversight holder through the key it implies) — never through a
+// class staff assignment, hoc_vu included. The family statement URL is stricter still —
 // it is a public bearer token, so it goes only to owner/oversight, never to a
 // class teacher or a hoc_vu (they get the per-class variant in a later phase).
 func TestStatementPhoneAndURLFollowTheOnePhoneRule(t *testing.T) {
@@ -96,10 +97,10 @@ func TestStatementPhoneAndURLFollowTheOnePhoneRule(t *testing.T) {
 	require.Equal(t, apperror.CodeNotFound, apperror.From(err).Code,
 		"a tro_giang stint alone opens no family-statement listing")
 
-	// The row grant is the ONE rule, not a per-surface special case: give the
-	// period teacher an active hoc_vu stint on another teacher's class where
-	// this contact's student is actively enrolled, and the phone appears on
-	// their own statement read — but the family URL still does not.
+	// Class assignments never widen the phone: give the period teacher an
+	// active hoc_vu stint on another teacher's class where this contact's
+	// student is actively enrolled, and their own statement read still
+	// carries no phone.
 	classB := testutil.Class(t, db, memberB.ID, testutil.WithClassName("PrivacyB"), testutil.WithClassStartDate(classStart))
 	testutil.Enrollment(t, db, memberB.ID, student.ID, classB.ID, classStart)
 	testutil.StaffAssignment(t, db, classB, member.ID, "hoc_vu")
@@ -108,18 +109,25 @@ func TestStatementPhoneAndURLFollowTheOnePhoneRule(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, memberRows, 1)
 	viaHocVu := statementsSvc.ToResponse(memberScope, memberRows[0])
-	require.NotNil(t, viaHocVu.Phone, "an active hoc_vu stint over the contact's student unlocks the phone")
-	require.Equal(t, "+84903334444", *viaHocVu.Phone)
+	require.Nil(t, viaHocVu.Phone, "an active hoc_vu stint no longer unlocks the phone")
 	require.Nil(t, viaHocVu.URL, "hoc_vu never receives the family URL — only owner/oversight do")
+
+	// contacts.view_all is the one grant that opens the phone, and it still
+	// never opens the family URL.
+	viewerScope := memberScope
+	viewerScope.Perms = authctx.BuildPermSet(nil, []string{authctx.PermContactsViewAll}, nil)
+	viaGrant := statementsSvc.ToResponse(viewerScope, memberRows[0])
+	require.NotNil(t, viaGrant.Phone, "contacts.view_all unlocks the phone")
+	require.Equal(t, "+84903334444", *viaGrant.Phone)
+	require.Nil(t, viaGrant.URL, "contacts.view_all is a read grant, never the family URL")
 }
 
-// TargetContacts takes two scopes on purpose: the rows come from the period
-// anchor (whose invoices are targeted) while phone_visible is judged for the
-// viewer (who is looking). The row-level bit is only the viewer's active
-// hoc_vu stint; owner and oversight widening happens above the repository
-// through Scope.PhoneVisible. Pin both halves here so a refactor that folds
-// the two scopes into one fails at the repository rather than in a send path.
-func TestTargetContactsRowsByAnchorPhoneByViewer(t *testing.T) {
+// TargetContacts reads rows by the period anchor alone: whose invoices are
+// targeted is the anchor's business, and whether the phone may be shown is
+// decided above the repository by Scope.PhoneVisible. Pin that the rows
+// follow the anchor and always carry the stored phone, so a refactor that
+// masks inside the repository fails here rather than in a send path.
+func TestTargetContactsRowsFollowTheAnchor(t *testing.T) {
 	t.Parallel()
 	_, billingSvc, db := newIntegrationDeps(t)
 	repo := statements.NewRepository(db)
@@ -127,42 +135,26 @@ func TestTargetContactsRowsByAnchorPhoneByViewer(t *testing.T) {
 
 	owner, _ := testutil.Teacher(t, db)
 	member, _ := testutil.Teacher(t, db)
-	bystander, _ := testutil.Teacher(t, db)
 	ownerScope := testutil.ScopeFor(t, db, owner.ID)
 	testutil.JoinCenter(t, db, member.ID, ownerScope.CenterID)
-	testutil.JoinCenter(t, db, bystander.ID, ownerScope.CenterID)
 	memberScope := testutil.ScopeFor(t, db, member.ID)
-	bystanderScope := testutil.ScopeFor(t, db, bystander.ID)
 
 	contact := testutil.Contact(t, db, member.ID, testutil.WithContactPhone("+84901234567"))
-	class := seedChild(t, db, member.ID, contact.ID, "Anchor", date("2026-08-01"), 1)
+	seedChild(t, db, member.ID, contact.ID, "Anchor", date("2026-08-01"), 1)
 	period, err := billingSvc.EnsurePeriod(ctx, memberScope, 2026, 8)
 	require.NoError(t, err)
 	_, err = billingSvc.Close(ctx, memberScope, period.ID)
 	require.NoError(t, err)
 
-	rows, err := repo.TargetContacts(ctx, memberScope.Self(), ownerScope, period.ID)
+	rows, err := repo.TargetContacts(ctx, memberScope.Self(), period.ID)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Equal(t, contact.ID, rows[0].ContactID)
-	require.False(t, rows[0].PhoneVisible, "the row bit is the viewer's stint alone, even for the owner")
-	require.True(t, ownerScope.PhoneVisible(rows[0].PhoneVisible), "the owner is widened above the row")
+	require.Equal(t, "+84901234567", rows[0].Phone, "the repository returns the stored phone; masking is the service's job")
+	require.True(t, ownerScope.PhoneVisible())
+	require.False(t, memberScope.PhoneVisible(), "a plain member never sees another teacher's contact phone")
 
-	rows, err = repo.TargetContacts(ctx, memberScope.Self(), bystanderScope, period.ID)
-	require.NoError(t, err)
-	require.Len(t, rows, 1, "rows follow the anchor, not the viewer")
-	require.Equal(t, contact.ID, rows[0].ContactID)
-	require.False(t, rows[0].PhoneVisible)
-	require.False(t, bystanderScope.PhoneVisible(rows[0].PhoneVisible),
-		"a member with neither oversight nor a stint never sees another teacher's contact phone")
-
-	testutil.StaffAssignment(t, db, class, bystander.ID, "hoc_vu")
-	rows, err = repo.TargetContacts(ctx, memberScope.Self(), bystanderScope, period.ID)
-	require.NoError(t, err)
-	require.Len(t, rows, 1)
-	require.True(t, rows[0].PhoneVisible, "an active hoc_vu stint on the anchor's class opens the phone for that viewer")
-
-	rows, err = repo.TargetContacts(ctx, ownerScope.Self(), ownerScope, period.ID)
+	rows, err = repo.TargetContacts(ctx, ownerScope.Self(), period.ID)
 	require.NoError(t, err)
 	require.Empty(t, rows, "the anchor decides whose invoices are targeted")
 }

@@ -9,9 +9,12 @@ import type { RouteHandle } from "@/components/shared/document-title";
  */
 export const rosterRoutes: RouteObject[] = [
   {
+    // The contact list lives in the students page's contacts tab now.
     path: "contacts",
-    handle: { title: "Phụ huynh" } satisfies RouteHandle,
-    lazy: async () => ({ Component: (await import("./pages/contacts-page")).ContactsPage }),
+    handle: { title: "Người liên hệ" } satisfies RouteHandle,
+    lazy: async () => ({
+      Component: (await import("./components/contacts-redirect")).ContactsRedirect,
+    }),
   },
   {
     path: "contacts/:id",
@@ -22,7 +25,7 @@ export const rosterRoutes: RouteObject[] = [
   },
   {
     path: "students",
-    handle: { title: "Quản trị học sinh" } satisfies RouteHandle,
+    handle: { title: "Học sinh" } satisfies RouteHandle,
     lazy: async () => ({ Component: (await import("./pages/students-page")).StudentsPage }),
   },
   {
@@ -47,11 +50,13 @@ export const rosterRoutes: RouteObject[] = [
     lazy: async () => ({ Component: (await import("./pages/class-list-page")).ClassListPage }),
   },
   {
-    // Static segment, so react-router ranks it above "classes/:id".
+    // Static segment, so react-router ranks it above "classes/:id". The
+    // recruiting list lives in the catalog's "Cần tuyển sinh" chip now; the
+    // title matches the catalog so it does not flicker through the redirect.
     path: "classes/recruiting",
-    handle: { title: "Lớp cần tuyển sinh" } satisfies RouteHandle,
+    handle: { title: "Danh mục lớp" } satisfies RouteHandle,
     lazy: async () => ({
-      Component: (await import("./pages/class-list-page")).RecruitingClassListPage,
+      Component: (await import("./components/recruiting-redirect")).RecruitingRedirect,
     }),
   },
   {

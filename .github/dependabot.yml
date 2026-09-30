@@ -20,6 +20,11 @@ updates:
     ignore:
       - dependency-name: typescript
         versions: [">=7 <8"]
+      # 30.1.0 breaks menus, focus return and File uploads under vitest;
+      # 30.1.1 still fails FormData uploads through axios. Later releases
+      # arrive as usual and CI decides.
+      - dependency-name: jsdom
+        versions: ["30.1.0", "30.1.1"]
 
   - package-ecosystem: npm
     directory: /

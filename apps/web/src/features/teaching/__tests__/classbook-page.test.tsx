@@ -4,6 +4,7 @@ import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
+import { centerKeys } from "@/features/center";
 import { API_URL, ok } from "@/test/msw/handlers";
 import {
   classWithSchedule,
@@ -189,6 +190,38 @@ describe("ClassbookPage sessions ledger", () => {
 
     expect(await screen.findByText("Chưa có lớp đang hoạt động")).toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: /^Chọn lớp/ })).not.toBeInTheDocument();
+  });
+
+  it("sends a member with classes.create to the create dialog from the empty class state", async () => {
+    const user = userEvent.setup();
+    getRosterStore().classes.length = 0;
+    signInAs(testPrimaryTeacher);
+    const { router } = renderWithProviders(<ClassbookPage />, {
+      route: "/classbook",
+      path: "/classbook",
+      extraRoutes: [{ path: "/classes", element: <div>class-list-stub</div> }],
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Tạo lớp" }));
+    expect(await screen.findByText("class-list-stub")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/classes");
+    expect(router.state.location.search).toBe("?create=1");
+  });
+
+  it("hides Tạo lớp from a member without classes.create", async () => {
+    server.use(
+      http.get(`${API_URL}/centers/me`, () =>
+        HttpResponse.json(
+          ok({ center_name: "Trung Tâm Bình Minh", permissions: ["teaching.read"] }),
+        ),
+      ),
+    );
+    getRosterStore().classes.length = 0;
+    const { queryClient } = renderClassbookPage();
+
+    expect(await screen.findByText("Chưa có lớp đang hoạt động")).toBeInTheDocument();
+    await waitFor(() => expect(queryClient.getQueryState(centerKeys.me)?.status).toBe("success"));
+    expect(screen.queryByRole("button", { name: "Tạo lớp" })).not.toBeInTheDocument();
   });
 });
 

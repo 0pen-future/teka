@@ -100,12 +100,11 @@ func (s *Service) List(ctx context.Context, sc authctx.Scope, filter ListFilter,
 	return rows, total, err
 }
 
-// maskPhone enforces the one phone rule at the service boundary: the repo's
-// phone_visible column carries the row grant (active hoc_vu on a class with an
-// active enrollment); the owner/oversight bypass lives in Scope.PhoneVisible.
-// Masked means nil — the wire form is JSON null, never an empty string.
+// maskPhone enforces the one phone rule (Scope.PhoneVisible) at the service
+// boundary. Masked means nil — the wire form is JSON null, never an empty
+// string.
 func maskPhone(sc authctx.Scope, row *Row) *Row {
-	if row != nil && !sc.PhoneVisible(row.PhoneVisible) {
+	if row != nil && !sc.PhoneVisible() {
 		row.ContactPhone = nil
 	}
 	return row

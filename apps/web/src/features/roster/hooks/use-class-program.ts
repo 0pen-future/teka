@@ -38,8 +38,11 @@ export function useCourseDefaultTemplate(courseId: string | undefined) {
 
 /**
  * Applying or swapping rewrites the class curriculum's lesson titles
- * server-side, so the classbook's curriculum cache is stale too. Removing
- * only drops the link, but the same invalidation keeps both paths uniform.
+ * server-side and can seed the class's score components from the template,
+ * so the classbook's curriculum, score-component and session-score caches are
+ * stale too.
+ * Removing only drops the link, but the same invalidation keeps both paths
+ * uniform.
  */
 function useProgramWrite<TVars>(classId: string, mutationFn: (vars: TVars) => Promise<unknown>) {
   const queryClient = useQueryClient();
@@ -49,6 +52,10 @@ function useProgramWrite<TVars>(classId: string, mutationFn: (vars: TVars) => Pr
       void queryClient.invalidateQueries({ queryKey: classProgramKeys.detail(classId) });
       void queryClient.invalidateQueries({ queryKey: classProgramKeys.lessons(classId) });
       void queryClient.invalidateQueries({ queryKey: teachingKeys.curriculum(classId) });
+      void queryClient.invalidateQueries({ queryKey: teachingKeys.scoreComponents(classId) });
+      // Session score grids carry their own column list, keyed by session rather
+      // than class, so every cached grid is refreshed.
+      void queryClient.invalidateQueries({ queryKey: [...teachingKeys.all, "session-scores"] });
     },
   });
 }

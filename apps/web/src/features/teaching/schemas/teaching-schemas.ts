@@ -88,7 +88,7 @@ export interface MarkEntryInput {
   personal_note?: string | null;
 }
 
-/** `teaching.MonthMarksResponse` — the classbook/records batch read. */
+/** `teaching.MonthMarksResponse` — the classbook batch read. */
 export const monthMarksResponseSchema = z.object({
   session_notes: z.array(noteResponseSchema),
   marks: z.array(markResponseSchema),

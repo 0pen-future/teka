@@ -196,11 +196,11 @@ describe("PathDetailPage", () => {
     await screen.findByRole("heading", { name: "Lộ trình Toán THCS" });
 
     await user.click(screen.getByRole("button", { name: "Sửa lộ trình" }));
-    const dialog = await screen.findByRole("dialog", { name: "Sửa lộ trình" });
+    const dialog = await screen.findByRole("dialog", { name: "Sửa lộ trình học" });
     const name = within(dialog).getByLabelText("Tên lộ trình");
     await user.clear(name);
     await user.type(name, "Lộ trình Toán 6-9");
-    await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
+    await user.click(within(dialog).getByRole("button", { name: "Lưu thay đổi" }));
 
     expect(await screen.findByRole("heading", { name: "Lộ trình Toán 6-9" })).toBeInTheDocument();
     expect(getPathsStore().paths[0]!.name).toBe("Lộ trình Toán 6-9");

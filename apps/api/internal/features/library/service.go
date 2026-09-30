@@ -195,6 +195,21 @@ func (s *Service) PublishedVersion(ctx context.Context, sc authctx.Scope, versio
 	return s.versionForClass(ctx, sc, versionID, func(status string) bool { return status == StatusPublished })
 }
 
+// PublishedScoreSet returns a published version's score set for the
+// class-program feature, which copies it into the class when the version is
+// applied. Like PublishedVersion it skips the library.read gate and refuses a
+// draft or archived version with a 409. The result is never nil.
+func (s *Service) PublishedScoreSet(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) ([]ScoreSetGroup, error) {
+	row, err := s.repo.GetVersion(ctx, sc, versionID)
+	if err != nil {
+		return nil, notFound(err, "template version")
+	}
+	if row.Status != StatusPublished {
+		return nil, errVersionNotPublishedForClass()
+	}
+	return scoreSet(row.ScoreSet), nil
+}
+
 // ReleasedVersion is PublishedVersion for reading back a version a class
 // already applies: a released (published or archived) version is immutable,
 // so retiring it in the library must not blank the class's lessons. Only a
@@ -866,10 +881,11 @@ func mapCodeClash(err error) error {
 }
 
 // exerciseCodePattern is the shape of a caller-supplied exercise code:
-// letters, digits and dashes, no length minimum (an auto-generated code is
-// always BT-0001-style, but a caller may label an exercise with anything
-// short, e.g. a single letter).
-var exerciseCodePattern = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
+// letters, digits, dashes and underscores, no length minimum (an
+// auto-generated code is always BT-0001-style, but a caller may label an
+// exercise with anything short, e.g. a single letter, or a textbook
+// reference such as PP1_U3L1).
+var exerciseCodePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // normalizeExerciseCode upper-cases and validates a caller-supplied exercise
 // code. A blank or omitted one returns (nil, nil): CreateExercise then
@@ -885,7 +901,7 @@ func normalizeExerciseCode(raw *string) (*string, error) {
 	}
 	if !exerciseCodePattern.MatchString(code) {
 		return nil, apperror.Invalid("Mã bài tập không hợp lệ",
-			map[string]string{"code": "chỉ gồm chữ, số và dấu gạch ngang"})
+			map[string]string{"code": "chỉ gồm chữ, số, dấu gạch ngang và gạch dưới"})
 	}
 	return &code, nil
 }

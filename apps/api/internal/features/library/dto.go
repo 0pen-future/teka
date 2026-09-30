@@ -250,7 +250,7 @@ func materialBankResponse(row *MaterialRow) MaterialResponse {
 }
 
 // ExerciseRequest creates or fully replaces a library exercise. Code, when
-// given, is uppercased and checked against ^[A-Za-z0-9-]+$; when omitted the
+// given, is uppercased and checked against ^[A-Za-z0-9_-]+$; when omitted the
 // service assigns the next BT-0001-style code of the center.
 type ExerciseRequest struct {
 	Title       string   `json:"title" binding:"required,min=1,max=200"`

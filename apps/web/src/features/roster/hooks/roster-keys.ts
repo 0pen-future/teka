@@ -14,6 +14,8 @@ export const contactsKeys = {
   all: ["roster", "contacts"] as const,
   lists: () => [...contactsKeys.all, "list"] as const,
   list: (params: ListContactsParams) => [...contactsKeys.lists(), params] as const,
+  /** Under `lists()` so every list invalidation also resets the load-more pages. */
+  infinite: (params: ListContactsParams) => [...contactsKeys.lists(), "infinite", params] as const,
   details: () => [...contactsKeys.all, "detail"] as const,
   detail: (id: string) => [...contactsKeys.details(), id] as const,
 };
@@ -22,6 +24,8 @@ export const studentsKeys = {
   all: ["roster", "students"] as const,
   lists: () => [...studentsKeys.all, "list"] as const,
   list: (params: ListStudentsParams) => [...studentsKeys.lists(), params] as const,
+  /** Under `lists()` so every list invalidation also resets the load-more pages. */
+  infinite: (params: ListStudentsParams) => [...studentsKeys.lists(), "infinite", params] as const,
   details: () => [...studentsKeys.all, "detail"] as const,
   detail: (id: string) => [...studentsKeys.details(), id] as const,
 };

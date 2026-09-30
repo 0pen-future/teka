@@ -4,29 +4,24 @@ import "testing"
 
 func TestPhoneVisible(t *testing.T) {
 	owner := Scope{IsOwner: true}
-	if !owner.PhoneVisible(false) {
+	if !owner.PhoneVisible() {
 		t.Error("owner must always see phones")
 	}
 
-	// Every member combination of: holding reports.send, holding
-	// contacts.view_all, and the row itself being visible (assigned hoc_vu).
-	// The phone is visible exactly when the caller reads contacts
-	// center-wide (directly or through reports.send) or owns the row.
+	// Every member combination of holding reports.send and holding
+	// contacts.view_all. The phone is visible exactly when the caller reads
+	// contacts center-wide, directly or through reports.send; no class
+	// assignment widens it.
 	cases := []struct {
-		name       string
-		reports    bool
-		contacts   bool
-		rowVisible bool
-		want       bool
+		name     string
+		reports  bool
+		contacts bool
+		want     bool
 	}{
-		{"plain member, foreign row", false, false, false, false},
-		{"plain member, own row", false, false, true, true},
-		{"contacts.view_all, foreign row", false, true, false, true},
-		{"contacts.view_all, own row", false, true, true, true},
-		{"reports.send, foreign row", true, false, false, true},
-		{"reports.send, own row", true, false, true, true},
-		{"both keys, foreign row", true, true, false, true},
-		{"both keys, own row", true, true, true, true},
+		{"plain member", false, false, false},
+		{"contacts.view_all", false, true, true},
+		{"reports.send", true, false, true},
+		{"both keys", true, true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -38,14 +33,14 @@ func TestPhoneVisible(t *testing.T) {
 				grants = append(grants, PermContactsViewAll)
 			}
 			sc := Scope{Perms: BuildPermSet(nil, grants, nil)}
-			if got := sc.PhoneVisible(tc.rowVisible); got != tc.want {
-				t.Errorf("PhoneVisible(%v) = %v, want %v", tc.rowVisible, got, tc.want)
+			if got := sc.PhoneVisible(); got != tc.want {
+				t.Errorf("PhoneVisible() = %v, want %v", got, tc.want)
 			}
 		})
 	}
 
 	otherWide := Scope{Perms: BuildPermSet(nil, []string{PermStudentsViewAll}, nil)}
-	if otherWide.PhoneVisible(false) {
+	if otherWide.PhoneVisible() {
 		t.Error("another resource's view_all must not leak phones")
 	}
 }

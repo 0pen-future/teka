@@ -509,60 +509,129 @@ describe("ExercisesBank", () => {
     expect(screen.getByRole("row", { name: /Bài 1: Tập hợp/ })).toBeInTheDocument();
   });
 
-  it("creates an exercise with a code, skill and level from the dialog", async () => {
+  it("creates an exercise from the Tạo bài tập dialog with a normalized code", async () => {
     const user = userEvent.setup();
     renderPage("/library/exercises");
     await screen.findByRole("row", { name: /Bài 1: Tập hợp/ });
 
-    await user.click(screen.getByRole("button", { name: "Thêm bài tập" }));
-    const dialog = await screen.findByRole("dialog", { name: "Thêm bài tập" });
-    await user.type(within(dialog).getByLabelText("Tên bài tập"), "Bài 3: Hỗn số");
-    await user.type(within(dialog).getByLabelText("Mã"), "bt-hon-so");
-    await user.type(within(dialog).getByLabelText("Kỹ năng"), "Tính toán");
-    await user.type(within(dialog).getByLabelText("Cấp độ"), "Nâng cao");
-    await user.click(within(dialog).getByRole("button", { name: "Thêm" }));
+    await user.click(screen.getByRole("button", { name: "+ Soạn bài tập" }));
+    const dialog = await screen.findByRole("dialog", { name: "Tạo bài tập" });
+    expect(within(dialog).getByText("Mã dùng để tra cứu và sao chép nhanh.")).toBeInTheDocument();
+    expect(within(dialog).getByRole("combobox", { name: "Kỹ năng" })).toHaveTextContent("Tổng hợp");
+    await user.type(within(dialog).getByLabelText("Mã bài tập"), "pp1 u3l1");
+    await user.type(within(dialog).getByLabelText("Cấp độ"), "Prepare 1");
+    await user.type(within(dialog).getByLabelText("Tên bài tập"), "PP1, U3L1");
+    await user.click(within(dialog).getByRole("combobox", { name: "Kỹ năng" }));
+    await user.click(await screen.findByRole("option", { name: "Grammar" }));
+    await user.click(within(dialog).getByRole("button", { name: "Tạo mới" }));
 
-    expect(await screen.findByText("Đã thêm bài tập")).toBeInTheDocument();
-    const row = await screen.findByRole("row", { name: /Bài 3: Hỗn số/ });
-    expect(within(row).getByText("Tính toán")).toBeInTheDocument();
-    expect(within(row).getByText("Nâng cao")).toBeInTheDocument();
-    expect(getLibraryStore().exercises.find((e) => e.title === "Bài 3: Hỗn số")).toMatchObject({
-      code: "BT-HON-SO",
-      skill: "Tính toán",
-      level: "Nâng cao",
+    expect(await screen.findByText("Đã thêm PP1_U3L1 vào ngân hàng")).toBeInTheDocument();
+    const row = await screen.findByRole("row", { name: /PP1, U3L1/ });
+    expect(within(row).getByText("Grammar")).toBeInTheDocument();
+    expect(within(row).getByText("Prepare 1")).toBeInTheDocument();
+    expect(getLibraryStore().exercises.find((e) => e.title === "PP1, U3L1")).toMatchObject({
+      code: "PP1_U3L1",
+      skill: "Grammar",
+      level: "Prepare 1",
+      description: null,
+      difficulty: null,
+      tags: [],
     });
   });
 
-  it("rejects a malformed exercise code before calling the API", async () => {
+  it("leaves a blank code for the API to generate", async () => {
     const user = userEvent.setup();
     renderPage("/library/exercises");
     await screen.findByRole("row", { name: /Bài 1: Tập hợp/ });
 
-    await user.click(screen.getByRole("button", { name: "Thêm bài tập" }));
-    const dialog = await screen.findByRole("dialog", { name: "Thêm bài tập" });
-    await user.type(within(dialog).getByLabelText("Tên bài tập"), "Bài lỗi mã");
-    await user.type(within(dialog).getByLabelText("Mã"), "bt lỗi");
-    await user.click(within(dialog).getByRole("button", { name: "Thêm" }));
+    await user.click(screen.getByRole("button", { name: "+ Soạn bài tập" }));
+    const dialog = await screen.findByRole("dialog", { name: "Tạo bài tập" });
+    expect(within(dialog).getByText("Để trống để tự sinh mã BT-…")).toBeInTheDocument();
+    await user.type(within(dialog).getByLabelText("Tên bài tập"), "Bài 3: Hỗn số");
+    await user.click(within(dialog).getByRole("button", { name: "Tạo mới" }));
 
-    expect(
-      await within(dialog).findByText("Chỉ dùng chữ, số và dấu gạch ngang"),
-    ).toBeInTheDocument();
-    expect(getLibraryStore().exercises.some((e) => e.title === "Bài lỗi mã")).toBe(false);
+    expect(await screen.findByText("Đã thêm BT-0003 vào ngân hàng")).toBeInTheDocument();
+    expect(getLibraryStore().exercises.find((e) => e.title === "Bài 3: Hỗn số")).toMatchObject({
+      code: "BT-0003",
+      skill: "Tổng hợp",
+      level: null,
+    });
   });
 
-  it("rejects an exercise skill longer than the API's 50-character limit", async () => {
+  it("requires a name and rejects a malformed code before calling the API", async () => {
     const user = userEvent.setup();
     renderPage("/library/exercises");
     await screen.findByRole("row", { name: /Bài 1: Tập hợp/ });
 
-    await user.click(screen.getByRole("button", { name: "Thêm bài tập" }));
-    const dialog = await screen.findByRole("dialog", { name: "Thêm bài tập" });
-    await user.type(within(dialog).getByLabelText("Tên bài tập"), "Bài lỗi kỹ năng");
-    await user.type(within(dialog).getByLabelText("Kỹ năng"), "a".repeat(51));
-    await user.click(within(dialog).getByRole("button", { name: "Thêm" }));
+    await user.click(screen.getByRole("button", { name: "+ Soạn bài tập" }));
+    const dialog = await screen.findByRole("dialog", { name: "Tạo bài tập" });
+    await user.type(within(dialog).getByLabelText("Mã bài tập"), "bt lỗi");
+    await user.click(within(dialog).getByRole("button", { name: "Tạo mới" }));
 
-    expect(await within(dialog).findByText("Tối đa 50 ký tự")).toBeInTheDocument();
-    expect(getLibraryStore().exercises.some((e) => e.title === "Bài lỗi kỹ năng")).toBe(false);
+    expect(await within(dialog).findByText("Nhập tên bài tập")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText("Chỉ dùng chữ, số, dấu gạch ngang và gạch dưới"),
+    ).toBeInTheDocument();
+    expect(getLibraryStore().exercises).toHaveLength(2);
+  });
+
+  it("edits an exercise, keeping the fields the dialog does not show", async () => {
+    const user = userEvent.setup();
+    renderPage("/library/exercises");
+    await screen.findByRole("row", { name: /Bài 1: Tập hợp/ });
+
+    await user.click(screen.getByRole("button", { name: "Sửa Bài 1: Tập hợp" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sửa bài tập" });
+    expect(within(dialog).getByLabelText("Mã bài tập")).toHaveValue("BT-0001");
+    // A stored "no skill" stays unset until someone picks one.
+    expect(within(dialog).getByRole("combobox", { name: "Kỹ năng" })).toHaveTextContent("Chưa đặt");
+    await user.type(within(dialog).getByLabelText("Cấp độ"), "Lớp 6");
+    await user.click(within(dialog).getByRole("button", { name: "Lưu thay đổi" }));
+
+    expect(await screen.findByText("Đã lưu bài tập")).toBeInTheDocument();
+    expect(getLibraryStore().exercises.find((e) => e.id === exerciseBai1.id)).toMatchObject({
+      code: "BT-0001",
+      level: "Lớp 6",
+      skill: null,
+      description: "Liệt kê phần tử của tập hợp.",
+      difficulty: 2,
+      tags: ["chương 1"],
+    });
+  });
+
+  it("deletes a free exercise from its edit dialog after a stacked confirm", async () => {
+    const user = userEvent.setup();
+    renderPage("/library/exercises");
+    await screen.findByRole("row", { name: /Bài 2: So sánh phân số/ });
+
+    await user.click(screen.getByRole("button", { name: "Sửa Bài 2: So sánh phân số" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sửa bài tập" });
+    await user.click(within(dialog).getByRole("button", { name: "Xoá" }));
+    const confirm = await screen.findByRole("dialog", { name: "Xoá bài tập BT-0002?" });
+    expect(within(confirm).getByText("Xoá vĩnh viễn khỏi ngân hàng bài tập.")).toBeInTheDocument();
+    await user.click(within(confirm).getByRole("button", { name: "Xoá" }));
+
+    expect(await screen.findByText("Đã xoá BT-0002")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Sửa bài tập" })).not.toBeInTheDocument();
+    });
+    expect(getLibraryStore().exercises.some((e) => e.id === exerciseBai2.id)).toBe(false);
+  });
+
+  it("tells the editor to detach an exercise a lesson still uses before deleting it", async () => {
+    const user = userEvent.setup();
+    renderPage("/library/exercises");
+    await screen.findByRole("row", { name: /Bài 1: Tập hợp/ });
+
+    await user.click(screen.getByRole("button", { name: "Sửa Bài 1: Tập hợp" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sửa bài tập" });
+    await user.click(within(dialog).getByRole("button", { name: "Xoá" }));
+
+    expect(
+      await screen.findByText("Còn 1 buổi mẫu dùng BT-0001 — gỡ khỏi buổi trước"),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /^Xoá bài tập/ })).not.toBeInTheDocument();
+    expect(getLibraryStore().exercises.some((e) => e.id === exerciseBai1.id)).toBe(true);
   });
 
   it("deletes a free exercise", async () => {
@@ -599,7 +668,7 @@ describe("ExercisesBank", () => {
     renderPage("/library/exercises");
 
     await screen.findByRole("row", { name: /Bài 1: Tập hợp/ });
-    expect(screen.queryByRole("button", { name: "Thêm bài tập" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "+ Soạn bài tập" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Sửa / })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Xoá / })).not.toBeInTheDocument();
   });

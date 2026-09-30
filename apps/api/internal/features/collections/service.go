@@ -46,10 +46,10 @@ func (s *Service) List(ctx context.Context, sc authctx.Scope, periodID uuid.UUID
 		if err != nil {
 			return nil, err
 		}
-		// The one phone rule: null the phone unless sc is owner/oversight or
-		// the row carries the caller's hoc_vu grant.
-		for i := range rows {
-			if !sc.PhoneVisible(rows[i].PhoneVisible) {
+		// The one phone rule: null the phone unless sc reads contacts
+		// center-wide.
+		if !sc.PhoneVisible() {
+			for i := range rows {
 				rows[i].Phone = nil
 			}
 		}
@@ -75,6 +75,17 @@ func (s *Service) Summary(ctx context.Context, sc authctx.Scope, periodID uuid.U
 		return nil, err
 	}
 	return s.repo.PeriodSummary(ctx, sc, periodID)
+}
+
+// ContactOutstandingByMonth returns every family's outstanding balance for
+// one month, summed across the center's billing periods. The route already
+// requires billing.view_all; the check is repeated here so a future caller
+// that bypasses HTTP cannot read center-wide debt.
+func (s *Service) ContactOutstandingByMonth(ctx context.Context, sc authctx.Scope, year, month int) ([]ContactOutstanding, error) {
+	if !sc.CenterWideFor(authctx.PermBillingViewAll) {
+		return nil, apperror.Forbidden("reading monthly balances requires billing.view_all")
+	}
+	return s.repo.ContactOutstandingByMonth(ctx, sc, year, month)
 }
 
 func (s *Service) ensurePeriod(ctx context.Context, sc authctx.Scope, periodID uuid.UUID) error {

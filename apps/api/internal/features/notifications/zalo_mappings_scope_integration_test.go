@@ -33,17 +33,15 @@ func grantContactsViewAll(t *testing.T, db *gorm.DB, teacherID uuid.UUID) {
 		teacherID, row.CenterID, authctx.PermContactsViewAll).Error)
 }
 
-// TestZaloMappingsFollowsCenterWideOrStint proves the notifications
-// repository's ZaloMappings query — read directly here since every service
-// entry point that calls it (BulkSend, SendPreview, ResumeRun) requires
-// reports.send oversight first, and reports.send now implies
-// contacts.view_all, so a service-level call never exercises the stint arm on
-// its own — resolves a contact's Zalo mapping through either of its two
-// legitimate arms: contacts.view_all (direct grant or owner), or an active
-// hoc_vu stint over one of the contact's actively enrolled students. A caller
-// with neither sees nothing, matching the ledger's own phone-visibility rule
-// this mirrors.
-func TestZaloMappingsFollowsCenterWideOrStint(t *testing.T) {
+// TestZaloMappingsFollowsThePhoneRule proves the notifications repository's
+// ZaloMappings query — read directly here since every service entry point
+// that calls it (BulkSend, SendPreview, ResumeRun) requires reports.send
+// oversight first, and reports.send implies contacts.view_all — resolves a
+// contact's Zalo mapping only for a contacts.view_all holder (direct grant or
+// owner). A class staff assignment, hoc_vu included, never opens the
+// center-wide lookup; the class send path goes through ZaloMappingsClass,
+// which filters by the class's own active enrollments instead.
+func TestZaloMappingsFollowsThePhoneRule(t *testing.T) {
 	t.Parallel()
 	d := newDeps(t)
 	db := d.db
@@ -92,13 +90,18 @@ func TestZaloMappingsFollowsCenterWideOrStint(t *testing.T) {
 	require.Equal(t, "uid-zalo-mapping-scope", viewAllMappings[contact.ID],
 		"a direct contacts.view_all grant (or, transitively, reports.send's implied key) must see the mapping center-wide")
 
-	stintMappings, err := repo.ZaloMappings(ctx, testutil.ScopeFor(t, db, stintHolder.ID), contactIDs)
+	stintScope := testutil.ScopeFor(t, db, stintHolder.ID)
+	stintMappings, err := repo.ZaloMappings(ctx, stintScope, contactIDs)
 	require.NoError(t, err)
-	require.Equal(t, "uid-zalo-mapping-scope", stintMappings[contact.ID],
-		"an active hoc_vu stint over the contact's actively enrolled student must see the mapping")
+	require.Empty(t, stintMappings, "an active hoc_vu stint no longer opens the center-wide mapping lookup")
+
+	classMappings, err := repo.ZaloMappingsClass(ctx, stintScope, stintClass.ID, contactIDs)
+	require.NoError(t, err)
+	require.Equal(t, "uid-zalo-mapping-scope", classMappings[contact.ID],
+		"the class send path still resolves the mapping of a contact actively enrolled in the class")
 
 	strangerMappings, err := repo.ZaloMappings(ctx, testutil.ScopeFor(t, db, stranger.ID), contactIDs)
 	require.NoError(t, err)
 	_, strangerSees := strangerMappings[contact.ID]
-	require.False(t, strangerSees, "a caller with neither contacts.view_all nor an active stint must not see the mapping")
+	require.False(t, strangerSees, "a caller without contacts.view_all must not see the mapping")
 }

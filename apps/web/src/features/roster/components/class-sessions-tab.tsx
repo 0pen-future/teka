@@ -103,10 +103,10 @@ export function ClassSessionsTab({ klass, today }: ClassSessionsTabProps) {
             Sổ đầu bài
           </Link>
           <Link
-            to={`/classbook?class_id=${klass.id}`}
+            to={`/sessions?class_id=${klass.id}`}
             className="font-display text-[13px] font-bold text-mint-600 hover:underline"
           >
-            Điểm danh & nhận xét →
+            Điểm danh
           </Link>
         </div>
       </div>

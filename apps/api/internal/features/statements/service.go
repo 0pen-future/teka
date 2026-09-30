@@ -142,7 +142,7 @@ func (s *Service) GenerateForSendClass(ctx context.Context, sc authctx.Scope, pe
 		}
 		periodAnchor := sc.AnchorTo(info.TeacherID)
 
-		targets, err := s.repo.TargetContactsClass(ctx, periodAnchor, sc, periodID, classID)
+		targets, err := s.repo.TargetContactsClass(ctx, periodAnchor, periodID, classID)
 		if err != nil {
 			return apperror.From(err)
 		}
@@ -183,7 +183,6 @@ func (s *Service) GenerateForSendClass(ctx context.Context, sc authctx.Scope, pe
 				Statement:       *candidate,
 				ContactFullName: target.FullName,
 				ContactPhone:    target.Phone,
-				PhoneVisible:    target.PhoneVisible,
 			})
 		}
 		result.Statements = rows
@@ -211,7 +210,7 @@ func (s *Service) generate(ctx context.Context, sc authctx.Scope, periodID uuid.
 		}
 		periodAnchor := sc.AnchorTo(info.TeacherID)
 
-		targets, err := s.repo.TargetContacts(ctx, periodAnchor, sc, periodID)
+		targets, err := s.repo.TargetContacts(ctx, periodAnchor, periodID)
 		if err != nil {
 			return apperror.From(err)
 		}
@@ -252,7 +251,6 @@ func (s *Service) generate(ctx context.Context, sc authctx.Scope, periodID uuid.
 				Statement:       *candidate,
 				ContactFullName: target.FullName,
 				ContactPhone:    target.Phone,
-				PhoneVisible:    target.PhoneVisible,
 			})
 		}
 		result.Statements = rows
@@ -325,7 +323,7 @@ func (s *Service) Revoke(ctx context.Context, sc authctx.Scope, statementID uuid
 // teacher-authenticated request path.
 //
 // sc masks the privacy-sensitive fields: the phone follows the one phone rule
-// (Scope.PhoneVisible over the row's derived grant), and the URL — a public
+// (Scope.PhoneVisible), and the URL — a public
 // bearer token for the whole family's statement — is derived only for
 // owner/oversight callers; for anyone else the token is never even computed.
 func (s *Service) ToResponse(sc authctx.Scope, row Row) StatementResponse {
@@ -341,7 +339,7 @@ func (s *Service) ToResponse(sc authctx.Scope, row Row) StatementResponse {
 		FirstViewedAt: row.FirstViewedAt,
 		LastViewedAt:  row.LastViewedAt,
 	}
-	if sc.PhoneVisible(row.PhoneVisible) {
+	if sc.PhoneVisible() {
 		resp.Phone = &row.ContactPhone
 	}
 	if sc.ReportsOversight() {

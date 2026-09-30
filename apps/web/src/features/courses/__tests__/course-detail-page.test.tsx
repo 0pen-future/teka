@@ -4,7 +4,11 @@ import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { useAuthStore } from "@/features/auth";
-import { libraryHandlers, resetLibraryStore } from "@/features/library/__tests__/library-handlers";
+import {
+  getLibraryStore,
+  libraryHandlers,
+  resetLibraryStore,
+} from "@/features/library/__tests__/library-handlers";
 import { API_URL, ok } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
@@ -213,11 +217,111 @@ describe("CourseDetailPage", () => {
     const name = within(dialog).getByLabelText("Tên khóa học");
     await user.clear(name);
     await user.type(name, "Toán 6 nền tảng mới");
-    await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
+    await user.click(within(dialog).getByRole("button", { name: "Lưu thay đổi" }));
 
     expect(await screen.findByRole("heading", { name: "Toán 6 nền tảng mới" })).toBeInTheDocument();
     expect(stored().default_template_version_id).toBe(courseToan6.default_template_version_id);
     expect(stored().default_unit_price).toBe(180000);
+  });
+
+  it("unbinds the default template through the dialog", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("heading", { name: "Toán 6 nền tảng" });
+
+    await user.click(screen.getByRole("button", { name: "Sửa khóa" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sửa khóa học" });
+    const template = within(dialog).getByRole("combobox", { name: "Chương trình mẫu" });
+    await within(dialog).findByText("v1 — Đã phát hành");
+    await user.click(template);
+    await user.click(await screen.findByRole("option", { name: "— Chưa gắn —" }));
+    expect(within(dialog).getByRole("combobox", { name: "Phiên bản mặc định" })).toBeDisabled();
+    await user.click(within(dialog).getByRole("button", { name: "Lưu thay đổi" }));
+
+    await expect.poll(() => stored().default_template_version_id).toBeNull();
+  });
+
+  it("keeps a stored version that was archived after binding", async () => {
+    const version = getLibraryStore().versions.find(
+      (candidate) => candidate.id === courseToan6.default_template_version_id,
+    )!;
+    version.status = "archived";
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("heading", { name: "Toán 6 nền tảng" });
+
+    await user.click(screen.getByRole("button", { name: "Sửa khóa" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sửa khóa học" });
+    expect(await within(dialog).findByText("v1 — Đã lưu trữ")).toBeInTheDocument();
+    const name = within(dialog).getByLabelText("Tên khóa học");
+    await user.clear(name);
+    await user.type(name, "Toán 6 bản cũ");
+    await user.click(within(dialog).getByRole("button", { name: "Lưu thay đổi" }));
+
+    expect(await screen.findByRole("heading", { name: "Toán 6 bản cũ" })).toBeInTheDocument();
+    expect(stored().default_template_version_id).toBe(courseToan6.default_template_version_id);
+  });
+
+  it("clears a binding whose template was deleted", async () => {
+    const orphan = stored(courseVan9.id);
+    orphan.default_template_version_id = "81000000-0000-4000-8000-0000000000ff";
+    orphan.default_template = null;
+    const user = userEvent.setup();
+    renderPage(`/courses/${courseVan9.id}`);
+    await screen.findByRole("heading", { name: "Văn 9 luyện thi" });
+
+    await user.click(screen.getByRole("button", { name: "Sửa khóa" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sửa khóa học" });
+    const template = within(dialog).getByRole("combobox", { name: "Chương trình mẫu" });
+    expect(template).toHaveTextContent("Chương trình đã bị xoá");
+    expect(
+      within(dialog).getByText(/Chương trình mẫu đã gắn không còn trong kho/),
+    ).toBeInTheDocument();
+    await user.click(template);
+    await user.click(await screen.findByRole("option", { name: "— Chưa gắn —" }));
+    await user.click(within(dialog).getByRole("button", { name: "Lưu thay đổi" }));
+
+    await expect.poll(() => stored(courseVan9.id).default_template_version_id).toBeNull();
+  });
+
+  it("shows the binding read-only to an editor who cannot read the library", async () => {
+    server.use(memberWith("courses.read", "courses.edit", "classes.read"));
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("heading", { name: "Toán 6 nền tảng" });
+
+    await user.click(screen.getByRole("button", { name: "Sửa khóa" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sửa khóa học" });
+    expect(within(dialog).getByLabelText("Chương trình mẫu")).toHaveValue("Toán 6 cơ bản");
+    expect(within(dialog).getByLabelText("Phiên bản mặc định")).toHaveValue("v1 — Đã phát hành");
+    expect(
+      within(dialog).getByText("Cần quyền xem Kho học liệu để chọn chương trình mẫu."),
+    ).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Lưu thay đổi" }));
+
+    expect(await screen.findByText("Đã lưu khóa học")).toBeInTheDocument();
+    expect(stored().default_template_version_id).toBe(courseToan6.default_template_version_id);
+  });
+
+  it("deletes a course from the dialog and returns to the list", async () => {
+    const user = userEvent.setup();
+    renderPage(`/courses/${courseVan9.id}`);
+    await screen.findByRole("heading", { name: "Văn 9 luyện thi" });
+
+    await user.click(screen.getByRole("button", { name: "Sửa khóa" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sửa khóa học" });
+    await user.click(within(dialog).getByRole("button", { name: "Xoá" }));
+    const confirm = await screen.findByRole("dialog", { name: 'Xoá khóa "Văn 9 luyện thi"?' });
+    expect(
+      within(confirm).getByText(
+        "Xoá vĩnh viễn khóa VAN-9 cùng lịch sử và gói học phí. Chương trình mẫu không bị ảnh hưởng.",
+      ),
+    ).toBeInTheDocument();
+    await user.click(within(confirm).getByRole("button", { name: "Xoá khóa" }));
+
+    expect(await screen.findByText("courses-list-stub")).toBeInTheDocument();
+    expect(screen.getByText("Đã xoá khóa VAN-9")).toBeInTheDocument();
+    expect(getCoursesStore().courses.some((course) => course.id === courseVan9.id)).toBe(false);
   });
 
   it("refuses to stop a course with open classes", async () => {

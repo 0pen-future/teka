@@ -11,6 +11,7 @@ import { pickOption } from "@/test/pick-option";
 import { renderWithProviders, signInAs, testPrimaryTeacher } from "@/test/utils";
 import { mockViewport } from "@/test/viewport";
 
+import { ClassConfigRedirect } from "../components/class-config-redirect";
 import { CenterPage } from "../pages/center-page";
 import {
   makeCenterMeMember,
@@ -333,5 +334,19 @@ describe("CenterPage — degraded states", () => {
     renderCenter();
 
     expect(await screen.findByText("Không tải được thông tin trung tâm.")).toBeInTheDocument();
+  });
+});
+
+describe("ClassConfigRedirect", () => {
+  it("replaces old /center/class-config links with the center page", async () => {
+    const { router } = renderWithProviders(<ClassConfigRedirect />, {
+      route: "/center/class-config",
+      path: "/center/class-config",
+      extraRoutes: [{ path: "/center", element: <p>Cài đặt trung tâm</p> }],
+    });
+
+    expect(await screen.findByText("Cài đặt trung tâm")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/center");
+    expect(router.state.historyAction).toBe("REPLACE");
   });
 });

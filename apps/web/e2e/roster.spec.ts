@@ -26,11 +26,14 @@ test("roster flow: contact, two students, a class, enroll both, end one", async 
   await login(page);
 
   // 1. Create the contact (phone owner — PRD R1: phone lives on the contact).
+  // The old contacts page now redirects to the students page's contacts tab.
   await page.goto("/contacts");
+  await expect(page).toHaveURL(/\/students\?tab=contacts$/);
   await page.getByRole("button", { name: "Thêm người liên hệ" }).click();
-  await page.getByLabel("Họ và tên").fill(contactName);
-  await page.getByLabel("Số điện thoại").fill(contactPhone);
-  await page.getByRole("button", { name: "Lưu" }).click();
+  const contactDialog = page.getByRole("dialog");
+  await contactDialog.getByLabel("Họ và tên").fill(contactName);
+  await contactDialog.getByLabel("Số điện thoại").fill(contactPhone);
+  await contactDialog.getByRole("button", { name: "Lưu" }).click();
   await expect(page.getByText(contactName)).toBeVisible();
   await page.getByText(contactName).click();
   await expect(page).toHaveURL(/\/contacts\/.+/);
@@ -46,11 +49,10 @@ test("roster flow: contact, two students, a class, enroll both, end one", async 
   await page.getByRole("dialog").getByRole("button", { name: "Thêm học sinh" }).click();
   await expect(page.getByText(studentTwoName)).toBeVisible();
 
-  // 3. Create a class with one weekly slot (`ClassDialog` create mode) —
-  // a bare /students lands on the "Lớp học" tab, where class creation lives;
-  // the new class shows up as a row in the class list.
-  await page.goto("/students");
-  await page.getByRole("button", { name: "+ Tạo lớp mới" }).click();
+  // 3. Create a class with one weekly slot (`ClassDialog` create mode) from
+  // Danh mục lớp; the new class shows up as a row in the class list.
+  await page.goto("/classes");
+  await page.getByRole("button", { name: "+ Lớp học" }).click();
   await page.getByLabel("Tên lớp").fill(className);
   // The starter khung giờ has no weekday preselected — pick T2 first.
   await page.getByRole("dialog").getByRole("button", { name: "T2" }).click();
@@ -60,10 +62,10 @@ test("roster flow: contact, two students, a class, enroll both, end one", async 
   await page.getByRole("dialog").getByRole("button", { name: "Tạo lớp" }).click();
   await expect(page.getByRole("row").filter({ hasText: className })).toBeVisible();
 
-  // 3b. Add-student wizard on the "Học sinh" tab: create the profile (Bước
+  // 3b. Add-student wizard on the students page: create the profile (Bước
   // 1/2), postpone enrollment with "Để sau", find the student on the "Chưa
-  // ghi danh" tab, then enroll from there (Bước 2 reused standalone).
-  await page.getByRole("tab", { name: "Học sinh" }).click();
+  // vào lớp" tab, then enroll from there (Bước 2 reused standalone).
+  await page.goto("/students");
   await page.getByRole("button", { name: "+ Thêm học sinh" }).click();
   await page.getByLabel("Họ và tên").fill(studentThreeName);
   await page.getByRole("combobox", { name: "Người liên hệ" }).fill(contactName);
@@ -83,17 +85,18 @@ test("roster flow: contact, two students, a class, enroll both, end one", async 
   await page.getByRole("dialog").getByRole("button", { name: "Ghi danh vào lớp" }).click();
   await expect(page.getByText(/tính tiền từ buổi có mặt đầu tiên/)).toBeVisible();
 
-  // Enrolling lands on the class's students tab; the student is on it.
-  await expect(page).toHaveURL(/tab=students/);
+  // Enrolling lands on the class's by-class tab; the student is on it.
+  await expect(page).toHaveURL(/tab=by-class/);
   await expect(page).toHaveURL(/class_id=/);
   await expect(page.getByRole("row").filter({ hasText: studentThreeName })).toBeVisible();
 
-  // 4. Enroll both remaining students from the "Chưa ghi danh" tab — the
+  // 4. Enroll both remaining students from the "Chưa vào lớp" tab — the
   // per-class enrollment screen is gone; every enrollment goes through
   // `EnrollStudentDialog` for one student at a time. The success toast names
   // the student, which also disambiguates it from the previous toast.
   for (const studentName of [studentOneName, studentTwoName]) {
-    await page.getByRole("tab", { name: "Chưa ghi danh" }).click();
+    // The open tab carries its count, so match the label's prefix.
+    await page.getByRole("tab", { name: /^Chưa vào lớp/ }).click();
     await page.getByPlaceholder("Tìm theo tên học sinh").fill(studentName);
     const studentRow = page.getByRole("row").filter({ hasText: studentName });
     await studentRow.getByRole("button", { name: "Ghi danh vào lớp" }).click();
@@ -117,10 +120,9 @@ test("roster flow: contact, two students, a class, enroll both, end one", async 
   await expect(page.getByText(/— \d{4}-\d{2}-\d{2}/)).toBeVisible();
 
   // The other student's enrollment is untouched by ending the first one.
-  // A bare /students opens the classes tab; the class pills live on the
-  // "Học sinh" tab.
+  // A bare /students opens "Tất cả"; the class pills live on "Theo lớp".
   await page.goto("/students");
-  await page.getByRole("tab", { name: "Học sinh" }).click();
+  await page.getByRole("tab", { name: "Theo lớp" }).click();
   await page.getByRole("tab", { name: className }).click();
   await page.getByPlaceholder("Tìm theo tên học sinh").fill(studentTwoName);
   await page.getByRole("link", { name: studentTwoName }).click();

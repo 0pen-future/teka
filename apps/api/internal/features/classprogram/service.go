@@ -1,9 +1,12 @@
 // Package classprogram links a class to one published program template
 // version. Applying a program copies the version's lesson titles into the
-// class curriculum (owned by teaching); removing it drops only the link, so
-// the curriculum and every lesson plan survive. It is a coordinating feature
-// over classes (the read gate), teaching (the curriculum) and library (the
-// published version), each driven through a consumer-defined interface.
+// class curriculum (owned by teaching) and, while the class has no recorded
+// score, the version's score components into the class (owned by grading);
+// removing it drops only the link, so the curriculum, every lesson plan and
+// the score components survive. It is a coordinating feature over classes
+// (the read gate), teaching (the curriculum), grading (the score components)
+// and library (the published version), each driven through a
+// consumer-defined interface.
 package classprogram
 
 import (
@@ -15,6 +18,7 @@ import (
 
 	"teka/apps/api/internal/database"
 	"teka/apps/api/internal/features/classes"
+	"teka/apps/api/internal/features/grading"
 	"teka/apps/api/internal/features/library"
 	"teka/apps/api/internal/features/teaching"
 	"teka/apps/api/internal/shared/apperror"
@@ -40,16 +44,26 @@ type CurriculumStore interface {
 }
 
 // LibrarySource is the slice of library this feature drives, without the
-// library.read gate: PublishedVersion gates what may be applied, while
-// ReleasedVersion also accepts an archived version so a class keeps reading
-// the program it already follows. *library.Service satisfies it.
+// library.read gate: PublishedVersion and PublishedScoreSet gate what may be
+// applied, while ReleasedVersion also accepts an archived version so a class
+// keeps reading the program it already follows. *library.Service satisfies
+// it.
 type LibrarySource interface {
 	PublishedVersion(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) (*library.VersionResponse, []library.LessonDetailResponse, error)
+	PublishedScoreSet(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) ([]library.ScoreSetGroup, error)
 	ReleasedVersion(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) (*library.VersionResponse, []library.LessonDetailResponse, error)
 	// LockTemplateForVersion locks the version's template row inside Apply's
 	// transaction so applying a version serialises with a concurrent
 	// DeleteTemplate of the same template instead of racing it.
 	LockTemplateForVersion(ctx context.Context, sc authctx.Scope, versionID uuid.UUID) error
+}
+
+// ScoreSnapshotStore is the slice of grading this feature drives: copying the
+// applied version's score groups into the class's score components. It joins
+// Apply's transaction, and leaves a class that already has scores untouched.
+// *grading.Service satisfies it.
+type ScoreSnapshotStore interface {
+	SyncTemplateComponents(ctx context.Context, sc authctx.Scope, classID uuid.UUID, groups []grading.TemplateScoreGroup) (grading.SnapshotOutcome, error)
 }
 
 // Service applies and removes class programs.
@@ -58,12 +72,13 @@ type Service struct {
 	classes   ClassSource
 	curricula CurriculumStore
 	library   LibrarySource
+	scores    ScoreSnapshotStore
 	tx        database.TxManager
 }
 
 // NewService wires the repository and its collaborators.
-func NewService(repo Repository, classSrc ClassSource, curricula CurriculumStore, lib LibrarySource, tx database.TxManager) *Service {
-	return &Service{repo: repo, classes: classSrc, curricula: curricula, library: lib, tx: tx}
+func NewService(repo Repository, classSrc ClassSource, curricula CurriculumStore, lib LibrarySource, scores ScoreSnapshotStore, tx database.TxManager) *Service {
+	return &Service{repo: repo, classes: classSrc, curricula: curricula, library: lib, scores: scores, tx: tx}
 }
 
 // Get returns the class's applied program, or nil when it applies none.
@@ -105,6 +120,9 @@ func (s *Service) Lessons(ctx context.Context, sc authctx.Scope, classID uuid.UU
 // into the class curriculum. When the class already keeps a different,
 // non-empty lesson list the call stops with CURRICULUM_DIFFERS until the
 // owner confirms; the curriculum pointer (current_index) is kept either way.
+// In the same transaction it sets the class's score components from the
+// version's score set while the class has no recorded score; a scored class
+// keeps its components and grades, and the apply still succeeds.
 // Owner only — the manifest classifies the route the same way.
 func (s *Service) Apply(ctx context.Context, sc authctx.Scope, classID uuid.UUID, req ApplyRequest) (*ProgramResponse, error) {
 	if err := s.resolveClass(ctx, sc, classID); err != nil {
@@ -154,10 +172,17 @@ func (s *Service) Apply(ctx context.Context, sc authctx.Scope, classID uuid.UUID
 		}); err != nil {
 			return apperror.Internal(err)
 		}
-		_, err = s.curricula.PutCurriculum(ctx, sc, classID, teaching.PutCurriculumRequest{
+		if _, err := s.curricula.PutCurriculum(ctx, sc, classID, teaching.PutCurriculumRequest{
 			Lessons:      titles,
 			CurrentIndex: current.CurrentIndex,
-		})
+		}); err != nil {
+			return err
+		}
+		groups, err := s.library.PublishedScoreSet(ctx, sc, req.TemplateVersionID)
+		if err != nil {
+			return err
+		}
+		_, err = s.scores.SyncTemplateComponents(ctx, sc, classID, templateScoreGroups(groups))
 		return err
 	})
 	if err != nil {
@@ -166,8 +191,8 @@ func (s *Service) Apply(ctx context.Context, sc authctx.Scope, classID uuid.UUID
 	return s.Get(ctx, sc, classID)
 }
 
-// Remove drops the class's program link. The curriculum and lesson plans are
-// untouched. Owner only; 404 when the class applies no program.
+// Remove drops the class's program link. The curriculum, lesson plans and
+// score components are untouched. Owner only; 404 when the class applies no program.
 func (s *Service) Remove(ctx context.Context, sc authctx.Scope, classID uuid.UUID) error {
 	if err := s.resolveClass(ctx, sc, classID); err != nil {
 		return err
@@ -183,6 +208,20 @@ func (s *Service) Remove(ctx context.Context, sc authctx.Scope, classID uuid.UUI
 		return apperror.NotFound("class program")
 	}
 	return nil
+}
+
+// templateScoreGroups hands the version's score groups to grading as titles
+// and component labels, in order; grading owns how they become components.
+func templateScoreGroups(groups []library.ScoreSetGroup) []grading.TemplateScoreGroup {
+	out := make([]grading.TemplateScoreGroup, len(groups))
+	for i, g := range groups {
+		labels := make([]string, len(g.Components))
+		for j, c := range g.Components {
+			labels[j] = c.Label
+		}
+		out[i] = grading.TemplateScoreGroup{Title: g.Title, Labels: labels}
+	}
+	return out
 }
 
 // resolveClass is the read gate: a class outside the caller's reach (other

@@ -17,15 +17,20 @@ const tableCellClassName = "border-t border-line-100 px-[18px] py-[11px]";
 
 interface RosterTableProps {
   /**
-   * The two roster tabs share this table; "unenrolled" adds the warning badge
-   * and the per-row enroll action while the enrollment columns degrade to "—"
+   * The roster tabs share this table. "all" is the center-wide list without
+   * the per-class enrollment columns; "unenrolled" adds the warning badge and
+   * the per-row enroll action while the enrollment columns degrade to "—"
    * through the label callbacks.
    */
-  variant: "students" | "unenrolled";
+  variant: "all" | "students" | "unenrolled";
   students: Student[];
   monthNumber: number;
   enrollmentStartLabel: (studentId: string) => string;
   monthSessionCount: (studentId: string) => string;
+  /** Edit, delete and enroll actions — the owner's alone. */
+  canManage: boolean;
+  /** Contact names link to the contact page only for contacts.view_all. */
+  canOpenContact: boolean;
   onEnroll: (student: Student) => void;
   onEdit: (student: Student) => void;
   onAnonymize: (student: Student) => void;
@@ -38,11 +43,43 @@ export function RosterTable({
   monthNumber,
   enrollmentStartLabel,
   monthSessionCount,
+  canManage,
+  canOpenContact,
   onEnroll,
   onEdit,
   onAnonymize,
 }: RosterTableProps) {
   const isUnenrolled = variant === "unenrolled";
+  const showEnrollmentColumns = variant !== "all";
+
+  function contactName(student: Student, className: string) {
+    return canOpenContact ? (
+      <Link to={`/contacts/${student.contact_id}`} className={className}>
+        {student.contact_name}
+      </Link>
+    ) : (
+      <span className={className}>{student.contact_name}</span>
+    );
+  }
+
+  function actions(student: Student) {
+    if (!canManage) return null;
+    return (
+      <>
+        {isUnenrolled ? (
+          <HvButton size="sm" onClick={() => onEnroll(student)}>
+            Ghi danh vào lớp
+          </HvButton>
+        ) : null}
+        <HvButton variant="ghost" size="sm" onClick={() => onEdit(student)}>
+          Sửa
+        </HvButton>
+        <HvButton variant="danger" size="sm" onClick={() => onAnonymize(student)}>
+          Xoá
+        </HvButton>
+      </>
+    );
+  }
 
   return (
     <>
@@ -62,27 +99,16 @@ export function RosterTable({
               ) : null}
             </div>
             {isUnenrolled ? <HvBadge variant="warning">Chưa vào lớp nào</HvBadge> : null}
-            <Link to={`/contacts/${student.contact_id}`} className="text-[13px] text-ink-500">
-              {student.contact_name}
-            </Link>
+            {contactName(student, "text-[13px] text-ink-500")}
             {student.contact_phone ? (
-              <a href={`tel:${student.contact_phone}`} className="text-[13px] text-mint-600">
+              <a
+                href={`tel:${student.contact_phone}`}
+                className="inline-flex min-h-6 items-center self-start text-[13px] text-mint-600"
+              >
                 {formatPhoneLocal(student.contact_phone)}
               </a>
             ) : null}
-            <div className="flex gap-2">
-              {isUnenrolled ? (
-                <HvButton size="sm" onClick={() => onEnroll(student)}>
-                  Ghi danh vào lớp
-                </HvButton>
-              ) : null}
-              <HvButton variant="ghost" size="sm" onClick={() => onEdit(student)}>
-                Sửa
-              </HvButton>
-              <HvButton variant="danger" size="sm" onClick={() => onAnonymize(student)}>
-                Xoá
-              </HvButton>
-            </div>
+            {canManage ? <div className="flex gap-2">{actions(student)}</div> : null}
           </HvCard>
         ))}
       </div>
@@ -95,20 +121,33 @@ export function RosterTable({
       <div className="hidden flex-col overflow-hidden rounded-[20px] bg-white shadow-soft-md sm:flex">
         <HvTableScroll aria-label="Bảng danh sách học sinh" className="max-h-[62vh] overflow-auto">
           <table className="w-full min-w-[640px] border-collapse text-left text-[14px]">
-            {/* Prototype grid 2fr 2fr 1.1fr 1fr 1.6fr as column ratios. */}
-            <colgroup>
-              <col className="w-[26%]" />
-              <col className="w-[26%]" />
-              <col className="w-[14%]" />
-              <col className="w-[13%]" />
-              <col className="w-[21%]" />
-            </colgroup>
+            {/* Prototype grid 2fr 2fr 1.1fr 1fr 1.6fr as column ratios; the
+                center-wide list drops the two enrollment columns. */}
+            {showEnrollmentColumns ? (
+              <colgroup>
+                <col className="w-[26%]" />
+                <col className="w-[26%]" />
+                <col className="w-[14%]" />
+                <col className="w-[13%]" />
+                <col className="w-[21%]" />
+              </colgroup>
+            ) : (
+              <colgroup>
+                <col className="w-[36%]" />
+                <col className="w-[36%]" />
+                <col className="w-[28%]" />
+              </colgroup>
+            )}
             <thead>
               <tr>
                 <th className={tableHeadCellClassName}>Học sinh</th>
                 <th className={tableHeadCellClassName}>Người liên hệ</th>
-                <th className={tableHeadCellClassName}>Nhập học</th>
-                <th className={tableHeadCellClassName}>Buổi T{monthNumber}</th>
+                {showEnrollmentColumns ? (
+                  <>
+                    <th className={tableHeadCellClassName}>Nhập học</th>
+                    <th className={tableHeadCellClassName}>Buổi T{monthNumber}</th>
+                  </>
+                ) : null}
                 <th className={tableHeadCellClassName}>
                   {/* Visually empty per the prototype, but the cells hold the
                       display-note badge too, so the accessible name must
@@ -129,27 +168,26 @@ export function RosterTable({
                     </Link>
                   </td>
                   <td className={tableCellClassName}>
-                    <Link
-                      to={`/contacts/${student.contact_id}`}
-                      className="block font-bold hover:text-mint-600"
-                    >
-                      {student.contact_name}
-                    </Link>
+                    {contactName(student, "block font-bold hover:text-mint-600")}
                     {student.contact_phone ? (
                       <a
                         href={`tel:${student.contact_phone}`}
-                        className="text-[12.5px] text-ink-500 hover:text-mint-600"
+                        className="inline-flex min-h-6 items-center text-[12.5px] text-ink-500 hover:text-mint-600"
                       >
                         {formatPhoneLocal(student.contact_phone)}
                       </a>
                     ) : null}
                   </td>
-                  <td className={cn(tableCellClassName, "text-ink-500")}>
-                    {enrollmentStartLabel(student.id)}
-                  </td>
-                  <td className={cn(tableCellClassName, "font-bold")}>
-                    {monthSessionCount(student.id)}
-                  </td>
+                  {showEnrollmentColumns ? (
+                    <>
+                      <td className={cn(tableCellClassName, "text-ink-500")}>
+                        {enrollmentStartLabel(student.id)}
+                      </td>
+                      <td className={cn(tableCellClassName, "font-bold")}>
+                        {monthSessionCount(student.id)}
+                      </td>
+                    </>
+                  ) : null}
                   <td className={tableCellClassName}>
                     <div className="flex flex-wrap items-center justify-end gap-2">
                       {student.display_note ? (
@@ -160,17 +198,7 @@ export function RosterTable({
                           Chưa vào lớp nào
                         </HvBadge>
                       ) : null}
-                      {isUnenrolled ? (
-                        <HvButton size="sm" onClick={() => onEnroll(student)}>
-                          Ghi danh vào lớp
-                        </HvButton>
-                      ) : null}
-                      <HvButton variant="ghost" size="sm" onClick={() => onEdit(student)}>
-                        Sửa
-                      </HvButton>
-                      <HvButton variant="danger" size="sm" onClick={() => onAnonymize(student)}>
-                        Xoá
-                      </HvButton>
+                      {actions(student)}
                     </div>
                   </td>
                 </tr>

@@ -19,28 +19,32 @@ async function login(page: Page, user: { phone: string; password: string; name: 
 }
 
 /**
- * The read journey both staff roles share: the owner-only roster screen
- * bounces the member home, the assigned class's students read on Hồ sơ học
- * sinh, the class detail hides edit actions, and the classbook opens without
+ * The read journey both staff roles share: the students page opens read-only
+ * (students.list is a default key), the assigned class's students read on its
+ * by-class tab, the class detail hides edit actions, and the classbook opens without
  * edit affordances. Purely read-only — it must not mutate the shared seeded
  * stack. Attendance is asserted per role below, because the two staff roles
  * diverge there: tro_giang may confirm attendance, hoc_vu may not.
  */
 async function assertStaffReadJourney(page: Page) {
-  // "Quản trị học sinh" is owner-only center administration now — a member
-  // landing on it is sent straight back to the dashboard.
+  // The students page opens for any member holding students.list, but its
+  // write actions stay the owner's.
   await page.goto("/students");
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("tab", { name: /^Tất cả/ })).toBeVisible();
+  await expect(page).toHaveURL(/\/students$/);
+  await expect(page.getByRole("button", { name: "+ Thêm học sinh" })).toHaveCount(0);
 
-  // The member's read surface for the class's students is Hồ sơ học sinh:
-  // the assigned class is offered by the class picker and its active
-  // enrollments are listed.
-  await page.goto("/records");
-  await page.getByRole("combobox", { name: /^Lớp/ }).click();
-  await page.getByRole("option", { name: new RegExp(STAFF_CLASS) }).click();
+  // The member reads the class's students on the students page's by-class
+  // tab: the assigned class is offered as a class tab and its students are
+  // listed (the roster renders a card list and a table; only one is visible).
+  await page.goto("/students?tab=by-class");
+  await page
+    .getByRole("tablist", { name: "Lớp" })
+    .getByRole("tab", { name: new RegExp(STAFF_CLASS) })
+    .click();
   await expect(page).toHaveURL(/class_id=/);
-  await expect(page.getByText("Bé An", { exact: true })).toBeVisible();
-  await expect(page.getByText("Bé Bình", { exact: true })).toBeVisible();
+  await expect(page.getByText("Bé An", { exact: true }).filter({ visible: true })).toBeVisible();
+  await expect(page.getByText("Bé Bình", { exact: true }).filter({ visible: true })).toBeVisible();
   const classId = new URL(page.url()).searchParams.get("class_id");
   expect(classId).toBeTruthy();
 

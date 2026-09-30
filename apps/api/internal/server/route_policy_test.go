@@ -66,7 +66,7 @@ func TestRoutePolicyEntriesWellFormed(t *testing.T) {
 
 // The owner-only list is frozen by the phase-1 inventory: permission
 // administration, class staffing and handoff, sensitive lesson-plan review
-// writes, and score-set configuration. None of these may ever appear with a
+// writes, and class program changes. None of these may ever appear with a
 // grantable policy. (reports.send itself is an ordinary grantable key, set
 // through roles and member overrides.)
 func TestOwnerOnlyRoutesStayHardGated(t *testing.T) {
@@ -81,12 +81,8 @@ func TestOwnerOnlyRoutesStayHardGated(t *testing.T) {
 		"POST /api/v1/classes/:id/lesson-plans/:index/approve",
 		"POST /api/v1/classes/:id/lesson-plans/:index/request-redo",
 		"POST /api/v1/classes/:id/lesson-plans/:index/reopen",
-		"GET /api/v1/score-sets",
-		"POST /api/v1/score-sets",
-		"PUT /api/v1/score-sets/:id",
-		"DELETE /api/v1/score-sets/:id",
-		"POST /api/v1/classes/:id/score-set",
-		"DELETE /api/v1/classes/:id/score-set",
+		"PUT /api/v1/classes/:id/program",
+		"DELETE /api/v1/classes/:id/program",
 	}
 	byID := map[string]RoutePolicy{}
 	for _, p := range routePolicies {

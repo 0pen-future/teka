@@ -69,7 +69,7 @@ test.afterEach(async ({ request }) => {
   expect(failures, "cleanup left rows behind").toEqual([]);
 });
 
-test("owner builds a learning path, stages it, picks a course and tears the stage down", async ({
+test("owner builds a learning path, stages it, picks a course and tears it all down", async ({
   page,
 }) => {
   await loginAsOwner(page);
@@ -78,10 +78,10 @@ test("owner builds a learning path, stages it, picks a course and tears the stag
   await expect(page.getByRole("heading", { name: "Lộ trình học" })).toBeVisible();
 
   await page.getByRole("button", { name: "+ Tạo lộ trình" }).click();
-  const createDialog = page.getByRole("dialog", { name: "Tạo lộ trình" });
+  const createDialog = page.getByRole("dialog", { name: "Tạo lộ trình học" });
   await createDialog.getByLabel("Mã lộ trình").fill(PATH_CODE);
   await createDialog.getByLabel("Tên lộ trình").fill(PATH_NAME);
-  await createDialog.getByRole("button", { name: "Tạo", exact: true }).click();
+  await createDialog.getByRole("button", { name: "Tạo mới" }).click();
 
   // Creating stays on the list and opens the new row.
   await expect(page.getByText(`Đã tạo lộ trình ${PATH_CODE}`)).toBeVisible();
@@ -95,11 +95,11 @@ test("owner builds a learning path, stages it, picks a course and tears the stag
   // Editing keeps the code and adds a description; the status can move
   // straight from draft to active from the same form.
   await page.getByRole("button", { name: `Sửa ${PATH_NAME}` }).click();
-  const editDialog = page.getByRole("dialog", { name: "Sửa lộ trình" });
+  const editDialog = page.getByRole("dialog", { name: "Sửa lộ trình học" });
   await expect(editDialog.getByLabel("Mã lộ trình")).toHaveValue(PATH_CODE);
   await editDialog.getByLabel("Mô tả").fill(PATH_DESCRIPTION_EDITED);
   await pickOption(page, "Trạng thái", "Đang hoạt động");
-  await editDialog.getByRole("button", { name: "Lưu" }).click();
+  await editDialog.getByRole("button", { name: "Lưu thay đổi" }).click();
   await expect(page.getByText("Đã lưu lộ trình")).toBeVisible();
   await expect(row.getByText("Đang hoạt động")).toBeVisible();
 
@@ -130,7 +130,7 @@ test("owner builds a learning path, stages it, picks a course and tears the stag
   await expect(stageAfterEdit.getByText(`${COURSE_CODE} · ${COURSE_NAME}`)).toBeVisible();
 
   // Removing the course leaves an empty stage; deleting the stage then leaves
-  // an empty path. The path itself is removed by afterEach.
+  // an empty path, which the edit form deletes.
   await stageAfterEdit.getByRole("button", { name: `Thêm khóa vào ${STAGE_NAME_EDITED}` }).click();
   const coursesAgain = page.getByRole("dialog", {
     name: `Khóa học của chặng ${STAGE_NAME_EDITED}`,
@@ -143,4 +143,16 @@ test("owner builds a learning path, stages it, picks a course and tears the stag
   const stageDeleteDialog = page.getByRole("dialog", { name: `Xoá chặng "${STAGE_NAME_EDITED}"?` });
   await stageDeleteDialog.getByRole("button", { name: "Xoá chặng", exact: true }).click();
   await expect(page.getByRole("group", { name: /Chặng 1:/ })).toHaveCount(0);
+
+  await page.getByRole("button", { name: `Sửa ${PATH_NAME}` }).click();
+  await page
+    .getByRole("dialog", { name: "Sửa lộ trình học" })
+    .getByRole("button", { name: "Xoá", exact: true })
+    .click();
+  await page
+    .getByRole("dialog", { name: `Xoá lộ trình "${PATH_NAME}"?` })
+    .getByRole("button", { name: "Xoá lộ trình" })
+    .click();
+  await expect(page.getByText(`Đã xoá lộ trình ${PATH_NAME}`)).toBeVisible();
+  await expect(page.getByRole("row").filter({ hasText: PATH_NAME })).toHaveCount(0);
 });

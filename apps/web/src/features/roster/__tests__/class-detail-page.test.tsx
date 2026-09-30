@@ -169,16 +169,13 @@ describe("ClassDetailPage", () => {
         "href",
         `/classbook?class_id=${classWithSchedule.id}`,
       );
-      expect(screen.getByRole("link", { name: "Hồ sơ học sinh" })).toHaveAttribute(
+      expect(screen.getByRole("link", { name: "Học sinh của lớp" })).toHaveAttribute(
         "href",
-        `/records?class_id=${classWithSchedule.id}`,
+        `/students?class_id=${classWithSchedule.id}`,
       );
       expect(screen.getByRole("link", { name: "Điểm danh" })).toHaveAttribute("href", "/sessions");
       expect(screen.getByRole("button", { name: "Thiết lập lớp" })).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: "Cấu hình lớp học" })).toHaveAttribute(
-        "href",
-        "/center/class-config",
-      );
+      expect(screen.queryByRole("link", { name: "Cấu hình lớp học" })).not.toBeInTheDocument();
 
       expect(screen.getByText("Lịch sử lớp")).toBeInTheDocument();
       expect(screen.getByText("Chương trình học")).toBeInTheDocument();
@@ -267,7 +264,6 @@ describe("ClassDetailPage", () => {
       expect(
         screen.queryByRole("button", { name: "Sửa thông tin vận hành" }),
       ).not.toBeInTheDocument();
-      expect(screen.queryByRole("link", { name: "Cấu hình lớp học" })).not.toBeInTheDocument();
     });
   });
 
@@ -286,6 +282,13 @@ describe("ClassDetailPage", () => {
         "href",
         `/students?class_id=${classWithSchedule.id}`,
       );
+    });
+
+    it("hides Thêm học viên from a member who is not the owner", async () => {
+      server.use(memberCenterHandler);
+      renderPage(`/classes/${classWithSchedule.id}?tab=students`);
+      await screen.findByRole("table");
+      expect(screen.queryByRole("link", { name: "Thêm học viên" })).not.toBeInTheDocument();
     });
 
     it("tells the reader when the roster was cut to the first page", async () => {
@@ -346,10 +349,17 @@ describe("ClassDetailPage", () => {
         const weekday = new Date(`${session.session_date}T00:00:00Z`).getUTCDay();
         expect(sources[index]).toBe(weekday === 2 ? "Lịch tuần" : "Thêm tay");
       });
-      expect(screen.getByRole("link", { name: "Điểm danh & nhận xét →" })).toHaveAttribute(
+      expect(screen.getByRole("link", { name: "Điểm danh" })).toHaveAttribute(
         "href",
-        `/classbook?class_id=${classWithSchedule.id}`,
+        `/sessions?class_id=${classWithSchedule.id}`,
       );
+      expect(
+        screen
+          .getAllByRole("link")
+          .filter(
+            (link) => link.getAttribute("href") === `/classbook?class_id=${classWithSchedule.id}`,
+          ),
+      ).toHaveLength(1);
     });
 
     it("caps an open-ended class at 90 days ahead and shows the empty copy", async () => {

@@ -123,7 +123,7 @@ test("every audited route has a distinct title", async ({ browser, ownerContext 
   // Visits every audited route once; the default 30s budget is per page.
   test.setTimeout(UX_ROUTES.length * 15_000);
   const titles = new Map<string, string>();
-  for (const route of UX_ROUTES) {
+  for (const route of UX_ROUTES.filter((r) => !r.tabOf)) {
     await withRoutePage(
       ownerContext,
       () => browser.newContext(),

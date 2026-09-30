@@ -18,7 +18,7 @@ interface ClassOverviewCardProps {
   sessionsFailed: boolean;
   /** Enrolled headcount; undefined while loading or on failure. */
   studentCount: number | undefined;
-  /** The roster page behind the `Lớp mới` link is owner-only. */
+  /** Only the owner enrolls students, so only they see the `Lớp mới` card. */
   isOwner: boolean;
 }
 
@@ -34,14 +34,14 @@ function ClassOverviewCard({
   const isNew = sessions != null && countable.length === 0;
   const isFull = countable.length > 0 && confirmed === countable.length;
 
-  // A sessionless class's card opens the roster, which redirects non-owners
-  // straight back to this dashboard — hide it from them instead of looping.
+  // A sessionless class's card opens the students page to add students, which
+  // only the owner can do — hide it from everyone else.
   if (isNew && !isOwner) {
     return null;
   }
 
   // A class with no sessions this period has nothing to attend — its card
-  // opens the roster instead, per the prototype's `Lớp mới` branch.
+  // opens the students page instead, per the prototype's `Lớp mới` branch.
   const to = isNew ? `/students?class_id=${cls.id}` : `/sessions?class_id=${cls.id}`;
 
   return (
@@ -116,9 +116,9 @@ export function ClassOverviewCards({ className }: { className?: string }) {
         </p>
       ) : classes.length === 0 ? (
         <p className="mt-3 text-[14px] text-ink-500">
-          {/* Only the owner can reach the owner-only roster page the hint names. */}
+          {/* The hint sends the owner to the class catalog to create the first class. */}
           {isOwner
-            ? 'Chưa có lớp nào — tạo lớp đầu tiên ở mục "Quản trị học sinh".'
+            ? 'Chưa có lớp nào — tạo lớp đầu tiên ở mục "Danh mục lớp".'
             : "Chưa có lớp nào."}
         </p>
       ) : (

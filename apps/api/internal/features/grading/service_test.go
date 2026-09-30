@@ -2,7 +2,9 @@ package grading
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -65,45 +67,93 @@ func TestValidateScoreEntries(t *testing.T) {
 	})
 }
 
-// normalizeComponentNames trims, keeps input order (position = index), and
-// rejects both blanks and case-insensitive duplicates.
-func TestNormalizeComponentNames(t *testing.T) {
+// flattenTemplateComponents keeps group then component order (position =
+// index), prefixes the group title only when two or more groups carry
+// components, and keeps every name within the column's 50 characters and
+// unique case-insensitively.
+func TestFlattenTemplateComponents(t *testing.T) {
 	t.Parallel()
+	long := strings.Repeat("Đ", 60)
 
-	names, msg := normalizeComponentNames([]string{"  Listening ", "Speaking"})
-	require.Empty(t, msg)
-	require.Equal(t, []string{"Listening", "Speaking"}, names, "trimmed and order-preserving")
-
-	_, msg = normalizeComponentNames([]string{"Reading", "  "})
-	require.NotEmpty(t, msg, "a blank name must be rejected")
-
-	_, msg = normalizeComponentNames([]string{"Writing", "writing"})
-	require.NotEmpty(t, msg, "a case-insensitive duplicate must be rejected")
+	cases := []struct {
+		name   string
+		groups []TemplateScoreGroup
+		want   []string
+	}{
+		{
+			name:   "a single group keeps its bare trimmed labels",
+			groups: []TemplateScoreGroup{{Title: "Giữa kỳ", Labels: []string{" Nghe ", "Nói"}}},
+			want:   []string{"Nghe", "Nói"},
+		},
+		{
+			name: "empty groups do not count towards prefixing",
+			groups: []TemplateScoreGroup{
+				{Title: "Trống", Labels: nil},
+				{Title: "Cuối kỳ", Labels: []string{"Viết"}},
+			},
+			want: []string{"Viết"},
+		},
+		{
+			name: "several groups prefix each label with the group title in order",
+			groups: []TemplateScoreGroup{
+				{Title: "Giữa kỳ", Labels: []string{"Nghe", "Nói"}},
+				{Title: "Cuối kỳ", Labels: []string{"Nghe"}},
+			},
+			want: []string{"Giữa kỳ · Nghe", "Giữa kỳ · Nói", "Cuối kỳ · Nghe"},
+		},
+		{
+			name:   "a 60-rune label is cut to 50 runes",
+			groups: []TemplateScoreGroup{{Title: "G", Labels: []string{long}}},
+			want:   []string{strings.Repeat("Đ", 50)},
+		},
+		{
+			name:   "a case-insensitive repeat gets a numbered suffix",
+			groups: []TemplateScoreGroup{{Title: "G", Labels: []string{"Nghe", "nghe", "NGHE"}}},
+			want:   []string{"Nghe", "nghe (2)", "NGHE (3)"},
+		},
+		{
+			name:   "names equal only after the cut are deduplicated within 50 runes",
+			groups: []TemplateScoreGroup{{Title: "G", Labels: []string{long + "a", long + "b"}}},
+			want:   []string{strings.Repeat("Đ", 50), strings.Repeat("Đ", 46) + " (2)"},
+		},
+		{
+			name: "a long group title is cut so the labels stay apart",
+			groups: []TemplateScoreGroup{
+				{Title: "Kiểm tra định kỳ giữa học kỳ I năm học 2026-2027", Labels: []string{"Nghe", "Nói"}},
+				{Title: "Cuối kỳ", Labels: []string{"Viết"}},
+			},
+			want: []string{
+				"Kiểm tra định kỳ giữa học kỳ I năm học 2026 · Nghe",
+				"Kiểm tra định kỳ giữa học kỳ I năm học 2026- · Nói",
+				"Cuối kỳ · Viết",
+			},
+		},
+		{
+			name:   "no groups flatten to nothing",
+			groups: nil,
+			want:   []string{},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := flattenTemplateComponents(tc.groups)
+			require.Equal(t, tc.want, got)
+			for _, name := range got {
+				require.LessOrEqual(t, utf8.RuneCountInString(name), maxComponentNameRunes)
+			}
+		})
+	}
 }
 
-// Every owner-configuration surface refuses a non-owner before it touches a
+// Changing a class's components refuses a non-owner before it touches a
 // dependency — so a Service with nil deps is enough to prove the gate.
 func TestOwnerGatesShortCircuit(t *testing.T) {
 	t.Parallel()
 	svc := NewService(nil, nil, nil, nil, nil)
-	ctx := context.Background()
 	member := authctx.Scope{TeacherID: uuid.New(), CenterID: uuid.New(), IsOwner: false}
 
-	isForbidden := func(err error) {
-		t.Helper()
-		require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code)
-	}
-
-	_, err := svc.ListSets(ctx, member)
-	isForbidden(err)
-	_, err = svc.CreateSet(ctx, member, ScoreSetRequest{Name: "IELTS", Components: []string{"Listening"}})
-	isForbidden(err)
-	_, err = svc.UpdateSet(ctx, member, uuid.New(), ScoreSetRequest{Name: "x", Components: []string{"a"}})
-	isForbidden(err)
-	err = svc.DeleteSet(ctx, member, uuid.New())
-	isForbidden(err)
-	_, err = svc.AssignScoreSet(ctx, member, uuid.New(), uuid.New())
-	isForbidden(err)
-	err = svc.ClearScoreSet(ctx, member, uuid.New())
-	isForbidden(err)
+	_, err := svc.SyncTemplateComponents(context.Background(), member, uuid.New(), []TemplateScoreGroup{
+		{Title: "Giữa kỳ", Labels: []string{"Nghe"}},
+	})
+	require.Equal(t, apperror.CodeForbidden, apperror.From(err).Code)
 }

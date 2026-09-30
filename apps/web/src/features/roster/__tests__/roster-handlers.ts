@@ -517,6 +517,16 @@ function withStudentCount(klass: Class): Class {
   };
 }
 
+/** Slices a filtered list by the request's `page`/`per_page`, as the API does. */
+function paginated<T>(items: T[], url: URL) {
+  const page = Number(url.searchParams.get("page") ?? "1") || 1;
+  const perPage = Number(url.searchParams.get("per_page") ?? "20") || 20;
+  return ok(
+    items.slice((page - 1) * perPage, page * perPage),
+    listMeta(items.length, page, perPage),
+  );
+}
+
 export const rosterHandlers = [
   http.get(`${API_URL}/contacts`, ({ request }) => {
     const url = new URL(request.url);
@@ -524,8 +534,10 @@ export const rosterHandlers = [
     const items = store.contacts.filter(
       (contact) => contact.full_name.toLowerCase().includes(query) || contact.phone.includes(query),
     );
-    return HttpResponse.json(ok(items, listMeta(items.length)));
+    return HttpResponse.json(paginated(items, url));
   }),
+  // No family owes anything by default; debt tests override this.
+  http.get(`${API_URL}/collections/contact-balances`, () => HttpResponse.json(ok([]))),
   http.get(`${API_URL}/contacts/:id`, ({ params }) => {
     const contact = store.contacts.find((item) => item.id === params.id);
     if (!contact) {
@@ -602,7 +614,7 @@ export const rosterHandlers = [
       if (unenrolled && anyOpenEnrollmentIds.has(student.id)) return false;
       return student.full_name.toLowerCase().includes(query);
     });
-    return HttpResponse.json(ok(items, listMeta(items.length)));
+    return HttpResponse.json(paginated(items, url));
   }),
   http.get(`${API_URL}/students/:id`, ({ params }) => {
     const student = store.students.find((item) => item.id === params.id);

@@ -119,11 +119,11 @@ describe("LearningPathsPage", () => {
     await screen.findByText("Lộ trình Toán THCS");
 
     await user.click(screen.getByRole("button", { name: "+ Tạo lộ trình" }));
-    const dialog = await screen.findByRole("dialog", { name: "Tạo lộ trình" });
+    const dialog = await screen.findByRole("dialog", { name: "Tạo lộ trình học" });
     await user.type(within(dialog).getByLabelText("Mã lộ trình"), "lt-ly");
     await user.type(within(dialog).getByLabelText("Tên lộ trình"), "Lộ trình Lý THCS");
     await user.type(within(dialog).getByLabelText("Mô tả"), "Từ lớp 8 tới lớp 9.");
-    await user.click(within(dialog).getByRole("button", { name: "Tạo" }));
+    await user.click(within(dialog).getByRole("button", { name: "Tạo mới" }));
 
     expect(await screen.findByText("Đã tạo lộ trình LT-LY")).toBeInTheDocument();
     expect(await screen.findByText("Lộ trình Lý THCS")).toBeInTheDocument();
@@ -146,15 +146,90 @@ describe("LearningPathsPage", () => {
     await screen.findByText("Lộ trình Toán THCS");
 
     await user.click(screen.getByRole("button", { name: "+ Tạo lộ trình" }));
-    const dialog = await screen.findByRole("dialog", { name: "Tạo lộ trình" });
+    const dialog = await screen.findByRole("dialog", { name: "Tạo lộ trình học" });
     await user.type(within(dialog).getByLabelText("Mã lộ trình"), "LT-TOAN");
     await user.type(within(dialog).getByLabelText("Tên lộ trình"), "Trùng mã");
-    await user.click(within(dialog).getByRole("button", { name: "Tạo" }));
+    await user.click(within(dialog).getByRole("button", { name: "Tạo mới" }));
 
     expect(
       await within(dialog).findByText("Mã lộ trình đã được dùng trong trung tâm"),
     ).toBeInTheDocument();
     expect(within(dialog).getByLabelText("Mã lộ trình")).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("edits a path's name and status from the v5 form", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("Lộ trình Toán THCS");
+
+    await user.click(screen.getByRole("button", { name: "Sửa Lộ trình Toán THCS" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sửa lộ trình học" });
+    expect(dialog).toHaveAccessibleDescription(
+      "Tên và trạng thái. Chặng quản lý ngay trong bảng lộ trình.",
+    );
+    const name = within(dialog).getByLabelText("Tên lộ trình");
+    expect(name).toHaveValue("Lộ trình Toán THCS");
+    await user.clear(name);
+    await user.type(name, "Toán THCS nâng cao");
+    await user.click(within(dialog).getByRole("combobox", { name: "Trạng thái" }));
+    await user.click(await screen.findByRole("option", { name: "Ngừng hoạt động" }));
+    await user.click(within(dialog).getByRole("button", { name: "Lưu thay đổi" }));
+
+    expect(await screen.findByText("Đã lưu lộ trình")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Sửa lộ trình học" })).not.toBeInTheDocument(),
+    );
+    // The fields the form does not touch keep their stored values.
+    expect(getPathsStore().paths.find((path) => path.id === pathToan.id)).toMatchObject({
+      code: "LT-TOAN",
+      name: "Toán THCS nâng cao",
+      description: pathToan.description,
+      status: "archived",
+    });
+  });
+
+  it("deletes a path from the edit form after confirmation", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("Lộ trình Toán THCS");
+
+    await user.click(screen.getByRole("button", { name: "Sửa Lộ trình Toán THCS" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sửa lộ trình học" });
+    await user.click(within(dialog).getByRole("button", { name: "Xoá" }));
+
+    // Cancelling the confirmation returns to the still-open edit form.
+    let confirm = await screen.findByRole("dialog", {
+      name: 'Xoá lộ trình "Lộ trình Toán THCS"?',
+    });
+    expect(confirm).toHaveAccessibleDescription(
+      "Xoá lộ trình cùng 2 chặng bên trong. Khóa học vẫn giữ nguyên trong danh mục.",
+    );
+    await user.click(within(confirm).getByRole("button", { name: "Hủy" }));
+    await waitFor(() => expect(confirm).not.toBeInTheDocument());
+    expect(screen.getByRole("dialog", { name: "Sửa lộ trình học" })).toBeInTheDocument();
+
+    await user.click(
+      within(screen.getByRole("dialog", { name: "Sửa lộ trình học" })).getByRole("button", {
+        name: "Xoá",
+      }),
+    );
+    confirm = await screen.findByRole("dialog", { name: 'Xoá lộ trình "Lộ trình Toán THCS"?' });
+    await user.click(within(confirm).getByRole("button", { name: "Xoá lộ trình" }));
+
+    expect(await screen.findByText("Đã xoá lộ trình Lộ trình Toán THCS")).toBeInTheDocument();
+    await waitFor(() => expect(queryPathRow("Lộ trình Toán THCS")).not.toBeInTheDocument());
+    expect(screen.queryByRole("dialog", { name: "Sửa lộ trình học" })).not.toBeInTheDocument();
+    expect(getPathsStore().paths.some((path) => path.id === pathToan.id)).toBe(false);
+  });
+
+  it("offers no delete while creating a path", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("Lộ trình Toán THCS");
+
+    await user.click(screen.getByRole("button", { name: "+ Tạo lộ trình" }));
+    const dialog = await screen.findByRole("dialog", { name: "Tạo lộ trình học" });
+    expect(within(dialog).queryByRole("button", { name: "Xoá" })).not.toBeInTheDocument();
   });
 
   it("adds a stage at the end of the path through the dialog", async () => {

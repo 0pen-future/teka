@@ -171,8 +171,8 @@ exactly `center_id = a.CenterID AND teacher_id = a.TeacherID` through an
 you whether widening may apply: `sc Scope` means "the caller; `view_all`,
 stints, or ownership may widen this", `a Anchor` means "these rows, no
 widening, ever". A method with both is the exemplar of the split —
-`statements.TargetContacts(ctx, a Anchor, viewer Scope, periodID)` takes the
-rows from the anchored period while judging `phone_visible` for the viewer.
+`enrollments.CreateAnchored(ctx, actor Scope, a Anchor, req)` writes the row
+onto the anchored class teacher while the audit event names the actor.
 Where the teacher is irrelevant (dedupe of contacts/students by center, the
 roster of a class for reconciliation) the query is center-keyed through a
 `centerScoped(ctx, sc)` helper with the real caller's scope rather than an
@@ -288,22 +288,34 @@ student records, and a member sees a contact's phone only through the
 phone-privacy rule below.
 
 **Phone privacy**: one rule for every surface, list and detail alike — a
-caller sees a contact's phone iff `IsOwner || CenterWideFor(contacts.view_all)`
-or the caller holds an active hoc_vu stint on a class where a student of that
-contact is actively enrolled. Repositories compute the per-row arm as a
-derived `phone_visible` column (an EXISTS in the same query — fragments
-`classscope.PhoneVisibleViaStudent` / `PhoneVisibleViaContact`); services
-combine it through `Scope.PhoneVisible(rowVisible)` and null the DTO field —
-`null`, never an empty string. Masked surfaces: student reads, statements
-(including the family statement URL, which is a bearer token and is returned
-only to `ReportsOversight()` callers — that field stays send-gated, not
-read-gated, since exposing the link is itself a sending act), the notification
-ledger, and collections. Sending paths (statements, notifications, zalo) read
-the phone server-side, so a sender who cannot see a phone can still send.
-`ContactResponse.Phone` stays a non-null string because contact reads are
-already owner/`contacts.view_all`-only. Zalo friend-match and per-contact
-zalo-mapping stay open to assigned hoc_vu — their send path depends on
-mapping.
+caller sees a contact's phone iff `Scope.PhoneVisible()`, which is exactly
+`CenterWideFor(contacts.view_all)`: the owner, an explicit grant, or
+`reports.send` through the key it implies. No class staff assignment widens it,
+hoc_vu included, so repositories always return the stored phone and services
+null the DTO field — `null`, never an empty string. Masked surfaces: student
+reads, statements (including the family statement URL, which is a bearer token
+and is returned only to `ReportsOversight()` callers — that field stays
+send-gated, not read-gated, since exposing the link is itself a sending act),
+the notification ledger, collections, and the rows of a bulk-send response
+(`BulkSendRow.phone`). Sending paths (statements, notifications, zalo) read the
+phone server-side, so a sender who cannot see a phone can still send — a
+hoc_vu's class-scoped `zalo_personal` send resolves Zalo ids through
+`ZaloMappingsClass` (the class's active enrollments) and never exposes the
+phone. Contact rows are phone rows, so `GET /contacts` and `GET /contacts/:id`
+return nothing to a caller without `contacts.view_all`, and
+`ContactResponse.Phone` stays a non-null string. Matching phones against Zalo
+friends (`POST /me/zalo/friends/match`) sends them to a third party and requires
+`contacts.view_all` (403 otherwise). Writing or clearing a contact's
+zalo-mapping redirects that family's messages, so it is reports oversight's
+alone (owner or `reports.send`; 404 otherwise) — `contacts.view_all` is a read
+grant and does not reach it.
+
+*Release note (behavior change)*: an active hoc_vu assignment used to unlock
+the phones of the class's families, contact reads, Zalo friend matching and
+zalo-mapping writes for those contacts. It no longer does: a hoc_vu reads
+students without phones until the owner grants `contacts.view_all` to the
+hoc_vu role (or the member) in role permissions; mapping writes additionally
+need `reports.send`. Class-scoped sends keep working unchanged.
 
 **Delegated report sending (`reports.send`)**: an ordinary permission-catalog
 key, granted and revoked only by the owner through roles or the member
@@ -432,8 +444,8 @@ declares `AccountService` with only the `teachers.Service` methods it needs.
 
 ### Teaching menu features
 
-Six feature modules back the "Giảng dạy" and "Kho học liệu" sidebar groups
-(`library` serves "Kho học liệu"):
+Six feature modules back the "Lớp học", "Học liệu" and "Dạy học" sidebar
+groups (`library` serves "Học liệu"):
 
 - `classes` gained catalog fields (`code`, `tags`, `note`, `course_id`,
   `parent_class_id`, `lineage_note`) rather than becoming a new feature — see
@@ -458,12 +470,18 @@ Six feature modules back the "Giảng dạy" and "Kho học liệu" sidebar grou
   (422) when newly attached. List endpoints filter on `active`.
 - An exercise `code` is optional on create; the server assigns the next
   `BT-NNNN` per center, and a duplicate code answers 409 `EXERCISE_CODE_TAKEN`.
+  A caller-chosen code is upper-cased and may use letters, digits, `-` and `_`
+  (e.g. `PP1_U3L1`).
 - Exercise groups belong to one template version
   (`/library/versions/:vid/exercise-groups`); a lesson exercise points at a
   group through `group_id`, which clears when the group is deleted. Creating a
   draft from a published version copies its groups.
 - `score_set` is an array of named score sets, each with its own weighted
-  components; log fields add the `long_text` and `student` kinds.
+  components; log fields add the `long_text` and `student` kinds. Applying a
+  published version to a class copies its `score_set` into the class's score
+  components (the set title prefixes each label when more than one set has
+  components); a class that already holds scores keeps its components. There
+  is no separate score-set CRUD — the template is the only place to edit one.
 - A published version is immutable: every write to it or its lessons answers
   409 `VERSION_LOCKED`.
 

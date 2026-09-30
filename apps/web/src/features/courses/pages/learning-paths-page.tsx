@@ -245,6 +245,7 @@ export function LearningPathsPage() {
                 if (!next) setEditing(null);
               }}
               onSaved={() => hvToast("Đã lưu lộ trình")}
+              onDeleted={(path) => hvToast(`Đã xoá lộ trình ${path.name}`)}
             />
           ) : null}
         </>

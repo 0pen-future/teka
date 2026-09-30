@@ -6931,7 +6931,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Owner only. Copies the version's lesson titles into the class curriculum. When the class already keeps a different lesson list the call returns 409 CURRICULUM_DIFFERS (fields.current_count / fields.template_count) until re-sent with confirm=true; the curriculum pointer and every lesson plan are kept.",
+                "description": "Owner only. Copies the version's lesson titles into the class curriculum. When the class already keeps a different lesson list the call returns 409 CURRICULUM_DIFFERS (fields.current_count / fields.template_count) until re-sent with confirm=true; the curriculum pointer and every lesson plan are kept. In the same transaction the version's score set becomes the class's score components (groups flattened in order, \"Group · Label\" once two or more groups carry components) — unless the class already has a recorded score, in which case its components and grades are kept silently; a version without score components also keeps the class's current ones.",
                 "consumes": [
                     "application/json"
                 ],
@@ -7620,237 +7620,6 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    }
-                }
-            }
-        },
-        "/classes/{id}/score-set": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Snapshots the set's components into the class (class_score_components), replacing whatever it had. Owner only. A class that already carries any score refuses with 409 — replacing the components would cascade-delete recorded grades.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "grading"
-                ],
-                "summary": "Assign a score set to a class",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "class id",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "set to assign",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/grading.AssignScoreSetRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "data": {
-                                            "$ref": "#/definitions/grading.ClassComponentsResponse"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "403": {
-                        "description": "caller is not the center owner",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "404": {
-                        "description": "class or set not found",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "409": {
-                        "description": "class already has recorded scores",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Removes the class's snapshot components — the fix for a wrong assignment. Owner only, and refused with 409 if the class already has recorded scores.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "grading"
-                ],
-                "summary": "Clear a class's score set",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "class id",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "cleared"
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "403": {
-                        "description": "caller is not the center owner",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "409": {
-                        "description": "class already has recorded scores",
                         "schema": {
                             "allOf": [
                                 {
@@ -8637,6 +8406,134 @@ const docTemplate = `{
                 }
             }
         },
+        "/collections/contact-balances": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Sums each contact's outstanding balance over every billing period of the center in the given month (periods are per teacher, so one family may owe on several). Uses the same figures as the collection board: draft invoices of an open period count, void invoices do not. Only contacts whose sum is non-zero are returned; a month with no period returns an empty list. Not paginated. Requires billing.view_all.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "collections"
+                ],
+                "summary": "List monthly outstanding balances per contact",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "calendar year (2020-2100)",
+                        "name": "year",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "calendar month (1-12)",
+                        "name": "month",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/collections.ContactOutstanding"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "non-numeric year or month",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "caller lacks billing.view_all",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "422": {
+                        "description": "validation failed",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "$ref": "#/definitions/response.ErrorBody"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/contacts": {
             "get": {
                 "security": [
@@ -9124,7 +9021,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Stores the picked friend's id and display name on the contact. Values come from GET /me/zalo/friends; the backend does not re-check them against the live friend list.",
+                "description": "Stores the picked friend's id and display name on the contact. Values come from GET /me/zalo/friends; the backend does not re-check them against the live friend list. Owner or send-reports holders only — rewiring the mapping redirects the family's messages, so contacts.view_all alone does not grant it; anyone else gets 404.",
                 "consumes": [
                     "application/json"
                 ],
@@ -9252,7 +9149,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Nulls both mapping fields. Idempotent: unmapping an unmapped contact is still 204.",
+                "description": "Nulls both mapping fields. Idempotent: unmapping an unmapped contact is still 204. Owner or send-reports holders only; anyone else gets 404.",
                 "produces": [
                     "application/json"
                 ],
@@ -11536,7 +11433,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Code, when given, is upper-cased and must match ^[A-Za-z0-9-]+$ (409 EXERCISE_CODE_TAKEN on a clash); omitted, the next BT-0001-style code of the center is assigned.",
+                "description": "Code, when given, is upper-cased and must match ^[A-Za-z0-9_-]+$ (409 EXERCISE_CODE_TAKEN on a clash); omitted, the next BT-0001-style code of the center is assigned.",
                 "consumes": [
                     "application/json"
                 ],
@@ -16265,7 +16162,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Looks up 1–200 phone numbers against Zalo in paced chunks, intersects the hits with the linked account's friend list, and returns one row per phone in request order. Rows echo the phone exactly as sent; unresolved phones come back matched=false. Owner and send-reports holders match any phone; an active hoc_vu matches only phones of contacts their assignments make phone-visible (out-of-reach phones come back matched=false without a lookup); other staff get 403. Nothing is persisted — confirming a suggestion goes through PUT /contacts/{id}/zalo-mapping. 404 when no account is linked, 409 when the stored session no longer works.",
+                "description": "Looks up 1–200 phone numbers against Zalo in paced chunks, intersects the hits with the linked account's friend list, and returns one row per phone in request order. Rows echo the phone exactly as sent; unresolved phones come back matched=false. Requires contacts.view_all (the owner holds it implicitly; send-reports implies it); every other caller gets 403 before any phone leaves. Nothing is persisted — confirming a suggestion goes through PUT /contacts/{id}/zalo-mapping. 404 when no account is linked, 409 when the stored session no longer works.",
                 "consumes": [
                     "application/json"
                 ],
@@ -16346,7 +16243,7 @@ const docTemplate = `{
                         }
                     },
                     "403": {
-                        "description": "caller has neither oversight nor an active hoc_vu assignment",
+                        "description": "caller lacks contacts.view_all",
                         "schema": {
                             "allOf": [
                                 {
@@ -18726,434 +18623,6 @@ const docTemplate = `{
                 "responses": {
                     "200": {
                         "description": "OK"
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    }
-                }
-            }
-        },
-        "/score-sets": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Every live score set (bộ điểm) in the center with its component names in position order. Owner only — this is a center-configuration surface.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "grading"
-                ],
-                "summary": "List score sets",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "data": {
-                                            "type": "array",
-                                            "items": {
-                                                "$ref": "#/definitions/grading.ScoreSetResponse"
-                                            }
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "403": {
-                        "description": "caller is not the center owner",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    }
-                }
-            },
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Creates a named set with its ordered component names (1..10, unique case-insensitively within the set). Owner only. A duplicate live name in the center is a 409.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "grading"
-                ],
-                "summary": "Create a score set",
-                "parameters": [
-                    {
-                        "description": "set name and components",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/grading.ScoreSetRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "data": {
-                                            "$ref": "#/definitions/grading.ScoreSetResponse"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "403": {
-                        "description": "caller is not the center owner",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "409": {
-                        "description": "a set with this name already exists",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "422": {
-                        "description": "invalid or duplicate component names",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    }
-                }
-            }
-        },
-        "/score-sets/{id}": {
-            "put": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Renames the set and whole-replaces its component list. Owner only. Per-class snapshots taken from this set earlier are untouched — that is the point of the snapshot design.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "grading"
-                ],
-                "summary": "Update a score set",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "score set id",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "set name and components",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/grading.ScoreSetRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "data": {
-                                            "$ref": "#/definitions/grading.ScoreSetResponse"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "403": {
-                        "description": "caller is not the center owner",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "409": {
-                        "description": "a set with this name already exists",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "422": {
-                        "description": "invalid or duplicate component names",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Soft-deletes the set. Owner only. Classes already using a snapshot of it keep their components.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "grading"
-                ],
-                "summary": "Delete a score set",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "score set id",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "deleted"
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "403": {
-                        "description": "caller is not the center owner",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/response.Envelope"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "$ref": "#/definitions/response.ErrorBody"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
                     },
                     "404": {
                         "description": "Not Found",
@@ -23987,7 +23456,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "phone": {
-                    "description": "Phone is null unless the caller may see the contact's phone (owner,\nreports oversight, or an active hoc_vu stint over one of the contact's\nenrolled students). The repository always fills it; the service nils it\nby PhoneVisible before the row leaves.",
+                    "description": "Phone is null unless the caller may see contacts' phones — the owner,\ncontacts.view_all, or reports.send through the keys it implies\n(Scope.PhoneVisible). The repository always fills it; the service nils\nit before the row leaves.",
                     "type": "string"
                 },
                 "student_count": {
@@ -24017,6 +23486,17 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "total_due": {
+                    "type": "integer"
+                }
+            }
+        },
+        "collections.ContactOutstanding": {
+            "type": "object",
+            "properties": {
+                "contact_id": {
+                    "type": "string"
+                },
+                "outstanding": {
                     "type": "integer"
                 }
             }
@@ -24410,17 +23890,6 @@ const docTemplate = `{
                 }
             }
         },
-        "grading.AssignScoreSetRequest": {
-            "type": "object",
-            "required": [
-                "set_id"
-            ],
-            "properties": {
-                "set_id": {
-                    "type": "string"
-                }
-            }
-        },
         "grading.ClassComponentResponse": {
             "type": "object",
             "properties": {
@@ -24477,44 +23946,6 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "student_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "grading.ScoreSetRequest": {
-            "type": "object",
-            "required": [
-                "components",
-                "name"
-            ],
-            "properties": {
-                "components": {
-                    "type": "array",
-                    "maxItems": 10,
-                    "minItems": 1,
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "name": {
-                    "type": "string",
-                    "maxLength": 100
-                }
-            }
-        },
-        "grading.ScoreSetResponse": {
-            "type": "object",
-            "properties": {
-                "components": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "id": {
-                    "type": "string"
-                },
-                "name": {
                     "type": "string"
                 }
             }
@@ -25749,7 +25180,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "phone": {
-                    "description": "Phone is null unless the caller may see the contact's phone (owner,\nreports oversight, or an active hoc_vu stint over one of the contact's\nenrolled students).",
+                    "description": "Phone is null unless the caller may see the contact's phone (owner or\ncontacts.view_all, which reports oversight implies).",
                     "type": "string"
                 },
                 "purpose": {

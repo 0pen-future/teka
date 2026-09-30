@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Link, useParams } from "react-router";
+import { Link, Navigate, useParams } from "react-router";
 
 import { HvBadge, HvButton, HvCard, hvToast } from "@/components/hv";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
@@ -108,8 +108,43 @@ function ContactZaloCard({ contact }: { contact: Contact }) {
   );
 }
 
-/** Contact header (tap-to-call) plus the list of children linked to it. */
+/**
+ * The mapping without the controls, for a viewer who may not write it: no
+ * Zalo status request, just who receives this family's notifications.
+ */
+function ContactZaloReadOnlyCard({ contact }: { contact: Contact }) {
+  return (
+    <HvCard className="flex flex-col gap-2">
+      <h2 className="font-display text-[16px] font-bold text-ink-900">Zalo</h2>
+      {contact.zalo_name ? (
+        <HvBadge variant="success" dot className="self-start">
+          {contact.zalo_name}
+        </HvBadge>
+      ) : (
+        <p className="text-[13px] text-ink-500">Chưa liên kết bạn Zalo nào.</p>
+      )}
+    </HvCard>
+  );
+}
+
+/**
+ * The contact page needs contacts.view_all (the owner always holds it). The
+ * guard is a shell so the contact queries never mount for anyone else.
+ */
 export function ContactDetailPage() {
+  const { has, isResolved, isError } = useCenterContext();
+
+  if (!isResolved && !isError) {
+    return null;
+  }
+  if (!has("contacts.view_all")) {
+    return <Navigate to="/students" replace />;
+  }
+  return <ContactDetailContent />;
+}
+
+/** Contact header (tap-to-call) plus the list of children linked to it. */
+function ContactDetailContent() {
   const { id } = useParams<{ id: string }>();
   const { data: contact, isPending } = useContact(id);
   const { data: studentsPage } = useStudentsList({ contact_id: id, per_page: 50 });
@@ -117,8 +152,10 @@ export function ContactDetailPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [addStudentOpen, setAddStudentOpen] = useState(false);
   // Contact and student records are owner-managed; a reader who is not the
-  // owner (an oversight secretary) sees the data without the edit controls.
-  const { isOwner } = useCenterContext();
+  // owner sees the data without the edit controls. Zalo mapping writes follow
+  // reports.send, the same gate the API applies.
+  const { isOwner, has } = useCenterContext();
+  const canMapZalo = has("reports.send");
 
   if (isPending) {
     return <p className="text-[13px] text-ink-500">Đang tải…</p>;
@@ -147,7 +184,11 @@ export function ContactDetailPage() {
         ) : null}
       </HvCard>
 
-      <ContactZaloCard contact={contact} />
+      {canMapZalo ? (
+        <ContactZaloCard contact={contact} />
+      ) : (
+        <ContactZaloReadOnlyCard contact={contact} />
+      )}
 
       <div className="flex items-center justify-between">
         <h2 className="font-display text-[16px] font-bold text-ink-900">Học sinh</h2>

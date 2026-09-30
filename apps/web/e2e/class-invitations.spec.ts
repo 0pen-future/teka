@@ -12,7 +12,7 @@ const INVITE_CLASS = "Văn 9 - Sáng Thứ Bảy";
 const OWNER_NAME = "Cô Lan";
 const MEMBER_NAME = "Thầy Minh";
 
-/** Resolves the class id from the Giảng dạy class list (owner-readable). */
+/** Resolves the class id from the Lớp học class list (owner-readable). */
 async function classIdFromClassList(page: Page, className: string): Promise<string> {
   await page.goto("/classes");
   await page.getByRole("link", { name: className, exact: true }).click();

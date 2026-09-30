@@ -33,10 +33,11 @@ function groupByTeacher(periods: ReportPeriod[]): TeacherGroup[] {
 }
 
 /**
- * "Gửi báo cáo" — the send-reports permission holder's entry surface: every
- * center teacher's billing periods grouped by teacher, each row opening the
- * existing send page (`/notifications/:periodId`), which handles generation,
- * channel choice, and the pre-send preview. Read-only here by design: no
+ * "Gửi thông báo" — the one send entry surface for every role: the billing
+ * periods the caller can see (the whole center for the owner and
+ * `reports.send` holders) grouped by teacher, each row opening the existing
+ * send page (`/notifications/:periodId`), which handles generation, channel
+ * choice, and the pre-send preview. Read-only here by design: no
  * close/payment/roster affordances for the secretary.
  */
 export function SendReportsPage() {
@@ -44,7 +45,7 @@ export function SendReportsPage() {
 
   return (
     <div>
-      <h1 className="font-display text-[26px] font-extrabold text-ink-900">Gửi báo cáo</h1>
+      <h1 className="font-display text-[26px] font-extrabold text-ink-900">Gửi thông báo</h1>
       <p className="mt-1 text-[14px] text-ink-500">
         Chọn kỳ của một giáo viên để gửi thông báo học phí hoặc nhắc nợ cho phụ huynh.
       </p>
@@ -67,7 +68,7 @@ export function SendReportsPage() {
                   <li key={period.id}>
                     <Link
                       to={`/notifications/${period.id}`}
-                      aria-label={`Gửi báo cáo tháng ${period.month}/${period.year} của ${group.teacherName}`}
+                      aria-label={`Gửi thông báo tháng ${period.month}/${period.year} của ${group.teacherName}`}
                       className="flex items-center justify-between gap-3 rounded-[10px] px-2 py-3 transition-colors hover:bg-cream-100"
                     >
                       <span className="font-display text-[14px] font-bold text-ink-900">

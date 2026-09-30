@@ -19,7 +19,7 @@ const cellClassName = "border-t border-line-100 px-[18px] py-[11px]";
  * roster itself still renders for everyone who can open the class.
  */
 export function ClassStudentsTab({ klass }: { klass: Class }) {
-  const { has } = useCenterContext();
+  const { has, isOwner } = useCenterContext();
   const enrollments = useEnrollmentsList({ class_id: klass.id, active: true, per_page: 100 });
   const canReadStudents = has("students.list");
   const students = useStudentsList(
@@ -37,12 +37,15 @@ export function ClassStudentsTab({ klass }: { klass: Class }) {
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-display text-[16px] font-bold text-ink-900">Học viên ({total})</h2>
-        <Link
-          to={`/students?class_id=${klass.id}`}
-          className="font-display text-[13px] font-bold text-mint-600 hover:underline"
-        >
-          Thêm học viên
-        </Link>
+        {/* Teachers do not enroll students, so only the owner gets the way into the students page to add one. */}
+        {isOwner ? (
+          <Link
+            to={`/students?class_id=${klass.id}`}
+            className="font-display text-[13px] font-bold text-mint-600 hover:underline"
+          >
+            Thêm học viên
+          </Link>
+        ) : null}
       </div>
 
       {truncated ? (
