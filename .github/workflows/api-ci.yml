@@ -38,7 +38,7 @@ jobs:
           cache-dependency-path: apps/api/go.sum
       - uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.7.2
+          version: v2.9.0
           working-directory: apps/api
 
   test:

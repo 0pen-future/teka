@@ -38,6 +38,12 @@ linters:
         linters:
           - revive
         text: "exported:"
+      # token shadows go/token by name only; nothing in the API parses Go
+      # source, and the name is the domain term its importers read.
+      - path: internal/shared/token/
+        linters:
+          - revive
+        text: "conflict with Go standard library package names"
 
 formatters:
   enable:
