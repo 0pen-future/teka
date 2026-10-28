@@ -27,7 +27,7 @@ RUN test -n "${VITE_PUBLIC_ORIGIN}" || { echo "VITE_PUBLIC_ORIGIN build-arg is r
 ENV VITE_PUBLIC_ORIGIN=${VITE_PUBLIC_ORIGIN}
 RUN npm run build
 
-FROM nginxinc/nginx-unprivileged:1.31-alpine@sha256:2ddec616f1cb58bcac057aa388f28cb81e35137641ef4226d321714499329bd1
+FROM nginxinc/nginx-unprivileged:1.31-alpine@sha256:b5047b9b76845eac124358373c6852377c52e4b05834a47647e955dd91cb8f1e
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY nginx-security-headers.conf /etc/nginx/snippets/teka-security-headers.conf
